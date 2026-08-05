@@ -1,5 +1,7 @@
 #include "gui/logging/LogViewerDialog.h"
 
+#include <KLocalizedString>
+
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
@@ -35,18 +37,18 @@ namespace javelin::gui::logging
 
     LogViewerDialog::LogViewerDialog(QWidget* parent) : QDialog(parent)
     {
-        setWindowTitle(QStringLiteral("Application Log"));
+        setWindowTitle(i18n("Application Log"));
         resize(1000, 650);
         auto* layout = new QVBoxLayout(this);
         auto* filters = new QHBoxLayout;
         m_level = new QComboBox(this);
-        m_level->addItems({QStringLiteral("Debug and above"), QStringLiteral("Info and above"),
-                           QStringLiteral("Warnings and above"), QStringLiteral("Errors only")});
+        m_level->addItems({i18n("Debug and above"), i18n("Info and above"),
+                           i18n("Warnings and above"), i18n("Errors only")});
         m_level->setCurrentIndex(1);
         m_subsystem = new QComboBox(this);
-        m_subsystem->addItem(QStringLiteral("All systems"));
+        m_subsystem->addItem(i18n("All systems"));
         m_search = new QLineEdit(this);
-        m_search->setPlaceholderText(QStringLiteral("Filter log text"));
+        m_search->setPlaceholderText(i18n("Filter log text"));
         filters->addWidget(m_level);
         filters->addWidget(m_subsystem);
         filters->addWidget(m_search, 1);
@@ -56,7 +58,8 @@ namespace javelin::gui::logging
         m_output->setLineWrapMode(QPlainTextEdit::NoWrap);
         layout->addWidget(m_output, 1);
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
-        auto* clear = buttons->addButton(QStringLiteral("Clear"), QDialogButtonBox::ResetRole);
+        auto* clear = buttons->addButton(i18nc("@action:button", "Clear"),
+                                         QDialogButtonBox::ResetRole);
         connect(clear, &QPushButton::clicked, &javelin::app::LogStore::instance(),
                 &javelin::app::LogStore::clear);
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);

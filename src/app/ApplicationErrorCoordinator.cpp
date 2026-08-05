@@ -1,5 +1,7 @@
 #include "app/ApplicationErrorCoordinator.h"
 
+#include <KLocalizedString>
+
 #include <QDebug>
 #include <QSettings>
 
@@ -121,43 +123,41 @@ namespace javelin::app
     QString ApplicationErrorCoordinator::userTitle(const javelin::jmap::OperationError& error)
     {
         if (javelin::jmap::isAuthenticationError(error))
-            return QStringLiteral("Account sign-in required");
+            return i18n("Account sign-in required");
         if (javelin::jmap::isTransientError(error))
-            return QStringLiteral("Connection problem");
+            return i18n("Connection problem");
         if (error.code == javelin::jmap::OperationErrorCode::PermissionDenied)
-            return QStringLiteral("Permission denied");
+            return i18n("Permission denied");
         if (error.code == javelin::jmap::OperationErrorCode::LocalStorageFailure)
-            return QStringLiteral("Local storage error");
-        return QStringLiteral("Javelin Mail error");
+            return i18n("Local storage error");
+        return i18n("Javelin Mail error");
     }
 
     QString ApplicationErrorCoordinator::userMessage(const QString& accountId,
                                                      const QString& operation,
                                                      const javelin::jmap::OperationError& error)
     {
-        const auto account = accountId.isEmpty() ? QStringLiteral("this account") : accountId;
+        const auto account = accountId.isEmpty() ? i18n("this account") : accountId;
         if (javelin::jmap::isAuthenticationError(error))
-            return QStringLiteral("Authentication failed for %1. Update and save its connection "
-                                  "settings to resume synchronization.")
-                .arg(account);
+            return i18n("Authentication failed for %1. Update and save its connection settings to "
+                        "resume synchronization.",
+                        account);
         if (javelin::jmap::isTransientError(error))
-            return QStringLiteral("%1 could not complete for %2. Javelin Mail will keep retrying.")
-                .arg(operation, account);
+            return i18n("%1 could not complete for %2. Javelin Mail will keep retrying.", operation,
+                        account);
         if (error.code == javelin::jmap::OperationErrorCode::PermissionDenied)
-            return QStringLiteral("The server denied %1 for %2.").arg(operation, account);
+            return i18n("The server denied %1 for %2.", operation, account);
         if (error.code == javelin::jmap::OperationErrorCode::Conflict)
-            return QStringLiteral("%1 conflicted with a newer server change. Refresh and try "
-                                  "again.")
-                .arg(operation);
+            return i18n("%1 conflicted with a newer server change. Refresh and try again.",
+                        operation);
         if (error.code == javelin::jmap::OperationErrorCode::UnsupportedCapability)
-            return QStringLiteral("The server does not support %1 for %2.").arg(operation, account);
+            return i18n("The server does not support %1 for %2.", operation, account);
         if (error.code == javelin::jmap::OperationErrorCode::SchedulingUnsupported)
-            return QStringLiteral("The server cannot schedule this calendar event.");
+            return i18n("The server cannot schedule this calendar event.");
         if (error.code == javelin::jmap::OperationErrorCode::InvalidUserInput ||
             error.code == javelin::jmap::OperationErrorCode::PreconditionFailed)
             return error.message;
-        return QStringLiteral("%1 failed for %2. See the application log for details.")
-            .arg(operation, account);
+        return i18n("%1 failed for %2. See the application log for details.", operation, account);
     }
 
     void

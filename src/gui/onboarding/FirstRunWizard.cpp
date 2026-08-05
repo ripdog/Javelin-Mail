@@ -5,6 +5,8 @@
 
 #include <QCoroTask>
 
+#include <KLocalizedString>
+
 #include <QAbstractSocket>
 #include <QDesktopServices>
 #include <QFormLayout>
@@ -66,27 +68,27 @@ namespace javelin::gui::onboarding
             switch (kind)
             {
             case Kind::Jmap:
-                return QStringLiteral("JMAP account access");
+                return i18n("JMAP account access");
             case Kind::Mail:
-                return QStringLiteral("Mail synchronization");
+                return i18n("Mail synchronization");
             case Kind::Sending:
-                return QStringLiteral("Send mail");
+                return i18n("Send mail");
             case Kind::Contacts:
-                return QStringLiteral("Contacts");
+                return i18n("Contacts");
             case Kind::Calendars:
-                return QStringLiteral("Calendars");
+                return i18n("Calendars");
             case Kind::Sieve:
-                return QStringLiteral("Server-side mail rules");
+                return i18n("Server-side mail rules");
             case Kind::Push:
-                return QStringLiteral("Instant updates");
+                return i18n("Instant updates");
             case Kind::OAuth:
-                return QStringLiteral("Secure browser sign-in");
+                return i18n("Secure browser sign-in");
             case Kind::DynamicClientRegistration:
-                return QStringLiteral("Automatic app registration");
+                return i18n("Automatic app registration");
             case Kind::OfflineAccess:
-                return QStringLiteral("Stay signed in");
+                return i18n("Stay signed in");
             }
-            return QStringLiteral("Unknown feature");
+            return i18n("Unknown feature");
         }
 
         void logOAuthResult(const char* stage,
@@ -127,17 +129,17 @@ namespace javelin::gui::onboarding
           m_connectionId(std::move(connectionId)),
           m_firstRun(m_connectionId.isEmpty() && m_settings.accounts().empty())
     {
-        setWindowTitle(!m_connectionId.isEmpty() ? QStringLiteral("Sign In Again")
-                       : m_firstRun              ? QStringLiteral("Welcome to Javelin Mail")
-                                                 : QStringLiteral("Add a Mail Account"));
+        setWindowTitle(!m_connectionId.isEmpty() ? i18n("Sign In Again")
+                       : m_firstRun              ? i18n("Welcome to Javelin Mail")
+                                                 : i18n("Add a Mail Account"));
         setWindowIcon(QIcon(QStringLiteral(":/icons/icon.svg")));
         setWizardStyle(QWizard::ModernStyle);
         setOption(QWizard::NoBackButtonOnStartPage);
         setOption(QWizard::NoBackButtonOnLastPage);
         setButtonText(QWizard::FinishButton, !m_connectionId.isEmpty()
-                                                 ? QStringLiteral("Finish Sign-In")
-                                             : m_firstRun ? QStringLiteral("Open Javelin")
-                                                          : QStringLiteral("Add Account"));
+                                                 ? i18n("Finish Sign-In")
+                                             : m_firstRun ? i18n("Open Javelin")
+                                                          : i18n("Add Account"));
         resize(700, 560);
         setStyleSheet(QStringLiteral(
             "QWizard { background: palette(window); }"
@@ -184,22 +186,22 @@ namespace javelin::gui::onboarding
     void FirstRunWizard::buildWelcomePage()
     {
         auto* page = new CompletionPage(this);
-        page->setTitle(!m_connectionId.isEmpty() ? QStringLiteral("Sign in to your account again")
-                       : m_firstRun              ? QStringLiteral("Let’s set up your mail")
-                                                 : QStringLiteral("Add another mail account"));
-        page->setSubTitle(QStringLiteral(
-            "Javelin’s background service is ready. Choose a label for this account."));
+        page->setTitle(!m_connectionId.isEmpty() ? i18n("Sign in to your account again")
+                       : m_firstRun              ? i18n("Let’s set up your mail")
+                                                 : i18n("Add another mail account"));
+        page->setSubTitle(
+            i18n("Javelin’s background service is ready. Choose a label for this account."));
         auto* layout = new QVBoxLayout(page);
-        auto* ready = new QLabel(QStringLiteral("✓ Background sync is ready"), page);
+        auto* ready = new QLabel(i18n("✓ Background sync is ready"), page);
         ready->setStyleSheet(QStringLiteral("color: palette(highlight); font-weight: 600;"));
         layout->addWidget(ready);
         auto* form = new QFormLayout();
         m_nameEdit = new QLineEdit(page);
-        m_nameEdit->setPlaceholderText(QStringLiteral("Personal mail, Work, or another label"));
+        m_nameEdit->setPlaceholderText(i18n("Personal mail, Work, or another label"));
         m_emailEdit = new QLineEdit(page);
         m_emailEdit->setPlaceholderText(QStringLiteral("you@example.com"));
-        form->addRow(QStringLiteral("Account name"), m_nameEdit);
-        form->addRow(QStringLiteral("Email address"), m_emailEdit);
+        form->addRow(i18n("Account name"), m_nameEdit);
+        form->addRow(i18n("Email address"), m_emailEdit);
         layout->addSpacing(18);
         layout->addLayout(form);
         layout->addStretch();
@@ -219,11 +221,11 @@ namespace javelin::gui::onboarding
     void FirstRunWizard::buildDiscoveryPage()
     {
         m_discoveryPage = new CompletionPage(this);
-        m_discoveryPage->setTitle(QStringLiteral("Checking your mail service"));
-        m_discoveryPage->setSubTitle(QStringLiteral(
-            "Javelin uses your email address to find the right server automatically."));
+        m_discoveryPage->setTitle(i18n("Checking your mail service"));
+        m_discoveryPage->setSubTitle(
+            i18n("Javelin uses your email address to find the right server automatically."));
         auto* layout = new QVBoxLayout(m_discoveryPage);
-        m_discoveryStatus = new QLabel(QStringLiteral("Looking for your server…"), m_discoveryPage);
+        m_discoveryStatus = new QLabel(i18n("Looking for your server…"), m_discoveryPage);
         m_discoveryStatus->setWordWrap(true);
         layout->addWidget(m_discoveryStatus);
         m_discoveryFeatures = new QListWidget(m_discoveryPage);
@@ -235,38 +237,35 @@ namespace javelin::gui::onboarding
     void FirstRunWizard::buildAuthenticationPage()
     {
         m_authenticationPage = new CompletionPage(this);
-        m_authenticationPage->setTitle(QStringLiteral("Sign in"));
-        m_authenticationPage->setSubTitle(
-            QStringLiteral("Sign in with your mail service to continue."));
+        m_authenticationPage->setTitle(i18n("Sign in"));
+        m_authenticationPage->setSubTitle(i18n("Sign in with your mail service to continue."));
         auto* layout = new QVBoxLayout(m_authenticationPage);
         m_authenticationStatus = new QLabel(m_authenticationPage);
         m_authenticationStatus->setWordWrap(true);
         layout->addWidget(m_authenticationStatus);
-        m_oauthButton =
-            new QPushButton(QStringLiteral("Continue in browser"), m_authenticationPage);
+        m_oauthButton = new QPushButton(i18n("Continue in browser"), m_authenticationPage);
         m_oauthButton->setDefault(true);
         m_oauthButton->setIcon(QIcon::fromTheme(QStringLiteral("internet-web-browser")));
         layout->addWidget(m_oauthButton);
         connect(m_oauthButton, &QPushButton::clicked, this, &FirstRunWizard::beginOAuth);
 
         m_manualToggle = new QToolButton(m_authenticationPage);
-        m_manualToggle->setText(QStringLiteral("Use manual details instead"));
+        m_manualToggle->setText(i18n("Use manual details instead"));
         m_manualToggle->setCheckable(true);
         m_manualToggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         m_manualToggle->setArrowType(Qt::RightArrow);
         layout->addWidget(m_manualToggle, 0, Qt::AlignLeft);
 
-        m_manualPanel = new QGroupBox(QStringLiteral("Manual JMAP sign-in"), m_authenticationPage);
+        m_manualPanel = new QGroupBox(i18n("Manual JMAP sign-in"), m_authenticationPage);
         auto* manualLayout = new QFormLayout(m_manualPanel);
         m_serverEdit = new QLineEdit(m_manualPanel);
-        m_serverEdit->setPlaceholderText(
-            QStringLiteral("Discovered automatically when left blank"));
+        m_serverEdit->setPlaceholderText(i18n("Discovered automatically when left blank"));
         m_tokenEdit = new QLineEdit(m_manualPanel);
         m_tokenEdit->setEchoMode(QLineEdit::Password);
-        m_tokenEdit->setPlaceholderText(QStringLiteral("API token or access token"));
-        m_manualButton = new QPushButton(QStringLiteral("Verify details"), m_manualPanel);
-        manualLayout->addRow(QStringLiteral("JMAP server"), m_serverEdit);
-        manualLayout->addRow(QStringLiteral("Access token"), m_tokenEdit);
+        m_tokenEdit->setPlaceholderText(i18n("API token or access token"));
+        m_manualButton = new QPushButton(i18n("Verify details"), m_manualPanel);
+        manualLayout->addRow(i18n("JMAP server"), m_serverEdit);
+        manualLayout->addRow(i18n("Access token"), m_tokenEdit);
         manualLayout->addRow(QString{}, m_manualButton);
         m_manualPanel->hide();
         layout->addWidget(m_manualPanel);
@@ -285,15 +284,14 @@ namespace javelin::gui::onboarding
     void FirstRunWizard::buildFinishedPage()
     {
         auto* page = new QWizardPage(this);
-        page->setTitle(!m_connectionId.isEmpty() ? QStringLiteral("You’re signed in again")
-                                                 : QStringLiteral("Your account is ready"));
+        page->setTitle(!m_connectionId.isEmpty() ? i18n("You’re signed in again")
+                                                 : i18n("Your account is ready"));
         page->setSubTitle(
             !m_connectionId.isEmpty()
-                ? QStringLiteral("Javelin will resume synchronizing when setup finishes.")
-                : QStringLiteral(
-                      "Javelin will fetch your mailboxes and recent mail when setup finishes."));
+                ? i18n("Javelin will resume synchronizing when setup finishes.")
+                : i18n("Javelin will fetch your mailboxes and recent mail when setup finishes."));
         auto* layout = new QVBoxLayout(page);
-        auto* heading = new QLabel(QStringLiteral("Available for this account"), page);
+        auto* heading = new QLabel(i18n("Available for this account"), page);
         heading->setStyleSheet(QStringLiteral("font-weight: 600; font-size: 12pt;"));
         layout->addWidget(heading);
         m_finishedFeatures = new QListWidget(page);
@@ -309,7 +307,7 @@ namespace javelin::gui::onboarding
         m_authentication.reset();
         m_discoveryPage->setComplete(false);
         m_discoveryFeatures->clear();
-        setBusy(true, QStringLiteral("Looking for your mail service…"));
+        setBusy(true, i18n("Looking for your mail service…"));
         auto task = m_onboarding.discover({.emailAddress = m_discoveredEmail});
         QCoro::connect(
             std::move(task), this,
@@ -319,8 +317,7 @@ namespace javelin::gui::onboarding
                 setBusy(false);
                 if (const auto* error = std::get_if<QString>(&callResult))
                 {
-                    m_discoveryStatus->setText(
-                        QStringLiteral("We couldn’t check that service. %1").arg(*error));
+                    m_discoveryStatus->setText(i18n("We couldn’t check that service. %1", *error));
                     return;
                 }
                 m_discovery = std::get<javelin::app::AccountDiscoveryResult>(std::move(callResult));
@@ -341,16 +338,15 @@ namespace javelin::gui::onboarding
             return;
         }
         m_discoveryStatus->setText(
-            QStringLiteral("We found a compatible service for %1.").arg(m_discovery->emailAddress));
+            i18n("We found a compatible service for %1.", m_discovery->emailAddress));
         m_discoveryPage->setComplete(true);
         const bool browserLogin = !m_discovery->authorizationEndpoint.isEmpty() &&
                                   !m_discovery->registrationEndpoint.isEmpty();
         m_oauthButton->setVisible(browserLogin);
         m_authenticationStatus->setText(
             browserLogin
-                ? QStringLiteral("Your provider supports secure browser sign-in.")
-                : QStringLiteral(
-                      "This provider needs an API token or manually registered application."));
+                ? i18n("Your provider supports secure browser sign-in.")
+                : i18n("This provider needs an API token or manually registered application."));
         if (!browserLogin)
             m_manualToggle->setChecked(true);
     }
@@ -370,12 +366,12 @@ namespace javelin::gui::onboarding
         if (!m_callbackServer->listen(QHostAddress::LocalHost, 0))
         {
             m_authenticationStatus->setText(
-                QStringLiteral("Javelin couldn’t prepare a secure browser callback."));
+                i18n("Javelin couldn’t prepare a secure browser callback."));
             return;
         }
         const auto redirect = QStringLiteral("http://127.0.0.1:%1/oauth/callback")
                                   .arg(m_callbackServer->serverPort());
-        setBusy(true, QStringLiteral("Preparing secure sign-in…"));
+        setBusy(true, i18n("Preparing secure sign-in…"));
         auto task = m_onboarding.startOAuth({.discovery = *m_discovery, .redirectUri = redirect});
         QCoro::connect(
             std::move(task), this,
@@ -395,11 +391,11 @@ namespace javelin::gui::onboarding
                     return;
                 }
                 m_oauthFlowId = result.flowId;
-                m_authenticationStatus->setText(QStringLiteral(
-                    "Finish signing in in your browser. You can return here when it closes."));
+                m_authenticationStatus->setText(
+                    i18n("Finish signing in in your browser. You can return here when it closes."));
                 if (!QDesktopServices::openUrl(QUrl{result.authorizationUrl}))
-                    m_authenticationStatus->setText(QStringLiteral(
-                        "Your browser could not be opened. Use manual details below."));
+                    m_authenticationStatus->setText(
+                        i18n("Your browser could not be opened. Use manual details below."));
             });
     }
 
@@ -437,11 +433,12 @@ namespace javelin::gui::onboarding
                     const auto error =
                         query.queryItemValue(QStringLiteral("error"), QUrl::FullyDecoded);
                     const QByteArray body =
-                        error.isEmpty()
-                            ? QByteArrayLiteral("<h1>Signed in</h1><p>You can close this tab "
-                                                "and return to Javelin.</p>")
-                            : QByteArrayLiteral("<h1>Sign-in was cancelled</h1><p>You can "
-                                                "return to Javelin and try again.</p>");
+                        (error.isEmpty()
+                             ? i18n("<h1>Signed in</h1><p>You can close this tab and return to "
+                                    "Javelin.</p>")
+                             : i18n("<h1>Sign-in was cancelled</h1><p>You can return to Javelin "
+                                    "and try again.</p>"))
+                            .toUtf8();
                     socket->write(QByteArrayLiteral(
                                       "HTTP/1.1 200 OK\r\nContent-Type: text/html; "
                                       "charset=utf-8\r\nConnection: close\r\nContent-Length: ") +
@@ -452,11 +449,11 @@ namespace javelin::gui::onboarding
                         m_callbackServer->close();
                     if (!error.isEmpty())
                     {
-                        m_authenticationStatus->setText(QStringLiteral(
-                            "Sign-in was cancelled. You can try again or use manual details."));
+                        m_authenticationStatus->setText(
+                            i18n("Sign-in was cancelled. You can try again or use manual details."));
                         return;
                     }
-                    setBusy(true, QStringLiteral("Finishing sign-in…"));
+                    setBusy(true, i18n("Finishing sign-in…"));
                     auto task = m_onboarding.finishOAuth(
                         {.flowId = m_oauthFlowId, .code = code, .state = state, .issuer = issuer});
                     QCoro::connect(
@@ -485,10 +482,10 @@ namespace javelin::gui::onboarding
     {
         if (m_busy || m_tokenEdit->text().trimmed().isEmpty())
         {
-            m_authenticationStatus->setText(QStringLiteral("Enter an API or access token first."));
+            m_authenticationStatus->setText(i18n("Enter an API or access token first."));
             return;
         }
-        setBusy(true, QStringLiteral("Checking those details…"));
+        setBusy(true, i18n("Checking those details…"));
         auto task = m_onboarding.authenticateManually({
             .emailAddress = m_emailEdit->text().trimmed(),
             .sessionUrl = m_serverEdit->text().trimmed(),
@@ -519,7 +516,7 @@ namespace javelin::gui::onboarding
             return;
         }
         m_authentication = std::move(result);
-        m_authenticationStatus->setText(QStringLiteral("✓ Signed in successfully"));
+        m_authenticationStatus->setText(i18n("✓ Signed in successfully"));
         m_authenticationPage->setComplete(true);
         m_finishedFeatures->clear();
         showFeatures(*m_finishedFeatures, m_authentication->features);
@@ -536,7 +533,9 @@ namespace javelin::gui::onboarding
             const auto prefix = feature.available ? QStringLiteral("✓  ")
                                 : pending         ? QStringLiteral("?  ")
                                                   : QStringLiteral("—  ");
-            const auto suffix = pending ? QStringLiteral(" — checked after sign-in") : QString{};
+            const auto suffix =
+                pending ? i18nc("@item suffix for onboarding feature", " — checked after sign-in")
+                        : QString{};
             auto* item = new QListWidgetItem(prefix + featureName(feature.kind) + suffix, &list);
             item->setForeground(feature.available || pending
                                     ? palette().brush(QPalette::Text)
@@ -590,8 +589,8 @@ namespace javelin::gui::onboarding
                                                    &javelin::gui::settings::ConnectionSettings::id);
             if (account == accounts.end())
             {
-                QMessageBox::warning(this, QStringLiteral("Couldn’t update the account"),
-                                     QStringLiteral("This account is no longer configured."));
+                QMessageBox::warning(this, i18n("Couldn’t update the account"),
+                                     i18n("This account is no longer configured."));
                 return;
             }
             ++account->revision;
@@ -616,8 +615,8 @@ namespace javelin::gui::onboarding
         if (const auto error = m_settings.update(std::move(update)))
         {
             QMessageBox::warning(
-                this, QStringLiteral("Couldn’t save the account"),
-                QStringLiteral("Javelin couldn’t save your account yet. Please try again."));
+                this, i18n("Couldn’t save the account"),
+                i18n("Javelin couldn’t save your account yet. Please try again."));
             return;
         }
         if (m_oauthAuthentication)

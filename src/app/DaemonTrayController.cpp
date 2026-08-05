@@ -2,6 +2,8 @@
 
 #include "app/WorkScheduler.h"
 
+#include <KLocalizedString>
+
 #include <QCoreApplication>
 #include <QDBusArgument>
 #include <QDBusConnection>
@@ -120,14 +122,14 @@ namespace javelin::app
                     QVariantList children;
                     if (recursionDepth != 0)
                     {
-                        children.push_back(QVariant::fromValue(menuLayoutItem(
-                            1, actionProperties(QStringLiteral("Open Javelin"), true))));
-                        children.push_back(QVariant::fromValue(menuLayoutItem(
-                            2, actionProperties(QStringLiteral("Task Center…"), true))));
-                        children.push_back(QVariant::fromValue(menuLayoutItem(
-                            3, actionProperties(QStringLiteral("Refresh accounts"), true))));
                         children.push_back(QVariant::fromValue(
-                            menuLayoutItem(4, actionProperties(QStringLiteral("Quit"), true))));
+                            menuLayoutItem(1, actionProperties(i18n("Open Javelin"), true))));
+                        children.push_back(QVariant::fromValue(
+                            menuLayoutItem(2, actionProperties(i18n("Task Center…"), true))));
+                        children.push_back(QVariant::fromValue(
+                            menuLayoutItem(3, actionProperties(i18n("Refresh accounts"), true))));
+                        children.push_back(QVariant::fromValue(
+                            menuLayoutItem(4, actionProperties(i18nc("@action:inmenu", "Quit"), true))));
                     }
                     const auto layout = menuLayoutItem(0, {}, children);
                     QList<QVariant> replyArguments;
@@ -212,13 +214,13 @@ namespace javelin::app
             switch (id)
             {
             case 1:
-                return actionProperties(QStringLiteral("Open Javelin"), true);
+                return actionProperties(i18n("Open Javelin"), true);
             case 2:
-                return actionProperties(QStringLiteral("Task Center…"), true);
+                return actionProperties(i18n("Task Center…"), true);
             case 3:
-                return actionProperties(QStringLiteral("Refresh accounts"), true);
+                return actionProperties(i18n("Refresh accounts"), true);
             case 4:
-                return actionProperties(QStringLiteral("Quit"), true);
+                return actionProperties(i18nc("@action:inmenu", "Quit"), true);
             default:
                 return {};
             }
@@ -426,8 +428,8 @@ namespace javelin::app
     void DaemonTrayController::updateSummary()
     {
         const auto summary = m_workScheduler.summary();
-        const auto title = summary.isEmpty() ? QStringLiteral("Javelin Mail")
-                                             : QStringLiteral("Javelin Mail — %1").arg(summary);
+        const auto title =
+            summary.isEmpty() ? i18n("Javelin Mail") : i18n("Javelin Mail — %1", summary);
         const auto status = QStringLiteral("Active");
         if (m_title != title)
         {

@@ -6,6 +6,8 @@
 #include "gui/mailboxes/MailboxIconUtils.h"
 #include "gui/settings/GuiSettings.h"
 
+#include <KLocalizedString>
+
 #include <QIcon>
 #include <QPalette>
 #include <QSignalBlocker>
@@ -66,7 +68,7 @@ namespace javelin::gui::shell
         m_tabBar.setVisible(tabs.size() > 1);
 
         const auto* active = activeWorkspaceTab(tabs, activeIndex);
-        m_window.setWindowTitle(active == nullptr ? QStringLiteral("Javelin Mail")
+        m_window.setWindowTitle(active == nullptr ? i18n("Javelin Mail")
                                                   : titleForTab(*active));
     }
 
@@ -110,7 +112,10 @@ namespace javelin::gui::shell
         {
             accountName = settings.loginEmail;
         }
-        return accountName.isEmpty() ? title : QStringLiteral("%1 - %2").arg(title, accountName);
+        return accountName.isEmpty()
+                   ? title
+                   : i18nc("@title:window tab title and account name", "%1 - %2", title,
+                           accountName);
     }
 
     QIcon TabBarPresenter::iconForTab(const TabState& tab) const
@@ -156,6 +161,8 @@ namespace javelin::gui::shell
         auto* closeButton = new QToolButton(&m_tabBar);
         closeButton->setAutoRaise(true);
         closeButton->setText(QStringLiteral("x"));
+        closeButton->setAccessibleName(i18nc("@action:button", "Close tab"));
+        closeButton->setToolTip(i18nc("@info:tooltip", "Close tab"));
         connect(closeButton, &QToolButton::clicked, this,
                 [this, index] { Q_EMIT closeRequested(index); });
         m_tabBar.setTabButton(index, QTabBar::RightSide, closeButton);

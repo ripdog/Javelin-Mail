@@ -9,6 +9,8 @@
 
 #include <QCoroTask>
 
+#include <KLocalizedString>
+
 #include <QDebug>
 #include <QStackedWidget>
 
@@ -38,7 +40,7 @@ namespace javelin::gui::shell
             settings.apiKey.isEmpty())
         {
             Q_EMIT userInterventionRequired(
-                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."));
+                i18n("Set Session URL, Login Email, and API Key in Preferences first."));
             return;
         }
 

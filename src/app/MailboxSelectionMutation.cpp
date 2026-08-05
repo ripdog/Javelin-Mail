@@ -1,5 +1,7 @@
 #include "app/MailboxSelectionMutation.h"
 
+#include <KLocalizedString>
+
 #include <algorithm>
 #include <ranges>
 #include <string_view>
@@ -31,20 +33,20 @@ namespace javelin::app
 
         [[nodiscard]] QString mailboxUnavailable(const std::string_view mailboxId)
         {
-            return QStringLiteral("Mailbox %1 is not available in the local account state.")
-                .arg(QString::fromStdString(std::string{mailboxId}));
+            return i18n("Mailbox %1 is not available in the local account state.",
+                        QString::fromStdString(std::string{mailboxId}));
         }
 
         [[nodiscard]] QString cannotAddTo(const Mailbox& mailbox)
         {
-            return QStringLiteral("You do not have permission to add messages to %1.")
-                .arg(QString::fromStdString(mailbox.name));
+            return i18n("You do not have permission to add messages to %1.",
+                        QString::fromStdString(mailbox.name));
         }
 
         [[nodiscard]] QString cannotRemoveFrom(const Mailbox& mailbox)
         {
-            return QStringLiteral("You do not have permission to remove messages from %1.")
-                .arg(QString::fromStdString(mailbox.name));
+            return i18n("You do not have permission to remove messages from %1.",
+                        QString::fromStdString(mailbox.name));
         }
     } // namespace
 
@@ -67,14 +69,14 @@ namespace javelin::app
             destination = findMailboxByRole(mailboxes, "archive");
             if (destination == nullptr)
             {
-                return QStringLiteral("No Archive mailbox is available.");
+                return i18n("No Archive mailbox is available.");
             }
             if (!intent.sourceMailboxId.has_value())
             {
                 searchArchiveSource = findMailboxByRole(mailboxes, "inbox");
                 if (searchArchiveSource == nullptr)
                 {
-                    return QStringLiteral("No Inbox mailbox is available.");
+                    return i18n("No Inbox mailbox is available.");
                 }
             }
         }
@@ -82,7 +84,7 @@ namespace javelin::app
         {
             if (!intent.destinationMailboxId.has_value())
             {
-                return QStringLiteral("A destination mailbox is required.");
+                return i18n("A destination mailbox is required.");
             }
             destination = findMailboxById(mailboxesById, *intent.destinationMailboxId);
             if (destination == nullptr)
@@ -111,8 +113,8 @@ namespace javelin::app
             const auto foundEmail = emailsById.find(emailId);
             if (foundEmail == emailsById.end())
             {
-                return QStringLiteral("Message %1 is not available in the local cache.")
-                    .arg(QString::fromStdString(emailId));
+                return i18n("Message %1 is not available in the local cache.",
+                            QString::fromStdString(emailId));
             }
             const auto& email = *foundEmail->second;
             const bool alreadyInDestination =
@@ -126,8 +128,8 @@ namespace javelin::app
                     if (std::ranges::find(email.mailboxIds, *intent.sourceMailboxId) ==
                         email.mailboxIds.end())
                     {
-                        return QStringLiteral("Message %1 is no longer in the source mailbox.")
-                            .arg(QString::fromStdString(emailId));
+                        return i18n("Message %1 is no longer in the source mailbox.",
+                                    QString::fromStdString(emailId));
                     }
                     removeMailboxIds.push_back(*intent.sourceMailboxId);
                 }

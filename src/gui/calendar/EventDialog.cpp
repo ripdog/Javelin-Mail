@@ -4,6 +4,8 @@
 
 #include "jmap/calendar/CalendarEventEditing.h"
 
+#include <KLocalizedString>
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateEdit>
@@ -145,7 +147,7 @@ namespace javelin::gui::calendar
                              QWidget* parent)
         : QDialog(parent), m_calendars(std::move(calendars))
     {
-        setWindowTitle(QStringLiteral("Calendar event"));
+        setWindowTitle(i18n("Calendar event"));
         setModal(true);
         auto* layout = new QFormLayout(this);
         m_title = new QLineEdit(this);
@@ -156,7 +158,8 @@ namespace javelin::gui::calendar
             m_calendar->addItem(
                 writable
                     ? QString::fromStdString(calendar.name)
-                    : QStringLiteral("%1 (read-only)").arg(QString::fromStdString(calendar.name)),
+                    : i18nc("@item calendar name", "%1 (read-only)",
+                            QString::fromStdString(calendar.name)),
                 calendarKey(calendar.accountId, calendar.id));
             if (!writable)
             {
@@ -164,13 +167,13 @@ namespace javelin::gui::calendar
                     model->item(m_calendar->count() - 1)->setEnabled(false);
             }
         }
-        m_allDay = new QCheckBox(QStringLiteral("All day"), this);
+        m_allDay = new QCheckBox(i18nc("@option:check calendar event", "All day"), this);
         auto* startRow = new QWidget(this);
         auto* startLayout = new QHBoxLayout(startRow);
         startLayout->setContentsMargins(0, 0, 0, 0);
         m_startDate = new QDateEdit(startRow);
         m_startDate->setCalendarPopup(true);
-        m_startTime = createTimeEditor(startRow, QStringLiteral("Start time"));
+        m_startTime = createTimeEditor(startRow, i18n("Start time"));
         startLayout->addWidget(m_startDate, 1);
         startLayout->addWidget(m_startTime);
         auto* endRow = new QWidget(this);
@@ -178,7 +181,7 @@ namespace javelin::gui::calendar
         endLayout->setContentsMargins(0, 0, 0, 0);
         m_endDate = new QDateEdit(endRow);
         m_endDate->setCalendarPopup(true);
-        m_endTime = createTimeEditor(endRow, QStringLiteral("End time"));
+        m_endTime = createTimeEditor(endRow, i18n("End time"));
         endLayout->addWidget(m_endDate, 1);
         endLayout->addWidget(m_endTime);
         const auto now = QDateTime::currentDateTime();
@@ -192,23 +195,28 @@ namespace javelin::gui::calendar
         m_description = new QPlainTextEdit(this);
         m_location = new QLineEdit(this);
         m_recurrence = new QComboBox(this);
-        m_recurrence->addItem(QStringLiteral("Does not repeat"), QStringLiteral("none"));
-        m_recurrence->addItem(QStringLiteral("Daily"), QStringLiteral("daily"));
-        m_recurrence->addItem(QStringLiteral("Weekly"), QStringLiteral("weekly"));
-        m_recurrence->addItem(QStringLiteral("Monthly"), QStringLiteral("monthly"));
-        m_recurrence->addItem(QStringLiteral("Yearly"), QStringLiteral("yearly"));
-        m_recurrence->addItem(QStringLiteral("Custom…"), QStringLiteral("custom"));
+        m_recurrence->addItem(i18n("Does not repeat"), QStringLiteral("none"));
+        m_recurrence->addItem(i18nc("@item recurrence frequency", "Daily"),
+                              QStringLiteral("daily"));
+        m_recurrence->addItem(i18nc("@item recurrence frequency", "Weekly"),
+                              QStringLiteral("weekly"));
+        m_recurrence->addItem(i18nc("@item recurrence frequency", "Monthly"),
+                              QStringLiteral("monthly"));
+        m_recurrence->addItem(i18nc("@item recurrence frequency", "Yearly"),
+                              QStringLiteral("yearly"));
+        m_recurrence->addItem(i18nc("@item recurrence frequency", "Custom…"),
+                              QStringLiteral("custom"));
         auto* recurrenceRow = new QWidget(this);
         auto* recurrenceLayout = new QHBoxLayout(recurrenceRow);
         recurrenceLayout->setContentsMargins(0, 0, 0, 0);
-        m_customizeRecurrence = new QPushButton(QStringLiteral("Customize…"), recurrenceRow);
+        m_customizeRecurrence = new QPushButton(i18n("Customize…"), recurrenceRow);
         recurrenceLayout->addWidget(m_recurrence, 1);
         recurrenceLayout->addWidget(m_customizeRecurrence);
 
         m_attendees = new QWidget(this);
         m_attendeeRowsLayout = new QVBoxLayout(m_attendees);
         m_attendeeRowsLayout->setContentsMargins(0, 0, 0, 0);
-        auto* addAttendee = new QPushButton(QStringLiteral("+ Add attendee"), m_attendees);
+        auto* addAttendee = new QPushButton(i18n("+ Add attendee"), m_attendees);
         addAttendee->setObjectName(QStringLiteral("addAttendee"));
         m_attendeeRowsLayout->addWidget(addAttendee, 0, Qt::AlignLeft);
         connect(addAttendee, &QPushButton::clicked, this,
@@ -221,20 +229,21 @@ namespace javelin::gui::calendar
         m_error = new QLabel(this);
         m_error->setStyleSheet(QStringLiteral("color: palette(link-visited);"));
         m_error->setWordWrap(true);
-        layout->addRow(QStringLiteral("Title"), m_title);
-        layout->addRow(QStringLiteral("Calendar"), m_calendar);
+        layout->addRow(i18n("Title"), m_title);
+        layout->addRow(i18n("Calendar"), m_calendar);
         layout->addRow(QString{}, m_allDay);
-        layout->addRow(QStringLiteral("Start"), startRow);
-        layout->addRow(QStringLiteral("End"), endRow);
-        layout->addRow(QStringLiteral("Time zone"), m_timeZone);
-        layout->addRow(QStringLiteral("Location"), m_location);
-        layout->addRow(QStringLiteral("Description"), m_description);
-        layout->addRow(QStringLiteral("Recurrence"), recurrenceRow);
-        layout->addRow(QStringLiteral("Attendees"), m_attendees);
+        layout->addRow(i18n("Start"), startRow);
+        layout->addRow(i18n("End"), endRow);
+        layout->addRow(i18n("Time zone"), m_timeZone);
+        layout->addRow(i18n("Location"), m_location);
+        layout->addRow(i18n("Description"), m_description);
+        layout->addRow(i18n("Recurrence"), recurrenceRow);
+        layout->addRow(i18n("Attendees"), m_attendees);
         layout->addRow(m_error);
         auto* buttons =
             new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
-        m_delete = buttons->addButton(QStringLiteral("Delete"), QDialogButtonBox::DestructiveRole);
+        m_delete = buttons->addButton(i18nc("@action:button", "Delete"),
+                                      QDialogButtonBox::DestructiveRole);
         m_delete->setVisible(false);
         layout->addRow(buttons);
         connect(buttons, &QDialogButtonBox::accepted, this, &EventDialog::validateAndAccept);
@@ -269,9 +278,9 @@ namespace javelin::gui::calendar
         m_alertRowsLayout = new QVBoxLayout(m_alerts);
         m_alertRowsLayout->setContentsMargins(0, 0, 0, 0);
         m_useDefaultAlerts =
-            new QCheckBox(QStringLiteral("Use calendar default notifications"), m_alerts);
+            new QCheckBox(i18n("Use calendar default notifications"), m_alerts);
         m_alertRowsLayout->addWidget(m_useDefaultAlerts);
-        m_addAlert = new QPushButton(QStringLiteral("+ Add notification"), m_alerts);
+        m_addAlert = new QPushButton(i18n("+ Add notification"), m_alerts);
         m_addAlert->setObjectName(QStringLiteral("addNotification"));
         m_alertRowsLayout->addWidget(m_addAlert, 0, Qt::AlignLeft);
         connect(m_addAlert, &QPushButton::clicked, this,
@@ -289,7 +298,7 @@ namespace javelin::gui::calendar
                         row.container->setEnabled(!checked);
                 });
 
-        layout->insertRow(layout->rowCount() - 2, QStringLiteral("Notifications"), m_alerts);
+        layout->insertRow(layout->rowCount() - 2, i18n("Notifications"), m_alerts);
         updateRecurrenceControls();
     }
 
@@ -395,8 +404,7 @@ namespace javelin::gui::calendar
 
     void EventDialog::setOccurrenceMode(const bool occurrenceMode)
     {
-        setWindowTitle(occurrenceMode ? QStringLiteral("Edit occurrence")
-                                      : QStringLiteral("Calendar event"));
+        setWindowTitle(occurrenceMode ? i18n("Edit occurrence") : i18n("Calendar event"));
         m_calendar->setEnabled(!occurrenceMode);
         m_allDay->setEnabled(!occurrenceMode);
         m_timeZone->setEnabled(!occurrenceMode && !m_allDay->isChecked());
@@ -523,7 +531,8 @@ namespace javelin::gui::calendar
         row.editor->setText(address);
         row.editor->setPlaceholderText(QStringLiteral("name@example.com"));
         row.remove = new QPushButton(QStringLiteral("−"), row.container);
-        row.remove->setAccessibleName(QStringLiteral("Remove attendee"));
+        row.remove->setAccessibleName(i18n("Remove attendee"));
+        row.remove->setToolTip(i18n("Remove attendee"));
         row.remove->setFixedWidth(row.remove->sizeHint().height() + 8);
         layout->addWidget(row.editor, 1);
         layout->addWidget(row.remove);
@@ -577,28 +586,30 @@ namespace javelin::gui::calendar
         auto* layout = new QHBoxLayout(row.container);
         layout->setContentsMargins(0, 0, 0, 0);
         row.triggerKind = new QComboBox(row.container);
-        row.triggerKind->addItem(QStringLiteral("Relative"), QStringLiteral("offset"));
-        row.triggerKind->addItem(QStringLiteral("At date/time"), QStringLiteral("absolute"));
+        row.triggerKind->addItem(i18nc("@item notification trigger", "Relative"),
+                                 QStringLiteral("offset"));
+        row.triggerKind->addItem(i18nc("@item notification trigger", "At date/time"),
+                                 QStringLiteral("absolute"));
         row.amount = new QSpinBox(row.container);
         row.amount->setRange(0, 10000);
         row.unit = new QComboBox(row.container);
-        row.unit->addItem(QStringLiteral("minutes"), 60);
-        row.unit->addItem(QStringLiteral("hours"), 3600);
-        row.unit->addItem(QStringLiteral("days"), 86400);
-        row.unit->addItem(QStringLiteral("weeks"), 7 * 86400);
-        row.unit->addItem(QStringLiteral("seconds"), 1);
+        row.unit->addItem(i18nc("@item time unit", "minutes"), 60);
+        row.unit->addItem(i18nc("@item time unit", "hours"), 3600);
+        row.unit->addItem(i18nc("@item time unit", "days"), 86400);
+        row.unit->addItem(i18nc("@item time unit", "weeks"), 7 * 86400);
+        row.unit->addItem(i18nc("@item time unit", "seconds"), 1);
         row.relation = new QComboBox(row.container);
-        row.relation->addItem(QStringLiteral("before event starts"),
-                              QStringLiteral("before-start"));
-        row.relation->addItem(QStringLiteral("after event starts"), QStringLiteral("after-start"));
-        row.relation->addItem(QStringLiteral("before event ends"), QStringLiteral("before-end"));
-        row.relation->addItem(QStringLiteral("after event ends"), QStringLiteral("after-end"));
+        row.relation->addItem(i18n("before event starts"), QStringLiteral("before-start"));
+        row.relation->addItem(i18n("after event starts"), QStringLiteral("after-start"));
+        row.relation->addItem(i18n("before event ends"), QStringLiteral("before-end"));
+        row.relation->addItem(i18n("after event ends"), QStringLiteral("after-end"));
         row.absoluteTime =
             new QDateTimeEdit(QDateTime::currentDateTime().addSecs(600), row.container);
         row.absoluteTime->setCalendarPopup(true);
         row.absoluteTime->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm"));
         row.remove = new QPushButton(QStringLiteral("−"), row.container);
-        row.remove->setAccessibleName(QStringLiteral("Remove notification"));
+        row.remove->setAccessibleName(i18n("Remove notification"));
+        row.remove->setToolTip(i18n("Remove notification"));
         row.remove->setFixedWidth(row.remove->sizeHint().height() + 8);
 
         if (row.original.triggerKind == javelin::jmap::calendar::AlertTriggerKind::Absolute)
@@ -743,31 +754,31 @@ namespace javelin::gui::calendar
     {
         if (m_title->text().trimmed().isEmpty())
         {
-            showMutationError(QStringLiteral("Enter a title."));
+            showMutationError(i18n("Enter a title."));
             return;
         }
         if (m_calendar->currentIndex() < 0)
         {
-            showMutationError(QStringLiteral("Choose a writable calendar."));
+            showMutationError(i18n("Choose a writable calendar."));
             return;
         }
         if (!(m_calendar->model()->flags(
                   m_calendar->model()->index(m_calendar->currentIndex(), 0)) &
               Qt::ItemIsEnabled))
         {
-            showMutationError(QStringLiteral("Choose a writable calendar."));
+            showMutationError(i18n("Choose a writable calendar."));
             return;
         }
         const auto start = enteredDateTime(m_startDate, m_startTime);
         const auto end = enteredDateTime(m_endDate, m_endTime);
         if (!start.has_value() || !end.has_value())
         {
-            showMutationError(QStringLiteral("Enter start and end times as HH:mm."));
+            showMutationError(i18n("Enter start and end times as HH:mm."));
             return;
         }
         if (*end <= *start)
         {
-            showMutationError(QStringLiteral("The end must be after the start."));
+            showMutationError(i18n("The end must be after the start."));
             return;
         }
         m_error->clear();

@@ -6,6 +6,8 @@
 #include "gui/shell/MainWindowStateStore.h"
 #include "jmap/cache/ContactReader.h"
 
+#include <KLocalizedString>
+
 #include <QMenu>
 #include <QStackedWidget>
 
@@ -44,7 +46,7 @@ namespace javelin::gui::shell
         if (accounts == nullptr || accounts->empty())
         {
             Q_EMIT statusMessage(
-                QStringLiteral("The configured server does not support JMAP Contacts."), 10000);
+                i18n("The configured server does not support JMAP Contacts."), 10000);
             return;
         }
 
@@ -57,7 +59,7 @@ namespace javelin::gui::shell
                 selected = match;
         }
 
-        auto* widget = materialize(selected->ownerAccountId, QStringLiteral("Contacts"));
+        auto* widget = materialize(selected->ownerAccountId, i18n("Contacts"));
         if (widget == nullptr)
             return;
         const auto index = static_cast<int>(m_tabs.size() - 1);
@@ -68,7 +70,7 @@ namespace javelin::gui::shell
     bool ContactsTabController::restore(const PersistedContactsTab& persisted)
     {
         auto* widget = materialize(persisted.common.accountId, persisted.common.title.isEmpty()
-                                                                   ? QStringLiteral("Contacts")
+                                                                   ? i18n("Contacts")
                                                                    : persisted.common.title);
         if (widget == nullptr)
             return false;
@@ -175,8 +177,7 @@ namespace javelin::gui::shell
             return false;
         if (contactsTab->widget->operationInFlight())
         {
-            Q_EMIT statusMessage(QStringLiteral("Wait for the Contacts operation to finish."),
-                                 5000);
+            Q_EMIT statusMessage(i18n("Wait for the Contacts operation to finish."), 5000);
             return false;
         }
 

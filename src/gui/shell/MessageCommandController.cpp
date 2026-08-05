@@ -7,6 +7,8 @@
 
 #include <QCoroTask>
 
+#include <KLocalizedString>
+
 #include <QAction>
 #include <QCursor>
 #include <QItemSelectionModel>
@@ -73,14 +75,14 @@ namespace javelin::gui::shell
     {
         if (!accountId.has_value() || (!sourceMailboxId.has_value() && !searchTab))
         {
-            Q_EMIT statusMessage(QStringLiteral("Select a message to archive."), 3000);
+            Q_EMIT statusMessage(i18n("Select a message to archive."), 3000);
             return;
         }
 
         auto selection = selectedActionItems();
         if (selection.empty())
         {
-            Q_EMIT statusMessage(QStringLiteral("Select a message to archive."), 3000);
+            Q_EMIT statusMessage(i18n("Select a message to archive."), 3000);
             return;
         }
         queueArchive(std::move(*accountId), std::move(sourceMailboxId), std::move(selection));
@@ -91,14 +93,14 @@ namespace javelin::gui::shell
     {
         if (!accountId.has_value() || !sourceMailboxId.has_value())
         {
-            Q_EMIT statusMessage(QStringLiteral("Select a message to delete."), 3000);
+            Q_EMIT statusMessage(i18n("Select a message to delete."), 3000);
             return;
         }
 
         auto selection = selectedActionItems();
         if (selection.empty())
         {
-            Q_EMIT statusMessage(QStringLiteral("Select a message to delete."), 3000);
+            Q_EMIT statusMessage(i18n("Select a message to delete."), 3000);
             return;
         }
 
@@ -122,14 +124,14 @@ namespace javelin::gui::shell
     {
         if (!accountId.has_value())
         {
-            Q_EMIT statusMessage(QStringLiteral("Select a message to delete."), 3000);
+            Q_EMIT statusMessage(i18n("Select a message to delete."), 3000);
             return;
         }
 
         auto selection = selectedActionItems();
         if (selection.empty())
         {
-            Q_EMIT statusMessage(QStringLiteral("Select a message to delete."), 3000);
+            Q_EMIT statusMessage(i18n("Select a message to delete."), 3000);
             return;
         }
         if (!confirmPermanentDelete(selection.size()))
@@ -145,28 +147,31 @@ namespace javelin::gui::shell
                                                     const bool searchTab)
     {
         const bool move = operation == MessageTransferOperation::Move;
-        const auto verb = move ? QStringLiteral("move") : QStringLiteral("copy");
         if (!accountId.has_value() || (!sourceMailboxId.has_value() && !searchTab))
         {
-            Q_EMIT statusMessage(QStringLiteral("Select a message to %1.").arg(verb), 3000);
+            Q_EMIT statusMessage(move ? i18n("Select a message to move.")
+                                      : i18n("Select a message to copy."),
+                                 3000);
             return;
         }
 
         auto selection = selectedActionItems();
         if (selection.empty())
         {
-            Q_EMIT statusMessage(QStringLiteral("Select a message to %1.").arg(verb), 3000);
+            Q_EMIT statusMessage(move ? i18n("Select a message to move.")
+                                      : i18n("Select a message to copy."),
+                                 3000);
             return;
         }
 
         QMenu menu{m_dialogParent.data()};
-        menu.setTitle(move ? QStringLiteral("Move to") : QStringLiteral("Copy to"));
+        menu.setTitle(move ? i18n("Move to") : i18n("Copy to"));
         populateDestinationMenus(move ? &menu : nullptr, move ? nullptr : &menu,
                                  std::move(*accountId), std::move(sourceMailboxId),
                                  std::move(selection));
         if (menu.actions().empty())
         {
-            Q_EMIT statusMessage(QStringLiteral("No destination mailboxes available."), 3000);
+            Q_EMIT statusMessage(i18n("No destination mailboxes available."), 3000);
             return;
         }
         menu.exec(QCursor::pos());
@@ -209,9 +214,9 @@ namespace javelin::gui::shell
             {
                 continue;
             }
-            addDestination(moveMenu, MessageTransferOperation::Move, QStringLiteral("Queued move."),
+            addDestination(moveMenu, MessageTransferOperation::Move, i18n("Queued move."),
                            *mailbox);
-            addDestination(copyMenu, MessageTransferOperation::Copy, QStringLiteral("Queued copy."),
+            addDestination(copyMenu, MessageTransferOperation::Copy, i18n("Queued copy."),
                            *mailbox);
         }
     }
@@ -252,8 +257,7 @@ namespace javelin::gui::shell
                     std::get<javelin::app::QueuedMailboxSelectionMutation>(result);
                 if (summary.queuedEmailCount == 0)
                 {
-                    Q_EMIT statusMessage(QStringLiteral("The selected messages are already there."),
-                                         5000);
+                    Q_EMIT statusMessage(i18n("The selected messages are already there."), 5000);
                     return;
                 }
 
@@ -261,10 +265,10 @@ namespace javelin::gui::shell
                 if (summary.skippedEmailCount > 0)
                 {
                     Q_EMIT statusMessage(
-                        QStringLiteral("Queued %1 for %2 messages; skipped %3 already there.")
-                            .arg(move ? QStringLiteral("move") : QStringLiteral("copy"))
-                            .arg(summary.queuedEmailCount)
-                            .arg(summary.skippedEmailCount),
+                        move ? i18n("Queued move for %1 messages; skipped %2 already there.",
+                                    summary.queuedEmailCount, summary.skippedEmailCount)
+                             : i18n("Queued copy for %1 messages; skipped %2 already there.",
+                                    summary.queuedEmailCount, summary.skippedEmailCount),
                         5000);
                 }
                 else if (summary.queuedEmailCount > 1)
@@ -272,10 +276,8 @@ namespace javelin::gui::shell
                     auto message = successMessage;
                     if (message.endsWith(QLatin1Char('.')))
                         message.chop(1);
-                    Q_EMIT statusMessage(QStringLiteral("%1 for %2 messages.")
-                                             .arg(message)
-                                             .arg(summary.queuedEmailCount),
-                                         5000);
+                    Q_EMIT statusMessage(
+                        i18n("%1 for %2 messages.", message, summary.queuedEmailCount), 5000);
                 }
                 else
                 {
@@ -350,8 +352,7 @@ namespace javelin::gui::shell
                 if (index.isValid())
                     m_messageView.setCurrentIndex(index);
                 Q_EMIT messageMetadataChanged(QString::fromStdString(accountId));
-                Q_EMIT statusMessage(flagged ? QStringLiteral("Removed star.")
-                                             : QStringLiteral("Added star."),
+                Q_EMIT statusMessage(flagged ? i18n("Removed star.") : i18n("Added star."),
                                      5000);
                 submitQueuedMutations(accountId,
                                       summary.queuedMutations.front().patch.operationGroupId);
@@ -363,7 +364,7 @@ namespace javelin::gui::shell
     {
         if (!accountId.has_value() || m_messageView.selectionModel() == nullptr)
         {
-            Q_EMIT statusMessage(QStringLiteral("Select a message to mark unread."), 3000);
+            Q_EMIT statusMessage(i18n("Select a message to mark unread."), 3000);
             return;
         }
 
@@ -396,8 +397,9 @@ namespace javelin::gui::shell
                 Q_EMIT messageMetadataChanged(QString::fromStdString(accountId));
                 Q_EMIT statusMessage(
                     markedCount == 1
-                        ? QStringLiteral("Marked unread.")
-                        : QStringLiteral("Marked %1 messages unread.").arg(markedCount),
+                        ? i18n("Marked unread.")
+                        : i18np("Marked %1 message unread.", "Marked %1 messages unread.",
+                                markedCount),
                     5000);
                 submitQueuedMutations(accountId,
                                       summary.queuedMutations.front().patch.operationGroupId);
@@ -433,9 +435,8 @@ namespace javelin::gui::shell
                 if (summary.queuedEmailCount == 0)
                 {
                     Q_EMIT statusMessage(
-                        searchArchive
-                            ? QStringLiteral("The selected messages are not in Inbox.")
-                            : QStringLiteral("The selected messages are already archived."),
+                        searchArchive ? i18n("The selected messages are not in Inbox.")
+                                      : i18n("The selected messages are already archived."),
                         5000);
                     return;
                 }
@@ -444,18 +445,18 @@ namespace javelin::gui::shell
                 if (summary.skippedEmailCount > 0)
                 {
                     Q_EMIT statusMessage(
-                        QStringLiteral("Queued archive for %1 messages; skipped %2 not in Inbox.")
-                            .arg(summary.queuedEmailCount)
-                            .arg(summary.skippedEmailCount),
+                        i18n("Queued archive for %1 messages; skipped %2 not in Inbox.",
+                             summary.queuedEmailCount, summary.skippedEmailCount),
                         5000);
                 }
                 else
                 {
-                    Q_EMIT statusMessage(summary.queuedEmailCount == 1
-                                             ? QStringLiteral("Queued archive.")
-                                             : QStringLiteral("Queued archive for %1 messages.")
-                                                   .arg(summary.queuedEmailCount),
-                                         5000);
+                    Q_EMIT statusMessage(
+                        summary.queuedEmailCount == 1
+                            ? i18n("Queued archive.")
+                            : i18np("Queued archive for %1 message.",
+                                    "Queued archive for %1 messages.", summary.queuedEmailCount),
+                        5000);
                 }
                 submitQueuedMutations(accountId,
                                       summary.queuedMutations.front().patch.operationGroupId);
@@ -468,12 +469,12 @@ namespace javelin::gui::shell
         const auto trashMailbox = findMailboxByRole(m_mailboxReader, accountId, "trash");
         if (!trashMailbox.has_value())
         {
-            Q_EMIT statusMessage(QStringLiteral("No Trash mailbox is available."), 5000);
+            Q_EMIT statusMessage(i18n("No Trash mailbox is available."), 5000);
             return;
         }
         queueTransfer(std::move(accountId), std::move(sourceMailboxId), trashMailbox->id,
                       std::move(selection), MessageTransferOperation::Move,
-                      QStringLiteral("Queued delete."));
+                      i18n("Queued delete."));
     }
 
     void MessageCommandController::queueDestroy(std::string accountId,
@@ -503,9 +504,9 @@ namespace javelin::gui::shell
                 Q_EMIT mailboxMembershipChanged(QString::fromStdString(accountId));
                 Q_EMIT statusMessage(
                     selectedCount == 1
-                        ? QStringLiteral("Queued permanent deletion.")
-                        : QStringLiteral("Queued permanent deletion for %1 messages.")
-                              .arg(selectedCount),
+                        ? i18n("Queued permanent deletion.")
+                        : i18np("Queued permanent deletion for %1 message.",
+                                "Queued permanent deletion for %1 messages.", selectedCount),
                     5000);
                 submitQueuedMutations(accountId,
                                       summary.queuedMutations.front().patch.operationGroupId);
@@ -543,10 +544,11 @@ namespace javelin::gui::shell
     {
         const auto prompt =
             selectionItemCount == 1
-                ? QStringLiteral("Permanently delete the selected message? This cannot be undone.")
-                : QStringLiteral("Permanently delete %1 selected messages? This cannot be undone.")
-                      .arg(selectionItemCount);
-        return QMessageBox::warning(m_dialogParent.data(), QStringLiteral("Delete Permanently"),
+                ? i18n("Permanently delete the selected message? This cannot be undone.")
+                : i18np("Permanently delete %1 selected message? This cannot be undone.",
+                        "Permanently delete %1 selected messages? This cannot be undone.",
+                        selectionItemCount);
+        return QMessageBox::warning(m_dialogParent.data(), i18n("Delete Permanently"),
                                     prompt, QMessageBox::Yes | QMessageBox::Cancel,
                                     QMessageBox::Cancel) == QMessageBox::Yes;
     }

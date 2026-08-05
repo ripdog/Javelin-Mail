@@ -4,6 +4,8 @@
 #include "gui/mailboxes/MailboxIconUtils.h"
 #include "gui/mailboxes/MailboxSort.h"
 
+#include <KLocalizedString>
+
 #include <QApplication>
 #include <QDataStream>
 #include <QFutureWatcher>
@@ -177,9 +179,8 @@ namespace javelin::gui::mailboxes
         {
             if (!node->mailboxId.empty())
             {
-                return QStringLiteral("%1 (%2 unread)")
-                    .arg(QString::fromStdString(node->displayName))
-                    .arg(node->unreadEmails);
+                return i18np("%2 (%1 unread)", "%2 (%1 unread)", node->unreadEmails,
+                             QString::fromStdString(node->displayName));
             }
             const auto status = m_connectionStatuses.find(node->accountId);
             const auto connection = status == m_connectionStatuses.end()
@@ -189,16 +190,16 @@ namespace javelin::gui::mailboxes
             switch (connection)
             {
             case ConnectionStatus::Disconnected:
-                statusText = QStringLiteral("Disconnected");
+                statusText = i18nc("@item account connection state", "Disconnected");
                 break;
             case ConnectionStatus::Connecting:
-                statusText = QStringLiteral("Connecting");
+                statusText = i18nc("@item account connection state", "Connecting");
                 break;
             case ConnectionStatus::Connected:
-                statusText = QStringLiteral("Connected");
+                statusText = i18nc("@item account connection state", "Connected");
                 break;
             case ConnectionStatus::AuthenticationPaused:
-                statusText = QStringLiteral("Sign-in required");
+                statusText = i18nc("@item account connection state", "Sign-in required");
                 break;
             }
             return QStringLiteral("%1 — %2").arg(QString::fromStdString(node->displayName),

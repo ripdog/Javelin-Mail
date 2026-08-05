@@ -1,5 +1,7 @@
 #include "gui/translation/TranslationModelManifest.h"
 
+#include <KLocalizedString>
+
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -34,15 +36,19 @@ namespace javelin::gui::translation
             };
         }
 
+        [[nodiscard]] TranslationError invalidField(const char* name)
+        {
+            return manifestError(i18n("Translation model manifest field '%1' is invalid.",
+                                      QString::fromLatin1(name)));
+        }
+
         [[nodiscard]] QString requiredString(const QJsonObject& object, const char* name,
                                              TranslationError& error)
         {
             const auto value = object.value(QLatin1StringView{name});
             if (!value.isString() || value.toString().isEmpty())
             {
-                error = manifestError(
-                    QStringLiteral("Translation model manifest field '%1' is invalid.")
-                        .arg(QString::fromLatin1(name)));
+                error = invalidField(name);
                 return {};
             }
             return value.toString();
@@ -54,18 +60,12 @@ namespace javelin::gui::translation
             const auto value = object.value(QLatin1StringView{name});
             if (!value.isDouble())
             {
-                error = manifestError(
-                    QStringLiteral("Translation model manifest field '%1' is invalid.")
-                        .arg(QString::fromLatin1(name)));
+                error = invalidField(name);
                 return 0;
             }
             const auto size = value.toInteger();
             if (size <= 0)
-            {
-                error = manifestError(
-                    QStringLiteral("Translation model manifest field '%1' is invalid.")
-                        .arg(QString::fromLatin1(name)));
-            }
+                error = invalidField(name);
             return size;
         }
 
@@ -112,15 +112,13 @@ namespace javelin::gui::translation
         const auto document = QJsonDocument::fromJson(json, &parseError);
         if (parseError.error != QJsonParseError::NoError || !document.isObject())
         {
-            error =
-                manifestError(QStringLiteral("The translation model manifest is not valid JSON."));
+            error = manifestError(i18n("The translation model manifest is not valid JSON."));
             return nullptr;
         }
         const auto root = document.object();
         if (root.value(QStringLiteral("schemaVersion")).toInt() != 1)
         {
-            error = manifestError(
-                QStringLiteral("The translation model manifest schema is unsupported."));
+            error = manifestError(i18n("The translation model manifest schema is unsupported."));
             return nullptr;
         }
 
@@ -131,8 +129,8 @@ namespace javelin::gui::translation
             engine.value(QStringLiteral("sourceCommit")).toString() !=
                 QString::fromLatin1(expectedEngineCommit))
         {
-            error = manifestError(QStringLiteral(
-                "The translation model manifest does not match the bundled engine."));
+            error = manifestError(
+                i18n("The translation model manifest does not match the bundled engine."));
             return nullptr;
         }
 
@@ -146,8 +144,7 @@ namespace javelin::gui::translation
         const auto directionsValue = root.value(QStringLiteral("directions"));
         if (!directionsValue.isArray())
         {
-            error =
-                manifestError(QStringLiteral("The translation model manifest has no directions."));
+            error = manifestError(i18n("The translation model manifest has no directions."));
             return nullptr;
         }
 
@@ -156,7 +153,7 @@ namespace javelin::gui::translation
         {
             if (!value.isObject())
             {
-                error = manifestError(QStringLiteral("A translation model direction is invalid."));
+                error = manifestError(i18n("A translation model direction is invalid."));
                 return nullptr;
             }
             const auto object = value.toObject();
@@ -177,8 +174,8 @@ namespace javelin::gui::translation
             }
             if (direction.source == direction.target || directionIds.contains(direction.id()))
             {
-                error = manifestError(QStringLiteral(
-                    "The translation model manifest has duplicate or identity directions."));
+                error = manifestError(
+                    i18n("The translation model manifest has duplicate or identity directions."));
                 return nullptr;
             }
             directionIds.insert(direction.id());
@@ -186,8 +183,7 @@ namespace javelin::gui::translation
             const auto filesValue = object.value(QStringLiteral("files"));
             if (!filesValue.isArray())
             {
-                error =
-                    manifestError(QStringLiteral("A translation model direction has no files."));
+                error = manifestError(i18n("A translation model direction has no files."));
                 return nullptr;
             }
             for (const auto& fileValue : filesValue.toArray())
@@ -213,15 +209,14 @@ namespace javelin::gui::translation
                     file.installedName.contains(QLatin1Char('/')) ||
                     file.installedName.contains(QStringLiteral("..")))
                 {
-                    error = manifestError(QStringLiteral("A translation model file is invalid."));
+                    error = manifestError(i18n("A translation model file is invalid."));
                     return nullptr;
                 }
                 direction.files.push_back(std::move(file));
             }
             if (!validFileSet(direction.files))
             {
-                error =
-                    manifestError(QStringLiteral("A translation model direction is incomplete."));
+                error = manifestError(i18n("A translation model direction is incomplete."));
                 return nullptr;
             }
 
@@ -229,7 +224,7 @@ namespace javelin::gui::translation
             if (!licenses.isArray())
             {
                 error = manifestError(
-                    QStringLiteral("A translation model direction has no license metadata."));
+                    i18n("A translation model direction has no license metadata."));
                 return nullptr;
             }
             for (const auto& license : licenses.toArray())
@@ -238,8 +233,7 @@ namespace javelin::gui::translation
                 if (name.isEmpty() || name.contains(QLatin1Char('/')) ||
                     name.contains(QStringLiteral("..")))
                 {
-                    error = manifestError(
-                        QStringLiteral("A translation model license entry is invalid."));
+                    error = manifestError(i18n("A translation model license entry is invalid."));
                     return nullptr;
                 }
                 direction.licenseFiles.push_back(name);
@@ -248,7 +242,7 @@ namespace javelin::gui::translation
         }
         if (manifest->m_directions.empty())
         {
-            error = manifestError(QStringLiteral("The translation model manifest is empty."));
+            error = manifestError(i18n("The translation model manifest is empty."));
             return nullptr;
         }
         std::ranges::sort(manifest->m_directions, {}, &TranslationModelDirection::id);
@@ -261,8 +255,7 @@ namespace javelin::gui::translation
         QFile file{QString::fromLatin1(manifestResource)};
         if (!file.open(QIODevice::ReadOnly))
         {
-            error =
-                manifestError(QStringLiteral("The bundled translation model manifest is missing."));
+            error = manifestError(i18n("The bundled translation model manifest is missing."));
             return nullptr;
         }
         return fromJson(file.readAll(), error);

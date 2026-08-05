@@ -4,6 +4,8 @@
 
 #include <QCoroCore>
 
+#include <KLocalizedString>
+
 #include <QUuid>
 
 #include <algorithm>
@@ -27,8 +29,8 @@ namespace javelin::app
         [[nodiscard]] QString sendLabel(const std::optional<std::string>& subject)
         {
             return subject.has_value() && !subject->empty()
-                       ? QStringLiteral("Send “%1”").arg(QString::fromStdString(*subject))
-                       : QStringLiteral("Send Message");
+                       ? i18n("Send “%1”", QString::fromStdString(*subject))
+                       : i18n("Send Message");
         }
 
         [[nodiscard]] javelin::app::undo::HistoryExecutionResult
@@ -111,7 +113,7 @@ namespace javelin::app
         if (!reservation.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
-                .message = QStringLiteral("Unable to reserve Undo Send history."),
+                .message = i18n("Unable to reserve Undo Send history."),
             };
 
         PendingSend send{
@@ -139,7 +141,7 @@ namespace javelin::app
 
         const auto timeout =
             std::clamp<std::int64_t>(delay.count() * 1000, 1, std::numeric_limits<int>::max());
-        Q_EMIT undoableSendScheduled(sendId, QStringLiteral("Message scheduled"),
+        Q_EMIT undoableSendScheduled(sendId, i18n("Message scheduled"),
                                      sendLabel(snapshot.subject), static_cast<int>(timeout));
         scheduleNext();
         co_return javelin::jmap::submission::SendSummary{
@@ -159,7 +161,7 @@ namespace javelin::app
             return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::Conflict,
                 .message =
-                    QStringLiteral("Unable to cancel a scheduled send while history is changing."),
+                    i18n("Unable to cancel a scheduled send while history is changing."),
             };
         const auto found = m_repository.find(sendId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&found))
@@ -189,7 +191,7 @@ namespace javelin::app
         auto* history = std::get_if<javelin::app::undo::DeferredSendHistory>(&entry.payload);
         if (history == nullptr ||
             direction == javelin::app::undo::HistoryExecutionDirection::Recover)
-            co_return historyFailure(QStringLiteral("The scheduled send requires reconciliation."),
+            co_return historyFailure(i18n("The scheduled send requires reconciliation."),
                                      javelin::app::undo::HistoryExecutionOutcome::Unknown);
 
         const auto sendId = QString::fromStdString(history->sendId);
@@ -200,7 +202,7 @@ namespace javelin::app
                 co_return historyFailure(
                     error->message, javelin::app::undo::HistoryExecutionOutcome::DefinitiveFailure);
             if (!std::get<bool>(cancelled))
-                co_return historyFailure(QStringLiteral("The message has already started sending."),
+                co_return historyFailure(i18n("The message has already started sending."),
                                          javelin::app::undo::HistoryExecutionOutcome::Expired);
             Q_EMIT undoableSendClosed(sendId);
             Q_EMIT draftRestoreRequested(QString::fromStdString(history->accountId),
@@ -216,9 +218,9 @@ namespace javelin::app
                     error->message, javelin::app::undo::HistoryExecutionOutcome::DefinitiveFailure);
             if (!std::get<bool>(rescheduled))
                 co_return historyFailure(
-                    QStringLiteral("The scheduled send can no longer be redone."),
+                    i18n("The scheduled send can no longer be redone."),
                     javelin::app::undo::HistoryExecutionOutcome::Conflict);
-            Q_EMIT undoableSendScheduled(sendId, QStringLiteral("Message scheduled"),
+            Q_EMIT undoableSendScheduled(sendId, i18n("Message scheduled"),
                                          sendLabel(history->subject),
                                          static_cast<int>(history->delaySeconds * 1000));
         }
@@ -282,8 +284,8 @@ namespace javelin::app
         {
             static_cast<void>(
                 m_repository.markWaiting(send.sendId, DeferredSendStatus::WaitingForAuth,
-                                         QStringLiteral("Account credentials are unavailable.")));
-            Q_EMIT undoableSendWaiting(send.sendId, QStringLiteral("Waiting to send"),
+                                         i18n("Account credentials are unavailable.")));
+            Q_EMIT undoableSendWaiting(send.sendId, i18n("Waiting to send"),
                                        sendLabel(send.subject));
             co_return;
         }
@@ -312,12 +314,12 @@ namespace javelin::app
             [this, &dispatched, send]()
             {
                 dispatched = true;
-                const auto explanation =
-                    QStringLiteral(
-                        "Unable to undo sending %1 because it has already been submitted.")
-                        .arg(send.subject.has_value()
-                                 ? QStringLiteral("“%1”").arg(QString::fromStdString(*send.subject))
-                                 : QStringLiteral("this message"));
+                const auto explanation = i18n(
+                    "Unable to undo sending %1 because it has already been submitted.",
+                    send.subject.has_value()
+                        ? i18nc("@item email subject quoted in a sentence", "“%1”",
+                                QString::fromStdString(*send.subject))
+                        : i18n("this message"));
                 static_cast<void>(m_undoManager.setEntryStatus(
                     send.historyEntryId, javelin::app::undo::HistoryEntryStatus::Expired,
                     explanation));
@@ -336,7 +338,7 @@ namespace javelin::app
                 static_cast<void>(m_repository.markWaiting(send.sendId, waiting, error->message));
                 static_cast<void>(m_undoManager.setEntryStatus(
                     send.historyEntryId, javelin::app::undo::HistoryEntryStatus::Ready));
-                Q_EMIT undoableSendWaiting(send.sendId, QStringLiteral("Waiting to send"),
+                Q_EMIT undoableSendWaiting(send.sendId, i18n("Waiting to send"),
                                            sendLabel(send.subject));
             }
             else if (dispatched &&

@@ -3,6 +3,8 @@
 #include "app/MessageListCacheRead.h"
 #include "app/MessageSubject.h"
 
+#include <KLocalizedString>
+
 #include <QDataStream>
 #include <QFutureWatcher>
 #include <QMimeData>
@@ -85,7 +87,7 @@ namespace javelin::gui::messages
         const auto& item = itemForRow(row);
         const auto sender = item.from.has_value()
                                 ? QString::fromStdString(item.from->name.value_or(item.from->email))
-                                : QStringLiteral("(unknown sender)");
+                                : i18nc("@item email with unknown sender", "(unknown sender)");
         const auto subject = javelin::app::subjectForDisplay(item.subject);
         const auto preview =
             item.preview.has_value() ? QString::fromStdString(*item.preview) : QString{};

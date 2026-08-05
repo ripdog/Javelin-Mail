@@ -1,5 +1,7 @@
 #pragma once
 
+#include <KLocalizedString>
+
 #include <QString>
 
 #include <optional>
@@ -12,7 +14,7 @@ namespace javelin::app
     {
         if (!subject.has_value() || subject->empty())
         {
-            return QStringLiteral("<No Subject>");
+            return i18nc("@item email with no subject", "<No Subject>");
         }
 
         return QString::fromStdString(*subject);

@@ -7,6 +7,8 @@
 
 #include <QCoroTask>
 
+#include <KLocalizedString>
+
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileDialog>
@@ -35,11 +37,11 @@ namespace javelin::gui::shell
                                               !QDir{attachmentSettings.directory}.exists()))
         {
             Q_EMIT userInterventionRequired(
-                QStringLiteral("Select a valid attachment save directory in Preferences."));
+                i18n("Select a valid attachment save directory in Preferences."));
             return;
         }
 
-        Q_EMIT statusMessage(QStringLiteral("Downloading attachment..."), 0);
+        Q_EMIT statusMessage(i18n("Downloading attachment..."), 0);
         auto task = m_contentPort.requestAttachment(std::move(accountId), std::move(emailId),
                                                     std::move(partId));
         QCoro::connect(
@@ -55,17 +57,16 @@ namespace javelin::gui::shell
                 const auto& download = std::get<javelin::jmap::AttachmentDownload>(result);
                 const QString targetPath =
                     attachmentSettings.alwaysAsk
-                        ? QFileDialog::getSaveFileName(m_dialogParent,
-                                                       QStringLiteral("Save Attachment"),
+                        ? QFileDialog::getSaveFileName(m_dialogParent, i18n("Save Attachment"),
                                                        suggestedFileName(download))
                         : uniqueFilePath(attachmentSettings.directory, suggestedFileName(download));
                 if (targetPath.isEmpty())
                 {
-                    Q_EMIT statusMessage(QStringLiteral("Attachment save canceled."), 3000);
+                    Q_EMIT statusMessage(i18n("Attachment save canceled."), 3000);
                     return;
                 }
 
-                Q_EMIT statusMessage(QStringLiteral("Saving attachment..."), 0);
+                Q_EMIT statusMessage(i18n("Saving attachment..."), 0);
                 auto* watcher = new QFutureWatcher<FileWriteResult>(this);
                 connect(watcher, &QFutureWatcher<FileWriteResult>::finished, this,
                         [this, watcher]
@@ -74,14 +75,12 @@ namespace javelin::gui::shell
                             if (!writeResult.errorMessage.isEmpty())
                             {
                                 Q_EMIT userInterventionRequired(
-                                    QStringLiteral("Failed to save attachment: %1")
-                                        .arg(writeResult.errorMessage));
+                                    i18n("Failed to save attachment: %1", writeResult.errorMessage));
                             }
                             else
                             {
                                 Q_EMIT statusMessage(
-                                    QStringLiteral("Saved attachment to %1").arg(writeResult.path),
-                                    5000);
+                                    i18n("Saved attachment to %1", writeResult.path), 5000);
                             }
                             watcher->deleteLater();
                         });
@@ -104,37 +103,36 @@ namespace javelin::gui::shell
             std::get<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(snapshotResult);
         if (!snapshot.has_value())
         {
-            Q_EMIT statusMessage(QStringLiteral("The selected message is unavailable."), 5000);
+            Q_EMIT statusMessage(i18n("The selected message is unavailable."), 5000);
             return;
         }
 
         const auto attachments = visibleDownloadableAttachments(*snapshot);
         if (attachments.empty())
         {
-            Q_EMIT statusMessage(QStringLiteral("No downloadable attachments are available."),
-                                 5000);
+            Q_EMIT statusMessage(i18n("No downloadable attachments are available."), 5000);
             return;
         }
 
         const auto attachmentSettings = m_settings.attachmentSaveSettings();
         const QString targetDirectory =
             attachmentSettings.alwaysAsk
-                ? QFileDialog::getExistingDirectory(
-                      m_dialogParent, QStringLiteral("Save All Attachments"), QDir::homePath())
+                ? QFileDialog::getExistingDirectory(m_dialogParent, i18n("Save All Attachments"),
+                                                    QDir::homePath())
                 : attachmentSettings.directory;
         if (targetDirectory.isEmpty())
         {
-            Q_EMIT statusMessage(QStringLiteral("Save all attachments canceled."), 3000);
+            Q_EMIT statusMessage(i18n("Save all attachments canceled."), 3000);
             return;
         }
         if (!QDir{targetDirectory}.exists())
         {
             Q_EMIT userInterventionRequired(
-                QStringLiteral("Select a valid attachment save directory in Preferences."));
+                i18n("Select a valid attachment save directory in Preferences."));
             return;
         }
 
-        Q_EMIT statusMessage(QStringLiteral("Downloading attachments..."), 0);
+        Q_EMIT statusMessage(i18n("Downloading attachments..."), 0);
         auto task = downloadAttachments(m_contentPort, accountId, emailId, attachments);
         QCoro::connect(
             std::move(task), this,
@@ -146,7 +144,7 @@ namespace javelin::gui::shell
                     return;
                 }
 
-                Q_EMIT statusMessage(QStringLiteral("Saving attachments..."), 0);
+                Q_EMIT statusMessage(i18n("Saving attachments..."), 0);
                 auto* watcher = new QFutureWatcher<BatchWriteResult>(this);
                 connect(
                     watcher, &QFutureWatcher<BatchWriteResult>::finished, this,
@@ -156,13 +154,14 @@ namespace javelin::gui::shell
                         if (!writeResult.errorMessage.isEmpty())
                         {
                             Q_EMIT userInterventionRequired(
-                                QStringLiteral("Failed to save attachments to %1: %2")
-                                    .arg(writeResult.failedPath, writeResult.errorMessage));
+                                i18n("Failed to save attachments to %1: %2", writeResult.failedPath,
+                                     writeResult.errorMessage));
                         }
                         else
                         {
                             Q_EMIT statusMessage(
-                                QStringLiteral("Saved %1 attachments.").arg(writeResult.savedCount),
+                                i18np("Saved %1 attachment.", "Saved %1 attachments.",
+                                      writeResult.savedCount),
                                 5000);
                         }
                         watcher->deleteLater();
@@ -179,11 +178,11 @@ namespace javelin::gui::shell
         if (!m_temporaryDirectory.isValid())
         {
             Q_EMIT userInterventionRequired(
-                QStringLiteral("A temporary directory for attachments is unavailable."));
+                i18n("A temporary directory for attachments is unavailable."));
             return;
         }
 
-        Q_EMIT statusMessage(QStringLiteral("Downloading attachment..."), 0);
+        Q_EMIT statusMessage(i18n("Downloading attachment..."), 0);
         auto task = m_contentPort.requestAttachment(std::move(accountId), std::move(emailId),
                                                     std::move(partId));
         QCoro::connect(
@@ -198,7 +197,7 @@ namespace javelin::gui::shell
 
                 const auto& download = std::get<javelin::jmap::AttachmentDownload>(result);
                 const QString targetPath = tempAttachmentPath(m_temporaryDirectory, download);
-                Q_EMIT statusMessage(QStringLiteral("Preparing attachment..."), 0);
+                Q_EMIT statusMessage(i18n("Preparing attachment..."), 0);
 
                 auto* watcher = new QFutureWatcher<FileWriteResult>(this);
                 connect(watcher, &QFutureWatcher<FileWriteResult>::finished, this,
@@ -207,9 +206,8 @@ namespace javelin::gui::shell
                             const auto writeResult = watcher->result();
                             if (!writeResult.errorMessage.isEmpty())
                             {
-                                Q_EMIT userInterventionRequired(
-                                    QStringLiteral("Failed to prepare attachment: %1")
-                                        .arg(writeResult.errorMessage));
+                                Q_EMIT userInterventionRequired(i18n(
+                                    "Failed to prepare attachment: %1", writeResult.errorMessage));
                                 watcher->deleteLater();
                                 return;
                             }
@@ -217,9 +215,8 @@ namespace javelin::gui::shell
                             const bool opened =
                                 QDesktopServices::openUrl(QUrl::fromLocalFile(writeResult.path));
                             Q_EMIT statusMessage(
-                                opened ? QStringLiteral("Opened attachment.")
-                                       : QStringLiteral(
-                                             "The attachment was saved, but no app opened it."),
+                                opened ? i18n("Opened attachment.")
+                                       : i18n("The attachment was saved, but no app opened it."),
                                 5000);
                             watcher->deleteLater();
                         });
@@ -234,11 +231,11 @@ namespace javelin::gui::shell
         if (!m_temporaryDirectory.isValid())
         {
             Q_EMIT userInterventionRequired(
-                QStringLiteral("A temporary directory for message source files is unavailable."));
+                i18n("A temporary directory for message source files is unavailable."));
             return;
         }
 
-        Q_EMIT statusMessage(QStringLiteral("Preparing message source..."), 0);
+        Q_EMIT statusMessage(i18n("Preparing message source..."), 0);
         auto task = m_contentPort.requestMessageSource(std::move(accountId), std::move(emailId));
         QCoro::connect(
             std::move(task), this,
@@ -259,9 +256,8 @@ namespace javelin::gui::shell
                             const auto writeResult = watcher->result();
                             if (!writeResult.errorMessage.isEmpty())
                             {
-                                Q_EMIT userInterventionRequired(
-                                    QStringLiteral("Failed to prepare message source: %1")
-                                        .arg(writeResult.errorMessage));
+                                Q_EMIT userInterventionRequired(i18n(
+                                    "Failed to prepare message source: %1", writeResult.errorMessage));
                                 watcher->deleteLater();
                                 return;
                             }
@@ -269,9 +265,8 @@ namespace javelin::gui::shell
                             const bool opened =
                                 QDesktopServices::openUrl(QUrl::fromLocalFile(writeResult.path));
                             Q_EMIT statusMessage(
-                                opened ? QStringLiteral("Opened message source.")
-                                       : QStringLiteral(
-                                             "The source file was saved, but no app opened it."),
+                                opened ? i18n("Opened message source.")
+                                       : i18n("The source file was saved, but no app opened it."),
                                 5000);
                             watcher->deleteLater();
                         });

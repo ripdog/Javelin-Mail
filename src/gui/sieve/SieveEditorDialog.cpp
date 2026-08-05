@@ -4,6 +4,7 @@
 
 #include <QCoroTask>
 
+#include <KLocalizedString>
 #include <KTextEditor/Document>
 #include <KTextEditor/Editor>
 #include <KTextEditor/View>
@@ -29,7 +30,7 @@ namespace javelin::gui::sieve
                                          std::string ownerAccountId, QWidget* parent)
         : QDialog(parent), m_commandPort(commandPort), m_ownerAccountId(std::move(ownerAccountId))
     {
-        setWindowTitle(QStringLiteral("Sieve Rules"));
+        setWindowTitle(i18n("Sieve Rules"));
         resize(960, 640);
 
         auto* layout = new QVBoxLayout(this);
@@ -46,17 +47,17 @@ namespace javelin::gui::sieve
         layout->addWidget(splitter, 1);
 
         auto* footer = new QHBoxLayout;
-        m_newButton = new QPushButton(QStringLiteral("New"), this);
-        m_deleteButton = new QPushButton(QStringLiteral("Delete"), this);
+        m_newButton = new QPushButton(i18nc("@action:button", "New"), this);
+        m_deleteButton = new QPushButton(i18nc("@action:button", "Delete"), this);
         footer->addWidget(m_newButton);
         footer->addWidget(m_deleteButton);
-        m_activeCheckBox = new QCheckBox(QStringLiteral("Active"), this);
+        m_activeCheckBox = new QCheckBox(i18nc("@option:check", "Active"), this);
         footer->addWidget(m_activeCheckBox);
-        m_statusLabel = new QLabel(QStringLiteral("Loading scripts…"), this);
+        m_statusLabel = new QLabel(i18n("Loading scripts…"), this);
         m_statusLabel->setWordWrap(true);
         footer->addWidget(m_statusLabel, 1);
-        m_validateButton = new QPushButton(QStringLiteral("Validate"), this);
-        m_saveButton = new QPushButton(QStringLiteral("Save"), this);
+        m_validateButton = new QPushButton(i18nc("@action:button", "Validate"), this);
+        m_saveButton = new QPushButton(i18nc("@action:button", "Save"), this);
         footer->addWidget(m_validateButton);
         footer->addWidget(m_saveButton);
         layout->addLayout(footer);
@@ -73,7 +74,7 @@ namespace javelin::gui::sieve
                     if (m_loaded)
                     {
                         m_dirty = true;
-                        m_statusLabel->setText(QStringLiteral("Not saved"));
+                        m_statusLabel->setText(i18n("Not saved"));
                         updateActions();
                     }
                 });
@@ -112,7 +113,7 @@ namespace javelin::gui::sieve
                     {
                         auto title = QString::fromStdString(script.name);
                         if (script.isActive)
-                            title += QStringLiteral(" (active)");
+                            title += i18nc("@item suffix marking active Sieve script", " (active)");
                         m_scriptList->addItem(title);
                     }
                 }
@@ -125,7 +126,7 @@ namespace javelin::gui::sieve
                 {
                     const QSignalBlocker blocker{m_activeCheckBox};
                     m_activeCheckBox->setChecked(false);
-                    m_statusLabel->setText(QStringLiteral("No Sieve scripts."));
+                    m_statusLabel->setText(i18n("No Sieve scripts."));
                 }
                 else
                 {
@@ -152,8 +153,8 @@ namespace javelin::gui::sieve
         if (m_dirty)
         {
             const auto answer = QMessageBox::question(
-                this, QStringLiteral("Discard Changes?"),
-                QStringLiteral("This script has unsaved changes. Discard them?"));
+                this, i18n("Discard Changes?"),
+                i18n("This script has unsaved changes. Discard them?"));
             if (answer != QMessageBox::Yes)
             {
                 const QSignalBlocker blocker{m_scriptList};
@@ -175,12 +176,12 @@ namespace javelin::gui::sieve
         {
             m_loaded = true;
             m_dirty = true;
-            m_statusLabel->setText(QStringLiteral("New script — not saved"));
+            m_statusLabel->setText(i18n("New script — not saved"));
             updateActions();
             return;
         }
         setBusy(true);
-        m_statusLabel->setText(QStringLiteral("Loading script…"));
+        m_statusLabel->setText(i18n("Loading script…"));
         auto task = m_commandPort.requestSieveScript(m_ownerAccountId,
                                                      m_scripts[static_cast<std::size_t>(row)]);
         QCoro::connect(
@@ -199,7 +200,7 @@ namespace javelin::gui::sieve
                 m_document->setText(QString::fromUtf8(std::get<QByteArray>(std::move(result))));
                 m_loaded = true;
                 m_dirty = false;
-                m_statusLabel->setText(QStringLiteral("Ready"));
+                m_statusLabel->setText(i18n("Ready"));
                 updateActions();
             });
     }
@@ -208,14 +209,14 @@ namespace javelin::gui::sieve
     {
         if (m_dirty &&
             QMessageBox::question(
-                this, QStringLiteral("Discard Changes?"),
-                QStringLiteral("The current script has unsaved changes. Discard them?")) !=
+                this, i18n("Discard Changes?"),
+                i18n("The current script has unsaved changes. Discard them?")) !=
                 QMessageBox::Yes)
             return;
         bool accepted = false;
         const auto name =
-            QInputDialog::getText(this, QStringLiteral("New Sieve Script"),
-                                  QStringLiteral("Script name:"), QLineEdit::Normal, {}, &accepted)
+            QInputDialog::getText(this, i18n("New Sieve Script"), i18n("Script name:"),
+                                  QLineEdit::Normal, {}, &accepted)
                 .trimmed();
         if (!accepted || name.isEmpty())
             return;
@@ -231,9 +232,10 @@ namespace javelin::gui::sieve
         if (m_currentRow < 0)
             return;
         const auto script = m_scripts[static_cast<std::size_t>(m_currentRow)];
-        if (QMessageBox::question(this, QStringLiteral("Delete Sieve Script?"),
-                                  QStringLiteral("Delete “%1”? This cannot be undone.")
-                                      .arg(QString::fromStdString(script.name))) !=
+        if (QMessageBox::question(
+                this, i18n("Delete Sieve Script?"),
+                i18n("Delete “%1”? This cannot be undone.",
+                     QString::fromStdString(script.name))) !=
             QMessageBox::Yes)
             return;
         if (script.id.empty())
@@ -242,8 +244,8 @@ namespace javelin::gui::sieve
             return;
         }
         setBusy(true);
-        m_statusLabel->setText(script.isActive ? QStringLiteral("Deactivating and deleting…")
-                                               : QStringLiteral("Deleting…"));
+        m_statusLabel->setText(script.isActive ? i18n("Deactivating and deleting…")
+                                               : i18n("Deleting…"));
         auto task = m_commandPort.deleteSieveScript(m_ownerAccountId, script);
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::sieve::SieveDeleteResult result)
@@ -267,8 +269,7 @@ namespace javelin::gui::sieve
         if (script.id.empty() || script.isActive == active)
             return;
         setBusy(true);
-        m_statusLabel->setText(active ? QStringLiteral("Activating…")
-                                      : QStringLiteral("Deactivating…"));
+        m_statusLabel->setText(active ? i18n("Activating…") : i18n("Deactivating…"));
         auto task = m_commandPort.setSieveScriptActive(m_ownerAccountId, script, active);
         QCoro::connect(
             std::move(task), this,
@@ -299,7 +300,7 @@ namespace javelin::gui::sieve
         m_document->setReadWrite(true);
         m_document->setText(QString{});
         if (m_scripts.empty())
-            m_statusLabel->setText(QStringLiteral("No Sieve scripts."));
+            m_statusLabel->setText(i18n("No Sieve scripts."));
         else
             m_scriptList->setCurrentRow(std::min(row, static_cast<int>(m_scripts.size() - 1)));
         updateActions();
@@ -308,7 +309,7 @@ namespace javelin::gui::sieve
     void SieveEditorDialog::validateScript()
     {
         setBusy(true);
-        m_statusLabel->setText(QStringLiteral("Validating…"));
+        m_statusLabel->setText(i18n("Validating…"));
         auto task =
             m_commandPort.validateSieveScript(m_ownerAccountId, m_document->text().toUtf8());
         QCoro::connect(
@@ -331,7 +332,7 @@ namespace javelin::gui::sieve
         if (m_currentRow < 0)
             return;
         setBusy(true);
-        m_statusLabel->setText(QStringLiteral("Validating…"));
+        m_statusLabel->setText(i18n("Validating…"));
         auto task = m_commandPort.saveSieveScript(m_ownerAccountId,
                                                   m_scripts[static_cast<std::size_t>(m_currentRow)],
                                                   m_document->text().toUtf8());
@@ -350,10 +351,10 @@ namespace javelin::gui::sieve
                 auto title =
                     QString::fromStdString(m_scripts[static_cast<std::size_t>(m_currentRow)].name);
                 if (m_scripts[static_cast<std::size_t>(m_currentRow)].isActive)
-                    title += QStringLiteral(" (active)");
+                    title += i18nc("@item suffix marking active Sieve script", " (active)");
                 m_scriptList->item(m_currentRow)->setText(title);
                 m_dirty = false;
-                m_statusLabel->setText(QStringLiteral("Saved"));
+                m_statusLabel->setText(i18n("Saved"));
                 updateActions();
             });
     }
@@ -369,7 +370,7 @@ namespace javelin::gui::sieve
     {
         m_statusLabel->setText(error.code == javelin::jmap::OperationErrorCode::InvalidUserInput
                                    ? error.message
-                                   : QStringLiteral("The operation failed."));
+                                   : i18n("The operation failed."));
     }
 
     void SieveEditorDialog::updateActions()

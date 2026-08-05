@@ -5,6 +5,8 @@
 
 #include <QCoroFuture>
 
+#include <KLocalizedString>
+
 #include <QDir>
 #include <QFileInfo>
 #include <QHash>
@@ -273,7 +275,7 @@ namespace javelin::gui::translation
             {
                 return TranslationError{
                     .code = TranslationErrorCode::InferenceFailed,
-                    .message = QStringLiteral("Local translation returned incomplete text."),
+                    .message = i18n("Local translation returned incomplete text."),
                 };
             }
 
@@ -298,15 +300,15 @@ namespace javelin::gui::translation
         {
             return TranslationError{
                 .code = TranslationErrorCode::InferenceFailed,
-                .message = QStringLiteral("Local translation failed: %1")
-                               .arg(QString::fromUtf8(exception.what())),
+                .message =
+                    i18n("Local translation failed: %1", QString::fromUtf8(exception.what())),
             };
         }
         catch (...)
         {
             return TranslationError{
                 .code = TranslationErrorCode::InferenceFailed,
-                .message = QStringLiteral("Local translation failed unexpectedly."),
+                .message = i18n("Local translation failed unexpectedly."),
             };
         }
     }

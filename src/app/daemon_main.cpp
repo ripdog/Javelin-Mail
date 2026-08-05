@@ -2,6 +2,8 @@
 #include "app/LogStore.h"
 #include "app/PerformanceMetrics.h"
 
+#include <KLocalizedString>
+
 #include <QCommandLineOption>
 #include <QCommandLineParser>
 #include <QCoreApplication>
@@ -42,6 +44,7 @@ namespace
 int main(int argc, char* argv[])
 {
     QCoreApplication application{argc, argv};
+    KLocalizedString::setApplicationDomain(QByteArrayLiteral("javelinmail"));
     javelin::app::LogStore::install();
     QCoreApplication::setOrganizationName(QStringLiteral("Javelin Mail"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("javelin.app"));
@@ -49,15 +52,15 @@ int main(int argc, char* argv[])
     QCoreApplication::setApplicationVersion(QStringLiteral(JAVELIN_APP_VERSION));
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("Javelin Mail background daemon"));
+    parser.setApplicationDescription(i18n("Javelin Mail background daemon"));
     parser.addHelpOption();
     parser.addVersionOption();
-    const QCommandLineOption runtimeOption{QStringLiteral("runtime-directory"),
-                                           QStringLiteral("Private runtime directory."),
-                                           QStringLiteral("directory")};
+    const QCommandLineOption runtimeOption{
+        QStringLiteral("runtime-directory"), i18n("Private runtime directory."),
+        i18nc("@info:shell command-line value", "directory")};
     const QCommandLineOption socketOption{
-        QStringLiteral("socket"),
-        QStringLiteral("Daemon socket path inside the runtime directory."), QStringLiteral("path")};
+        QStringLiteral("socket"), i18n("Daemon socket path inside the runtime directory."),
+        i18nc("@info:shell command-line value", "path")};
     parser.addOption(runtimeOption);
     parser.addOption(socketOption);
     parser.process(application);
@@ -65,7 +68,7 @@ int main(int argc, char* argv[])
     const auto runtime =
         parser.isSet(runtimeOption) ? parser.value(runtimeOption) : runtimeDirectory();
     if (runtime.isEmpty())
-        return fail(QStringLiteral("no private runtime directory is available"));
+        return fail(i18n("No private runtime directory is available."));
 
     const auto socketPath = parser.isSet(socketOption)
                                 ? parser.value(socketOption)

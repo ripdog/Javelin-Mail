@@ -1,5 +1,7 @@
 #include "app/WorkScheduler.h"
 
+#include <KLocalizedString>
+
 #include <QSqlError>
 #include <QSqlQuery>
 
@@ -127,21 +129,21 @@ namespace javelin::app
             QStringLiteral("SELECT EXISTS(SELECT 1 FROM background_jobs WHERE job_id=:job_id)"));
         existing.bindValue(QStringLiteral(":job_id"), QString::fromStdString(spec.jobId));
         if (!existing.exec() || !existing.next())
-            return queryError(QStringLiteral("Inspect background work queue"), existing);
+            return queryError(i18n("Inspect background work queue"), existing);
         if (!existing.value(0).toBool())
         {
             QSqlQuery queued{m_connection.database()};
             if (!queued.exec(QStringLiteral(
                     "SELECT COUNT(*) FROM background_jobs WHERE status IN "
                     "('queued','waiting_for_space','waiting_for_network','waiting_for_auth')")))
-                return queryError(QStringLiteral("Count background work queue"), queued);
+                return queryError(i18n("Count background work queue"), queued);
             if (!queued.next())
-                return queryError(QStringLiteral("Count background work queue"), queued);
+                return queryError(i18n("Count background work queue"), queued);
             if (queued.value(0).toULongLong() >= maximumQueuedWork)
             {
                 return javelin::jmap::cache::DatabaseError{
                     .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
-                    .message = QStringLiteral("The background work queue is full."),
+                    .message = i18n("The background work queue is full."),
                 };
             }
         }
@@ -173,7 +175,7 @@ namespace javelin::app
         query.bindValue(QStringLiteral(":checkpoint"), spec.checkpointJson);
         query.bindValue(QStringLiteral(":restart_completed"), spec.restartCompleted ? 1 : 0);
         if (!query.exec())
-            return queryError(QStringLiteral("Create background job"), query);
+            return queryError(i18n("Create background job"), query);
         m_firstQueuedAt.try_emplace(spec.jobId, std::chrono::steady_clock::now());
         Q_EMIT jobsChanged();
         return std::nullopt;
@@ -208,7 +210,7 @@ namespace javelin::app
         query.bindValue(QStringLiteral(":error"), errorText ? QVariant{*errorText} : QVariant{});
         query.bindValue(QStringLiteral(":id"), QString::fromStdString(std::string{jobId}));
         if (!query.exec())
-            return queryError(QStringLiteral("Update background job"), query);
+            return queryError(i18n("Update background job"), query);
         Q_EMIT jobsChanged();
         return std::nullopt;
     }
@@ -242,7 +244,7 @@ namespace javelin::app
                                "THEN 4 WHEN 'paused' THEN 5 WHEN 'failed' THEN 6 ELSE 7 END,"
                                "priority DESC,created_at ASC,job_id")
                     .arg(columns())))
-            return queryError(QStringLiteral("List background jobs"), query);
+            return queryError(i18n("List background jobs"), query);
         std::vector<WorkRecord> records;
         while (query.next())
             records.push_back(record(query));
@@ -257,7 +259,7 @@ namespace javelin::app
             QStringLiteral("SELECT %1 FROM background_jobs WHERE job_id=:id").arg(columns()));
         query.bindValue(QStringLiteral(":id"), QString::fromStdString(std::string{jobId}));
         if (!query.exec())
-            return queryError(QStringLiteral("Read background job"), query);
+            return queryError(i18n("Read background job"), query);
         if (!query.next())
             return std::optional<WorkRecord>{};
         return std::optional<WorkRecord>{record(query)};
@@ -440,21 +442,13 @@ namespace javelin::app
         };
         const auto failed = countStatus(WorkStatus::Failed);
         if (failed > 0)
-        {
-            return QStringLiteral("%1 background task%2 failed")
-                .arg(failed)
-                .arg(failed == 1 ? QString{} : QStringLiteral("s"));
-        }
+            return i18np("%1 background task failed", "%1 background tasks failed", failed);
 
         const auto waiting = countStatus(WorkStatus::WaitingForSpace) +
                              countStatus(WorkStatus::WaitingForNetwork) +
                              countStatus(WorkStatus::WaitingForAuth);
         if (waiting > 0)
-        {
-            return QStringLiteral("%1 background task%2 waiting")
-                .arg(waiting)
-                .arg(waiting == 1 ? QString{} : QStringLiteral("s"));
-        }
+            return i18np("%1 background task waiting", "%1 background tasks waiting", waiting);
 
         const auto running = countStatus(WorkStatus::Running);
         const auto queued = countStatus(WorkStatus::Queued);
@@ -480,9 +474,7 @@ namespace javelin::app
                                         : QStringLiteral("%1 — %2").arg(current->title, detail);
             }
         }
-        return QStringLiteral("%1 background task%2")
-            .arg(active)
-            .arg(active == 1 ? QString{} : QStringLiteral("s"));
+        return i18np("%1 background task", "%1 background tasks", active);
     }
 
     QMetaObject::Connection WorkScheduler::connectChanged(QObject* context,
@@ -505,7 +497,7 @@ namespace javelin::app
         query.bindValue(QStringLiteral(":pause"), pauseRequested ? 1 : 0);
         query.bindValue(QStringLiteral(":id"), QString::fromStdString(std::string{jobId}));
         if (!query.exec())
-            return queryError(QStringLiteral("Control background job"), query);
+            return queryError(i18n("Control background job"), query);
         Q_EMIT jobsChanged();
         return std::nullopt;
     }

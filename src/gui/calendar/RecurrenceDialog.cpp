@@ -1,5 +1,7 @@
 #include "gui/calendar/RecurrenceDialog.h"
 
+#include <KLocalizedString>
+
 #include <QButtonGroup>
 #include <QComboBox>
 #include <QDateEdit>
@@ -28,15 +30,15 @@ namespace
         switch (ordinal)
         {
         case 1:
-            return QStringLiteral("first");
+            return i18nc("@item ordinal in a monthly recurrence", "first");
         case 2:
-            return QStringLiteral("second");
+            return i18nc("@item ordinal in a monthly recurrence", "second");
         case 3:
-            return QStringLiteral("third");
+            return i18nc("@item ordinal in a monthly recurrence", "third");
         case 4:
-            return QStringLiteral("fourth");
+            return i18nc("@item ordinal in a monthly recurrence", "fourth");
         default:
-            return QStringLiteral("last");
+            return i18nc("@item ordinal in a monthly recurrence", "last");
         }
     }
 } // namespace
@@ -45,7 +47,7 @@ namespace javelin::gui::calendar
 {
     RecurrenceDialog::RecurrenceDialog(QWidget* parent) : QDialog(parent)
     {
-        setWindowTitle(QStringLiteral("Custom recurrence"));
+        setWindowTitle(i18n("Custom recurrence"));
         setModal(true);
         setMinimumWidth(420);
 
@@ -54,15 +56,15 @@ namespace javelin::gui::calendar
 
         m_unsupported = new QLabel(this);
         m_unsupported->setWordWrap(true);
-        m_unsupported->setText(QStringLiteral(
-            "This event uses an uncommon repeat pattern. Done replaces it with the pattern "
-            "below; Cancel leaves it unchanged."));
+        m_unsupported->setText(
+            i18n("This event uses an uncommon repeat pattern. Done replaces it with the pattern "
+                 "below; Cancel leaves it unchanged."));
         m_unsupported->setStyleSheet(QStringLiteral("color: palette(link-visited);"));
         m_unsupported->hide();
         outer->addWidget(m_unsupported);
 
         auto* repeatRow = new QHBoxLayout;
-        repeatRow->addWidget(new QLabel(QStringLiteral("Repeat every"), this));
+        repeatRow->addWidget(new QLabel(i18n("Repeat every"), this));
         m_interval = new QSpinBox(this);
         m_interval->setObjectName(QStringLiteral("recurrenceInterval"));
         m_interval->setRange(1, std::numeric_limits<int>::max());
@@ -70,13 +72,13 @@ namespace javelin::gui::calendar
         repeatRow->addWidget(m_interval);
         m_frequency = new QComboBox(this);
         m_frequency->setObjectName(QStringLiteral("recurrenceFrequency"));
-        m_frequency->addItem(QStringLiteral("day"),
+        m_frequency->addItem(i18nc("@item recurrence interval unit", "day"),
                              static_cast<int>(FriendlyRecurrenceFrequency::Day));
-        m_frequency->addItem(QStringLiteral("week"),
+        m_frequency->addItem(i18nc("@item recurrence interval unit", "week"),
                              static_cast<int>(FriendlyRecurrenceFrequency::Week));
-        m_frequency->addItem(QStringLiteral("month"),
+        m_frequency->addItem(i18nc("@item recurrence interval unit", "month"),
                              static_cast<int>(FriendlyRecurrenceFrequency::Month));
-        m_frequency->addItem(QStringLiteral("year"),
+        m_frequency->addItem(i18nc("@item recurrence interval unit", "year"),
                              static_cast<int>(FriendlyRecurrenceFrequency::Year));
         repeatRow->addWidget(m_frequency);
         repeatRow->addStretch(1);
@@ -85,7 +87,7 @@ namespace javelin::gui::calendar
         m_weeklyControls = new QWidget(this);
         auto* weeklyLayout = new QVBoxLayout(m_weeklyControls);
         weeklyLayout->setContentsMargins(0, 0, 0, 0);
-        weeklyLayout->addWidget(new QLabel(QStringLiteral("Repeat on"), m_weeklyControls));
+        weeklyLayout->addWidget(new QLabel(i18n("Repeat on"), m_weeklyControls));
         auto* dayButtons = new QHBoxLayout;
         const auto locale = QLocale{};
         const auto firstDay = locale.firstDayOfWeek();
@@ -97,7 +99,7 @@ namespace javelin::gui::calendar
             button->setCheckable(true);
             button->setText(locale.standaloneDayName(qtDay, QLocale::NarrowFormat));
             button->setToolTip(locale.standaloneDayName(qtDay, QLocale::LongFormat));
-            button->setAccessibleName(QStringLiteral("Repeat on %1").arg(button->toolTip()));
+            button->setAccessibleName(i18n("Repeat on %1", button->toolTip()));
             button->setFixedSize(32, 32);
             dayButtons->addWidget(button);
             m_weekdays.emplace_back(weekday(qtDay), button);
@@ -110,11 +112,11 @@ namespace javelin::gui::calendar
         m_monthlyMode->setObjectName(QStringLiteral("recurrenceMonthlyMode"));
         outer->addWidget(m_monthlyMode);
 
-        outer->addWidget(new QLabel(QStringLiteral("Ends"), this));
+        outer->addWidget(new QLabel(i18n("Ends"), this));
         auto* endGroup = new QButtonGroup(this);
-        m_never = new QRadioButton(QStringLiteral("Never"), this);
-        m_onDate = new QRadioButton(QStringLiteral("On"), this);
-        m_afterCount = new QRadioButton(QStringLiteral("After"), this);
+        m_never = new QRadioButton(i18nc("@option:radio recurrence end", "Never"), this);
+        m_onDate = new QRadioButton(i18nc("@option:radio recurrence end", "On"), this);
+        m_afterCount = new QRadioButton(i18nc("@option:radio recurrence end", "After"), this);
         endGroup->addButton(m_never);
         endGroup->addButton(m_onDate);
         endGroup->addButton(m_afterCount);
@@ -135,7 +137,7 @@ namespace javelin::gui::calendar
         m_count->setObjectName(QStringLiteral("recurrenceCount"));
         m_count->setRange(1, std::numeric_limits<int>::max());
         m_count->setValue(10);
-        m_count->setSuffix(QStringLiteral(" occurrences"));
+        m_count->setSuffix(i18nc("@item recurrence count suffix", " occurrences"));
         countRow->addWidget(m_count);
         countRow->addStretch(1);
         outer->addLayout(countRow);
@@ -146,7 +148,8 @@ namespace javelin::gui::calendar
         outer->addWidget(m_error);
 
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
-        auto* done = buttons->addButton(QStringLiteral("Done"), QDialogButtonBox::AcceptRole);
+        auto* done =
+            buttons->addButton(i18nc("@action:button", "Done"), QDialogButtonBox::AcceptRole);
         done->setDefault(true);
         outer->addWidget(buttons);
         connect(done, &QPushButton::clicked, this, &RecurrenceDialog::validateAndAccept);
@@ -239,13 +242,13 @@ namespace javelin::gui::calendar
         const auto value = pattern();
         if (value.frequency == FriendlyRecurrenceFrequency::Week && value.weekdays.empty())
         {
-            m_error->setText(QStringLiteral("Choose at least one weekday."));
+            m_error->setText(i18n("Choose at least one weekday."));
             return;
         }
         if (value.end == FriendlyRecurrenceEnd::OnDate &&
             (!value.untilDate || *value.untilDate < m_eventStart.date()))
         {
-            m_error->setText(QStringLiteral("Choose an end date on or after the event date."));
+            m_error->setText(i18n("Choose an end date on or after the event date."));
             return;
         }
         m_rule = recurrenceRule(value, m_eventStart);
@@ -272,12 +275,12 @@ namespace javelin::gui::calendar
         const auto previous = m_monthlyMode->currentData();
         m_monthlyMode->clear();
         const auto date = m_eventStart.date();
-        m_monthlyMode->addItem(QStringLiteral("Monthly on day %1").arg(date.day()),
+        m_monthlyMode->addItem(i18n("Monthly on day %1", date.day()),
                                static_cast<int>(FriendlyMonthlyMode::DayOfMonth));
         const auto dayName = QLocale{}.standaloneDayName(
             static_cast<Qt::DayOfWeek>(date.dayOfWeek()), QLocale::LongFormat);
         m_monthlyMode->addItem(
-            QStringLiteral("Monthly on the %1 %2").arg(ordinalName(ordinalWeekday(date)), dayName),
+            i18n("Monthly on the %1 %2", ordinalName(ordinalWeekday(date)), dayName),
             static_cast<int>(FriendlyMonthlyMode::OrdinalWeekday));
         const auto index = m_monthlyMode->findData(previous);
         m_monthlyMode->setCurrentIndex(index >= 0 ? index : 0);

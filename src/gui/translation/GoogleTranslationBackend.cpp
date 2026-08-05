@@ -9,6 +9,8 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include <KLocalizedString>
+
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkAccessManager>
@@ -165,7 +167,7 @@ namespace javelin::gui::translation
             {
                 return TranslationError{
                     .code = TranslationErrorCode::GoogleResponseInvalid,
-                    .message = QStringLiteral("Google Translate returned an invalid response."),
+                    .message = i18n("Google Translate returned an invalid response."),
                 };
             }
             const auto root = document.array();
@@ -174,7 +176,7 @@ namespace javelin::gui::translation
                 return TranslationError{
                     .code = TranslationErrorCode::GoogleResponseInvalid,
                     .message =
-                        QStringLiteral("Google Translate response did not contain translations."),
+                        i18n("Google Translate response did not contain translations."),
                 };
             }
 
@@ -252,7 +254,7 @@ namespace javelin::gui::translation
             {
                 co_return TranslationError{
                     .code = TranslationErrorCode::GoogleResponseInvalid,
-                    .message = QStringLiteral("Google Translate returned an incomplete response."),
+                    .message = i18n("Google Translate returned an incomplete response."),
                 };
             }
             for (qsizetype index = 0; index < batch.size(); ++index)

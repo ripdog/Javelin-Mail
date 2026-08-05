@@ -1,5 +1,7 @@
 #include "gui/translation/TranslationCache.h"
 
+#include <KLocalizedString>
+
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
@@ -63,7 +65,7 @@ namespace javelin::gui::translation
         {
             return TranslationError{
                 .code = TranslationErrorCode::CacheOpenFailed,
-                .message = QStringLiteral("Could not create the translation cache directory."),
+                .message = i18n("Could not create the translation cache directory."),
             };
         }
 
@@ -281,8 +283,7 @@ namespace javelin::gui::translation
     {
         return {
             .code = code,
-            .message =
-                QStringLiteral("Could not %1: %2").arg(operation, m_database.lastError().text()),
+            .message = i18n("Could not %1: %2", operation, m_database.lastError().text()),
         };
     }
 } // namespace javelin::gui::translation

@@ -3,6 +3,8 @@
 #include "app/WorkTaskModel.h"
 #include "app/WorkTaskPort.h"
 
+#include <KLocalizedString>
+
 #include <QApplication>
 #include <QClipboard>
 #include <QEvent>
@@ -55,11 +57,11 @@ namespace javelin::gui::tasks
             switch (action)
             {
             case RowAction::Pause:
-                return QStringLiteral("Pause");
+                return i18nc("@action:button pause background task", "Pause");
             case RowAction::Resume:
-                return QStringLiteral("Resume");
+                return i18nc("@action:button resume background task", "Resume");
             case RowAction::Retry:
-                return QStringLiteral("Retry");
+                return i18nc("@action:button retry background task", "Retry");
             case RowAction::None:
                 return {};
             }
@@ -141,7 +143,7 @@ namespace javelin::gui::tasks
     TaskCenterDialog::TaskCenterDialog(javelin::app::WorkTaskPort& taskPort, QWidget* parent)
         : QDialog(parent)
     {
-        setWindowTitle(QStringLiteral("Task Center"));
+        setWindowTitle(i18n("Task Center"));
         setAttribute(Qt::WA_DeleteOnClose);
         resize(760, 360);
 
@@ -164,7 +166,7 @@ namespace javelin::gui::tasks
 
         auto* actionLayout = new QHBoxLayout;
         actionLayout->addStretch(1);
-        auto* closeButton = new QPushButton(QStringLiteral("Close"), this);
+        auto* closeButton = new QPushButton(i18nc("@action:button", "Close"), this);
         actionLayout->addWidget(closeButton);
         layout->addLayout(actionLayout);
 
@@ -176,7 +178,7 @@ namespace javelin::gui::tasks
                         return;
                     const QString details = m_model->index(index.row(), 3).data().toString();
                     QMenu menu{m_table};
-                    auto* copy = menu.addAction(QStringLiteral("Copy"));
+                    auto* copy = menu.addAction(i18nc("@action:inmenu", "Copy"));
                     copy->setEnabled(!details.isEmpty());
                     if (menu.exec(m_table->viewport()->mapToGlobal(position)) == copy)
                         QApplication::clipboard()->setText(details);

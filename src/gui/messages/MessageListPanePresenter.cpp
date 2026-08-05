@@ -3,6 +3,8 @@
 #include "gui/messages/Pagination.h"
 #include "gui/shell/ElidingLabel.h"
 
+#include <KLocalizedString>
+
 #include <QLabel>
 #include <QListView>
 #include <QProgressBar>
@@ -35,28 +37,28 @@ namespace javelin::gui::messages
         if (!state.refreshError.isEmpty())
         {
             m_emptyState.setText(
-                QStringLiteral("Could not refresh the message list.\n%1").arg(state.refreshError));
+                i18n("Could not refresh the message list.\n%1", state.refreshError));
             m_emptyState.setStyleSheet(QStringLiteral("color: #e58b8b;"));
         }
         else if (state.refreshInFlight && state.itemCount == 0)
         {
-            m_emptyState.setText(QStringLiteral("Looking for messages…"));
+            m_emptyState.setText(i18n("Looking for messages…"));
             m_emptyState.setStyleSheet(QString{});
         }
         else if (state.collection == MessageCollectionKind::LocalSearch)
         {
             m_emptyState.setText(
-                QStringLiteral("No indexed messages on this device matched your search."));
+                i18n("No indexed messages on this device matched your search."));
             m_emptyState.setStyleSheet(QString{});
         }
         else if (state.collection == MessageCollectionKind::OnlineSearch)
         {
-            m_emptyState.setText(QStringLiteral("No messages matched your search."));
+            m_emptyState.setText(i18n("No messages matched your search."));
             m_emptyState.setStyleSheet(QString{});
         }
         else
         {
-            m_emptyState.setText(QStringLiteral("No messages"));
+            m_emptyState.setText(i18n("No messages"));
             m_emptyState.setStyleSheet(QString{});
         }
         m_emptyState.setVisible(state.itemCount == 0);
@@ -65,7 +67,7 @@ namespace javelin::gui::messages
 
     void MessageListPanePresenter::showNoContext() const
     {
-        m_titleLabel.setText(QStringLiteral("Messages"));
+        m_titleLabel.setText(i18n("Messages"));
         m_metaLabel.clear();
         m_searchServerButton.setVisible(false);
         showLoadingIndicator(false);
@@ -90,11 +92,11 @@ namespace javelin::gui::messages
         const QSignalBlocker pageNumberBlocker{&m_pageNumberSpinBox};
         if (!header.total)
         {
-            m_metaLabel.setText(header.search
-                                    ? QStringLiteral("%1 Loaded Matches")
-                                          .arg(static_cast<qulonglong>(header.itemCount))
-                                    : QStringLiteral("%1 Loaded Conversations")
-                                          .arg(static_cast<qulonglong>(header.itemCount)));
+            m_metaLabel.setText(
+                header.search
+                    ? i18np("%1 Loaded Match", "%1 Loaded Matches", header.itemCount)
+                    : i18np("%1 Loaded Conversation", "%1 Loaded Conversations",
+                            header.itemCount));
             m_pageLabel.clear();
             m_firstPageButton.setEnabled(header.offset > 0);
             m_previousPageButton.setEnabled(header.offset > 0);
@@ -109,10 +111,10 @@ namespace javelin::gui::messages
 
         m_metaLabel.setText(
             header.indexedSearch
-                ? QStringLiteral("%1 Indexed Matches").arg(static_cast<qulonglong>(*header.total))
+                ? i18np("%1 Indexed Match", "%1 Indexed Matches", *header.total)
             : header.search
-                ? QStringLiteral("%1 Matches").arg(static_cast<qulonglong>(*header.total))
-                : QStringLiteral("%1 Conversations").arg(static_cast<qulonglong>(*header.total)));
+                ? i18np("%1 Match", "%1 Matches", *header.total)
+                : i18np("%1 Conversation", "%1 Conversations", *header.total));
         const auto metrics = pageMetrics(header.position, header.itemCount, *header.total);
         m_pageLabel.setText(*header.total == 0 ? QStringLiteral("0-0")
                                                : QStringLiteral("%1-%2")
@@ -125,7 +127,8 @@ namespace javelin::gui::messages
         m_pageNumberSpinBox.setRange(pages == 0 ? 0 : 1,
                                      static_cast<int>(std::min(pages, intMaximum)));
         m_pageNumberSpinBox.setValue(static_cast<int>(std::min(currentPage, intMaximum)));
-        m_pageNumberSpinBox.setSuffix(QStringLiteral(" of %1").arg(static_cast<qulonglong>(pages)));
+        m_pageNumberSpinBox.setSuffix(
+            i18nc("@info page number suffix", " of %1", static_cast<qulonglong>(pages)));
         m_pageNumberSpinBox.setEnabled(pages > 0);
         m_firstPageButton.setEnabled(header.position > 0);
         m_previousPageButton.setEnabled(header.position > 0);

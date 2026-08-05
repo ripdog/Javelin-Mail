@@ -6,6 +6,9 @@
 #include "jmap/calendar/CalendarEventEditing.h"
 
 #include <QCoroTask>
+
+#include <KLocalizedString>
+
 #include <QDateTime>
 #include <QDebug>
 #include <QLocale>
@@ -128,7 +131,7 @@ namespace javelin::app
                 QLocale().toString(reminder.startsAt.toLocalTime(), QLocale::ShortFormat);
             Q_EMIT reminderDue(QString::fromStdString(reminder.key),
                                QString::fromStdString(reminder.title),
-                               QStringLiteral("Starts %1").arg(localStart));
+                               i18n("Starts %1", localStart));
         }
         constexpr qint64 maximumRescanMs = 5 * 60 * 1000;
         const auto nextTrigger = m_repository.nextTrigger();

@@ -1,5 +1,7 @@
 #include "gui/mailboxes/MailboxPropertiesDialog.h"
 
+#include <KLocalizedString>
+
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -14,7 +16,8 @@ namespace javelin::gui::mailboxes
     {
         [[nodiscard]] QString yesNo(const bool value)
         {
-            return value ? QStringLiteral("Yes") : QStringLiteral("No");
+            return value ? i18nc("@item boolean value", "Yes")
+                         : i18nc("@item boolean value", "No");
         }
 
         void addValue(QFormLayout& layout, const QString& label, QString value, QWidget* parent)
@@ -29,64 +32,58 @@ namespace javelin::gui::mailboxes
         QString accountId, const javelin::jmap::cache::MailboxTreeItem& mailbox, QWidget* parent)
         : QDialog(parent)
     {
-        setWindowTitle(QStringLiteral("%1 Properties").arg(QString::fromStdString(mailbox.name)));
+        setWindowTitle(i18n("%1 Properties", QString::fromStdString(mailbox.name)));
         resize(560, 680);
 
         auto* layout = new QVBoxLayout(this);
 
-        auto* identityGroup = new QGroupBox(QStringLiteral("Mailbox"), this);
+        auto* identityGroup = new QGroupBox(i18n("Mailbox"), this);
         auto* identityLayout = new QFormLayout(identityGroup);
-        addValue(*identityLayout, QStringLiteral("Name:"), QString::fromStdString(mailbox.name),
+        addValue(*identityLayout, i18n("Name:"), QString::fromStdString(mailbox.name),
                  identityGroup);
-        addValue(*identityLayout, QStringLiteral("JMAP ID:"), QString::fromStdString(mailbox.id),
+        addValue(*identityLayout, i18n("JMAP ID:"), QString::fromStdString(mailbox.id),
                  identityGroup);
-        addValue(*identityLayout, QStringLiteral("Account JMAP ID:"), std::move(accountId),
+        addValue(*identityLayout, i18n("Account JMAP ID:"), std::move(accountId), identityGroup);
+        addValue(*identityLayout, i18n("Parent JMAP ID:"),
+                 mailbox.parentId.has_value()
+                     ? QString::fromStdString(*mailbox.parentId)
+                     : i18nc("@item no mailbox parent", "None"),
                  identityGroup);
-        addValue(*identityLayout, QStringLiteral("Parent JMAP ID:"),
-                 mailbox.parentId.has_value() ? QString::fromStdString(*mailbox.parentId)
-                                              : QStringLiteral("None"),
-                 identityGroup);
-        addValue(*identityLayout, QStringLiteral("Role:"),
+        addValue(*identityLayout, i18n("Role:"),
                  mailbox.role.has_value() ? QString::fromStdString(*mailbox.role)
-                                          : QStringLiteral("None"),
+                                          : i18nc("@item no mailbox role", "None"),
                  identityGroup);
-        addValue(*identityLayout, QStringLiteral("Sort order:"), QString::number(mailbox.sortOrder),
+        addValue(*identityLayout, i18n("Sort order:"), QString::number(mailbox.sortOrder),
                  identityGroup);
-        addValue(*identityLayout, QStringLiteral("Subscribed:"), yesNo(mailbox.isSubscribed),
+        addValue(*identityLayout, i18n("Subscribed:"), yesNo(mailbox.isSubscribed), identityGroup);
+        addValue(*identityLayout, i18n("Has child mailboxes:"), yesNo(mailbox.hasChildren),
                  identityGroup);
-        addValue(*identityLayout, QStringLiteral("Has child mailboxes:"),
-                 yesNo(mailbox.hasChildren), identityGroup);
         layout->addWidget(identityGroup);
 
-        auto* countsGroup = new QGroupBox(QStringLiteral("Counts"), this);
+        auto* countsGroup = new QGroupBox(i18n("Counts"), this);
         auto* countsLayout = new QFormLayout(countsGroup);
-        addValue(*countsLayout, QStringLiteral("Total emails:"),
-                 QString::number(mailbox.totalEmails), countsGroup);
-        addValue(*countsLayout, QStringLiteral("Unread emails:"),
-                 QString::number(mailbox.unreadEmails), countsGroup);
-        addValue(*countsLayout, QStringLiteral("Total threads:"),
-                 QString::number(mailbox.totalThreads), countsGroup);
-        addValue(*countsLayout, QStringLiteral("Unread threads:"),
-                 QString::number(mailbox.unreadThreads), countsGroup);
+        addValue(*countsLayout, i18n("Total emails:"), QString::number(mailbox.totalEmails),
+                 countsGroup);
+        addValue(*countsLayout, i18n("Unread emails:"), QString::number(mailbox.unreadEmails),
+                 countsGroup);
+        addValue(*countsLayout, i18n("Total threads:"), QString::number(mailbox.totalThreads),
+                 countsGroup);
+        addValue(*countsLayout, i18n("Unread threads:"), QString::number(mailbox.unreadThreads),
+                 countsGroup);
         layout->addWidget(countsGroup);
 
         const auto& rights = mailbox.myRights;
-        auto* rightsGroup = new QGroupBox(QStringLiteral("My rights"), this);
+        auto* rightsGroup = new QGroupBox(i18n("My rights"), this);
         auto* rightsLayout = new QFormLayout(rightsGroup);
-        addValue(*rightsLayout, QStringLiteral("Read items:"), yesNo(rights.mayReadItems),
-                 rightsGroup);
-        addValue(*rightsLayout, QStringLiteral("Add items:"), yesNo(rights.mayAddItems),
-                 rightsGroup);
-        addValue(*rightsLayout, QStringLiteral("Remove items:"), yesNo(rights.mayRemoveItems),
-                 rightsGroup);
-        addValue(*rightsLayout, QStringLiteral("Set seen:"), yesNo(rights.maySetSeen), rightsGroup);
-        addValue(*rightsLayout, QStringLiteral("Set keywords:"), yesNo(rights.maySetKeywords),
-                 rightsGroup);
-        addValue(*rightsLayout, QStringLiteral("Create child:"), yesNo(rights.mayCreateChild),
-                 rightsGroup);
-        addValue(*rightsLayout, QStringLiteral("Rename:"), yesNo(rights.mayRename), rightsGroup);
-        addValue(*rightsLayout, QStringLiteral("Delete:"), yesNo(rights.mayDelete), rightsGroup);
-        addValue(*rightsLayout, QStringLiteral("Submit:"), yesNo(rights.maySubmit), rightsGroup);
+        addValue(*rightsLayout, i18n("Read items:"), yesNo(rights.mayReadItems), rightsGroup);
+        addValue(*rightsLayout, i18n("Add items:"), yesNo(rights.mayAddItems), rightsGroup);
+        addValue(*rightsLayout, i18n("Remove items:"), yesNo(rights.mayRemoveItems), rightsGroup);
+        addValue(*rightsLayout, i18n("Set seen:"), yesNo(rights.maySetSeen), rightsGroup);
+        addValue(*rightsLayout, i18n("Set keywords:"), yesNo(rights.maySetKeywords), rightsGroup);
+        addValue(*rightsLayout, i18n("Create child:"), yesNo(rights.mayCreateChild), rightsGroup);
+        addValue(*rightsLayout, i18n("Rename:"), yesNo(rights.mayRename), rightsGroup);
+        addValue(*rightsLayout, i18n("Delete:"), yesNo(rights.mayDelete), rightsGroup);
+        addValue(*rightsLayout, i18n("Submit:"), yesNo(rights.maySubmit), rightsGroup);
         layout->addWidget(rightsGroup);
 
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);

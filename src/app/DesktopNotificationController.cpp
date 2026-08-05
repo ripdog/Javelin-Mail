@@ -1,5 +1,7 @@
 #include "app/DesktopNotificationController.h"
 
+#include <KLocalizedString>
+
 #include <QCoreApplication>
 #include <QDBusConnection>
 #include <QDBusInterface>
@@ -37,11 +39,10 @@ namespace javelin::app
                                              QString::fromLatin1(notificationsInterface),
                                              QDBusConnection::sessionBus()};
                 if (!notifications.isValid())
-                    return QStringLiteral(
-                        "Desktop notifications are unavailable on the session bus");
+                    return i18n("Desktop notifications are unavailable on the session bus");
 
                 const QDBusReply<uint> reply{notifications.call(
-                    QStringLiteral("Notify"), QStringLiteral("Javelin Mail"), static_cast<uint>(0),
+                    QStringLiteral("Notify"), i18n("Javelin Mail"), static_cast<uint>(0),
                     icon, summary, message, actions, hints, timeoutMs)};
                 if (!reply.isValid())
                     return reply.error().message();
@@ -89,7 +90,7 @@ namespace javelin::app
         const QString summary = mailboxName.isEmpty() ? title : QStringLiteral("%1").arg(title);
         const QStringList actions = {
             QString::fromLatin1(defaultActionKey),
-            QStringLiteral("Open"),
+            i18nc("@action:button desktop notification", "Open"),
         };
         const auto sent =
             m_transport->send(QString::fromLatin1(notificationIconName), summary, message, actions,
@@ -122,7 +123,8 @@ namespace javelin::app
     {
         const QStringList actions = opensSettings
                                         ? QStringList{QString::fromLatin1(defaultActionKey),
-                                                      QStringLiteral("Open Settings")}
+                                                      i18nc("@action:button desktop notification",
+                                                            "Open Settings")}
                                         : QStringList{};
         const auto sent =
             m_transport->send(QStringLiteral("dialog-warning"), title, message, actions,
@@ -151,8 +153,10 @@ namespace javelin::app
                                                             const QString& title,
                                                             const QString& message)
     {
-        const QStringList actions = {QStringLiteral("dismiss"), QStringLiteral("Dismiss"),
-                                     QStringLiteral("snooze"), QStringLiteral("Snooze 5 min")};
+        const QStringList actions = {
+            QStringLiteral("dismiss"), i18nc("@action:button desktop notification", "Dismiss"),
+            QStringLiteral("snooze"),
+            i18nc("@action:button desktop notification", "Snooze 5 min")};
         const auto sent = m_transport->send(QStringLiteral("x-office-calendar"), title, message,
                                             actions, notificationHints(urgencyNormal, false), 0);
         if (const auto* error = std::get_if<QString>(&sent))
@@ -180,7 +184,9 @@ namespace javelin::app
                                                            const int timeoutMs)
     {
         closeUndoableSendNotification(sendId);
-        const QStringList actions = {QStringLiteral("undo-send"), QStringLiteral("Undo Send")};
+        const QStringList actions = {
+            QStringLiteral("undo-send"),
+            i18nc("@action:button desktop notification", "Undo Send")};
         const auto sent = m_transport->send(QStringLiteral("mail-send"), title, message, actions,
                                             notificationHints(urgencyNormal), timeoutMs);
         if (std::holds_alternative<QString>(sent))

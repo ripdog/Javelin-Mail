@@ -8,6 +8,8 @@
 
 #include <QCoroTask>
 
+#include <KLocalizedString>
+
 #include <QAbstractButton>
 #include <QDateTime>
 #include <QDebug>
@@ -76,8 +78,7 @@ namespace javelin::gui::shell
         if (accounts == nullptr || accounts->empty())
         {
             Q_EMIT statusMessage(
-                QStringLiteral("The configured server does not support JMAP Calendars draft-26."),
-                10000);
+                i18n("The configured server does not support JMAP Calendars draft-26."), 10000);
             return;
         }
 
@@ -285,8 +286,7 @@ namespace javelin::gui::shell
                 }
                 if (!destinationIndex.has_value())
                 {
-                    Q_EMIT statusMessage(QStringLiteral("No writable calendar is available."),
-                                         5000);
+                    Q_EMIT statusMessage(i18n("No writable calendar is available."), 5000);
                     return;
                 }
                 const auto& destination = choices[*destinationIndex];
@@ -329,7 +329,7 @@ namespace javelin::gui::shell
                 if (selectedAccount == accounts.end())
                 {
                     dialog->showMutationError(
-                        QStringLiteral("The selected calendar account is no longer available."));
+                        i18n("The selected calendar account is no longer available."));
                     dialog->show();
                     return;
                 }
@@ -424,14 +424,13 @@ namespace javelin::gui::shell
                 if (!recurrenceId.isEmpty())
                 {
                     QMessageBox scopePrompt{widget};
-                    scopePrompt.setWindowTitle(QStringLiteral("Edit recurring event"));
+                    scopePrompt.setWindowTitle(i18n("Edit recurring event"));
                     scopePrompt.setText(
-                        QStringLiteral("Do you want to edit only this occurrence or the entire "
-                                       "series?"));
+                        i18n("Do you want to edit only this occurrence or the entire series?"));
                     auto* occurrenceButton = scopePrompt.addButton(
-                        QStringLiteral("This occurrence"), QMessageBox::AcceptRole);
-                    auto* seriesButton = scopePrompt.addButton(QStringLiteral("Entire series"),
-                                                               QMessageBox::ActionRole);
+                        i18n("This occurrence"), QMessageBox::AcceptRole);
+                    auto* seriesButton =
+                        scopePrompt.addButton(i18n("Entire series"), QMessageBox::ActionRole);
                     scopePrompt.addButton(QMessageBox::Cancel);
                     scopePrompt.exec();
                     if (scopePrompt.clickedButton() == occurrenceButton)
@@ -457,8 +456,7 @@ namespace javelin::gui::shell
                             << "calendar occurrence is missing from the visible cache" << accountId
                             << eventId << recurrenceId;
                         Q_EMIT statusMessage(
-                            QStringLiteral("This occurrence is no longer available. Refresh and "
-                                           "try again."),
+                            i18n("This occurrence is no longer available. Refresh and try again."),
                             10000);
                         return;
                     }
@@ -568,7 +566,7 @@ namespace javelin::gui::shell
         m_contentStack.addWidget(widget);
         m_tabs.push_back(
             TabState{.content = CalendarTabState{.accountId = accounts->front().ownerAccountId,
-                                                 .title = QStringLiteral("Calendar"),
+                                                 .title = i18n("Calendar"),
                                                  .widget = widget,
                                                  .selection = {}}});
         const auto index = static_cast<int>(m_tabs.size() - 1);

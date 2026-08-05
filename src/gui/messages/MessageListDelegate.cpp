@@ -3,8 +3,11 @@
 #include "gui/IconUtils.h"
 #include "gui/messages/MessageListModel.h"
 
+#include <KLocalizedString>
+
 #include <QApplication>
 #include <QDateTime>
+#include <QLocale>
 #include <QHelpEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -70,7 +73,7 @@ namespace javelin::gui::messages
                 return isoTimestamp;
             }
 
-            return dateTime.toLocalTime().toString(QStringLiteral("dd/MM/yyyy, HH:mm"));
+            return QLocale{}.toString(dateTime.toLocalTime(), QLocale::ShortFormat);
         }
 
         [[nodiscard]] QRect insetRect(const QRect& rect, const int amount)
@@ -103,7 +106,7 @@ namespace javelin::gui::messages
             // threadCount includes the parent summary row itself; replies are the rest.
             const auto replyCount =
                 threadCount > 0 ? static_cast<qulonglong>(threadCount - 1) : qulonglong{0};
-            return QStringLiteral("%1 replies").arg(replyCount);
+            return i18np("%1 reply", "%1 replies", replyCount);
         }
 
         // Horizontal extent a button needs to display its leading icon, label and
@@ -497,19 +500,19 @@ namespace javelin::gui::messages
             case ButtonKind::Replies:
                 QToolTip::showText(helpEvent->globalPos(),
                                    index.data(MessageListModel::IsExpandedRole).toBool()
-                                       ? QStringLiteral("Collapse thread")
-                                       : QStringLiteral("Expand thread"),
+                                       ? i18n("Collapse thread")
+                                       : i18n("Expand thread"),
                                    tooltipWidget(option));
                 return true;
             case ButtonKind::Attachment:
-                QToolTip::showText(helpEvent->globalPos(), QStringLiteral("Has attachments"),
+                QToolTip::showText(helpEvent->globalPos(), i18n("Has attachments"),
                                    tooltipWidget(option));
                 return true;
             case ButtonKind::Star:
                 QToolTip::showText(helpEvent->globalPos(),
                                    index.data(MessageListModel::IsFlaggedRole).toBool()
-                                       ? QStringLiteral("Remove star")
-                                       : QStringLiteral("Add star"),
+                                       ? i18n("Remove star")
+                                       : i18n("Add star"),
                                    tooltipWidget(option));
                 return true;
             case ButtonKind::None:

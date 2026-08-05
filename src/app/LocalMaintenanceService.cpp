@@ -7,6 +7,8 @@
 #include <QCoroFuture>
 #include <QCoroTask>
 
+#include <KLocalizedString>
+
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QTimer>
@@ -81,7 +83,7 @@ namespace javelin::app
             .accountId = std::nullopt,
             .kind = WorkKind::LegacyMigration,
             .priority = WorkPriority::Maintenance,
-            .title = QStringLiteral("Move saved messages into mail vault"),
+            .title = i18n("Move saved messages into mail vault"),
             .checkpointJson = QStringLiteral("{}"),
         }));
         static_cast<void>(m_scheduler.ensure({
@@ -90,7 +92,7 @@ namespace javelin::app
             .accountId = std::nullopt,
             .kind = WorkKind::VaultProjection,
             .priority = WorkPriority::Maintenance,
-            .title = QStringLiteral("Update mail vault folders"),
+            .title = i18n("Update mail vault folders"),
             .checkpointJson = QStringLiteral("{}"),
         }));
         connect(&m_scheduler, &WorkScheduler::foregroundAvailabilityChanged, this,
@@ -167,7 +169,7 @@ namespace javelin::app
                                        .totalUnits = std::nullopt,
                                        .completedBytes = 0,
                                        .totalBytes = std::nullopt,
-                                       .detail = QStringLiteral("Migrating saved messages")};
+                                       .detail = i18n("Migrating saved messages")};
         static_cast<void>(m_scheduler.update("legacy-mail-vault-migration", WorkStatus::Running,
                                              migrationProgress));
         auto future = QtConcurrent::run(performMaintenance, m_connection.database().databaseName());
@@ -182,13 +184,12 @@ namespace javelin::app
         m_migrated += result.migrated;
         migrationProgress.completedUnits = m_migrated;
         migrationProgress.detail = result.migrationComplete
-                                       ? QStringLiteral("Saved message migration complete")
-                                       : QStringLiteral("Migrating saved messages");
+                                       ? i18n("Saved message migration complete")
+                                       : i18n("Migrating saved messages");
         if (result.evicted > 0)
             migrationProgress.detail =
-                QStringLiteral("Evicted %1 unretained vault object%2")
-                    .arg(result.evicted)
-                    .arg(result.evicted == 1 ? QString{} : QStringLiteral("s"));
+                i18np("Evicted %1 unretained vault object",
+                      "Evicted %1 unretained vault objects", result.evicted);
         static_cast<void>(
             m_scheduler.update("legacy-mail-vault-migration",
                                result.migrationComplete ? WorkStatus::Complete : WorkStatus::Queued,
@@ -199,8 +200,8 @@ namespace javelin::app
                                         .completedBytes = 0,
                                         .totalBytes = std::nullopt,
                                         .detail = result.pendingProjections == 0
-                                                      ? QStringLiteral("Mail folders are current")
-                                                      : QStringLiteral("Updating mail folders")};
+                                                      ? i18n("Mail folders are current")
+                                                      : i18n("Updating mail folders")};
         static_cast<void>(m_scheduler.update("mail-vault-projections",
                                              result.pendingProjections == 0 ? WorkStatus::Complete
                                                                             : WorkStatus::Queued,

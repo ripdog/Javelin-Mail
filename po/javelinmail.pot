@@ -1,0 +1,5466 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the Javelin-Mail package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Javelin-Mail\n"
+"Report-Msgid-Bugs-To: https://github.com/ripdog/Javelin-Mail/issues\n"
+"POT-Creation-Date: 2026-08-05 12:57+1200\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/out/build/debug/javelin-i18n-rc.cpp:1
+#, kde-format
+msgctxt "NAME OF TRANSLATORS"
+msgid "Your names"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/out/build/debug/javelin-i18n-rc.cpp:2
+#, kde-format
+msgctxt "EMAIL OF TRANSLATORS"
+msgid "Your emails"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/out/build/debug/javelin-i18n-rc.cpp:3
+#, kde-format
+msgid "&File"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/out/build/debug/javelin-i18n-rc.cpp:4
+#, kde-format
+msgid "&Edit"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/out/build/debug/javelin-i18n-rc.cpp:5
+#, kde-format
+msgid "&Account"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/out/build/debug/javelin-i18n-rc.cpp:6
+#, kde-format
+msgid "&Message"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/out/build/debug/javelin-i18n-rc.cpp:7
+#, kde-format
+msgid "&Settings"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/out/build/debug/javelin-i18n-rc.cpp:8
+#, kde-format
+msgid "&Help"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/out/build/debug/javelin-i18n-rc.cpp:9
+#, kde-format
+msgid "Mail Toolbar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/out/build/debug/javelin-i18n-rc.cpp:10
+#, kde-format
+msgid "Compose Toolbar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/out/build/debug/javelin-i18n-rc.cpp:11
+#, kde-format
+msgid "Contacts Toolbar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/out/build/debug/javelin-i18n-rc.cpp:12
+#, kde-format
+msgid "Calendar Toolbar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ApplicationErrorCoordinator.cpp:126
+#, kde-format
+msgid "Account sign-in required"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ApplicationErrorCoordinator.cpp:128
+#, kde-format
+msgid "Connection problem"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ApplicationErrorCoordinator.cpp:130
+#, kde-format
+msgid "Permission denied"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ApplicationErrorCoordinator.cpp:132
+#, kde-format
+msgid "Local storage error"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ApplicationErrorCoordinator.cpp:133
+#, kde-format
+msgid "Javelin Mail error"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ApplicationErrorCoordinator.cpp:140
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:360
+#, kde-format
+msgid "this account"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ApplicationErrorCoordinator.cpp:142
+#, kde-format
+msgid ""
+"Authentication failed for %1. Update and save its connection settings to "
+"resume synchronization."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ApplicationErrorCoordinator.cpp:146
+#, kde-format
+msgid "%1 could not complete for %2. Javelin Mail will keep retrying."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ApplicationErrorCoordinator.cpp:149
+#, kde-format
+msgid "The server denied %1 for %2."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ApplicationErrorCoordinator.cpp:151
+#, kde-format
+msgid "%1 conflicted with a newer server change. Refresh and try again."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ApplicationErrorCoordinator.cpp:154
+#, kde-format
+msgid "The server does not support %1 for %2."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ApplicationErrorCoordinator.cpp:156
+#, kde-format
+msgid "The server cannot schedule this calendar event."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ApplicationErrorCoordinator.cpp:160
+#, kde-format
+msgid "%1 failed for %2. See the application log for details."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/CalendarNotificationService.cpp:134
+#, kde-format
+msgid "Starts %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:62
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:45
+#, kde-format
+msgid "Account synchronization is not configured."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:182
+#, kde-format
+msgid "Save contact"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:195
+#, kde-format
+msgid "Change starred contacts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:207
+#, kde-format
+msgid "Delete contacts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:215
+#, kde-format
+msgid "Create contact group “%1”"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:225
+#, kde-format
+msgid "Create contact group"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:239
+#, kde-format
+msgid "Delete contact group “%1” (%2)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:247
+#, kde-format
+msgid "Delete contact group"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:290
+#, kde-format
+msgid "Change contact group membership"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:303
+#, kde-format
+msgid "Copy contact"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:315
+#, kde-format
+msgid "Import contacts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:327
+#, kde-format
+msgid "Merge contacts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:339
+#, kde-format
+msgid "Upload contact media"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:354
+#, kde-format
+msgid "Download contact media"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:516
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:536
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:557
+#, kde-format
+msgid "The address book is no longer available."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:525
+#, kde-format
+msgid "The address-book update is invalid."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:564
+#, kde-format
+msgid "Change Address Books"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:570
+#, kde-format
+msgid "Change address books"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:608
+#, kde-format
+msgid "The address-book response omitted its created id."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:756
+#, kde-format
+msgid "The server returned incomplete contact creation identities."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:811
+#, kde-format
+msgid "The copied contact is no longer available."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:817
+#, kde-format
+msgid "The contact copy document is invalid."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:824
+#, kde-format
+msgid "The copied contact cannot be represented in history."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/ContactCommandService.cpp:872
+#, kde-format
+msgid "The contact copy response omitted a created identity."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DaemonTrayController.cpp:126
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DaemonTrayController.cpp:217
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:141
+#, kde-format
+msgid "Open Javelin"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DaemonTrayController.cpp:128
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DaemonTrayController.cpp:219
+#, kde-format
+msgid "Task Center…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DaemonTrayController.cpp:130
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DaemonTrayController.cpp:221
+#, kde-format
+msgid "Refresh accounts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DaemonTrayController.cpp:132
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DaemonTrayController.cpp:223
+#, kde-format
+msgctxt "@action:inmenu"
+msgid "Quit"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DaemonTrayController.cpp:432
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DesktopNotificationController.cpp:45
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/gui_main.cpp:168
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1074
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/TabBarPresenter.cpp:71
+#, kde-format
+msgid "Javelin Mail"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DaemonTrayController.cpp:432
+#, kde-format
+msgid "Javelin Mail — %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DeferredSendService.cpp:32
+#, kde-format
+msgid "Send “%1”"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DeferredSendService.cpp:33
+#, kde-format
+msgid "Send Message"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DeferredSendService.cpp:116
+#, kde-format
+msgid "Unable to reserve Undo Send history."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DeferredSendService.cpp:144
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DeferredSendService.cpp:223
+#, kde-format
+msgid "Message scheduled"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DeferredSendService.cpp:164
+#, kde-format
+msgid "Unable to cancel a scheduled send while history is changing."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DeferredSendService.cpp:194
+#, kde-format
+msgid "The scheduled send requires reconciliation."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DeferredSendService.cpp:205
+#, kde-format
+msgid "The message has already started sending."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DeferredSendService.cpp:221
+#, kde-format
+msgid "The scheduled send can no longer be redone."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DeferredSendService.cpp:287
+#, kde-format
+msgid "Account credentials are unavailable."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DeferredSendService.cpp:288
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DeferredSendService.cpp:341
+#, kde-format
+msgid "Waiting to send"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DeferredSendService.cpp:318
+#, kde-format
+msgid "Unable to undo sending %1 because it has already been submitted."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DeferredSendService.cpp:320
+#, kde-format
+msgctxt "@item email subject quoted in a sentence"
+msgid "“%1”"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DeferredSendService.cpp:322
+#, kde-format
+msgid "this message"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DesktopNotificationController.cpp:42
+#, kde-format
+msgid "Desktop notifications are unavailable on the session bus"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DesktopNotificationController.cpp:93
+#, kde-format
+msgctxt "@action:button desktop notification"
+msgid "Open"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DesktopNotificationController.cpp:127
+#, kde-format
+msgctxt "@action:button desktop notification"
+msgid "Open Settings"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DesktopNotificationController.cpp:157
+#, kde-format
+msgctxt "@action:button desktop notification"
+msgid "Dismiss"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DesktopNotificationController.cpp:159
+#, kde-format
+msgctxt "@action:button desktop notification"
+msgid "Snooze 5 min"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/DesktopNotificationController.cpp:189
+#, kde-format
+msgctxt "@action:button desktop notification"
+msgid "Undo Send"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/FullMailSyncService.cpp:121
+#, kde-format
+msgid "Offline mailbox generation disappeared."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/FullMailSyncService.cpp:458
+#, kde-format
+msgid "Download all mail in %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/FullMailSyncService.cpp:705
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/FullMailSyncService.cpp:874
+#, kde-format
+msgid "Reading mailbox contents"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/FullMailSyncService.cpp:706
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/FullMailSyncService.cpp:1023
+#, kde-format
+msgid "Downloading complete messages"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/FullMailSyncService.cpp:893
+#, kde-format
+msgid "Offline mailbox coverage disappeared."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/FullMailSyncService.cpp:916
+#, kde-format
+msgid "Offline mailbox query state is unavailable."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/FullMailSyncService.cpp:998
+#, kde-format
+msgid "Waiting for free disk space"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/FullMailSyncService.cpp:1105
+#, kde-format
+msgid "Available offline"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/LocalMaintenanceService.cpp:86
+#, kde-format
+msgid "Move saved messages into mail vault"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/LocalMaintenanceService.cpp:95
+#, kde-format
+msgid "Update mail vault folders"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/LocalMaintenanceService.cpp:172
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/LocalMaintenanceService.cpp:188
+#, kde-format
+msgid "Migrating saved messages"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/LocalMaintenanceService.cpp:187
+#, kde-format
+msgid "Saved message migration complete"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/LocalMaintenanceService.cpp:191
+#, kde-format
+msgid "Evicted %1 unretained vault object"
+msgid_plural "Evicted %1 unretained vault objects"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/LocalMaintenanceService.cpp:203
+#, kde-format
+msgid "Mail folders are current"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/LocalMaintenanceService.cpp:204
+#, kde-format
+msgid "Updating mail folders"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:874
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:897
+#, kde-format
+msgid "The search tab has been closed."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:967
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailboxSelectionMutation.cpp:116
+#, kde-format
+msgid "Message %1 is not available in the local cache."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1039
+#, kde-format
+msgid "A planned email mutation lost its cache snapshot."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1055
+#, kde-format
+msgid "Failed to reserve operation history."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1133
+#, kde-format
+msgid "A selected message is not cached locally."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1268
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1332
+#, kde-format
+msgid "Message not found."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1558
+#, kde-format
+msgid "Email state is not available offline."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1645
+#, kde-format
+msgid "Refresh contacts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1774
+#, kde-format
+msgid "Checking for contact changes"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1828
+#, kde-format
+msgid "%1 contacts across %2 address books"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1845
+#, kde-format
+msgid "Synchronize contacts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1878
+#, kde-format
+msgid "Synchronize calendar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1890
+#, kde-format
+msgid "Calendar synchronization is not configured."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1902
+#, kde-format
+msgid "Synchronize calendar changes"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1936
+#, kde-format
+msgid "Calendar event state is not available offline."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1974
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2325
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2407
+#, kde-format
+msgid "Unable to serialize the calendar event history."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:1982
+#, kde-format
+msgid "Create “%1”"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2029
+#, kde-format
+msgid "The created calendar event has no server ID."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2053
+#, kde-format
+msgid "Create calendar event"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2070
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2128
+#, kde-format
+msgid "The calendar is no longer available."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2075
+#, kde-format
+msgid "Hide Calendar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2075
+#, kde-format
+msgid "Show Calendar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2134
+#, kde-format
+msgid "Unknown calendar preference history."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2148
+#, kde-format
+msgid "The calendar visibility history is invalid."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2166
+#, kde-format
+msgid "The calendar preference history is invalid."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2198
+#, kde-format
+msgid "Change Default Calendar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2240
+#, kde-format
+msgid "Change default calendar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2263
+#, kde-format
+msgid "Create calendar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2286
+#, kde-format
+msgid "Delete calendar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2310
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2401
+#, kde-format
+msgid "The calendar event is no longer in the cache."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2333
+#, kde-format
+msgid "Edit “%1”"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2377
+#, kde-format
+msgid "Update calendar event"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2415
+#, kde-format
+msgid "Delete “%1”"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2459
+#, kde-format
+msgid "Delete calendar event"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2474
+#, kde-format
+msgid "Load Sieve scripts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2492
+#, kde-format
+msgid "Load Sieve script"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2508
+#, kde-format
+msgid "Validate Sieve script"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2552
+#, kde-format
+msgid "Create Sieve Script “%1”"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2554
+#, kde-format
+msgid "Edit Sieve Script “%1”"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2567
+#, kde-format
+msgid "Save Sieve script"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2627
+#, kde-format
+msgid "Delete Sieve Script “%1”"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2638
+#, kde-format
+msgid "Delete Sieve script"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2702
+#, kde-format
+msgid "Activate Sieve Script “%1”"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2703
+#, kde-format
+msgid "Deactivate Sieve Script “%1”"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2714
+#, kde-format
+msgid "Change active Sieve script"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailIndexService.cpp:130
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailIndexService.cpp:148
+#, kde-format
+msgid "Index downloaded mail"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailIndexService.cpp:217
+#, kde-format
+msgid "Preparing local search"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailIndexService.cpp:273
+#, kde-format
+msgid "Indexing downloaded mail"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailIndexService.cpp:276
+#, kde-format
+msgid "Search index is current"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailboxSelectionMutation.cpp:36
+#, kde-format
+msgid "Mailbox %1 is not available in the local account state."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailboxSelectionMutation.cpp:42
+#, kde-format
+msgid "You do not have permission to add messages to %1."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailboxSelectionMutation.cpp:48
+#, kde-format
+msgid "You do not have permission to remove messages from %1."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailboxSelectionMutation.cpp:72
+#, kde-format
+msgid "No Archive mailbox is available."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailboxSelectionMutation.cpp:79
+#, kde-format
+msgid "No Inbox mailbox is available."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailboxSelectionMutation.cpp:87
+#, kde-format
+msgid "A destination mailbox is required."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailboxSelectionMutation.cpp:131
+#, kde-format
+msgid "Message %1 is no longer in the source mailbox."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MessageSubject.h:17
+#, kde-format
+msgctxt "@item email with no subject"
+msgid "<No Subject>"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/SearchSession.cpp:148
+#, kde-format
+msgctxt "@title search tab"
+msgid "Search: %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkScheduler.cpp:132
+#, kde-format
+msgid "Inspect background work queue"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkScheduler.cpp:139
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkScheduler.cpp:141
+#, kde-format
+msgid "Count background work queue"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkScheduler.cpp:146
+#, kde-format
+msgid "The background work queue is full."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkScheduler.cpp:178
+#, kde-format
+msgid "Create background job"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkScheduler.cpp:213
+#, kde-format
+msgid "Update background job"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkScheduler.cpp:247
+#, kde-format
+msgid "List background jobs"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkScheduler.cpp:262
+#, kde-format
+msgid "Read background job"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkScheduler.cpp:445
+#, kde-format
+msgid "%1 background task failed"
+msgid_plural "%1 background tasks failed"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkScheduler.cpp:451
+#, kde-format
+msgid "%1 background task waiting"
+msgid_plural "%1 background tasks waiting"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkScheduler.cpp:477
+#, kde-format
+msgid "%1 background task"
+msgid_plural "%1 background tasks"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkScheduler.cpp:500
+#, kde-format
+msgid "Control background job"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkTaskModel.cpp:17
+#, kde-format
+msgctxt "@item background task state"
+msgid "Queued"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkTaskModel.cpp:19
+#, kde-format
+msgctxt "@item background task state"
+msgid "Running"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkTaskModel.cpp:21
+#, kde-format
+msgctxt "@item background task state"
+msgid "Paused"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkTaskModel.cpp:23
+#, kde-format
+msgctxt "@item background task state"
+msgid "Waiting for space"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkTaskModel.cpp:25
+#, kde-format
+msgctxt "@item background task state"
+msgid "Waiting for network"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkTaskModel.cpp:27
+#, kde-format
+msgctxt "@item background task state"
+msgid "Waiting for sign-in"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkTaskModel.cpp:29
+#, kde-format
+msgctxt "@item background task state"
+msgid "Failed"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkTaskModel.cpp:31
+#, kde-format
+msgctxt "@item background task state"
+msgid "Complete"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkTaskModel.cpp:100
+#, kde-format
+msgctxt "@title:column"
+msgid "Task"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkTaskModel.cpp:102
+#, kde-format
+msgctxt "@title:column"
+msgid "State"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkTaskModel.cpp:104
+#, kde-format
+msgctxt "@title:column"
+msgid "Progress"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkTaskModel.cpp:106
+#, kde-format
+msgctxt "@title:column"
+msgid "Details"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/WorkTaskModel.cpp:108
+#, kde-format
+msgctxt "@title:column"
+msgid "Actions"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/daemon_main.cpp:55
+#, kde-format
+msgid "Javelin Mail background daemon"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/daemon_main.cpp:59
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/gui_main.cpp:194
+#, kde-format
+msgid "Private runtime directory."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/daemon_main.cpp:60
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/gui_main.cpp:195
+#, kde-format
+msgctxt "@info:shell command-line value"
+msgid "directory"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/daemon_main.cpp:62
+#, kde-format
+msgid "Daemon socket path inside the runtime directory."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/daemon_main.cpp:63
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/gui_main.cpp:198
+#, kde-format
+msgctxt "@info:shell command-line value"
+msgid "path"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/daemon_main.cpp:71
+#, kde-format
+msgid "No private runtime directory is available."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/gui_main.cpp:169
+#, kde-format
+msgid "A JMAP email client"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/gui_main.cpp:197
+#, kde-format
+msgid "Daemon socket path."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/gui_main.cpp:318
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:133
+#, kde-format
+msgid "Welcome to Javelin Mail"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/gui_main.cpp:325
+#, kde-format
+msgid "Enable background sync"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/gui_main.cpp:326
+#, kde-format
+msgid "Start Javelin now"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/gui_main.cpp:327
+#, kde-format
+msgid "Retry daemon connection"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/gui_main.cpp:345
+#, kde-format
+msgid ""
+"Javelin’s background sync service isn’t running yet. Start it once, or "
+"enable it so mail stays up to date whenever you sign in."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/gui_main.cpp:347
+#, kde-format
+msgid "Javelin couldn’t open its background sync service. Please try again."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/gui_main.cpp:383
+#, kde-format
+msgid "Open Task Center"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/gui_main.cpp:538
+#, kde-format
+msgid "Starting Javelin…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/undo/MailHistoryExecutor.cpp:97
+#, kde-format
+msgid "The mail history payload is incomplete."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/undo/MailHistoryExecutor.cpp:103
+#, kde-format
+msgid "The previous mail history request requires reconciliation."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/undo/MailHistoryExecutor.cpp:112
+#, kde-format
+msgid "A mail history entry spans multiple accounts unexpectedly."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/undo/MailHistoryExecutor.cpp:140
+#, kde-format
+msgid "%1 is no longer available on the server."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/undo/MailHistoryExecutor.cpp:151
+#, kde-format
+msgid "%1 no longer has the expected mailbox or keyword state."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/undo/MailHistoryExecutor.cpp:158
+#, kde-format
+msgid "The mail operation changed on another client."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/undo/MailHistoryExecutor.cpp:248
+#, kde-format
+msgid "The partially changed mail operation could not be compensated."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/undo/MailHistoryExecutor.cpp:259
+#, kde-format
+msgid "A partially changed message no longer matches the server result."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/undo/MailHistoryExecutor.cpp:293
+#, kde-format
+msgid "The server rejected part of the compensation request."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/undo/MailHistoryExecutor.cpp:300
+#, kde-format
+msgid ""
+"The server accepted only part of the mail operation; the accepted changes "
+"were restored."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/undo/MailHistoryExecutor.cpp:312
+#, kde-format
+msgid "The server rejected the mail operation."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:150
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:407
+#, kde-format
+msgid "Calendar event"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:161
+#, kde-format
+msgctxt "@item calendar name"
+msgid "%1 (read-only)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:170
+#, kde-format
+msgctxt "@option:check calendar event"
+msgid "All day"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:176
+#, kde-format
+msgid "Start time"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:184
+#, kde-format
+msgid "End time"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:198
+#, kde-format
+msgid "Does not repeat"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:199
+#, kde-format
+msgctxt "@item recurrence frequency"
+msgid "Daily"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:201
+#, kde-format
+msgctxt "@item recurrence frequency"
+msgid "Weekly"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:203
+#, kde-format
+msgctxt "@item recurrence frequency"
+msgid "Monthly"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:205
+#, kde-format
+msgctxt "@item recurrence frequency"
+msgid "Yearly"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:207
+#, kde-format
+msgctxt "@item recurrence frequency"
+msgid "Custom…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:212
+#, kde-format
+msgid "Customize…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:219
+#, kde-format
+msgid "+ Add attendee"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:232
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1046
+#, kde-format
+msgid "Title"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:233
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/CalendarTabController.cpp:569
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:728
+#, kde-format
+msgid "Calendar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:235
+#, kde-format
+msgid "Start"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:236
+#, kde-format
+msgid "End"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:237
+#, kde-format
+msgid "Time zone"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:238
+#, kde-format
+msgid "Location"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:239
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:431
+#, kde-format
+msgid "Description"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:240
+#, kde-format
+msgid "Recurrence"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:241
+#, kde-format
+msgid "Attendees"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:245
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:414
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:494
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2928
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:51
+#, kde-format
+msgctxt "@action:button"
+msgid "Delete"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:281
+#, kde-format
+msgid "Use calendar default notifications"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:283
+#, kde-format
+msgid "+ Add notification"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:301
+#, kde-format
+msgid "Notifications"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:407
+#, kde-format
+msgid "Edit occurrence"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:534
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:535
+#, kde-format
+msgid "Remove attendee"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:589
+#, kde-format
+msgctxt "@item notification trigger"
+msgid "Relative"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:591
+#, kde-format
+msgctxt "@item notification trigger"
+msgid "At date/time"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:596
+#, kde-format
+msgctxt "@item time unit"
+msgid "minutes"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:597
+#, kde-format
+msgctxt "@item time unit"
+msgid "hours"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:598
+#, kde-format
+msgctxt "@item time unit"
+msgid "days"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:599
+#, kde-format
+msgctxt "@item time unit"
+msgid "weeks"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:600
+#, kde-format
+msgctxt "@item time unit"
+msgid "seconds"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:602
+#, kde-format
+msgid "before event starts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:603
+#, kde-format
+msgid "after event starts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:604
+#, kde-format
+msgid "before event ends"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:605
+#, kde-format
+msgid "after event ends"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:611
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:612
+#, kde-format
+msgid "Remove notification"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:757
+#, kde-format
+msgid "Enter a title."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:762
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:769
+#, kde-format
+msgid "Choose a writable calendar."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:776
+#, kde-format
+msgid "Enter start and end times as HH:mm."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/EventDialog.cpp:781
+#, kde-format
+msgid "The end must be after the start."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:173
+#, kde-format
+msgctxt "@action:button additional calendar events"
+msgid "+%1 more"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:373
+#, kde-format
+msgid "Default for New Events"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:389
+#, kde-format
+msgid "Manage Calendars…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:396
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:549
+#, kde-format
+msgid "Manage Calendars"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:411
+#, kde-format
+msgctxt "@action:button"
+msgid "Add…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:415
+#, kde-format
+msgctxt "@action:button"
+msgid "Choose Color…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:417
+#, kde-format
+msgctxt "@action:button"
+msgid "Use Calendar Color"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:444
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:450
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:461
+#, kde-format
+msgid "Create Calendar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:444
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:42
+#, kde-format
+msgid "Name:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:451
+#, kde-format
+msgid "Enter a calendar name."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:461
+#, kde-format
+msgid "Account:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:471
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:511
+#, kde-format
+msgid "Calendar Color"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:487
+#, kde-format
+msgid "Delete Calendar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:488
+#, kde-format
+msgid ""
+"Delete “%1”? Events that belong only to this calendar will also be deleted. "
+"This cannot be undone."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:550
+#, kde-format
+msgid ""
+"The calendar colours could not be saved.\n"
+"\n"
+"%1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:33
+#, kde-format
+msgctxt "@item ordinal in a monthly recurrence"
+msgid "first"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:35
+#, kde-format
+msgctxt "@item ordinal in a monthly recurrence"
+msgid "second"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:37
+#, kde-format
+msgctxt "@item ordinal in a monthly recurrence"
+msgid "third"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:39
+#, kde-format
+msgctxt "@item ordinal in a monthly recurrence"
+msgid "fourth"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:41
+#, kde-format
+msgctxt "@item ordinal in a monthly recurrence"
+msgid "last"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:50
+#, kde-format
+msgid "Custom recurrence"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:60
+#, kde-format
+msgid ""
+"This event uses an uncommon repeat pattern. Done replaces it with the "
+"pattern below; Cancel leaves it unchanged."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:67
+#, kde-format
+msgid "Repeat every"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:75
+#, kde-format
+msgctxt "@item recurrence interval unit"
+msgid "day"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:77
+#, kde-format
+msgctxt "@item recurrence interval unit"
+msgid "week"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:79
+#, kde-format
+msgctxt "@item recurrence interval unit"
+msgid "month"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:81
+#, kde-format
+msgctxt "@item recurrence interval unit"
+msgid "year"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:90
+#, kde-format
+msgid "Repeat on"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:102
+#, kde-format
+msgid "Repeat on %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:115
+#, kde-format
+msgid "Ends"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:117
+#, kde-format
+msgctxt "@option:radio recurrence end"
+msgid "Never"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:118
+#, kde-format
+msgctxt "@option:radio recurrence end"
+msgid "On"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:119
+#, kde-format
+msgctxt "@option:radio recurrence end"
+msgid "After"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:140
+#, kde-format
+msgctxt "@item recurrence count suffix"
+msgid " occurrences"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:152
+#, kde-format
+msgctxt "@action:button"
+msgid "Done"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:245
+#, kde-format
+msgid "Choose at least one weekday."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:251
+#, kde-format
+msgid "Choose an end date on or after the event date."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:278
+#, kde-format
+msgid "Monthly on day %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:283
+#, kde-format
+msgid "Monthly on the %1 %2"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:84
+#, kde-format
+msgid "New Message"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:86
+#, kde-format
+msgid "Reply"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:88
+#, kde-format
+msgid "Reply All"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:90
+#, kde-format
+msgid "Forward"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:92
+#, kde-format
+msgid "Edit Draft"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:95
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:679
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:786
+#, kde-format
+msgid "Compose"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:205
+#, kde-format
+msgctxt "@item file size"
+msgid "%1 GB"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:210
+#, kde-format
+msgctxt "@item file size"
+msgid "%1 MB"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:215
+#, kde-format
+msgctxt "@item file size"
+msgid "%1 KB"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:219
+#, kde-format
+msgctxt "@item file size"
+msgid "%1 B"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:230
+#, kde-format
+msgctxt "@item unknown attachment media type"
+msgid "attachment"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:247
+#, kde-format
+msgid "Attachment"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:353
+#, kde-format
+msgctxt "@option:radio"
+msgid "Attach"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:354
+#, kde-format
+msgctxt "@option:radio"
+msgid "Embed"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:357
+#, kde-format
+msgid "Send this image as an attachment"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:358
+#, kde-format
+msgid "Show this image in the message body"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:381
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:382
+#, kde-format
+msgid "Remove attachment"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:435
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/AccountRefreshController.cpp:49
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/ComposeTabController.cpp:43
+#, kde-format
+msgid "Set Session URL, Login Email, and API Key in Preferences first."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:686
+#, kde-format
+msgid "Format"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:688
+#, kde-format
+msgctxt "@item message body format"
+msgid "HTML"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:689
+#, kde-format
+msgctxt "@item message body format"
+msgid "Plain text"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:695
+#, kde-format
+msgctxt "@label email sender"
+msgid "From"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:703
+#, kde-format
+msgctxt "@label email recipients"
+msgid "To"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:708
+#, kde-format
+msgctxt "@action:button show carbon-copy field"
+msgid "Cc"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:712
+#, kde-format
+msgctxt "@action:button show blind-carbon-copy field"
+msgid "Bcc"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:724
+#, kde-format
+msgctxt "@label email carbon-copy recipients"
+msgid "Cc"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:727
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:739
+#, kde-format
+msgctxt "@info:placeholder"
+msgid "Optional"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:736
+#, kde-format
+msgctxt "@label email blind-carbon-copy recipients"
+msgid "Bcc"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:763
+#, kde-format
+msgctxt "@label email subject"
+msgid "Subject"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:766
+#, kde-format
+msgid "Add a subject"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:787
+#, kde-format
+msgid "Preview"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:834
+#, kde-format
+msgctxt "@action text formatting"
+msgid "Code"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:856
+#, kde-format
+msgctxt "@action insert image"
+msgid "Image"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:983
+#, kde-format
+msgid "No sender identities are available for configured accounts."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1151
+#, kde-format
+msgid "Convert to Plain Text"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1152
+#, kde-format
+msgid ""
+"This message contains formatting. How should it be converted to plain text?"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1156
+#, kde-format
+msgctxt "@action:button"
+msgid "Lose Formatting"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1158
+#, kde-format
+msgctxt "@action:button"
+msgid "Add Markup Plain Text"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1262
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:867
+#, kde-format
+msgid "Attach Files"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1314
+#, kde-format
+msgid "The selected image could not be loaded."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1346
+#, kde-format
+msgid "Could not create storage for the pasted image."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1355
+#, kde-format
+msgid "Could not save the pasted image."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1364
+#, kde-format
+msgid "Insert Image"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1365
+#, kde-format
+msgid "Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp);;All Files (*)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1539
+#, kde-format
+msgid "Saving draft..."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1565
+#, kde-format
+msgid "Draft saved."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1600
+#, kde-format
+msgid "Add at least one recipient before sending."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1606
+#, kde-format
+msgid "Sending message..."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1624
+#, kde-format
+msgid "Message scheduled."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/compose/ComposeTabWidget.cpp:1625
+#, kde-format
+msgid "Message sent."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:240
+#, kde-format
+msgctxt "@item contact field context"
+msgid "Other"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:241
+#, kde-format
+msgctxt "@item contact field context"
+msgid "Home"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:243
+#, kde-format
+msgctxt "@item contact field context"
+msgid "Work"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:270
+#, kde-format
+msgctxt "@info:placeholder contact field label"
+msgid "Label"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:276
+#, kde-format
+msgid "Preference rank; 1 is preferred and — is unspecified"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:279
+#, kde-format
+msgid "Remove field"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:316
+#, kde-format
+msgctxt "@item contact field context"
+msgid "Custom (preserved)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:341
+#, kde-format
+msgctxt "@title contact field column"
+msgid "Value"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:342
+#, kde-format
+msgctxt "@title contact field column"
+msgid "Type"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:343
+#, kde-format
+msgctxt "@title contact field column"
+msgid "Label"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:344
+#, kde-format
+msgctxt "@title contact field column"
+msgid "Pref"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:351
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:159
+#, kde-format
+msgctxt "@action:button"
+msgid "Add"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:413
+#, kde-format
+msgid "New Address Book"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:414
+#, kde-format
+msgid "Edit Address Book"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:426
+#, kde-format
+msgctxt "@item address book visibility"
+msgid "Subscribed"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:427
+#, kde-format
+msgctxt "@item address book visibility"
+msgid "Unsubscribed"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:430
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1044
+#, kde-format
+msgid "Name"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:432
+#, kde-format
+msgid "Sort order"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:433
+#, kde-format
+msgid "Visibility"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:444
+#, kde-format
+msgid "Invalid Address Book"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:445
+#, kde-format
+msgid "The name must contain 1 to 255 UTF-8 bytes."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:484
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2777
+#, kde-format
+msgid "Address Book Sharing"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:489
+#, kde-format
+msgctxt "@title:column"
+msgid "Principal ID"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:489
+#, kde-format
+msgctxt "@title:column"
+msgid "Read"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:490
+#, kde-format
+msgctxt "@title:column"
+msgid "Share"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:490
+#, kde-format
+msgctxt "@title:column"
+msgid "Write"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:491
+#, kde-format
+msgctxt "@title:column"
+msgid "Delete"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:500
+#, kde-format
+msgid "Add Principal"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:501
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:160
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:261
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:398
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:411
+#, kde-format
+msgctxt "@action:button"
+msgid "Remove"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:514
+#, kde-format
+msgid "Principal"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:514
+#, kde-format
+msgid "Principal ID"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:892
+#, kde-format
+msgid "Account"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:894
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1833
+#, kde-format
+msgid "Address book"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:901
+#, kde-format
+msgid "Groups"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:917
+#, kde-format
+msgid "Filter contacts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:919
+#, kde-format
+msgctxt "@item contact sort order"
+msgid "Name A–Z"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:920
+#, kde-format
+msgctxt "@item contact sort order"
+msgid "Name Z–A"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:921
+#, kde-format
+msgctxt "@item contact sort order"
+msgid "Organization"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:922
+#, kde-format
+msgctxt "@item contact sort order"
+msgid "Email"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:936
+#, kde-format
+msgid "Select a contact to view it."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:973
+#, kde-format
+msgid "Advanced details"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1021
+#, kde-format
+msgid "Contact details"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1031
+#, kde-format
+msgctxt "@item contact kind"
+msgid "Person"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1033
+#, kde-format
+msgctxt "@item contact kind"
+msgid "Organization"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1035
+#, kde-format
+msgctxt "@item contact kind"
+msgid "Group"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1038
+#, kde-format
+msgid "Full name"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1040
+#, kde-format
+msgid "Company or organization"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1042
+#, kde-format
+msgid "Role or job title"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1043
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2052
+#, kde-format
+msgid "Type"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1045
+#, kde-format
+msgid "Organization"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1048
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:204
+#, kde-format
+msgid "Email address"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1049
+#, kde-format
+msgid "Phone number"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1050
+#, kde-format
+msgid "Postal address"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1051
+#, kde-format
+msgid "Emails"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1052
+#, kde-format
+msgid "Phones"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1053
+#, kde-format
+msgid "Addresses"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1057
+#, kde-format
+msgid "Group members"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1072
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1077
+#, kde-format
+msgid "Notes"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1076
+#, kde-format
+msgid "Birthday"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1078
+#, kde-format
+msgid "Address books"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1082
+#, kde-format
+msgid "Advanced and unusual fields"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1105
+#, kde-format
+msgid "Replace Photo…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1106
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2228
+#, kde-format
+msgid "Remove Photo"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1110
+#, kde-format
+msgctxt "@action:button"
+msgid "Cancel"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1111
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:60
+#, kde-format
+msgctxt "@action:button"
+msgid "Save"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1176
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1187
+#, kde-format
+msgid "All address books"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1194
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2950
+#, kde-format
+msgctxt "@item address book suffix"
+msgid " (default)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1198
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2952
+#, kde-format
+msgctxt "@item address book suffix"
+msgid " (unsubscribed)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1271
+#, kde-format
+msgid "All contacts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1275
+#, kde-format
+msgid "Starred contacts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1279
+#, kde-format
+msgid "No group"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1504
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1663
+#, kde-format
+msgid "Remove from Starred"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1505
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1663
+#, kde-format
+msgid "Add to Starred"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1528
+#, kde-format
+msgid "%1 contact selected"
+msgid_plural "%1 contacts selected"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1531
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1603
+#, kde-format
+msgid "Remove all from Starred"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1532
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1603
+#, kde-format
+msgid "Add all to Starred"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1560
+#, kde-format
+msgctxt "@item additional contact email addresses"
+msgid "+%1 more"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1608
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1667
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:922
+#, kde-format
+msgid "Add to Group"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1611
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1670
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:930
+#, kde-format
+msgid "Remove from Group"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1623
+#, kde-format
+msgid "Write Message"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1640
+#, kde-format
+msgid "Copy Email Address"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1647
+#, kde-format
+msgid "Find Mail From"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1674
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:891
+#, kde-format
+msgid "Edit Contact"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1678
+#, kde-format
+msgid "Copy Contact…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1681
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:911
+#, kde-format
+msgid "Export vCard…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1684
+#, kde-format
+msgid "Find and Merge Duplicates…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1687
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2303
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:896
+#, kde-format
+msgid "Delete Contact"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1711
+#, kde-format
+msgid "Delete Group"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1750
+#, kde-format
+msgid "No available groups"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1755
+#, kde-format
+msgid "New Group…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1793
+#, kde-format
+msgid "Not in a writable group"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1803
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1833
+#, kde-format
+msgid "New Contact Group"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1804
+#, kde-format
+msgid "Group name"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1890
+#, kde-format
+msgid "Delete Contact Group"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1891
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2304
+#, kde-format
+msgid "Delete %1?"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1947
+#, kde-format
+msgid "Contact Editor"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:1948
+#, kde-format
+msgid "This contact document cannot be edited."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2016
+#, kde-format
+msgid "%1 (currently unavailable)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2040
+#, kde-format
+msgid "No Address Book"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2041
+#, kde-format
+msgid "Create or select an address book first."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2048
+#, kde-format
+msgctxt "@item contact type"
+msgid "Individual"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2049
+#, kde-format
+msgctxt "@item contact type"
+msgid "Organization"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2050
+#, kde-format
+msgctxt "@item contact type"
+msgid "Group"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2052
+#, kde-format
+msgid "Contact Type"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2115
+#, kde-format
+msgid "Read-only Contact"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2116
+#, kde-format
+msgid "You do not have write permission for every selected address book."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2163
+#, kde-format
+msgid "Choose Contact Photo"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2164
+#, kde-format
+msgid "Images (*.png *.jpg *.jpeg *.gif *.webp *.avif);;All Files (*)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2172
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2179
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2201
+#, kde-format
+msgid "Photo Upload"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2180
+#, kde-format
+msgid "The selected file is not a recognized image."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2217
+#, kde-format
+msgid "Photo uploaded; save the contact to apply it."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2359
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2364
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2375
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:901
+#, kde-format
+msgid "Copy Contact"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2360
+#, kde-format
+msgid "There is no writable destination address book."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2365
+#, kde-format
+msgid "Destination account"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2375
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2465
+#, kde-format
+msgid "Destination address book"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2409
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2416
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2423
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2430
+#, kde-format
+msgid "Export vCard"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2410
+#, kde-format
+msgid "This contact cannot be exported."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2417
+#, kde-format
+msgid "vCard files (*.vcf)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2433
+#, kde-format
+msgid "Contact exported."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2465
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2473
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2480
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2485
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2496
+#, kde-format
+msgid "Import vCard"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2474
+#, kde-format
+msgid "vCard files (*.vcf *.vcard);;All files (*)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2486
+#, kde-format
+msgid "The vCard file exceeds 10 MiB."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2544
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2579
+#, kde-format
+msgid "Duplicate Contacts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2545
+#, kde-format
+msgid "No likely duplicates were found."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2579
+#, kde-format
+msgid "Duplicate group"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2600
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2615
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2621
+#, kde-format
+msgid "Merge Duplicate Contacts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2601
+#, kde-format
+msgid "Keep this contact as the primary"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2616
+#, kde-format
+msgid "Every duplicate must be writable before it can be merged."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2622
+#, kde-format
+msgid ""
+"Merge %1 contacts into %2? This keeps all mapped fields and removes the "
+"redundant contacts."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2656
+#, kde-format
+msgid "Refreshing contacts…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2672
+#, kde-format
+msgid "Cached %1 contacts in %2 address books."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2694
+#, kde-format
+msgid "Creating address book…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2712
+#, kde-format
+msgid "Updating address book…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2723
+#, kde-format
+msgid "Delete Address Book"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2724
+#, kde-format
+msgid "Delete %1 and remove its contacts that belong to no other address book?"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2734
+#, kde-format
+msgid "Deleting address book…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2749
+#, kde-format
+msgid "Changing default address book…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2766
+#, kde-format
+msgid "Updating subscription…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2778
+#, kde-format
+msgid "You do not have permission to change sharing."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2791
+#, kde-format
+msgid "Updating address book sharing…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2906
+#, kde-format
+msgid "Manage Address Books"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2923
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:50
+#, kde-format
+msgctxt "@action:button"
+msgid "New"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2924
+#, kde-format
+msgctxt "@action:button"
+msgid "Edit"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2925
+#, kde-format
+msgid "Make Default"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2926
+#, kde-format
+msgid "Toggle Subscription"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:2927
+#, kde-format
+msgid "Sharing…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:3069
+#, kde-format
+msgid "This contact could not be displayed."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:3090
+#, kde-format
+msgid "Compose mail"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:3100
+#, kde-format
+msgid "Find mail from this address"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:3111
+#, kde-format
+msgctxt "@action:button"
+msgid "Copy"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:3112
+#, kde-format
+msgid "Copy to clipboard"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:3130
+#, kde-format
+msgctxt "@title contact information card"
+msgid "Work"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:3140
+#, kde-format
+msgctxt "@title contact field in work context"
+msgid "%1 · Work"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:3143
+#, kde-format
+msgctxt "@title contact field in home context"
+msgid "%1 · Home"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:3147
+#, kde-format
+msgctxt "@title contact information card"
+msgid "Email"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:3152
+#, kde-format
+msgctxt "@title contact information card"
+msgid "Phone"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:3155
+#, kde-format
+msgctxt "@title contact information card"
+msgid "Address"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:3158
+#, kde-format
+msgctxt "@title contact information card"
+msgid "Birthday"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/contacts/ContactsManagerWidget.cpp:3161
+#, kde-format
+msgctxt "@title contact information card"
+msgid "Notes"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/logging/LogViewerDialog.cpp:40
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:990
+#, kde-format
+msgid "Application Log"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/logging/LogViewerDialog.cpp:45
+#, kde-format
+msgid "Debug and above"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/logging/LogViewerDialog.cpp:45
+#, kde-format
+msgid "Info and above"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/logging/LogViewerDialog.cpp:46
+#, kde-format
+msgid "Errors only"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/logging/LogViewerDialog.cpp:46
+#, kde-format
+msgid "Warnings and above"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/logging/LogViewerDialog.cpp:49
+#, kde-format
+msgid "All systems"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/logging/LogViewerDialog.cpp:51
+#, kde-format
+msgid "Filter log text"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/logging/LogViewerDialog.cpp:61
+#, kde-format
+msgctxt "@action:button"
+msgid "Clear"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:19
+#, kde-format
+msgctxt "@item boolean value"
+msgid "Yes"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:20
+#, kde-format
+msgctxt "@item boolean value"
+msgid "No"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:35
+#, kde-format
+msgid "%1 Properties"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:40
+#, kde-format
+msgid "Mailbox"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:44
+#, kde-format
+msgid "JMAP ID:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:46
+#, kde-format
+msgid "Account JMAP ID:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:47
+#, kde-format
+msgid "Parent JMAP ID:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:50
+#, kde-format
+msgctxt "@item no mailbox parent"
+msgid "None"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:52
+#, kde-format
+msgid "Role:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:54
+#, kde-format
+msgctxt "@item no mailbox role"
+msgid "None"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:56
+#, kde-format
+msgid "Sort order:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:58
+#, kde-format
+msgid "Subscribed:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:59
+#, kde-format
+msgid "Has child mailboxes:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:63
+#, kde-format
+msgid "Counts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:65
+#, kde-format
+msgid "Total emails:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:67
+#, kde-format
+msgid "Unread emails:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:69
+#, kde-format
+msgid "Total threads:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:71
+#, kde-format
+msgid "Unread threads:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:76
+#, kde-format
+msgid "My rights"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:78
+#, kde-format
+msgid "Read items:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:79
+#, kde-format
+msgid "Add items:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:80
+#, kde-format
+msgid "Remove items:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:81
+#, kde-format
+msgid "Set seen:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:82
+#, kde-format
+msgid "Set keywords:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:83
+#, kde-format
+msgid "Create child:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:84
+#, kde-format
+msgid "Rename:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:85
+#, kde-format
+msgid "Delete:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxPropertiesDialog.cpp:86
+#, kde-format
+msgid "Submit:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxTreeModel.cpp:182
+#, kde-format
+msgid "%2 (%1 unread)"
+msgid_plural "%2 (%1 unread)"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxTreeModel.cpp:193
+#, kde-format
+msgctxt "@item account connection state"
+msgid "Disconnected"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxTreeModel.cpp:196
+#, kde-format
+msgctxt "@item account connection state"
+msgid "Connecting"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxTreeModel.cpp:199
+#, kde-format
+msgctxt "@item account connection state"
+msgid "Connected"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/mailboxes/MailboxTreeModel.cpp:202
+#, kde-format
+msgctxt "@item account connection state"
+msgid "Sign-in required"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListDelegate.cpp:109
+#, kde-format
+msgid "%1 reply"
+msgid_plural "%1 replies"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListDelegate.cpp:503
+#, kde-format
+msgid "Collapse thread"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListDelegate.cpp:504
+#, kde-format
+msgid "Expand thread"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListDelegate.cpp:508
+#, kde-format
+msgid "Has attachments"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListDelegate.cpp:514
+#, kde-format
+msgid "Remove star"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListDelegate.cpp:515
+#, kde-format
+msgid "Add star"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListModel.cpp:90
+#, kde-format
+msgctxt "@item email with unknown sender"
+msgid "(unknown sender)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListPanePresenter.cpp:40
+#, kde-format
+msgid ""
+"Could not refresh the message list.\n"
+"%1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListPanePresenter.cpp:45
+#, kde-format
+msgid "Looking for messages…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListPanePresenter.cpp:51
+#, kde-format
+msgid "No indexed messages on this device matched your search."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListPanePresenter.cpp:56
+#, kde-format
+msgid "No messages matched your search."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListPanePresenter.cpp:61
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1292
+#, kde-format
+msgid "No messages"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListPanePresenter.cpp:70
+#, kde-format
+msgid "Messages"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListPanePresenter.cpp:97
+#, kde-format
+msgid "%1 Loaded Match"
+msgid_plural "%1 Loaded Matches"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListPanePresenter.cpp:98
+#, kde-format
+msgid "%1 Loaded Conversation"
+msgid_plural "%1 Loaded Conversations"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListPanePresenter.cpp:114
+#, kde-format
+msgid "%1 Indexed Match"
+msgid_plural "%1 Indexed Matches"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListPanePresenter.cpp:116
+#, kde-format
+msgid "%1 Match"
+msgid_plural "%1 Matches"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListPanePresenter.cpp:117
+#, kde-format
+msgid "%1 Conversation"
+msgid_plural "%1 Conversations"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messages/MessageListPanePresenter.cpp:131
+#, kde-format
+msgctxt "@info page number suffix"
+msgid " of %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/HtmlMessageView.cpp:197
+#, kde-format
+msgid "View Source"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/HtmlMessageView.cpp:200
+#, kde-format
+msgid "Use Original Colours"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/HtmlMessageView.cpp:201
+#, kde-format
+msgid "Use Dark Appearance"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:122
+#, kde-format
+msgctxt "@item no email addresses"
+msgid "(none)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:245
+#, kde-format
+msgid "Open %1 in default application"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:318
+#, kde-format
+msgid "(no preview available)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:460
+#, kde-format
+msgid "Always load sender"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:465
+#, kde-format
+msgid "Always load domain"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:470
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1012
+#, kde-format
+msgid "Load remote content"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:499
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1037
+#, kde-format
+msgctxt "@action:button"
+msgid "Translate"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:504
+#, kde-format
+msgctxt "@action:button"
+msgid "Options"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:506
+#, kde-format
+msgid "Translation options"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:508
+#, kde-format
+msgid "Auto-translate sender"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:512
+#, kde-format
+msgid "Auto-translate sender domain"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:660
+#, kde-format
+msgctxt "@action:button"
+msgid "Save All"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:696
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1489
+#, kde-format
+msgctxt "@label email sender"
+msgid "From: %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:716
+#, kde-format
+msgid "Downloading %1 translation model… %2%"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:721
+#, kde-format
+msgid "Downloading %1 translation model…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:903
+#, kde-format
+msgid "The cached message content could not be loaded."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:995
+#, kde-format
+msgid "Blocked remote resource: %1"
+msgid_plural "Blocked remote resources: %1"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1004
+#, kde-format
+msgid "No sender address is available"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1005
+#, kde-format
+msgid "Always load remote content from this sender"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1008
+#, kde-format
+msgid "No sender domain is available"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1009
+#, kde-format
+msgid "Always load remote content from this sender domain"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1011
+#, kde-format
+msgid "Hide remote content"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1036
+#, kde-format
+msgid "Show original"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1039
+#, kde-format
+msgid "Restore the original message text"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1040
+#, kde-format
+msgid "Translate this message to %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1045
+#, kde-format
+msgid "Translating message…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1059
+#, kde-format
+msgid "Auto-translated to %1."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1060
+#, kde-format
+msgid "Message translated to %1."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1066
+#, kde-format
+msgid "This message appears to be in %1."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1102
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1111
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1126
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1135
+#, kde-format
+msgid "Could not save translation rule: %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1248
+#, kde-format
+msgid "Translation failed: %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1258
+#, kde-format
+msgid "Translation failed: no translated text was returned."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1289
+#, kde-format
+msgid "Translation failed: no message text was found."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1400
+#, kde-format
+msgid "Choose an account"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1401
+#, kde-format
+msgid "Select an account to browse your mail."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1402
+#, kde-format
+msgid "Ready when you are"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1404
+#, kde-format
+msgid ""
+"Message details will appear here after you choose an account, mailbox, and "
+"message."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1414
+#, kde-format
+msgid "%1 message selected"
+msgid_plural "%1 messages selected"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1426
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1429
+#, kde-format
+msgid "Choose a mailbox"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1428
+#, kde-format
+msgid "Select a mailbox in the left pane to populate the message list."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1431
+#, kde-format
+msgid "Choose a mailbox to see its messages here."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1440
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1443
+#, kde-format
+msgid "Choose a message"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1442
+#, kde-format
+msgid "Select a message in the center pane to open it here."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1444
+#, kde-format
+msgid "Select a message to read it here."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1455
+#, kde-format
+msgid "Could not load message"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1457
+#, kde-format
+msgid "Message retrieval failed"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1462
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1465
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1538
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1541
+#, kde-format
+msgid "Loading message"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1472
+#, kde-format
+msgid "Message is unavailable"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1473
+#, kde-format
+msgid "This message is not available on this device yet."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1474
+#, kde-format
+msgid "Message unavailable"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1476
+#, kde-format
+msgid "Try refreshing the mailbox or reopening the message in a moment."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1490
+#, kde-format
+msgctxt "@label email recipients"
+msgid "To: %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1493
+#, kde-format
+msgctxt "@label email received date"
+msgid "Received: %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1548
+#, kde-format
+msgid "Nothing to display"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1550
+#, kde-format
+msgid "This message does not currently have a readable body available."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1674
+#, kde-format
+msgid "Save %1 to selected location"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1675
+#, kde-format
+msgid "Save %1 to %2"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1769
+#, kde-format
+msgid "%1 attachment"
+msgid_plural "%1 attachments"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/messageview/MessageViewContainer.cpp:1775
+#, kde-format
+msgid "Inline resource: %1"
+msgid_plural "Inline resources: %1"
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:71
+#, kde-format
+msgid "JMAP account access"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:73
+#, kde-format
+msgid "Mail synchronization"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:75
+#, kde-format
+msgid "Send mail"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:77
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/ContactsTabController.cpp:62
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/ContactsTabController.cpp:73
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:722
+#, kde-format
+msgid "Contacts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:79
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:981
+#, kde-format
+msgid "Calendars"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:81
+#, kde-format
+msgid "Server-side mail rules"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:83
+#, kde-format
+msgid "Instant updates"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:85
+#, kde-format
+msgid "Secure browser sign-in"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:87
+#, kde-format
+msgid "Automatic app registration"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:89
+#, kde-format
+msgid "Stay signed in"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:91
+#, kde-format
+msgid "Unknown feature"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:132
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:185
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2839
+#, kde-format
+msgid "Sign In Again"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:134
+#, kde-format
+msgid "Add a Mail Account"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:140
+#, kde-format
+msgid "Finish Sign-In"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:142
+#, kde-format
+msgid "Add Account"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:189
+#, kde-format
+msgid "Sign in to your account again"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:190
+#, kde-format
+msgid "Let’s set up your mail"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:191
+#, kde-format
+msgid "Add another mail account"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:193
+#, kde-format
+msgid "Javelin’s background service is ready. Choose a label for this account."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:195
+#, kde-format
+msgid "✓ Background sync is ready"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:200
+#, kde-format
+msgid "Personal mail, Work, or another label"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:203
+#, kde-format
+msgid "Account name"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:224
+#, kde-format
+msgid "Checking your mail service"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:226
+#, kde-format
+msgid "Javelin uses your email address to find the right server automatically."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:228
+#, kde-format
+msgid "Looking for your server…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:240
+#, kde-format
+msgid "Sign in"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:241
+#, kde-format
+msgid "Sign in with your mail service to continue."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:246
+#, kde-format
+msgid "Continue in browser"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:253
+#, kde-format
+msgid "Use manual details instead"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:259
+#, kde-format
+msgid "Manual JMAP sign-in"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:262
+#, kde-format
+msgid "Discovered automatically when left blank"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:265
+#, kde-format
+msgid "API token or access token"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:266
+#, kde-format
+msgid "Verify details"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:267
+#, kde-format
+msgid "JMAP server"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:268
+#, kde-format
+msgid "Access token"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:287
+#, kde-format
+msgid "You’re signed in again"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:288
+#, kde-format
+msgid "Your account is ready"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:291
+#, kde-format
+msgid "Javelin will resume synchronizing when setup finishes."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:292
+#, kde-format
+msgid "Javelin will fetch your mailboxes and recent mail when setup finishes."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:294
+#, kde-format
+msgid "Available for this account"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:310
+#, kde-format
+msgid "Looking for your mail service…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:320
+#, kde-format
+msgid "We couldn’t check that service. %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:341
+#, kde-format
+msgid "We found a compatible service for %1."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:348
+#, kde-format
+msgid "Your provider supports secure browser sign-in."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:349
+#, kde-format
+msgid "This provider needs an API token or manually registered application."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:369
+#, kde-format
+msgid "Javelin couldn’t prepare a secure browser callback."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:374
+#, kde-format
+msgid "Preparing secure sign-in…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:395
+#, kde-format
+msgid "Finish signing in in your browser. You can return here when it closes."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:398
+#, kde-format
+msgid "Your browser could not be opened. Use manual details below."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:437
+#, kde-format
+msgid "<h1>Signed in</h1><p>You can close this tab and return to Javelin.</p>"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:439
+#, kde-format
+msgid ""
+"<h1>Sign-in was cancelled</h1><p>You can return to Javelin and try again.</p>"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:453
+#, kde-format
+msgid "Sign-in was cancelled. You can try again or use manual details."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:456
+#, kde-format
+msgid "Finishing sign-in…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:485
+#, kde-format
+msgid "Enter an API or access token first."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:488
+#, kde-format
+msgid "Checking those details…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:519
+#, kde-format
+msgid "✓ Signed in successfully"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:537
+#, kde-format
+msgctxt "@item suffix for onboarding feature"
+msgid " — checked after sign-in"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:592
+#, kde-format
+msgid "Couldn’t update the account"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:593
+#, kde-format
+msgid "This account is no longer configured."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:618
+#, kde-format
+msgid "Couldn’t save the account"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/onboarding/FirstRunWizard.cpp:619
+#, kde-format
+msgid "Javelin couldn’t save your account yet. Please try again."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/search/AdvancedSearchDialog.cpp:31
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:848
+#, kde-format
+msgid "Advanced Search"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/search/AdvancedSearchDialog.cpp:43
+#, kde-format
+msgctxt "@label email search field"
+msgid "Anywhere"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/search/AdvancedSearchDialog.cpp:44
+#, kde-format
+msgctxt "@label email search participant"
+msgid "With"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/search/AdvancedSearchDialog.cpp:45
+#, kde-format
+msgctxt "@label email sender search field"
+msgid "From"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/search/AdvancedSearchDialog.cpp:46
+#, kde-format
+msgctxt "@label email recipient search field"
+msgid "To"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/search/AdvancedSearchDialog.cpp:47
+#, kde-format
+msgctxt "@label email carbon-copy search field"
+msgid "Cc"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/search/AdvancedSearchDialog.cpp:48
+#, kde-format
+msgctxt "@label email blind-carbon-copy search field"
+msgid "Bcc"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/search/AdvancedSearchDialog.cpp:50
+#, kde-format
+msgctxt "@label email subject search field"
+msgid "Subject"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/search/AdvancedSearchDialog.cpp:52
+#, kde-format
+msgctxt "@label email body search field"
+msgid "Body"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/search/AdvancedSearchDialog.cpp:55
+#, kde-format
+msgctxt "@action:button"
+msgid "Search"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:93
+#, kde-format
+msgid "New account"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:146
+#, kde-format
+msgid "Preferences"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:154
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:193
+#, kde-format
+msgid "Accounts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:169
+#, kde-format
+msgctxt "@info:placeholder account name"
+msgid "Personal"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:175
+#, kde-format
+msgid "Display Name"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:176
+#, kde-format
+msgid "Email"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:177
+#, kde-format
+msgid "Mail Server"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:180
+#, kde-format
+msgid "Sign-in and server details are managed automatically."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:199
+#, kde-format
+msgid ""
+"Download every message and attachment in selected mailboxes for complete "
+"offline access. Large mailboxes continue in the Task Center and can be "
+"paused. Unchecking keeps downloaded mail as removable cache."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:223
+#, kde-format
+msgid "Keep complete offline copy"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:229
+#, kde-format
+msgid "Show notifications"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:248
+#, kde-format
+msgid "Mailbox Sync"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:254
+#, kde-format
+msgid "Allowed Remote Content"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:264
+#, kde-format
+msgid "Remote Content"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:271
+#, kde-format
+msgid "Follow application"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:274
+#, kde-format
+msgid "Always use original colours"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:277
+#, kde-format
+msgid "Always use dark colours"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:282
+#, kde-format
+msgid "HTML message colours"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:283
+#, kde-format
+msgid "Appearance"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:291
+#, kde-format
+msgctxt "@item translation provider"
+msgid "Disabled"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:294
+#, kde-format
+msgctxt "@item translation provider"
+msgid "Google Translate"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:299
+#, kde-format
+msgctxt "@item translation provider"
+msgid "Local (Firefox models)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:305
+#, kde-format
+msgid "Translation provider"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:314
+#, kde-format
+msgid "English"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:315
+#, kde-format
+msgid "Chinese (Simplified)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:317
+#, kde-format
+msgid "Chinese (Traditional)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:319
+#, kde-format
+msgid "French"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:320
+#, kde-format
+msgid "German"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:321
+#, kde-format
+msgid "Italian"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:322
+#, kde-format
+msgid "Japanese"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:323
+#, kde-format
+msgid "Korean"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:324
+#, kde-format
+msgid "Portuguese"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:325
+#, kde-format
+msgid "Russian"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:326
+#, kde-format
+msgid "Spanish"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:337
+#, kde-format
+msgid "Target language"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:345
+#, kde-format
+msgid ""
+"Translated message text is sent to Google Translate. Leave the API key empty "
+"to use Javelin's built-in default key."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:353
+#, kde-format
+msgid "Use built-in default key"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:355
+#, kde-format
+msgid "API key override"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:363
+#, kde-format
+msgid ""
+"Local translation runs only in the Javelin GUI. Firefox-compatible models "
+"are downloaded on demand and remain on this computer."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:376
+#, kde-format
+msgctxt "@label translation source language"
+msgid "From"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:380
+#, kde-format
+msgctxt "@label translation target language"
+msgid "to"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:384
+#, kde-format
+msgid "Download models"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:391
+#, kde-format
+msgid "Downloaded model directions"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:404
+#, kde-format
+msgid "Auto-Translate Entries"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:415
+#, kde-format
+msgid "Translation"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:421
+#, kde-format
+msgid "Always ask where to save attachments"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:423
+#, kde-format
+msgid "Always save attachments to:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:429
+#, kde-format
+msgid "Choose..."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:437
+#, kde-format
+msgid "Attachments"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:444
+#, kde-format
+msgctxt "@item time suffix"
+msgid " seconds"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:446
+#, kde-format
+msgid "Undo send window:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:447
+#, kde-format
+msgid "Composing"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:514
+#, kde-format
+msgid "Downloading %1 → %2: %3 of %4"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:665
+#, kde-format
+msgid "Remove account"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:666
+#, kde-format
+msgid ""
+"Applying this change will permanently wipe all of this account's cached "
+"mail, drafts, state, and pending actions."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:669
+#, kde-format
+msgid "Remove Account"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:672
+#, kde-format
+msgid "I understand that all cached data will be wiped."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:812
+#, kde-format
+msgid "Could not save preferences"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:818
+#, kde-format
+msgid "Could not save translation preferences"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:828
+#, kde-format
+msgid "Could not remove account cache"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:938
+#, kde-format
+msgctxt "@item remote-content permission"
+msgid "Sender: %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:947
+#, kde-format
+msgctxt "@item remote-content permission"
+msgid "Domain: %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:984
+#, kde-format
+msgctxt "@item automatic translation rule"
+msgid "Sender: %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:993
+#, kde-format
+msgctxt "@item automatic translation rule"
+msgid "Domain: %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:1061
+#, kde-format
+msgctxt "@item installed translation model"
+msgid "%1 → %2 — %3 (%4), %5"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:1071
+#, kde-format
+msgid "No local translation models are installed."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:1076
+#, kde-format
+msgid "%1 model direction installed, using %2."
+msgid_plural "%1 model directions installed, using %2."
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:1091
+#, kde-format
+msgid "Preparing %1 → %2 models…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:1100
+#, kde-format
+msgid "Model download failed: %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:1115
+#, kde-format
+msgid "Could not remove translation model"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:1126
+#, kde-format
+msgid "Select Attachment Directory"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:1144
+#, kde-format
+msgid "Invalid translation language"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:1145
+#, kde-format
+msgid "Choose or enter a target language code."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:1162
+#, kde-format
+msgid "Invalid attachment directory"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/settings/PreferencesDialog.cpp:1163
+#, kde-format
+msgid ""
+"Choose an existing directory for attachments, or select always asking where "
+"to save attachments."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/AccountRefreshController.cpp:33
+#, kde-format
+msgid "Synchronizing account..."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/AccountRefreshController.cpp:55
+#, kde-format
+msgid "Refreshing mail from server..."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/CalendarTabController.cpp:81
+#, kde-format
+msgid "The configured server does not support JMAP Calendars draft-26."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/CalendarTabController.cpp:289
+#, kde-format
+msgid "No writable calendar is available."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/CalendarTabController.cpp:332
+#, kde-format
+msgid "The selected calendar account is no longer available."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/CalendarTabController.cpp:427
+#, kde-format
+msgid "Edit recurring event"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/CalendarTabController.cpp:429
+#, kde-format
+msgid "Do you want to edit only this occurrence or the entire series?"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/CalendarTabController.cpp:431
+#, kde-format
+msgid "This occurrence"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/CalendarTabController.cpp:433
+#, kde-format
+msgid "Entire series"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/CalendarTabController.cpp:459
+#, kde-format
+msgid "This occurrence is no longer available. Refresh and try again."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/ContactsTabController.cpp:49
+#, kde-format
+msgid "The configured server does not support JMAP Contacts."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/ContactsTabController.cpp:180
+#, kde-format
+msgid "Wait for the Contacts operation to finish."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:130
+#, kde-format
+msgid "Action Required"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:219
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:232
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2339
+#, kde-format
+msgid "Date received"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:221
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2341
+#, kde-format
+msgid "Date sent"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:223
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2343
+#, kde-format
+msgctxt "@item message sort property"
+msgid "From"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:225
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2345
+#, kde-format
+msgctxt "@item message sort property"
+msgid "To"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:227
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2347
+#, kde-format
+msgctxt "@item message sort property"
+msgid "Subject"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:229
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2349
+#, kde-format
+msgctxt "@item message sort property"
+msgid "Size"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:239
+#, kde-format
+msgctxt "@item message sort direction"
+msgid "ascending"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:240
+#, kde-format
+msgctxt "@item message sort direction"
+msgid "descending"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:314
+#, kde-format
+msgid "Undid %1."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:315
+#, kde-format
+msgid "Redid %1."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:362
+#, kde-format
+msgid "Synced %1 mailboxes and %2 messages for %3."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:470
+#, kde-format
+msgid "%1 Refreshing the current view…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:513
+#, kde-format
+msgid "Message ready."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:686
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1035
+#, kde-format
+msgctxt "@action"
+msgid "Undo"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:692
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1036
+#, kde-format
+msgctxt "@action"
+msgid "Redo"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:703
+#, kde-format
+msgid "Refresh From Server"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:710
+#, kde-format
+msgctxt "@action:inmenu"
+msgid "&Quit"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:734
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:33
+#, kde-format
+msgid "Sieve Rules"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:740
+#, kde-format
+msgctxt "@action"
+msgid "&New Message"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:748
+#, kde-format
+msgctxt "@action"
+msgid "&Reply"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:756
+#, kde-format
+msgctxt "@action"
+msgid "Reply &All"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:762
+#, kde-format
+msgctxt "@action"
+msgid "&Forward"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:768
+#, kde-format
+msgctxt "@action"
+msgid "Edit &Draft"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:774
+#, kde-format
+msgctxt "@action"
+msgid "&Archive"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:787
+#, kde-format
+msgctxt "@action"
+msgid "Mark &Unread"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:798
+#, kde-format
+msgctxt "@action"
+msgid "&Delete"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:806
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:551
+#, kde-format
+msgid "Delete Permanently"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:819
+#, kde-format
+msgctxt "@action"
+msgid "&Move to…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:830
+#, kde-format
+msgctxt "@action"
+msgid "&Copy to…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:841
+#, kde-format
+msgctxt "@action"
+msgid "View &Source"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:853
+#, kde-format
+msgctxt "@action"
+msgid "Send"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:859
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2242
+#, kde-format
+msgid "Save Draft"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:876
+#, kde-format
+msgctxt "@action"
+msgid "Add"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:881
+#, kde-format
+msgid "New Contact"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:885
+#, kde-format
+msgid "New Group"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:906
+#, kde-format
+msgid "Import vCard…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:916
+#, kde-format
+msgid "Find Duplicates…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:944
+#, kde-format
+msgid "Manage Address Books…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:950
+#, kde-format
+msgid "Refresh Contacts"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:958
+#, kde-format
+msgid "New Event"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:964
+#, kde-format
+msgid "Previous Month"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:970
+#, kde-format
+msgid "Today"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:975
+#, kde-format
+msgid "Next Month"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:984
+#, kde-format
+msgid "Refresh Calendar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1058
+#, kde-format
+msgid "Remove from History"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1089
+#, kde-format
+msgid "Search this account on the server"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1179
+#, kde-format
+msgid ""
+"The server rejected %1 email mutation. The mailbox has been refreshed to "
+"restore the server state."
+msgid_plural ""
+"The server rejected %1 email mutations. The mailbox has been refreshed to "
+"restore the server state."
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1205
+#, kde-format
+msgid "Messages can only be moved within their account."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1213
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:217
+#, kde-format
+msgid "Queued move."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1231
+#, kde-format
+msgid "Search server"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1234
+#, kde-format
+msgid ""
+"Replace results indexed on this device with authoritative server results"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1240
+#, kde-format
+msgid "Sort messages"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1243
+#, kde-format
+msgid "First page"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1248
+#, kde-format
+msgid "Previous page"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1253
+#, kde-format
+msgid "Next page"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1256
+#, kde-format
+msgid "Last page"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1258
+#, kde-format
+msgctxt "@item page number prefix"
+msgid "Page "
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1260
+#, kde-format
+msgid "Enter a page number"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1278
+#, kde-format
+msgid "Loading messages"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1556
+#, kde-format
+msgid "Select an account to edit its Sieve rules."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1574
+#, kde-format
+msgid "Select an account before composing a message."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1594
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1613
+#, kde-format
+msgid "Select a message to reply to."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1632
+#, kde-format
+msgid "Select a message to forward."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1651
+#, kde-format
+msgid "Select a draft to edit."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1659
+#, kde-format
+msgid "Open a message from Drafts to edit it."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2216
+#, kde-format
+msgid "Wait for the current compose operation to finish first."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2225
+#, kde-format
+msgid "Close Draft"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2227
+#, kde-format
+msgid ""
+"This message is already saved in Drafts. Close the tab and keep it there?"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2229
+#, kde-format
+msgid "Keep Draft"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2239
+#, kde-format
+msgid "Close Compose Tab"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2240
+#, kde-format
+msgid "Save this message as a draft before closing?"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2244
+#, kde-format
+msgctxt "@action:button"
+msgid "Discard"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2273
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2286
+#, kde-format
+msgid "Select an account before searching."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2299
+#, kde-format
+msgid "Enter at least one search field."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2370
+#, kde-format
+msgctxt "@item message sort direction"
+msgid "Descending"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2372
+#, kde-format
+msgctxt "@item message sort direction"
+msgid "Ascending"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2396
+#, kde-format
+msgid "Could not save the message-list sort."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2402
+#, kde-format
+msgid "Sorting by %1, %2."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2593
+#, kde-format
+msgid "Sort messages: %1, %2"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2834
+#, kde-format
+msgid "Sign in required"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2835
+#, kde-format
+msgid "%1 needs you to sign in again before Javelin can synchronize mail."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2840
+#, kde-format
+msgctxt "@action:button"
+msgid "Later"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2874
+#, kde-format
+msgid "Saved preferences."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2897
+#, kde-format
+msgid "Select an account to refresh."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2917
+#, kde-format
+msgid "No sender address is available."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2963
+#, kde-format
+msgid "Find all conversations with %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2977
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:168
+#, kde-format
+msgid "Move to"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:2978
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:168
+#, kde-format
+msgid "Copy to"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:3016
+#, kde-format
+msgid "Refresh Account"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:3023
+#, kde-format
+msgid "Open as Tab"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:3027
+#, kde-format
+msgid "Properties…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:3045
+#, kde-format
+msgid "The mailbox is no longer available."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:3069
+#, kde-format
+msgid "Select a message to view its source."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:78
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:85
+#, kde-format
+msgid "Select a message to archive."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:96
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:103
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:127
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:134
+#, kde-format
+msgid "Select a message to delete."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:152
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:161
+#, kde-format
+msgid "Select a message to move."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:153
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:162
+#, kde-format
+msgid "Select a message to copy."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:174
+#, kde-format
+msgid "No destination mailboxes available."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:219
+#, kde-format
+msgid "Queued copy."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:260
+#, kde-format
+msgid "The selected messages are already there."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:268
+#, kde-format
+msgid "Queued move for %1 messages; skipped %2 already there."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:270
+#, kde-format
+msgid "Queued copy for %1 messages; skipped %2 already there."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:280
+#, kde-format
+msgid "%1 for %2 messages."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:355
+#, kde-format
+msgid "Added star."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:355
+#, kde-format
+msgid "Removed star."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:367
+#, kde-format
+msgid "Select a message to mark unread."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:400
+#, kde-format
+msgid "Marked unread."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:401
+#, kde-format
+msgid "Marked %1 message unread."
+msgid_plural "Marked %1 messages unread."
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:438
+#, kde-format
+msgid "The selected messages are not in Inbox."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:439
+#, kde-format
+msgid "The selected messages are already archived."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:448
+#, kde-format
+msgid "Queued archive for %1 messages; skipped %2 not in Inbox."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:456
+#, kde-format
+msgid "Queued archive."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:457
+#, kde-format
+msgid "Queued archive for %1 message."
+msgid_plural "Queued archive for %1 messages."
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:472
+#, kde-format
+msgid "No Trash mailbox is available."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:477
+#, kde-format
+msgid "Queued delete."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:507
+#, kde-format
+msgid "Queued permanent deletion."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:508
+#, kde-format
+msgid "Queued permanent deletion for %1 message."
+msgid_plural "Queued permanent deletion for %1 messages."
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:547
+#, kde-format
+msgid "Permanently delete the selected message? This cannot be undone."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageCommandController.cpp:548
+#, kde-format
+msgid "Permanently delete %1 selected message? This cannot be undone."
+msgid_plural "Permanently delete %1 selected messages? This cannot be undone."
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:40
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:131
+#, kde-format
+msgid "Select a valid attachment save directory in Preferences."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:44
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:185
+#, kde-format
+msgid "Downloading attachment..."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:60
+#, kde-format
+msgid "Save Attachment"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:65
+#, kde-format
+msgid "Attachment save canceled."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:69
+#, kde-format
+msgid "Saving attachment..."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:78
+#, kde-format
+msgid "Failed to save attachment: %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:83
+#, kde-format
+msgid "Saved attachment to %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:106
+#, kde-format
+msgid "The selected message is unavailable."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:113
+#, kde-format
+msgid "No downloadable attachments are available."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:120
+#, kde-format
+msgid "Save All Attachments"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:125
+#, kde-format
+msgid "Save all attachments canceled."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:135
+#, kde-format
+msgid "Downloading attachments..."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:147
+#, kde-format
+msgid "Saving attachments..."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:157
+#, kde-format
+msgid "Failed to save attachments to %1: %2"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:163
+#, kde-format
+msgid "Saved %1 attachment."
+msgid_plural "Saved %1 attachments."
+msgstr[0] ""
+msgstr[1] ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:181
+#, kde-format
+msgid "A temporary directory for attachments is unavailable."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:200
+#, kde-format
+msgid "Preparing attachment..."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:210
+#, kde-format
+msgid "Failed to prepare attachment: %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:218
+#, kde-format
+msgid "Opened attachment."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:219
+#, kde-format
+msgid "The attachment was saved, but no app opened it."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:234
+#, kde-format
+msgid "A temporary directory for message source files is unavailable."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:238
+#, kde-format
+msgid "Preparing message source..."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:260
+#, kde-format
+msgid "Failed to prepare message source: %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:268
+#, kde-format
+msgid "Opened message source."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MessageFileController.cpp:269
+#, kde-format
+msgid "The source file was saved, but no app opened it."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/TabBarPresenter.cpp:117
+#, kde-format
+msgctxt "@title:window tab title and account name"
+msgid "%1 - %2"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/TabBarPresenter.cpp:164
+#, kde-format
+msgctxt "@action:button"
+msgid "Close tab"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/TabBarPresenter.cpp:165
+#, kde-format
+msgctxt "@info:tooltip"
+msgid "Close tab"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:54
+#, kde-format
+msgctxt "@option:check"
+msgid "Active"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:56
+#, kde-format
+msgid "Loading scripts…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:59
+#, kde-format
+msgctxt "@action:button"
+msgid "Validate"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:77
+#, kde-format
+msgid "Not saved"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:116
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:354
+#, kde-format
+msgctxt "@item suffix marking active Sieve script"
+msgid " (active)"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:129
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:303
+#, kde-format
+msgid "No Sieve scripts."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:156
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:212
+#, kde-format
+msgid "Discard Changes?"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:157
+#, kde-format
+msgid "This script has unsaved changes. Discard them?"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:179
+#, kde-format
+msgid "New script — not saved"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:184
+#, kde-format
+msgid "Loading script…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:203
+#, kde-format
+msgid "Ready"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:213
+#, kde-format
+msgid "The current script has unsaved changes. Discard them?"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:218
+#, kde-format
+msgid "New Sieve Script"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:218
+#, kde-format
+msgid "Script name:"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:236
+#, kde-format
+msgid "Delete Sieve Script?"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:237
+#, kde-format
+msgid "Delete “%1”? This cannot be undone."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:247
+#, kde-format
+msgid "Deactivating and deleting…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:248
+#, kde-format
+msgid "Deleting…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:272
+#, kde-format
+msgid "Activating…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:272
+#, kde-format
+msgid "Deactivating…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:312
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:335
+#, kde-format
+msgid "Validating…"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:357
+#, kde-format
+msgid "Saved"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/sieve/SieveEditorDialog.cpp:373
+#, kde-format
+msgid "The operation failed."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/tasks/TaskCenterDialog.cpp:60
+#, kde-format
+msgctxt "@action:button pause background task"
+msgid "Pause"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/tasks/TaskCenterDialog.cpp:62
+#, kde-format
+msgctxt "@action:button resume background task"
+msgid "Resume"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/tasks/TaskCenterDialog.cpp:64
+#, kde-format
+msgctxt "@action:button retry background task"
+msgid "Retry"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/tasks/TaskCenterDialog.cpp:146
+#, kde-format
+msgid "Task Center"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/tasks/TaskCenterDialog.cpp:169
+#, kde-format
+msgctxt "@action:button"
+msgid "Close"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/tasks/TaskCenterDialog.cpp:181
+#, kde-format
+msgctxt "@action:inmenu"
+msgid "Copy"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/BergamotTranslationBackend.cpp:278
+#, kde-format
+msgid "Local translation returned incomplete text."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/BergamotTranslationBackend.cpp:304
+#, kde-format
+msgid "Local translation failed: %1"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/BergamotTranslationBackend.cpp:311
+#, kde-format
+msgid "Local translation failed unexpectedly."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/GoogleTranslationBackend.cpp:170
+#, kde-format
+msgid "Google Translate returned an invalid response."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/GoogleTranslationBackend.cpp:179
+#, kde-format
+msgid "Google Translate response did not contain translations."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/GoogleTranslationBackend.cpp:257
+#, kde-format
+msgid "Google Translate returned an incomplete response."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationCache.cpp:68
+#, kde-format
+msgid "Could not create the translation cache directory."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationCache.cpp:286
+#, kde-format
+msgid "Could not %1: %2"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelManifest.cpp:41
+#, kde-format
+msgid "Translation model manifest field '%1' is invalid."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelManifest.cpp:115
+#, kde-format
+msgid "The translation model manifest is not valid JSON."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelManifest.cpp:121
+#, kde-format
+msgid "The translation model manifest schema is unsupported."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelManifest.cpp:133
+#, kde-format
+msgid "The translation model manifest does not match the bundled engine."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelManifest.cpp:147
+#, kde-format
+msgid "The translation model manifest has no directions."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelManifest.cpp:156
+#, kde-format
+msgid "A translation model direction is invalid."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelManifest.cpp:178
+#, kde-format
+msgid "The translation model manifest has duplicate or identity directions."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelManifest.cpp:186
+#, kde-format
+msgid "A translation model direction has no files."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelManifest.cpp:212
+#, kde-format
+msgid "A translation model file is invalid."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelManifest.cpp:219
+#, kde-format
+msgid "A translation model direction is incomplete."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelManifest.cpp:227
+#, kde-format
+msgid "A translation model direction has no license metadata."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelManifest.cpp:236
+#, kde-format
+msgid "A translation model license entry is invalid."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelManifest.cpp:245
+#, kde-format
+msgid "The translation model manifest is empty."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelManifest.cpp:258
+#, kde-format
+msgid "The bundled translation model manifest is missing."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:195
+#, kde-format
+msgid "Refusing to remove a model outside the model store."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:201
+#, kde-format
+msgid "Refusing to remove an unrecognised model directory."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:208
+#, kde-format
+msgid "Could not remove the installed translation model."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:238
+#, kde-format
+msgid "Could not create the translation model directory."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:246
+#, kde-format
+msgid "Could not create a temporary model directory."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:276
+#, kde-format
+msgid "Could not create the model destination."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:286
+#, kde-format
+msgid "Could not replace the installed translation model."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:296
+#, kde-format
+msgid "Could not activate the downloaded translation model."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:317
+#, kde-format
+msgid "Could not create a model download file."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:354
+#, kde-format
+msgid "The model download exceeded its declared size."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:361
+#, kde-format
+msgid "The downloaded model has an unexpected size."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:373
+#, kde-format
+msgid "The downloaded model failed verification."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:398
+#, kde-format
+msgid "The required translation model is not installed."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:409
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:440
+#, kde-format
+msgid "The installed translation model is corrupt."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:423
+#, kde-format
+msgid "The installed translation model is obsolete."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:457
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:471
+#, kde-format
+msgid "Could not read an installed model file."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:481
+#, kde-format
+msgid "An installed model file is too large."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:505
+#, kde-format
+msgid "Could not open translation model files."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:512
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:519
+#, kde-format
+msgid "Could not initialize model decompression."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:536
+#, kde-format
+msgid "Could not read the compressed translation model."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:548
+#, kde-format
+msgid "The translation model could not be decompressed."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:557
+#, kde-format
+msgid "The decompressed translation model is invalid."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:567
+#, kde-format
+msgid "The decompressed translation model failed verification."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:575
+#, kde-format
+msgid "Could not finish installing a translation model file."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:593
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:601
+#, kde-format
+msgid "Could not install translation model licence metadata."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationModelStore.cpp:630
+#, kde-format
+msgid "Could not record the installed translation model."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationService.cpp:205
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationService.cpp:235
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationService.cpp:248
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationService.cpp:269
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationService.cpp:503
+#, kde-format
+msgid "Local translation is not available in this build."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationService.cpp:213
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationService.cpp:256
+#, kde-format
+msgid "That local translation route is not supported."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationService.cpp:226
+#, kde-format
+msgid "The required local translation models are unavailable."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/translation/TranslationService.cpp:438
+#, kde-format
+msgid "The translation provider returned incomplete text."
+msgstr ""

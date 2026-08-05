@@ -2,6 +2,8 @@
 #include "gui/calendar/MonthCalendarLayout.h"
 #include "gui/settings/WorkspaceSettingsPort.h"
 
+#include <KLocalizedString>
+
 #include <QActionGroup>
 #include <QColorDialog>
 #include <QDialog>
@@ -168,7 +170,7 @@ namespace javelin::gui::calendar
         {
             m_overflow = count;
             auto* button = new QToolButton(this);
-            button->setText(QStringLiteral("+%1 more").arg(count));
+            button->setText(i18nc("@action:button additional calendar events", "+%1 more", count));
             button->setAutoRaise(true);
             QObject::connect(button, &QToolButton::clicked, button, std::move(activated));
             m_layout->insertWidget(m_layout->count() - 1, button);
@@ -368,7 +370,7 @@ namespace javelin::gui::calendar
                         Q_EMIT calendarVisibilityChanged(QString::fromStdString(id), visible);
                     });
         }
-        auto* destinations = m_calendarMenu->addMenu(QStringLiteral("Default for New Events"));
+        auto* destinations = m_calendarMenu->addMenu(i18n("Default for New Events"));
         auto* destinationGroup = new QActionGroup(destinations);
         destinationGroup->setExclusive(true);
         for (const auto& calendar : m_calendars)
@@ -384,14 +386,14 @@ namespace javelin::gui::calendar
         if (!m_calendars.empty())
             m_calendarMenu->addSeparator();
         auto* manage = m_calendarMenu->addAction(QIcon::fromTheme(QStringLiteral("configure")),
-                                                 QStringLiteral("Manage Calendars…"));
+                                                 i18n("Manage Calendars…"));
         connect(manage, &QAction::triggered, this, &MonthCalendarWidget::manageCalendars);
     }
 
     void MonthCalendarWidget::manageCalendars()
     {
         QDialog dialog{this};
-        dialog.setWindowTitle(QStringLiteral("Manage Calendars"));
+        dialog.setWindowTitle(i18n("Manage Calendars"));
         dialog.resize(480, 360);
         auto* layout = new QVBoxLayout(&dialog);
         auto* list = new QListWidget(&dialog);
@@ -406,12 +408,13 @@ namespace javelin::gui::calendar
         layout->addWidget(list);
         auto* colorButtons = new QHBoxLayout();
         auto* addCalendar = new QPushButton(QIcon::fromTheme(QStringLiteral("list-add")),
-                                            QStringLiteral("Add…"), &dialog);
+                                            i18nc("@action:button", "Add…"), &dialog);
         addCalendar->setEnabled(!m_calendarAccounts.empty());
         auto* deleteCalendar = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-delete")),
-                                               QStringLiteral("Delete"), &dialog);
-        auto* chooseColor = new QPushButton(QStringLiteral("Choose Color…"), &dialog);
-        auto* resetColor = new QPushButton(QStringLiteral("Use Calendar Color"), &dialog);
+                                               i18nc("@action:button", "Delete"), &dialog);
+        auto* chooseColor = new QPushButton(i18nc("@action:button", "Choose Color…"), &dialog);
+        auto* resetColor =
+            new QPushButton(i18nc("@action:button", "Use Calendar Color"), &dialog);
         deleteCalendar->setEnabled(false);
         chooseColor->setEnabled(false);
         resetColor->setEnabled(false);
@@ -438,14 +441,14 @@ namespace javelin::gui::calendar
                         return;
                     bool accepted = false;
                     const auto name = QInputDialog::getText(
-                        &dialog, QStringLiteral("Create Calendar"), QStringLiteral("Name:"),
-                        QLineEdit::Normal, {}, &accepted);
+                        &dialog, i18n("Create Calendar"), i18n("Name:"), QLineEdit::Normal, {},
+                        &accepted);
                     if (!accepted)
                         return;
                     if (name.trimmed().isEmpty())
                     {
-                        QMessageBox::warning(&dialog, QStringLiteral("Create Calendar"),
-                                             QStringLiteral("Enter a calendar name."));
+                        QMessageBox::warning(&dialog, i18n("Create Calendar"),
+                                             i18n("Enter a calendar name."));
                         return;
                     }
                     std::size_t accountIndex = 0;
@@ -455,8 +458,8 @@ namespace javelin::gui::calendar
                         for (const auto& account : m_calendarAccounts)
                             names.push_back(account.name);
                         const auto selected = QInputDialog::getItem(
-                            &dialog, QStringLiteral("Create Calendar"), QStringLiteral("Account:"),
-                            names, 0, false, &accepted);
+                            &dialog, i18n("Create Calendar"), i18n("Account:"), names, 0, false,
+                            &accepted);
                         if (!accepted)
                             return;
                         const auto found = std::ranges::find(names, selected);
@@ -465,7 +468,7 @@ namespace javelin::gui::calendar
                     }
                     const auto color =
                         QColorDialog::getColor(palette().color(QPalette::Highlight), &dialog,
-                                               QStringLiteral("Calendar Color"));
+                                               i18n("Calendar Color"));
                     if (!color.isValid())
                         return;
                     Q_EMIT calendarCreationRequested(
@@ -481,16 +484,15 @@ namespace javelin::gui::calendar
                         return;
                     QMessageBox prompt{
                         QMessageBox::Warning,
-                        QStringLiteral("Delete Calendar"),
-                        QStringLiteral(
-                            "Delete “%1”? Events that belong only to this calendar will also be "
-                            "deleted. This cannot be undone.")
-                            .arg(item->text()),
+                        i18n("Delete Calendar"),
+                        i18n("Delete “%1”? Events that belong only to this calendar will also be "
+                             "deleted. This cannot be undone.",
+                             item->text()),
                         QMessageBox::NoButton,
                         &dialog,
                     };
-                    auto* deleteButton =
-                        prompt.addButton(QStringLiteral("Delete"), QMessageBox::DestructiveRole);
+                    auto* deleteButton = prompt.addButton(i18nc("@action:button", "Delete"),
+                                                          QMessageBox::DestructiveRole);
                     prompt.addButton(QMessageBox::Cancel);
                     prompt.exec();
                     if (prompt.clickedButton() != deleteButton)
@@ -506,7 +508,7 @@ namespace javelin::gui::calendar
                         return;
                     const auto id = item->data(Qt::UserRole).toString().toStdString();
                     const auto color = QColorDialog::getColor(effectiveCalendarColor(id), &dialog,
-                                                              QStringLiteral("Calendar Color"));
+                                                              i18n("Calendar Color"));
                     if (!color.isValid())
                         return;
                     pendingColors[id] = color;
@@ -544,9 +546,9 @@ namespace javelin::gui::calendar
         }
         if (const auto error = m_settings.updateWorkspace(std::move(workspace)))
         {
-            QMessageBox::warning(this, QStringLiteral("Manage Calendars"),
-                                 QStringLiteral("The calendar colours could not be saved.\n\n%1")
-                                     .arg(error->detail));
+            QMessageBox::warning(this, i18n("Manage Calendars"),
+                                 i18n("The calendar colours could not be saved.\n\n%1",
+                                      error->detail));
             return;
         }
         m_customCalendarColors = std::move(pendingColors);

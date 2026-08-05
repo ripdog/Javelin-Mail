@@ -29,7 +29,7 @@ include(cmake/Sanitizers.cmake)
 include(CTest)
 
 # 1. Find Qt6 FIRST
-find_package(Qt6 6.6 REQUIRED COMPONENTS Core DBus Network Sql Widgets Concurrent LinguistTools WebEngineCore WebEngineWidgets Svg WebSockets)
+find_package(Qt6 6.6 REQUIRED COMPONENTS Core DBus Network Sql Widgets Concurrent WebEngineCore WebEngineWidgets Svg WebSockets)
 
 # 2. Fetch Dependencies BEFORE KDE is allowed to load
 javelin_configure_dependencies()
@@ -54,7 +54,7 @@ configure_file(
     @ONLY
 )
 
-find_package(KF6 REQUIRED COMPONENTS Codecs ConfigWidgets XmlGui CoreAddons TextEditor)
+find_package(KF6 REQUIRED COMPONENTS Codecs ConfigWidgets XmlGui CoreAddons I18n TextEditor)
 find_package(KPim6Mime REQUIRED)
 find_package(KPim6MessageComposer REQUIRED)
 
@@ -929,6 +929,7 @@ target_link_libraries(javelin_translation
         Qt::Concurrent
         Qt::Network
         Qt::Sql
+        KF6::I18n
 )
 if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION)
     target_link_libraries(javelin_translation PRIVATE fasttext_javelin)
@@ -1252,6 +1253,7 @@ target_link_libraries(javelin_gui
         Qt::Widgets
         Qt::WebEngineWidgets
         KF6::ConfigWidgets
+        KF6::I18n
         KF6::XmlGui
         KF6::TextEditor
         KPim6::MessageComposer
@@ -1284,7 +1286,13 @@ add_library(javelin_calendar_gui STATIC
 target_include_directories(javelin_calendar_gui PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
 )
-target_link_libraries(javelin_calendar_gui PUBLIC Qt::Widgets PRIVATE javelin_cache_read)
+target_link_libraries(javelin_calendar_gui
+    PUBLIC
+        Qt::Widgets
+    PRIVATE
+        KF6::I18n
+        javelin_cache_read
+)
 javelin_set_project_warnings(javelin_calendar_gui)
 javelin_enable_static_analysis(javelin_calendar_gui)
 javelin_enable_sanitizers(javelin_calendar_gui)
@@ -1444,6 +1452,7 @@ target_link_libraries(javelin_daemon_core
         Qt::Concurrent
         Qt::DBus
         Qt::Network
+        KF6::I18n
         glaze::glaze
         javelin_observability
 )
@@ -1489,6 +1498,7 @@ target_link_libraries(javelind
     PRIVATE
         javelin_daemon_core
         Qt::Core
+        KF6::I18n
 )
 target_compile_definitions(javelind PRIVATE JAVELIN_APP_VERSION="${PROJECT_VERSION}")
 target_compile_options(javelind PRIVATE -fexceptions)
@@ -1621,10 +1631,17 @@ javelin_set_project_warnings(javelin)
 javelin_enable_static_analysis(javelin)
 javelin_enable_sanitizers(javelin)
 
-qt_add_translations(
-    TARGETS javelin
-    TS_FILES Javelin-Mail_en_NZ.ts
+add_custom_target(extract-translations
+    COMMAND ${CMAKE_COMMAND}
+        -DJAVELIN_SOURCE_DIR=${PROJECT_SOURCE_DIR}
+        -DJAVELIN_TRANSLATION_DOMAIN=javelinmail
+        -DJAVELIN_TRANSLATION_OUTPUT=${PROJECT_SOURCE_DIR}/po/javelinmail.pot
+        -P ${PROJECT_SOURCE_DIR}/cmake/ExtractTranslations.cmake
+    COMMENT "Extracting KI18n messages"
+    VERBATIM
 )
+
+ki18n_install(po)
 
 get_target_property(javelin_bootstrap_links javelin LINK_LIBRARIES)
 if(javelin_bootstrap_links MATCHES "javelin_daemon_core|javelin_jmap")

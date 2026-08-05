@@ -10,6 +10,8 @@
 #include "gui/translation/TranslationModelStore.h"
 #endif
 
+#include <KLocalizedString>
+
 #include <QHash>
 #include <QSet>
 #include <QtConcurrent>
@@ -200,7 +202,7 @@ namespace javelin::gui::translation
         {
             co_return TranslationError{
                 .code = TranslationErrorCode::ModelDownloadFailed,
-                .message = QStringLiteral("Local translation is not available in this build."),
+                .message = i18n("Local translation is not available in this build."),
             };
         }
         const auto route = m_localManifest->route(sourceLanguage, targetLanguage);
@@ -208,7 +210,7 @@ namespace javelin::gui::translation
         {
             co_return TranslationError{
                 .code = TranslationErrorCode::ModelDownloadFailed,
-                .message = QStringLiteral("That local translation route is not supported."),
+                .message = i18n("That local translation route is not supported."),
             };
         }
         auto installed = co_await m_localModelStore->ensureInstalled(
@@ -221,7 +223,7 @@ namespace javelin::gui::translation
         {
             co_return TranslationError{
                 .code = TranslationErrorCode::ModelDownloadFailed,
-                .message = QStringLiteral("The required local translation models are unavailable."),
+                .message = i18n("The required local translation models are unavailable."),
             };
         }
         co_return std::nullopt;
@@ -230,7 +232,7 @@ namespace javelin::gui::translation
         (void)targetLanguage;
         co_return TranslationError{
             .code = TranslationErrorCode::ModelDownloadFailed,
-            .message = QStringLiteral("Local translation is not available in this build."),
+            .message = i18n("Local translation is not available in this build."),
         };
 #endif
     }
@@ -243,7 +245,7 @@ namespace javelin::gui::translation
         {
             return TranslationError{
                 .code = TranslationErrorCode::ModelVerificationFailed,
-                .message = QStringLiteral("Local translation is not available in this build."),
+                .message = i18n("Local translation is not available in this build."),
             };
         }
         const auto route = m_localManifest->route(sourceLanguage, targetLanguage);
@@ -251,7 +253,7 @@ namespace javelin::gui::translation
         {
             return TranslationError{
                 .code = TranslationErrorCode::ModelVerificationFailed,
-                .message = QStringLiteral("That local translation route is not supported."),
+                .message = i18n("That local translation route is not supported."),
             };
         }
         if (m_localBackend != nullptr)
@@ -264,7 +266,7 @@ namespace javelin::gui::translation
         (void)targetLanguage;
         return TranslationError{
             .code = TranslationErrorCode::ModelVerificationFailed,
-            .message = QStringLiteral("Local translation is not available in this build."),
+            .message = i18n("Local translation is not available in this build."),
         };
 #endif
     }
@@ -433,7 +435,7 @@ namespace javelin::gui::translation
             {
                 co_return TranslationError{
                     .code = TranslationErrorCode::InferenceFailed,
-                    .message = QStringLiteral("The translation provider returned incomplete text."),
+                    .message = i18n("The translation provider returned incomplete text."),
                 };
             }
 
@@ -498,7 +500,7 @@ namespace javelin::gui::translation
         {
             return TranslationError{
                 .code = TranslationErrorCode::SettingsWriteFailed,
-                .message = QStringLiteral("Local translation is not available in this build."),
+                .message = i18n("Local translation is not available in this build."),
             };
         }
         if (const auto error = m_settingsStore.save(settings))

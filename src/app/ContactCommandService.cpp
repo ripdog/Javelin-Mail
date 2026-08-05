@@ -11,6 +11,8 @@
 
 #include <glaze/glaze.hpp>
 
+#include <KLocalizedString>
+
 #include <QLoggingCategory>
 #include <QUuid>
 
@@ -57,7 +59,7 @@ namespace javelin::app
         {
             return {
                 .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
-                .message = QStringLiteral("Account synchronization is not configured."),
+                .message = i18n("Account synchronization is not configured."),
             };
         }
 
@@ -177,7 +179,7 @@ namespace javelin::app
         co_return co_await submitContactCards(
             std::move(ownerAccountId),
             std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared)),
-            QStringLiteral("Save contact"));
+            i18n("Save contact"));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -190,7 +192,7 @@ namespace javelin::app
         co_return co_await submitContactCards(
             std::move(ownerAccountId),
             std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared)),
-            QStringLiteral("Change starred contacts"));
+            i18n("Change starred contacts"));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -202,7 +204,7 @@ namespace javelin::app
         co_return co_await submitContactCards(
             std::move(ownerAccountId),
             std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared)),
-            QStringLiteral("Delete contacts"));
+            i18n("Delete contacts"));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -210,7 +212,7 @@ namespace javelin::app
                                               CreateContactGroupCommand command)
     {
         const QString actionDescription =
-            QStringLiteral("Create contact group “%1”").arg(QString::fromStdString(command.name));
+            i18n("Create contact group “%1”", QString::fromStdString(command.name));
         auto prepared =
             m_contactService.prepareCreateGroup({.accountId = std::move(command.accountId),
                                                  .addressBookId = std::move(command.addressBookId),
@@ -220,7 +222,7 @@ namespace javelin::app
         co_return co_await submitContactCards(
             std::move(ownerAccountId),
             std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared)),
-            QStringLiteral("Create contact group"), actionDescription);
+            i18n("Create contact group"), actionDescription);
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -234,15 +236,15 @@ namespace javelin::app
             contact != nullptr && contact->has_value())
             groupName = QString::fromStdString(contact->value().displayName);
         const QString actionDescription =
-            QStringLiteral("Delete contact group “%1” (%2)")
-                .arg(groupName, QString::fromStdString(command.groupId));
+            i18n("Delete contact group “%1” (%2)", groupName,
+                 QString::fromStdString(command.groupId));
         auto prepared = prepareDeleteContactGroup(std::move(command));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
             co_return *error;
         co_return co_await submitContactCards(
             std::move(ownerAccountId),
             std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared)),
-            QStringLiteral("Delete contact group"), actionDescription);
+            i18n("Delete contact group"), actionDescription);
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -285,7 +287,7 @@ namespace javelin::app
             };
         }
         co_return co_await submitContactCards(std::move(ownerAccountId), std::move(request),
-                                              QStringLiteral("Change contact group membership"),
+                                              i18n("Change contact group membership"),
                                               actionDescription);
     }
 
@@ -298,7 +300,7 @@ namespace javelin::app
         co_return co_await submitContactCopy(
             std::move(ownerAccountId),
             std::get<javelin::jmap::api::ContactCardCopyRequest>(std::move(prepared)),
-            QStringLiteral("Copy contact"));
+            i18n("Copy contact"));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -310,7 +312,7 @@ namespace javelin::app
         co_return co_await submitContactCards(
             std::move(ownerAccountId),
             std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared)),
-            QStringLiteral("Import contacts"));
+            i18n("Import contacts"));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -322,7 +324,7 @@ namespace javelin::app
         co_return co_await submitContactCards(
             std::move(ownerAccountId),
             std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared)),
-            QStringLiteral("Merge contacts"));
+            i18n("Merge contacts"));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactUploadResult>
@@ -334,7 +336,7 @@ namespace javelin::app
         if (!settings.has_value())
             co_return missingConfiguration();
         co_return observeResult(
-            m_errorCoordinator, *settings, ownerAccountId, QStringLiteral("Upload contact media"),
+            m_errorCoordinator, *settings, ownerAccountId, i18n("Upload contact media"),
             co_await m_contactService.uploadMedia(toLiveConnectionSettings(*settings),
                                                   ownerAccountId, std::move(accountId),
                                                   std::move(payload), std::move(mediaType)));
@@ -349,7 +351,7 @@ namespace javelin::app
         if (!settings.has_value())
             co_return missingConfiguration();
         co_return observeResult(
-            m_errorCoordinator, *settings, ownerAccountId, QStringLiteral("Download contact media"),
+            m_errorCoordinator, *settings, ownerAccountId, i18n("Download contact media"),
             co_await m_contactService.downloadMedia(toLiveConnectionSettings(*settings),
                                                     ownerAccountId, std::move(accountId),
                                                     std::move(blobId), std::move(mediaType)));
@@ -511,7 +513,7 @@ namespace javelin::app
             if (found == books.end())
                 co_return javelin::jmap::OperationError{
                     .code = javelin::jmap::OperationErrorCode::NotFound,
-                    .message = QStringLiteral("The address book is no longer available."),
+                    .message = i18n("The address book is no longer available."),
                 };
             history.currentAddressBookId = id;
             history.beforeDocumentJson = javelin::jmap::api::serializeAddressBookDocument(*found);
@@ -520,7 +522,7 @@ namespace javelin::app
             if (!std::holds_alternative<std::string>(after))
                 co_return javelin::jmap::OperationError{
                     .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
-                    .message = QStringLiteral("The address-book update is invalid."),
+                    .message = i18n("The address-book update is invalid."),
                 };
             history.afterDocumentJson = std::get<std::string>(after);
         }
@@ -531,7 +533,7 @@ namespace javelin::app
             if (found == books.end())
                 co_return javelin::jmap::OperationError{
                     .code = javelin::jmap::OperationErrorCode::NotFound,
-                    .message = QStringLiteral("The address book is no longer available."),
+                    .message = i18n("The address book is no longer available."),
                 };
             history.currentAddressBookId = id;
             history.beforeDocumentJson = javelin::jmap::api::serializeAddressBookDocument(*found);
@@ -552,20 +554,20 @@ namespace javelin::app
             if (found == books.end())
                 co_return javelin::jmap::OperationError{
                     .code = javelin::jmap::OperationErrorCode::NotFound,
-                    .message = QStringLiteral("The address book is no longer available."),
+                    .message = i18n("The address book is no longer available."),
                 };
             history.currentAddressBookId = found->id;
             history.beforeDocumentJson = javelin::jmap::api::serializeAddressBookDocument(*found);
             history.afterDocumentJson = history.beforeDocumentJson;
         }
         auto preparedResult =
-            m_undoManager.prepareNormal(QStringLiteral("Change Address Books"),
-                                        undo::HistoryDomain::Contacts, history, std::nullopt);
+            m_undoManager.prepareNormal(i18n("Change Address Books"), undo::HistoryDomain::Contacts,
+                                        history, std::nullopt);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
             co_return javelin::jmap::operationError(*error);
         auto prepared = std::get<std::optional<undo::HistoryEntry>>(std::move(preparedResult));
         auto result = observeResult(
-            m_errorCoordinator, *settings, ownerAccountId, QStringLiteral("Change address books"),
+            m_errorCoordinator, *settings, ownerAccountId, i18n("Change address books"),
             co_await m_contactService.setAddressBooks(toLiveConnectionSettings(*settings),
                                                       ownerAccountId, std::move(request)));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
@@ -603,7 +605,7 @@ namespace javelin::app
                     co_return javelin::jmap::OperationError{
                         .code = javelin::jmap::OperationErrorCode::ProtocolViolation,
                         .message =
-                            QStringLiteral("The address-book response omitted its created id."),
+                            i18n("The address-book response omitted its created id."),
                     };
                 committedHistory.currentAddressBookId = mapping->serverId;
             }
@@ -751,7 +753,7 @@ namespace javelin::app
             {
                 static_cast<void>(m_undoManager.setEntryStatus(
                     prepared->entryId, undo::HistoryEntryStatus::BlockedPartial,
-                    QStringLiteral("The server returned incomplete contact creation identities.")));
+                    i18n("The server returned incomplete contact creation identities.")));
             }
             else
             {
@@ -806,20 +808,20 @@ namespace javelin::app
             if (!contact.has_value())
                 co_return javelin::jmap::OperationError{
                     .code = javelin::jmap::OperationErrorCode::NotFound,
-                    .message = QStringLiteral("The copied contact is no longer available."),
+                    .message = i18n("The copied contact is no longer available."),
                 };
             auto destination = javelin::jmap::api::applyPatchObject(contact->document, patch.json);
             if (!std::holds_alternative<std::string>(destination))
                 co_return javelin::jmap::OperationError{
                     .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
-                    .message = QStringLiteral("The contact copy document is invalid."),
+                    .message = i18n("The contact copy document is invalid."),
                 };
             auto item = createdHistoryItem(request.accountId, std::get<std::string>(destination));
             if (!item.has_value())
                 co_return javelin::jmap::OperationError{
                     .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
                     .message =
-                        QStringLiteral("The copied contact cannot be represented in history."),
+                        i18n("The copied contact cannot be represented in history."),
                 };
             creationItems.emplace(creationId, history.items.size());
             history.items.push_back(std::move(*item));
@@ -867,7 +869,7 @@ namespace javelin::app
                 co_return javelin::jmap::OperationError{
                     .code = javelin::jmap::OperationErrorCode::ProtocolViolation,
                     .message =
-                        QStringLiteral("The contact copy response omitted a created identity."),
+                        i18n("The contact copy response omitted a created identity."),
                 };
             auto committed = m_undoManager.commitNormal(std::move(*prepared));
             if (const auto* databaseError =

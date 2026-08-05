@@ -13,6 +13,7 @@
 #include <QCoroTask>
 
 #include <KActionCollection>
+#include <KLocalizedString>
 #include <KPIMTextEdit/RichTextComposerControler>
 #include <KPIMTextEdit/RichTextComposerImages>
 #include <MessageComposer/TextPart>
@@ -80,18 +81,18 @@ namespace javelin::gui::compose
             switch (mode)
             {
             case javelin::jmap::submission::ComposeMode::NewMessage:
-                return QStringLiteral("New Message");
+                return i18n("New Message");
             case javelin::jmap::submission::ComposeMode::Reply:
-                return QStringLiteral("Reply");
+                return i18n("Reply");
             case javelin::jmap::submission::ComposeMode::ReplyAll:
-                return QStringLiteral("Reply All");
+                return i18n("Reply All");
             case javelin::jmap::submission::ComposeMode::Forward:
-                return QStringLiteral("Forward");
+                return i18n("Forward");
             case javelin::jmap::submission::ComposeMode::EditDraft:
-                return QStringLiteral("Edit Draft");
+                return i18n("Edit Draft");
             }
 
-            return QStringLiteral("Compose");
+            return i18n("Compose");
         }
 
         [[nodiscard]] QString displayAddress(const javelin::jmap::domain::EmailAddress& address)
@@ -201,18 +202,21 @@ namespace javelin::gui::compose
 
             if (size >= static_cast<std::uint64_t>(gib))
             {
-                return QStringLiteral("%1 GB").arg(static_cast<double>(size) / gib, 0, 'f', 1);
+                return i18nc("@item file size", "%1 GB",
+                             QString::number(static_cast<double>(size) / gib, 'f', 1));
             }
             if (size >= static_cast<std::uint64_t>(mib))
             {
-                return QStringLiteral("%1 MB").arg(static_cast<double>(size) / mib, 0, 'f', 1);
+                return i18nc("@item file size", "%1 MB",
+                             QString::number(static_cast<double>(size) / mib, 'f', 1));
             }
             if (size >= static_cast<std::uint64_t>(kib))
             {
-                return QStringLiteral("%1 KB").arg(static_cast<double>(size) / kib, 0, 'f', 1);
+                return i18nc("@item file size", "%1 KB",
+                             QString::number(static_cast<double>(size) / kib, 'f', 1));
             }
 
-            return QStringLiteral("%1 B").arg(static_cast<qulonglong>(size));
+            return i18nc("@item file size", "%1 B", static_cast<qulonglong>(size));
         }
 
         [[nodiscard]] QString
@@ -223,7 +227,7 @@ namespace javelin::gui::compose
                     ? QString::fromStdString(attachment.displayName)
                     : QFileInfo{QString::fromStdString(attachment.localFilePath)}.fileName();
             const auto mediaType = attachment.mediaType.empty()
-                                       ? QStringLiteral("attachment")
+                                       ? i18nc("@item unknown attachment media type", "attachment")
                                        : QString::fromStdString(attachment.mediaType);
             return QStringLiteral("%1  •  %2  •  %3")
                 .arg(displayName, mediaType, attachmentSizeLabel(attachment.size));
@@ -240,7 +244,7 @@ namespace javelin::gui::compose
             {
                 return QFileInfo{QString::fromStdString(attachment.localFilePath)}.fileName();
             }
-            return QStringLiteral("Attachment");
+            return i18n("Attachment");
         }
 
         [[nodiscard]] QIcon
@@ -345,12 +349,13 @@ namespace javelin::gui::compose
 
                 if (embeddingAllowed && isImageAttachment(attachment))
                 {
-                    auto* attachRadio = new QRadioButton(QStringLiteral("Attach"), this);
-                    auto* embedRadio = new QRadioButton(QStringLiteral("Embed"), this);
+                    auto* attachRadio =
+                        new QRadioButton(i18nc("@option:radio", "Attach"), this);
+                    auto* embedRadio = new QRadioButton(i18nc("@option:radio", "Embed"), this);
                     attachRadio->setChecked(!attachment.inlineDisposition);
                     embedRadio->setChecked(attachment.inlineDisposition);
-                    attachRadio->setToolTip(QStringLiteral("Send this image as an attachment"));
-                    embedRadio->setToolTip(QStringLiteral("Show this image in the message body"));
+                    attachRadio->setToolTip(i18n("Send this image as an attachment"));
+                    embedRadio->setToolTip(i18n("Show this image in the message body"));
                     connect(attachRadio, &QRadioButton::toggled, this,
                             [this](const bool checked)
                             {
@@ -373,7 +378,8 @@ namespace javelin::gui::compose
 
                 auto* removeButton = new QToolButton(this);
                 removeButton->setText(QStringLiteral("x"));
-                removeButton->setToolTip(QStringLiteral("Remove attachment"));
+                removeButton->setToolTip(i18n("Remove attachment"));
+                removeButton->setAccessibleName(i18n("Remove attachment"));
                 removeButton->setAutoRaise(true);
                 removeButton->setFixedSize(22, 22);
                 connect(removeButton, &QToolButton::clicked, this,
@@ -425,8 +431,8 @@ namespace javelin::gui::compose
             {
                 if (errorMessage != nullptr)
                 {
-                    *errorMessage = QStringLiteral(
-                        "Set Session URL, Login Email, and API Key in Preferences first.");
+                    *errorMessage =
+                        i18n("Set Session URL, Login Email, and API Key in Preferences first.");
                 }
                 return std::nullopt;
             }
@@ -670,23 +676,23 @@ namespace javelin::gui::compose
         headerLayout->setSpacing(10);
 
         auto* headingRow = new QHBoxLayout();
-        auto* titleLabel = new QLabel(QStringLiteral("Compose"), headerFrame);
+        auto* titleLabel = new QLabel(i18n("Compose"), headerFrame);
         auto titleFont = titleLabel->font();
         titleFont.setPointSize(titleFont.pointSize() + 6);
         titleFont.setBold(true);
         titleLabel->setFont(titleFont);
         headingRow->addWidget(titleLabel);
         headingRow->addStretch(1);
-        auto* formatLabel = new QLabel(QStringLiteral("Format"), headerFrame);
+        auto* formatLabel = new QLabel(i18n("Format"), headerFrame);
         m_bodyFormatCombo = new QComboBox(headerFrame);
-        m_bodyFormatCombo->addItem(QStringLiteral("HTML"));
-        m_bodyFormatCombo->addItem(QStringLiteral("Plain text"));
+        m_bodyFormatCombo->addItem(i18nc("@item message body format", "HTML"));
+        m_bodyFormatCombo->addItem(i18nc("@item message body format", "Plain text"));
         headingRow->addWidget(formatLabel);
         headingRow->addWidget(m_bodyFormatCombo);
         headerLayout->addLayout(headingRow);
 
         auto* fromRow = new QHBoxLayout();
-        auto* fromLabel = new QLabel(QStringLiteral("From"), headerFrame);
+        auto* fromLabel = new QLabel(i18nc("@label email sender", "From"), headerFrame);
         fromLabel->setMinimumWidth(52);
         m_fromCombo = new QComboBox(headerFrame);
         fromRow->addWidget(fromLabel);
@@ -694,16 +700,16 @@ namespace javelin::gui::compose
         headerLayout->addLayout(fromRow);
 
         auto* toRow = new QHBoxLayout();
-        auto* toLabel = new QLabel(QStringLiteral("To"), headerFrame);
+        auto* toLabel = new QLabel(i18nc("@label email recipients", "To"), headerFrame);
         toLabel->setMinimumWidth(52);
         m_toEdit = new widgets::EmailAddressLineEdit(true, headerFrame);
         m_toEdit->setPlaceholderText(QStringLiteral("alice@example.com, Bob <bob@example.com>"));
         m_ccButton = new QToolButton(headerFrame);
-        m_ccButton->setText(QStringLiteral("Cc"));
+        m_ccButton->setText(i18nc("@action:button show carbon-copy field", "Cc"));
         m_ccButton->setCheckable(true);
         m_ccButton->setAutoRaise(true);
         m_bccButton = new QToolButton(headerFrame);
-        m_bccButton->setText(QStringLiteral("Bcc"));
+        m_bccButton->setText(i18nc("@action:button show blind-carbon-copy field", "Bcc"));
         m_bccButton->setCheckable(true);
         m_bccButton->setAutoRaise(true);
         toRow->addWidget(toLabel);
@@ -715,10 +721,10 @@ namespace javelin::gui::compose
         m_ccRow = new QWidget(headerFrame);
         auto* ccRowLayout = new QHBoxLayout(m_ccRow);
         ccRowLayout->setContentsMargins(0, 0, 0, 0);
-        auto* ccLabel = new QLabel(QStringLiteral("Cc"), m_ccRow);
+        auto* ccLabel = new QLabel(i18nc("@label email carbon-copy recipients", "Cc"), m_ccRow);
         ccLabel->setMinimumWidth(52);
         m_ccEdit = new widgets::EmailAddressLineEdit(true, m_ccRow);
-        m_ccEdit->setPlaceholderText(QStringLiteral("Optional"));
+        m_ccEdit->setPlaceholderText(i18nc("@info:placeholder", "Optional"));
         ccRowLayout->addWidget(ccLabel);
         ccRowLayout->addWidget(m_ccEdit, 1);
         headerLayout->addWidget(m_ccRow);
@@ -726,10 +732,11 @@ namespace javelin::gui::compose
         m_bccRow = new QWidget(headerFrame);
         auto* bccRowLayout = new QHBoxLayout(m_bccRow);
         bccRowLayout->setContentsMargins(0, 0, 0, 0);
-        auto* bccLabel = new QLabel(QStringLiteral("Bcc"), m_bccRow);
+        auto* bccLabel =
+            new QLabel(i18nc("@label email blind-carbon-copy recipients", "Bcc"), m_bccRow);
         bccLabel->setMinimumWidth(52);
         m_bccEdit = new widgets::EmailAddressLineEdit(true, m_bccRow);
-        m_bccEdit->setPlaceholderText(QStringLiteral("Optional"));
+        m_bccEdit->setPlaceholderText(i18nc("@info:placeholder", "Optional"));
         bccRowLayout->addWidget(bccLabel);
         bccRowLayout->addWidget(m_bccEdit, 1);
         headerLayout->addWidget(m_bccRow);
@@ -753,10 +760,10 @@ namespace javelin::gui::compose
                 });
 
         auto* subjectRow = new QHBoxLayout();
-        auto* subjectLabel = new QLabel(QStringLiteral("Subject"), headerFrame);
+        auto* subjectLabel = new QLabel(i18nc("@label email subject", "Subject"), headerFrame);
         subjectLabel->setMinimumWidth(52);
         m_subjectEdit = new QLineEdit(headerFrame);
-        m_subjectEdit->setPlaceholderText(QStringLiteral("Add a subject"));
+        m_subjectEdit->setPlaceholderText(i18n("Add a subject"));
         subjectRow->addWidget(subjectLabel);
         subjectRow->addWidget(m_subjectEdit, 1);
         headerLayout->addLayout(subjectRow);
@@ -776,8 +783,8 @@ namespace javelin::gui::compose
             m_settings.messageAppearanceSettings(), m_editorTabs);
         m_previewView->setAcceptDrops(false);
         m_previewView->setRemoteContentEnabled(false);
-        m_editorTabs->addTab(m_richTextEdit, QStringLiteral("Compose"));
-        m_editorTabs->addTab(m_previewView, QStringLiteral("Preview"));
+        m_editorTabs->addTab(m_richTextEdit, i18n("Compose"));
+        m_editorTabs->addTab(m_previewView, i18n("Preview"));
         rootLayout->addWidget(m_editorTabs, 1);
 
         m_attachmentScrollArea = new QScrollArea(this);
@@ -824,7 +831,7 @@ namespace javelin::gui::compose
         addKdeAction(QStringLiteral("format_text_strikeout"));
 
         m_codeAction = new QAction(QIcon::fromTheme(QStringLiteral("format-text-code")),
-                                   QStringLiteral("Code"), this);
+                                   i18nc("@action text formatting", "Code"), this);
         m_codeAction->setCheckable(true);
         m_actionCollection->addAction(QStringLiteral("javelin_format_code"), m_codeAction);
         m_formatToolbar->addAction(m_codeAction);
@@ -846,7 +853,7 @@ namespace javelin::gui::compose
         addKdeAction(QStringLiteral("insert_horizontal_rule"));
 
         m_insertImageAction = new QAction(QIcon::fromTheme(QStringLiteral("insert-image")),
-                                          QStringLiteral("Image"), this);
+                                          i18nc("@action insert image", "Image"), this);
         m_actionCollection->addAction(QStringLiteral("javelin_insert_image"), m_insertImageAction);
         m_formatToolbar->addAction(m_insertImageAction);
         connect(m_insertImageAction, &QAction::triggered, this, &ComposeTabWidget::insertImage);
@@ -973,7 +980,7 @@ namespace javelin::gui::compose
         else
         {
             Q_EMIT statusMessageRequested(
-                QStringLiteral("No sender identities are available for configured accounts."),
+                i18n("No sender identities are available for configured accounts."),
                 10000);
         }
     }
@@ -1140,14 +1147,15 @@ namespace javelin::gui::compose
             bool useMarkup = false;
             if (m_richTextEdit->composerControler()->isFormattingUsed())
             {
-                QMessageBox warning{QMessageBox::Warning, QStringLiteral("Convert to Plain Text"),
-                                    QStringLiteral("This message contains formatting. How should "
-                                                   "it be converted to plain text?"),
+                QMessageBox warning{
+                    QMessageBox::Warning, i18n("Convert to Plain Text"),
+                    i18n("This message contains formatting. How should it be converted to plain "
+                         "text?"),
                                     QMessageBox::NoButton, this};
                 QAbstractButton* loseFormatting = warning.addButton(
-                    QStringLiteral("Lose Formatting"), QMessageBox::DestructiveRole);
-                QPushButton* addMarkup = warning.addButton(QStringLiteral("Add Markup Plain Text"),
-                                                           QMessageBox::AcceptRole);
+                    i18nc("@action:button", "Lose Formatting"), QMessageBox::DestructiveRole);
+                QPushButton* addMarkup = warning.addButton(
+                    i18nc("@action:button", "Add Markup Plain Text"), QMessageBox::AcceptRole);
                 QAbstractButton* cancel = warning.addButton(QMessageBox::Cancel);
                 warning.setDefaultButton(addMarkup);
                 warning.exec();
@@ -1251,7 +1259,7 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::addAttachments()
     {
-        const auto filePaths = QFileDialog::getOpenFileNames(this, QStringLiteral("Attach Files"));
+        const auto filePaths = QFileDialog::getOpenFileNames(this, i18n("Attach Files"));
         addAttachmentPaths(filePaths);
     }
 
@@ -1303,8 +1311,7 @@ namespace javelin::gui::compose
         const QImage image{filePath};
         if (!info.exists() || !info.isFile() || image.isNull())
         {
-            Q_EMIT statusMessageRequested(QStringLiteral("The selected image could not be loaded."),
-                                          7000);
+            Q_EMIT statusMessageRequested(i18n("The selected image could not be loaded."), 7000);
             return;
         }
 
@@ -1336,7 +1343,7 @@ namespace javelin::gui::compose
         if (!QDir{}.mkpath(directory))
         {
             Q_EMIT statusMessageRequested(
-                QStringLiteral("Could not create storage for the pasted image."), 10000);
+                i18n("Could not create storage for the pasted image."), 10000);
             return;
         }
 
@@ -1345,8 +1352,7 @@ namespace javelin::gui::compose
         const auto filePath = QDir{directory}.filePath(fileName);
         if (!image.save(filePath, "PNG"))
         {
-            Q_EMIT statusMessageRequested(QStringLiteral("Could not save the pasted image."),
-                                          10000);
+            Q_EMIT statusMessageRequested(i18n("Could not save the pasted image."), 10000);
             return;
         }
         addInlineImagePath(filePath);
@@ -1355,8 +1361,8 @@ namespace javelin::gui::compose
     void ComposeTabWidget::insertImage()
     {
         const auto filePath = QFileDialog::getOpenFileName(
-            this, QStringLiteral("Insert Image"), QString{},
-            QStringLiteral("Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp);;All Files (*)"));
+            this, i18n("Insert Image"), QString{},
+            i18n("Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp);;All Files (*)"));
         if (!filePath.isEmpty())
         {
             addInlineImagePath(filePath);
@@ -1530,7 +1536,7 @@ namespace javelin::gui::compose
 
         setBusy(true);
         m_closeAfterSave = closeAfterSave;
-        Q_EMIT statusMessageRequested(QStringLiteral("Saving draft..."), 5000);
+        Q_EMIT statusMessageRequested(i18n("Saving draft..."), 5000);
         auto task = m_composeCommandPort.saveDraft(*settings, m_snapshot);
         QCoro::connect(
             std::move(task), this,
@@ -1556,7 +1562,7 @@ namespace javelin::gui::compose
                     return;
                 }
 
-                Q_EMIT statusMessageRequested(QStringLiteral("Draft saved."), 5000);
+                Q_EMIT statusMessageRequested(i18n("Draft saved."), 5000);
                 if (m_closeAfterSave)
                 {
                     m_closeAfterSave = false;
@@ -1591,13 +1597,13 @@ namespace javelin::gui::compose
 
         if (m_snapshot.to.empty())
         {
-            Q_EMIT statusMessageRequested(
-                QStringLiteral("Add at least one recipient before sending."), 7000);
+            Q_EMIT statusMessageRequested(i18n("Add at least one recipient before sending."),
+                                          7000);
             return;
         }
 
         setBusy(true);
-        Q_EMIT statusMessageRequested(QStringLiteral("Sending message..."), 5000);
+        Q_EMIT statusMessageRequested(i18n("Sending message..."), 5000);
         auto task = m_composeCommandPort.send(*settings, m_snapshot);
         QCoro::connect(
             std::move(task), this,
@@ -1615,9 +1621,8 @@ namespace javelin::gui::compose
                 const auto& summary = std::get<javelin::jmap::submission::SendSummary>(result);
                 m_snapshot.draftEmailId = summary.draftEmailId;
                 m_closeWithoutPrompt = true;
-                Q_EMIT statusMessageRequested(summary.scheduled
-                                                  ? QStringLiteral("Message scheduled.")
-                                                  : QStringLiteral("Message sent."),
+                Q_EMIT statusMessageRequested(summary.scheduled ? i18n("Message scheduled.")
+                                                                : i18n("Message sent."),
                                               7000);
                 Q_EMIT closeRequested();
             });

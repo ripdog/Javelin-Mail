@@ -10,6 +10,8 @@
 #include <QCoroFuture>
 #include <QCoroTask>
 
+#include <KLocalizedString>
+
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -125,7 +127,7 @@ namespace javelin::app
                 .accountId = accountId,
                 .kind = WorkKind::SearchIndex,
                 .priority = WorkPriority::Derived,
-                .title = QStringLiteral("Index downloaded mail"),
+                .title = i18n("Index downloaded mail"),
                 .checkpointJson = QStringLiteral("{}"),
             }));
         }
@@ -143,7 +145,7 @@ namespace javelin::app
             .accountId = std::string{accountId},
             .kind = WorkKind::SearchIndex,
             .priority = WorkPriority::Derived,
-            .title = QStringLiteral("Index downloaded mail"),
+            .title = i18n("Index downloaded mail"),
             .checkpointJson = QStringLiteral("{}"),
         }));
         QSqlQuery queue{m_connection.database()};
@@ -212,7 +214,7 @@ namespace javelin::app
                               .totalUnits = total,
                               .completedBytes = 0,
                               .totalBytes = std::nullopt,
-                              .detail = QStringLiteral("Preparing local search")};
+                              .detail = i18n("Preparing local search")};
         static_cast<void>(m_scheduler.update(jobId, WorkStatus::Running, progress));
         const auto vault = javelin::jmap::cache::MailVault::forDatabase(m_connection);
         while (true)
@@ -268,10 +270,10 @@ namespace javelin::app
             }
             ++progress.completedUnits;
             progress.completedBytes += size;
-            progress.detail = QStringLiteral("Indexing downloaded mail");
+            progress.detail = i18n("Indexing downloaded mail");
             static_cast<void>(m_scheduler.update(jobId, WorkStatus::Running, progress));
         }
-        progress.detail = QStringLiteral("Search index is current");
+        progress.detail = i18n("Search index is current");
         static_cast<void>(m_scheduler.update(jobId, WorkStatus::Complete, progress));
     }
 } // namespace javelin::app

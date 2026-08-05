@@ -67,6 +67,7 @@
 #include <QCoroTask>
 
 #include <KActionCollection>
+#include <KLocalizedString>
 #include <KStandardAction>
 
 #include <QAbstractButton>
@@ -126,7 +127,7 @@ namespace javelin::gui::shell
     void MainWindow::presentUserInterventionError(const QString& message)
     {
         m_statusBar->showMessage(message, 10000);
-        QMessageBox::critical(this, QStringLiteral("Action Required"), message);
+        QMessageBox::critical(this, i18n("Action Required"), message);
     }
 
     namespace
@@ -215,28 +216,28 @@ namespace javelin::gui::shell
             switch (property)
             {
             case javelin::jmap::query::EmailListSortProperty::ReceivedAt:
-                return QStringLiteral("Date received");
+                return i18n("Date received");
             case javelin::jmap::query::EmailListSortProperty::SentAt:
-                return QStringLiteral("Date sent");
+                return i18n("Date sent");
             case javelin::jmap::query::EmailListSortProperty::From:
-                return QStringLiteral("From");
+                return i18nc("@item message sort property", "From");
             case javelin::jmap::query::EmailListSortProperty::To:
-                return QStringLiteral("To");
+                return i18nc("@item message sort property", "To");
             case javelin::jmap::query::EmailListSortProperty::Subject:
-                return QStringLiteral("Subject");
+                return i18nc("@item message sort property", "Subject");
             case javelin::jmap::query::EmailListSortProperty::Size:
-                return QStringLiteral("Size");
+                return i18nc("@item message sort property", "Size");
             }
 
-            return QStringLiteral("Date received");
+            return i18n("Date received");
         }
 
         [[nodiscard]] QString
         sortDirectionLabel(const javelin::jmap::query::EmailListSortDirection direction)
         {
             return direction == javelin::jmap::query::EmailListSortDirection::Ascending
-                       ? QStringLiteral("ascending")
-                       : QStringLiteral("descending");
+                       ? i18nc("@item message sort direction", "ascending")
+                       : i18nc("@item message sort direction", "descending");
         }
 
     } // namespace
@@ -308,11 +309,11 @@ namespace javelin::gui::shell
                     std::ranges::find(entries, entryId, &javelin::app::undo::HistoryEntry::entryId);
                 if (completed == entries.end())
                     return;
-                m_statusBar->showMessage((completed->stack == javelin::app::undo::HistoryStack::Redo
-                                              ? QStringLiteral("Undid ")
-                                              : QStringLiteral("Redid ")) +
-                                             completed->label + QStringLiteral("."),
-                                         5000);
+                m_statusBar->showMessage(
+                    completed->stack == javelin::app::undo::HistoryStack::Redo
+                        ? i18n("Undid %1.", completed->label)
+                        : i18n("Redid %1.", completed->label),
+                    5000);
             });
         connect(&m_undoCommandPort, &javelin::app::UndoCommandPort::executionFailed, this,
                 &MainWindow::presentHistoryFailure);
@@ -355,14 +356,11 @@ namespace javelin::gui::shell
                     selectPendingInitialMailbox();
                     const auto account =
                         m_settings.accountForCachedId(QString::fromStdString(summary.accountId));
-                    const auto accountName = account.displayName.isEmpty()
-                                                 ? QStringLiteral("this account")
-                                                 : account.displayName;
+                    const auto accountName =
+                        account.displayName.isEmpty() ? i18n("this account") : account.displayName;
                     m_statusBar->showMessage(
-                        QStringLiteral("Synced %1 mailboxes and %2 messages for %3.")
-                            .arg(summary.mailboxCount)
-                            .arg(summary.emailCount)
-                            .arg(accountName),
+                        i18n("Synced %1 mailboxes and %2 messages for %3.", summary.mailboxCount,
+                             summary.emailCount, accountName),
                         10000);
                 });
         connect(m_accountRefreshController, &AccountRefreshController::contactsRefreshed, this,
@@ -469,7 +467,7 @@ namespace javelin::gui::shell
                     markTabsStaleForAccount(unavailable.accountId);
                     refreshActiveTabFromServer();
                     const auto message =
-                        unavailable.message + QStringLiteral(" Refreshing the current view…");
+                        i18n("%1 Refreshing the current view…", unavailable.message);
                     m_messageViewContainer->setErrorState(message);
                     m_statusBar->showMessage(message, 10000);
                 });
@@ -512,7 +510,7 @@ namespace javelin::gui::shell
                     updateMessageListHeader();
                     updateMessageActions();
                     if (!summary.usedCachedContent)
-                        m_statusBar->showMessage(QStringLiteral("Message ready."), 5000);
+                        m_statusBar->showMessage(i18n("Message ready."), 5000);
                 });
         connect(m_messageListTabController, &MessageListTabController::pageChanged, this,
                 [this](javelin::app::MessageListSession* session)
@@ -685,13 +683,13 @@ namespace javelin::gui::shell
         { return javelin::gui::themedSvgIcon(resourcePath, iconColor); };
 
         m_undoAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-undo")),
-                                   QStringLiteral("Undo"), this);
+                                   i18nc("@action", "Undo"), this);
         connect(m_undoAction, &QAction::triggered, this, &MainWindow::routeUndo);
         actionCollection()->addAction(QStringLiteral("undo_operation"), m_undoAction);
         actionCollection()->setDefaultShortcut(m_undoAction, QKeySequence::Undo);
 
         m_redoAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-redo")),
-                                   QStringLiteral("Redo"), this);
+                                   i18nc("@action", "Redo"), this);
         connect(m_redoAction, &QAction::triggered, this, &MainWindow::routeRedo);
         actionCollection()->addAction(QStringLiteral("redo_operation"), m_redoAction);
         auto redoShortcuts = QKeySequence::keyBindings(QKeySequence::Redo);
@@ -702,14 +700,14 @@ namespace javelin::gui::shell
 
         m_refreshAction = new QAction(
             thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/cloud-download.svg")),
-            QStringLiteral("Refresh From Server"), this);
+            i18n("Refresh From Server"), this);
         m_refreshAction->setShortcut(QKeySequence::Refresh);
         connect(m_refreshAction, &QAction::triggered, this, &MainWindow::refreshFromServer);
         actionCollection()->addAction(QStringLiteral("refresh_from_server"), m_refreshAction);
         actionCollection()->setDefaultShortcut(m_refreshAction, QKeySequence::Refresh);
 
         m_quitAction = new QAction(QIcon::fromTheme(QStringLiteral("application-exit")),
-                                   QStringLiteral("&Quit"), this);
+                                   i18nc("@action:inmenu", "&Quit"), this);
         m_quitAction->setShortcut(QKeySequence::Quit);
         connect(m_quitAction, &QAction::triggered, qApp, &QCoreApplication::quit);
         actionCollection()->addAction(QStringLiteral("quit_application"), m_quitAction);
@@ -721,25 +719,25 @@ namespace javelin::gui::shell
             thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/settings.svg")));
 
         m_contactsAction = new QAction(QIcon::fromTheme(QStringLiteral("view-pim-contacts")),
-                                       QStringLiteral("Contacts"), this);
+                                       i18n("Contacts"), this);
         connect(m_contactsAction, &QAction::triggered, this, &MainWindow::openContacts);
         actionCollection()->addAction(QStringLiteral("open_contacts"), m_contactsAction);
         m_contactsAction->setEnabled(true);
 
         m_calendarAction = new QAction(QIcon::fromTheme(QStringLiteral("view-calendar-month")),
-                                       QStringLiteral("Calendar"), this);
+                                       i18n("Calendar"), this);
         connect(m_calendarAction, &QAction::triggered, this, &MainWindow::openCalendar);
         actionCollection()->addAction(QStringLiteral("open_calendar"), m_calendarAction);
         m_calendarAction->setEnabled(true);
 
         m_sieveAction = new QAction(QIcon::fromTheme(QStringLiteral("document-edit")),
-                                    QStringLiteral("Sieve Rules"), this);
+                                    i18n("Sieve Rules"), this);
         connect(m_sieveAction, &QAction::triggered, this, &MainWindow::openSieveEditor);
         actionCollection()->addAction(QStringLiteral("open_sieve_editor"), m_sieveAction);
 
         m_newMessageAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/new-mail.svg")),
-                        QStringLiteral("&New Message"), this);
+                        i18nc("@action", "&New Message"), this);
         m_newMessageAction->setShortcut(QKeySequence::New);
         connect(m_newMessageAction, &QAction::triggered, this, &MainWindow::composeNewMessage);
         actionCollection()->addAction(QStringLiteral("compose_new_message"), m_newMessageAction);
@@ -747,7 +745,7 @@ namespace javelin::gui::shell
 
         m_replyAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/reply.svg")),
-                        QStringLiteral("&Reply"), this);
+                        i18nc("@action", "&Reply"), this);
         m_replyAction->setShortcut(QKeySequence{Qt::Key_R});
         connect(m_replyAction, &QAction::triggered, this, &MainWindow::composeReply);
         actionCollection()->addAction(QStringLiteral("compose_reply"), m_replyAction);
@@ -755,25 +753,25 @@ namespace javelin::gui::shell
 
         m_replyAllAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/reply-all.svg")),
-                        QStringLiteral("Reply &All"), this);
+                        i18nc("@action", "Reply &All"), this);
         connect(m_replyAllAction, &QAction::triggered, this, &MainWindow::composeReplyAll);
         actionCollection()->addAction(QStringLiteral("compose_reply_all"), m_replyAllAction);
 
         m_forwardAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/forward.svg")),
-                        QStringLiteral("&Forward"), this);
+                        i18nc("@action", "&Forward"), this);
         connect(m_forwardAction, &QAction::triggered, this, &MainWindow::composeForward);
         actionCollection()->addAction(QStringLiteral("compose_forward"), m_forwardAction);
 
         m_editDraftAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/draft.svg")),
-                        QStringLiteral("Edit &Draft"), this);
+                        i18nc("@action", "Edit &Draft"), this);
         connect(m_editDraftAction, &QAction::triggered, this, &MainWindow::editSelectedDraft);
         actionCollection()->addAction(QStringLiteral("compose_edit_draft"), m_editDraftAction);
 
         m_archiveAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/archive.svg")),
-                        QStringLiteral("&Archive"), this);
+                        i18nc("@action", "&Archive"), this);
         m_archiveAction->setShortcut(QKeySequence{Qt::Key_A});
         connect(m_archiveAction, &QAction::triggered, this,
                 [this]
@@ -786,7 +784,7 @@ namespace javelin::gui::shell
 
         m_markUnreadAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/unread.svg")),
-                        QStringLiteral("Mark &Unread"), this);
+                        i18nc("@action", "Mark &Unread"), this);
         connect(m_markUnreadAction, &QAction::triggered, this,
                 [this]
                 {
@@ -797,7 +795,7 @@ namespace javelin::gui::shell
 
         m_deleteAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/delete.svg")),
-                        QStringLiteral("&Delete"), this);
+                        i18nc("@action", "&Delete"), this);
         m_deleteAction->setShortcut(QKeySequence::Delete);
         connect(
             m_deleteAction, &QAction::triggered, this, [this]
@@ -805,7 +803,7 @@ namespace javelin::gui::shell
         actionCollection()->addAction(QStringLiteral("delete_email"), m_deleteAction);
         actionCollection()->setDefaultShortcut(m_deleteAction, QKeySequence::Delete);
 
-        m_permanentDeleteAction = new QAction(QStringLiteral("Delete Permanently"), this);
+        m_permanentDeleteAction = new QAction(i18n("Delete Permanently"), this);
         connect(m_permanentDeleteAction, &QAction::triggered, this,
                 [this]
                 {
@@ -818,7 +816,7 @@ namespace javelin::gui::shell
                                                QKeySequence{Qt::SHIFT | Qt::Key_Delete});
 
         m_moveAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-move")),
-                                   QStringLiteral("&Move to…"), this);
+                                   i18nc("@action", "&Move to…"), this);
         connect(m_moveAction, &QAction::triggered, this,
                 [this]
                 {
@@ -829,7 +827,7 @@ namespace javelin::gui::shell
         actionCollection()->addAction(QStringLiteral("move_email"), m_moveAction);
 
         m_copyAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
-                                   QStringLiteral("&Copy to…"), this);
+                                   i18nc("@action", "&Copy to…"), this);
         connect(m_copyAction, &QAction::triggered, this,
                 [this]
                 {
@@ -840,25 +838,25 @@ namespace javelin::gui::shell
         actionCollection()->addAction(QStringLiteral("copy_email"), m_copyAction);
 
         m_viewSourceAction = new QAction(QIcon::fromTheme(QStringLiteral("document-open")),
-                                         QStringLiteral("View &Source"), this);
+                                         i18nc("@action", "View &Source"), this);
         connect(m_viewSourceAction, &QAction::triggered, this,
                 &MainWindow::viewSelectedMessageSource);
         actionCollection()->addAction(QStringLiteral("view_message_source"), m_viewSourceAction);
 
         m_advancedSearchAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/search.svg")),
-                        QStringLiteral("Advanced Search"), this);
+                        i18n("Advanced Search"), this);
         connect(m_advancedSearchAction, &QAction::triggered, this, &MainWindow::showAdvancedSearch);
         actionCollection()->addAction(QStringLiteral("advanced_search"), m_advancedSearchAction);
 
         m_composeSendAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-send")),
-                                          QStringLiteral("Send"), this);
+                                          i18nc("@action", "Send"), this);
         connect(m_composeSendAction, &QAction::triggered, this,
                 [this] { m_composeTabController->sendMessage(activeTab()); });
         actionCollection()->addAction(QStringLiteral("compose_send"), m_composeSendAction);
 
         m_composeSaveDraftAction = new QAction(QIcon::fromTheme(QStringLiteral("document-save")),
-                                               QStringLiteral("Save Draft"), this);
+                                               i18n("Save Draft"), this);
         connect(m_composeSaveDraftAction, &QAction::triggered, this,
                 [this] { m_composeTabController->saveDraft(activeTab()); });
         actionCollection()->addAction(QStringLiteral("compose_save_draft"),
@@ -866,7 +864,7 @@ namespace javelin::gui::shell
 
         m_composeAttachFilesAction =
             new QAction(QIcon::fromTheme(QStringLiteral("mail-attachment")),
-                        QStringLiteral("Attach Files"), this);
+                        i18n("Attach Files"), this);
         connect(m_composeAttachFilesAction, &QAction::triggered, this,
                 [this] { m_composeTabController->attachFiles(activeTab()); });
         actionCollection()->addAction(QStringLiteral("compose_attach_files"),
@@ -875,53 +873,53 @@ namespace javelin::gui::shell
         const auto invokeContact = [this](const ContactsTabCommand command)
         { m_contactsTabController->invoke(activeTab(), command); };
         m_contactNewAction = new QAction(QIcon::fromTheme(QStringLiteral("contact-new")),
-                                         QStringLiteral("Add"), this);
+                                         i18nc("@action", "Add"), this);
         connect(m_contactNewAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::CreateContact); });
         auto* contactAddMenu = new QMenu(this);
         auto* newContact = contactAddMenu->addAction(
-            QIcon::fromTheme(QStringLiteral("contact-new")), QStringLiteral("New Contact"));
+            QIcon::fromTheme(QStringLiteral("contact-new")), i18n("New Contact"));
         connect(newContact, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::CreateContact); });
         auto* newGroup = contactAddMenu->addAction(QIcon::fromTheme(QStringLiteral("system-users")),
-                                                   QStringLiteral("New Group"));
+                                                   i18n("New Group"));
         connect(newGroup, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::CreateGroup); });
         m_contactNewAction->setMenu(contactAddMenu);
         actionCollection()->addAction(QStringLiteral("contact_new"), m_contactNewAction);
         m_contactEditAction = new QAction(QIcon::fromTheme(QStringLiteral("document-edit")),
-                                          QStringLiteral("Edit Contact"), this);
+                                          i18n("Edit Contact"), this);
         connect(m_contactEditAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::EditContact); });
         actionCollection()->addAction(QStringLiteral("contact_edit"), m_contactEditAction);
         m_contactDeleteAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-delete")),
-                                            QStringLiteral("Delete Contact"), this);
+                                            i18n("Delete Contact"), this);
         connect(m_contactDeleteAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::DeleteContact); });
         actionCollection()->addAction(QStringLiteral("contact_delete"), m_contactDeleteAction);
         m_contactCopyAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
-                                          QStringLiteral("Copy Contact"), this);
+                                          i18n("Copy Contact"), this);
         connect(m_contactCopyAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::CopyContact); });
         actionCollection()->addAction(QStringLiteral("contact_copy"), m_contactCopyAction);
         m_contactImportAction = new QAction(QIcon::fromTheme(QStringLiteral("document-import")),
-                                            QStringLiteral("Import vCard…"), this);
+                                            i18n("Import vCard…"), this);
         connect(m_contactImportAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::ImportVCard); });
         actionCollection()->addAction(QStringLiteral("contact_import"), m_contactImportAction);
         m_contactExportAction = new QAction(QIcon::fromTheme(QStringLiteral("document-export")),
-                                            QStringLiteral("Export vCard…"), this);
+                                            i18n("Export vCard…"), this);
         connect(m_contactExportAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::ExportVCard); });
         actionCollection()->addAction(QStringLiteral("contact_export"), m_contactExportAction);
         m_contactDuplicatesAction = new QAction(QIcon::fromTheme(QStringLiteral("merge")),
-                                                QStringLiteral("Find Duplicates…"), this);
+                                                i18n("Find Duplicates…"), this);
         connect(m_contactDuplicatesAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::FindDuplicates); });
         actionCollection()->addAction(QStringLiteral("contact_duplicates"),
                                       m_contactDuplicatesAction);
         m_contactAddToGroupAction = new QAction(QIcon::fromTheme(QStringLiteral("list-add")),
-                                                QStringLiteral("Add to Group"), this);
+                                                i18n("Add to Group"), this);
         auto* addToGroupMenu = new QMenu(this);
         connect(addToGroupMenu, &QMenu::aboutToShow, this, [this, addToGroupMenu]
                 { m_contactsTabController->populateAddToGroupMenu(activeTab(), *addToGroupMenu); });
@@ -929,8 +927,8 @@ namespace javelin::gui::shell
         actionCollection()->addAction(QStringLiteral("contact_add_to_group"),
                                       m_contactAddToGroupAction);
         m_contactRemoveFromGroupAction =
-            new QAction(QIcon::fromTheme(QStringLiteral("list-remove")),
-                        QStringLiteral("Remove from Group"), this);
+            new QAction(QIcon::fromTheme(QStringLiteral("list-remove")), i18n("Remove from Group"),
+                        this);
         auto* removeFromGroupMenu = new QMenu(this);
         connect(removeFromGroupMenu, &QMenu::aboutToShow, this,
                 [this, removeFromGroupMenu]
@@ -943,13 +941,13 @@ namespace javelin::gui::shell
                                       m_contactRemoveFromGroupAction);
         m_contactManageAddressBooksAction =
             new QAction(QIcon::fromTheme(QStringLiteral("view-list-details")),
-                        QStringLiteral("Manage Address Books…"), this);
+                        i18n("Manage Address Books…"), this);
         connect(m_contactManageAddressBooksAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::ManageAddressBooks); });
         actionCollection()->addAction(QStringLiteral("contact_manage_address_books"),
                                       m_contactManageAddressBooksAction);
         m_contactRefreshAction = new QAction(QIcon::fromTheme(QStringLiteral("view-refresh")),
-                                             QStringLiteral("Refresh Contacts"), this);
+                                             i18n("Refresh Contacts"), this);
         connect(m_contactRefreshAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::Refresh); });
         actionCollection()->addAction(QStringLiteral("contact_refresh"), m_contactRefreshAction);
@@ -957,39 +955,39 @@ namespace javelin::gui::shell
         const auto invokeCalendar = [this](const CalendarTabCommand command)
         { m_calendarTabController->invoke(activeTab(), command); };
         m_calendarNewEventAction = new QAction(QIcon::fromTheme(QStringLiteral("appointment-new")),
-                                               QStringLiteral("New Event"), this);
+                                               i18n("New Event"), this);
         connect(m_calendarNewEventAction, &QAction::triggered, this,
                 [invokeCalendar] { invokeCalendar(CalendarTabCommand::CreateEvent); });
         actionCollection()->addAction(QStringLiteral("calendar_new_event"),
                                       m_calendarNewEventAction);
         m_calendarPreviousMonthAction = new QAction(QIcon::fromTheme(QStringLiteral("go-previous")),
-                                                    QStringLiteral("Previous Month"), this);
+                                                    i18n("Previous Month"), this);
         connect(m_calendarPreviousMonthAction, &QAction::triggered, this,
                 [invokeCalendar] { invokeCalendar(CalendarTabCommand::PreviousMonth); });
         actionCollection()->addAction(QStringLiteral("calendar_previous_month"),
                                       m_calendarPreviousMonthAction);
         m_calendarTodayAction = new QAction(QIcon::fromTheme(QStringLiteral("go-jump-today")),
-                                            QStringLiteral("Today"), this);
+                                            i18n("Today"), this);
         connect(m_calendarTodayAction, &QAction::triggered, this,
                 [invokeCalendar] { invokeCalendar(CalendarTabCommand::Today); });
         actionCollection()->addAction(QStringLiteral("calendar_today"), m_calendarTodayAction);
         m_calendarNextMonthAction = new QAction(QIcon::fromTheme(QStringLiteral("go-next")),
-                                                QStringLiteral("Next Month"), this);
+                                                i18n("Next Month"), this);
         connect(m_calendarNextMonthAction, &QAction::triggered, this,
                 [invokeCalendar] { invokeCalendar(CalendarTabCommand::NextMonth); });
         actionCollection()->addAction(QStringLiteral("calendar_next_month"),
                                       m_calendarNextMonthAction);
         m_calendarListAction = new QAction(QIcon::fromTheme(QStringLiteral("view-calendar-list")),
-                                           QStringLiteral("Calendars"), this);
+                                           i18n("Calendars"), this);
         actionCollection()->addAction(QStringLiteral("calendar_list"), m_calendarListAction);
         m_calendarRefreshAction = new QAction(QIcon::fromTheme(QStringLiteral("view-refresh")),
-                                              QStringLiteral("Refresh Calendar"), this);
+                                              i18n("Refresh Calendar"), this);
         connect(m_calendarRefreshAction, &QAction::triggered, this,
                 [this] { refreshActiveTabFromServer(); });
         actionCollection()->addAction(QStringLiteral("calendar_refresh"), m_calendarRefreshAction);
 
         auto* logAction = new QAction(QIcon::fromTheme(QStringLiteral("view-list-text")),
-                                      QStringLiteral("Application Log"), this);
+                                      i18n("Application Log"), this);
         connect(logAction, &QAction::triggered, this,
                 [this]
                 {
@@ -1034,8 +1032,8 @@ namespace javelin::gui::shell
         const bool nativeRedo =
             FocusedCommandRouter::isNativeCommandAvailable(focus, EditHistoryDirection::Redo);
         const auto& state = m_undoCommandPort.state();
-        m_undoAction->setText(nativeUndo ? QStringLiteral("Undo") : state.undoLabel);
-        m_redoAction->setText(nativeRedo ? QStringLiteral("Redo") : state.redoLabel);
+        m_undoAction->setText(nativeUndo ? i18nc("@action", "Undo") : state.undoLabel);
+        m_redoAction->setText(nativeRedo ? i18nc("@action", "Redo") : state.redoLabel);
         m_undoAction->setEnabled(nativeUndo || state.canUndo);
         m_redoAction->setEnabled(nativeRedo || state.canRedo);
     }
@@ -1057,7 +1055,7 @@ namespace javelin::gui::shell
         QAbstractButton* removeButton = nullptr;
         if (failure.mayRemoveFromHistory && !failure.acknowledgeAndRemove)
         {
-            removeButton = messageBox.addButton(QStringLiteral("Remove from History"),
+            removeButton = messageBox.addButton(i18n("Remove from History"),
                                                 QMessageBox::DestructiveRole);
         }
         messageBox.exec();
@@ -1073,7 +1071,7 @@ namespace javelin::gui::shell
 
     void MainWindow::setupUi()
     {
-        setWindowTitle(QStringLiteral("Javelin Mail"));
+        setWindowTitle(i18n("Javelin Mail"));
 
         m_mailboxModel = new javelin::gui::mailboxes::MailboxTreeModel(
             m_accountReader, m_mailboxReader, m_queryReader.databasePath(),
@@ -1088,8 +1086,7 @@ namespace javelin::gui::shell
 
         m_mailboxSearchEdit = new QLineEdit(this);
         m_mailboxSearchEdit->setClearButtonEnabled(true);
-        m_mailboxSearchEdit->setPlaceholderText(
-            QStringLiteral("Search this account on the server"));
+        m_mailboxSearchEdit->setPlaceholderText(i18n("Search this account on the server"));
 
         m_tabBar = new QTabBar(this);
         m_tabBar->setDocumentMode(true);
@@ -1178,10 +1175,12 @@ namespace javelin::gui::shell
                         markTabsStaleForAccount(summary.accountId);
                         refreshActiveTabFromServer();
                         presentError(javelin::jmap::OperationError{
-                            .message = QStringLiteral("The server rejected %1 email mutation(s). "
-                                                      "The mailbox has been refreshed to restore "
-                                                      "the server state.")
-                                           .arg(summary.failedEmailCount),
+                            .message = i18np(
+                                "The server rejected %1 email mutation. The mailbox has been "
+                                "refreshed to restore the server state.",
+                                "The server rejected %1 email mutations. The mailbox has been "
+                                "refreshed to restore the server state.",
+                                summary.failedEmailCount),
                         });
                         return;
                     }
@@ -1203,8 +1202,7 @@ namespace javelin::gui::shell
                         sourceAccountId != destinationAccountId)
                     {
                         m_statusBar->showMessage(
-                            QStringLiteral("Messages can only be moved within their account."),
-                            5000);
+                            i18n("Messages can only be moved within their account."), 5000);
                         return;
                     }
 
@@ -1212,7 +1210,7 @@ namespace javelin::gui::shell
                     m_messageCommandController->queueTransfer(
                         sourceAccountId.toStdString(), *sourceMailboxId,
                         destinationMailboxId.toStdString(), std::move(selection),
-                        MessageTransferOperation::Move, QStringLiteral("Queued move."));
+                        MessageTransferOperation::Move, i18n("Queued move."));
                 });
 
         auto* messagePane = new QWidget(this);
@@ -1230,37 +1228,36 @@ namespace javelin::gui::shell
         m_messageListTitleLabel = new ElidingLabel(messageHeaderRow);
         m_messageListMetaLabel = new QLabel(messageHeaderRow);
         m_searchServerButton = new QToolButton(messageHeaderRow);
-        m_searchServerButton->setText(QStringLiteral("Search server"));
+        m_searchServerButton->setText(i18n("Search server"));
         m_searchServerButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
         m_searchServerButton->setToolTip(
-            QStringLiteral("Replace results indexed on this device with authoritative server "
-                           "results"));
+            i18n("Replace results indexed on this device with authoritative server results"));
         m_searchServerButton->setVisible(false);
         m_messageSortButton = new QToolButton(messageHeaderRow);
         m_messageSortButton->setIcon(javelin::gui::themedSvgIcon(
             QStringLiteral(":/icons/thunderbird-icons/display-options.svg"),
             palette().color(QPalette::Text)));
-        m_messageSortButton->setToolTip(QStringLiteral("Sort messages"));
+        m_messageSortButton->setToolTip(i18n("Sort messages"));
         m_firstPageButton = new QToolButton(messageHeaderRow);
         m_firstPageButton->setIcon(style()->standardIcon(QStyle::SP_MediaSkipBackward));
-        m_firstPageButton->setToolTip(QStringLiteral("First page"));
+        m_firstPageButton->setToolTip(i18n("First page"));
         m_previousPageButton = new QToolButton(messageHeaderRow);
         m_previousPageButton->setIcon(
             javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/nav-left.svg"),
                                         palette().color(QPalette::Text)));
-        m_previousPageButton->setToolTip(QStringLiteral("Previous page"));
+        m_previousPageButton->setToolTip(i18n("Previous page"));
         m_nextPageButton = new QToolButton(messageHeaderRow);
         m_nextPageButton->setIcon(
             javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/nav-right.svg"),
                                         palette().color(QPalette::Text)));
-        m_nextPageButton->setToolTip(QStringLiteral("Next page"));
+        m_nextPageButton->setToolTip(i18n("Next page"));
         m_lastPageButton = new QToolButton(messageHeaderRow);
         m_lastPageButton->setIcon(style()->standardIcon(QStyle::SP_MediaSkipForward));
-        m_lastPageButton->setToolTip(QStringLiteral("Last page"));
+        m_lastPageButton->setToolTip(i18n("Last page"));
         m_pageNumberSpinBox = new QSpinBox(messageHeaderRow);
-        m_pageNumberSpinBox->setPrefix(QStringLiteral("Page "));
+        m_pageNumberSpinBox->setPrefix(i18nc("@item page number prefix", "Page "));
         m_pageNumberSpinBox->setAlignment(Qt::AlignCenter);
-        m_pageNumberSpinBox->setToolTip(QStringLiteral("Enter a page number"));
+        m_pageNumberSpinBox->setToolTip(i18n("Enter a page number"));
         m_messagePageLabel = new QLabel(messageHeaderRow);
         auto titleFont = m_messageListTitleLabel->font();
         titleFont.setPointSize(titleFont.pointSize() + 4);
@@ -1278,7 +1275,7 @@ namespace javelin::gui::shell
         messageHeaderRowLayout->addWidget(m_messageSortButton);
         messageHeaderLayout->addWidget(messageHeaderRow);
         m_messageLoadingIndicator = new QProgressBar(messageHeader);
-        m_messageLoadingIndicator->setAccessibleName(QStringLiteral("Loading messages"));
+        m_messageLoadingIndicator->setAccessibleName(i18n("Loading messages"));
         m_messageLoadingIndicator->setFixedHeight(2);
         m_messageLoadingIndicator->setTextVisible(false);
         m_messageLoadingIndicator->setRange(0, 1);
@@ -1292,7 +1289,7 @@ namespace javelin::gui::shell
         auto* messageListAreaLayout = new QGridLayout(messageListArea);
         messageListAreaLayout->setContentsMargins(0, 0, 0, 0);
         messageListAreaLayout->setSpacing(0);
-        m_messageEmptyState = new QLabel(QStringLiteral("No messages"), messageListArea);
+        m_messageEmptyState = new QLabel(i18n("No messages"), messageListArea);
         m_messageEmptyState->setAlignment(Qt::AlignCenter);
         m_messageEmptyState->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
         m_messageEmptyState->setWordWrap(true);
@@ -1556,8 +1553,7 @@ namespace javelin::gui::shell
         const auto accountId = activeAccountId();
         if (!accountId)
         {
-            m_statusBar->showMessage(QStringLiteral("Select an account to edit its Sieve rules."),
-                                     5000);
+            m_statusBar->showMessage(i18n("Select an account to edit its Sieve rules."), 5000);
             return;
         }
         javelin::gui::sieve::SieveEditorDialog dialog{m_sieveCommandPort, *accountId, this};
@@ -1575,8 +1571,8 @@ namespace javelin::gui::shell
             activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
         if (!accountId.has_value())
         {
-            m_statusBar->showMessage(
-                QStringLiteral("Select an account before composing a message."), 5000);
+            m_statusBar->showMessage(i18n("Select an account before composing a message."),
+                                     5000);
             return;
         }
 
@@ -1595,7 +1591,7 @@ namespace javelin::gui::shell
         const auto emailId = m_messageSelectionController->currentEmailId();
         if (!accountId.has_value() || !emailId.has_value())
         {
-            m_statusBar->showMessage(QStringLiteral("Select a message to reply to."), 5000);
+            m_statusBar->showMessage(i18n("Select a message to reply to."), 5000);
             return;
         }
 
@@ -1614,7 +1610,7 @@ namespace javelin::gui::shell
         const auto emailId = m_messageSelectionController->currentEmailId();
         if (!accountId.has_value() || !emailId.has_value())
         {
-            m_statusBar->showMessage(QStringLiteral("Select a message to reply to."), 5000);
+            m_statusBar->showMessage(i18n("Select a message to reply to."), 5000);
             return;
         }
 
@@ -1633,7 +1629,7 @@ namespace javelin::gui::shell
         const auto emailId = m_messageSelectionController->currentEmailId();
         if (!accountId.has_value() || !emailId.has_value())
         {
-            m_statusBar->showMessage(QStringLiteral("Select a message to forward."), 5000);
+            m_statusBar->showMessage(i18n("Select a message to forward."), 5000);
             return;
         }
 
@@ -1652,7 +1648,7 @@ namespace javelin::gui::shell
         const auto emailId = m_messageSelectionController->currentEmailId();
         if (!accountId.has_value() || !emailId.has_value())
         {
-            m_statusBar->showMessage(QStringLiteral("Select a draft to edit."), 5000);
+            m_statusBar->showMessage(i18n("Select a draft to edit."), 5000);
             return;
         }
 
@@ -1660,8 +1656,7 @@ namespace javelin::gui::shell
         if (!activeMailboxId().has_value() || !draftsMailbox.has_value() ||
             draftsMailbox->id != *activeMailboxId())
         {
-            m_statusBar->showMessage(QStringLiteral("Open a message from Drafts to edit it."),
-                                     5000);
+            m_statusBar->showMessage(i18n("Open a message from Drafts to edit it."), 5000);
             return;
         }
 
@@ -2218,7 +2213,7 @@ namespace javelin::gui::shell
         {
         case ComposeTabClosePlan::BlockWhileBusy:
             m_statusBar->showMessage(
-                QStringLiteral("Wait for the current compose operation to finish first."), 5000);
+                i18n("Wait for the current compose operation to finish first."), 5000);
             return false;
         case ComposeTabClosePlan::CloseImmediately:
             return m_composeTabController->closeImmediately(index);
@@ -2227,11 +2222,11 @@ namespace javelin::gui::shell
         case ComposeTabClosePlan::ConfirmKeepSavedDraft:
         {
             QMessageBox messageBox{this};
-            messageBox.setWindowTitle(QStringLiteral("Close Draft"));
-            messageBox.setText(QStringLiteral(
-                "This message is already saved in Drafts. Close the tab and keep it there?"));
+            messageBox.setWindowTitle(i18n("Close Draft"));
+            messageBox.setText(
+                i18n("This message is already saved in Drafts. Close the tab and keep it there?"));
             QAbstractButton* keepDraftButton =
-                messageBox.addButton(QStringLiteral("Keep Draft"), QMessageBox::AcceptRole);
+                messageBox.addButton(i18n("Keep Draft"), QMessageBox::AcceptRole);
             messageBox.addButton(QMessageBox::Cancel);
             messageBox.exec();
             if (messageBox.clickedButton() != keepDraftButton)
@@ -2241,12 +2236,12 @@ namespace javelin::gui::shell
         case ComposeTabClosePlan::ConfirmSaveOrDiscard:
         {
             QMessageBox messageBox{this};
-            messageBox.setWindowTitle(QStringLiteral("Close Compose Tab"));
-            messageBox.setText(QStringLiteral("Save this message as a draft before closing?"));
+            messageBox.setWindowTitle(i18n("Close Compose Tab"));
+            messageBox.setText(i18n("Save this message as a draft before closing?"));
             QAbstractButton* saveButton =
-                messageBox.addButton(QStringLiteral("Save Draft"), QMessageBox::AcceptRole);
-            QAbstractButton* discardButton =
-                messageBox.addButton(QStringLiteral("Discard"), QMessageBox::DestructiveRole);
+                messageBox.addButton(i18n("Save Draft"), QMessageBox::AcceptRole);
+            QAbstractButton* discardButton = messageBox.addButton(
+                i18nc("@action:button", "Discard"), QMessageBox::DestructiveRole);
             messageBox.addButton(QMessageBox::Cancel);
             messageBox.exec();
             if (messageBox.clickedButton() == saveButton)
@@ -2275,7 +2270,7 @@ namespace javelin::gui::shell
             activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
         if (!accountId.has_value())
         {
-            m_statusBar->showMessage(QStringLiteral("Select an account before searching."), 5000);
+            m_statusBar->showMessage(i18n("Select an account before searching."), 5000);
             return;
         }
 
@@ -2288,7 +2283,7 @@ namespace javelin::gui::shell
             activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
         if (!accountId.has_value())
         {
-            m_statusBar->showMessage(QStringLiteral("Select an account before searching."), 5000);
+            m_statusBar->showMessage(i18n("Select an account before searching."), 5000);
             return;
         }
 
@@ -2301,7 +2296,7 @@ namespace javelin::gui::shell
         auto criteria = dialog.criteria();
         if (javelin::jmap::search::isEmpty(criteria))
         {
-            m_statusBar->showMessage(QStringLiteral("Enter at least one search field."), 5000);
+            m_statusBar->showMessage(i18n("Enter at least one search field."), 5000);
             return;
         }
 
@@ -2341,16 +2336,17 @@ namespace javelin::gui::shell
                     });
         };
 
-        addPropertyAction(QStringLiteral("Date received"),
+        addPropertyAction(i18n("Date received"),
                           javelin::jmap::query::EmailListSortProperty::ReceivedAt);
-        addPropertyAction(QStringLiteral("Date sent"),
+        addPropertyAction(i18n("Date sent"),
                           javelin::jmap::query::EmailListSortProperty::SentAt);
-        addPropertyAction(QStringLiteral("From"),
+        addPropertyAction(i18nc("@item message sort property", "From"),
                           javelin::jmap::query::EmailListSortProperty::From);
-        addPropertyAction(QStringLiteral("To"), javelin::jmap::query::EmailListSortProperty::To);
-        addPropertyAction(QStringLiteral("Subject"),
+        addPropertyAction(i18nc("@item message sort property", "To"),
+                          javelin::jmap::query::EmailListSortProperty::To);
+        addPropertyAction(i18nc("@item message sort property", "Subject"),
                           javelin::jmap::query::EmailListSortProperty::Subject);
-        addPropertyAction(QStringLiteral("Size"),
+        addPropertyAction(i18nc("@item message sort property", "Size"),
                           javelin::jmap::query::EmailListSortProperty::Size);
         menu.addSeparator();
 
@@ -2371,9 +2367,9 @@ namespace javelin::gui::shell
                     });
         };
 
-        addDirectionAction(QStringLiteral("Descending"),
+        addDirectionAction(i18nc("@item message sort direction", "Descending"),
                            javelin::jmap::query::EmailListSortDirection::Descending);
-        addDirectionAction(QStringLiteral("Ascending"),
+        addDirectionAction(i18nc("@item message sort direction", "Ascending"),
                            javelin::jmap::query::EmailListSortDirection::Ascending);
 
         menu.exec(m_messageSortButton->mapToGlobal(QPoint{0, m_messageSortButton->height()}));
@@ -2397,15 +2393,15 @@ namespace javelin::gui::shell
         {
             qWarning().noquote() << QStringLiteral("Could not save message-list sort:")
                                  << error->detail;
-            m_statusBar->showMessage(QStringLiteral("Could not save the message-list sort."), 5000);
+            m_statusBar->showMessage(i18n("Could not save the message-list sort."), 5000);
         }
 
         updateSortButton();
         loadActiveTabFromCache(true);
         updateMessageListHeader();
-        m_statusBar->showMessage(QStringLiteral("Sorting by %1, %2.")
-                                     .arg(sortPropertyLabel(m_emailListSort.property),
-                                          sortDirectionLabel(m_emailListSort.direction)),
+        m_statusBar->showMessage(i18n("Sorting by %1, %2.",
+                                      sortPropertyLabel(m_emailListSort.property),
+                                      sortDirectionLabel(m_emailListSort.direction)),
                                  5000);
     }
 
@@ -2593,9 +2589,9 @@ namespace javelin::gui::shell
             return;
         }
 
-        m_messageSortButton->setToolTip(QStringLiteral("Sort messages: %1, %2")
-                                            .arg(sortPropertyLabel(m_emailListSort.property),
-                                                 sortDirectionLabel(m_emailListSort.direction)));
+        m_messageSortButton->setToolTip(
+            i18n("Sort messages: %1, %2", sortPropertyLabel(m_emailListSort.property),
+                 sortDirectionLabel(m_emailListSort.direction)));
     }
 
     void MainWindow::scheduleApplicationPaletteRefresh()
@@ -2834,14 +2830,14 @@ namespace javelin::gui::shell
 
             const auto accountName =
                 account->displayName.isEmpty() ? account->loginEmail : account->displayName;
-            QMessageBox prompt{QMessageBox::Warning, QStringLiteral("Sign in required"),
-                               QStringLiteral("%1 needs you to sign in again before Javelin can "
-                                              "synchronize mail.")
-                                   .arg(accountName),
-                               QMessageBox::NoButton, this};
+            QMessageBox prompt{
+                QMessageBox::Warning, i18n("Sign in required"),
+                i18n("%1 needs you to sign in again before Javelin can synchronize mail.",
+                     accountName),
+                QMessageBox::NoButton, this};
             auto* signInButton =
-                prompt.addButton(QStringLiteral("Sign In Again"), QMessageBox::AcceptRole);
-            prompt.addButton(QStringLiteral("Later"), QMessageBox::RejectRole);
+                prompt.addButton(i18n("Sign In Again"), QMessageBox::AcceptRole);
+            prompt.addButton(i18nc("@action:button", "Later"), QMessageBox::RejectRole);
             m_authenticationPromptOpen = true;
             prompt.exec();
             m_authenticationPromptOpen = false;
@@ -2875,7 +2871,7 @@ namespace javelin::gui::shell
         {
             m_messageViewContainer->appearanceSettingsChanged();
             m_messageViewContainer->translationSettingsChanged();
-            m_statusBar->showMessage(QStringLiteral("Saved preferences."), 3000);
+            m_statusBar->showMessage(i18n("Saved preferences."), 3000);
             m_mailboxModel->refresh();
             const auto accountId = activeAccountId().has_value() ? activeAccountId()
                                                                  : currentAccountId(*m_mailboxView);
@@ -2898,7 +2894,7 @@ namespace javelin::gui::shell
             activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
         if (!accountId.has_value())
         {
-            presentUserInterventionError(QStringLiteral("Select an account to refresh."));
+            presentUserInterventionError(i18n("Select an account to refresh."));
             return;
         }
         refreshAccountFromServer(*accountId);
@@ -2918,7 +2914,7 @@ namespace javelin::gui::shell
                 .trimmed();
         if (!accountId.has_value() || senderEmail.isEmpty())
         {
-            m_statusBar->showMessage(QStringLiteral("No sender address is available."), 5000);
+            m_statusBar->showMessage(i18n("No sender address is available."), 5000);
             return;
         }
 
@@ -2964,7 +2960,7 @@ namespace javelin::gui::shell
         if (!senderEmail.isEmpty())
         {
             auto* findSenderAction =
-                menu.addAction(QStringLiteral("Find all conversations with %1").arg(senderEmail));
+                menu.addAction(i18n("Find all conversations with %1", senderEmail));
             connect(findSenderAction, &QAction::triggered, this,
                     [this, index] { findConversationsWithSender(index); });
         }
@@ -2978,8 +2974,8 @@ namespace javelin::gui::shell
                 menu.addAction(m_permanentDeleteAction);
             }
             menu.addSeparator();
-            auto* moveMenu = menu.addMenu(QStringLiteral("Move to"));
-            auto* copyMenu = menu.addMenu(QStringLiteral("Copy to"));
+            auto* moveMenu = menu.addMenu(i18n("Move to"));
+            auto* copyMenu = menu.addMenu(i18n("Copy to"));
             m_messageCommandController->populateDestinationMenus(moveMenu, copyMenu, *accountId,
                                                                  sourceMailboxId, selection);
             if (moveMenu->actions().empty())
@@ -3017,18 +3013,18 @@ namespace javelin::gui::shell
         QMenu menu{this};
         if (mailboxId.isEmpty())
         {
-            auto* refreshAccountAction = menu.addAction(QStringLiteral("Refresh Account"));
+            auto* refreshAccountAction = menu.addAction(i18n("Refresh Account"));
             connect(refreshAccountAction, &QAction::triggered, this,
                     [this, account = accountId.toStdString()]
                     { refreshAccountFromServer(account); });
             menu.exec(m_mailboxView->viewport()->mapToGlobal(position));
             return;
         }
-        auto* openAsTabAction = menu.addAction(QStringLiteral("Open as Tab"));
+        auto* openAsTabAction = menu.addAction(i18n("Open as Tab"));
         connect(openAsTabAction, &QAction::triggered, this,
                 [this] { openMailboxSelectionInTab(true); });
         menu.addSeparator();
-        auto* propertiesAction = menu.addAction(QStringLiteral("Properties…"));
+        auto* propertiesAction = menu.addAction(i18n("Properties…"));
         connect(
             propertiesAction, &QAction::triggered, this,
             [this, accountId, mailboxId]
@@ -3046,8 +3042,7 @@ namespace javelin::gui::shell
                                                        &javelin::jmap::cache::MailboxTreeItem::id);
                 if (mailbox == mailboxes.cend())
                 {
-                    m_statusBar->showMessage(QStringLiteral("The mailbox is no longer available."),
-                                             5000);
+                    m_statusBar->showMessage(i18n("The mailbox is no longer available."), 5000);
                     return;
                 }
 
@@ -3071,7 +3066,7 @@ namespace javelin::gui::shell
         const auto emailId = m_messageSelectionController->currentEmailId();
         if (!accountId.has_value() || !emailId.has_value())
         {
-            m_statusBar->showMessage(QStringLiteral("Select a message to view its source."), 3000);
+            m_statusBar->showMessage(i18n("Select a message to view its source."), 3000);
             return;
         }
 

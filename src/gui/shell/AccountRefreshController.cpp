@@ -7,6 +7,8 @@
 
 #include <QCoroTask>
 
+#include <KLocalizedString>
+
 #include <QDebug>
 
 #include <utility>
@@ -28,7 +30,7 @@ namespace javelin::gui::shell
     {
         if (m_commandPort.requestAccountSynchronization(accountId))
         {
-            Q_EMIT statusMessage(QStringLiteral("Synchronizing account..."), 0);
+            Q_EMIT statusMessage(i18n("Synchronizing account..."), 0);
             return;
         }
 
@@ -44,13 +46,13 @@ namespace javelin::gui::shell
         if (settings.loginEmail.isEmpty() || settings.apiKey.isEmpty())
         {
             Q_EMIT userInterventionRequired(
-                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."));
+                i18n("Set Session URL, Login Email, and API Key in Preferences first."));
             return;
         }
 
         m_refreshInFlight = true;
         Q_EMIT busyChanged(true);
-        Q_EMIT statusMessage(QStringLiteral("Refreshing mail from server..."), 0);
+        Q_EMIT statusMessage(i18n("Refreshing mail from server..."), 0);
         qInfo().noquote() << "GUI refresh requested" << settings.loginEmail << settings.sessionUrl;
 
         std::vector<std::string> mailboxIds;

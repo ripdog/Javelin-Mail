@@ -1,6 +1,8 @@
 #include "gui/search/AdvancedSearchDialog.h"
 #include "gui/widgets/EmailAddressLineEdit.h"
 
+#include <KLocalizedString>
+
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QLineEdit>
@@ -26,7 +28,7 @@ namespace javelin::gui::search
 
     AdvancedSearchDialog::AdvancedSearchDialog(QWidget* parent) : QDialog(parent)
     {
-        setWindowTitle(QStringLiteral("Advanced Search"));
+        setWindowTitle(i18n("Advanced Search"));
 
         m_textEdit = new QLineEdit(this);
         m_withEdit = new widgets::EmailAddressLineEdit(true, this);
@@ -38,17 +40,19 @@ namespace javelin::gui::search
         m_bodyEdit = new QLineEdit(this);
 
         auto* formLayout = new QFormLayout;
-        formLayout->addRow(QStringLiteral("Anywhere"), m_textEdit);
-        formLayout->addRow(QStringLiteral("With"), m_withEdit);
-        formLayout->addRow(QStringLiteral("From"), m_fromEdit);
-        formLayout->addRow(QStringLiteral("To"), m_toEdit);
-        formLayout->addRow(QStringLiteral("Cc"), m_ccEdit);
-        formLayout->addRow(QStringLiteral("Bcc"), m_bccEdit);
-        formLayout->addRow(QStringLiteral("Subject"), m_subjectEdit);
-        formLayout->addRow(QStringLiteral("Body"), m_bodyEdit);
+        formLayout->addRow(i18nc("@label email search field", "Anywhere"), m_textEdit);
+        formLayout->addRow(i18nc("@label email search participant", "With"), m_withEdit);
+        formLayout->addRow(i18nc("@label email sender search field", "From"), m_fromEdit);
+        formLayout->addRow(i18nc("@label email recipient search field", "To"), m_toEdit);
+        formLayout->addRow(i18nc("@label email carbon-copy search field", "Cc"), m_ccEdit);
+        formLayout->addRow(i18nc("@label email blind-carbon-copy search field", "Bcc"),
+                           m_bccEdit);
+        formLayout->addRow(i18nc("@label email subject search field", "Subject"),
+                           m_subjectEdit);
+        formLayout->addRow(i18nc("@label email body search field", "Body"), m_bodyEdit);
 
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok, this);
-        buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("Search"));
+        buttons->button(QDialogButtonBox::Ok)->setText(i18nc("@action:button", "Search"));
         connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 

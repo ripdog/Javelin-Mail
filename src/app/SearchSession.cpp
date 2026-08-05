@@ -5,6 +5,8 @@
 #include "jmap/cache/QueryService.h"
 #include <QCoroTask>
 
+#include <KLocalizedString>
+
 #include <QFutureWatcher>
 #include <QUuid>
 #include <QtConcurrentRun>
@@ -143,7 +145,7 @@ namespace javelin::app
 
     QString SearchSession::title() const
     {
-        return QStringLiteral("Search: %1").arg(QString::fromStdString(m_query));
+        return i18nc("@title search tab", "Search: %1", QString::fromStdString(m_query));
     }
 
     const MessageListPage& SearchSession::page() const

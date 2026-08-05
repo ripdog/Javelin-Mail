@@ -3,6 +3,8 @@
 #include "app/MailApplicationService.h"
 #include "jmap/OperationError.h"
 
+#include <KLocalizedString>
+
 #include <QUuid>
 
 #include <algorithm>
@@ -92,13 +94,13 @@ namespace javelin::app::undo
         if (history == nullptr || history->items.empty())
         {
             co_return failure(HistoryExecutionOutcome::DefinitiveFailure,
-                              QStringLiteral("The mail history payload is incomplete."));
+                              i18n("The mail history payload is incomplete."));
         }
         if (direction == HistoryExecutionDirection::Recover)
         {
             co_return failure(
                 HistoryExecutionOutcome::Unknown,
-                QStringLiteral("The previous mail history request requires reconciliation."));
+                i18n("The previous mail history request requires reconciliation."));
         }
 
         const auto& accountId = history->items.front().accountId;
@@ -107,7 +109,7 @@ namespace javelin::app::undo
         {
             co_return failure(
                 HistoryExecutionOutcome::DefinitiveFailure,
-                QStringLiteral("A mail history entry spans multiple accounts unexpectedly."));
+                i18n("A mail history entry spans multiple accounts unexpectedly."));
         }
 
         std::vector<std::string> emailIds;
@@ -135,8 +137,7 @@ namespace javelin::app::undo
             {
                 conflicts.push_back({
                     .objectId = QString::fromStdString(item.emailId),
-                    .summary =
-                        displayName + QStringLiteral(" is no longer available on the server."),
+                    .summary = i18n("%1 is no longer available on the server.", displayName),
                 });
                 continue;
             }
@@ -147,15 +148,14 @@ namespace javelin::app::undo
                 conflicts.push_back({
                     .objectId = QString::fromStdString(item.emailId),
                     .summary =
-                        displayName +
-                        QStringLiteral(" no longer has the expected mailbox or keyword state."),
+                        i18n("%1 no longer has the expected mailbox or keyword state.", displayName),
                 });
             }
         }
         if (!conflicts.empty())
         {
             auto result = failure(HistoryExecutionOutcome::Conflict,
-                                  QStringLiteral("The mail operation changed on another client."),
+                                  i18n("The mail operation changed on another client."),
                                   std::move(conflicts));
             result.refreshScope = {
                 .accountIds = {QString::fromStdString(accountId)},
@@ -245,8 +245,7 @@ namespace javelin::app::undo
                 {
                     auto result = failure(
                         HistoryExecutionOutcome::PartialFailure,
-                        QStringLiteral(
-                            "The partially changed mail operation could not be compensated."));
+                        i18n("The partially changed mail operation could not be compensated."));
                     result.updatedPayload = *history;
                     co_return result;
                 }
@@ -257,8 +256,7 @@ namespace javelin::app::undo
                 {
                     auto result = failure(
                         HistoryExecutionOutcome::PartialFailure,
-                        QStringLiteral(
-                            "A partially changed message no longer matches the server result."));
+                        i18n("A partially changed message no longer matches the server result."));
                     result.updatedPayload = *history;
                     co_return result;
                 }
@@ -292,16 +290,15 @@ namespace javelin::app::undo
             {
                 auto result = failure(
                     HistoryExecutionOutcome::PartialFailure,
-                    QStringLiteral("The server rejected part of the compensation request."));
+                    i18n("The server rejected part of the compensation request."));
                 result.updatedPayload = *history;
                 co_return result;
             }
 
             auto result = failure(
                 HistoryExecutionOutcome::DefinitiveFailure,
-                QStringLiteral(
-                    "The server accepted only part of the mail operation; the accepted changes "
-                    "were restored."));
+                i18n("The server accepted only part of the mail operation; the accepted changes "
+                     "were restored."));
             result.updatedPayload = *history;
             result.mayRemoveFromHistory = false;
             result.refreshScope = {
@@ -312,7 +309,7 @@ namespace javelin::app::undo
             co_return result;
         }
         auto result = failure(HistoryExecutionOutcome::DefinitiveFailure,
-                              QStringLiteral("The server rejected the mail operation."));
+                              i18n("The server rejected the mail operation."));
         result.updatedPayload = *history;
         co_return result;
     }

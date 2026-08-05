@@ -2,6 +2,8 @@
 
 #include "jmap/render/InlineMessageUrl.h"
 
+#include <KLocalizedString>
+
 #include <QAction>
 #include <QChildEvent>
 #include <QColor>
@@ -192,11 +194,11 @@ namespace javelin::gui::messageview
                 }
 
                 QMenu menu(this);
-                auto* sourceAction = menu.addAction(QStringLiteral("View Source"));
+                auto* sourceAction = menu.addAction(i18n("View Source"));
                 auto* appearanceAction =
                     menu.addAction(m_darkModeEnabled && m_darkModeEnabled()
-                                       ? QStringLiteral("Use Original Colours")
-                                       : QStringLiteral("Use Dark Appearance"));
+                                       ? i18n("Use Original Colours")
+                                       : i18n("Use Dark Appearance"));
 
                 if (request->editFlags().testFlag(QWebEngineContextMenuRequest::CanCopy))
                 {

@@ -17,6 +17,8 @@
 #include <QCoroTask>
 #include <QCoroTimer>
 
+#include <KLocalizedString>
+
 #include <QCryptographicHash>
 #include <QElapsedTimer>
 #include <QJsonDocument>
@@ -116,7 +118,7 @@ namespace javelin::app
             if (!baseline.exec() || !baseline.next())
                 return FullMailboxPageCommit{
                     baseline.lastError().text().isEmpty()
-                        ? QStringLiteral("Offline mailbox generation disappeared.")
+                        ? i18n("Offline mailbox generation disappeared.")
                         : baseline.lastError().text()};
             const auto storedQueryState = baseline.value(0).toString().toStdString();
             baseline.finish();
@@ -453,9 +455,9 @@ namespace javelin::app
                     .accountId = configuration.accountId,
                     .kind = WorkKind::FullMailSync,
                     .priority = WorkPriority::Bulk,
-                    .title = QStringLiteral("Download all mail in %1")
-                                 .arg(mailboxDisplayName(m_connection, configuration.accountId,
-                                                         mailboxId)),
+                    .title = i18n("Download all mail in %1",
+                                  mailboxDisplayName(m_connection, configuration.accountId,
+                                                     mailboxId)),
                     .checkpointJson = QStringLiteral("{}"),
                 }));
                 if (wasDisabled)
@@ -700,8 +702,8 @@ namespace javelin::app
         if (!state.value(3).isNull())
             progress.totalUnits = state.value(3).toULongLong();
         progress.detail = scopeStatus == QStringLiteral("enumerating")
-                              ? QStringLiteral("Reading mailbox contents")
-                              : QStringLiteral("Downloading complete messages");
+                              ? i18n("Reading mailbox contents")
+                              : i18n("Downloading complete messages");
         state.finish();
         static_cast<void>(
             m_scheduler.update(scope.jobId, WorkStatus::Running, progress,
@@ -869,7 +871,7 @@ namespace javelin::app
                 position = pagePosition + pageCount;
                 progress.completedUnits = position;
                 progress.totalUnits = total;
-                progress.detail = QStringLiteral("Reading mailbox contents");
+                progress.detail = i18n("Reading mailbox contents");
                 static_cast<void>(m_scheduler.update(
                     scope.jobId, WorkStatus::Running, progress,
                     checkpoint(QStringLiteral("enumerating"), position, generation)));
@@ -888,7 +890,7 @@ namespace javelin::app
                 const QString error =
                     coverage == nullptr
                         ? std::get<javelin::jmap::cache::DatabaseError>(coverageResult).message
-                        : QStringLiteral("Offline mailbox coverage disappeared.");
+                        : i18n("Offline mailbox coverage disappeared.");
                 static_cast<void>(m_scheduler.update(
                     scope.jobId, WorkStatus::Failed, progress,
                     checkpoint(QStringLiteral("enumerating"), position, generation), error));
@@ -911,7 +913,7 @@ namespace javelin::app
                     scope.jobId, WorkStatus::Failed, progress,
                     checkpoint(QStringLiteral("enumerating"), position, generation),
                     currentScopeState.lastError().text().isEmpty()
-                        ? QStringLiteral("Offline mailbox query state is unavailable.")
+                        ? i18n("Offline mailbox query state is unavailable.")
                         : currentScopeState.lastError().text()));
                 co_return;
             }
@@ -993,7 +995,7 @@ namespace javelin::app
         {
             progress.totalBytes = remainingBytes;
             progress.totalUnits = missingCount;
-            progress.detail = QStringLiteral("Waiting for free disk space");
+            progress.detail = i18n("Waiting for free disk space");
             static_cast<void>(
                 m_scheduler.update(scope.jobId, WorkStatus::WaitingForSpace, progress));
             QTimer::singleShot(std::chrono::minutes{1}, this,
@@ -1018,7 +1020,7 @@ namespace javelin::app
                     .totalUnits = missingCount,
                     .completedBytes = 0,
                     .totalBytes = remainingBytes,
-                    .detail = QStringLiteral("Downloading complete messages")};
+                    .detail = i18n("Downloading complete messages")};
         QElapsedTimer progressPersistenceTimer;
         progressPersistenceTimer.start();
         QSqlQuery missing{m_connection.database()};
@@ -1100,7 +1102,7 @@ namespace javelin::app
         if (!retention.exec())
             logDatabaseFailure(QStringLiteral("Retain synchronized mail"), retention);
 
-        progress.detail = QStringLiteral("Available offline");
+        progress.detail = i18n("Available offline");
         static_cast<void>(m_scheduler.update(
             scope.jobId, WorkStatus::Complete, progress,
             checkpoint(QStringLiteral("complete"), progress.completedUnits, generation)));

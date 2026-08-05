@@ -1,10 +1,39 @@
 #include "app/WorkTaskModel.h"
 
+#include <KLocalizedString>
+
 #include <algorithm>
 #include <chrono>
 
 namespace javelin::app
 {
+    namespace
+    {
+        [[nodiscard]] QString localizedStatus(const WorkStatus status)
+        {
+            switch (status)
+            {
+            case WorkStatus::Queued:
+                return i18nc("@item background task state", "Queued");
+            case WorkStatus::Running:
+                return i18nc("@item background task state", "Running");
+            case WorkStatus::Paused:
+                return i18nc("@item background task state", "Paused");
+            case WorkStatus::WaitingForSpace:
+                return i18nc("@item background task state", "Waiting for space");
+            case WorkStatus::WaitingForNetwork:
+                return i18nc("@item background task state", "Waiting for network");
+            case WorkStatus::WaitingForAuth:
+                return i18nc("@item background task state", "Waiting for sign-in");
+            case WorkStatus::Failed:
+                return i18nc("@item background task state", "Failed");
+            case WorkStatus::Complete:
+                return i18nc("@item background task state", "Complete");
+            }
+            return {};
+        }
+    } // namespace
+
     WorkTaskModel::WorkTaskModel(WorkTaskPort& taskPort, QObject* parent)
         : QAbstractTableModel(parent), m_taskPort(taskPort)
     {
@@ -43,7 +72,7 @@ namespace javelin::app
         case 0:
             return item.title;
         case 1:
-            return QString::fromStdString(std::string{toString(item.status)});
+            return localizedStatus(item.status);
         case 2:
             if (item.progress.totalUnits && *item.progress.totalUnits > 0)
                 return QStringLiteral("%1 / %2")
@@ -68,15 +97,15 @@ namespace javelin::app
         switch (section)
         {
         case 0:
-            return QStringLiteral("Task");
+            return i18nc("@title:column", "Task");
         case 1:
-            return QStringLiteral("State");
+            return i18nc("@title:column", "State");
         case 2:
-            return QStringLiteral("Progress");
+            return i18nc("@title:column", "Progress");
         case 3:
-            return QStringLiteral("Details");
+            return i18nc("@title:column", "Details");
         case 4:
-            return QStringLiteral("Actions");
+            return i18nc("@title:column", "Actions");
         default:
             return {};
         }

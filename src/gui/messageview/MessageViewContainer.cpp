@@ -10,6 +10,8 @@
 
 #include <QCoroTask>
 
+#include <KLocalizedString>
+
 #include <QAction>
 #include <QApplication>
 #include <QDateTime>
@@ -117,7 +119,7 @@ namespace javelin::gui::messageview
         {
             if (addresses.empty())
             {
-                return QStringLiteral("(none)");
+                return i18nc("@item no email addresses", "(none)");
             }
 
             QStringList labels;
@@ -240,8 +242,7 @@ namespace javelin::gui::messageview
                 openButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
                 openButton->setIcon(attachmentIcon(attachment));
                 openButton->setText(fileName);
-                openButton->setToolTip(
-                    QStringLiteral("Open %1 in default application").arg(fileName));
+                openButton->setToolTip(i18n("Open %1 in default application", fileName));
                 openButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
                 connect(openButton, &QToolButton::clicked, this,
                         [action = std::move(openAction)]
@@ -314,7 +315,7 @@ namespace javelin::gui::messageview
 
                 const auto preview = message.preview.has_value()
                                          ? QString::fromStdString(*message.preview)
-                                         : QStringLiteral("(no preview available)");
+                                         : i18n("(no preview available)");
                 auto* previewLabel = new QLabel(preview, this);
                 previewLabel->setWordWrap(true);
                 previewLabel->setMaximumHeight(previewLabel->fontMetrics().lineSpacing() * 2 + 6);
@@ -456,17 +457,17 @@ namespace javelin::gui::messageview
         makeLabelSelectable(m_remoteContentStatusLabel);
 
         m_permitSenderRemoteContentButton = new QToolButton(m_bodyControlsWidget);
-        m_permitSenderRemoteContentButton->setText(QStringLiteral("Always load sender"));
+        m_permitSenderRemoteContentButton->setText(i18n("Always load sender"));
         connect(m_permitSenderRemoteContentButton, &QToolButton::clicked, this,
                 &MessageViewContainer::permitRemoteContentForCurrentSender);
 
         m_permitDomainRemoteContentButton = new QToolButton(m_bodyControlsWidget);
-        m_permitDomainRemoteContentButton->setText(QStringLiteral("Always load domain"));
+        m_permitDomainRemoteContentButton->setText(i18n("Always load domain"));
         connect(m_permitDomainRemoteContentButton, &QToolButton::clicked, this,
                 &MessageViewContainer::permitRemoteContentForCurrentDomain);
 
         m_remoteContentButton = new QToolButton(m_bodyControlsWidget);
-        m_remoteContentButton->setText(QStringLiteral("Load remote content"));
+        m_remoteContentButton->setText(i18n("Load remote content"));
         m_remoteContentButton->setCheckable(true);
         connect(m_remoteContentButton, &QToolButton::clicked, this,
                 [this](const bool checked)
@@ -495,20 +496,20 @@ namespace javelin::gui::messageview
         makeLabelSelectable(m_languageStatusLabel);
 
         m_translateButton = new QToolButton(m_languageBannerWidget);
-        m_translateButton->setText(QStringLiteral("Translate"));
+        m_translateButton->setText(i18nc("@action:button", "Translate"));
         connect(m_translateButton, &QToolButton::clicked, this,
                 [this]() { translateCurrentMessage(); });
 
         m_translateOptionsButton = new QToolButton(m_languageBannerWidget);
-        m_translateOptionsButton->setText(QStringLiteral("Options"));
+        m_translateOptionsButton->setText(i18nc("@action:button", "Options"));
         m_translateOptionsButton->setPopupMode(QToolButton::InstantPopup);
-        m_translateOptionsButton->setToolTip(QStringLiteral("Translation options"));
+        m_translateOptionsButton->setToolTip(i18n("Translation options"));
         auto* translateMenu = new QMenu(m_translateOptionsButton);
-        auto* autoSenderAction = translateMenu->addAction(QStringLiteral("Auto-translate sender"));
+        auto* autoSenderAction = translateMenu->addAction(i18n("Auto-translate sender"));
         autoSenderAction->setCheckable(true);
         autoSenderAction->setData(QStringLiteral("sender"));
         auto* autoDomainAction =
-            translateMenu->addAction(QStringLiteral("Auto-translate sender domain"));
+            translateMenu->addAction(i18n("Auto-translate sender domain"));
         autoDomainAction->setCheckable(true);
         autoDomainAction->setData(QStringLiteral("domain"));
         connect(autoSenderAction, &QAction::toggled, this,
@@ -656,7 +657,7 @@ namespace javelin::gui::messageview
         m_attachmentStatusLabel->setParent(m_attachmentHeaderWidget);
 
         m_saveAllAttachmentsButton = new QToolButton(m_attachmentHeaderWidget);
-        m_saveAllAttachmentsButton->setText(QStringLiteral("Save All"));
+        m_saveAllAttachmentsButton->setText(i18nc("@action:button", "Save All"));
         connect(m_saveAllAttachmentsButton, &QToolButton::clicked, this,
                 [this]
                 {
@@ -692,7 +693,7 @@ namespace javelin::gui::messageview
                 {
                     if (m_snapshot.has_value())
                         m_fromLabel->setText(
-                            QStringLiteral("From: %1").arg(contactAwareSenderLabel()));
+                            i18nc("@label email sender", "From: %1", contactAwareSenderLabel()));
                 });
         connect(&m_translationService,
                 &javelin::gui::translation::TranslationService::localModelDownloadProgress, this,
@@ -712,14 +713,12 @@ namespace javelin::gui::messageview
                             100.0 * static_cast<double>(received) / static_cast<double>(total), 0.0,
                             100.0));
                         m_translationProgressText =
-                            QStringLiteral("Downloading %1 translation model… %2%")
-                                .arg(direction)
-                                .arg(percentage);
+                            i18n("Downloading %1 translation model… %2%", direction, percentage);
                     }
                     else
                     {
                         m_translationProgressText =
-                            QStringLiteral("Downloading %1 translation model…").arg(direction);
+                            i18n("Downloading %1 translation model…", direction);
                     }
                     updateLanguageBanner();
                 });
@@ -901,8 +900,7 @@ namespace javelin::gui::messageview
                     else
                     {
                         m_loading = false;
-                        m_errorMessage =
-                            QStringLiteral("The cached message content could not be loaded.");
+                        m_errorMessage = i18n("The cached message content could not be loaded.");
                         updatePresentation();
                     }
                     return;
@@ -994,9 +992,8 @@ namespace javelin::gui::messageview
         if (hasBlockedRemoteContent)
         {
             m_remoteContentStatusLabel->setText(
-                QStringLiteral("Blocked remote resources: %1")
-                    .arg(static_cast<qulonglong>(
-                        m_snapshot->htmlRenderDocument->blockedRemoteResourceCount)));
+                i18np("Blocked remote resource: %1", "Blocked remote resources: %1",
+                      m_snapshot->htmlRenderDocument->blockedRemoteResourceCount));
         }
         else
         {
@@ -1004,15 +1001,15 @@ namespace javelin::gui::messageview
         }
         m_permitSenderRemoteContentButton->setToolTip(
             currentSenderAddress().isEmpty()
-                ? QStringLiteral("No sender address is available")
-                : QStringLiteral("Always load remote content from this sender"));
+                ? i18n("No sender address is available")
+                : i18n("Always load remote content from this sender"));
         m_permitDomainRemoteContentButton->setToolTip(
             currentSenderDomain().isEmpty()
-                ? QStringLiteral("No sender domain is available")
-                : QStringLiteral("Always load remote content from this sender domain"));
+                ? i18n("No sender domain is available")
+                : i18n("Always load remote content from this sender domain"));
         m_remoteContentButton->setText(m_htmlView->remoteContentEnabled()
-                                           ? QStringLiteral("Hide remote content")
-                                           : QStringLiteral("Load remote content"));
+                                           ? i18n("Hide remote content")
+                                           : i18n("Load remote content"));
     }
 
     void MessageViewContainer::updateLanguageBanner()
@@ -1036,16 +1033,16 @@ namespace javelin::gui::messageview
 
         const auto targetName = languageName(m_translationService.targetLanguage().toStdString());
         m_translateButton->setEnabled(!m_translationInProgress);
-        m_translateButton->setText(m_messageTranslated ? QStringLiteral("Show original")
-                                                       : QStringLiteral("Translate"));
+        m_translateButton->setText(m_messageTranslated ? i18n("Show original")
+                                                       : i18nc("@action:button", "Translate"));
         m_translateButton->setToolTip(
-            m_messageTranslated ? QStringLiteral("Restore the original message text")
-                                : QStringLiteral("Translate this message to %1").arg(targetName));
+            m_messageTranslated ? i18n("Restore the original message text")
+                                : i18n("Translate this message to %1", targetName));
 
         if (m_translationInProgress)
         {
             m_languageStatusLabel->setText(m_translationProgressText.isEmpty()
-                                               ? QStringLiteral("Translating message…")
+                                               ? i18n("Translating message…")
                                                : m_translationProgressText);
             return;
         }
@@ -1059,15 +1056,14 @@ namespace javelin::gui::messageview
         if (m_messageTranslated)
         {
             m_languageStatusLabel->setText(
-                m_translationWasAutomatic
-                    ? QStringLiteral("Auto-translated to %1.").arg(targetName)
-                    : QStringLiteral("Message translated to %1.").arg(targetName));
+                m_translationWasAutomatic ? i18n("Auto-translated to %1.", targetName)
+                                          : i18n("Message translated to %1.", targetName));
             return;
         }
 
         const auto& detection = *m_languageDetection;
-        m_languageStatusLabel->setText(QStringLiteral("This message appears to be in %1.")
-                                           .arg(languageName(detection.languageCode)));
+        m_languageStatusLabel->setText(
+            i18n("This message appears to be in %1.", languageName(detection.languageCode)));
     }
 
     void MessageViewContainer::updateTranslateOptionsMenu()
@@ -1103,8 +1099,7 @@ namespace javelin::gui::messageview
         if (const auto error =
                 m_translationService.setAutoTranslateSender(currentSenderAddress(), enabled))
         {
-            m_translationError =
-                QStringLiteral("Could not save translation rule: %1").arg(error->message);
+            m_translationError = i18n("Could not save translation rule: %1", error->message);
             updateLanguageBanner();
             return;
         }
@@ -1113,8 +1108,7 @@ namespace javelin::gui::messageview
             if (const auto error =
                     m_translationService.setAutoTranslateDomain(currentSenderDomain(), false))
             {
-                m_translationError =
-                    QStringLiteral("Could not save translation rule: %1").arg(error->message);
+                m_translationError = i18n("Could not save translation rule: %1", error->message);
                 updateLanguageBanner();
                 return;
             }
@@ -1129,8 +1123,7 @@ namespace javelin::gui::messageview
         if (const auto error =
                 m_translationService.setAutoTranslateDomain(currentSenderDomain(), enabled))
         {
-            m_translationError =
-                QStringLiteral("Could not save translation rule: %1").arg(error->message);
+            m_translationError = i18n("Could not save translation rule: %1", error->message);
             updateLanguageBanner();
             return;
         }
@@ -1139,8 +1132,7 @@ namespace javelin::gui::messageview
             if (const auto error =
                     m_translationService.setAutoTranslateSender(currentSenderAddress(), false))
             {
-                m_translationError =
-                    QStringLiteral("Could not save translation rule: %1").arg(error->message);
+                m_translationError = i18n("Could not save translation rule: %1", error->message);
                 updateLanguageBanner();
                 return;
             }
@@ -1253,8 +1245,7 @@ namespace javelin::gui::messageview
                     if (const auto* error =
                             std::get_if<javelin::gui::translation::TranslationError>(&result))
                     {
-                        m_translationError =
-                            QStringLiteral("Translation failed: %1").arg(error->message);
+                        m_translationError = i18n("Translation failed: %1", error->message);
                         updateLanguageBanner();
                         return;
                     }
@@ -1264,7 +1255,7 @@ namespace javelin::gui::messageview
                     if (!applyTranslatedChunks(translatedChunks))
                     {
                         m_translationError =
-                            QStringLiteral("Translation failed: no translated text was returned.");
+                            i18n("Translation failed: no translated text was returned.");
                         updateLanguageBanner();
                         return;
                     }
@@ -1295,7 +1286,7 @@ namespace javelin::gui::messageview
                     {
                         m_translationInProgress = false;
                         m_translationError =
-                            QStringLiteral("Translation failed: no message text was found.");
+                            i18n("Translation failed: no message text was found.");
                         updateLanguageBanner();
                         return;
                     }
@@ -1406,12 +1397,12 @@ namespace javelin::gui::messageview
         {
             m_detailLabel->setVisible(true);
             m_metadataWidget->setVisible(false);
-            m_titleLabel->setText(QStringLiteral("Choose an account"));
-            m_detailLabel->setText(QStringLiteral("Select an account to browse your mail."));
-            m_placeholderTitleLabel->setText(QStringLiteral("Ready when you are"));
+            m_titleLabel->setText(i18n("Choose an account"));
+            m_detailLabel->setText(i18n("Select an account to browse your mail."));
+            m_placeholderTitleLabel->setText(i18n("Ready when you are"));
             m_placeholderDetailLabel->setText(
-                QStringLiteral("Message details will appear here after you choose an account, "
-                               "mailbox, and message."));
+                i18n("Message details will appear here after you choose an account, mailbox, and "
+                     "message."));
             setActiveView(ActiveView::Placeholder);
             return;
         }
@@ -1420,8 +1411,8 @@ namespace javelin::gui::messageview
         {
             m_detailLabel->setVisible(true);
             m_metadataWidget->setVisible(false);
-            m_titleLabel->setText(QStringLiteral("%1 messages selected")
-                                      .arg(static_cast<qulonglong>(m_multipleMessages.size())));
+            m_titleLabel->setText(i18np("%1 message selected", "%1 messages selected",
+                                        m_multipleMessages.size()));
             m_detailLabel->clear();
             m_bodyControlsWidget->setVisible(false);
             setActiveView(ActiveView::Multiple);
@@ -1432,12 +1423,12 @@ namespace javelin::gui::messageview
         {
             m_detailLabel->setVisible(true);
             m_metadataWidget->setVisible(false);
-            m_titleLabel->setText(QStringLiteral("Choose a mailbox"));
+            m_titleLabel->setText(i18n("Choose a mailbox"));
             m_detailLabel->setText(
-                QStringLiteral("Select a mailbox in the left pane to populate the message list."));
-            m_placeholderTitleLabel->setText(QStringLiteral("Choose a mailbox"));
+                i18n("Select a mailbox in the left pane to populate the message list."));
+            m_placeholderTitleLabel->setText(i18n("Choose a mailbox"));
             m_placeholderDetailLabel->setText(
-                QStringLiteral("Choose a mailbox to see its messages here."));
+                i18n("Choose a mailbox to see its messages here."));
             setActiveView(ActiveView::Placeholder);
             return;
         }
@@ -1446,11 +1437,11 @@ namespace javelin::gui::messageview
         {
             m_detailLabel->setVisible(true);
             m_metadataWidget->setVisible(false);
-            m_titleLabel->setText(QStringLiteral("Choose a message"));
+            m_titleLabel->setText(i18n("Choose a message"));
             m_detailLabel->setText(
-                QStringLiteral("Select a message in the center pane to open it here."));
-            m_placeholderTitleLabel->setText(QStringLiteral("Choose a message"));
-            m_placeholderDetailLabel->setText(QStringLiteral("Select a message to read it here."));
+                i18n("Select a message in the center pane to open it here."));
+            m_placeholderTitleLabel->setText(i18n("Choose a message"));
+            m_placeholderDetailLabel->setText(i18n("Select a message to read it here."));
             setActiveView(ActiveView::Placeholder);
             return;
         }
@@ -1461,29 +1452,28 @@ namespace javelin::gui::messageview
             m_metadataWidget->setVisible(false);
             if (!m_errorMessage.isEmpty())
             {
-                m_titleLabel->setText(QStringLiteral("Could not load message"));
+                m_titleLabel->setText(i18n("Could not load message"));
                 m_detailLabel->setText(m_errorMessage);
-                m_placeholderTitleLabel->setText(QStringLiteral("Message retrieval failed"));
+                m_placeholderTitleLabel->setText(i18n("Message retrieval failed"));
                 m_placeholderDetailLabel->setText(m_errorMessage);
             }
             else if (m_loading)
             {
-                m_titleLabel->setText(QStringLiteral("Loading message"));
+                m_titleLabel->setText(i18n("Loading message"));
                 m_detailLabel->clear();
                 m_detailLabel->setVisible(false);
-                m_placeholderTitleLabel->setText(QStringLiteral("Loading message"));
+                m_placeholderTitleLabel->setText(i18n("Loading message"));
                 m_placeholderDetailLabel->clear();
                 m_placeholderDetailLabel->setVisible(false);
                 m_loadingIndicator->setVisible(true);
             }
             else
             {
-                m_titleLabel->setText(QStringLiteral("Message is unavailable"));
-                m_detailLabel->setText(
-                    QStringLiteral("This message is not available on this device yet."));
-                m_placeholderTitleLabel->setText(QStringLiteral("Message unavailable"));
-                m_placeholderDetailLabel->setText(QStringLiteral(
-                    "Try refreshing the mailbox or reopening the message in a moment."));
+                m_titleLabel->setText(i18n("Message is unavailable"));
+                m_detailLabel->setText(i18n("This message is not available on this device yet."));
+                m_placeholderTitleLabel->setText(i18n("Message unavailable"));
+                m_placeholderDetailLabel->setText(
+                    i18n("Try refreshing the mailbox or reopening the message in a moment."));
             }
             setActiveView(ActiveView::Placeholder);
             return;
@@ -1495,10 +1485,13 @@ namespace javelin::gui::messageview
         m_detailLabel->clear();
         m_detailLabel->setVisible(false);
         m_metadataWidget->setVisible(true);
-        m_fromLabel->setText(QStringLiteral("From: %1").arg(contactAwareSenderLabel()));
-        m_toLabel->setText(QStringLiteral("To: %1").arg(addressListLabel(m_snapshot->email.to)));
-        m_receivedLabel->setText(QStringLiteral("Received: %1")
-                                     .arg(formatReceivedDateTime(m_snapshot->email.receivedAt)));
+        m_fromLabel->setText(
+            i18nc("@label email sender", "From: %1", contactAwareSenderLabel()));
+        m_toLabel->setText(i18nc("@label email recipients", "To: %1",
+                                 addressListLabel(m_snapshot->email.to)));
+        m_receivedLabel->setText(
+            i18nc("@label email received date", "Received: %1",
+                  formatReceivedDateTime(m_snapshot->email.receivedAt)));
 
         if (reloadBody && m_snapshot->plainTextBody.has_value())
         {
@@ -1542,19 +1535,19 @@ namespace javelin::gui::messageview
         {
             if (m_loading)
             {
-                m_titleLabel->setText(QStringLiteral("Loading message"));
+                m_titleLabel->setText(i18n("Loading message"));
                 m_detailLabel->clear();
                 m_detailLabel->setVisible(false);
-                m_placeholderTitleLabel->setText(QStringLiteral("Loading message"));
+                m_placeholderTitleLabel->setText(i18n("Loading message"));
                 m_placeholderDetailLabel->clear();
                 m_placeholderDetailLabel->setVisible(false);
                 m_loadingIndicator->setVisible(true);
             }
             else
             {
-                m_placeholderTitleLabel->setText(QStringLiteral("Nothing to display"));
-                m_placeholderDetailLabel->setText(QStringLiteral(
-                    "This message does not currently have a readable body available."));
+                m_placeholderTitleLabel->setText(i18n("Nothing to display"));
+                m_placeholderDetailLabel->setText(
+                    i18n("This message does not currently have a readable body available."));
             }
             setActiveView(ActiveView::Placeholder);
         }
@@ -1678,9 +1671,8 @@ namespace javelin::gui::messageview
             const auto fileName = attachmentName(*attachment);
             const auto saveToolTip =
                 attachmentSaveSettings.alwaysAsk
-                    ? QStringLiteral("Save %1 to selected location").arg(fileName)
-                    : QStringLiteral("Save %1 to %2")
-                          .arg(fileName, attachmentSaveSettings.directory);
+                    ? i18n("Save %1 to selected location", fileName)
+                    : i18n("Save %1 to %2", fileName, attachmentSaveSettings.directory);
             auto* tile = new AttachmentTile(
                 *attachment,
                 [this, partId = QString::fromStdString(attachment->partId)]
@@ -1774,18 +1766,14 @@ namespace javelin::gui::messageview
         const auto attachments = visibleAttachments(m_snapshot);
         if (!attachments.empty())
         {
-            const auto attachmentCount = static_cast<qulonglong>(attachments.size());
-            return QStringLiteral("%1 %2")
-                .arg(attachmentCount)
-                .arg(attachmentCount == 1 ? QStringLiteral("attachment")
-                                          : QStringLiteral("attachments"));
+            return i18np("%1 attachment", "%1 attachments", attachments.size());
         }
 
         if (m_snapshot->htmlRenderDocument.has_value() &&
             m_snapshot->htmlRenderDocument->inlineResourceCount > 0)
         {
-            return QStringLiteral("Inline resources: %1")
-                .arg(static_cast<qulonglong>(m_snapshot->htmlRenderDocument->inlineResourceCount));
+            return i18np("Inline resource: %1", "Inline resources: %1",
+                         m_snapshot->htmlRenderDocument->inlineResourceCount);
         }
 
         return {};
