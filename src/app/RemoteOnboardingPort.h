@@ -21,6 +21,8 @@ namespace javelin::app
         authenticateManually(ManualAuthenticationRequest request) override;
         [[nodiscard]] QCoro::Task<OnboardingCallResult<OAuthRevocationResult>>
         revokeOAuth(OAuthRevocationRequest request) override;
+        [[nodiscard]] QCoro::Task<OnboardingCallResult<OAuthCancelResult>>
+        cancelOAuth(OAuthCancelRequest request) override;
 
       private:
         RemoteActionClient& m_client;

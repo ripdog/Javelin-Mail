@@ -60,7 +60,10 @@ namespace javelin::app
                     .oauthIssuer = settings.oauthIssuer.toStdString(),
                     .oauthResource = settings.oauthResource.toStdString(),
                     .oauthScope = settings.oauthScope.toStdString(),
-                    .revocationEndpoint = settings.revocationEndpoint.toStdString()};
+                    .revocationEndpoint = settings.revocationEndpoint.toStdString(),
+                    .registrationClientUri = settings.registrationClientUri.toStdString(),
+                    .registrationAccessToken =
+                        settings.registrationAccessToken.toStdString()};
         }
 
         [[nodiscard]] const MailboxSelectionSettings*

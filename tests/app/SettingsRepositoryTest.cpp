@@ -221,6 +221,9 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
                         .oauthResource = QStringLiteral("https://mail.example.test/jmap"),
                         .oauthScope = QStringLiteral("mail offline_access"),
                         .revocationEndpoint = QStringLiteral("https://auth.example.test/revoke"),
+                        .registrationClientUri =
+                            QStringLiteral("https://auth.example.test/register/client-id"),
+                        .registrationAccessToken = QStringLiteral("registration-token"),
                         .tokenExpiresAtEpochSeconds = 1'785'784'100,
                         .reauthenticationRequired = true,
                         .cachedAccountIds = {}}};
@@ -262,6 +265,10 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
     CHECK(reloaded->accounts.front().oauthScope == QStringLiteral("mail offline_access"));
     CHECK(reloaded->accounts.front().revocationEndpoint ==
           QStringLiteral("https://auth.example.test/revoke"));
+    CHECK(reloaded->accounts.front().registrationClientUri ==
+          QStringLiteral("https://auth.example.test/register/client-id"));
+    CHECK(reloaded->accounts.front().registrationAccessToken ==
+          QStringLiteral("registration-token"));
     CHECK(reloaded->accounts.front().tokenExpiresAtEpochSeconds == 1'785'784'100);
     CHECK(reloaded->accounts.front().reauthenticationRequired);
     REQUIRE(reloaded->syncedMailboxSelections.size() == 1);

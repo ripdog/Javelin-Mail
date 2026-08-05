@@ -315,6 +315,8 @@ namespace javelin::app
             return QStringLiteral("onboarding_authenticate_manually");
         case Kind::OnboardingRevokeOAuth:
             return QStringLiteral("onboarding_revoke_oauth");
+        case Kind::OnboardingCancelOAuth:
+            return QStringLiteral("onboarding_cancel_oauth");
         }
         return QStringLiteral("unknown");
     }

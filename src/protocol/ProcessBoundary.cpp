@@ -225,6 +225,14 @@ namespace javelin::protocol
                             account.revocationEndpoint,
                             QStringLiteral("update.accounts.revocationEndpoint"), limits))
                         return error;
+                    if (auto error = optionalStringError(
+                            account.registrationClientUri,
+                            QStringLiteral("update.accounts.registrationClientUri"), limits))
+                        return error;
+                    if (auto error = optionalStringError(
+                            account.registrationAccessToken,
+                            QStringLiteral("update.accounts.registrationAccessToken"), limits))
+                        return error;
                     if (account.tokenExpiresAtEpochSeconds < 0)
                     {
                         return BoundaryError{
@@ -480,7 +488,9 @@ namespace javelin::protocol
                                     stringSize(account.oauthIssuer) +
                                     stringSize(account.oauthResource) +
                                     stringSize(account.oauthScope) +
-                                    stringSize(account.revocationEndpoint) + 1;
+                                    stringSize(account.revocationEndpoint) +
+                                    stringSize(account.registrationClientUri) +
+                                    stringSize(account.registrationAccessToken) + 1;
                             for (const auto& accountId : account.cachedAccountIds)
                                 size += stringSize(accountId);
                         }

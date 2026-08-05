@@ -42,6 +42,7 @@ namespace javelin::gui::onboarding
 
       protected:
         void accept() override;
+        void reject() override;
 
       private:
         void buildWelcomePage();
@@ -54,6 +55,7 @@ namespace javelin::gui::onboarding
         void beginManualAuthentication();
         void handleBrowserCallback();
         void completeAuthentication(javelin::app::AccountAuthenticationResult result);
+        void cancelOAuthFlow();
         void showFeatures(QListWidget& list,
                           const std::vector<javelin::app::OnboardingFeature>& features) const;
         void setBusy(bool busy, const QString& message = {});

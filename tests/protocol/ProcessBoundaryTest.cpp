@@ -276,6 +276,9 @@ namespace
                      .oauthResource = QStringLiteral("https://mail.example.com/jmap"),
                      .oauthScope = QStringLiteral("mail offline_access"),
                      .revocationEndpoint = QStringLiteral("https://auth.example.com/revoke"),
+                     .registrationClientUri =
+                         QStringLiteral("https://auth.example.com/register/client-id"),
+                     .registrationAccessToken = QStringLiteral("registration-token"),
                      .tokenExpiresAtEpochSeconds = 1'785'784'100,
                      .reauthenticationRequired = true,
                      .cachedAccountIds = {QStringLiteral("account-1")},
@@ -306,6 +309,9 @@ namespace
         CHECK(account.oauthResource == QStringLiteral("https://mail.example.com/jmap"));
         CHECK(account.oauthScope == QStringLiteral("mail offline_access"));
         CHECK(account.revocationEndpoint == QStringLiteral("https://auth.example.com/revoke"));
+        CHECK(account.registrationClientUri ==
+              QStringLiteral("https://auth.example.com/register/client-id"));
+        CHECK(account.registrationAccessToken == QStringLiteral("registration-token"));
         CHECK(account.tokenExpiresAtEpochSeconds == 1'785'784'100);
         CHECK(account.reauthenticationRequired);
         REQUIRE(handler.receivedSettingsUpdate->update.workspace.has_value());
@@ -787,6 +793,7 @@ TEST_CASE("socket endpoint admits every onboarding remote action", "[protocol][s
         RemoteActionKind::OnboardingFinishOAuth,
         RemoteActionKind::OnboardingAuthenticateManually,
         RemoteActionKind::OnboardingRevokeOAuth,
+        RemoteActionKind::OnboardingCancelOAuth,
     };
     for (const auto action : actions)
     {

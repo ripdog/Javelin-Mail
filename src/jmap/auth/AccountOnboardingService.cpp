@@ -78,6 +78,8 @@ namespace javelin::jmap::auth::detail
         std::string clientId;
         std::optional<std::string> tokenEndpointAuthMethod;
         std::optional<std::vector<std::string>> redirectUris;
+        std::optional<std::string> registrationClientUri;
+        std::optional<std::string> registrationAccessToken;
     };
 
     struct OAuthErrorResponse
@@ -139,7 +141,9 @@ template <> struct glz::meta<javelin::jmap::auth::detail::RegistrationResponse>
     using T = javelin::jmap::auth::detail::RegistrationResponse;
     static constexpr auto value =
         glz::object("client_id", &T::clientId, "token_endpoint_auth_method",
-                    &T::tokenEndpointAuthMethod, "redirect_uris", &T::redirectUris);
+                    &T::tokenEndpointAuthMethod, "redirect_uris", &T::redirectUris,
+                    "registration_client_uri", &T::registrationClientUri,
+                    "registration_access_token", &T::registrationAccessToken);
 };
 
 template <> struct glz::meta<javelin::jmap::auth::detail::OAuthErrorResponse>
@@ -248,6 +252,28 @@ namespace javelin::jmap::auth
                                  QByteArrayLiteral("application/json"));
             request.setRawHeader(QByteArrayLiteral("Content-Type"), contentType);
             auto* reply = manager.post(request, body);
+            co_await qCoro(reply).waitForFinished();
+            const auto cleanup = qScopeGuard([reply] { reply->deleteLater(); });
+            static_cast<void>(cleanup);
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            co_return HttpResult{.statusCode = status,
+                                 .body = reply->readAll(),
+                                 .authenticateHeader = {},
+                                 .error = status == 0 ? reply->errorString() : QString{}};
+        }
+
+        [[nodiscard]] QCoro::Task<HttpResult>
+        remove(QNetworkAccessManager& manager, const QUrl& url, const QByteArray& bearer)
+        {
+            QNetworkRequest request{url};
+            request.setTransferTimeout(30'000);
+            request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                                 QNetworkRequest::SameOriginRedirectPolicy);
+            request.setRawHeader(QByteArrayLiteral("Accept"),
+                                 QByteArrayLiteral("application/json"));
+            request.setRawHeader(QByteArrayLiteral("Authorization"),
+                                 QByteArrayLiteral("Bearer ") + bearer);
+            auto* reply = manager.deleteResource(request);
             co_await qCoro(reply).waitForFinished();
             const auto cleanup = qScopeGuard([reply] { reply->deleteLater(); });
             static_cast<void>(cleanup);
@@ -504,6 +530,23 @@ namespace javelin::jmap::auth
             return result;
         }
 
+        [[nodiscard]] QCoro::Task<std::optional<QString>>
+        deleteClientRegistration(QNetworkAccessManager& manager, const QString& clientUri,
+                                 const QString& accessToken)
+        {
+            if (clientUri.isEmpty() && accessToken.isEmpty())
+                co_return std::nullopt;
+            if (clientUri.isEmpty() || accessToken.isEmpty() ||
+                !detail::isSecureOAuthUrl(QUrl{clientUri}))
+                co_return QStringLiteral("OAuth client-registration cleanup information is incomplete.");
+
+            const auto response =
+                co_await remove(manager, QUrl{clientUri}, accessToken.toUtf8());
+            if (response.statusCode >= 200 && response.statusCode < 300)
+                co_return std::nullopt;
+            co_return response.error.isEmpty() ? oauthErrorText(response.body) : response.error;
+        }
+
         [[nodiscard]] javelin::app::OAuthRefreshResult
         refreshError(QString error, const javelin::app::OAuthRefreshFailureKind kind)
         {
@@ -529,6 +572,8 @@ namespace javelin::jmap::auth
                     .resourceUrl = {},
                     .scope = {},
                     .revocationEndpoint = {},
+                    .registrationClientUri = {},
+                    .registrationAccessToken = {},
                     .expiresAtEpochSeconds = 0,
                     .features = {}};
         }
@@ -539,12 +584,28 @@ namespace javelin::jmap::auth
     {
     }
 
-    void AccountOnboardingService::pruneExpiredFlows()
+    QCoro::Task<void> AccountOnboardingService::pruneExpiredFlows()
     {
         constexpr qint64 flowLifetimeSeconds = 10 * 60;
         const auto cutoff = QDateTime::currentSecsSinceEpoch() - flowLifetimeSeconds;
-        std::erase_if(m_pendingFlows, [cutoff](const auto& entry)
-                      { return entry.second.createdAtEpochSeconds < cutoff; });
+        std::vector<std::pair<QString, QString>> registrations;
+        std::erase_if(
+            m_pendingFlows,
+            [cutoff, &registrations](const auto& entry)
+            {
+                if (entry.second.createdAtEpochSeconds >= cutoff)
+                    return false;
+                registrations.emplace_back(entry.second.registrationClientUri,
+                                           entry.second.registrationAccessToken);
+                return true;
+            });
+        for (const auto& [clientUri, accessToken] : registrations)
+        {
+            if (const auto error = co_await deleteClientRegistration(
+                    m_networkAccessManager, clientUri, accessToken))
+                qCWarning(oauthLog).noquote()
+                    << "OAuth expired-flow registration cleanup failed" << *error;
+        }
     }
 
     QCoro::Task<javelin::app::AccountDiscoveryResult>
@@ -690,7 +751,7 @@ namespace javelin::jmap::auth
     AccountOnboardingService::startOAuth(javelin::app::OAuthStartRequest request)
     {
         javelin::app::OAuthStartResult result;
-        pruneExpiredFlows();
+        co_await pruneExpiredFlows();
         constexpr std::size_t maximumPendingFlows = 8;
         if (m_pendingFlows.size() >= maximumPendingFlows)
         {
@@ -756,12 +817,26 @@ namespace javelin::jmap::auth
             co_return result;
         }
 
+        const auto registrationClientUri =
+            registered->registrationClientUri.has_value()
+                ? QString::fromStdString(*registered->registrationClientUri)
+                : QString{};
+        const auto registrationAccessToken =
+            registered->registrationAccessToken.has_value()
+                ? QString::fromStdString(*registered->registrationAccessToken)
+                : QString{};
+        const bool manageableRegistration =
+            !registrationClientUri.isEmpty() && !registrationAccessToken.isEmpty() &&
+            detail::isSecureOAuthUrl(QUrl{registrationClientUri});
         PendingOAuthFlow flow{
             .discovery = std::move(request.discovery),
             .redirectUri = std::move(request.redirectUri),
             .clientId = QString::fromStdString(registered->clientId),
             .codeVerifier = randomUrlSafe(48),
             .state = randomUrlSafe(32),
+            .registrationClientUri = manageableRegistration ? registrationClientUri : QString{},
+            .registrationAccessToken =
+                manageableRegistration ? registrationAccessToken : QString{},
             .createdAtEpochSeconds = QDateTime::currentSecsSinceEpoch(),
         };
         const auto challenge = QString::fromLatin1(
@@ -792,7 +867,7 @@ namespace javelin::jmap::auth
     QCoro::Task<javelin::app::AccountAuthenticationResult>
     AccountOnboardingService::finishOAuth(javelin::app::OAuthFinishRequest request)
     {
-        pruneExpiredFlows();
+        co_await pruneExpiredFlows();
         const auto found = m_pendingFlows.find(request.flowId);
         if (found == m_pendingFlows.end())
         {
@@ -832,6 +907,16 @@ namespace javelin::jmap::auth
 
         auto flow = std::move(found->second);
         m_pendingFlows.erase(found);
+        const auto failAndCleanup =
+            [this, &flow](QString error) -> QCoro::Task<javelin::app::AccountAuthenticationResult>
+        {
+            if (const auto cleanupError = co_await deleteClientRegistration(
+                    m_networkAccessManager, flow.registrationClientUri,
+                    flow.registrationAccessToken))
+                qCWarning(oauthLog).noquote()
+                    << "OAuth failed-flow registration cleanup failed" << *cleanupError;
+            co_return authenticationError(std::move(error));
+        };
         const auto body = formBody({
             {QStringLiteral("grant_type"), QStringLiteral("authorization_code")},
             {QStringLiteral("code"), request.code},
@@ -850,11 +935,11 @@ namespace javelin::jmap::auth
             const auto detail = token.has_value() && token->errorDescription.has_value()
                                     ? QString::fromStdString(*token->errorDescription)
                                     : QStringLiteral("The server did not issue an access token.");
-            co_return authenticationError(detail);
+            co_return co_await failAndCleanup(detail);
         }
 
         if (!token->refreshToken.has_value() || token->refreshToken->empty())
-            co_return authenticationError(QStringLiteral(
+            co_return co_await failAndCleanup(QStringLiteral(
                 "The mail service did not issue the refresh token required for background mail."));
 
         qCInfo(oauthLog).noquote()
@@ -869,7 +954,7 @@ namespace javelin::jmap::auth
                          QByteArray::fromStdString(token->accessToken));
         const auto session = api::parseSession(sessionResponse.body.toStdString());
         if (sessionResponse.statusCode != 200 || !session.ok())
-            co_return authenticationError(
+            co_return co_await failAndCleanup(
                 QStringLiteral("Sign-in succeeded, but the JMAP account could not be verified."));
 
         auto result = javelin::app::AccountAuthenticationResult{
@@ -887,6 +972,8 @@ namespace javelin::jmap::auth
             .scope = effectiveScope(*token,
                                     requestedScopes(flow.discovery.scopes).join(QLatin1Char(' '))),
             .revocationEndpoint = flow.discovery.revocationEndpoint,
+            .registrationClientUri = flow.registrationClientUri,
+            .registrationAccessToken = flow.registrationAccessToken,
             .expiresAtEpochSeconds = token->expiresIn.has_value()
                                          ? QDateTime::currentSecsSinceEpoch() + *token->expiresIn
                                          : 0,
@@ -936,6 +1023,8 @@ namespace javelin::jmap::auth
             .resourceUrl = {},
             .scope = {},
             .revocationEndpoint = {},
+            .registrationClientUri = {},
+            .registrationAccessToken = {},
             .expiresAtEpochSeconds = 0,
             .features = sessionFeatures(*session.session),
         };
@@ -990,50 +1079,89 @@ namespace javelin::jmap::auth
     QCoro::Task<javelin::app::OAuthRevocationResult>
     AccountOnboardingService::revokeOAuth(javelin::app::OAuthRevocationRequest request)
     {
+        const bool hasTokens = !request.accessToken.isEmpty() || !request.refreshToken.isEmpty();
+        const bool hasRegistration = !request.registrationClientUri.isEmpty() ||
+                                     !request.registrationAccessToken.isEmpty();
         javelin::app::OAuthRevocationResult result{
-            .attempted = false,
+            .attempted = hasTokens || hasRegistration,
             .succeeded = true,
             .error = {},
         };
-        if (request.revocationEndpoint.isEmpty() ||
-            (request.accessToken.isEmpty() && request.refreshToken.isEmpty()))
+        if (!result.attempted)
             co_return result;
-
-        result.attempted = true;
-        if (request.clientId.isEmpty() ||
-            !isSecureServerUrl(QUrl{request.revocationEndpoint}))
-        {
-            result.succeeded = false;
-            result.error = QStringLiteral("OAuth revocation information is incomplete.");
-            co_return result;
-        }
 
         QStringList failures;
-        const auto revoke = [&](const QString& token,
-                                const QString& tokenTypeHint) -> QCoro::Task<void>
+        if (hasTokens)
         {
-            if (token.isEmpty())
-                co_return;
-            const auto response = co_await post(
-                m_networkAccessManager, QUrl{request.revocationEndpoint},
-                QByteArrayLiteral("application/x-www-form-urlencoded"),
-                formBody({
-                    {QStringLiteral("token"), token},
-                    {QStringLiteral("token_type_hint"), tokenTypeHint},
-                    {QStringLiteral("client_id"), request.clientId},
-                }));
-            if (response.statusCode < 200 || response.statusCode >= 300)
+            if (request.clientId.isEmpty() || request.revocationEndpoint.isEmpty() ||
+                !isSecureServerUrl(QUrl{request.revocationEndpoint}))
             {
-                failures.push_back(response.error.isEmpty() ? oauthErrorText(response.body)
-                                                            : response.error);
+                failures.push_back(QStringLiteral("OAuth revocation information is incomplete."));
             }
-        };
+            else
+            {
+                const auto revoke = [&](const QString& token,
+                                        const QString& tokenTypeHint) -> QCoro::Task<void>
+                {
+                    if (token.isEmpty())
+                        co_return;
+                    const auto response = co_await post(
+                        m_networkAccessManager, QUrl{request.revocationEndpoint},
+                        QByteArrayLiteral("application/x-www-form-urlencoded"),
+                        formBody({
+                            {QStringLiteral("token"), token},
+                            {QStringLiteral("token_type_hint"), tokenTypeHint},
+                            {QStringLiteral("client_id"), request.clientId},
+                        }));
+                    if (response.statusCode < 200 || response.statusCode >= 300)
+                    {
+                        failures.push_back(response.error.isEmpty()
+                                               ? oauthErrorText(response.body)
+                                               : response.error);
+                    }
+                };
 
-        co_await revoke(request.refreshToken, QStringLiteral("refresh_token"));
-        co_await revoke(request.accessToken, QStringLiteral("access_token"));
+                co_await revoke(request.refreshToken, QStringLiteral("refresh_token"));
+                co_await revoke(request.accessToken, QStringLiteral("access_token"));
+            }
+        }
+
+        if (hasRegistration)
+        {
+            if (const auto error = co_await deleteClientRegistration(
+                    m_networkAccessManager, request.registrationClientUri,
+                    request.registrationAccessToken))
+                failures.push_back(*error);
+        }
+
         result.succeeded = failures.isEmpty();
         if (!result.succeeded)
             result.error = failures.join(QStringLiteral("; "));
         co_return result;
+    }
+
+    QCoro::Task<javelin::app::OAuthCancelResult>
+    AccountOnboardingService::cancelOAuth(javelin::app::OAuthCancelRequest request)
+    {
+        co_await pruneExpiredFlows();
+        const auto found = m_pendingFlows.find(request.flowId);
+        if (found == m_pendingFlows.end())
+            co_return javelin::app::OAuthCancelResult{};
+
+        auto flow = std::move(found->second);
+        m_pendingFlows.erase(found);
+        if (const auto error = co_await deleteClientRegistration(
+                m_networkAccessManager, flow.registrationClientUri,
+                flow.registrationAccessToken))
+        {
+            co_return javelin::app::OAuthCancelResult{
+                .registrationDeleted = false,
+                .error = *error,
+            };
+        }
+        co_return javelin::app::OAuthCancelResult{
+            .registrationDeleted = !flow.registrationClientUri.isEmpty(),
+            .error = {},
+        };
     }
 } // namespace javelin::jmap::auth

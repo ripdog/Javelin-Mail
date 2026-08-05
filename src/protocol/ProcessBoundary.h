@@ -194,6 +194,7 @@ namespace javelin::protocol
         OnboardingFinishOAuth,
         OnboardingAuthenticateManually,
         OnboardingRevokeOAuth,
+        OnboardingCancelOAuth,
         CalendarSetSubscribed,
         Last = CalendarSetSubscribed,
     };
@@ -255,6 +256,8 @@ namespace javelin::protocol
         QString oauthResource = {};
         QString oauthScope = {};
         QString revocationEndpoint = {};
+        QString registrationClientUri = {};
+        QString registrationAccessToken = {};
         qint64 tokenExpiresAtEpochSeconds = 0;
         bool reauthenticationRequired = false;
         std::vector<QString> cachedAccountIds;

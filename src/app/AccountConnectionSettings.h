@@ -20,6 +20,8 @@ namespace javelin::app
         std::string oauthResource = {};
         std::string oauthScope = {};
         std::string revocationEndpoint = {};
+        std::string registrationClientUri = {};
+        std::string registrationAccessToken = {};
 
         friend bool operator==(const AccountConnectionSettings&,
                                const AccountConnectionSettings&) = default;

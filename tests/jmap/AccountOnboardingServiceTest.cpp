@@ -75,7 +75,7 @@ TEST_CASE("OAuth refresh errors distinguish expired grants from transient failur
     CHECK(refreshFailureKind(QString{}) == Kind::Transient);
 }
 
-TEST_CASE("OAuth revocation skips accounts without a revocation endpoint",
+TEST_CASE("OAuth revocation reports missing endpoint for stored tokens",
           "[jmap][auth][onboarding]")
 {
     ensureApplication();
@@ -87,6 +87,25 @@ TEST_CASE("OAuth revocation skips accounts without a revocation endpoint",
         .clientId = QStringLiteral("javelin"),
         .accessToken = QStringLiteral("access-token"),
         .refreshToken = QStringLiteral("refresh-token"),
+    }));
+
+    CHECK(result.attempted);
+    CHECK_FALSE(result.succeeded);
+    CHECK(result.error == QStringLiteral("OAuth revocation information is incomplete."));
+}
+
+TEST_CASE("OAuth revocation skips accounts without OAuth credentials",
+          "[jmap][auth][onboarding]")
+{
+    ensureApplication();
+    QNetworkAccessManager networkAccessManager;
+    javelin::jmap::auth::AccountOnboardingService service{networkAccessManager};
+
+    const auto result = QCoro::waitFor(service.revokeOAuth({
+        .revocationEndpoint = {},
+        .clientId = {},
+        .accessToken = {},
+        .refreshToken = {},
     }));
 
     CHECK_FALSE(result.attempted);
@@ -119,6 +138,9 @@ TEST_CASE("OAuth revocation request survives the daemon boundary", "[jmap][auth]
         .clientId = QStringLiteral("client-id"),
         .accessToken = QStringLiteral("access-token"),
         .refreshToken = QStringLiteral("refresh-token"),
+        .registrationClientUri =
+            QStringLiteral("https://auth.example.com/register/client-id"),
+        .registrationAccessToken = QStringLiteral("registration-token"),
     };
 
     const auto encoded = javelin::app::remote::encode(request);
@@ -131,6 +153,34 @@ TEST_CASE("OAuth revocation request survives the daemon boundary", "[jmap][auth]
     CHECK(restored.clientId == request.clientId);
     CHECK(restored.accessToken == request.accessToken);
     CHECK(restored.refreshToken == request.refreshToken);
+    CHECK(restored.registrationClientUri == request.registrationClientUri);
+    CHECK(restored.registrationAccessToken == request.registrationAccessToken);
+}
+
+TEST_CASE("OAuth cancellation request survives the daemon boundary",
+          "[jmap][auth][onboarding]")
+{
+    const javelin::app::OAuthCancelRequest request{.flowId = QStringLiteral("flow-id")};
+
+    const auto encoded = javelin::app::remote::encode(request);
+    REQUIRE(std::holds_alternative<QByteArray>(encoded));
+    const auto decoded = javelin::app::remote::decodeValue<javelin::app::OAuthCancelRequest>(
+        std::get<QByteArray>(encoded));
+    REQUIRE(std::holds_alternative<javelin::app::OAuthCancelRequest>(decoded));
+    CHECK(std::get<javelin::app::OAuthCancelRequest>(decoded).flowId == request.flowId);
+}
+
+TEST_CASE("OAuth cancellation ignores an unknown flow", "[jmap][auth][onboarding]")
+{
+    ensureApplication();
+    QNetworkAccessManager networkAccessManager;
+    javelin::jmap::auth::AccountOnboardingService service{networkAccessManager};
+
+    const auto result =
+        QCoro::waitFor(service.cancelOAuth({.flowId = QStringLiteral("missing-flow")}));
+
+    CHECK_FALSE(result.registrationDeleted);
+    CHECK(result.error.isEmpty());
 }
 
 TEST_CASE("OAuth metadata URLs require secure endpoint syntax", "[jmap][auth][onboarding]")
@@ -255,6 +305,9 @@ TEST_CASE("OAuth authentication credentials survive the daemon boundary",
         .resourceUrl = QStringLiteral("https://mail.example.com/jmap"),
         .scope = QStringLiteral("mail offline_access"),
         .revocationEndpoint = QStringLiteral("https://auth.example.com/revoke"),
+        .registrationClientUri =
+            QStringLiteral("https://auth.example.com/register/client-id"),
+        .registrationAccessToken = QStringLiteral("registration-token"),
         .expiresAtEpochSeconds = 123456789,
         .features = {},
     };
@@ -276,5 +329,7 @@ TEST_CASE("OAuth authentication credentials survive the daemon boundary",
     CHECK(restored.resourceUrl == result.resourceUrl);
     CHECK(restored.scope == result.scope);
     CHECK(restored.revocationEndpoint == result.revocationEndpoint);
+    CHECK(restored.registrationClientUri == result.registrationClientUri);
+    CHECK(restored.registrationAccessToken == result.registrationAccessToken);
     CHECK(restored.expiresAtEpochSeconds == result.expiresAtEpochSeconds);
 }

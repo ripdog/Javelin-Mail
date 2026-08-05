@@ -163,6 +163,7 @@ namespace javelin::app
             case Kind::OnboardingFinishOAuth:
             case Kind::OnboardingAuthenticateManually:
             case Kind::OnboardingRevokeOAuth:
+            case Kind::OnboardingCancelOAuth:
                 return {};
             }
             return {};
@@ -306,6 +307,10 @@ namespace javelin::app
             return decodeAndApply<OAuthRevocationRequest>(
                 command.payload, invalidPayload, [&](OAuthRevocationRequest request)
                 { return launch(m_services.onboardingService().revokeOAuth(std::move(request))); });
+        case Kind::OnboardingCancelOAuth:
+            return decodeAndApply<OAuthCancelRequest>(
+                command.payload, invalidPayload, [&](OAuthCancelRequest request)
+                { return launch(m_services.onboardingService().cancelOAuth(std::move(request))); });
         case Kind::RemoveConfiguredAccount:
             return decodeAndApply<QString, QString, QStringList>(
                 command.payload, invalidPayload,

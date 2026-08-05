@@ -22,6 +22,8 @@ namespace javelin::gui::settings
         QString oauthResource = {};
         QString oauthScope = {};
         QString revocationEndpoint = {};
+        QString registrationClientUri = {};
+        QString registrationAccessToken = {};
         qint64 tokenExpiresAtEpochSeconds = 0;
         bool reauthenticationRequired = false;
         QStringList cachedAccountIds;

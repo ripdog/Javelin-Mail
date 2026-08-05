@@ -36,6 +36,8 @@ namespace javelin::jmap::auth
         refreshOAuth(javelin::app::OAuthRefreshRequest request);
         [[nodiscard]] QCoro::Task<javelin::app::OAuthRevocationResult>
         revokeOAuth(javelin::app::OAuthRevocationRequest request);
+        [[nodiscard]] QCoro::Task<javelin::app::OAuthCancelResult>
+        cancelOAuth(javelin::app::OAuthCancelRequest request);
         [[nodiscard]] QCoro::Task<javelin::app::AccountAuthenticationResult>
         authenticateManually(javelin::app::ManualAuthenticationRequest request);
 
@@ -47,10 +49,12 @@ namespace javelin::jmap::auth
             QString clientId;
             QString codeVerifier;
             QString state;
+            QString registrationClientUri;
+            QString registrationAccessToken;
             qint64 createdAtEpochSeconds = 0;
         };
 
-        void pruneExpiredFlows();
+        [[nodiscard]] QCoro::Task<void> pruneExpiredFlows();
 
         QNetworkAccessManager& m_networkAccessManager;
         std::unordered_map<QString, PendingOAuthFlow> m_pendingFlows;

@@ -824,6 +824,8 @@ namespace javelin::gui::settings
                 .clientId = account.oauthClientId,
                 .accessToken = account.apiKey,
                 .refreshToken = account.refreshToken,
+                .registrationClientUri = account.registrationClientUri,
+                .registrationAccessToken = account.registrationAccessToken,
             });
             QCoro::connect(
                 std::move(revocation), this,

@@ -29,6 +29,8 @@ namespace javelin::app
         constexpr auto accountOauthResourceKey = "oauthResource";
         constexpr auto accountOauthScopeKey = "oauthScope";
         constexpr auto accountRevocationEndpointKey = "revocationEndpoint";
+        constexpr auto accountRegistrationClientUriKey = "registrationClientUri";
+        constexpr auto accountRegistrationAccessTokenKey = "registrationAccessToken";
         constexpr auto accountTokenExpiresAtKey = "tokenExpiresAt";
         constexpr auto accountReauthenticationRequiredKey = "reauthenticationRequired";
         constexpr auto accountCachedIdsKey = "cachedAccountIds";
@@ -536,6 +538,12 @@ namespace javelin::app
                     settings.value(settingKey(accountOauthScopeKey)).toString().simplified(),
                 .revocationEndpoint =
                     settings.value(settingKey(accountRevocationEndpointKey)).toString().trimmed(),
+                .registrationClientUri =
+                    settings.value(settingKey(accountRegistrationClientUriKey)).toString().trimmed(),
+                .registrationAccessToken = settings
+                                               .value(settingKey(accountRegistrationAccessTokenKey))
+                                               .toString()
+                                               .trimmed(),
                 .tokenExpiresAtEpochSeconds = tokenExpiresAtEpochSeconds,
                 .reauthenticationRequired =
                     settings.value(settingKey(accountReauthenticationRequiredKey), false).toBool(),
@@ -622,6 +630,10 @@ namespace javelin::app
             settings.setValue(settingKey(accountOauthResourceKey), account.oauthResource);
             settings.setValue(settingKey(accountOauthScopeKey), account.oauthScope);
             settings.setValue(settingKey(accountRevocationEndpointKey), account.revocationEndpoint);
+            settings.setValue(settingKey(accountRegistrationClientUriKey),
+                              account.registrationClientUri);
+            settings.setValue(settingKey(accountRegistrationAccessTokenKey),
+                              account.registrationAccessToken);
             settings.setValue(settingKey(accountTokenExpiresAtKey),
                               account.tokenExpiresAtEpochSeconds);
             settings.setValue(settingKey(accountReauthenticationRequiredKey),

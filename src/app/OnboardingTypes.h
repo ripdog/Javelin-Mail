@@ -115,6 +115,8 @@ namespace javelin::app
         QString resourceUrl = {};
         QString scope = {};
         QString revocationEndpoint = {};
+        QString registrationClientUri = {};
+        QString registrationAccessToken = {};
         qint64 expiresAtEpochSeconds = 0;
         std::vector<OnboardingFeature> features;
     };
@@ -125,12 +127,25 @@ namespace javelin::app
         QString clientId;
         QString accessToken;
         QString refreshToken;
+        QString registrationClientUri = {};
+        QString registrationAccessToken = {};
     };
 
     struct OAuthRevocationResult
     {
         bool attempted = false;
         bool succeeded = false;
+        QString error;
+    };
+
+    struct OAuthCancelRequest
+    {
+        QString flowId;
+    };
+
+    struct OAuthCancelResult
+    {
+        bool registrationDeleted = false;
         QString error;
     };
 

@@ -26,6 +26,8 @@ namespace javelin::gui::settings
             .oauthResource = settings.oauthResource.toStdString(),
             .oauthScope = settings.oauthScope.toStdString(),
             .revocationEndpoint = settings.revocationEndpoint.toStdString(),
+            .registrationClientUri = settings.registrationClientUri.toStdString(),
+            .registrationAccessToken = settings.registrationAccessToken.toStdString(),
         };
     }
 
