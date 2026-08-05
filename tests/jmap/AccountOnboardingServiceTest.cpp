@@ -57,8 +57,7 @@ TEST_CASE("OAuth refresh refuses an insecure token endpoint", "[jmap][auth][onbo
 
     CHECK_FALSE(result.succeeded);
     CHECK(result.error == QStringLiteral("OAuth refresh information is incomplete."));
-    CHECK(result.failureKind ==
-          javelin::app::OAuthRefreshFailureKind::ReauthenticationRequired);
+    CHECK(result.failureKind == javelin::app::OAuthRefreshFailureKind::ReauthenticationRequired);
 }
 
 TEST_CASE("OAuth refresh errors distinguish expired grants from transient failures",
@@ -67,16 +66,13 @@ TEST_CASE("OAuth refresh errors distinguish expired grants from transient failur
     using Kind = javelin::app::OAuthRefreshFailureKind;
     using javelin::jmap::auth::detail::refreshFailureKind;
 
-    CHECK(refreshFailureKind(QStringLiteral("invalid_grant")) ==
-          Kind::ReauthenticationRequired);
-    CHECK(refreshFailureKind(QStringLiteral("invalid_client")) ==
-          Kind::ReauthenticationRequired);
+    CHECK(refreshFailureKind(QStringLiteral("invalid_grant")) == Kind::ReauthenticationRequired);
+    CHECK(refreshFailureKind(QStringLiteral("invalid_client")) == Kind::ReauthenticationRequired);
     CHECK(refreshFailureKind(QStringLiteral("temporarily_unavailable")) == Kind::Transient);
     CHECK(refreshFailureKind(QString{}) == Kind::Transient);
 }
 
-TEST_CASE("OAuth revocation reports missing endpoint for stored tokens",
-          "[jmap][auth][onboarding]")
+TEST_CASE("OAuth revocation reports missing endpoint for stored tokens", "[jmap][auth][onboarding]")
 {
     ensureApplication();
     QNetworkAccessManager networkAccessManager;
@@ -94,8 +90,7 @@ TEST_CASE("OAuth revocation reports missing endpoint for stored tokens",
     CHECK(result.error == QStringLiteral("OAuth revocation information is incomplete."));
 }
 
-TEST_CASE("OAuth revocation skips accounts without OAuth credentials",
-          "[jmap][auth][onboarding]")
+TEST_CASE("OAuth revocation skips accounts without OAuth credentials", "[jmap][auth][onboarding]")
 {
     ensureApplication();
     QNetworkAccessManager networkAccessManager;
@@ -138,8 +133,7 @@ TEST_CASE("OAuth revocation request survives the daemon boundary", "[jmap][auth]
         .clientId = QStringLiteral("client-id"),
         .accessToken = QStringLiteral("access-token"),
         .refreshToken = QStringLiteral("refresh-token"),
-        .registrationClientUri =
-            QStringLiteral("https://auth.example.com/register/client-id"),
+        .registrationClientUri = QStringLiteral("https://auth.example.com/register/client-id"),
         .registrationAccessToken = QStringLiteral("registration-token"),
     };
 
@@ -157,8 +151,7 @@ TEST_CASE("OAuth revocation request survives the daemon boundary", "[jmap][auth]
     CHECK(restored.registrationAccessToken == request.registrationAccessToken);
 }
 
-TEST_CASE("OAuth cancellation request survives the daemon boundary",
-          "[jmap][auth][onboarding]")
+TEST_CASE("OAuth cancellation request survives the daemon boundary", "[jmap][auth][onboarding]")
 {
     const javelin::app::OAuthCancelRequest request{.flowId = QStringLiteral("flow-id")};
 
@@ -188,7 +181,8 @@ TEST_CASE("OAuth metadata URLs require secure endpoint syntax", "[jmap][auth][on
     using javelin::jmap::auth::detail::isSecureOAuthUrl;
 
     CHECK(isSecureOAuthUrl(QUrl{QStringLiteral("https://auth.example.com/token")}));
-    CHECK(isSecureOAuthUrl(QUrl{QStringLiteral("https://auth.example.com/authorize?prompt=login")}));
+    CHECK(
+        isSecureOAuthUrl(QUrl{QStringLiteral("https://auth.example.com/authorize?prompt=login")}));
     CHECK_FALSE(isSecureOAuthUrl(QUrl{QStringLiteral("http://auth.example.com/token")}));
     CHECK_FALSE(isSecureOAuthUrl(QUrl{QStringLiteral("https://user@auth.example.com/token")}));
     CHECK_FALSE(isSecureOAuthUrl(QUrl{QStringLiteral("https://auth.example.com/token#fragment")}));
@@ -218,8 +212,7 @@ TEST_CASE("OAuth dynamic registration preserves exact loopback callback addresse
           QStringLiteral("http://[::1]:49152/oauth/callback"));
 }
 
-TEST_CASE("OAuth start callback identity survives the daemon boundary",
-          "[jmap][auth][onboarding]")
+TEST_CASE("OAuth start callback identity survives the daemon boundary", "[jmap][auth][onboarding]")
 {
     const javelin::app::OAuthStartResult result{
         .succeeded = true,
@@ -305,8 +298,7 @@ TEST_CASE("OAuth authentication credentials survive the daemon boundary",
         .resourceUrl = QStringLiteral("https://mail.example.com/jmap"),
         .scope = QStringLiteral("mail offline_access"),
         .revocationEndpoint = QStringLiteral("https://auth.example.com/revoke"),
-        .registrationClientUri =
-            QStringLiteral("https://auth.example.com/register/client-id"),
+        .registrationClientUri = QStringLiteral("https://auth.example.com/register/client-id"),
         .registrationAccessToken = QStringLiteral("registration-token"),
         .expiresAtEpochSeconds = 123456789,
         .features = {},

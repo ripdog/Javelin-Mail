@@ -195,13 +195,6 @@ namespace javelin::protocol
                             limits))
                         return error;
                     if (auto error = optionalStringError(
-                            account.apiKey, QStringLiteral("update.accounts.apiKey"), limits))
-                        return error;
-                    if (auto error = optionalStringError(
-                            account.refreshToken, QStringLiteral("update.accounts.refreshToken"),
-                            limits))
-                        return error;
-                    if (auto error = optionalStringError(
                             account.tokenEndpoint, QStringLiteral("update.accounts.tokenEndpoint"),
                             limits))
                         return error;
@@ -230,8 +223,8 @@ namespace javelin::protocol
                             QStringLiteral("update.accounts.registrationClientUri"), limits))
                         return error;
                     if (auto error = optionalStringError(
-                            account.registrationAccessToken,
-                            QStringLiteral("update.accounts.registrationAccessToken"), limits))
+                            account.credentialHandle,
+                            QStringLiteral("update.accounts.credentialHandle"), limits))
                         return error;
                     if (account.tokenExpiresAtEpochSeconds < 0)
                     {
@@ -479,18 +472,16 @@ namespace javelin::protocol
                     {
                         for (const auto& account : *value.update.accounts)
                         {
-                            size += stringSize(account.id) + stringSize(account.displayName) +
-                                    stringSize(account.sessionUrl) +
-                                    stringSize(account.loginEmail) + stringSize(account.apiKey) +
-                                    stringSize(account.refreshToken) +
-                                    stringSize(account.tokenEndpoint) +
-                                    stringSize(account.oauthClientId) +
-                                    stringSize(account.oauthIssuer) +
-                                    stringSize(account.oauthResource) +
-                                    stringSize(account.oauthScope) +
-                                    stringSize(account.revocationEndpoint) +
-                                    stringSize(account.registrationClientUri) +
-                                    stringSize(account.registrationAccessToken) + 1;
+                            size +=
+                                stringSize(account.id) + stringSize(account.displayName) +
+                                stringSize(account.sessionUrl) + stringSize(account.loginEmail) +
+                                stringSize(account.tokenEndpoint) +
+                                stringSize(account.oauthClientId) +
+                                stringSize(account.oauthIssuer) +
+                                stringSize(account.oauthResource) + stringSize(account.oauthScope) +
+                                stringSize(account.revocationEndpoint) +
+                                stringSize(account.registrationClientUri) +
+                                stringSize(account.credentialHandle) + 2;
                             for (const auto& accountId : account.cachedAccountIds)
                                 size += stringSize(accountId);
                         }

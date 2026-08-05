@@ -115,13 +115,13 @@ template <> struct glz::meta<javelin::jmap::auth::detail::AuthorizationServerMet
     using T = javelin::jmap::auth::detail::AuthorizationServerMetadata;
     static constexpr auto value = glz::object(
         "issuer", &T::issuer, "authorization_endpoint", &T::authorizationEndpoint, "token_endpoint",
-        &T::tokenEndpoint, "registration_endpoint", &T::registrationEndpoint,
-        "revocation_endpoint", &T::revocationEndpoint, "scopes_supported", &T::scopesSupported,
-        "response_types_supported", &T::responseTypesSupported, "grant_types_supported",
-        &T::grantTypesSupported, "token_endpoint_auth_methods_supported",
-        &T::tokenEndpointAuthMethodsSupported, "revocation_endpoint_auth_methods_supported",
-        &T::revocationEndpointAuthMethodsSupported, "code_challenge_methods_supported",
-        &T::codeChallengeMethodsSupported, "authorization_response_iss_parameter_supported",
+        &T::tokenEndpoint, "registration_endpoint", &T::registrationEndpoint, "revocation_endpoint",
+        &T::revocationEndpoint, "scopes_supported", &T::scopesSupported, "response_types_supported",
+        &T::responseTypesSupported, "grant_types_supported", &T::grantTypesSupported,
+        "token_endpoint_auth_methods_supported", &T::tokenEndpointAuthMethodsSupported,
+        "revocation_endpoint_auth_methods_supported", &T::revocationEndpointAuthMethodsSupported,
+        "code_challenge_methods_supported", &T::codeChallengeMethodsSupported,
+        "authorization_response_iss_parameter_supported",
         &T::authorizationResponseIssParameterSupported);
 };
 
@@ -139,11 +139,10 @@ template <> struct glz::meta<javelin::jmap::auth::detail::RegistrationRequest>
 template <> struct glz::meta<javelin::jmap::auth::detail::RegistrationResponse>
 {
     using T = javelin::jmap::auth::detail::RegistrationResponse;
-    static constexpr auto value =
-        glz::object("client_id", &T::clientId, "token_endpoint_auth_method",
-                    &T::tokenEndpointAuthMethod, "redirect_uris", &T::redirectUris,
-                    "registration_client_uri", &T::registrationClientUri,
-                    "registration_access_token", &T::registrationAccessToken);
+    static constexpr auto value = glz::object(
+        "client_id", &T::clientId, "token_endpoint_auth_method", &T::tokenEndpointAuthMethod,
+        "redirect_uris", &T::redirectUris, "registration_client_uri", &T::registrationClientUri,
+        "registration_access_token", &T::registrationAccessToken);
 };
 
 template <> struct glz::meta<javelin::jmap::auth::detail::OAuthErrorResponse>
@@ -157,10 +156,10 @@ template <> struct glz::meta<javelin::jmap::auth::detail::OAuthErrorResponse>
 template <> struct glz::meta<javelin::jmap::auth::detail::TokenResponse>
 {
     using T = javelin::jmap::auth::detail::TokenResponse;
-    static constexpr auto value = glz::object(
-        "access_token", &T::accessToken, "refresh_token", &T::refreshToken, "token_type",
-        &T::tokenType, "scope", &T::scope, "expires_in", &T::expiresIn, "error", &T::error,
-        "error_description", &T::errorDescription);
+    static constexpr auto value =
+        glz::object("access_token", &T::accessToken, "refresh_token", &T::refreshToken,
+                    "token_type", &T::tokenType, "scope", &T::scope, "expires_in", &T::expiresIn,
+                    "error", &T::error, "error_description", &T::errorDescription);
 };
 
 namespace javelin::jmap::auth
@@ -174,8 +173,8 @@ namespace javelin::jmap::auth
 
     bool detail::isSecureOAuthUrl(const QUrl& url)
     {
-        return url.isValid() && url.scheme() == QStringLiteral("https") &&
-               !url.host().isEmpty() && url.userInfo().isEmpty() && !url.hasFragment();
+        return url.isValid() && url.scheme() == QStringLiteral("https") && !url.host().isEmpty() &&
+               url.userInfo().isEmpty() && !url.hasFragment();
     }
 
     bool detail::resourceMetadataMatches(const QString& returnedResource,
@@ -184,8 +183,7 @@ namespace javelin::jmap::auth
         return !returnedResource.isEmpty() && returnedResource == expectedResource;
     }
 
-    javelin::app::OAuthRefreshFailureKind
-    detail::refreshFailureKind(const QString& oauthErrorCode)
+    javelin::app::OAuthRefreshFailureKind detail::refreshFailureKind(const QString& oauthErrorCode)
     {
         using Kind = javelin::app::OAuthRefreshFailureKind;
         return oauthErrorCode == QStringLiteral("invalid_grant") ||
@@ -218,10 +216,10 @@ namespace javelin::jmap::auth
         {
             QNetworkRequest request{url};
             request.setTransferTimeout(30'000);
-            request.setAttribute(
-                QNetworkRequest::RedirectPolicyAttribute,
-                redirectTrust == RedirectTrust::Resource ? QNetworkRequest::NoLessSafeRedirectPolicy
-                                                         : QNetworkRequest::SameOriginRedirectPolicy);
+            request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                                 redirectTrust == RedirectTrust::Resource
+                                     ? QNetworkRequest::NoLessSafeRedirectPolicy
+                                     : QNetworkRequest::SameOriginRedirectPolicy);
             request.setRawHeader(QByteArrayLiteral("Accept"),
                                  QByteArrayLiteral("application/json"));
             if (!bearer.isEmpty())
@@ -262,8 +260,8 @@ namespace javelin::jmap::auth
                                  .error = status == 0 ? reply->errorString() : QString{}};
         }
 
-        [[nodiscard]] QCoro::Task<HttpResult>
-        remove(QNetworkAccessManager& manager, const QUrl& url, const QByteArray& bearer)
+        [[nodiscard]] QCoro::Task<HttpResult> remove(QNetworkAccessManager& manager,
+                                                     const QUrl& url, const QByteArray& bearer)
         {
             QNetworkRequest request{url};
             request.setTransferTimeout(30'000);
@@ -397,8 +395,8 @@ namespace javelin::jmap::auth
         [[nodiscard]] bool validBearerTokenResponse(const detail::TokenResponse& token)
         {
             if (token.accessToken.empty() || !token.tokenType.has_value() ||
-                QString::fromStdString(*token.tokenType).compare(QStringLiteral("Bearer"),
-                                                                 Qt::CaseInsensitive) != 0)
+                QString::fromStdString(*token.tokenType)
+                        .compare(QStringLiteral("Bearer"), Qt::CaseInsensitive) != 0)
                 return false;
             return !token.expiresIn.has_value() || *token.expiresIn > 0;
         }
@@ -456,9 +454,9 @@ namespace javelin::jmap::auth
                 session.primaryAccounts.contactsAccountId.has_value()
                     ? session.accounts.find(*session.primaryAccounts.contactsAccountId)
                     : session.accounts.end();
-            const bool contacts =
-                session.capabilities.contacts && contactsAccount != session.accounts.end() &&
-                contactsAccount->second.accountCapabilities.contacts.has_value();
+            const bool contacts = session.capabilities.contacts &&
+                                  contactsAccount != session.accounts.end() &&
+                                  contactsAccount->second.accountCapabilities.contacts.has_value();
             const auto calendarsAccount =
                 session.primaryAccounts.calendarsAccountId.has_value()
                     ? session.accounts.find(*session.primaryAccounts.calendarsAccountId)
@@ -472,12 +470,8 @@ namespace javelin::jmap::auth
                 Feature{.kind = Kind::Sending,
                         .available = session.capabilities.submission,
                         .detail = {}},
-                Feature{.kind = Kind::Contacts,
-                        .available = contacts,
-                        .detail = {}},
-                Feature{.kind = Kind::Calendars,
-                        .available = calendars,
-                        .detail = {}},
+                Feature{.kind = Kind::Contacts, .available = contacts, .detail = {}},
+                Feature{.kind = Kind::Calendars, .available = calendars, .detail = {}},
                 Feature{.kind = Kind::Sieve, .available = session.capabilities.sieve, .detail = {}},
                 Feature{.kind = Kind::Push, .available = push, .detail = {}},
             };
@@ -538,10 +532,10 @@ namespace javelin::jmap::auth
                 co_return std::nullopt;
             if (clientUri.isEmpty() || accessToken.isEmpty() ||
                 !detail::isSecureOAuthUrl(QUrl{clientUri}))
-                co_return QStringLiteral("OAuth client-registration cleanup information is incomplete.");
+                co_return QStringLiteral(
+                    "OAuth client-registration cleanup information is incomplete.");
 
-            const auto response =
-                co_await remove(manager, QUrl{clientUri}, accessToken.toUtf8());
+            const auto response = co_await remove(manager, QUrl{clientUri}, accessToken.toUtf8());
             if (response.statusCode >= 200 && response.statusCode < 300)
                 co_return std::nullopt;
             co_return response.error.isEmpty() ? oauthErrorText(response.body) : response.error;
@@ -589,20 +583,19 @@ namespace javelin::jmap::auth
         constexpr qint64 flowLifetimeSeconds = 10 * 60;
         const auto cutoff = QDateTime::currentSecsSinceEpoch() - flowLifetimeSeconds;
         std::vector<std::pair<QString, QString>> registrations;
-        std::erase_if(
-            m_pendingFlows,
-            [cutoff, &registrations](const auto& entry)
-            {
-                if (entry.second.createdAtEpochSeconds >= cutoff)
-                    return false;
-                registrations.emplace_back(entry.second.registrationClientUri,
-                                           entry.second.registrationAccessToken);
-                return true;
-            });
+        std::erase_if(m_pendingFlows,
+                      [cutoff, &registrations](const auto& entry)
+                      {
+                          if (entry.second.createdAtEpochSeconds >= cutoff)
+                              return false;
+                          registrations.emplace_back(entry.second.registrationClientUri,
+                                                     entry.second.registrationAccessToken);
+                          return true;
+                      });
         for (const auto& [clientUri, accessToken] : registrations)
         {
-            if (const auto error = co_await deleteClientRegistration(
-                    m_networkAccessManager, clientUri, accessToken))
+            if (const auto error = co_await deleteClientRegistration(m_networkAccessManager,
+                                                                     clientUri, accessToken))
                 qCWarning(oauthLog).noquote()
                     << "OAuth expired-flow registration cleanup failed" << *error;
         }
@@ -801,8 +794,7 @@ namespace javelin::jmap::auth
             (!registered->tokenEndpointAuthMethod.has_value() ||
              *registered->tokenEndpointAuthMethod == "none") &&
             (!registered->redirectUris.has_value() ||
-             std::ranges::contains(*registered->redirectUris,
-                                   registeredRedirectUri.toStdString()));
+             std::ranges::contains(*registered->redirectUris, registeredRedirectUri.toStdString()));
         if (registrationResponse.statusCode < 200 || registrationResponse.statusCode >= 300 ||
             !usableRegistration)
         {
@@ -825,9 +817,9 @@ namespace javelin::jmap::auth
             registered->registrationAccessToken.has_value()
                 ? QString::fromStdString(*registered->registrationAccessToken)
                 : QString{};
-        const bool manageableRegistration =
-            !registrationClientUri.isEmpty() && !registrationAccessToken.isEmpty() &&
-            detail::isSecureOAuthUrl(QUrl{registrationClientUri});
+        const bool manageableRegistration = !registrationClientUri.isEmpty() &&
+                                            !registrationAccessToken.isEmpty() &&
+                                            detail::isSecureOAuthUrl(QUrl{registrationClientUri});
         PendingOAuthFlow flow{
             .discovery = std::move(request.discovery),
             .redirectUri = std::move(request.redirectUri),
@@ -835,8 +827,7 @@ namespace javelin::jmap::auth
             .codeVerifier = randomUrlSafe(48),
             .state = randomUrlSafe(32),
             .registrationClientUri = manageableRegistration ? registrationClientUri : QString{},
-            .registrationAccessToken =
-                manageableRegistration ? registrationAccessToken : QString{},
+            .registrationAccessToken = manageableRegistration ? registrationAccessToken : QString{},
             .createdAtEpochSeconds = QDateTime::currentSecsSinceEpoch(),
         };
         const auto challenge = QString::fromLatin1(
@@ -899,8 +890,9 @@ namespace javelin::jmap::auth
         }
         if (request.issuer != pending.discovery.issuer)
         {
-            qCWarning(oauthLog).noquote() << "OAuth callback issuer mismatch; expected"
-                                          << pending.discovery.issuer << "but got" << request.issuer;
+            qCWarning(oauthLog).noquote()
+                << "OAuth callback issuer mismatch; expected" << pending.discovery.issuer
+                << "but got" << request.issuer;
             co_return authenticationError(
                 QStringLiteral("The authorization response came from an unexpected server."));
         }
@@ -1053,9 +1045,9 @@ namespace javelin::jmap::auth
         if (response.statusCode < 200 || response.statusCode >= 300)
         {
             const auto code = oauthErrorCode(response.body);
-            co_return refreshError(
-                response.error.isEmpty() ? oauthErrorText(response.body) : response.error,
-                detail::refreshFailureKind(code.value_or(QString{})));
+            co_return refreshError(response.error.isEmpty() ? oauthErrorText(response.body)
+                                                            : response.error,
+                                   detail::refreshFailureKind(code.value_or(QString{})));
         }
         if (!token.has_value() || !validBearerTokenResponse(*token))
             co_return refreshError(QStringLiteral("The account session response was invalid."),
@@ -1080,8 +1072,8 @@ namespace javelin::jmap::auth
     AccountOnboardingService::revokeOAuth(javelin::app::OAuthRevocationRequest request)
     {
         const bool hasTokens = !request.accessToken.isEmpty() || !request.refreshToken.isEmpty();
-        const bool hasRegistration = !request.registrationClientUri.isEmpty() ||
-                                     !request.registrationAccessToken.isEmpty();
+        const bool hasRegistration =
+            !request.registrationClientUri.isEmpty() || !request.registrationAccessToken.isEmpty();
         javelin::app::OAuthRevocationResult result{
             .attempted = hasTokens || hasRegistration,
             .succeeded = true,
@@ -1105,19 +1097,18 @@ namespace javelin::jmap::auth
                 {
                     if (token.isEmpty())
                         co_return;
-                    const auto response = co_await post(
-                        m_networkAccessManager, QUrl{request.revocationEndpoint},
-                        QByteArrayLiteral("application/x-www-form-urlencoded"),
-                        formBody({
-                            {QStringLiteral("token"), token},
-                            {QStringLiteral("token_type_hint"), tokenTypeHint},
-                            {QStringLiteral("client_id"), request.clientId},
-                        }));
+                    const auto response =
+                        co_await post(m_networkAccessManager, QUrl{request.revocationEndpoint},
+                                      QByteArrayLiteral("application/x-www-form-urlencoded"),
+                                      formBody({
+                                          {QStringLiteral("token"), token},
+                                          {QStringLiteral("token_type_hint"), tokenTypeHint},
+                                          {QStringLiteral("client_id"), request.clientId},
+                                      }));
                     if (response.statusCode < 200 || response.statusCode >= 300)
                     {
-                        failures.push_back(response.error.isEmpty()
-                                               ? oauthErrorText(response.body)
-                                               : response.error);
+                        failures.push_back(response.error.isEmpty() ? oauthErrorText(response.body)
+                                                                    : response.error);
                     }
                 };
 
@@ -1151,8 +1142,7 @@ namespace javelin::jmap::auth
         auto flow = std::move(found->second);
         m_pendingFlows.erase(found);
         if (const auto error = co_await deleteClientRegistration(
-                m_networkAccessManager, flow.registrationClientUri,
-                flow.registrationAccessToken))
+                m_networkAccessManager, flow.registrationClientUri, flow.registrationAccessToken))
         {
             co_return javelin::app::OAuthCancelResult{
                 .registrationDeleted = false,

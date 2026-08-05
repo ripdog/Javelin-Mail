@@ -41,6 +41,12 @@ namespace
         std::unique_ptr<QCoreApplication> m_application;
     };
 
+    [[nodiscard]] std::shared_ptr<javelin::app::MemoryAccountCredentialStore> testCredentialStore()
+    {
+        static auto store = std::make_shared<javelin::app::MemoryAccountCredentialStore>();
+        return store;
+    }
+
     [[nodiscard]] javelin::app::DaemonProcessOptions optionsFor(const QString& runtimeDirectory,
                                                                 const QString& cacheRoot,
                                                                 const QString& settingsPath)
@@ -49,18 +55,19 @@ namespace
             .socket = {.runtimeDirectory = runtimeDirectory,
                        .socketPath = runtimeDirectory + QStringLiteral("/javelind.sock"),
                        .limits = {},
-                       .protocol = {.major = 4, .minor = 0},
+                       .protocol = {.major = 5, .minor = 0},
                        .expectedBuild = std::nullopt,
                        .maximumQueuedFrames = 16,
                        .maximumQueuedBytes = 4096,
                        .responseTimeoutMilliseconds = 1000,
                        .enforcePeerCredentials = false},
-            .protocol = {.major = 4, .minor = 0},
+            .protocol = {.major = 5, .minor = 0},
             .build = {.application = QStringLiteral("Javelin-Mail"),
                       .revision = QStringLiteral("daemon-test")},
             .guiExecutable = {},
             .cacheRootPath = cacheRoot,
             .settingsPath = settingsPath,
+            .credentialStore = testCredentialStore(),
         };
     }
 } // namespace
@@ -95,19 +102,19 @@ TEST_CASE("daemon process migrates settings before exposing readiness", "[app][d
     CHECK(duplicateError->code == javelin::app::DaemonStartupErrorCode::InstanceAlreadyRunning);
     CHECK(process.isReady());
 
-    const auto hello = process.handleHello({.protocol = {.major = 4, .minor = 0},
+    const auto hello = process.handleHello({.protocol = {.major = 5, .minor = 0},
                                             .build = {.application = QStringLiteral("Javelin-Mail"),
                                                       .revision = QStringLiteral("daemon-test")}});
     const auto* ready = std::get_if<javelin::protocol::ReadyReply>(&hello);
     REQUIRE(ready != nullptr);
-    CHECK(ready->protocol.major == 4);
+    CHECK(ready->protocol.major == 5);
     CHECK(ready->cache.instance.value != QUuid{});
     CHECK(ready->cache.schema.value > 0);
 
     const auto settings = process.handleGetSettings({});
     const auto* snapshot = std::get_if<javelin::protocol::SettingsSnapshotReply>(&settings);
     REQUIRE(snapshot != nullptr);
-    CHECK(snapshot->snapshot.schemaVersion == 3);
+    CHECK(snapshot->snapshot.schemaVersion == 4);
     CHECK(snapshot->snapshot.revision.value == 0);
 
     const auto update = process.handleUpdateSettings({
@@ -167,6 +174,12 @@ TEST_CASE("daemon does not queue vault metadata for undiscovered connection ids"
     INFO((startupError.has_value() ? startupError->detail.toStdString() : std::string{"no error"}));
     REQUIRE_FALSE(startupError.has_value());
 
+    REQUIRE_FALSE(
+        testCredentialStore()
+            ->store(QStringLiteral("connection-1"), {.accessToken = QStringLiteral("secret"),
+                                                     .refreshToken = {},
+                                                     .registrationAccessToken = {}})
+            .has_value());
     const auto currentSettings = process.handleGetSettings({});
     const auto* current = std::get_if<javelin::protocol::SettingsSnapshotReply>(&currentSettings);
     REQUIRE(current != nullptr);
@@ -178,10 +191,10 @@ TEST_CASE("daemon does not queue vault metadata for undiscovered connection ids"
                        .displayName = QStringLiteral("Example"),
                        .sessionUrl = QStringLiteral("https://example.test/jmap"),
                        .loginEmail = QStringLiteral("user@example.test"),
-                       .apiKey = QStringLiteral("secret"),
-                       .refreshToken = {},
                        .tokenEndpoint = {},
                        .oauthClientId = {},
+                       .hasCredentials = true,
+                       .credentialHandle = {},
                        .tokenExpiresAtEpochSeconds = 0,
                        .cachedAccountIds = {},
                    }},
@@ -250,6 +263,12 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
     REQUIRE(seed.exec(QStringLiteral("INSERT INTO mailboxes(account_id,mailbox_id,name,role) "
                                      "VALUES('account-1','archive','Archive','archive')")));
 
+    REQUIRE_FALSE(
+        testCredentialStore()
+            ->store(QStringLiteral("connection-1"), {.accessToken = QStringLiteral("secret"),
+                                                     .refreshToken = {},
+                                                     .registrationAccessToken = {}})
+            .has_value());
     const auto currentSettings = process.handleGetSettings({});
     const auto* current = std::get_if<javelin::protocol::SettingsSnapshotReply>(&currentSettings);
     REQUIRE(current != nullptr);
@@ -259,10 +278,10 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
         .displayName = QStringLiteral("Example"),
         .sessionUrl = QStringLiteral("https://example.test/jmap"),
         .loginEmail = QStringLiteral("user@example.test"),
-        .apiKey = QStringLiteral("secret"),
-        .refreshToken = {},
         .tokenEndpoint = {},
         .oauthClientId = {},
+        .hasCredentials = true,
+        .credentialHandle = {},
         .tokenExpiresAtEpochSeconds = 0,
         .cachedAccountIds = {QStringLiteral("account-1")},
     };
@@ -550,8 +569,15 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
         }
     } eventSink;
     javelin::app::DaemonRemoteActionDispatcher dispatcher{
-        services, eventSink, [epoch] { return epoch; },
-        []() -> std::optional<javelin::protocol::BoundaryError> { return std::nullopt; }};
+        services,
+        eventSink,
+        [epoch] { return epoch; },
+        []() -> std::optional<javelin::protocol::BoundaryError> { return std::nullopt; },
+        [](javelin::app::AccountAuthenticationResult result) { return result; },
+        [](javelin::app::AccountConnectionSettings settings)
+            -> std::variant<javelin::app::AccountConnectionSettings, QString> { return settings; },
+        [](javelin::app::OAuthRevocationRequest request)
+            -> std::variant<javelin::app::OAuthRevocationRequest, QString> { return request; }};
 
     const javelin::protocol::CommandId commandId{.value = QUuid::createUuid()};
     const auto first = dispatcher.dispatch({

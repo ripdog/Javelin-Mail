@@ -49,8 +49,7 @@ namespace javelin::app
             qCInfo(remoteOAuthLog).noquote()
                 << "OAuth result decoded from daemon"
                 << "succeeded=" << authentication->succeeded
-                << "accessTokenPresent=" << !authentication->accessToken.isEmpty()
-                << "refreshTokenPresent=" << !authentication->refreshToken.isEmpty()
+                << "credentialHandlePresent=" << !authentication->credentialHandle.isEmpty()
                 << "clientIdPresent=" << !authentication->clientId.isEmpty()
                 << "tokenEndpointHost=" << QUrl{authentication->tokenEndpoint}.host()
                 << "expiresAtEpochSeconds=" << authentication->expiresAtEpochSeconds;

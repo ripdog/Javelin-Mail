@@ -19,7 +19,7 @@ namespace javelin::jmap::auth
                                                    const QString& expectedResource);
         [[nodiscard]] javelin::app::OAuthRefreshFailureKind
         refreshFailureKind(const QString& oauthErrorCode);
-    }
+    } // namespace detail
 
     class AccountOnboardingService final
     {

@@ -268,8 +268,6 @@ namespace
                      .displayName = QStringLiteral("Alice"),
                      .sessionUrl = QStringLiteral("https://mail.example.com/.well-known/jmap"),
                      .loginEmail = QStringLiteral("alice@example.com"),
-                     .apiKey = QStringLiteral("access-token"),
-                     .refreshToken = QStringLiteral("refresh-token"),
                      .tokenEndpoint = QStringLiteral("https://mail.example.com/token"),
                      .oauthClientId = QStringLiteral("client-id"),
                      .oauthIssuer = QStringLiteral("https://auth.example.com"),
@@ -278,7 +276,8 @@ namespace
                      .revocationEndpoint = QStringLiteral("https://auth.example.com/revoke"),
                      .registrationClientUri =
                          QStringLiteral("https://auth.example.com/register/client-id"),
-                     .registrationAccessToken = QStringLiteral("registration-token"),
+                     .hasCredentials = true,
+                     .credentialHandle = QStringLiteral("one-time-handle"),
                      .tokenExpiresAtEpochSeconds = 1'785'784'100,
                      .reauthenticationRequired = true,
                      .cachedAccountIds = {QStringLiteral("account-1")},
@@ -301,8 +300,6 @@ namespace
         REQUIRE(handler.receivedSettingsUpdate->update.accounts.has_value());
         REQUIRE(handler.receivedSettingsUpdate->update.accounts->size() == 1);
         const auto& account = handler.receivedSettingsUpdate->update.accounts->front();
-        CHECK(account.apiKey == QStringLiteral("access-token"));
-        CHECK(account.refreshToken == QStringLiteral("refresh-token"));
         CHECK(account.tokenEndpoint == QStringLiteral("https://mail.example.com/token"));
         CHECK(account.oauthClientId == QStringLiteral("client-id"));
         CHECK(account.oauthIssuer == QStringLiteral("https://auth.example.com"));
@@ -311,7 +308,8 @@ namespace
         CHECK(account.revocationEndpoint == QStringLiteral("https://auth.example.com/revoke"));
         CHECK(account.registrationClientUri ==
               QStringLiteral("https://auth.example.com/register/client-id"));
-        CHECK(account.registrationAccessToken == QStringLiteral("registration-token"));
+        CHECK(account.hasCredentials);
+        CHECK(account.credentialHandle == QStringLiteral("one-time-handle"));
         CHECK(account.tokenExpiresAtEpochSeconds == 1'785'784'100);
         CHECK(account.reauthenticationRequired);
         REQUIRE(handler.receivedSettingsUpdate->update.workspace.has_value());
@@ -788,12 +786,9 @@ TEST_CASE("socket endpoint admits every onboarding remote action", "[protocol][s
                                 .revision = QStringLiteral("test")}})));
 
     const std::array actions{
-        RemoteActionKind::OnboardingDiscover,
-        RemoteActionKind::OnboardingStartOAuth,
-        RemoteActionKind::OnboardingFinishOAuth,
-        RemoteActionKind::OnboardingAuthenticateManually,
-        RemoteActionKind::OnboardingRevokeOAuth,
-        RemoteActionKind::OnboardingCancelOAuth,
+        RemoteActionKind::OnboardingDiscover,    RemoteActionKind::OnboardingStartOAuth,
+        RemoteActionKind::OnboardingFinishOAuth, RemoteActionKind::OnboardingAuthenticateManually,
+        RemoteActionKind::OnboardingRevokeOAuth, RemoteActionKind::OnboardingCancelOAuth,
     };
     for (const auto action : actions)
     {

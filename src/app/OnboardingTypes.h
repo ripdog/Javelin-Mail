@@ -117,12 +117,14 @@ namespace javelin::app
         QString revocationEndpoint = {};
         QString registrationClientUri = {};
         QString registrationAccessToken = {};
+        QString credentialHandle = {};
         qint64 expiresAtEpochSeconds = 0;
         std::vector<OnboardingFeature> features;
     };
 
     struct OAuthRevocationRequest
     {
+        QString connectionId = {};
         QString revocationEndpoint;
         QString clientId;
         QString accessToken;

@@ -47,14 +47,16 @@ namespace javelin::app
     {
         using namespace javelin::protocol;
 
-        [[nodiscard]] AccountConnectionSettings connectionSettings(const AccountSettings& settings)
+        [[nodiscard]] AccountConnectionSettings
+        connectionSettings(const AccountSettings& settings,
+                           const AccountCredentialSecrets& credentials)
         {
             return {.connectionId = settings.id.toStdString(),
                     .revision = settings.revision,
                     .sessionUrl = settings.sessionUrl.toStdString(),
                     .loginEmail = settings.loginEmail.toStdString(),
-                    .apiKey = settings.apiKey.toStdString(),
-                    .refreshToken = settings.refreshToken.toStdString(),
+                    .apiKey = credentials.accessToken.toStdString(),
+                    .refreshToken = credentials.refreshToken.toStdString(),
                     .tokenEndpoint = settings.tokenEndpoint.toStdString(),
                     .oauthClientId = settings.oauthClientId.toStdString(),
                     .oauthIssuer = settings.oauthIssuer.toStdString(),
@@ -62,8 +64,7 @@ namespace javelin::app
                     .oauthScope = settings.oauthScope.toStdString(),
                     .revocationEndpoint = settings.revocationEndpoint.toStdString(),
                     .registrationClientUri = settings.registrationClientUri.toStdString(),
-                    .registrationAccessToken =
-                        settings.registrationAccessToken.toStdString()};
+                    .registrationAccessToken = credentials.registrationAccessToken.toStdString()};
         }
 
         [[nodiscard]] const MailboxSelectionSettings*
@@ -85,13 +86,19 @@ namespace javelin::app
         }
 
         [[nodiscard]] std::vector<AccountSyncConfiguration>
-        accountConfigurations(const SettingsSnapshot& snapshot)
+        accountConfigurations(const SettingsSnapshot& snapshot,
+                              AccountCredentialStore& credentialStore)
         {
             std::vector<AccountSyncConfiguration> result;
             for (const auto& account : snapshot.accounts)
             {
-                if (account.loginEmail.isEmpty() || account.apiKey.isEmpty())
+                if (account.loginEmail.isEmpty() || !account.hasCredentials)
                     continue;
+                const auto loaded = credentialStore.load(account.id);
+                const auto* stored = std::get_if<std::optional<AccountCredentialSecrets>>(&loaded);
+                if (stored == nullptr || !stored->has_value() || !(*stored)->hasAccessToken())
+                    continue;
+                const auto& credentials = **stored;
 
                 const auto appendConfiguration = [&](const QString& accountId)
                 {
@@ -110,7 +117,7 @@ namespace javelin::app
                     mailboxIds.erase(std::ranges::unique(mailboxIds).begin(), mailboxIds.end());
 
                     result.push_back({
-                        .settings = connectionSettings(account),
+                        .settings = connectionSettings(account, credentials),
                         .accountId = accountId.toStdString(),
                         .mailboxIds = stringIds(mailboxIds),
                         .fullSyncMailboxIds = synced == nullptr ? std::vector<std::string>{}
@@ -252,15 +259,23 @@ namespace javelin::app
             }
         }
 
+        m_credentialStore =
+            m_options.credentialStore != nullptr
+                ? m_options.credentialStore
+                : std::shared_ptr<AccountCredentialStore>{makeKWalletAccountCredentialStore()};
         m_settingsRepository =
             m_options.settingsPath.isEmpty()
-                ? std::make_unique<SettingsRepository>()
+                ? std::make_unique<SettingsRepository>(SettingsRepository::canonicalSettings(),
+                                                       m_credentialStore.get())
                 : std::make_unique<SettingsRepository>(
-                      std::make_unique<QSettings>(m_options.settingsPath, QSettings::IniFormat));
+                      std::make_unique<QSettings>(m_options.settingsPath, QSettings::IniFormat),
+                      m_credentialStore.get());
         const auto settingsResult = m_settingsRepository->load();
         if (const auto* error = std::get_if<SettingsRepositoryError>(&settingsResult))
             return fail(DaemonStartupErrorCode::SettingsMigration, error->detail);
         m_settingsSnapshot = std::get<SettingsSnapshot>(settingsResult);
+        if (const auto error = refreshCredentialFlags())
+            return fail(DaemonStartupErrorCode::SettingsMigration, error->detail);
 
         const auto locationResult =
             (m_options.cacheRootPath.isEmpty() ? CacheLocationProvider::forApplication()
@@ -274,14 +289,24 @@ namespace javelin::app
             m_services = std::make_unique<DaemonServices>(std::get<CacheLocation>(locationResult));
             m_remoteActions = std::make_unique<DaemonRemoteActionDispatcher>(
                 *m_services, *this, [this] { return currentEpoch(); },
-                [this] { return reloadSettings(); }, this);
+                [this] { return reloadSettings(); }, [this](AccountAuthenticationResult result)
+                { return stageAuthenticationResult(std::move(result)); },
+                [this](AccountConnectionSettings settings)
+                { return hydrateConnectionSettings(std::move(settings)); },
+                [this](OAuthRevocationRequest request)
+                { return hydrateRevocationRequest(std::move(request)); }, this);
             m_services->setAccessTokenProvider(
                 [this](const std::string_view accountId) -> std::optional<std::string>
                 {
                     const auto* connection = connectionForAccount(accountId);
-                    if (connection == nullptr || connection->apiKey.isEmpty())
+                    if (connection == nullptr)
                         return std::nullopt;
-                    return connection->apiKey.toStdString();
+                    const auto loaded = credentials(connection->id);
+                    const auto* stored =
+                        std::get_if<std::optional<AccountCredentialSecrets>>(&loaded);
+                    if (stored == nullptr || !stored->has_value() || !(*stored)->hasAccessToken())
+                        return std::nullopt;
+                    return (*stored)->accessToken.toStdString();
                 });
             m_services->setAuthenticationRefreshHandler(
                 [this](std::string accountId, std::string rejectedAccessToken)
@@ -632,25 +657,156 @@ namespace javelin::app
         if (!isReady())
             return protocol::SettingsUpdateRejected{.currentRevision = m_settingsSnapshot.revision,
                                                     .error = notReadyError()};
+
+        struct CredentialChange
+        {
+            QString connectionId;
+            QString handle;
+            AccountCredentialSecrets replacement;
+            std::optional<AccountCredentialSecrets> previous;
+            protocol::AccountSettings previousAccount;
+        };
+        std::vector<CredentialChange> credentialChanges;
+        if (request.update.accounts.has_value())
+        {
+            prunePendingCredentials();
+            for (auto& account : *request.update.accounts)
+            {
+                const auto loaded = credentials(account.id);
+                if (const auto* error = std::get_if<AccountCredentialStoreError>(&loaded))
+                {
+                    return protocol::SettingsUpdateRejected{
+                        .currentRevision = m_settingsSnapshot.revision,
+                        .error = {.code = protocol::BoundaryErrorCode::SettingsStorageFailure,
+                                  .field = QStringLiteral("accounts.credentials"),
+                                  .detail = error->detail}};
+                }
+                const auto previous = std::get<std::optional<AccountCredentialSecrets>>(loaded);
+                account.hasCredentials = previous.has_value() && previous->hasAccessToken();
+                if (!account.credentialHandle.isEmpty())
+                {
+                    const auto pending = m_pendingCredentials.constFind(account.credentialHandle);
+                    if (pending == m_pendingCredentials.cend())
+                    {
+                        return protocol::SettingsUpdateRejected{
+                            .currentRevision = m_settingsSnapshot.revision,
+                            .error = {.code = protocol::BoundaryErrorCode::InvalidRequest,
+                                      .field = QStringLiteral("accounts.credentialHandle"),
+                                      .detail = QStringLiteral(
+                                          "The sign-in credentials have expired. Sign in again.")}};
+                    }
+                    const auto oldAccount = std::ranges::find(
+                        m_settingsSnapshot.accounts, account.id, &protocol::AccountSettings::id);
+                    credentialChanges.push_back({
+                        .connectionId = account.id,
+                        .handle = account.credentialHandle,
+                        .replacement = pending->credentials,
+                        .previous = previous,
+                        .previousAccount = oldAccount == m_settingsSnapshot.accounts.end()
+                                               ? protocol::AccountSettings{}
+                                               : *oldAccount,
+                    });
+                    account.hasCredentials = true;
+                }
+                account.credentialHandle.clear();
+            }
+        }
+
         const auto previousAccounts = m_settingsSnapshot.accounts;
         const auto previousSyncedMailboxes = m_settingsSnapshot.syncedMailboxSelections;
         const auto previousNotificationMailboxes = m_settingsSnapshot.notificationMailboxSelections;
-        const auto reply = m_settingsRepository->update(std::move(request));
-        if (const auto* updated = std::get_if<protocol::SettingsUpdated>(&reply))
+
+        std::size_t storedChanges = 0;
+        const auto rollbackCredentials = [&]
         {
-            const auto loaded = m_settingsRepository->load();
-            if (const auto* error = std::get_if<SettingsRepositoryError>(&loaded))
+            while (storedChanges > 0)
             {
-                return protocol::SettingsUpdateRejected{
-                    .currentRevision = m_settingsSnapshot.revision, .error = settingsError(*error)};
+                const auto& change = credentialChanges[--storedChanges];
+                if (change.previous.has_value())
+                    (void)m_credentialStore->store(change.connectionId, *change.previous);
+                else
+                    (void)m_credentialStore->remove(change.connectionId);
             }
-            m_settingsSnapshot = std::get<protocol::SettingsSnapshot>(loaded);
-            if (m_settingsSnapshot.accounts != previousAccounts ||
-                m_settingsSnapshot.syncedMailboxSelections != previousSyncedMailboxes ||
-                m_settingsSnapshot.notificationMailboxSelections != previousNotificationMailboxes)
-                applySettings();
-            onBoundaryEvent(*updated);
+        };
+        for (const auto& change : credentialChanges)
+        {
+            if (const auto error =
+                    m_credentialStore->store(change.connectionId, change.replacement))
+            {
+                rollbackCredentials();
+                return protocol::SettingsUpdateRejected{
+                    .currentRevision = m_settingsSnapshot.revision,
+                    .error = {.code = protocol::BoundaryErrorCode::SettingsStorageFailure,
+                              .field = QStringLiteral("accounts.credentials"),
+                              .detail = error->detail}};
+            }
+            ++storedChanges;
         }
+
+        const auto reply = m_settingsRepository->update(std::move(request));
+        const auto* updated = std::get_if<protocol::SettingsUpdated>(&reply);
+        if (updated == nullptr)
+        {
+            rollbackCredentials();
+            return reply;
+        }
+
+        const auto loaded = m_settingsRepository->load();
+        if (const auto* error = std::get_if<SettingsRepositoryError>(&loaded))
+        {
+            rollbackCredentials();
+            return protocol::SettingsUpdateRejected{.currentRevision = m_settingsSnapshot.revision,
+                                                    .error = settingsError(*error)};
+        }
+        m_settingsSnapshot = std::get<protocol::SettingsSnapshot>(loaded);
+        if (const auto error = refreshCredentialFlags())
+        {
+            rollbackCredentials();
+            return protocol::SettingsUpdateRejected{.currentRevision = m_settingsSnapshot.revision,
+                                                    .error = *error};
+        }
+
+        for (const auto& change : credentialChanges)
+        {
+            m_pendingCredentials.remove(change.handle);
+            if (change.previous.has_value())
+            {
+                auto previousAccount = change.previousAccount;
+                const auto current =
+                    std::ranges::find(m_settingsSnapshot.accounts, change.connectionId,
+                                      &protocol::AccountSettings::id);
+                if (current != m_settingsSnapshot.accounts.end() &&
+                    previousAccount.registrationClientUri == current->registrationClientUri)
+                {
+                    previousAccount.registrationClientUri.clear();
+                }
+                revokeCredentials(std::move(previousAccount), *change.previous);
+            }
+        }
+
+        for (const auto& previous : previousAccounts)
+        {
+            const auto retained = std::ranges::find(m_settingsSnapshot.accounts, previous.id,
+                                                    &protocol::AccountSettings::id);
+            if (retained != m_settingsSnapshot.accounts.end())
+                continue;
+            const auto loadedCredentials = credentials(previous.id);
+            if (const auto* stored =
+                    std::get_if<std::optional<AccountCredentialSecrets>>(&loadedCredentials);
+                stored != nullptr && stored->has_value())
+            {
+                revokeCredentials(previous, **stored);
+            }
+            if (const auto error = m_credentialStore->remove(previous.id))
+                qWarning().noquote() << QStringLiteral("Could not remove account credentials")
+                                     << previous.id << error->detail;
+        }
+
+        if (m_settingsSnapshot.accounts != previousAccounts ||
+            m_settingsSnapshot.syncedMailboxSelections != previousSyncedMailboxes ||
+            m_settingsSnapshot.notificationMailboxSelections != previousNotificationMailboxes)
+            applySettings();
+        onBoundaryEvent(*updated);
         return reply;
     }
 
@@ -770,18 +926,143 @@ namespace javelin::app
         onBoundaryEvent(DaemonStatusChanged{.status = daemonStatus()});
     }
 
+    void DaemonProcess::prunePendingCredentials()
+    {
+        constexpr qint64 pendingLifetimeSeconds = 10 * 60;
+        const auto cutoff = QDateTime::currentSecsSinceEpoch() - pendingLifetimeSeconds;
+        for (auto it = m_pendingCredentials.begin(); it != m_pendingCredentials.end();)
+        {
+            if (it->createdAtEpochSeconds < cutoff)
+                it = m_pendingCredentials.erase(it);
+            else
+                ++it;
+        }
+    }
+
+    AccountAuthenticationResult
+    DaemonProcess::stageAuthenticationResult(AccountAuthenticationResult result)
+    {
+        prunePendingCredentials();
+        if (!result.succeeded)
+            return result;
+        AccountCredentialSecrets credentials{
+            .accessToken = std::move(result.accessToken),
+            .refreshToken = std::move(result.refreshToken),
+            .registrationAccessToken = std::move(result.registrationAccessToken),
+        };
+        result.accessToken.clear();
+        result.refreshToken.clear();
+        result.registrationAccessToken.clear();
+        if (!credentials.hasAccessToken())
+        {
+            result.succeeded = false;
+            result.error = QStringLiteral("The sign-in result did not contain usable credentials.");
+            return result;
+        }
+        result.credentialHandle = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        m_pendingCredentials.insert(result.credentialHandle,
+                                    {.credentials = std::move(credentials),
+                                     .createdAtEpochSeconds = QDateTime::currentSecsSinceEpoch()});
+        return result;
+    }
+
+    AccountCredentialLoadResult DaemonProcess::credentials(const QString& connectionId) const
+    {
+        if (m_credentialStore == nullptr)
+        {
+            return AccountCredentialStoreError{
+                .detail = QStringLiteral("Secure credential storage is unavailable.")};
+        }
+        return m_credentialStore->load(connectionId);
+    }
+
+    std::variant<AccountConnectionSettings, QString>
+    DaemonProcess::hydrateConnectionSettings(AccountConnectionSettings settings) const
+    {
+        const auto loaded = credentials(QString::fromStdString(settings.connectionId));
+        if (const auto* error = std::get_if<AccountCredentialStoreError>(&loaded))
+            return error->detail;
+        const auto& stored = std::get<std::optional<AccountCredentialSecrets>>(loaded);
+        if (!stored.has_value() || !stored->hasAccessToken())
+            return QStringLiteral("This account needs to be signed in again.");
+        settings.apiKey = stored->accessToken.toStdString();
+        settings.refreshToken = stored->refreshToken.toStdString();
+        settings.registrationAccessToken = stored->registrationAccessToken.toStdString();
+        return settings;
+    }
+
+    std::variant<OAuthRevocationRequest, QString>
+    DaemonProcess::hydrateRevocationRequest(OAuthRevocationRequest request) const
+    {
+        if (request.connectionId.isEmpty())
+            return QStringLiteral("The account credential identity is missing.");
+        const auto loaded = credentials(request.connectionId);
+        if (const auto* error = std::get_if<AccountCredentialStoreError>(&loaded))
+            return error->detail;
+        const auto& stored = std::get<std::optional<AccountCredentialSecrets>>(loaded);
+        if (!stored.has_value())
+            return QStringLiteral("No stored credentials remain for this account.");
+        request.accessToken = stored->accessToken;
+        request.refreshToken = stored->refreshToken;
+        request.registrationAccessToken = stored->registrationAccessToken;
+        return request;
+    }
+
+    std::optional<protocol::BoundaryError> DaemonProcess::refreshCredentialFlags()
+    {
+        for (auto& account : m_settingsSnapshot.accounts)
+        {
+            account.credentialHandle.clear();
+            const auto loaded = credentials(account.id);
+            if (const auto* error = std::get_if<AccountCredentialStoreError>(&loaded))
+            {
+                return protocol::BoundaryError{
+                    .code = protocol::BoundaryErrorCode::SettingsStorageFailure,
+                    .field = QStringLiteral("accounts.credentials"),
+                    .detail = error->detail,
+                };
+            }
+            const auto& stored = std::get<std::optional<AccountCredentialSecrets>>(loaded);
+            account.hasCredentials = stored.has_value() && stored->hasAccessToken();
+        }
+        return std::nullopt;
+    }
+
+    void DaemonProcess::revokeCredentials(protocol::AccountSettings account,
+                                          AccountCredentialSecrets credentials)
+    {
+        if (m_services == nullptr || credentials.empty())
+            return;
+        auto task = m_services->onboardingService().revokeOAuth({
+            .connectionId = account.id,
+            .revocationEndpoint = std::move(account.revocationEndpoint),
+            .clientId = std::move(account.oauthClientId),
+            .accessToken = std::move(credentials.accessToken),
+            .refreshToken = std::move(credentials.refreshToken),
+            .registrationClientUri = std::move(account.registrationClientUri),
+            .registrationAccessToken = std::move(credentials.registrationAccessToken),
+        });
+        QCoro::connect(std::move(task), this,
+                       [connectionId = std::move(account.id)](OAuthRevocationResult result)
+                       {
+                           if (result.attempted && !result.succeeded)
+                               qWarning().noquote() << QStringLiteral("OAuth cleanup failed")
+                                                    << connectionId << result.error;
+                       });
+    }
+
     void DaemonProcess::applySettings()
     {
         const auto completeSettings = std::ranges::count_if(
             m_settingsSnapshot.accounts, [](const auto& account)
-            { return !account.loginEmail.isEmpty() && !account.apiKey.isEmpty(); });
+            { return !account.loginEmail.isEmpty() && account.hasCredentials; });
         qInfo().noquote() << QStringLiteral(
                                  "Loaded %1 configured connection%2 (%3 with credentials)")
                                  .arg(m_settingsSnapshot.accounts.size())
                                  .arg(m_settingsSnapshot.accounts.size() == 1 ? QString{}
                                                                               : QStringLiteral("s"))
                                  .arg(completeSettings);
-        const auto configurations = accountConfigurations(m_settingsSnapshot);
+        const auto configurations = accountConfigurations(m_settingsSnapshot, *m_credentialStore);
         std::vector<FullSyncAccountConfiguration> fullSync;
         std::vector<std::string> accountIds;
         fullSync.reserve(configurations.size());
@@ -814,13 +1095,17 @@ namespace javelin::app
         const auto refreshBefore = QDateTime::currentSecsSinceEpoch() + 300;
         for (const auto& account : m_settingsSnapshot.accounts)
         {
-            if (account.reauthenticationRequired || account.refreshToken.isEmpty() ||
+            if (account.reauthenticationRequired || !account.hasCredentials ||
                 account.tokenEndpoint.isEmpty() || account.oauthClientId.isEmpty() ||
                 account.tokenExpiresAtEpochSeconds == 0 ||
                 account.tokenExpiresAtEpochSeconds > refreshBefore)
             {
                 continue;
             }
+            const auto loaded = credentials(account.id);
+            const auto* stored = std::get_if<std::optional<AccountCredentialSecrets>>(&loaded);
+            if (stored == nullptr || !stored->has_value() || (*stored)->refreshToken.isEmpty())
+                continue;
 
             auto task = startOAuthRefresh(account.id, false);
             QCoro::connect(std::move(task), this, [](OAuthRefreshOutcome) {});
@@ -836,11 +1121,16 @@ namespace javelin::app
         const auto account = std::ranges::find(m_settingsSnapshot.accounts, connectionId,
                                                &protocol::AccountSettings::id);
         if (account == m_settingsSnapshot.accounts.end() || account->reauthenticationRequired ||
-            account->refreshToken.isEmpty() || account->tokenEndpoint.isEmpty() ||
+            !account->hasCredentials || account->tokenEndpoint.isEmpty() ||
             account->oauthClientId.isEmpty())
         {
             co_return OAuthRefreshOutcome{};
         }
+        const auto loaded = credentials(account->id);
+        const auto* stored = std::get_if<std::optional<AccountCredentialSecrets>>(&loaded);
+        if (stored == nullptr || !stored->has_value() || (*stored)->refreshToken.isEmpty())
+            co_return OAuthRefreshOutcome{};
+        const auto currentCredentials = **stored;
         if (!force &&
             (account->tokenExpiresAtEpochSeconds == 0 ||
              account->tokenExpiresAtEpochSeconds > QDateTime::currentSecsSinceEpoch() + 300))
@@ -849,30 +1139,28 @@ namespace javelin::app
         }
 
         const auto sessionUrl = account->sessionUrl;
-        const auto refreshToken = account->refreshToken;
+        const auto refreshToken = currentCredentials.refreshToken;
         const auto tokenEndpoint = account->tokenEndpoint;
         const auto clientId = account->oauthClientId;
         const auto resourceUrl = account->oauthResource;
         const auto scope = account->oauthScope;
-        const auto previousAccessToken = account->apiKey;
+        const auto previousAccessToken = currentCredentials.accessToken;
         const auto refreshKey = connectionId;
         co_return co_await m_oauthRefreshes.run(
             refreshKey,
             [this, connectionId = std::move(connectionId), sessionUrl, refreshToken, tokenEndpoint,
              clientId, resourceUrl, scope, previousAccessToken]() mutable
             {
-                return performOAuthRefresh(
-                    std::move(connectionId), std::move(sessionUrl), std::move(refreshToken),
-                    std::move(tokenEndpoint), std::move(clientId), std::move(resourceUrl),
-                    std::move(scope), std::move(previousAccessToken));
+                return performOAuthRefresh(std::move(connectionId), std::move(sessionUrl),
+                                           std::move(refreshToken), std::move(tokenEndpoint),
+                                           std::move(clientId), std::move(resourceUrl),
+                                           std::move(scope), std::move(previousAccessToken));
             });
     }
 
-    QCoro::Task<OAuthRefreshOutcome>
-    DaemonProcess::performOAuthRefresh(QString connectionId, QString sessionUrl,
-                                       QString refreshToken, QString tokenEndpoint,
-                                       QString clientId, QString resourceUrl, QString scope,
-                                       QString previousAccessToken)
+    QCoro::Task<OAuthRefreshOutcome> DaemonProcess::performOAuthRefresh(
+        QString connectionId, QString sessionUrl, QString refreshToken, QString tokenEndpoint,
+        QString clientId, QString resourceUrl, QString scope, QString previousAccessToken)
     {
         auto result = co_await m_services->onboardingService().refreshOAuth({
             .sessionUrl = std::move(sessionUrl),
@@ -887,21 +1175,36 @@ namespace javelin::app
         auto accounts = m_settingsSnapshot.accounts;
         const auto found =
             std::ranges::find(accounts, connectionId, &protocol::AccountSettings::id);
-        if (found != accounts.end() && found->apiKey != previousAccessToken)
+        const auto loaded = credentials(connectionId);
+        const auto* current = std::get_if<std::optional<AccountCredentialSecrets>>(&loaded);
+        if (current == nullptr || !current->has_value())
+            co_return outcome;
+        if ((*current)->accessToken != previousAccessToken)
         {
-            co_return OAuthRefreshOutcome{.succeeded = !found->apiKey.isEmpty(),
-                                          .accessToken = found->apiKey};
+            co_return OAuthRefreshOutcome{.succeeded = (*current)->hasAccessToken(),
+                                          .accessToken = (*current)->accessToken};
         }
         if (result.succeeded && isReady() && found != accounts.end() &&
-            found->refreshToken == refreshToken && found->tokenEndpoint == tokenEndpoint &&
+            (*current)->refreshToken == refreshToken && found->tokenEndpoint == tokenEndpoint &&
             found->oauthClientId == clientId && found->oauthResource == resourceUrl)
         {
-            const auto refreshedAccessToken = result.accessToken;
-            found->apiKey = result.accessToken;
-            found->refreshToken = result.refreshToken;
+            const auto previousCredentials = **current;
+            const AccountCredentialSecrets refreshedCredentials{
+                .accessToken = result.accessToken,
+                .refreshToken = result.refreshToken,
+                .registrationAccessToken = previousCredentials.registrationAccessToken,
+            };
+            if (const auto error = m_credentialStore->store(connectionId, refreshedCredentials))
+            {
+                qWarning().noquote() << QStringLiteral("OAuth refresh credentials were not stored")
+                                     << connectionId << error->detail;
+                co_return outcome;
+            }
+
             found->oauthScope = result.scope;
             found->tokenExpiresAtEpochSeconds = result.expiresAtEpochSeconds;
             found->reauthenticationRequired = false;
+            found->hasCredentials = true;
             ++found->revision;
             protocol::SettingsUpdate update;
             update.accounts = std::move(accounts);
@@ -909,12 +1212,12 @@ namespace javelin::app
                 {.baseRevision = m_settingsSnapshot.revision, .update = std::move(update)});
             if (std::holds_alternative<protocol::SettingsUpdated>(updateResult))
             {
-                co_return OAuthRefreshOutcome{.succeeded = true,
-                                              .accessToken = refreshedAccessToken};
+                co_return OAuthRefreshOutcome{.succeeded = true, .accessToken = result.accessToken};
             }
 
+            (void)m_credentialStore->store(connectionId, previousCredentials);
             const auto& rejected = std::get<protocol::SettingsUpdateRejected>(updateResult);
-            qWarning().noquote() << QStringLiteral("OAuth refresh credentials were not applied")
+            qWarning().noquote() << QStringLiteral("OAuth refresh metadata was not applied")
                                  << connectionId << rejected.error.detail;
         }
         else if (!result.succeeded)
@@ -932,8 +1235,7 @@ namespace javelin::app
                     {.baseRevision = m_settingsSnapshot.revision, .update = std::move(update)});
                 if (!std::holds_alternative<protocol::SettingsUpdated>(updateResult))
                 {
-                    const auto& rejected =
-                        std::get<protocol::SettingsUpdateRejected>(updateResult);
+                    const auto& rejected = std::get<protocol::SettingsUpdateRejected>(updateResult);
                     qWarning().noquote()
                         << QStringLiteral("OAuth reauthentication state was not saved")
                         << connectionId << rejected.error.detail;
@@ -972,10 +1274,14 @@ namespace javelin::app
             co_return std::nullopt;
 
         const auto* connection = connectionForAccount(accountId);
-        if (connection == nullptr || connection->apiKey.isEmpty())
+        if (connection == nullptr)
             co_return std::nullopt;
-        if (connection->apiKey.toStdString() != rejectedAccessToken)
-            co_return connection->apiKey.toStdString();
+        const auto loaded = credentials(connection->id);
+        const auto* stored = std::get_if<std::optional<AccountCredentialSecrets>>(&loaded);
+        if (stored == nullptr || !stored->has_value() || !(*stored)->hasAccessToken())
+            co_return std::nullopt;
+        if ((*stored)->accessToken.toStdString() != rejectedAccessToken)
+            co_return (*stored)->accessToken.toStdString();
 
         auto outcome = co_await startOAuthRefresh(connection->id, true);
         if (!outcome.succeeded || outcome.accessToken.isEmpty())
@@ -991,6 +1297,8 @@ namespace javelin::app
         if (const auto* error = std::get_if<SettingsRepositoryError>(&loaded))
             return settingsError(*error);
         m_settingsSnapshot = std::get<protocol::SettingsSnapshot>(loaded);
+        if (const auto error = refreshCredentialFlags())
+            return error;
         applySettings();
         onBoundaryEvent(protocol::SettingsUpdated{.revision = m_settingsSnapshot.revision});
         return std::nullopt;

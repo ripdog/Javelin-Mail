@@ -434,13 +434,13 @@ namespace javelin::protocol
         {
             return writer.string(account.id) && writer.qword(account.revision) &&
                    writer.string(account.displayName) && writer.string(account.sessionUrl) &&
-                   writer.string(account.loginEmail) && writer.string(account.apiKey) &&
-                   writer.string(account.refreshToken) && writer.string(account.tokenEndpoint) &&
+                   writer.string(account.loginEmail) && writer.string(account.tokenEndpoint) &&
                    writer.string(account.oauthClientId) && writer.string(account.oauthIssuer) &&
                    writer.string(account.oauthResource) && writer.string(account.oauthScope) &&
                    writer.string(account.revocationEndpoint) &&
                    writer.string(account.registrationClientUri) &&
-                   writer.string(account.registrationAccessToken) &&
+                   writer.boolean(account.hasCredentials) &&
+                   writer.string(account.credentialHandle) &&
                    writer.qword(static_cast<quint64>(account.tokenExpiresAtEpochSeconds)) &&
                    writer.boolean(account.reauthenticationRequired) &&
                    writeVector(writer, account.cachedAccountIds, limits.maximumCollectionItems,
@@ -454,13 +454,13 @@ namespace javelin::protocol
             quint64 expiresAt = 0;
             if (!reader.string(account.id) || !reader.qword(account.revision) ||
                 !reader.string(account.displayName) || !reader.string(account.sessionUrl) ||
-                !reader.string(account.loginEmail) || !reader.string(account.apiKey) ||
-                !reader.string(account.refreshToken) || !reader.string(account.tokenEndpoint) ||
+                !reader.string(account.loginEmail) || !reader.string(account.tokenEndpoint) ||
                 !reader.string(account.oauthClientId) || !reader.string(account.oauthIssuer) ||
                 !reader.string(account.oauthResource) || !reader.string(account.oauthScope) ||
                 !reader.string(account.revocationEndpoint) ||
                 !reader.string(account.registrationClientUri) ||
-                !reader.string(account.registrationAccessToken) || !reader.qword(expiresAt) ||
+                !reader.boolean(account.hasCredentials) ||
+                !reader.string(account.credentialHandle) || !reader.qword(expiresAt) ||
                 !reader.boolean(account.reauthenticationRequired) ||
                 expiresAt > static_cast<quint64>(std::numeric_limits<qint64>::max()))
                 return false;

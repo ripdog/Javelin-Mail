@@ -54,7 +54,7 @@ configure_file(
     @ONLY
 )
 
-find_package(KF6 REQUIRED COMPONENTS Codecs ConfigWidgets XmlGui CoreAddons I18n TextEditor)
+find_package(KF6 REQUIRED COMPONENTS Codecs ConfigWidgets XmlGui CoreAddons I18n TextEditor Wallet)
 find_package(KPim6Mime REQUIRED)
 find_package(KPim6MessageComposer REQUIRED)
 
@@ -1300,6 +1300,9 @@ target_compile_options(javelin_calendar_gui PRIVATE -fexceptions)
 
 add_library(javelin_daemon_core STATIC
     src/app/AccountApplicationPorts.h
+    src/app/AccountCredentialStore.cpp
+    src/app/AccountCredentialStore.h
+    src/app/KWalletAccountCredentialStore.cpp
     src/app/AccountCommandService.cpp
     src/app/AccountCommandService.h
     src/app/AccountRefreshApplicationPorts.h
@@ -1453,6 +1456,7 @@ target_link_libraries(javelin_daemon_core
         Qt::DBus
         Qt::Network
         KF6::I18n
+        KF6::Wallet
         glaze::glaze
         javelin_observability
 )

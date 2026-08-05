@@ -174,9 +174,14 @@ namespace javelin::app
         DaemonServices& services, javelin::protocol::BoundaryEventSink& eventSink,
         std::function<javelin::protocol::InvalidationEpoch()> currentEpoch,
         std::function<std::optional<javelin::protocol::BoundaryError>()> reloadSettings,
-        QObject* parent)
+        AuthenticationResultFilter authenticationResultFilter,
+        ConnectionSettingsHydrator connectionSettingsHydrator,
+        RevocationRequestHydrator revocationRequestHydrator, QObject* parent)
         : QObject(parent), m_services(services), m_eventSink(eventSink),
-          m_currentEpoch(std::move(currentEpoch)), m_reloadSettings(std::move(reloadSettings))
+          m_currentEpoch(std::move(currentEpoch)), m_reloadSettings(std::move(reloadSettings)),
+          m_authenticationResultFilter(std::move(authenticationResultFilter)),
+          m_connectionSettingsHydrator(std::move(connectionSettingsHydrator)),
+          m_revocationRequestHydrator(std::move(revocationRequestHydrator))
     {
     }
 
@@ -293,20 +298,43 @@ namespace javelin::app
                 { return launch(m_services.onboardingService().startOAuth(std::move(request))); });
         case Kind::OnboardingFinishOAuth:
             return decodeAndApply<OAuthFinishRequest>(
-                command.payload, invalidPayload, [&](OAuthFinishRequest request)
-                { return launch(m_services.onboardingService().finishOAuth(std::move(request))); });
+                command.payload, invalidPayload,
+                [&](OAuthFinishRequest request)
+                {
+                    auto task = [this, request = std::move(request)]() mutable
+                        -> QCoro::Task<AccountAuthenticationResult>
+                    {
+                        auto result =
+                            co_await m_services.onboardingService().finishOAuth(std::move(request));
+                        co_return m_authenticationResultFilter(std::move(result));
+                    }();
+                    return launch(std::move(task));
+                });
         case Kind::OnboardingAuthenticateManually:
             return decodeAndApply<ManualAuthenticationRequest>(
                 command.payload, invalidPayload,
                 [&](ManualAuthenticationRequest request)
                 {
-                    return launch(
-                        m_services.onboardingService().authenticateManually(std::move(request)));
+                    auto task = [this, request = std::move(request)]() mutable
+                        -> QCoro::Task<AccountAuthenticationResult>
+                    {
+                        auto result = co_await m_services.onboardingService().authenticateManually(
+                            std::move(request));
+                        co_return m_authenticationResultFilter(std::move(result));
+                    }();
+                    return launch(std::move(task));
                 });
         case Kind::OnboardingRevokeOAuth:
             return decodeAndApply<OAuthRevocationRequest>(
-                command.payload, invalidPayload, [&](OAuthRevocationRequest request)
-                { return launch(m_services.onboardingService().revokeOAuth(std::move(request))); });
+                command.payload, invalidPayload,
+                [&](OAuthRevocationRequest request)
+                {
+                    auto hydrated = m_revocationRequestHydrator(std::move(request));
+                    if (const auto* error = std::get_if<QString>(&hydrated))
+                        return reject(id, *error);
+                    return launch(m_services.onboardingService().revokeOAuth(
+                        std::get<OAuthRevocationRequest>(std::move(hydrated))));
+                });
         case Kind::OnboardingCancelOAuth:
             return decodeAndApply<OAuthCancelRequest>(
                 command.payload, invalidPayload, [&](OAuthCancelRequest request)
@@ -434,16 +462,24 @@ namespace javelin::app
                 [&](AccountConnectionSettings settings,
                     javelin::jmap::submission::OpenComposeRequest request)
                 {
-                    return launch(m_services.composeCommandPort().open(std::move(settings),
-                                                                       std::move(request)));
+                    auto hydrated = m_connectionSettingsHydrator(std::move(settings));
+                    if (const auto* error = std::get_if<QString>(&hydrated))
+                        return reject(id, *error);
+                    return launch(m_services.composeCommandPort().open(
+                        std::get<AccountConnectionSettings>(std::move(hydrated)),
+                        std::move(request)));
                 });
         case Kind::ComposeLoadSenderIdentities:
             return decodeAndApply<AccountConnectionSettings, std::string>(
                 command.payload, invalidPayload,
                 [&](AccountConnectionSettings settings, std::string accountId)
                 {
+                    auto hydrated = m_connectionSettingsHydrator(std::move(settings));
+                    if (const auto* error = std::get_if<QString>(&hydrated))
+                        return reject(id, *error);
                     return launch(m_services.composeCommandPort().loadSenderIdentities(
-                        std::move(settings), std::move(accountId)));
+                        std::get<AccountConnectionSettings>(std::move(hydrated)),
+                        std::move(accountId)));
                 });
         case Kind::ComposeSaveDraft:
             return decodeAndApply<AccountConnectionSettings,
@@ -452,8 +488,12 @@ namespace javelin::app
                 [&](AccountConnectionSettings settings,
                     javelin::jmap::submission::DraftSnapshot snapshot)
                 {
-                    return launch(m_services.composeCommandPort().saveDraft(std::move(settings),
-                                                                            std::move(snapshot)));
+                    auto hydrated = m_connectionSettingsHydrator(std::move(settings));
+                    if (const auto* error = std::get_if<QString>(&hydrated))
+                        return reject(id, *error);
+                    return launch(m_services.composeCommandPort().saveDraft(
+                        std::get<AccountConnectionSettings>(std::move(hydrated)),
+                        std::move(snapshot)));
                 });
         case Kind::ComposeSend:
             return decodeAndApply<AccountConnectionSettings,
@@ -462,8 +502,12 @@ namespace javelin::app
                 [&](AccountConnectionSettings settings,
                     javelin::jmap::submission::DraftSnapshot snapshot)
                 {
-                    return launch(m_services.composeCommandPort().send(std::move(settings),
-                                                                       std::move(snapshot)));
+                    auto hydrated = m_connectionSettingsHydrator(std::move(settings));
+                    if (const auto* error = std::get_if<QString>(&hydrated))
+                        return reject(id, *error);
+                    return launch(m_services.composeCommandPort().send(
+                        std::get<AccountConnectionSettings>(std::move(hydrated)),
+                        std::move(snapshot)));
                 });
         case Kind::ComposeLoadWorkingCopy:
             return decodeAndApply<std::string>(

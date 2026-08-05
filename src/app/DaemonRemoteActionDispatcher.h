@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/AccountConnectionSettings.h"
+#include "app/OnboardingTypes.h"
 #include "app/RemoteActionTypes.h"
 #include "protocol/ProcessBoundary.h"
 
@@ -13,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <variant>
 
 namespace javelin::app
 {
@@ -24,11 +27,21 @@ namespace javelin::app
         Q_OBJECT
 
       public:
+        using AuthenticationResultFilter =
+            std::function<AccountAuthenticationResult(AccountAuthenticationResult)>;
+        using ConnectionSettingsHydrator =
+            std::function<std::variant<AccountConnectionSettings, QString>(
+                AccountConnectionSettings)>;
+        using RevocationRequestHydrator =
+            std::function<std::variant<OAuthRevocationRequest, QString>(OAuthRevocationRequest)>;
+
         DaemonRemoteActionDispatcher(
             DaemonServices& services, javelin::protocol::BoundaryEventSink& eventSink,
             std::function<javelin::protocol::InvalidationEpoch()> currentEpoch,
             std::function<std::optional<javelin::protocol::BoundaryError>()> reloadSettings,
-            QObject* parent = nullptr);
+            AuthenticationResultFilter authenticationResultFilter,
+            ConnectionSettingsHydrator connectionSettingsHydrator,
+            RevocationRequestHydrator revocationRequestHydrator, QObject* parent = nullptr);
         ~DaemonRemoteActionDispatcher() override;
 
         [[nodiscard]] javelin::protocol::CommandReply
@@ -69,6 +82,9 @@ namespace javelin::app
         javelin::protocol::BoundaryEventSink& m_eventSink;
         std::function<javelin::protocol::InvalidationEpoch()> m_currentEpoch;
         std::function<std::optional<javelin::protocol::BoundaryError>()> m_reloadSettings;
+        AuthenticationResultFilter m_authenticationResultFilter;
+        ConnectionSettingsHydrator m_connectionSettingsHydrator;
+        RevocationRequestHydrator m_revocationRequestHydrator;
         std::unordered_map<QString, ReplayEntry> m_replays;
         std::deque<QString> m_replayOrder;
         std::unordered_map<QString, std::unique_ptr<MailboxObservation>> m_mailboxObservations;

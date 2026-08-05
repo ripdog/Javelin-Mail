@@ -83,19 +83,20 @@ int main(int argc, char* argv[])
                               .maximumAffectedKeys = 64,
                               .maximumMaterializationItems = 500,
                               .maximumFrameBytes = 64 * 1024 * 1024},
-                   .protocol = {.major = 4, .minor = 0},
+                   .protocol = {.major = 5, .minor = 0},
                    .expectedBuild = std::nullopt,
                    .maximumQueuedFrames = 128,
                    .maximumQueuedBytes = 128 * 1024 * 1024,
                    .responseTimeoutMilliseconds = 5000,
                    .enforcePeerCredentials = true},
-        .protocol = {.major = 4, .minor = 0},
+        .protocol = {.major = 5, .minor = 0},
         .build = {.application = QStringLiteral("Javelin-Mail"),
                   .revision = QStringLiteral(JAVELIN_APP_VERSION)},
         .guiExecutable =
             QDir{QCoreApplication::applicationDirPath()}.filePath(QStringLiteral("javelin")),
         .cacheRootPath = {},
         .settingsPath = legacySettings.fileName(),
+        .credentialStore = {},
     };
 
     try

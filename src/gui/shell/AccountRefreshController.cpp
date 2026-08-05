@@ -43,10 +43,9 @@ namespace javelin::gui::shell
         if (m_refreshInFlight)
             return;
 
-        if (settings.loginEmail.isEmpty() || settings.apiKey.isEmpty())
+        if (settings.loginEmail.isEmpty() || !settings.hasCredentials)
         {
-            Q_EMIT userInterventionRequired(
-                i18n("Set Session URL, Login Email, and API Key in Preferences first."));
+            Q_EMIT userInterventionRequired(i18n("Sign in to this account in Preferences first."));
             return;
         }
 

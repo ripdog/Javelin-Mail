@@ -14,8 +14,6 @@ namespace javelin::gui::settings
         QString displayName;
         QString sessionUrl;
         QString loginEmail;
-        QString apiKey;
-        QString refreshToken;
         QString tokenEndpoint;
         QString oauthClientId;
         QString oauthIssuer = {};
@@ -23,7 +21,8 @@ namespace javelin::gui::settings
         QString oauthScope = {};
         QString revocationEndpoint = {};
         QString registrationClientUri = {};
-        QString registrationAccessToken = {};
+        bool hasCredentials = false;
+        QString credentialHandle = {};
         qint64 tokenExpiresAtEpochSeconds = 0;
         bool reauthenticationRequired = false;
         QStringList cachedAccountIds;

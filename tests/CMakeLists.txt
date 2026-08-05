@@ -60,6 +60,8 @@ javelin_enable_sanitizers(javelin_translation_tests)
 catch_discover_tests(javelin_translation_tests)
 
 add_executable(javelin_jmap_tests
+    ${PROJECT_SOURCE_DIR}/src/app/AccountCredentialStore.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/AccountCredentialStore.h
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.cpp
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.h
     ${PROJECT_SOURCE_DIR}/src/app/OAuthRefreshSingleFlight.cpp
@@ -152,6 +154,7 @@ add_executable(javelin_jmap_tests
     jmap/MailVaultTest.cpp
     jmap/LongPollMailboxObserverTest.cpp
     jmap/LongPollWorkerTest.cpp
+    app/AccountCredentialStoreTest.cpp
     app/ApplicationErrorCoordinatorTest.cpp
     app/OAuthRefreshSingleFlightTest.cpp
     app/CacheInvalidationPublisherTest.cpp

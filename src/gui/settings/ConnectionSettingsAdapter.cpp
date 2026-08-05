@@ -7,7 +7,7 @@ namespace javelin::gui::settings
     bool needsInitialAccountBootstrap(const ConnectionSettings& settings)
     {
         return settings.cachedAccountIds.isEmpty() && !settings.sessionUrl.isEmpty() &&
-               !settings.loginEmail.isEmpty() && !settings.apiKey.isEmpty();
+               !settings.loginEmail.isEmpty() && settings.hasCredentials;
     }
 
     javelin::app::AccountConnectionSettings
@@ -18,8 +18,8 @@ namespace javelin::gui::settings
             .revision = settings.revision,
             .sessionUrl = settings.sessionUrl.toStdString(),
             .loginEmail = settings.loginEmail.toStdString(),
-            .apiKey = settings.apiKey.toStdString(),
-            .refreshToken = settings.refreshToken.toStdString(),
+            .apiKey = {},
+            .refreshToken = {},
             .tokenEndpoint = settings.tokenEndpoint.toStdString(),
             .oauthClientId = settings.oauthClientId.toStdString(),
             .oauthIssuer = settings.oauthIssuer.toStdString(),
@@ -27,7 +27,7 @@ namespace javelin::gui::settings
             .oauthScope = settings.oauthScope.toStdString(),
             .revocationEndpoint = settings.revocationEndpoint.toStdString(),
             .registrationClientUri = settings.registrationClientUri.toStdString(),
-            .registrationAccessToken = settings.registrationAccessToken.toStdString(),
+            .registrationAccessToken = {},
         };
     }
 

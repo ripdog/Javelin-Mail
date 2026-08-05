@@ -37,10 +37,9 @@ namespace javelin::gui::shell
         const auto settings =
             m_settings.accountForCachedId(QString::fromStdString(request.accountId));
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
-            settings.apiKey.isEmpty())
+            !settings.hasCredentials)
         {
-            Q_EMIT userInterventionRequired(
-                i18n("Set Session URL, Login Email, and API Key in Preferences first."));
+            Q_EMIT userInterventionRequired(i18n("Sign in to this account in Preferences first."));
             return;
         }
 

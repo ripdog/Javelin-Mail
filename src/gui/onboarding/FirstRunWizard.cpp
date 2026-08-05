@@ -97,8 +97,7 @@ namespace javelin::gui::onboarding
         {
             qCInfo(onboardingOAuthLog).noquote()
                 << stage << "succeeded=" << result.succeeded
-                << "accessTokenPresent=" << !result.accessToken.isEmpty()
-                << "refreshTokenPresent=" << !result.refreshToken.isEmpty()
+                << "credentialHandlePresent=" << !result.credentialHandle.isEmpty()
                 << "clientIdPresent=" << !result.clientId.isEmpty()
                 << "tokenEndpointHost=" << QUrl{result.tokenEndpoint}.host()
                 << "expiresAtEpochSeconds=" << result.expiresAtEpochSeconds;
@@ -109,8 +108,8 @@ namespace javelin::gui::onboarding
         {
             qCInfo(onboardingOAuthLog).noquote()
                 << stage << "connection=" << account.id
-                << "accessTokenPresent=" << !account.apiKey.isEmpty()
-                << "refreshTokenPresent=" << !account.refreshToken.isEmpty()
+                << "hasCredentials=" << account.hasCredentials
+                << "credentialHandlePresent=" << !account.credentialHandle.isEmpty()
                 << "clientIdPresent=" << !account.oauthClientId.isEmpty()
                 << "tokenEndpointHost=" << QUrl{account.tokenEndpoint}.host()
                 << "expiresAtEpochSeconds=" << account.tokenExpiresAtEpochSeconds;
@@ -197,8 +196,7 @@ namespace javelin::gui::onboarding
                 if (const auto* error = std::get_if<QString>(&result))
                     qCWarning(onboardingOAuthLog).noquote()
                         << "OAuth flow cancellation failed" << *error;
-                else if (const auto& cancelled =
-                             std::get<javelin::app::OAuthCancelResult>(result);
+                else if (const auto& cancelled = std::get<javelin::app::OAuthCancelResult>(result);
                          !cancelled.error.isEmpty())
                     qCWarning(onboardingOAuthLog).noquote()
                         << "OAuth registration cleanup failed" << cancelled.error;
@@ -401,11 +399,10 @@ namespace javelin::gui::onboarding
         }
         const bool ipv6 =
             m_callbackServer->serverAddress().protocol() == QAbstractSocket::IPv6Protocol;
-        const auto redirect =
-            ipv6 ? QStringLiteral("http://[::1]:%1/oauth/callback")
-                       .arg(m_callbackServer->serverPort())
-                 : QStringLiteral("http://127.0.0.1:%1/oauth/callback")
-                       .arg(m_callbackServer->serverPort());
+        const auto redirect = ipv6 ? QStringLiteral("http://[::1]:%1/oauth/callback")
+                                         .arg(m_callbackServer->serverPort())
+                                   : QStringLiteral("http://127.0.0.1:%1/oauth/callback")
+                                         .arg(m_callbackServer->serverPort());
         setBusy(true, i18n("Preparing secure sign-in…"));
         auto task = m_onboarding.startOAuth({.discovery = *m_discovery, .redirectUri = redirect});
         QCoro::connect(
@@ -454,13 +451,12 @@ namespace javelin::gui::onboarding
                     const auto respond = [socket](const QByteArray& status, const QString& text)
                     {
                         const auto body = text.toUtf8();
-                        socket->write(QByteArrayLiteral("HTTP/1.1 ") + status +
-                                      QByteArrayLiteral(
-                                          "\r\nContent-Type: text/html; charset=utf-8"
-                                          "\r\nCache-Control: no-store"
-                                          "\r\nConnection: close\r\nContent-Length: ") +
-                                      QByteArray::number(body.size()) +
-                                      QByteArrayLiteral("\r\n\r\n") + body);
+                        socket->write(
+                            QByteArrayLiteral("HTTP/1.1 ") + status +
+                            QByteArrayLiteral("\r\nContent-Type: text/html; charset=utf-8"
+                                              "\r\nCache-Control: no-store"
+                                              "\r\nConnection: close\r\nContent-Length: ") +
+                            QByteArray::number(body.size()) + QByteArrayLiteral("\r\n\r\n") + body);
                         socket->disconnectFromHost();
                     };
 
@@ -488,7 +484,8 @@ namespace javelin::gui::onboarding
                         return;
                     }
                     const auto requestParts = headerLines.front().trimmed().simplified().split(' ');
-                    if (requestParts.size() != 3 || requestParts.at(0) != QByteArrayLiteral("GET") ||
+                    if (requestParts.size() != 3 ||
+                        requestParts.at(0) != QByteArrayLiteral("GET") ||
                         !requestParts.at(2).startsWith(QByteArrayLiteral("HTTP/1.")))
                     {
                         respond(QByteArrayLiteral("405 Method Not Allowed"),
@@ -500,8 +497,8 @@ namespace javelin::gui::onboarding
                     for (const auto& rawLine : headerLines)
                     {
                         const auto line = rawLine.trimmed();
-                        if (line.left(5).compare(QByteArrayLiteral("Host:"),
-                                                 Qt::CaseInsensitive) == 0)
+                        if (line.left(5).compare(QByteArrayLiteral("Host:"), Qt::CaseInsensitive) ==
+                            0)
                         {
                             host = line.sliced(5).trimmed();
                             break;
@@ -512,9 +509,8 @@ namespace javelin::gui::onboarding
                                           QAbstractSocket::IPv6Protocol;
                     QByteArray expectedHost =
                         ipv6 ? QByteArrayLiteral("[::1]:") : QByteArrayLiteral("127.0.0.1:");
-                    expectedHost += QByteArray::number(m_callbackServer == nullptr
-                                                           ? 0
-                                                           : m_callbackServer->serverPort());
+                    expectedHost += QByteArray::number(
+                        m_callbackServer == nullptr ? 0 : m_callbackServer->serverPort());
                     if (host.compare(expectedHost, Qt::CaseInsensitive) != 0)
                     {
                         respond(QByteArrayLiteral("400 Bad Request"),
@@ -634,9 +630,11 @@ namespace javelin::gui::onboarding
 
     void FirstRunWizard::completeAuthentication(javelin::app::AccountAuthenticationResult result)
     {
-        if (!result.succeeded)
+        if (!result.succeeded || result.credentialHandle.isEmpty())
         {
-            m_authenticationStatus->setText(result.error);
+            m_authenticationStatus->setText(
+                result.error.isEmpty() ? i18n("Javelin could not securely retain the sign-in.")
+                                       : result.error);
             return;
         }
         m_authentication = std::move(result);
@@ -688,7 +686,6 @@ namespace javelin::gui::onboarding
         if (!m_authentication.has_value())
             return;
         auto accounts = m_settings.accounts();
-        std::optional<javelin::app::OAuthRevocationRequest> previousOAuth;
         QString savedConnectionId;
         if (m_connectionId.isEmpty())
         {
@@ -699,8 +696,6 @@ namespace javelin::gui::onboarding
                 .displayName = m_nameEdit->text().trimmed(),
                 .sessionUrl = m_authentication->sessionUrl,
                 .loginEmail = m_emailEdit->text().trimmed(),
-                .apiKey = m_authentication->accessToken,
-                .refreshToken = m_authentication->refreshToken,
                 .tokenEndpoint = m_authentication->tokenEndpoint,
                 .oauthClientId = m_authentication->clientId,
                 .oauthIssuer = m_authentication->issuer,
@@ -708,7 +703,8 @@ namespace javelin::gui::onboarding
                 .oauthScope = m_authentication->scope,
                 .revocationEndpoint = m_authentication->revocationEndpoint,
                 .registrationClientUri = m_authentication->registrationClientUri,
-                .registrationAccessToken = m_authentication->registrationAccessToken,
+                .hasCredentials = true,
+                .credentialHandle = m_authentication->credentialHandle,
                 .tokenExpiresAtEpochSeconds = m_authentication->expiresAtEpochSeconds,
                 .reauthenticationRequired = false,
                 .cachedAccountIds = {},
@@ -725,20 +721,10 @@ namespace javelin::gui::onboarding
                                      i18n("This account is no longer configured."));
                 return;
             }
-            previousOAuth = javelin::app::OAuthRevocationRequest{
-                .revocationEndpoint = account->revocationEndpoint,
-                .clientId = account->oauthClientId,
-                .accessToken = account->apiKey,
-                .refreshToken = account->refreshToken,
-                .registrationClientUri = account->registrationClientUri,
-                .registrationAccessToken = account->registrationAccessToken,
-            };
             ++account->revision;
             account->displayName = m_nameEdit->text().trimmed();
             account->sessionUrl = m_authentication->sessionUrl;
             account->loginEmail = m_emailEdit->text().trimmed();
-            account->apiKey = m_authentication->accessToken;
-            account->refreshToken = m_authentication->refreshToken;
             account->tokenEndpoint = m_authentication->tokenEndpoint;
             account->oauthClientId = m_authentication->clientId;
             account->oauthIssuer = m_authentication->issuer;
@@ -746,7 +732,8 @@ namespace javelin::gui::onboarding
             account->oauthScope = m_authentication->scope;
             account->revocationEndpoint = m_authentication->revocationEndpoint;
             account->registrationClientUri = m_authentication->registrationClientUri;
-            account->registrationAccessToken = m_authentication->registrationAccessToken;
+            account->hasCredentials = true;
+            account->credentialHandle = m_authentication->credentialHandle;
             account->tokenExpiresAtEpochSeconds = m_authentication->expiresAtEpochSeconds;
             account->reauthenticationRequired = false;
         }
@@ -764,25 +751,6 @@ namespace javelin::gui::onboarding
             QMessageBox::warning(this, i18n("Couldn’t save the account"),
                                  i18n("Javelin couldn’t save your account yet. Please try again."));
             return;
-        }
-        if (previousOAuth.has_value() &&
-            (previousOAuth->clientId != m_authentication->clientId ||
-             previousOAuth->registrationClientUri != m_authentication->registrationClientUri))
-        {
-            auto cleanup = m_onboarding.revokeOAuth(std::move(*previousOAuth));
-            QCoro::connect(
-                std::move(cleanup), QCoreApplication::instance(),
-                [](javelin::app::OnboardingCallResult<javelin::app::OAuthRevocationResult> result)
-                {
-                    if (const auto* error = std::get_if<QString>(&result))
-                        qCWarning(onboardingOAuthLog).noquote()
-                            << "Previous OAuth authorization cleanup failed" << *error;
-                    else if (const auto& revoked =
-                                 std::get<javelin::app::OAuthRevocationResult>(result);
-                             revoked.attempted && !revoked.succeeded)
-                        qCWarning(onboardingOAuthLog).noquote()
-                            << "Previous OAuth authorization cleanup failed" << revoked.error;
-                });
         }
         if (m_oauthAuthentication)
         {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/AccountCredentialStore.h"
 #include "protocol/ProcessBoundary.h"
 
 #include <QSettings>
@@ -33,7 +34,8 @@ namespace javelin::app
     {
       public:
         SettingsRepository();
-        explicit SettingsRepository(std::unique_ptr<QSettings> settings);
+        explicit SettingsRepository(std::unique_ptr<QSettings> settings,
+                                    AccountCredentialStore* credentialStore = nullptr);
 
         [[nodiscard]] static std::unique_ptr<QSettings> canonicalSettings();
 
@@ -43,12 +45,14 @@ namespace javelin::app
 
       private:
         [[nodiscard]] std::optional<SettingsRepositoryError> migrateIfNeeded();
+        [[nodiscard]] std::optional<SettingsRepositoryError> migrateLegacyCredentials();
         [[nodiscard]] SettingsReadResult readSnapshot(bool includeLegacyWorkspace = false);
         [[nodiscard]] std::optional<SettingsRepositoryError>
         writeSnapshot(const javelin::protocol::SettingsSnapshot& snapshot,
                       bool includeSchemaVersion = true);
 
         std::unique_ptr<QSettings> m_settings;
+        AccountCredentialStore* m_credentialStore = nullptr;
     };
 
 } // namespace javelin::app

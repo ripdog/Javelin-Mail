@@ -5,6 +5,7 @@
 #include "gui/compose/ComposerInlineImageCodec.h"
 #include "gui/compose/JavelinComposerEdit.h"
 #include "gui/messageview/HtmlMessageView.h"
+#include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/GuiSettings.h"
 #include "gui/widgets/EmailAddressLineEdit.h"
 #include "jmap/cache/IdentityReader.h"
@@ -420,32 +421,14 @@ namespace javelin::gui::compose
             const auto settings =
                 guiSettings.accountForCachedId(QString::fromStdString(std::string{accountId}));
             if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
-                settings.apiKey.isEmpty())
+                !settings.hasCredentials)
             {
                 if (errorMessage != nullptr)
-                {
-                    *errorMessage =
-                        i18n("Set Session URL, Login Email, and API Key in Preferences first.");
-                }
+                    *errorMessage = i18n("Sign in to this account in Preferences first.");
                 return std::nullopt;
             }
 
-            return javelin::app::AccountConnectionSettings{
-                .connectionId = settings.id.toStdString(),
-                .revision = settings.revision,
-                .sessionUrl = settings.sessionUrl.toStdString(),
-                .loginEmail = settings.loginEmail.toStdString(),
-                .apiKey = settings.apiKey.toStdString(),
-                .refreshToken = settings.refreshToken.toStdString(),
-                .tokenEndpoint = settings.tokenEndpoint.toStdString(),
-                .oauthClientId = settings.oauthClientId.toStdString(),
-                .oauthIssuer = settings.oauthIssuer.toStdString(),
-                .oauthResource = settings.oauthResource.toStdString(),
-                .oauthScope = settings.oauthScope.toStdString(),
-                .revocationEndpoint = settings.revocationEndpoint.toStdString(),
-                .registrationClientUri = settings.registrationClientUri.toStdString(),
-                .registrationAccessToken = settings.registrationAccessToken.toStdString(),
-            };
+            return javelin::gui::settings::toAccountConnectionSettings(settings);
         }
 
     } // namespace
@@ -905,29 +888,11 @@ namespace javelin::gui::compose
 
                 if (!hasSenderIdentity && !m_identityLoadsStarted.contains(accountId) &&
                     !connection.sessionUrl.isEmpty() && !connection.loginEmail.isEmpty() &&
-                    !connection.apiKey.isEmpty())
+                    connection.hasCredentials)
                 {
                     m_identityLoadsStarted.insert(accountId);
                     auto task = m_composeCommandPort.loadSenderIdentities(
-                        javelin::app::AccountConnectionSettings{
-                            .connectionId = connection.id.toStdString(),
-                            .revision = connection.revision,
-                            .sessionUrl = connection.sessionUrl.toStdString(),
-                            .loginEmail = connection.loginEmail.toStdString(),
-                            .apiKey = connection.apiKey.toStdString(),
-                            .refreshToken = connection.refreshToken.toStdString(),
-                            .tokenEndpoint = connection.tokenEndpoint.toStdString(),
-                            .oauthClientId = connection.oauthClientId.toStdString(),
-                            .oauthIssuer = connection.oauthIssuer.toStdString(),
-                            .oauthResource = connection.oauthResource.toStdString(),
-                            .oauthScope = connection.oauthScope.toStdString(),
-                            .revocationEndpoint = connection.revocationEndpoint.toStdString(),
-                            .registrationClientUri =
-                                connection.registrationClientUri.toStdString(),
-                            .registrationAccessToken =
-                                connection.registrationAccessToken.toStdString(),
-                        },
-                        accountId);
+                        javelin::gui::settings::toAccountConnectionSettings(connection), accountId);
                     QCoro::connect(std::move(task), this,
                                    [this](std::variant<std::vector<javelin::jmap::domain::Identity>,
                                                        javelin::jmap::OperationError>

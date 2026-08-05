@@ -43,7 +43,7 @@ namespace javelin::protocol
 
     struct ProtocolVersion
     {
-        std::uint16_t major = 4;
+        std::uint16_t major = 5;
         std::uint16_t minor = 0;
 
         friend bool operator==(const ProtocolVersion&, const ProtocolVersion&) = default;
@@ -248,8 +248,6 @@ namespace javelin::protocol
         QString displayName;
         QString sessionUrl;
         QString loginEmail;
-        QString apiKey;
-        QString refreshToken;
         QString tokenEndpoint;
         QString oauthClientId;
         QString oauthIssuer = {};
@@ -257,7 +255,8 @@ namespace javelin::protocol
         QString oauthScope = {};
         QString revocationEndpoint = {};
         QString registrationClientUri = {};
-        QString registrationAccessToken = {};
+        bool hasCredentials = false;
+        QString credentialHandle = {};
         qint64 tokenExpiresAtEpochSeconds = 0;
         bool reauthenticationRequired = false;
         std::vector<QString> cachedAccountIds;
@@ -432,7 +431,7 @@ namespace javelin::protocol
     struct SettingsSnapshot
     {
         SettingsRevision revision;
-        std::uint32_t schemaVersion = 3;
+        std::uint32_t schemaVersion = 4;
         std::vector<AccountSettings> accounts;
         std::vector<MailboxSelectionSettings> syncedMailboxSelections;
         std::vector<MailboxSelectionSettings> notificationMailboxSelections;

@@ -15,6 +15,8 @@
 namespace
 {
 
+    using javelin::app::AccountCredentialSecrets;
+    using javelin::app::MemoryAccountCredentialStore;
     using javelin::app::SettingsReadResult;
     using javelin::app::SettingsRepository;
     using javelin::app::SettingsRepositoryError;
@@ -22,9 +24,16 @@ namespace
     using javelin::protocol::SettingsSnapshot;
     using javelin::protocol::SettingsUpdate;
 
+    [[nodiscard]] MemoryAccountCredentialStore& credentialStore()
+    {
+        static MemoryAccountCredentialStore store;
+        return store;
+    }
+
     [[nodiscard]] SettingsRepository repositoryFor(const QString& path)
     {
-        return SettingsRepository{std::make_unique<QSettings>(path, QSettings::IniFormat)};
+        return SettingsRepository{std::make_unique<QSettings>(path, QSettings::IniFormat),
+                                  &credentialStore()};
     }
 
     [[nodiscard]] SettingsUpdate emptyUpdate()
@@ -108,11 +117,11 @@ TEST_CASE("settings repository creates and persists its schema identity", "[app]
     const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
     REQUIRE(snapshot != nullptr);
     CHECK(snapshot->revision.value == 0);
-    CHECK(snapshot->schemaVersion == 3);
+    CHECK(snapshot->schemaVersion == 4);
     CHECK(snapshot->undoSendDelaySeconds == 10);
 
     QSettings persisted{path, QSettings::IniFormat};
-    CHECK(persisted.value(QStringLiteral("settings/schemaVersion")).toUInt() == 3);
+    CHECK(persisted.value(QStringLiteral("settings/schemaVersion")).toUInt() == 4);
     CHECK(persisted.value(QStringLiteral("settings/revision")).toULongLong() == 0);
 }
 
@@ -122,6 +131,7 @@ TEST_CASE("settings repository migrates the complete legacy operational shape", 
     REQUIRE(directory.isValid());
     const QString path = directory.filePath(QStringLiteral("legacy.ini"));
     writeLegacySettings(path);
+    REQUIRE_FALSE(credentialStore().remove(QStringLiteral("configured-1")).has_value());
 
     auto repository = repositoryFor(path);
     const auto result = repository.load();
@@ -134,10 +144,10 @@ TEST_CASE("settings repository migrates the complete legacy operational shape", 
                           .displayName = QStringLiteral("Personal"),
                           .sessionUrl = QStringLiteral("https://example.test/jmap"),
                           .loginEmail = QStringLiteral("user@example.test"),
-                          .apiKey = QStringLiteral("secret"),
-                          .refreshToken = {},
                           .tokenEndpoint = {},
                           .oauthClientId = {},
+                          .hasCredentials = false,
+                          .credentialHandle = {},
                           .tokenExpiresAtEpochSeconds = 0,
                           .cachedAccountIds = {QStringLiteral("account-1")}});
     REQUIRE(snapshot->syncedMailboxSelections.size() == 1);
@@ -160,13 +170,27 @@ TEST_CASE("settings repository migrates the complete legacy operational shape", 
     CHECK(snapshot->workspace.calendarColorOverrides.front().color == QStringLiteral("#123456"));
 
     QSettings migrated{path, QSettings::IniFormat};
-    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 3);
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 4);
     CHECK(migrated.value(QStringLiteral("settings/revision")).toULongLong() == 0);
     CHECK_FALSE(migrated.value(QStringLiteral("translation/enabled")).toBool());
     CHECK(migrated.value(QStringLiteral("translation/targetLanguage")).toString() ==
           QStringLiteral("JA"));
     CHECK_FALSE(migrated.contains(QStringLiteral("mainWindow/geometry")));
     CHECK_FALSE(migrated.contains(QStringLiteral("calendar/colorOverrides")));
+    migrated.beginGroup(QStringLiteral("accounts"));
+    REQUIRE(migrated.beginReadArray(QStringLiteral("size")) == 1);
+    migrated.setArrayIndex(0);
+    CHECK_FALSE(migrated.contains(QStringLiteral("apiKey")));
+    CHECK_FALSE(migrated.contains(QStringLiteral("refreshToken")));
+    CHECK_FALSE(migrated.contains(QStringLiteral("registrationAccessToken")));
+    migrated.endArray();
+    migrated.endGroup();
+
+    const auto stored = credentialStore().load(QStringLiteral("configured-1"));
+    const auto* credentials = std::get_if<std::optional<AccountCredentialSecrets>>(&stored);
+    REQUIRE(credentials != nullptr);
+    REQUIRE(credentials->has_value());
+    CHECK((*credentials)->accessToken == QStringLiteral("secret"));
 }
 
 TEST_CASE("settings repository migrates schema one workspace state", "[app][settings]")
@@ -185,13 +209,13 @@ TEST_CASE("settings repository migrates schema one workspace state", "[app][sett
     const auto result = repository.load();
     const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
     REQUIRE(snapshot != nullptr);
-    CHECK(snapshot->schemaVersion == 3);
+    CHECK(snapshot->schemaVersion == 4);
     CHECK(snapshot->revision.value == 0);
     CHECK(javelin::gui::shell::deserializeMainWindowState(snapshot->workspace.mainWindowState, {})
               .activeTabIndex == 4);
 
     QSettings migrated{path, QSettings::IniFormat};
-    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 3);
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 4);
     CHECK_FALSE(migrated.contains(QStringLiteral("mainWindow/activeTabIndex")));
 }
 
@@ -207,26 +231,24 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
     REQUIRE(initial != nullptr);
 
     auto update = emptyUpdate();
-    update.accounts = std::vector<AccountSettings>{
-        AccountSettings{.id = QStringLiteral("configured-1"),
-                        .revision = 1,
-                        .displayName = QStringLiteral("Work"),
-                        .sessionUrl = {},
-                        .loginEmail = QStringLiteral("work@example.test"),
-                        .apiKey = QStringLiteral("key"),
-                        .refreshToken = QStringLiteral("refresh-token"),
-                        .tokenEndpoint = QStringLiteral("https://auth.example.test/token"),
-                        .oauthClientId = QStringLiteral("client-id"),
-                        .oauthIssuer = QStringLiteral("https://auth.example.test"),
-                        .oauthResource = QStringLiteral("https://mail.example.test/jmap"),
-                        .oauthScope = QStringLiteral("mail offline_access"),
-                        .revocationEndpoint = QStringLiteral("https://auth.example.test/revoke"),
-                        .registrationClientUri =
-                            QStringLiteral("https://auth.example.test/register/client-id"),
-                        .registrationAccessToken = QStringLiteral("registration-token"),
-                        .tokenExpiresAtEpochSeconds = 1'785'784'100,
-                        .reauthenticationRequired = true,
-                        .cachedAccountIds = {}}};
+    update.accounts = std::vector<AccountSettings>{AccountSettings{
+        .id = QStringLiteral("configured-1"),
+        .revision = 1,
+        .displayName = QStringLiteral("Work"),
+        .sessionUrl = {},
+        .loginEmail = QStringLiteral("work@example.test"),
+        .tokenEndpoint = QStringLiteral("https://auth.example.test/token"),
+        .oauthClientId = QStringLiteral("client-id"),
+        .oauthIssuer = QStringLiteral("https://auth.example.test"),
+        .oauthResource = QStringLiteral("https://mail.example.test/jmap"),
+        .oauthScope = QStringLiteral("mail offline_access"),
+        .revocationEndpoint = QStringLiteral("https://auth.example.test/revoke"),
+        .registrationClientUri = QStringLiteral("https://auth.example.test/register/client-id"),
+        .hasCredentials = false,
+        .credentialHandle = {},
+        .tokenExpiresAtEpochSeconds = 1'785'784'100,
+        .reauthenticationRequired = true,
+        .cachedAccountIds = {}}};
     update.syncedMailboxSelections = std::vector<javelin::protocol::MailboxSelectionSettings>{{
         .accountId = QStringLiteral("account-1"),
         .mailboxIds = {},
@@ -254,12 +276,12 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
     REQUIRE(reloaded != nullptr);
     CHECK(reloaded->revision.value == 1);
     CHECK(reloaded->accounts.front().displayName == QStringLiteral("Work"));
-    CHECK(reloaded->accounts.front().refreshToken == QStringLiteral("refresh-token"));
+    CHECK_FALSE(reloaded->accounts.front().hasCredentials);
+    CHECK(reloaded->accounts.front().credentialHandle.isEmpty());
     CHECK(reloaded->accounts.front().tokenEndpoint ==
           QStringLiteral("https://auth.example.test/token"));
     CHECK(reloaded->accounts.front().oauthClientId == QStringLiteral("client-id"));
-    CHECK(reloaded->accounts.front().oauthIssuer ==
-          QStringLiteral("https://auth.example.test"));
+    CHECK(reloaded->accounts.front().oauthIssuer == QStringLiteral("https://auth.example.test"));
     CHECK(reloaded->accounts.front().oauthResource ==
           QStringLiteral("https://mail.example.test/jmap"));
     CHECK(reloaded->accounts.front().oauthScope == QStringLiteral("mail offline_access"));
@@ -267,8 +289,6 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
           QStringLiteral("https://auth.example.test/revoke"));
     CHECK(reloaded->accounts.front().registrationClientUri ==
           QStringLiteral("https://auth.example.test/register/client-id"));
-    CHECK(reloaded->accounts.front().registrationAccessToken ==
-          QStringLiteral("registration-token"));
     CHECK(reloaded->accounts.front().tokenExpiresAtEpochSeconds == 1'785'784'100);
     CHECK(reloaded->accounts.front().reauthenticationRequired);
     REQUIRE(reloaded->syncedMailboxSelections.size() == 1);

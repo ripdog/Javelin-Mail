@@ -1,10 +1,14 @@
 #pragma once
 
+#include "app/AccountConnectionSettings.h"
+#include "app/AccountCredentialStore.h"
 #include "app/OAuthRefreshSingleFlight.h"
+#include "app/OnboardingTypes.h"
 #include "protocol/SocketTransport.h"
 
 #include <QCoroTask>
 
+#include <QHash>
 #include <QObject>
 #include <QTimer>
 
@@ -32,6 +36,7 @@ namespace javelin::app
         QString guiExecutable;
         QString cacheRootPath;
         QString settingsPath;
+        std::shared_ptr<AccountCredentialStore> credentialStore;
     };
 
     enum class DaemonStartupErrorCode
@@ -128,6 +133,23 @@ namespace javelin::app
         void launchGuiIfNeeded();
         void samplePerformance();
         void refreshOAuthCredentials();
+        struct PendingAccountCredentials
+        {
+            AccountCredentialSecrets credentials;
+            qint64 createdAtEpochSeconds = 0;
+        };
+
+        void prunePendingCredentials();
+        [[nodiscard]] AccountAuthenticationResult
+        stageAuthenticationResult(AccountAuthenticationResult result);
+        [[nodiscard]] std::variant<AccountConnectionSettings, QString>
+        hydrateConnectionSettings(AccountConnectionSettings settings) const;
+        [[nodiscard]] std::variant<OAuthRevocationRequest, QString>
+        hydrateRevocationRequest(OAuthRevocationRequest request) const;
+        [[nodiscard]] AccountCredentialLoadResult credentials(const QString& connectionId) const;
+        [[nodiscard]] std::optional<javelin::protocol::BoundaryError> refreshCredentialFlags();
+        void revokeCredentials(javelin::protocol::AccountSettings account,
+                               AccountCredentialSecrets credentials);
         [[nodiscard]] QCoro::Task<OAuthRefreshOutcome> startOAuthRefresh(QString connectionId,
                                                                          bool force);
         [[nodiscard]] QCoro::Task<OAuthRefreshOutcome>
@@ -144,6 +166,8 @@ namespace javelin::app
         DaemonProcessOptions m_options;
         std::unique_ptr<QLockFile> m_instanceLock;
         std::unique_ptr<SettingsRepository> m_settingsRepository;
+        std::shared_ptr<AccountCredentialStore> m_credentialStore;
+        QHash<QString, PendingAccountCredentials> m_pendingCredentials;
         std::unique_ptr<DaemonServices> m_services;
         std::unique_ptr<DaemonRemoteActionDispatcher> m_remoteActions;
         std::unique_ptr<DaemonBackgroundController> m_background;

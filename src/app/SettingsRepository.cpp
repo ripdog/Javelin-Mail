@@ -54,7 +54,7 @@ namespace javelin::app
         constexpr auto workspaceColorKey = "color";
         constexpr auto legacyWindowGroup = "mainWindow";
         constexpr auto legacyCalendarColorsKey = "calendar/colorOverrides";
-        constexpr int settingsSchemaVersion = 3;
+        constexpr int settingsSchemaVersion = 4;
         constexpr int workspaceFormatVersion = 1;
         constexpr int maximumAccounts = 256;
         constexpr int maximumSelections = 256;
@@ -322,8 +322,9 @@ namespace javelin::app
     {
     }
 
-    SettingsRepository::SettingsRepository(std::unique_ptr<QSettings> settings)
-        : m_settings(std::move(settings))
+    SettingsRepository::SettingsRepository(std::unique_ptr<QSettings> settings,
+                                           AccountCredentialStore* credentialStore)
+        : m_settings(std::move(settings)), m_credentialStore(credentialStore)
     {
     }
 
@@ -403,7 +404,8 @@ namespace javelin::app
         {
             bool ok = false;
             const auto version = settings.value(settingKey(schemaVersionKey)).toUInt(&ok);
-            if (!ok || (version != 1 && version != 2 && version != settingsSchemaVersion))
+            if (!ok ||
+                (version != 1 && version != 2 && version != 3 && version != settingsSchemaVersion))
             {
                 return SettingsRepositoryError{
                     .code = SettingsRepositoryErrorCode::UnsupportedSchema,
@@ -413,6 +415,9 @@ namespace javelin::app
             if (version == settingsSchemaVersion)
                 return std::nullopt;
         }
+
+        if (const auto error = migrateLegacyCredentials())
+            return error;
 
         const auto legacy = readSnapshot(true);
         if (const auto* error = std::get_if<SettingsRepositoryError>(&legacy))
@@ -464,6 +469,68 @@ namespace javelin::app
                 settingsStatusError(settings, SettingsRepositoryErrorCode::MigrationFailed,
                                     settingKey(schemaVersionKey)))
             return error;
+        return std::nullopt;
+    }
+
+    std::optional<SettingsRepositoryError> SettingsRepository::migrateLegacyCredentials()
+    {
+        auto& settings = *m_settings;
+        settings.beginGroup(settingKey(accountsGroup));
+        const int accountCount = settings.beginReadArray(settingKey(accountsSizeKey));
+        if (accountCount < 0 || accountCount > maximumAccounts)
+        {
+            settings.endArray();
+            settings.endGroup();
+            return SettingsRepositoryError{
+                .code = SettingsRepositoryErrorCode::MigrationFailed,
+                .key = settingKey(accountsSizeKey),
+                .detail = QStringLiteral("invalid account count during credential migration")};
+        }
+
+        for (int index = 0; index < accountCount; ++index)
+        {
+            settings.setArrayIndex(index);
+            const auto connectionId = settings.value(settingKey(accountIdKey)).toString().trimmed();
+            const AccountCredentialSecrets credentials{
+                .accessToken = settings.value(settingKey(accountApiKeyKey)).toString().trimmed(),
+                .refreshToken =
+                    settings.value(settingKey(accountRefreshTokenKey)).toString().trimmed(),
+                .registrationAccessToken =
+                    settings.value(settingKey(accountRegistrationAccessTokenKey))
+                        .toString()
+                        .trimmed(),
+            };
+            if (credentials.empty())
+                continue;
+            if (connectionId.isEmpty())
+            {
+                settings.endArray();
+                settings.endGroup();
+                return SettingsRepositoryError{
+                    .code = SettingsRepositoryErrorCode::MigrationFailed,
+                    .key = settingKey(accountIdKey),
+                    .detail = QStringLiteral("account id is required for credential migration")};
+            }
+            if (m_credentialStore == nullptr)
+            {
+                settings.endArray();
+                settings.endGroup();
+                return SettingsRepositoryError{
+                    .code = SettingsRepositoryErrorCode::MigrationFailed,
+                    .key = settingKey(accountApiKeyKey),
+                    .detail = QStringLiteral("secure credential storage is unavailable")};
+            }
+            if (const auto error = m_credentialStore->store(connectionId, credentials))
+            {
+                settings.endArray();
+                settings.endGroup();
+                return SettingsRepositoryError{.code = SettingsRepositoryErrorCode::MigrationFailed,
+                                               .key = settingKey(accountApiKeyKey),
+                                               .detail = error->detail};
+            }
+        }
+        settings.endArray();
+        settings.endGroup();
         return std::nullopt;
     }
 
@@ -523,9 +590,6 @@ namespace javelin::app
                     settings.value(settingKey(accountDisplayNameKey)).toString().trimmed(),
                 .sessionUrl = settings.value(settingKey(accountSessionUrlKey)).toString().trimmed(),
                 .loginEmail = settings.value(settingKey(accountLoginEmailKey)).toString().trimmed(),
-                .apiKey = settings.value(settingKey(accountApiKeyKey)).toString().trimmed(),
-                .refreshToken =
-                    settings.value(settingKey(accountRefreshTokenKey)).toString().trimmed(),
                 .tokenEndpoint =
                     settings.value(settingKey(accountTokenEndpointKey)).toString().trimmed(),
                 .oauthClientId =
@@ -538,12 +602,11 @@ namespace javelin::app
                     settings.value(settingKey(accountOauthScopeKey)).toString().simplified(),
                 .revocationEndpoint =
                     settings.value(settingKey(accountRevocationEndpointKey)).toString().trimmed(),
-                .registrationClientUri =
-                    settings.value(settingKey(accountRegistrationClientUriKey)).toString().trimmed(),
-                .registrationAccessToken = settings
-                                               .value(settingKey(accountRegistrationAccessTokenKey))
-                                               .toString()
-                                               .trimmed(),
+                .registrationClientUri = settings.value(settingKey(accountRegistrationClientUriKey))
+                                             .toString()
+                                             .trimmed(),
+                .hasCredentials = false,
+                .credentialHandle = {},
                 .tokenExpiresAtEpochSeconds = tokenExpiresAtEpochSeconds,
                 .reauthenticationRequired =
                     settings.value(settingKey(accountReauthenticationRequiredKey), false).toBool(),
@@ -622,8 +685,8 @@ namespace javelin::app
             settings.setValue(settingKey(accountDisplayNameKey), account.displayName);
             settings.setValue(settingKey(accountSessionUrlKey), account.sessionUrl);
             settings.setValue(settingKey(accountLoginEmailKey), account.loginEmail);
-            settings.setValue(settingKey(accountApiKeyKey), account.apiKey);
-            settings.setValue(settingKey(accountRefreshTokenKey), account.refreshToken);
+            settings.remove(settingKey(accountApiKeyKey));
+            settings.remove(settingKey(accountRefreshTokenKey));
             settings.setValue(settingKey(accountTokenEndpointKey), account.tokenEndpoint);
             settings.setValue(settingKey(accountOauthClientIdKey), account.oauthClientId);
             settings.setValue(settingKey(accountOauthIssuerKey), account.oauthIssuer);
@@ -632,8 +695,7 @@ namespace javelin::app
             settings.setValue(settingKey(accountRevocationEndpointKey), account.revocationEndpoint);
             settings.setValue(settingKey(accountRegistrationClientUriKey),
                               account.registrationClientUri);
-            settings.setValue(settingKey(accountRegistrationAccessTokenKey),
-                              account.registrationAccessToken);
+            settings.remove(settingKey(accountRegistrationAccessTokenKey));
             settings.setValue(settingKey(accountTokenExpiresAtKey),
                               account.tokenExpiresAtEpochSeconds);
             settings.setValue(settingKey(accountReauthenticationRequiredKey),
