@@ -8,6 +8,11 @@
 
 class QMimeData;
 
+namespace MessageComposer
+{
+    class TextPart;
+}
+
 namespace javelin::gui::compose
 {
 
@@ -19,6 +24,9 @@ namespace javelin::gui::compose
 
       public:
         explicit JavelinComposerEdit(QWidget* parent = nullptr);
+
+        void fillComposerTextPart(MessageComposer::TextPart* textPart);
+        [[nodiscard]] QString toCleanHtml() const;
 
       Q_SIGNALS:
         void attachmentPathsRequested(const QStringList& filePaths);

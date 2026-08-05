@@ -144,6 +144,39 @@ TEST_CASE("KDE body generation produces matching HTML and plain alternatives",
     CHECK(textPart.cleanPlainText().contains(QStringLiteral("Two")));
 }
 
+TEST_CASE("reply quotation survives KDE body generation", "[gui][compose][composer][reply]")
+{
+    javelin::gui::compose::JavelinComposerEdit editor;
+    editor.activateRichText();
+    editor.setTextOrHtml(QStringLiteral(
+        "<p>Reply text</p><div class=\"moz-cite-prefix\">On Wed, Aug 5, 2026 at 3:18 PM "
+        "Mitchell Ferguson &lt;mitchell@example.test&gt; wrote:<br></div>"
+        "<blockquote type=\"cite\"><p>Seth here</p><ul><li>Quoted item</li></ul>"
+        "<p>After list</p><p>Seth here</p></blockquote>"));
+
+    MessageComposer::TextPart textPart;
+    editor.fillComposerTextPart(&textPart);
+    const auto html = editor.toCleanHtml();
+
+    INFO(html.toStdString());
+    INFO(textPart.cleanPlainText().toStdString());
+    CHECK(html.contains(QStringLiteral("<blockquote"), Qt::CaseInsensitive));
+    CHECK(html.contains(QStringLiteral("class=\"gmail_quote\""), Qt::CaseInsensitive));
+    CHECK(textPart.cleanHtml().contains(QStringLiteral("<blockquote"), Qt::CaseInsensitive));
+    CHECK(textPart.cleanPlainText().contains(QStringLiteral("> Seth here")));
+    CHECK(textPart.cleanPlainText().contains(QStringLiteral(">      *  Quoted item")));
+    CHECK(textPart.cleanPlainText().contains(QStringLiteral("> After list")));
+
+    javelin::gui::compose::JavelinComposerEdit reopenedEditor;
+    reopenedEditor.activateRichText();
+    reopenedEditor.setTextOrHtml(html);
+    MessageComposer::TextPart reopenedTextPart;
+    reopenedEditor.fillComposerTextPart(&reopenedTextPart);
+    const auto reopenedHtml = reopenedEditor.toCleanHtml();
+    CHECK(reopenedHtml.count(QStringLiteral("<blockquote"), Qt::CaseInsensitive) == 1);
+    CHECK(reopenedTextPart.cleanPlainText().contains(QStringLiteral("> Seth here")));
+}
+
 TEST_CASE("unformatted composer content still has a complete preview document",
           "[gui][compose][composer]")
 {
