@@ -11,10 +11,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace
 {
@@ -60,17 +62,33 @@ namespace
                 .hints = hints,
                 .timeoutMs = timeoutMs,
             };
+            notificationId = nextNotificationId++;
+            if (sendError.has_value())
+                return *sendError;
             return notificationId;
+        }
+
+        [[nodiscard]] bool supportsActions() const override
+        {
+            return actionsSupported;
         }
 
         void close(const uint closedNotificationId) override
         {
             closedId = closedNotificationId;
+            closedIds.push_back(closedNotificationId);
+            if (closeObserver)
+                closeObserver(closedNotificationId);
         }
 
+        uint nextNotificationId = 73;
         uint notificationId = 73;
+        bool actionsSupported = true;
+        std::optional<QString> sendError;
         std::optional<NotificationRequest> request;
         std::optional<uint> closedId;
+        std::vector<uint> closedIds;
+        std::function<void(uint)> closeObserver;
     };
 } // namespace
 
@@ -131,4 +149,251 @@ TEST_CASE("mail notification activation preserves the message route and mailbox 
     CHECK(messageRoute->threadId == QStringLiteral("thread-8"));
     CHECK(messageRoute->emailId == QStringLiteral("email-13"));
     CHECK(messageRoute->activationToken == QStringLiteral("token-21"));
+}
+
+TEST_CASE("undoable send notification reports its actionable lifetime and timeout",
+          "[app][daemon][notification][deferred-send]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+
+    CHECK(controller.notifyUndoableSend(QStringLiteral("send-1"), QStringLiteral("Scheduled"),
+                                        QStringLiteral("Subject"), 12'345));
+    REQUIRE(observer->request.has_value());
+    CHECK(observer->request->timeoutMs == 12'345);
+    CHECK(observer->request->actions ==
+          QStringList{QStringLiteral("undo-send:send-1"), QStringLiteral("Undo Send")});
+}
+
+TEST_CASE("undoable send notification does not gate when delivery or actions are unavailable",
+          "[app][daemon][notification][deferred-send]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    SECTION("transport failure")
+    {
+        auto transport = std::make_unique<FakeNotificationTransport>();
+        transport->sendError = QStringLiteral("notification failed");
+        javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+        CHECK_FALSE(controller.notifyUndoableSend(QStringLiteral("send-1"),
+                                                  QStringLiteral("Scheduled"),
+                                                  QStringLiteral("Subject"), 1'000));
+    }
+
+    SECTION("missing action capability")
+    {
+        auto transport = std::make_unique<FakeNotificationTransport>();
+        transport->actionsSupported = false;
+        javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+        CHECK_FALSE(controller.notifyUndoableSend(QStringLiteral("send-1"),
+                                                  QStringLiteral("Scheduled"),
+                                                  QStringLiteral("Subject"), 1'000));
+    }
+
+    SECTION("failed signal subscription")
+    {
+        auto transport = std::make_unique<FakeNotificationTransport>();
+        javelin::app::DesktopNotificationController controller{std::move(transport), false, false};
+        CHECK_FALSE(controller.notifyUndoableSend(QStringLiteral("send-1"),
+                                                  QStringLiteral("Scheduled"),
+                                                  QStringLiteral("Subject"), 1'000));
+    }
+}
+
+TEST_CASE("undoable send closure reasons end the window exactly once",
+          "[app][daemon][notification][deferred-send]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+    std::vector<std::pair<QString, javelin::app::DesktopNotificationCloseReason>> ended;
+    QObject::connect(
+        &controller, &javelin::app::DesktopNotificationController::undoableSendWindowEnded,
+        &controller,
+        [&ended](const QString& sendId, const javelin::app::DesktopNotificationCloseReason reason)
+        { ended.emplace_back(sendId, reason); });
+
+    REQUIRE(controller.notifyUndoableSend(QStringLiteral("expired"), QStringLiteral("Scheduled"),
+                                          QStringLiteral("Subject"), 1'000));
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onNotificationClosed", Qt::DirectConnection,
+                                      Q_ARG(uint, observer->notificationId), Q_ARG(uint, 1U)));
+    REQUIRE(controller.notifyUndoableSend(QStringLiteral("dismissed"), QStringLiteral("Scheduled"),
+                                          QStringLiteral("Subject"), 1'000));
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onNotificationClosed", Qt::DirectConnection,
+                                      Q_ARG(uint, observer->notificationId), Q_ARG(uint, 2U)));
+    REQUIRE(controller.notifyUndoableSend(QStringLiteral("undefined"), QStringLiteral("Scheduled"),
+                                          QStringLiteral("Subject"), 1'000));
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onNotificationClosed", Qt::DirectConnection,
+                                      Q_ARG(uint, observer->notificationId), Q_ARG(uint, 4U)));
+    REQUIRE(controller.notifyUndoableSend(QStringLiteral("application"),
+                                          QStringLiteral("Scheduled"), QStringLiteral("Subject"),
+                                          1'000));
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onNotificationClosed", Qt::DirectConnection,
+                                      Q_ARG(uint, observer->notificationId), Q_ARG(uint, 3U)));
+
+    REQUIRE(ended.size() == 3);
+    CHECK(ended[0] == std::pair{QStringLiteral("expired"),
+                                javelin::app::DesktopNotificationCloseReason::Expired});
+    CHECK(ended[1] == std::pair{QStringLiteral("dismissed"),
+                                javelin::app::DesktopNotificationCloseReason::DismissedByUser});
+    CHECK(ended[2] == std::pair{QStringLiteral("undefined"),
+                                javelin::app::DesktopNotificationCloseReason::Undefined});
+}
+
+TEST_CASE("programmatic and duplicate notification closure cannot release a send",
+          "[app][daemon][notification][deferred-send]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+    int ended = 0;
+    QObject::connect(&controller,
+                     &javelin::app::DesktopNotificationController::undoableSendWindowEnded,
+                     &controller, [&ended](const QString&, auto) { ++ended; });
+
+    REQUIRE(controller.notifyUndoableSend(QStringLiteral("send-1"), QStringLiteral("Scheduled"),
+                                          QStringLiteral("Subject"), 1'000));
+    controller.closeUndoableSendNotification(QStringLiteral("send-1"));
+    CHECK(observer->closedId == observer->notificationId);
+    CHECK(ended == 0);
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onNotificationClosed", Qt::DirectConnection,
+                                      Q_ARG(uint, observer->notificationId), Q_ARG(uint, 1U)));
+    CHECK(ended == 0);
+
+    REQUIRE(controller.notifyUndoableSend(QStringLiteral("send-2"), QStringLiteral("Scheduled"),
+                                          QStringLiteral("Subject"), 1'000));
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onNotificationClosed", Qt::DirectConnection,
+                                      Q_ARG(uint, observer->notificationId), Q_ARG(uint, 1U)));
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onNotificationClosed", Qt::DirectConnection,
+                                      Q_ARG(uint, observer->notificationId), Q_ARG(uint, 1U)));
+    CHECK(ended == 1);
+}
+
+TEST_CASE("undo action consumes tracking before requesting cancellation",
+          "[app][daemon][notification][deferred-send]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+    int undoRequests = 0;
+    int ended = 0;
+    QObject::connect(&controller, &javelin::app::DesktopNotificationController::undoSendRequested,
+                     &controller,
+                     [&controller, &undoRequests](const QString&)
+                     {
+                         ++undoRequests;
+                         static_cast<void>(QMetaObject::invokeMethod(
+                             &controller, "onNotificationClosed", Qt::DirectConnection,
+                             Q_ARG(uint, 73U), Q_ARG(uint, 1U)));
+                     });
+    QObject::connect(&controller,
+                     &javelin::app::DesktopNotificationController::undoableSendWindowEnded,
+                     &controller, [&ended](const QString&, auto) { ++ended; });
+
+    REQUIRE(controller.notifyUndoableSend(QStringLiteral("send-1"), QStringLiteral("Scheduled"),
+                                          QStringLiteral("Subject"), 1'000));
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onActionInvoked", Qt::DirectConnection,
+                                      Q_ARG(uint, observer->notificationId),
+                                      Q_ARG(QString, QStringLiteral("undo-send:send-1"))));
+    CHECK(undoRequests == 1);
+    CHECK(ended == 0);
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onNotificationClosed", Qt::DirectConnection,
+                                      Q_ARG(uint, observer->notificationId), Q_ARG(uint, 1U)));
+    CHECK(undoRequests == 1);
+}
+
+TEST_CASE("self-describing Undo action survives an untracked notification",
+          "[app][daemon][notification][deferred-send]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+    std::vector<QString> requested;
+    QObject::connect(&controller, &javelin::app::DesktopNotificationController::undoSendRequested,
+                     &controller,
+                     [&requested](const QString& sendId) { requested.push_back(sendId); });
+
+    REQUIRE(QMetaObject::invokeMethod(
+        &controller, "onActionInvoked", Qt::DirectConnection, Q_ARG(uint, 901U),
+        Q_ARG(QString, QStringLiteral("undo-send:previous-process-send"))));
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onActionInvoked", Qt::DirectConnection,
+                                      Q_ARG(uint, 902U),
+                                      Q_ARG(QString, QStringLiteral("undo-send:"))));
+    REQUIRE(QMetaObject::invokeMethod(
+        &controller, "onActionInvoked", Qt::DirectConnection, Q_ARG(uint, 903U),
+        Q_ARG(QString, QStringLiteral("undo-send:send:with-extra-part"))));
+    REQUIRE(requested.size() == 1);
+    CHECK(requested.front() == QStringLiteral("previous-process-send"));
+}
+
+TEST_CASE("notification service loss ends every active Undo window once",
+          "[app][daemon][notification][deferred-send]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+    std::vector<QString> ended;
+    QObject::connect(
+        &controller, &javelin::app::DesktopNotificationController::undoableSendWindowEnded,
+        &controller,
+        [&ended](const QString& sendId, const javelin::app::DesktopNotificationCloseReason reason)
+        {
+            CHECK(reason == javelin::app::DesktopNotificationCloseReason::NotificationServiceLost);
+            ended.push_back(sendId);
+        });
+
+    REQUIRE(controller.notifyUndoableSend(QStringLiteral("send-1"), QStringLiteral("Scheduled"),
+                                          QStringLiteral("Subject"), 1'000));
+    REQUIRE(controller.notifyUndoableSend(QStringLiteral("send-2"), QStringLiteral("Scheduled"),
+                                          QStringLiteral("Subject"), 1'000));
+    REQUIRE(QMetaObject::invokeMethod(
+        &controller, "onNotificationServiceUnregistered", Qt::DirectConnection,
+        Q_ARG(QString, QStringLiteral("org.freedesktop.Notifications"))));
+    CHECK(ended.size() == 2);
+    CHECK(observer->closedIds.empty());
+    REQUIRE(QMetaObject::invokeMethod(
+        &controller, "onNotificationServiceUnregistered", Qt::DirectConnection,
+        Q_ARG(QString, QStringLiteral("org.freedesktop.Notifications"))));
+    CHECK(ended.size() == 2);
+}
+
+TEST_CASE("notification replacement untracks before closing the old notification",
+          "[app][daemon][notification][deferred-send]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    javelin::app::DesktopNotificationController* controller = nullptr;
+    observer->closeObserver = [&controller](const uint notificationId)
+    {
+        static_cast<void>(QMetaObject::invokeMethod(controller, "onNotificationClosed",
+                                                    Qt::DirectConnection,
+                                                    Q_ARG(uint, notificationId), Q_ARG(uint, 1U)));
+    };
+    javelin::app::DesktopNotificationController instance{std::move(transport), false, true};
+    controller = &instance;
+    int ended = 0;
+    QObject::connect(&instance,
+                     &javelin::app::DesktopNotificationController::undoableSendWindowEnded,
+                     &instance, [&ended](const QString&, auto) { ++ended; });
+
+    REQUIRE(instance.notifyUndoableSend(QStringLiteral("send-1"), QStringLiteral("Scheduled"),
+                                        QStringLiteral("Subject"), 1'000));
+    REQUIRE(instance.notifyUndoableSend(QStringLiteral("send-1"), QStringLiteral("Scheduled"),
+                                        QStringLiteral("Subject"), 1'000));
+    CHECK(ended == 0);
 }
