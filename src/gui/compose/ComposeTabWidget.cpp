@@ -29,7 +29,6 @@
 #include <QFileDialog>
 #include <QFileIconProvider>
 #include <QFileInfo>
-#include <QFont>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -315,24 +314,20 @@ namespace javelin::gui::compose
                 QStringLiteral("draft-assets/%1").arg(QString::fromStdString(composeSessionId)));
         }
 
-        class DraftAttachmentChip : public QFrame
+        class DraftAttachmentChip : public QWidget
         {
           public:
             DraftAttachmentChip(const javelin::jmap::submission::DraftAttachment& attachment,
                                 const bool embeddingAllowed, std::function<void()> removeAction,
                                 std::function<void(bool)> embedAction, QWidget* parent = nullptr)
-                : QFrame(parent), m_removeAction(std::move(removeAction)),
+                : QWidget(parent), m_removeAction(std::move(removeAction)),
                   m_embedAction(std::move(embedAction))
             {
-                setObjectName(QStringLiteral("draftAttachmentChip"));
                 setToolTip(attachmentItemText(attachment));
-                setStyleSheet(QStringLiteral(
-                    "#draftAttachmentChip { background: rgba(255, 255, 255, 0.06); border: 1px "
-                    "solid rgba(255, 255, 255, 0.08); border-radius: 6px; }"));
 
                 auto* layout = new QHBoxLayout(this);
-                layout->setContentsMargins(8, 4, 5, 4);
-                layout->setSpacing(6);
+                layout->setContentsMargins(4, 0, 2, 0);
+                layout->setSpacing(4);
 
                 auto* iconLabel = new QLabel(this);
                 iconLabel->setPixmap(attachmentIcon(attachment).pixmap(16, 16));
@@ -344,7 +339,6 @@ namespace javelin::gui::compose
                 nameLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
 
                 auto* sizeLabel = new QLabel(attachmentSizeLabel(attachment.size), this);
-                sizeLabel->setStyleSheet(QStringLiteral("color: #c2c6cf;"));
                 sizeLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
 
                 if (embeddingAllowed && isImageAttachment(attachment))
@@ -643,71 +637,40 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::setupUi()
     {
-        setObjectName(QStringLiteral("composeTab"));
-        setStyleSheet(QStringLiteral(
-            "#composeTab { background: #1d2026; }"
-            "#composeHeader { background: #232833; border: 1px solid #333c4b; border-radius: 14px; "
-            "}"
-            "QLineEdit, QComboBox, QTextEdit {"
-            "  background: #161a20; color: #eef2f7; border: 1px solid #394354; border-radius: 8px;"
-            "}"
-            "QLineEdit, QComboBox { padding: 6px 8px; }"
-            "QComboBox::drop-down { background: transparent; border: none; "
-            "border-top-right-radius: 8px; border-bottom-right-radius: 8px; }"
-            "QComboBox::down-arrow { image: "
-            "url(:/icons/thunderbird-icons/arrow-down-12-light.svg); width: 12px; height: 12px; }"
-            "QToolBar { background: #202632; border: 1px solid #394354; border-radius: 10px; "
-            "spacing: 4px; }"
-            "QTabWidget::pane { border: 1px solid #333c4b; border-radius: 12px; background: "
-            "#20242d; }"
-            "QTabBar::tab { background: #262c38; color: #ced7e4; padding: 8px 14px; "
-            "border-top-left-radius: 8px; border-top-right-radius: 8px; }"
-            "QTabBar::tab:selected { background: #38455e; color: #ffffff; }"));
-
         auto* rootLayout = new QVBoxLayout(this);
-        rootLayout->setContentsMargins(16, 16, 16, 16);
-        rootLayout->setSpacing(12);
+        rootLayout->setContentsMargins(0, 0, 0, 0);
+        rootLayout->setSpacing(4);
 
-        auto* headerFrame = new QFrame(this);
-        headerFrame->setObjectName(QStringLiteral("composeHeader"));
-        auto* headerLayout = new QVBoxLayout(headerFrame);
-        headerLayout->setContentsMargins(16, 16, 16, 16);
-        headerLayout->setSpacing(10);
-
-        auto* headingRow = new QHBoxLayout();
-        auto* titleLabel = new QLabel(i18n("Compose"), headerFrame);
-        auto titleFont = titleLabel->font();
-        titleFont.setPointSize(titleFont.pointSize() + 6);
-        titleFont.setBold(true);
-        titleLabel->setFont(titleFont);
-        headingRow->addWidget(titleLabel);
-        headingRow->addStretch(1);
-        auto* formatLabel = new QLabel(i18n("Format"), headerFrame);
-        m_bodyFormatCombo = new QComboBox(headerFrame);
-        m_bodyFormatCombo->addItem(i18nc("@item message body format", "HTML"));
-        m_bodyFormatCombo->addItem(i18nc("@item message body format", "Plain text"));
-        headingRow->addWidget(formatLabel);
-        headingRow->addWidget(m_bodyFormatCombo);
-        headerLayout->addLayout(headingRow);
+        auto* headerWidget = new QWidget(this);
+        auto* headerLayout = new QVBoxLayout(headerWidget);
+        headerLayout->setContentsMargins(6, 6, 6, 0);
+        headerLayout->setSpacing(4);
 
         auto* fromRow = new QHBoxLayout();
-        auto* fromLabel = new QLabel(i18nc("@label email sender", "From"), headerFrame);
+        auto* fromLabel = new QLabel(i18nc("@label email sender", "From"), headerWidget);
         fromLabel->setMinimumWidth(52);
-        m_fromCombo = new QComboBox(headerFrame);
+        m_fromCombo = new QComboBox(headerWidget);
+        auto* formatLabel = new QLabel(i18n("Format"), headerWidget);
+        m_bodyFormatCombo = new QComboBox(headerWidget);
+        m_bodyFormatCombo->addItem(i18nc("@item message body format", "HTML"));
+        m_bodyFormatCombo->addItem(i18nc("@item message body format", "Plain text"));
         fromRow->addWidget(fromLabel);
         fromRow->addWidget(m_fromCombo, 1);
+        fromRow->addSpacing(8);
+        fromRow->addWidget(formatLabel);
+        fromRow->addWidget(m_bodyFormatCombo);
         headerLayout->addLayout(fromRow);
 
         auto* toRow = new QHBoxLayout();
-        auto* toLabel = new QLabel(i18nc("@label email recipients", "To"), headerFrame);
+        auto* toLabel = new QLabel(i18nc("@label email recipients", "To"), headerWidget);
         toLabel->setMinimumWidth(52);
-        m_toEdit = new widgets::EmailAddressLineEdit(true, headerFrame);
+        m_toEdit = new widgets::EmailAddressLineEdit(true, headerWidget);
         m_toEdit->setPlaceholderText(QStringLiteral("alice@example.com, Bob <bob@example.com>"));
-        m_ccButton = new QToolButton(headerFrame);
+        m_ccButton = new QToolButton(headerWidget);
         m_ccButton->setText(i18nc("@action:button show carbon-copy field", "Cc"));
         m_ccButton->setCheckable(true);
         m_ccButton->setAutoRaise(true);
-        m_bccButton = new QToolButton(headerFrame);
+        m_bccButton = new QToolButton(headerWidget);
         m_bccButton->setText(i18nc("@action:button show blind-carbon-copy field", "Bcc"));
         m_bccButton->setCheckable(true);
         m_bccButton->setAutoRaise(true);
@@ -717,7 +680,7 @@ namespace javelin::gui::compose
         toRow->addWidget(m_bccButton);
         headerLayout->addLayout(toRow);
 
-        m_ccRow = new QWidget(headerFrame);
+        m_ccRow = new QWidget(headerWidget);
         auto* ccRowLayout = new QHBoxLayout(m_ccRow);
         ccRowLayout->setContentsMargins(0, 0, 0, 0);
         auto* ccLabel = new QLabel(i18nc("@label email carbon-copy recipients", "Cc"), m_ccRow);
@@ -728,7 +691,7 @@ namespace javelin::gui::compose
         ccRowLayout->addWidget(m_ccEdit, 1);
         headerLayout->addWidget(m_ccRow);
 
-        m_bccRow = new QWidget(headerFrame);
+        m_bccRow = new QWidget(headerWidget);
         auto* bccRowLayout = new QHBoxLayout(m_bccRow);
         bccRowLayout->setContentsMargins(0, 0, 0, 0);
         auto* bccLabel =
@@ -759,15 +722,15 @@ namespace javelin::gui::compose
                 });
 
         auto* subjectRow = new QHBoxLayout();
-        auto* subjectLabel = new QLabel(i18nc("@label email subject", "Subject"), headerFrame);
+        auto* subjectLabel = new QLabel(i18nc("@label email subject", "Subject"), headerWidget);
         subjectLabel->setMinimumWidth(52);
-        m_subjectEdit = new QLineEdit(headerFrame);
+        m_subjectEdit = new QLineEdit(headerWidget);
         m_subjectEdit->setPlaceholderText(i18n("Add a subject"));
         subjectRow->addWidget(subjectLabel);
         subjectRow->addWidget(m_subjectEdit, 1);
         headerLayout->addLayout(subjectRow);
 
-        rootLayout->addWidget(headerFrame);
+        rootLayout->addWidget(headerWidget);
 
         m_formatToolbar = new QToolBar(this);
         m_formatToolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -777,7 +740,7 @@ namespace javelin::gui::compose
         m_richTextEdit = new JavelinComposerEdit(m_editorTabs);
         m_richTextEdit->setAcceptDrops(false);
         m_richTextEdit->setAcceptRichText(true);
-        m_richTextEdit->document()->setDocumentMargin(14);
+        m_richTextEdit->document()->setDocumentMargin(8);
         m_previewView = new javelin::gui::messageview::HtmlMessageView(
             m_settings.messageAppearanceSettings(), m_editorTabs);
         m_previewView->setAcceptDrops(false);
