@@ -986,4 +986,54 @@ namespace javelin::jmap::auth
                                          : 0,
         };
     }
+
+    QCoro::Task<javelin::app::OAuthRevocationResult>
+    AccountOnboardingService::revokeOAuth(javelin::app::OAuthRevocationRequest request)
+    {
+        javelin::app::OAuthRevocationResult result{
+            .attempted = false,
+            .succeeded = true,
+            .error = {},
+        };
+        if (request.revocationEndpoint.isEmpty() ||
+            (request.accessToken.isEmpty() && request.refreshToken.isEmpty()))
+            co_return result;
+
+        result.attempted = true;
+        if (request.clientId.isEmpty() ||
+            !isSecureServerUrl(QUrl{request.revocationEndpoint}))
+        {
+            result.succeeded = false;
+            result.error = QStringLiteral("OAuth revocation information is incomplete.");
+            co_return result;
+        }
+
+        QStringList failures;
+        const auto revoke = [&](const QString& token,
+                                const QString& tokenTypeHint) -> QCoro::Task<void>
+        {
+            if (token.isEmpty())
+                co_return;
+            const auto response = co_await post(
+                m_networkAccessManager, QUrl{request.revocationEndpoint},
+                QByteArrayLiteral("application/x-www-form-urlencoded"),
+                formBody({
+                    {QStringLiteral("token"), token},
+                    {QStringLiteral("token_type_hint"), tokenTypeHint},
+                    {QStringLiteral("client_id"), request.clientId},
+                }));
+            if (response.statusCode < 200 || response.statusCode >= 300)
+            {
+                failures.push_back(response.error.isEmpty() ? oauthErrorText(response.body)
+                                                            : response.error);
+            }
+        };
+
+        co_await revoke(request.refreshToken, QStringLiteral("refresh_token"));
+        co_await revoke(request.accessToken, QStringLiteral("access_token"));
+        result.succeeded = failures.isEmpty();
+        if (!result.succeeded)
+            result.error = failures.join(QStringLiteral("; "));
+        co_return result;
+    }
 } // namespace javelin::jmap::auth

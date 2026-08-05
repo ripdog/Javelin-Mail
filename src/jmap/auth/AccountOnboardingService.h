@@ -34,6 +34,8 @@ namespace javelin::jmap::auth
         finishOAuth(javelin::app::OAuthFinishRequest request);
         [[nodiscard]] QCoro::Task<javelin::app::OAuthRefreshResult>
         refreshOAuth(javelin::app::OAuthRefreshRequest request);
+        [[nodiscard]] QCoro::Task<javelin::app::OAuthRevocationResult>
+        revokeOAuth(javelin::app::OAuthRevocationRequest request);
         [[nodiscard]] QCoro::Task<javelin::app::AccountAuthenticationResult>
         authenticateManually(javelin::app::ManualAuthenticationRequest request);
 

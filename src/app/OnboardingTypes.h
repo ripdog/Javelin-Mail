@@ -119,6 +119,21 @@ namespace javelin::app
         std::vector<OnboardingFeature> features;
     };
 
+    struct OAuthRevocationRequest
+    {
+        QString revocationEndpoint;
+        QString clientId;
+        QString accessToken;
+        QString refreshToken;
+    };
+
+    struct OAuthRevocationResult
+    {
+        bool attempted = false;
+        bool succeeded = false;
+        QString error;
+    };
+
     struct ManualAuthenticationRequest
     {
         QString emailAddress;

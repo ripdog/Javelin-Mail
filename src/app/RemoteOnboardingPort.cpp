@@ -68,4 +68,11 @@ namespace javelin::app
         co_return friendlyResult(co_await m_client.call<AccountAuthenticationResult>(
             javelin::protocol::RemoteActionKind::OnboardingAuthenticateManually, request));
     }
+
+    QCoro::Task<OnboardingCallResult<OAuthRevocationResult>>
+    RemoteOnboardingPort::revokeOAuth(OAuthRevocationRequest request)
+    {
+        co_return friendlyResult(co_await m_client.call<OAuthRevocationResult>(
+            javelin::protocol::RemoteActionKind::OnboardingRevokeOAuth, request));
+    }
 } // namespace javelin::app

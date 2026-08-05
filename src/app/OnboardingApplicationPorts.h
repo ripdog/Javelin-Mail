@@ -25,5 +25,7 @@ namespace javelin::app
         finishOAuth(OAuthFinishRequest request) = 0;
         [[nodiscard]] virtual QCoro::Task<OnboardingCallResult<AccountAuthenticationResult>>
         authenticateManually(ManualAuthenticationRequest request) = 0;
+        [[nodiscard]] virtual QCoro::Task<OnboardingCallResult<OAuthRevocationResult>>
+        revokeOAuth(OAuthRevocationRequest request) = 0;
     };
 } // namespace javelin::app

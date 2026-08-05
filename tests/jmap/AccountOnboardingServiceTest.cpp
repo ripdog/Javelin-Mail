@@ -75,6 +75,64 @@ TEST_CASE("OAuth refresh errors distinguish expired grants from transient failur
     CHECK(refreshFailureKind(QString{}) == Kind::Transient);
 }
 
+TEST_CASE("OAuth revocation skips accounts without a revocation endpoint",
+          "[jmap][auth][onboarding]")
+{
+    ensureApplication();
+    QNetworkAccessManager networkAccessManager;
+    javelin::jmap::auth::AccountOnboardingService service{networkAccessManager};
+
+    const auto result = QCoro::waitFor(service.revokeOAuth({
+        .revocationEndpoint = {},
+        .clientId = QStringLiteral("javelin"),
+        .accessToken = QStringLiteral("access-token"),
+        .refreshToken = QStringLiteral("refresh-token"),
+    }));
+
+    CHECK_FALSE(result.attempted);
+    CHECK(result.succeeded);
+    CHECK(result.error.isEmpty());
+}
+
+TEST_CASE("OAuth revocation refuses an insecure endpoint", "[jmap][auth][onboarding]")
+{
+    ensureApplication();
+    QNetworkAccessManager networkAccessManager;
+    javelin::jmap::auth::AccountOnboardingService service{networkAccessManager};
+
+    const auto result = QCoro::waitFor(service.revokeOAuth({
+        .revocationEndpoint = QStringLiteral("http://auth.example.com/revoke"),
+        .clientId = QStringLiteral("javelin"),
+        .accessToken = QStringLiteral("access-token"),
+        .refreshToken = QStringLiteral("refresh-token"),
+    }));
+
+    CHECK(result.attempted);
+    CHECK_FALSE(result.succeeded);
+    CHECK(result.error == QStringLiteral("OAuth revocation information is incomplete."));
+}
+
+TEST_CASE("OAuth revocation request survives the daemon boundary", "[jmap][auth][onboarding]")
+{
+    const javelin::app::OAuthRevocationRequest request{
+        .revocationEndpoint = QStringLiteral("https://auth.example.com/revoke"),
+        .clientId = QStringLiteral("client-id"),
+        .accessToken = QStringLiteral("access-token"),
+        .refreshToken = QStringLiteral("refresh-token"),
+    };
+
+    const auto encoded = javelin::app::remote::encode(request);
+    REQUIRE(std::holds_alternative<QByteArray>(encoded));
+    const auto decoded = javelin::app::remote::decodeValue<javelin::app::OAuthRevocationRequest>(
+        std::get<QByteArray>(encoded));
+    REQUIRE(std::holds_alternative<javelin::app::OAuthRevocationRequest>(decoded));
+    const auto& restored = std::get<javelin::app::OAuthRevocationRequest>(decoded);
+    CHECK(restored.revocationEndpoint == request.revocationEndpoint);
+    CHECK(restored.clientId == request.clientId);
+    CHECK(restored.accessToken == request.accessToken);
+    CHECK(restored.refreshToken == request.refreshToken);
+}
+
 TEST_CASE("OAuth metadata URLs require secure endpoint syntax", "[jmap][auth][onboarding]")
 {
     using javelin::jmap::auth::detail::isSecureOAuthUrl;

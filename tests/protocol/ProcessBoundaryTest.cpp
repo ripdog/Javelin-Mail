@@ -786,6 +786,7 @@ TEST_CASE("socket endpoint admits every onboarding remote action", "[protocol][s
         RemoteActionKind::OnboardingStartOAuth,
         RemoteActionKind::OnboardingFinishOAuth,
         RemoteActionKind::OnboardingAuthenticateManually,
+        RemoteActionKind::OnboardingRevokeOAuth,
     };
     for (const auto action : actions)
     {

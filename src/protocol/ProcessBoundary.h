@@ -193,6 +193,7 @@ namespace javelin::protocol
         OnboardingStartOAuth,
         OnboardingFinishOAuth,
         OnboardingAuthenticateManually,
+        OnboardingRevokeOAuth,
         CalendarSetSubscribed,
         Last = CalendarSetSubscribed,
     };

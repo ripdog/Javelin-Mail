@@ -1,6 +1,7 @@
 #include "gui/settings/PreferencesDialog.h"
 
 #include "app/AccountApplicationPorts.h"
+#include "app/OnboardingApplicationPorts.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/mailboxes/MailboxTreeView.h"
 #include "gui/onboarding/FirstRunWizard.h"
@@ -818,6 +819,37 @@ namespace javelin::gui::settings
 
         for (const auto& account : m_removedAccounts)
         {
+            auto revocation = m_onboardingPort.revokeOAuth({
+                .revocationEndpoint = account.revocationEndpoint,
+                .clientId = account.oauthClientId,
+                .accessToken = account.apiKey,
+                .refreshToken = account.refreshToken,
+            });
+            QCoro::connect(
+                std::move(revocation), this,
+                [this](javelin::app::OnboardingCallResult<javelin::app::OAuthRevocationResult>
+                           callResult)
+                {
+                    if (const auto* error = std::get_if<QString>(&callResult))
+                    {
+                        QMessageBox::warning(
+                            this, i18n("Account access may still be active"),
+                            i18n("The account was removed locally, but Javelin could not ask the "
+                                 "provider to revoke its OAuth access: %1",
+                                 *error));
+                        return;
+                    }
+                    const auto& result =
+                        std::get<javelin::app::OAuthRevocationResult>(callResult);
+                    if (result.attempted && !result.succeeded)
+                    {
+                        QMessageBox::warning(
+                            this, i18n("Account access may still be active"),
+                            i18n("The account was removed locally, but the provider did not "
+                                 "confirm OAuth revocation: %1",
+                                 result.error));
+                    }
+                });
             if (const auto error = m_accountCommandPort.removeConfiguredAccount(
                     account.loginEmail, account.sessionUrl, account.cachedAccountIds))
             {
