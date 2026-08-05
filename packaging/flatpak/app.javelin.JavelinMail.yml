@@ -30,6 +30,16 @@ modules:
         url: https://github.com/boostorg/pfr/archive/refs/tags/boost-1.88.0.tar.gz
         sha256: 56104541553dddb94079f66376a38b965cb2d9fc3e3b15fc0ea0fbfdfc56a6e6
 
+  - name: openblas
+    buildsystem: simple
+    build-commands:
+      - make -j${FLATPAK_BUILDER_N_JOBS} DYNAMIC_ARCH=1 NO_STATIC=1 USE_OPENMP=0
+      - make PREFIX=/app NO_STATIC=1 install
+    sources:
+      - type: archive
+        url: https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.34/OpenBLAS-0.3.34.tar.gz
+        sha256: cd7e129868320cc2d033afa920e31202dfe0b8066a5b66661900ccc0f197dfed
+
   - name: kmime
     buildsystem: cmake-ninja
     config-opts:

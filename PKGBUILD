@@ -7,6 +7,7 @@ arch=('x86_64')
 url='https://javelin.app'
 license=('GPL-3.0-only')
 depends=(
+  'blas-openblas'
   'gcc-libs'
   'glibc'
   'kconfigwidgets'

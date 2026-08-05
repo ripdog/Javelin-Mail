@@ -41,6 +41,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed \
             base-devel \
+            blas-openblas \
             boost \
             catch2 \
             ccache \

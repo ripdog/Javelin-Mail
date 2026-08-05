@@ -62,7 +62,6 @@ jobs:
           bundle: Javelin-Mail.flatpak
           manifest-path: packaging/flatpak/app.javelin.JavelinMail.yml
           cache-key: flatpak-builder-${{ github.sha }}
-          artifact-name: javelin-mail-flatpak
 
   appimage:
     name: AppImage
@@ -81,6 +80,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed \
             base-devel \
+            blas-openblas \
             boost \
             cmake \
             curl \
