@@ -85,6 +85,7 @@ namespace javelin::gui::shell
         void invoke(const TabState* tab, ContactsTabCommand command);
         void populateAddToGroupMenu(const TabState* tab, QMenu& menu) const;
         void populateRemoveFromGroupMenu(const TabState* tab, QMenu& menu) const;
+        void populateAddressBookMenu(const TabState* tab, QMenu& menu) const;
         [[nodiscard]] ContactsToolbarState toolbarState(const TabState* tab) const;
         [[nodiscard]] bool refresh(const TabState* tab);
         [[nodiscard]] bool close(TabState& tab);

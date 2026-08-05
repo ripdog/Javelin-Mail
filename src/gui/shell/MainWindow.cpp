@@ -721,13 +721,13 @@ namespace javelin::gui::shell
                                        i18n("Contacts"), this);
         connect(m_contactsAction, &QAction::triggered, this, &MainWindow::openContacts);
         actionCollection()->addAction(QStringLiteral("open_contacts"), m_contactsAction);
-        m_contactsAction->setEnabled(true);
+        m_contactsAction->setEnabled(false);
 
         m_calendarAction = new QAction(QIcon::fromTheme(QStringLiteral("view-calendar-month")),
                                        i18n("Calendar"), this);
         connect(m_calendarAction, &QAction::triggered, this, &MainWindow::openCalendar);
         actionCollection()->addAction(QStringLiteral("open_calendar"), m_calendarAction);
-        m_calendarAction->setEnabled(true);
+        m_calendarAction->setEnabled(false);
 
         m_sieveAction = new QAction(QIcon::fromTheme(QStringLiteral("document-edit")),
                                     i18n("Sieve Rules"), this);
@@ -941,6 +941,11 @@ namespace javelin::gui::shell
                         i18n("Manage Address Books…"), this);
         connect(m_contactManageAddressBooksAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::ManageAddressBooks); });
+        auto* addressBooksMenu = new QMenu(this);
+        connect(
+            addressBooksMenu, &QMenu::aboutToShow, this, [this, addressBooksMenu]
+            { m_contactsTabController->populateAddressBookMenu(activeTab(), *addressBooksMenu); });
+        m_contactManageAddressBooksAction->setMenu(addressBooksMenu);
         actionCollection()->addAction(QStringLiteral("contact_manage_address_books"),
                                       m_contactManageAddressBooksAction);
         m_contactRefreshAction = new QAction(QIcon::fromTheme(QStringLiteral("view-refresh")),
@@ -1748,6 +1753,23 @@ namespace javelin::gui::shell
     void MainWindow::updateToolbarForActiveTab()
     {
         const auto context = toolbarContextForActiveTab();
+        const auto selectedAccount = activeAccountId();
+        const auto contactAccounts = m_contactReader.listAccounts();
+        const auto* contacts =
+            std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&contactAccounts);
+        m_contactsAction->setEnabled(
+            contacts != nullptr &&
+            (!selectedAccount.has_value() ||
+             std::ranges::any_of(*contacts, [&selectedAccount](const auto& account)
+                                 { return account.accountId == *selectedAccount; })));
+        const auto calendarAccounts = m_calendarReader.accounts();
+        const auto* calendars =
+            std::get_if<std::vector<javelin::jmap::cache::CalendarAccount>>(&calendarAccounts);
+        m_calendarAction->setEnabled(
+            calendars != nullptr &&
+            (!selectedAccount.has_value() ||
+             std::ranges::any_of(*calendars, [&selectedAccount](const auto& account)
+                                 { return account.accountId == *selectedAccount; })));
         setToolBarVisible(QStringLiteral("mainToolBar"), context == ToolbarContext::Mail);
         setToolBarVisible(QStringLiteral("composeToolBar"), context == ToolbarContext::Compose);
         setToolBarVisible(QStringLiteral("contactsToolBar"), context == ToolbarContext::Contacts);

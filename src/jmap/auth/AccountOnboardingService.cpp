@@ -354,6 +354,20 @@ namespace javelin::jmap::auth
             using Kind = javelin::app::OnboardingFeatureKind;
             const bool push =
                 session.capabilities.websocket.has_value() || session.eventSourceUrl.has_value();
+            const auto contactsAccount =
+                session.primaryAccounts.contactsAccountId.has_value()
+                    ? session.accounts.find(*session.primaryAccounts.contactsAccountId)
+                    : session.accounts.end();
+            const bool contacts =
+                session.capabilities.contacts && contactsAccount != session.accounts.end() &&
+                contactsAccount->second.accountCapabilities.contacts.has_value();
+            const auto calendarsAccount =
+                session.primaryAccounts.calendarsAccountId.has_value()
+                    ? session.accounts.find(*session.primaryAccounts.calendarsAccountId)
+                    : session.accounts.end();
+            const bool calendars =
+                session.capabilities.calendars && calendarsAccount != session.accounts.end() &&
+                calendarsAccount->second.accountCapabilities.calendars.has_value();
             return {
                 Feature{.kind = Kind::Jmap, .available = session.capabilities.core, .detail = {}},
                 Feature{.kind = Kind::Mail, .available = session.capabilities.mail, .detail = {}},
@@ -361,10 +375,10 @@ namespace javelin::jmap::auth
                         .available = session.capabilities.submission,
                         .detail = {}},
                 Feature{.kind = Kind::Contacts,
-                        .available = session.capabilities.contacts,
+                        .available = contacts,
                         .detail = {}},
                 Feature{.kind = Kind::Calendars,
-                        .available = session.capabilities.calendars,
+                        .available = calendars,
                         .detail = {}},
                 Feature{.kind = Kind::Sieve, .available = session.capabilities.sieve, .detail = {}},
                 Feature{.kind = Kind::Push, .available = push, .detail = {}},

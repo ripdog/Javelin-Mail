@@ -81,6 +81,8 @@ namespace javelin::app
             return invalidContactCommand("Saving a contact requires an account.");
 
         const bool creating = !command.contactId.has_value();
+        if (creating && command.contact.uid.empty())
+            command.contact.uid = generatedUid();
         const auto document =
             javelin::jmap::contacts::applyContactEditorData(command.contact, creating);
         if (const auto* message = std::get_if<std::string_view>(&document))

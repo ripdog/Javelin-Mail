@@ -10,6 +10,7 @@
 
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 class QComboBox;
@@ -59,6 +60,7 @@ namespace javelin::gui::contacts
         void applicationPaletteChanged();
         void populateAddToGroupMenu(QMenu& menu);
         void populateRemoveFromGroupMenu(QMenu& menu);
+        void populateAddressBookMenu(QMenu& menu);
 
       public Q_SLOTS:
         void requestRefresh();
@@ -120,6 +122,8 @@ namespace javelin::gui::contacts
         [[nodiscard]] bool
         groupIsWritable(const javelin::jmap::contacts::ContactSummary& group) const;
         void populateContactCards(const javelin::jmap::contacts::ContactSummary& contact);
+        [[nodiscard]] QString
+        contactLocationLabel(const javelin::jmap::contacts::ContactSummary& contact) const;
 
         javelin::gui::settings::GuiSettings& m_settings;
         javelin::jmap::cache::ContactReader& m_repository;
@@ -130,6 +134,7 @@ namespace javelin::gui::contacts
         std::vector<javelin::jmap::api::AddressBook> m_addressBooks;
         std::vector<javelin::jmap::contacts::ContactSummary> m_contacts;
         std::vector<javelin::jmap::contacts::ContactSummary> m_groups;
+        std::unordered_set<std::string> m_hiddenAddressBooks;
         bool m_busy = false;
         bool m_refreshInFlight = false;
         bool m_creating = false;
@@ -144,6 +149,7 @@ namespace javelin::gui::contacts
         QVBoxLayout* m_multipleSelectionLayout = nullptr;
         QToolButton* m_multipleStarButton = nullptr;
         QLabel* m_viewTitle = nullptr;
+        QLabel* m_viewLocation = nullptr;
         QLabel* m_photoLabel = nullptr;
         QLabel* m_editorPhotoLabel = nullptr;
         QToolButton* m_starButton = nullptr;
@@ -162,6 +168,7 @@ namespace javelin::gui::contacts
         QPlainTextEdit* m_notesEdit = nullptr;
         QListWidget* m_addressBooksEdit = nullptr;
         QToolButton* m_advancedToggle = nullptr;
+        QLabel* m_editorLocation = nullptr;
         QPushButton* m_saveButton = nullptr;
         QPushButton* m_uploadPhotoButton = nullptr;
         QPushButton* m_removePhotoButton = nullptr;

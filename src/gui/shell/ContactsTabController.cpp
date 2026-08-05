@@ -135,6 +135,14 @@ namespace javelin::gui::shell
             menu.clear();
     }
 
+    void ContactsTabController::populateAddressBookMenu(const TabState* tab, QMenu& menu) const
+    {
+        if (auto* widget = widgetForTab(tab))
+            widget->populateAddressBookMenu(menu);
+        else
+            menu.clear();
+    }
+
     ContactsToolbarState ContactsTabController::toolbarState(const TabState* tab) const
     {
         const auto* widget = widgetForTab(tab);

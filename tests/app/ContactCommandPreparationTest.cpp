@@ -71,6 +71,22 @@ TEST_CASE("address book commands prepare set requests outside the GUI", "[app][c
     CHECK(removeRequest.onDestroyRemoveContents);
 }
 
+TEST_CASE("new contacts receive a uid during command preparation", "[app][contacts]")
+{
+    auto contact = editableContact({});
+    contact.document = R"({"kind":"individual","name":{"full":""}})";
+    auto prepared = javelin::app::prepareSaveContact({
+        .accountId = "a1",
+        .contactId = std::nullopt,
+        .contact = std::move(contact),
+    });
+
+    const auto* request = std::get_if<javelin::jmap::api::ContactCardSetRequest>(&prepared);
+    REQUIRE(request != nullptr);
+    REQUIRE(request->create.contains("new-contact"));
+    CHECK(request->create.at("new-contact").json.find("\"uid\"") != std::string::npos);
+}
+
 TEST_CASE("contact save commands prepare protocol requests outside the GUI", "[app][contacts]")
 {
     auto create = javelin::app::prepareSaveContact({
