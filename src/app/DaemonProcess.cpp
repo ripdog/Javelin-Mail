@@ -56,7 +56,11 @@ namespace javelin::app
                     .apiKey = settings.apiKey.toStdString(),
                     .refreshToken = settings.refreshToken.toStdString(),
                     .tokenEndpoint = settings.tokenEndpoint.toStdString(),
-                    .oauthClientId = settings.oauthClientId.toStdString()};
+                    .oauthClientId = settings.oauthClientId.toStdString(),
+                    .oauthIssuer = settings.oauthIssuer.toStdString(),
+                    .oauthResource = settings.oauthResource.toStdString(),
+                    .oauthScope = settings.oauthScope.toStdString(),
+                    .revocationEndpoint = settings.revocationEndpoint.toStdString()};
         }
 
         [[nodiscard]] const MailboxSelectionSettings*
@@ -843,29 +847,35 @@ namespace javelin::app
         const auto refreshToken = account->refreshToken;
         const auto tokenEndpoint = account->tokenEndpoint;
         const auto clientId = account->oauthClientId;
+        const auto resourceUrl = account->oauthResource;
+        const auto scope = account->oauthScope;
         const auto previousAccessToken = account->apiKey;
         const auto refreshKey = connectionId;
         co_return co_await m_oauthRefreshes.run(
             refreshKey,
             [this, connectionId = std::move(connectionId), sessionUrl, refreshToken, tokenEndpoint,
-             clientId, previousAccessToken]() mutable
+             clientId, resourceUrl, scope, previousAccessToken]() mutable
             {
-                return performOAuthRefresh(std::move(connectionId), std::move(sessionUrl),
-                                           std::move(refreshToken), std::move(tokenEndpoint),
-                                           std::move(clientId), std::move(previousAccessToken));
+                return performOAuthRefresh(
+                    std::move(connectionId), std::move(sessionUrl), std::move(refreshToken),
+                    std::move(tokenEndpoint), std::move(clientId), std::move(resourceUrl),
+                    std::move(scope), std::move(previousAccessToken));
             });
     }
 
     QCoro::Task<OAuthRefreshOutcome>
     DaemonProcess::performOAuthRefresh(QString connectionId, QString sessionUrl,
                                        QString refreshToken, QString tokenEndpoint,
-                                       QString clientId, QString previousAccessToken)
+                                       QString clientId, QString resourceUrl, QString scope,
+                                       QString previousAccessToken)
     {
         auto result = co_await m_services->onboardingService().refreshOAuth({
             .sessionUrl = std::move(sessionUrl),
             .tokenEndpoint = tokenEndpoint,
             .clientId = clientId,
             .refreshToken = refreshToken,
+            .resourceUrl = resourceUrl,
+            .scope = scope,
         });
 
         OAuthRefreshOutcome outcome;
@@ -879,11 +889,12 @@ namespace javelin::app
         }
         if (result.succeeded && isReady() && found != accounts.end() &&
             found->refreshToken == refreshToken && found->tokenEndpoint == tokenEndpoint &&
-            found->oauthClientId == clientId)
+            found->oauthClientId == clientId && found->oauthResource == resourceUrl)
         {
             const auto refreshedAccessToken = result.accessToken;
             found->apiKey = result.accessToken;
             found->refreshToken = result.refreshToken;
+            found->oauthScope = result.scope;
             found->tokenExpiresAtEpochSeconds = result.expiresAtEpochSeconds;
             ++found->revision;
             protocol::SettingsUpdate update;

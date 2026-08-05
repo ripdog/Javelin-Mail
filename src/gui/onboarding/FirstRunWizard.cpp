@@ -665,6 +665,10 @@ namespace javelin::gui::onboarding
                 .refreshToken = m_authentication->refreshToken,
                 .tokenEndpoint = m_authentication->tokenEndpoint,
                 .oauthClientId = m_authentication->clientId,
+                .oauthIssuer = m_authentication->issuer,
+                .oauthResource = m_authentication->resourceUrl,
+                .oauthScope = m_authentication->scope,
+                .revocationEndpoint = m_authentication->revocationEndpoint,
                 .tokenExpiresAtEpochSeconds = m_authentication->expiresAtEpochSeconds,
                 .cachedAccountIds = {},
             });
@@ -688,6 +692,10 @@ namespace javelin::gui::onboarding
             account->refreshToken = m_authentication->refreshToken;
             account->tokenEndpoint = m_authentication->tokenEndpoint;
             account->oauthClientId = m_authentication->clientId;
+            account->oauthIssuer = m_authentication->issuer;
+            account->oauthResource = m_authentication->resourceUrl;
+            account->oauthScope = m_authentication->scope;
+            account->revocationEndpoint = m_authentication->revocationEndpoint;
             account->tokenExpiresAtEpochSeconds = m_authentication->expiresAtEpochSeconds;
         }
         if (m_oauthAuthentication)

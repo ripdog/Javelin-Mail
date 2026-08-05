@@ -132,7 +132,8 @@ namespace javelin::app
                                                                          bool force);
         [[nodiscard]] QCoro::Task<OAuthRefreshOutcome>
         performOAuthRefresh(QString connectionId, QString sessionUrl, QString refreshToken,
-                            QString tokenEndpoint, QString clientId, QString previousAccessToken);
+                            QString tokenEndpoint, QString clientId, QString resourceUrl,
+                            QString scope, QString previousAccessToken);
         [[nodiscard]] const javelin::protocol::AccountSettings*
         connectionForAccount(std::string_view accountId) const;
         [[nodiscard]] QCoro::Task<std::optional<std::string>>

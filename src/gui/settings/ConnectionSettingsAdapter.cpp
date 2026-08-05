@@ -22,6 +22,10 @@ namespace javelin::gui::settings
             .refreshToken = settings.refreshToken.toStdString(),
             .tokenEndpoint = settings.tokenEndpoint.toStdString(),
             .oauthClientId = settings.oauthClientId.toStdString(),
+            .oauthIssuer = settings.oauthIssuer.toStdString(),
+            .oauthResource = settings.oauthResource.toStdString(),
+            .oauthScope = settings.oauthScope.toStdString(),
+            .revocationEndpoint = settings.revocationEndpoint.toStdString(),
         };
     }
 

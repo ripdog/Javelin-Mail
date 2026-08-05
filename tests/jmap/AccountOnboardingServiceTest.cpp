@@ -127,6 +127,7 @@ TEST_CASE("OAuth discovery resource survives the daemon boundary", "[jmap][auth]
         .authorizationEndpoint = QStringLiteral("https://auth.example.com/authorize"),
         .tokenEndpoint = QStringLiteral("https://auth.example.com/token"),
         .registrationEndpoint = QStringLiteral("https://auth.example.com/register"),
+        .revocationEndpoint = QStringLiteral("https://auth.example.com/revoke"),
         .issuer = QStringLiteral("https://auth.example.com"),
         .scopes = {QStringLiteral("urn:ietf:params:oauth:scope:mail")},
         .refreshTokensSupported = true,
@@ -138,8 +139,9 @@ TEST_CASE("OAuth discovery resource survives the daemon boundary", "[jmap][auth]
     const auto decoded = javelin::app::remote::decodeValue<javelin::app::AccountDiscoveryResult>(
         std::get<QByteArray>(encoded));
     REQUIRE(std::holds_alternative<javelin::app::AccountDiscoveryResult>(decoded));
-    CHECK(std::get<javelin::app::AccountDiscoveryResult>(decoded).resourceUrl ==
-          result.resourceUrl);
+    const auto& restored = std::get<javelin::app::AccountDiscoveryResult>(decoded);
+    CHECK(restored.resourceUrl == result.resourceUrl);
+    CHECK(restored.revocationEndpoint == result.revocationEndpoint);
 }
 
 TEST_CASE("OAuth browser callback identity survives the daemon boundary",
@@ -175,6 +177,10 @@ TEST_CASE("OAuth authentication credentials survive the daemon boundary",
         .refreshToken = QStringLiteral("refresh-token"),
         .tokenEndpoint = QStringLiteral("https://auth.example.com/token"),
         .clientId = QStringLiteral("client-id"),
+        .issuer = QStringLiteral("https://auth.example.com"),
+        .resourceUrl = QStringLiteral("https://mail.example.com/jmap"),
+        .scope = QStringLiteral("mail offline_access"),
+        .revocationEndpoint = QStringLiteral("https://auth.example.com/revoke"),
         .expiresAtEpochSeconds = 123456789,
         .features = {},
     };
@@ -192,5 +198,9 @@ TEST_CASE("OAuth authentication credentials survive the daemon boundary",
     CHECK(restored.refreshToken == result.refreshToken);
     CHECK(restored.tokenEndpoint == result.tokenEndpoint);
     CHECK(restored.clientId == result.clientId);
+    CHECK(restored.issuer == result.issuer);
+    CHECK(restored.resourceUrl == result.resourceUrl);
+    CHECK(restored.scope == result.scope);
+    CHECK(restored.revocationEndpoint == result.revocationEndpoint);
     CHECK(restored.expiresAtEpochSeconds == result.expiresAtEpochSeconds);
 }

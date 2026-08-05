@@ -47,10 +47,12 @@ namespace javelin::jmap::auth::detail
         std::string authorizationEndpoint;
         std::string tokenEndpoint;
         std::optional<std::string> registrationEndpoint;
+        std::optional<std::string> revocationEndpoint;
         std::vector<std::string> scopesSupported;
         std::vector<std::string> responseTypesSupported;
         std::vector<std::string> grantTypesSupported;
         std::vector<std::string> tokenEndpointAuthMethodsSupported;
+        std::vector<std::string> revocationEndpointAuthMethodsSupported;
         std::vector<std::string> codeChallengeMethodsSupported;
         bool authorizationResponseIssParameterSupported = false;
     };
@@ -74,6 +76,8 @@ namespace javelin::jmap::auth::detail
     struct RegistrationResponse
     {
         std::string clientId;
+        std::optional<std::string> tokenEndpointAuthMethod;
+        std::optional<std::vector<std::string>> redirectUris;
     };
 
     struct OAuthErrorResponse
@@ -88,6 +92,8 @@ namespace javelin::jmap::auth::detail
     {
         std::string accessToken;
         std::optional<std::string> refreshToken;
+        std::optional<std::string> tokenType;
+        std::optional<std::string> scope;
         std::optional<std::int64_t> expiresIn;
         std::optional<std::string> error;
         std::optional<std::string> errorDescription;
@@ -107,10 +113,12 @@ template <> struct glz::meta<javelin::jmap::auth::detail::AuthorizationServerMet
     using T = javelin::jmap::auth::detail::AuthorizationServerMetadata;
     static constexpr auto value = glz::object(
         "issuer", &T::issuer, "authorization_endpoint", &T::authorizationEndpoint, "token_endpoint",
-        &T::tokenEndpoint, "registration_endpoint", &T::registrationEndpoint, "scopes_supported",
-        &T::scopesSupported, "response_types_supported", &T::responseTypesSupported,
-        "grant_types_supported", &T::grantTypesSupported, "token_endpoint_auth_methods_supported",
-        &T::tokenEndpointAuthMethodsSupported, "code_challenge_methods_supported",
+        &T::tokenEndpoint, "registration_endpoint", &T::registrationEndpoint,
+        "revocation_endpoint", &T::revocationEndpoint, "scopes_supported", &T::scopesSupported,
+        "response_types_supported", &T::responseTypesSupported, "grant_types_supported",
+        &T::grantTypesSupported, "token_endpoint_auth_methods_supported",
+        &T::tokenEndpointAuthMethodsSupported, "revocation_endpoint_auth_methods_supported",
+        &T::revocationEndpointAuthMethodsSupported, "code_challenge_methods_supported",
         &T::codeChallengeMethodsSupported, "authorization_response_iss_parameter_supported",
         &T::authorizationResponseIssParameterSupported);
 };
@@ -129,7 +137,9 @@ template <> struct glz::meta<javelin::jmap::auth::detail::RegistrationRequest>
 template <> struct glz::meta<javelin::jmap::auth::detail::RegistrationResponse>
 {
     using T = javelin::jmap::auth::detail::RegistrationResponse;
-    static constexpr auto value = glz::object("client_id", &T::clientId);
+    static constexpr auto value =
+        glz::object("client_id", &T::clientId, "token_endpoint_auth_method",
+                    &T::tokenEndpointAuthMethod, "redirect_uris", &T::redirectUris);
 };
 
 template <> struct glz::meta<javelin::jmap::auth::detail::OAuthErrorResponse>
@@ -144,8 +154,9 @@ template <> struct glz::meta<javelin::jmap::auth::detail::TokenResponse>
 {
     using T = javelin::jmap::auth::detail::TokenResponse;
     static constexpr auto value = glz::object(
-        "access_token", &T::accessToken, "refresh_token", &T::refreshToken, "expires_in",
-        &T::expiresIn, "error", &T::error, "error_description", &T::errorDescription);
+        "access_token", &T::accessToken, "refresh_token", &T::refreshToken, "token_type",
+        &T::tokenType, "scope", &T::scope, "expires_in", &T::expiresIn, "error", &T::error,
+        "error_description", &T::errorDescription);
 };
 
 namespace javelin::jmap::auth
@@ -337,6 +348,22 @@ namespace javelin::jmap::auth
             return description.isEmpty() ? code : code + QStringLiteral(": ") + description;
         }
 
+        [[nodiscard]] bool validBearerTokenResponse(const detail::TokenResponse& token)
+        {
+            if (token.accessToken.empty() || !token.tokenType.has_value() ||
+                QString::fromStdString(*token.tokenType).compare(QStringLiteral("Bearer"),
+                                                                 Qt::CaseInsensitive) != 0)
+                return false;
+            return !token.expiresIn.has_value() || *token.expiresIn > 0;
+        }
+
+        [[nodiscard]] QString effectiveScope(const detail::TokenResponse& token,
+                                             const QString& fallback)
+        {
+            return token.scope.has_value() ? QString::fromStdString(*token.scope).simplified()
+                                           : fallback.simplified();
+        }
+
         [[nodiscard]] QStringList strings(const std::vector<std::string>& values)
         {
             QStringList result;
@@ -466,6 +493,10 @@ namespace javelin::jmap::auth
                     .refreshToken = {},
                     .tokenEndpoint = {},
                     .clientId = {},
+                    .issuer = {},
+                    .resourceUrl = {},
+                    .scope = {},
+                    .revocationEndpoint = {},
                     .expiresAtEpochSeconds = 0,
                     .features = {}};
         }
@@ -581,6 +612,17 @@ namespace javelin::jmap::auth
             result.issuer = QString::fromStdString(metadata->issuer);
             result.authorizationEndpoint = authorizationEndpoint;
             result.tokenEndpoint = tokenEndpoint;
+            if (metadata->revocationEndpoint.has_value())
+            {
+                const auto revocationEndpoint =
+                    QString::fromStdString(*metadata->revocationEndpoint);
+                const bool publicRevocation =
+                    metadata->revocationEndpointAuthMethodsSupported.empty() ||
+                    std::ranges::contains(metadata->revocationEndpointAuthMethodsSupported,
+                                          std::string{"none"});
+                if (publicRevocation && detail::isSecureOAuthUrl(QUrl{revocationEndpoint}))
+                    result.revocationEndpoint = revocationEndpoint;
+            }
             if (result.scopes.isEmpty())
                 result.scopes = strings(metadata->scopesSupported);
             const bool openPublicClient =
@@ -636,8 +678,9 @@ namespace javelin::jmap::auth
         }
 
         const auto scopes = requestedScopes(request.discovery.scopes);
+        const auto registeredRedirectUri = detail::registrationRedirectUri(request.redirectUri);
         detail::RegistrationRequest registration{
-            .redirectUris = {detail::registrationRedirectUri(request.redirectUri).toStdString()},
+            .redirectUris = {registeredRedirectUri.toStdString()},
             .clientName = "Javelin Mail",
             .tokenEndpointAuthMethod = "none",
             .grantTypes = {"authorization_code", "refresh_token"},
@@ -660,8 +703,15 @@ namespace javelin::jmap::auth
             m_networkAccessManager, QUrl{request.discovery.registrationEndpoint},
             QByteArrayLiteral("application/json"), QByteArray::fromStdString(registrationJson));
         const auto registered = parseJson<detail::RegistrationResponse>(registrationResponse.body);
+        const bool usableRegistration =
+            registered.has_value() && !registered->clientId.empty() &&
+            (!registered->tokenEndpointAuthMethod.has_value() ||
+             *registered->tokenEndpointAuthMethod == "none") &&
+            (!registered->redirectUris.has_value() ||
+             std::ranges::contains(*registered->redirectUris,
+                                   registeredRedirectUri.toStdString()));
         if (registrationResponse.statusCode < 200 || registrationResponse.statusCode >= 300 ||
-            !registered.has_value() || registered->clientId.empty())
+            !usableRegistration)
         {
             qCWarning(oauthLog).noquote()
                 << "OAuth dynamic registration rejected"
@@ -756,13 +806,14 @@ namespace javelin::jmap::auth
             {QStringLiteral("client_id"), flow.clientId},
             {QStringLiteral("redirect_uri"), flow.redirectUri},
             {QStringLiteral("code_verifier"), flow.codeVerifier},
+            {QStringLiteral("resource"), flow.discovery.resourceUrl},
         });
         const auto tokenResponse =
             co_await post(m_networkAccessManager, QUrl{flow.discovery.tokenEndpoint},
                           QByteArrayLiteral("application/x-www-form-urlencoded"), body);
         const auto token = parseJson<detail::TokenResponse>(tokenResponse.body);
         if (tokenResponse.statusCode < 200 || tokenResponse.statusCode >= 300 ||
-            !token.has_value() || token->accessToken.empty())
+            !token.has_value() || !validBearerTokenResponse(*token))
         {
             const auto detail = token.has_value() && token->errorDescription.has_value()
                                     ? QString::fromStdString(*token->errorDescription)
@@ -795,6 +846,11 @@ namespace javelin::jmap::auth
                                 : QString{},
             .tokenEndpoint = flow.discovery.tokenEndpoint,
             .clientId = flow.clientId,
+            .issuer = flow.discovery.issuer,
+            .resourceUrl = flow.discovery.resourceUrl,
+            .scope = effectiveScope(*token,
+                                    requestedScopes(flow.discovery.scopes).join(QLatin1Char(' '))),
+            .revocationEndpoint = flow.discovery.revocationEndpoint,
             .expiresAtEpochSeconds = token->expiresIn.has_value()
                                          ? QDateTime::currentSecsSinceEpoch() + *token->expiresIn
                                          : 0,
@@ -840,6 +896,10 @@ namespace javelin::jmap::auth
             .refreshToken = {},
             .tokenEndpoint = {},
             .clientId = {},
+            .issuer = {},
+            .resourceUrl = {},
+            .scope = {},
+            .revocationEndpoint = {},
             .expiresAtEpochSeconds = 0,
             .features = sessionFeatures(*session.session),
         };
@@ -849,20 +909,23 @@ namespace javelin::jmap::auth
     AccountOnboardingService::refreshOAuth(javelin::app::OAuthRefreshRequest request)
     {
         if (request.tokenEndpoint.isEmpty() || request.clientId.isEmpty() ||
-            request.refreshToken.isEmpty() || !isSecureServerUrl(QUrl{request.tokenEndpoint}))
+            request.refreshToken.isEmpty() || request.resourceUrl.isEmpty() ||
+            !isSecureServerUrl(QUrl{request.tokenEndpoint}) ||
+            !isSecureServerUrl(QUrl{request.resourceUrl}))
             co_return authenticationError(
                 QStringLiteral("OAuth refresh information is incomplete."));
         const auto body = formBody({
             {QStringLiteral("grant_type"), QStringLiteral("refresh_token")},
             {QStringLiteral("refresh_token"), request.refreshToken},
             {QStringLiteral("client_id"), request.clientId},
+            {QStringLiteral("resource"), request.resourceUrl},
         });
         const auto response =
             co_await post(m_networkAccessManager, QUrl{request.tokenEndpoint},
                           QByteArrayLiteral("application/x-www-form-urlencoded"), body);
         const auto token = parseJson<detail::TokenResponse>(response.body);
         if (response.statusCode < 200 || response.statusCode >= 300 || !token.has_value() ||
-            token->accessToken.empty())
+            !validBearerTokenResponse(*token))
             co_return authenticationError(
                 QStringLiteral("The account session could not be renewed."));
 
@@ -876,6 +939,10 @@ namespace javelin::jmap::auth
                                 : request.refreshToken,
             .tokenEndpoint = request.tokenEndpoint,
             .clientId = request.clientId,
+            .issuer = {},
+            .resourceUrl = request.resourceUrl,
+            .scope = effectiveScope(*token, request.scope),
+            .revocationEndpoint = {},
             .expiresAtEpochSeconds = token->expiresIn.has_value()
                                          ? QDateTime::currentSecsSinceEpoch() + *token->expiresIn
                                          : 0,

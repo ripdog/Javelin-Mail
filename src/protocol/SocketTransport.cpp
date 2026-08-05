@@ -436,7 +436,9 @@ namespace javelin::protocol
                    writer.string(account.displayName) && writer.string(account.sessionUrl) &&
                    writer.string(account.loginEmail) && writer.string(account.apiKey) &&
                    writer.string(account.refreshToken) && writer.string(account.tokenEndpoint) &&
-                   writer.string(account.oauthClientId) &&
+                   writer.string(account.oauthClientId) && writer.string(account.oauthIssuer) &&
+                   writer.string(account.oauthResource) && writer.string(account.oauthScope) &&
+                   writer.string(account.revocationEndpoint) &&
                    writer.qword(static_cast<quint64>(account.tokenExpiresAtEpochSeconds)) &&
                    writeVector(writer, account.cachedAccountIds, limits.maximumCollectionItems,
                                QStringLiteral("account.cachedAccountIds"),
@@ -451,7 +453,9 @@ namespace javelin::protocol
                 !reader.string(account.displayName) || !reader.string(account.sessionUrl) ||
                 !reader.string(account.loginEmail) || !reader.string(account.apiKey) ||
                 !reader.string(account.refreshToken) || !reader.string(account.tokenEndpoint) ||
-                !reader.string(account.oauthClientId) || !reader.qword(expiresAt) ||
+                !reader.string(account.oauthClientId) || !reader.string(account.oauthIssuer) ||
+                !reader.string(account.oauthResource) || !reader.string(account.oauthScope) ||
+                !reader.string(account.revocationEndpoint) || !reader.qword(expiresAt) ||
                 expiresAt > static_cast<quint64>(std::numeric_limits<qint64>::max()))
                 return false;
             account.tokenExpiresAtEpochSeconds = static_cast<qint64>(expiresAt);

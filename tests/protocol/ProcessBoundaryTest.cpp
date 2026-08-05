@@ -272,6 +272,10 @@ namespace
                      .refreshToken = QStringLiteral("refresh-token"),
                      .tokenEndpoint = QStringLiteral("https://mail.example.com/token"),
                      .oauthClientId = QStringLiteral("client-id"),
+                     .oauthIssuer = QStringLiteral("https://auth.example.com"),
+                     .oauthResource = QStringLiteral("https://mail.example.com/jmap"),
+                     .oauthScope = QStringLiteral("mail offline_access"),
+                     .revocationEndpoint = QStringLiteral("https://auth.example.com/revoke"),
                      .tokenExpiresAtEpochSeconds = 1'785'784'100,
                      .cachedAccountIds = {QStringLiteral("account-1")},
                  }},
@@ -297,6 +301,10 @@ namespace
         CHECK(account.refreshToken == QStringLiteral("refresh-token"));
         CHECK(account.tokenEndpoint == QStringLiteral("https://mail.example.com/token"));
         CHECK(account.oauthClientId == QStringLiteral("client-id"));
+        CHECK(account.oauthIssuer == QStringLiteral("https://auth.example.com"));
+        CHECK(account.oauthResource == QStringLiteral("https://mail.example.com/jmap"));
+        CHECK(account.oauthScope == QStringLiteral("mail offline_access"));
+        CHECK(account.revocationEndpoint == QStringLiteral("https://auth.example.com/revoke"));
         CHECK(account.tokenExpiresAtEpochSeconds == 1'785'784'100);
         REQUIRE(handler.receivedSettingsUpdate->update.workspace.has_value());
         CHECK(handler.receivedSettingsUpdate->update.workspace->mainWindowState ==

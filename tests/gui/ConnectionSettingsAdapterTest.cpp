@@ -18,6 +18,10 @@ TEST_CASE("connection settings adapt into application account settings")
         .refreshToken = QStringLiteral("refresh-token"),
         .tokenEndpoint = QStringLiteral("https://auth.example.test/token"),
         .oauthClientId = QStringLiteral("javelin-client"),
+        .oauthIssuer = QStringLiteral("https://auth.example.test"),
+        .oauthResource = QStringLiteral("https://mail.example.test/jmap"),
+        .oauthScope = QStringLiteral("mail offline_access"),
+        .revocationEndpoint = QStringLiteral("https://auth.example.test/revoke"),
         .tokenExpiresAtEpochSeconds = 0,
         .cachedAccountIds = {QStringLiteral("account")},
     };
@@ -32,6 +36,10 @@ TEST_CASE("connection settings adapt into application account settings")
     CHECK(actual.refreshToken == "refresh-token");
     CHECK(actual.tokenEndpoint == "https://auth.example.test/token");
     CHECK(actual.oauthClientId == "javelin-client");
+    CHECK(actual.oauthIssuer == "https://auth.example.test");
+    CHECK(actual.oauthResource == "https://mail.example.test/jmap");
+    CHECK(actual.oauthScope == "mail offline_access");
+    CHECK(actual.revocationEndpoint == "https://auth.example.test/revoke");
 }
 
 TEST_CASE("bootstrap adaptation transfers configured mailbox selections")

@@ -250,6 +250,10 @@ namespace javelin::protocol
         QString refreshToken;
         QString tokenEndpoint;
         QString oauthClientId;
+        QString oauthIssuer = {};
+        QString oauthResource = {};
+        QString oauthScope = {};
+        QString revocationEndpoint = {};
         qint64 tokenExpiresAtEpochSeconds = 0;
         std::vector<QString> cachedAccountIds;
 

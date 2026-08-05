@@ -209,6 +209,22 @@ namespace javelin::protocol
                             account.oauthClientId, QStringLiteral("update.accounts.oauthClientId"),
                             limits))
                         return error;
+                    if (auto error = optionalStringError(
+                            account.oauthIssuer, QStringLiteral("update.accounts.oauthIssuer"),
+                            limits))
+                        return error;
+                    if (auto error = optionalStringError(
+                            account.oauthResource, QStringLiteral("update.accounts.oauthResource"),
+                            limits))
+                        return error;
+                    if (auto error = optionalStringError(
+                            account.oauthScope, QStringLiteral("update.accounts.oauthScope"),
+                            limits))
+                        return error;
+                    if (auto error = optionalStringError(
+                            account.revocationEndpoint,
+                            QStringLiteral("update.accounts.revocationEndpoint"), limits))
+                        return error;
                     if (account.tokenExpiresAtEpochSeconds < 0)
                     {
                         return BoundaryError{
@@ -457,7 +473,14 @@ namespace javelin::protocol
                         {
                             size += stringSize(account.id) + stringSize(account.displayName) +
                                     stringSize(account.sessionUrl) +
-                                    stringSize(account.loginEmail) + stringSize(account.apiKey);
+                                    stringSize(account.loginEmail) + stringSize(account.apiKey) +
+                                    stringSize(account.refreshToken) +
+                                    stringSize(account.tokenEndpoint) +
+                                    stringSize(account.oauthClientId) +
+                                    stringSize(account.oauthIssuer) +
+                                    stringSize(account.oauthResource) +
+                                    stringSize(account.oauthScope) +
+                                    stringSize(account.revocationEndpoint);
                             for (const auto& accountId : account.cachedAccountIds)
                                 size += stringSize(accountId);
                         }

@@ -16,6 +16,10 @@ namespace javelin::app
         std::string refreshToken;
         std::string tokenEndpoint;
         std::string oauthClientId;
+        std::string oauthIssuer = {};
+        std::string oauthResource = {};
+        std::string oauthScope = {};
+        std::string revocationEndpoint = {};
 
         friend bool operator==(const AccountConnectionSettings&,
                                const AccountConnectionSettings&) = default;

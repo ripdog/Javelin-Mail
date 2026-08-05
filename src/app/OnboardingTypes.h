@@ -44,6 +44,7 @@ namespace javelin::app
         QString authorizationEndpoint;
         QString tokenEndpoint;
         QString registrationEndpoint;
+        QString revocationEndpoint = {};
         QString issuer;
         QStringList scopes;
         bool refreshTokensSupported = false;
@@ -79,6 +80,8 @@ namespace javelin::app
         QString tokenEndpoint;
         QString clientId;
         QString refreshToken;
+        QString resourceUrl = {};
+        QString scope = {};
     };
 
     struct AccountAuthenticationResult
@@ -90,6 +93,10 @@ namespace javelin::app
         QString refreshToken;
         QString tokenEndpoint;
         QString clientId;
+        QString issuer = {};
+        QString resourceUrl = {};
+        QString scope = {};
+        QString revocationEndpoint = {};
         qint64 expiresAtEpochSeconds = 0;
         std::vector<OnboardingFeature> features;
     };

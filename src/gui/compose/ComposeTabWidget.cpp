@@ -439,6 +439,10 @@ namespace javelin::gui::compose
                 .refreshToken = settings.refreshToken.toStdString(),
                 .tokenEndpoint = settings.tokenEndpoint.toStdString(),
                 .oauthClientId = settings.oauthClientId.toStdString(),
+                .oauthIssuer = settings.oauthIssuer.toStdString(),
+                .oauthResource = settings.oauthResource.toStdString(),
+                .oauthScope = settings.oauthScope.toStdString(),
+                .revocationEndpoint = settings.revocationEndpoint.toStdString(),
             };
         }
 
@@ -912,6 +916,10 @@ namespace javelin::gui::compose
                             .refreshToken = connection.refreshToken.toStdString(),
                             .tokenEndpoint = connection.tokenEndpoint.toStdString(),
                             .oauthClientId = connection.oauthClientId.toStdString(),
+                            .oauthIssuer = connection.oauthIssuer.toStdString(),
+                            .oauthResource = connection.oauthResource.toStdString(),
+                            .oauthScope = connection.oauthScope.toStdString(),
+                            .revocationEndpoint = connection.revocationEndpoint.toStdString(),
                         },
                         accountId);
                     QCoro::connect(std::move(task), this,

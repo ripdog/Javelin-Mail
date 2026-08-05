@@ -214,10 +214,14 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
                         .sessionUrl = {},
                         .loginEmail = QStringLiteral("work@example.test"),
                         .apiKey = QStringLiteral("key"),
-                        .refreshToken = {},
-                        .tokenEndpoint = {},
-                        .oauthClientId = {},
-                        .tokenExpiresAtEpochSeconds = 0,
+                        .refreshToken = QStringLiteral("refresh-token"),
+                        .tokenEndpoint = QStringLiteral("https://auth.example.test/token"),
+                        .oauthClientId = QStringLiteral("client-id"),
+                        .oauthIssuer = QStringLiteral("https://auth.example.test"),
+                        .oauthResource = QStringLiteral("https://mail.example.test/jmap"),
+                        .oauthScope = QStringLiteral("mail offline_access"),
+                        .revocationEndpoint = QStringLiteral("https://auth.example.test/revoke"),
+                        .tokenExpiresAtEpochSeconds = 1'785'784'100,
                         .cachedAccountIds = {}}};
     update.syncedMailboxSelections = std::vector<javelin::protocol::MailboxSelectionSettings>{{
         .accountId = QStringLiteral("account-1"),
@@ -246,6 +250,18 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
     REQUIRE(reloaded != nullptr);
     CHECK(reloaded->revision.value == 1);
     CHECK(reloaded->accounts.front().displayName == QStringLiteral("Work"));
+    CHECK(reloaded->accounts.front().refreshToken == QStringLiteral("refresh-token"));
+    CHECK(reloaded->accounts.front().tokenEndpoint ==
+          QStringLiteral("https://auth.example.test/token"));
+    CHECK(reloaded->accounts.front().oauthClientId == QStringLiteral("client-id"));
+    CHECK(reloaded->accounts.front().oauthIssuer ==
+          QStringLiteral("https://auth.example.test"));
+    CHECK(reloaded->accounts.front().oauthResource ==
+          QStringLiteral("https://mail.example.test/jmap"));
+    CHECK(reloaded->accounts.front().oauthScope == QStringLiteral("mail offline_access"));
+    CHECK(reloaded->accounts.front().revocationEndpoint ==
+          QStringLiteral("https://auth.example.test/revoke"));
+    CHECK(reloaded->accounts.front().tokenExpiresAtEpochSeconds == 1'785'784'100);
     REQUIRE(reloaded->syncedMailboxSelections.size() == 1);
     CHECK(reloaded->syncedMailboxSelections.front().mailboxIds.empty());
     REQUIRE(reloaded->notificationMailboxSelections.size() == 1);

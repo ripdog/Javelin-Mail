@@ -25,6 +25,10 @@ namespace javelin::app
         constexpr auto accountRefreshTokenKey = "refreshToken";
         constexpr auto accountTokenEndpointKey = "tokenEndpoint";
         constexpr auto accountOauthClientIdKey = "oauthClientId";
+        constexpr auto accountOauthIssuerKey = "oauthIssuer";
+        constexpr auto accountOauthResourceKey = "oauthResource";
+        constexpr auto accountOauthScopeKey = "oauthScope";
+        constexpr auto accountRevocationEndpointKey = "revocationEndpoint";
         constexpr auto accountTokenExpiresAtKey = "tokenExpiresAt";
         constexpr auto accountCachedIdsKey = "cachedAccountIds";
         constexpr auto mailboxIdsKey = "mailboxIds";
@@ -523,6 +527,14 @@ namespace javelin::app
                     settings.value(settingKey(accountTokenEndpointKey)).toString().trimmed(),
                 .oauthClientId =
                     settings.value(settingKey(accountOauthClientIdKey)).toString().trimmed(),
+                .oauthIssuer =
+                    settings.value(settingKey(accountOauthIssuerKey)).toString().trimmed(),
+                .oauthResource =
+                    settings.value(settingKey(accountOauthResourceKey)).toString().trimmed(),
+                .oauthScope =
+                    settings.value(settingKey(accountOauthScopeKey)).toString().simplified(),
+                .revocationEndpoint =
+                    settings.value(settingKey(accountRevocationEndpointKey)).toString().trimmed(),
                 .tokenExpiresAtEpochSeconds = tokenExpiresAtEpochSeconds,
                 .cachedAccountIds =
                     toVector(settings.value(settingKey(accountCachedIdsKey)).toStringList()),
@@ -603,6 +615,10 @@ namespace javelin::app
             settings.setValue(settingKey(accountRefreshTokenKey), account.refreshToken);
             settings.setValue(settingKey(accountTokenEndpointKey), account.tokenEndpoint);
             settings.setValue(settingKey(accountOauthClientIdKey), account.oauthClientId);
+            settings.setValue(settingKey(accountOauthIssuerKey), account.oauthIssuer);
+            settings.setValue(settingKey(accountOauthResourceKey), account.oauthResource);
+            settings.setValue(settingKey(accountOauthScopeKey), account.oauthScope);
+            settings.setValue(settingKey(accountRevocationEndpointKey), account.revocationEndpoint);
             settings.setValue(settingKey(accountTokenExpiresAtKey),
                               account.tokenExpiresAtEpochSeconds);
             settings.setValue(settingKey(accountCachedIdsKey),
