@@ -2071,18 +2071,18 @@ namespace javelin::app
             };
         if (calendar->isVisible == visible)
             return std::monostate{};
-        auto preparedResult = m_undoManager.prepareNormal(
-            visible ? i18n("Show Calendar") : i18n("Hide Calendar"),
-            javelin::app::undo::HistoryDomain::LocalPreference,
-            javelin::app::undo::CalendarPreferenceHistory{
-                .connectionId = {},
-                .accountId = accountId,
-                .preferenceKind = "visibility",
-                .objectId = calendarId,
-                .beforeValue = calendar->isVisible ? "true" : "false",
-                .afterValue = visible ? "true" : "false",
-            },
-            std::nullopt, std::nullopt, origin);
+        auto preparedResult =
+            m_undoManager.prepareNormal(visible ? i18n("Show Calendar") : i18n("Hide Calendar"),
+                                        javelin::app::undo::HistoryDomain::LocalPreference,
+                                        javelin::app::undo::CalendarPreferenceHistory{
+                                            .connectionId = {},
+                                            .accountId = accountId,
+                                            .preferenceKind = "visibility",
+                                            .objectId = calendarId,
+                                            .beforeValue = calendar->isVisible ? "true" : "false",
+                                            .afterValue = visible ? "true" : "false",
+                                        },
+                                        std::nullopt, std::nullopt, origin);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
             return javelin::jmap::operationError(*error);
         auto prepared =
@@ -2194,18 +2194,17 @@ namespace javelin::app
                 .createdId = std::nullopt,
                 .receipt = {},
             };
-        auto preparedResult =
-            m_undoManager.prepareNormal(i18n("Change Default Calendar"),
-                                        javelin::app::undo::HistoryDomain::LocalPreference,
-                                        javelin::app::undo::CalendarPreferenceHistory{
-                                            .connectionId = ownerAccountId,
-                                            .accountId = accountId,
-                                            .preferenceKind = "default_calendar",
-                                            .objectId = "default",
-                                            .beforeValue = before,
-                                            .afterValue = calendarId,
-                                        },
-                                        std::nullopt, std::nullopt, origin);
+        auto preparedResult = m_undoManager.prepareNormal(
+            i18n("Change Default Calendar"), javelin::app::undo::HistoryDomain::LocalPreference,
+            javelin::app::undo::CalendarPreferenceHistory{
+                .connectionId = ownerAccountId,
+                .accountId = accountId,
+                .preferenceKind = "default_calendar",
+                .objectId = "default",
+                .beforeValue = before,
+                .afterValue = calendarId,
+            },
+            std::nullopt, std::nullopt, origin);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
             co_return javelin::jmap::operationError(*error);
         auto prepared =
@@ -2549,10 +2548,9 @@ namespace javelin::app
                 .activeScriptIdAfter = script.isActive ? std::optional{script.id} : std::nullopt,
             };
             auto preparedResult = m_undoManager.prepareNormal(
-                script.id.empty() ? i18n("Create Sieve Script “%1”",
-                                         QString::fromStdString(script.name))
-                                  : i18n("Edit Sieve Script “%1”",
-                                         QString::fromStdString(script.name)),
+                script.id.empty()
+                    ? i18n("Create Sieve Script “%1”", QString::fromStdString(script.name))
+                    : i18n("Edit Sieve Script “%1”", QString::fromStdString(script.name)),
                 javelin::app::undo::HistoryDomain::Mail, std::move(history), operationGroupId,
                 std::nullopt, origin);
             if (const auto* error =
@@ -2700,8 +2698,7 @@ namespace javelin::app
             };
             auto preparedResult = m_undoManager.prepareNormal(
                 active ? i18n("Activate Sieve Script “%1”", QString::fromStdString(script.name))
-                       : i18n("Deactivate Sieve Script “%1”",
-                              QString::fromStdString(script.name)),
+                       : i18n("Deactivate Sieve Script “%1”", QString::fromStdString(script.name)),
                 javelin::app::undo::HistoryDomain::Mail, std::move(history), operationGroupId,
                 std::nullopt, origin);
             if (const auto* error =

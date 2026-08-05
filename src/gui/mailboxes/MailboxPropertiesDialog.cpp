@@ -16,8 +16,7 @@ namespace javelin::gui::mailboxes
     {
         [[nodiscard]] QString yesNo(const bool value)
         {
-            return value ? i18nc("@item boolean value", "Yes")
-                         : i18nc("@item boolean value", "No");
+            return value ? i18nc("@item boolean value", "Yes") : i18nc("@item boolean value", "No");
         }
 
         void addValue(QFormLayout& layout, const QString& label, QString value, QWidget* parent)
@@ -45,9 +44,8 @@ namespace javelin::gui::mailboxes
                  identityGroup);
         addValue(*identityLayout, i18n("Account JMAP ID:"), std::move(accountId), identityGroup);
         addValue(*identityLayout, i18n("Parent JMAP ID:"),
-                 mailbox.parentId.has_value()
-                     ? QString::fromStdString(*mailbox.parentId)
-                     : i18nc("@item no mailbox parent", "None"),
+                 mailbox.parentId.has_value() ? QString::fromStdString(*mailbox.parentId)
+                                              : i18nc("@item no mailbox parent", "None"),
                  identityGroup);
         addValue(*identityLayout, i18n("Role:"),
                  mailbox.role.has_value() ? QString::fromStdString(*mailbox.role)

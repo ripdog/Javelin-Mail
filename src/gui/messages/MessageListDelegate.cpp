@@ -7,8 +7,8 @@
 
 #include <QApplication>
 #include <QDateTime>
-#include <QLocale>
 #include <QHelpEvent>
+#include <QLocale>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QStyle>

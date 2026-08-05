@@ -155,12 +155,10 @@ namespace javelin::gui::calendar
         for (const auto& calendar : m_calendars)
         {
             const auto writable = calendar.myRights.mayWriteAll || calendar.myRights.mayWriteOwn;
-            m_calendar->addItem(
-                writable
-                    ? QString::fromStdString(calendar.name)
-                    : i18nc("@item calendar name", "%1 (read-only)",
-                            QString::fromStdString(calendar.name)),
-                calendarKey(calendar.accountId, calendar.id));
+            m_calendar->addItem(writable ? QString::fromStdString(calendar.name)
+                                         : i18nc("@item calendar name", "%1 (read-only)",
+                                                 QString::fromStdString(calendar.name)),
+                                calendarKey(calendar.accountId, calendar.id));
             if (!writable)
             {
                 if (auto* model = qobject_cast<QStandardItemModel*>(m_calendar->model()))
@@ -277,8 +275,7 @@ namespace javelin::gui::calendar
         m_alerts = new QWidget(this);
         m_alertRowsLayout = new QVBoxLayout(m_alerts);
         m_alertRowsLayout->setContentsMargins(0, 0, 0, 0);
-        m_useDefaultAlerts =
-            new QCheckBox(i18n("Use calendar default notifications"), m_alerts);
+        m_useDefaultAlerts = new QCheckBox(i18n("Use calendar default notifications"), m_alerts);
         m_alertRowsLayout->addWidget(m_useDefaultAlerts);
         m_addAlert = new QPushButton(i18n("+ Add notification"), m_alerts);
         m_addAlert->setObjectName(QStringLiteral("addNotification"));

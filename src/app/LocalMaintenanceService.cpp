@@ -187,9 +187,8 @@ namespace javelin::app
                                        ? i18n("Saved message migration complete")
                                        : i18n("Migrating saved messages");
         if (result.evicted > 0)
-            migrationProgress.detail =
-                i18np("Evicted %1 unretained vault object",
-                      "Evicted %1 unretained vault objects", result.evicted);
+            migrationProgress.detail = i18np("Evicted %1 unretained vault object",
+                                             "Evicted %1 unretained vault objects", result.evicted);
         static_cast<void>(
             m_scheduler.update("legacy-mail-vault-migration",
                                result.migrationComplete ? WorkStatus::Complete : WorkStatus::Queued,

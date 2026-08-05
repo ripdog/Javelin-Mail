@@ -175,8 +175,7 @@ namespace javelin::gui::translation
             {
                 return TranslationError{
                     .code = TranslationErrorCode::GoogleResponseInvalid,
-                    .message =
-                        i18n("Google Translate response did not contain translations."),
+                    .message = i18n("Google Translate response did not contain translations."),
                 };
             }
 

@@ -128,8 +128,8 @@ namespace javelin::app
                             menuLayoutItem(2, actionProperties(i18n("Task Center…"), true))));
                         children.push_back(QVariant::fromValue(
                             menuLayoutItem(3, actionProperties(i18n("Refresh accounts"), true))));
-                        children.push_back(QVariant::fromValue(
-                            menuLayoutItem(4, actionProperties(i18nc("@action:inmenu", "Quit"), true))));
+                        children.push_back(QVariant::fromValue(menuLayoutItem(
+                            4, actionProperties(i18nc("@action:inmenu", "Quit"), true))));
                     }
                     const auto layout = menuLayoutItem(0, {}, children);
                     QList<QVariant> replyArguments;

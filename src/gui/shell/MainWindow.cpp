@@ -309,11 +309,10 @@ namespace javelin::gui::shell
                     std::ranges::find(entries, entryId, &javelin::app::undo::HistoryEntry::entryId);
                 if (completed == entries.end())
                     return;
-                m_statusBar->showMessage(
-                    completed->stack == javelin::app::undo::HistoryStack::Redo
-                        ? i18n("Undid %1.", completed->label)
-                        : i18n("Redid %1.", completed->label),
-                    5000);
+                m_statusBar->showMessage(completed->stack == javelin::app::undo::HistoryStack::Redo
+                                             ? i18n("Undid %1.", completed->label)
+                                             : i18n("Redid %1.", completed->label),
+                                         5000);
             });
         connect(&m_undoCommandPort, &javelin::app::UndoCommandPort::executionFailed, this,
                 &MainWindow::presentHistoryFailure);
@@ -358,10 +357,10 @@ namespace javelin::gui::shell
                         m_settings.accountForCachedId(QString::fromStdString(summary.accountId));
                     const auto accountName =
                         account.displayName.isEmpty() ? i18n("this account") : account.displayName;
-                    m_statusBar->showMessage(
-                        i18n("Synced %1 mailboxes and %2 messages for %3.", summary.mailboxCount,
-                             summary.emailCount, accountName),
-                        10000);
+                    m_statusBar->showMessage(i18n("Synced %1 mailboxes and %2 messages for %3.",
+                                                  summary.mailboxCount, summary.emailCount,
+                                                  accountName),
+                                             10000);
                 });
         connect(m_accountRefreshController, &AccountRefreshController::contactsRefreshed, this,
                 [this](const javelin::jmap::contacts::ContactRefreshSummary&)
@@ -862,9 +861,8 @@ namespace javelin::gui::shell
         actionCollection()->addAction(QStringLiteral("compose_save_draft"),
                                       m_composeSaveDraftAction);
 
-        m_composeAttachFilesAction =
-            new QAction(QIcon::fromTheme(QStringLiteral("mail-attachment")),
-                        i18n("Attach Files"), this);
+        m_composeAttachFilesAction = new QAction(
+            QIcon::fromTheme(QStringLiteral("mail-attachment")), i18n("Attach Files"), this);
         connect(m_composeAttachFilesAction, &QAction::triggered, this,
                 [this] { m_composeTabController->attachFiles(activeTab()); });
         actionCollection()->addAction(QStringLiteral("compose_attach_files"),
@@ -897,8 +895,8 @@ namespace javelin::gui::shell
         connect(m_contactDeleteAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::DeleteContact); });
         actionCollection()->addAction(QStringLiteral("contact_delete"), m_contactDeleteAction);
-        m_contactCopyAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
-                                          i18n("Copy Contact"), this);
+        m_contactCopyAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("edit-copy")), i18n("Copy Contact"), this);
         connect(m_contactCopyAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::CopyContact); });
         actionCollection()->addAction(QStringLiteral("contact_copy"), m_contactCopyAction);
@@ -912,23 +910,22 @@ namespace javelin::gui::shell
         connect(m_contactExportAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::ExportVCard); });
         actionCollection()->addAction(QStringLiteral("contact_export"), m_contactExportAction);
-        m_contactDuplicatesAction = new QAction(QIcon::fromTheme(QStringLiteral("merge")),
-                                                i18n("Find Duplicates…"), this);
+        m_contactDuplicatesAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("merge")), i18n("Find Duplicates…"), this);
         connect(m_contactDuplicatesAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::FindDuplicates); });
         actionCollection()->addAction(QStringLiteral("contact_duplicates"),
                                       m_contactDuplicatesAction);
-        m_contactAddToGroupAction = new QAction(QIcon::fromTheme(QStringLiteral("list-add")),
-                                                i18n("Add to Group"), this);
+        m_contactAddToGroupAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("Add to Group"), this);
         auto* addToGroupMenu = new QMenu(this);
         connect(addToGroupMenu, &QMenu::aboutToShow, this, [this, addToGroupMenu]
                 { m_contactsTabController->populateAddToGroupMenu(activeTab(), *addToGroupMenu); });
         m_contactAddToGroupAction->setMenu(addToGroupMenu);
         actionCollection()->addAction(QStringLiteral("contact_add_to_group"),
                                       m_contactAddToGroupAction);
-        m_contactRemoveFromGroupAction =
-            new QAction(QIcon::fromTheme(QStringLiteral("list-remove")), i18n("Remove from Group"),
-                        this);
+        m_contactRemoveFromGroupAction = new QAction(
+            QIcon::fromTheme(QStringLiteral("list-remove")), i18n("Remove from Group"), this);
         auto* removeFromGroupMenu = new QMenu(this);
         connect(removeFromGroupMenu, &QMenu::aboutToShow, this,
                 [this, removeFromGroupMenu]
@@ -966,13 +963,13 @@ namespace javelin::gui::shell
                 [invokeCalendar] { invokeCalendar(CalendarTabCommand::PreviousMonth); });
         actionCollection()->addAction(QStringLiteral("calendar_previous_month"),
                                       m_calendarPreviousMonthAction);
-        m_calendarTodayAction = new QAction(QIcon::fromTheme(QStringLiteral("go-jump-today")),
-                                            i18n("Today"), this);
+        m_calendarTodayAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("go-jump-today")), i18n("Today"), this);
         connect(m_calendarTodayAction, &QAction::triggered, this,
                 [invokeCalendar] { invokeCalendar(CalendarTabCommand::Today); });
         actionCollection()->addAction(QStringLiteral("calendar_today"), m_calendarTodayAction);
-        m_calendarNextMonthAction = new QAction(QIcon::fromTheme(QStringLiteral("go-next")),
-                                                i18n("Next Month"), this);
+        m_calendarNextMonthAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("go-next")), i18n("Next Month"), this);
         connect(m_calendarNextMonthAction, &QAction::triggered, this,
                 [invokeCalendar] { invokeCalendar(CalendarTabCommand::NextMonth); });
         actionCollection()->addAction(QStringLiteral("calendar_next_month"),
@@ -1055,8 +1052,8 @@ namespace javelin::gui::shell
         QAbstractButton* removeButton = nullptr;
         if (failure.mayRemoveFromHistory && !failure.acknowledgeAndRemove)
         {
-            removeButton = messageBox.addButton(i18n("Remove from History"),
-                                                QMessageBox::DestructiveRole);
+            removeButton =
+                messageBox.addButton(i18n("Remove from History"), QMessageBox::DestructiveRole);
         }
         messageBox.exec();
         if (failure.acknowledgeAndRemove)
@@ -1166,29 +1163,29 @@ namespace javelin::gui::shell
                     static_cast<void>(m_messageModel->setEmailRead(emailId.toStdString()));
                     updateMessageActions();
                 });
-        connect(m_messageCommandController, &MessageCommandController::emailMutationsSubmitted,
-                this,
-                [this](const EmailMutationSubmissionSummary& summary)
+        connect(
+            m_messageCommandController, &MessageCommandController::emailMutationsSubmitted, this,
+            [this](const EmailMutationSubmissionSummary& summary)
+            {
+                if (summary.failedEmailCount > 0)
                 {
-                    if (summary.failedEmailCount > 0)
-                    {
-                        markTabsStaleForAccount(summary.accountId);
-                        refreshActiveTabFromServer();
-                        presentError(javelin::jmap::OperationError{
-                            .message = i18np(
-                                "The server rejected %1 email mutation. The mailbox has been "
-                                "refreshed to restore the server state.",
-                                "The server rejected %1 email mutations. The mailbox has been "
-                                "refreshed to restore the server state.",
-                                summary.failedEmailCount),
-                        });
-                        return;
-                    }
-                    if (summary.updatedEmailCount == 0)
-                        return;
                     markTabsStaleForAccount(summary.accountId);
                     refreshActiveTabFromServer();
-                });
+                    presentError(javelin::jmap::OperationError{
+                        .message =
+                            i18np("The server rejected %1 email mutation. The mailbox has been "
+                                  "refreshed to restore the server state.",
+                                  "The server rejected %1 email mutations. The mailbox has been "
+                                  "refreshed to restore the server state.",
+                                  summary.failedEmailCount),
+                    });
+                    return;
+                }
+                if (summary.updatedEmailCount == 0)
+                    return;
+                markTabsStaleForAccount(summary.accountId);
+                refreshActiveTabFromServer();
+            });
 
         connect(m_mailboxModel, &javelin::gui::mailboxes::MailboxTreeModel::emailsDropped, this,
                 [this](const QString& sourceAccountId, const QString& destinationAccountId,
@@ -1571,8 +1568,7 @@ namespace javelin::gui::shell
             activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
         if (!accountId.has_value())
         {
-            m_statusBar->showMessage(i18n("Select an account before composing a message."),
-                                     5000);
+            m_statusBar->showMessage(i18n("Select an account before composing a message."), 5000);
             return;
         }
 
@@ -2338,8 +2334,7 @@ namespace javelin::gui::shell
 
         addPropertyAction(i18n("Date received"),
                           javelin::jmap::query::EmailListSortProperty::ReceivedAt);
-        addPropertyAction(i18n("Date sent"),
-                          javelin::jmap::query::EmailListSortProperty::SentAt);
+        addPropertyAction(i18n("Date sent"), javelin::jmap::query::EmailListSortProperty::SentAt);
         addPropertyAction(i18nc("@item message sort property", "From"),
                           javelin::jmap::query::EmailListSortProperty::From);
         addPropertyAction(i18nc("@item message sort property", "To"),
@@ -2589,9 +2584,9 @@ namespace javelin::gui::shell
             return;
         }
 
-        m_messageSortButton->setToolTip(
-            i18n("Sort messages: %1, %2", sortPropertyLabel(m_emailListSort.property),
-                 sortDirectionLabel(m_emailListSort.direction)));
+        m_messageSortButton->setToolTip(i18n("Sort messages: %1, %2",
+                                             sortPropertyLabel(m_emailListSort.property),
+                                             sortDirectionLabel(m_emailListSort.direction)));
     }
 
     void MainWindow::scheduleApplicationPaletteRefresh()
@@ -2835,8 +2830,7 @@ namespace javelin::gui::shell
                 i18n("%1 needs you to sign in again before Javelin can synchronize mail.",
                      accountName),
                 QMessageBox::NoButton, this};
-            auto* signInButton =
-                prompt.addButton(i18n("Sign In Again"), QMessageBox::AcceptRole);
+            auto* signInButton = prompt.addButton(i18n("Sign In Again"), QMessageBox::AcceptRole);
             prompt.addButton(i18nc("@action:button", "Later"), QMessageBox::RejectRole);
             m_authenticationPromptOpen = true;
             prompt.exec();

@@ -45,10 +45,8 @@ namespace javelin::gui::search
         formLayout->addRow(i18nc("@label email sender search field", "From"), m_fromEdit);
         formLayout->addRow(i18nc("@label email recipient search field", "To"), m_toEdit);
         formLayout->addRow(i18nc("@label email carbon-copy search field", "Cc"), m_ccEdit);
-        formLayout->addRow(i18nc("@label email blind-carbon-copy search field", "Bcc"),
-                           m_bccEdit);
-        formLayout->addRow(i18nc("@label email subject search field", "Subject"),
-                           m_subjectEdit);
+        formLayout->addRow(i18nc("@label email blind-carbon-copy search field", "Bcc"), m_bccEdit);
+        formLayout->addRow(i18nc("@label email subject search field", "Subject"), m_subjectEdit);
         formLayout->addRow(i18nc("@label email body search field", "Body"), m_bodyEdit);
 
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok, this);

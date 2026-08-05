@@ -107,6 +107,7 @@ endfunction()
 
 function(javelin_fetch_bergamot)
     find_package(BLAS REQUIRED)
+    find_package(LAPACK REQUIRED)
     find_path(JAVELIN_BERGAMOT_CBLAS_INCLUDE_DIR
         NAMES cblas.h
         PATH_SUFFIXES openblas
@@ -149,6 +150,7 @@ function(javelin_fetch_bergamot)
         SOURCE_SUBDIR inference
     )
     FetchContent_MakeAvailable(mozilla_translations)
+    target_link_libraries(marian LAPACK::LAPACK)
     if(NOT cblas_cblas_WORKS)
         message(FATAL_ERROR "Marian could not link the required CBLAS implementation")
     endif()

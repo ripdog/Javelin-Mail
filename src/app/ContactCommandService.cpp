@@ -235,9 +235,8 @@ namespace javelin::app
                 std::get_if<std::optional<javelin::jmap::contacts::ContactSummary>>(&cached);
             contact != nullptr && contact->has_value())
             groupName = QString::fromStdString(contact->value().displayName);
-        const QString actionDescription =
-            i18n("Delete contact group “%1” (%2)", groupName,
-                 QString::fromStdString(command.groupId));
+        const QString actionDescription = i18n("Delete contact group “%1” (%2)", groupName,
+                                               QString::fromStdString(command.groupId));
         auto prepared = prepareDeleteContactGroup(std::move(command));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
             co_return *error;
@@ -560,9 +559,8 @@ namespace javelin::app
             history.beforeDocumentJson = javelin::jmap::api::serializeAddressBookDocument(*found);
             history.afterDocumentJson = history.beforeDocumentJson;
         }
-        auto preparedResult =
-            m_undoManager.prepareNormal(i18n("Change Address Books"), undo::HistoryDomain::Contacts,
-                                        history, std::nullopt);
+        auto preparedResult = m_undoManager.prepareNormal(
+            i18n("Change Address Books"), undo::HistoryDomain::Contacts, history, std::nullopt);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
             co_return javelin::jmap::operationError(*error);
         auto prepared = std::get<std::optional<undo::HistoryEntry>>(std::move(preparedResult));
@@ -604,8 +602,7 @@ namespace javelin::app
                 if (mapping == summary.createdIds.end())
                     co_return javelin::jmap::OperationError{
                         .code = javelin::jmap::OperationErrorCode::ProtocolViolation,
-                        .message =
-                            i18n("The address-book response omitted its created id."),
+                        .message = i18n("The address-book response omitted its created id."),
                     };
                 committedHistory.currentAddressBookId = mapping->serverId;
             }
@@ -820,8 +817,7 @@ namespace javelin::app
             if (!item.has_value())
                 co_return javelin::jmap::OperationError{
                     .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
-                    .message =
-                        i18n("The copied contact cannot be represented in history."),
+                    .message = i18n("The copied contact cannot be represented in history."),
                 };
             creationItems.emplace(creationId, history.items.size());
             history.items.push_back(std::move(*item));
@@ -868,8 +864,7 @@ namespace javelin::app
             if (summary.createdIds.size() != creationItems.size())
                 co_return javelin::jmap::OperationError{
                     .code = javelin::jmap::OperationErrorCode::ProtocolViolation,
-                    .message =
-                        i18n("The contact copy response omitted a created identity."),
+                    .message = i18n("The contact copy response omitted a created identity."),
                 };
             auto committed = m_undoManager.commitNormal(std::move(*prepared));
             if (const auto* databaseError =

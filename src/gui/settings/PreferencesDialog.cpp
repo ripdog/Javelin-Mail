@@ -177,8 +177,7 @@ namespace javelin::gui::settings
         formLayout->addRow(i18n("Mail Server"), m_sessionUrlLabel);
         detailsLayout->addLayout(formLayout);
         auto* managedDetails =
-            new QLabel(i18n("Sign-in and server details are managed automatically."),
-                       detailsPanel);
+            new QLabel(i18n("Sign-in and server details are managed automatically."), detailsPanel);
         managedDetails->setWordWrap(true);
         managedDetails->setForegroundRole(QPalette::PlaceholderText);
         detailsLayout->addWidget(managedDetails);
@@ -190,8 +189,7 @@ namespace javelin::gui::settings
         splitter->addWidget(detailsPanel);
         splitter->setStretchFactor(1, 1);
         accountsPageLayout->addWidget(splitter, 1);
-        addPage(accountsPage, i18n("Accounts"), QStringLiteral("user-identity"), QString{},
-                false);
+        addPage(accountsPage, i18n("Accounts"), QStringLiteral("user-identity"), QString{}, false);
 
         auto* mailboxSyncPage = new QWidget(this);
         auto* mailboxSyncLayout = new QVBoxLayout(mailboxSyncPage);
@@ -219,14 +217,12 @@ namespace javelin::gui::settings
         m_mailboxSyncList->setModel(m_mailboxSyncModel);
         auto* mailboxLists = new QGridLayout();
         auto* syncListLayout = new QVBoxLayout();
-        syncListLayout->addWidget(
-            new QLabel(i18n("Keep complete offline copy"), mailboxSyncPage));
+        syncListLayout->addWidget(new QLabel(i18n("Keep complete offline copy"), mailboxSyncPage));
         m_mailboxSyncList->setSizePolicy(QSizePolicy{QSizePolicy::Ignored, QSizePolicy::Expanding});
         syncListLayout->addWidget(m_mailboxSyncList, 1);
         mailboxLists->addLayout(syncListLayout, 0, 0);
         auto* notificationListLayout = new QVBoxLayout();
-        notificationListLayout->addWidget(
-            new QLabel(i18n("Show notifications"), mailboxSyncPage));
+        notificationListLayout->addWidget(new QLabel(i18n("Show notifications"), mailboxSyncPage));
         m_mailboxNotificationList = new javelin::gui::mailboxes::MailboxTreeView(mailboxSyncPage);
         m_mailboxNotificationModel = new javelin::gui::mailboxes::MailboxTreeModel(
             m_accountReader, m_mailboxReader,
@@ -261,8 +257,8 @@ namespace javelin::gui::settings
             new QPushButton(i18nc("@action:button", "Remove"), remoteContentPage);
         remoteContentButtons->addWidget(m_removeRemoteContentButton);
         remoteContentLayout->addLayout(remoteContentButtons);
-        addPage(remoteContentPage, i18n("Remote Content"),
-                QStringLiteral("network-wireless-on"), QString{}, false);
+        addPage(remoteContentPage, i18n("Remote Content"), QStringLiteral("network-wireless-on"),
+                QString{}, false);
 
         auto* appearancePage = new QWidget(this);
         auto* appearanceLayout = new QFormLayout(appearancePage);
@@ -280,8 +276,8 @@ namespace javelin::gui::settings
             m_messageColorMode->findData(static_cast<int>(m_messageAppearanceSettings.colorMode));
         m_messageColorMode->setCurrentIndex(messageColorModeIndex);
         appearanceLayout->addRow(i18n("HTML message colours"), m_messageColorMode);
-        addPage(appearancePage, i18n("Appearance"),
-                QStringLiteral("preferences-desktop-theme"), QString{}, false);
+        addPage(appearancePage, i18n("Appearance"), QStringLiteral("preferences-desktop-theme"),
+                QString{}, false);
 
         auto* translationPage = new QWidget(this);
         auto* translationLayout = new QVBoxLayout(translationPage);
@@ -372,13 +368,11 @@ namespace javelin::gui::settings
         {
             m_localTranslationSource->addItem(language, language);
         }
-        localRouteLayout->addWidget(
-            new QLabel(i18nc("@label translation source language", "From"),
-                       m_localTranslationControls));
+        localRouteLayout->addWidget(new QLabel(i18nc("@label translation source language", "From"),
+                                               m_localTranslationControls));
         localRouteLayout->addWidget(m_localTranslationSource, 1);
-        localRouteLayout->addWidget(
-            new QLabel(i18nc("@label translation target language", "to"),
-                       m_localTranslationControls));
+        localRouteLayout->addWidget(new QLabel(i18nc("@label translation target language", "to"),
+                                               m_localTranslationControls));
         localRouteLayout->addWidget(m_localTranslationTarget, 1);
         m_downloadLocalModelsButton =
             new QPushButton(i18n("Download models"), m_localTranslationControls);
@@ -412,13 +406,13 @@ namespace javelin::gui::settings
         translationButtons->addWidget(m_removeAutoTranslateButton);
         translationControlsLayout->addLayout(translationButtons);
         translationLayout->addWidget(m_translationControls, 1);
-        addPage(translationPage, i18n("Translation"),
-                QStringLiteral("preferences-desktop-locale"), QString{}, false);
+        addPage(translationPage, i18n("Translation"), QStringLiteral("preferences-desktop-locale"),
+                QString{}, false);
 
         auto* attachmentsPage = new QWidget(this);
         auto* attachmentsLayout = new QVBoxLayout(attachmentsPage);
-        m_askAttachmentDirectoryRadio = new QRadioButton(
-            i18n("Always ask where to save attachments"), attachmentsPage);
+        m_askAttachmentDirectoryRadio =
+            new QRadioButton(i18n("Always ask where to save attachments"), attachmentsPage);
         m_saveAttachmentDirectoryRadio =
             new QRadioButton(i18n("Always save attachments to:"), attachmentsPage);
         attachmentsLayout->addWidget(m_askAttachmentDirectoryRadio);
@@ -434,8 +428,8 @@ namespace javelin::gui::settings
         m_askAttachmentDirectoryRadio->setChecked(m_attachmentSaveSettings.alwaysAsk);
         m_saveAttachmentDirectoryRadio->setChecked(!m_attachmentSaveSettings.alwaysAsk);
         m_attachmentDirectoryEdit->setText(m_attachmentSaveSettings.directory);
-        addPage(attachmentsPage, i18n("Attachments"), QStringLiteral("mail-attachment"),
-                QString{}, false);
+        addPage(attachmentsPage, i18n("Attachments"), QStringLiteral("mail-attachment"), QString{},
+                false);
 
         auto* composingPage = new QWidget(this);
         auto* composingLayout = new QFormLayout(composingPage);
@@ -444,8 +438,7 @@ namespace javelin::gui::settings
         m_undoSendDelaySpinBox->setSuffix(i18nc("@item time suffix", " seconds"));
         m_undoSendDelaySpinBox->setValue(m_undoSendDelaySeconds);
         composingLayout->addRow(i18n("Undo send window:"), m_undoSendDelaySpinBox);
-        addPage(composingPage, i18n("Composing"), QStringLiteral("mail-send"), QString{},
-                false);
+        addPage(composingPage, i18n("Composing"), QStringLiteral("mail-send"), QString{}, false);
 
         connect(addButton, &QPushButton::clicked, this, &PreferencesDialog::addAccount);
         connect(m_reauthenticateButton, &QPushButton::clicked, this,
@@ -510,12 +503,10 @@ namespace javelin::gui::settings
                 [this](const QString& sourceLanguage, const QString& targetLanguage,
                        const qint64 received, const qint64 total)
                 {
-                    m_localModelStatus->setText(
-                        i18n("Downloading %1 → %2: %3 of %4",
-                             languageDisplayName(sourceLanguage),
-                             languageDisplayName(targetLanguage),
-                             QLocale{}.formattedDataSize(received),
-                             QLocale{}.formattedDataSize(total)));
+                    m_localModelStatus->setText(i18n(
+                        "Downloading %1 → %2: %3 of %4", languageDisplayName(sourceLanguage),
+                        languageDisplayName(targetLanguage), QLocale{}.formattedDataSize(received),
+                        QLocale{}.formattedDataSize(total)));
                 });
         connect(&m_translationService,
                 &javelin::gui::translation::TranslationService::installedLocalModelsChanged, this,
@@ -665,9 +656,9 @@ namespace javelin::gui::settings
             QMessageBox::Warning, i18n("Remove account"),
             i18n("Applying this change will permanently wipe all of this account's cached mail, "
                  "drafts, state, and pending actions."),
-                            QMessageBox::Cancel, this};
-        auto* removeButton = warning.addButton(i18n("Remove Account"),
-                                                QMessageBox::DestructiveRole);
+            QMessageBox::Cancel, this};
+        auto* removeButton =
+            warning.addButton(i18n("Remove Account"), QMessageBox::DestructiveRole);
         auto* confirmation =
             new QCheckBox(i18n("I understand that all cached data will be wiped."), &warning);
         confirmation->setChecked(false);
@@ -825,8 +816,7 @@ namespace javelin::gui::settings
             if (const auto error = m_accountCommandPort.removeConfiguredAccount(
                     account.loginEmail, account.sessionUrl, account.cachedAccountIds))
             {
-                QMessageBox::critical(this, i18n("Could not remove account cache"),
-                                      error->message);
+                QMessageBox::critical(this, i18n("Could not remove account cache"), error->message);
             }
         }
         m_baseRevision = m_settings.snapshot().revision;
@@ -934,18 +924,18 @@ namespace javelin::gui::settings
 
         for (const auto& sender : m_remoteContentSenders)
         {
-            auto* item = new QListWidgetItem(
-                i18nc("@item remote-content permission", "Sender: %1", sender),
-                m_remoteContentList);
+            auto* item =
+                new QListWidgetItem(i18nc("@item remote-content permission", "Sender: %1", sender),
+                                    m_remoteContentList);
             item->setData(remoteContentKindRole, static_cast<int>(RemoteContentPermitKind::Sender));
             item->setData(remoteContentValueRole, sender);
         }
 
         for (const auto& domain : m_remoteContentDomains)
         {
-            auto* item = new QListWidgetItem(
-                i18nc("@item remote-content permission", "Domain: %1", domain),
-                m_remoteContentList);
+            auto* item =
+                new QListWidgetItem(i18nc("@item remote-content permission", "Domain: %1", domain),
+                                    m_remoteContentList);
             item->setData(remoteContentKindRole, static_cast<int>(RemoteContentPermitKind::Domain));
             item->setData(remoteContentValueRole, domain);
         }
@@ -980,18 +970,18 @@ namespace javelin::gui::settings
 
         for (const auto& sender : m_autoTranslateSenders)
         {
-            auto* item = new QListWidgetItem(
-                i18nc("@item automatic translation rule", "Sender: %1", sender),
-                m_autoTranslateList);
+            auto* item =
+                new QListWidgetItem(i18nc("@item automatic translation rule", "Sender: %1", sender),
+                                    m_autoTranslateList);
             item->setData(autoTranslateKindRole, static_cast<int>(AutoTranslateEntryKind::Sender));
             item->setData(autoTranslateValueRole, sender);
         }
 
         for (const auto& domain : m_autoTranslateDomains)
         {
-            auto* item = new QListWidgetItem(
-                i18nc("@item automatic translation rule", "Domain: %1", domain),
-                m_autoTranslateList);
+            auto* item =
+                new QListWidgetItem(i18nc("@item automatic translation rule", "Domain: %1", domain),
+                                    m_autoTranslateList);
             item->setData(autoTranslateKindRole, static_cast<int>(AutoTranslateEntryKind::Domain));
             item->setData(autoTranslateValueRole, domain);
         }
@@ -1072,10 +1062,10 @@ namespace javelin::gui::settings
         }
         else
         {
-            m_localModelStatus->setText(
-                i18np("%1 model direction installed, using %2.",
-                      "%1 model directions installed, using %2.",
-                      m_installedLocalModels->count(), QLocale{}.formattedDataSize(totalSize)));
+            m_localModelStatus->setText(i18np("%1 model direction installed, using %2.",
+                                              "%1 model directions installed, using %2.",
+                                              m_installedLocalModels->count(),
+                                              QLocale{}.formattedDataSize(totalSize)));
         }
     }
 
@@ -1122,9 +1112,8 @@ namespace javelin::gui::settings
 
     void PreferencesDialog::selectAttachmentDirectory()
     {
-        const auto directory =
-            QFileDialog::getExistingDirectory(this, i18n("Select Attachment Directory"),
-                                              m_attachmentSaveSettings.directory);
+        const auto directory = QFileDialog::getExistingDirectory(
+            this, i18n("Select Attachment Directory"), m_attachmentSaveSettings.directory);
         if (directory.isEmpty())
         {
             return;

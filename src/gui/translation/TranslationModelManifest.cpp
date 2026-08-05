@@ -223,8 +223,8 @@ namespace javelin::gui::translation
             const auto licenses = object.value(QStringLiteral("licenseFiles"));
             if (!licenses.isArray())
             {
-                error = manifestError(
-                    i18n("A translation model direction has no license metadata."));
+                error =
+                    manifestError(i18n("A translation model direction has no license metadata."));
                 return nullptr;
             }
             for (const auto& license : licenses.toArray())

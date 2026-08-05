@@ -47,8 +47,7 @@ namespace javelin::gui::messages
         }
         else if (state.collection == MessageCollectionKind::LocalSearch)
         {
-            m_emptyState.setText(
-                i18n("No indexed messages on this device matched your search."));
+            m_emptyState.setText(i18n("No indexed messages on this device matched your search."));
             m_emptyState.setStyleSheet(QString{});
         }
         else if (state.collection == MessageCollectionKind::OnlineSearch)
@@ -95,8 +94,7 @@ namespace javelin::gui::messages
             m_metaLabel.setText(
                 header.search
                     ? i18np("%1 Loaded Match", "%1 Loaded Matches", header.itemCount)
-                    : i18np("%1 Loaded Conversation", "%1 Loaded Conversations",
-                            header.itemCount));
+                    : i18np("%1 Loaded Conversation", "%1 Loaded Conversations", header.itemCount));
             m_pageLabel.clear();
             m_firstPageButton.setEnabled(header.offset > 0);
             m_previousPageButton.setEnabled(header.offset > 0);
@@ -110,11 +108,9 @@ namespace javelin::gui::messages
         }
 
         m_metaLabel.setText(
-            header.indexedSearch
-                ? i18np("%1 Indexed Match", "%1 Indexed Matches", *header.total)
-            : header.search
-                ? i18np("%1 Match", "%1 Matches", *header.total)
-                : i18np("%1 Conversation", "%1 Conversations", *header.total));
+            header.indexedSearch ? i18np("%1 Indexed Match", "%1 Indexed Matches", *header.total)
+            : header.search      ? i18np("%1 Match", "%1 Matches", *header.total)
+                                 : i18np("%1 Conversation", "%1 Conversations", *header.total));
         const auto metrics = pageMetrics(header.position, header.itemCount, *header.total);
         m_pageLabel.setText(*header.total == 0 ? QStringLiteral("0-0")
                                                : QStringLiteral("%1-%2")

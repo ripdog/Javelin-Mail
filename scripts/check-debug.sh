@@ -53,12 +53,12 @@ while (($# > 0)); do
     esac
 done
 
-if "$full" && ((${#targets[@]} > 0) || [[ -n "$test_regex" ]]); then
+if [[ "$full" == true ]] && { ((${#targets[@]} > 0)) || [[ -n "$test_regex" ]]; }; then
     echo "--full cannot be combined with --target or --tests" >&2
     exit 2
 fi
 
-if ! "$full" && ((${#targets[@]} == 0)); then
+if [[ "$full" != true ]] && ((${#targets[@]} == 0)); then
     echo "Specify at least one --target, or use --full for final verification" >&2
     usage >&2
     exit 2
@@ -87,7 +87,7 @@ flock 9
 
 cd "$repository_root"
 
-if "$full"; then
+if [[ "$full" == true ]]; then
     cmake --workflow --preset debug-check
     exit 0
 fi

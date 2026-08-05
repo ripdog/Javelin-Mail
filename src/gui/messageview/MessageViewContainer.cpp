@@ -508,8 +508,7 @@ namespace javelin::gui::messageview
         auto* autoSenderAction = translateMenu->addAction(i18n("Auto-translate sender"));
         autoSenderAction->setCheckable(true);
         autoSenderAction->setData(QStringLiteral("sender"));
-        auto* autoDomainAction =
-            translateMenu->addAction(i18n("Auto-translate sender domain"));
+        auto* autoDomainAction = translateMenu->addAction(i18n("Auto-translate sender domain"));
         autoDomainAction->setCheckable(true);
         autoDomainAction->setData(QStringLiteral("domain"));
         connect(autoSenderAction, &QAction::toggled, this,
@@ -1000,9 +999,8 @@ namespace javelin::gui::messageview
             m_remoteContentStatusLabel->clear();
         }
         m_permitSenderRemoteContentButton->setToolTip(
-            currentSenderAddress().isEmpty()
-                ? i18n("No sender address is available")
-                : i18n("Always load remote content from this sender"));
+            currentSenderAddress().isEmpty() ? i18n("No sender address is available")
+                                             : i18n("Always load remote content from this sender"));
         m_permitDomainRemoteContentButton->setToolTip(
             currentSenderDomain().isEmpty()
                 ? i18n("No sender domain is available")
@@ -1035,9 +1033,9 @@ namespace javelin::gui::messageview
         m_translateButton->setEnabled(!m_translationInProgress);
         m_translateButton->setText(m_messageTranslated ? i18n("Show original")
                                                        : i18nc("@action:button", "Translate"));
-        m_translateButton->setToolTip(
-            m_messageTranslated ? i18n("Restore the original message text")
-                                : i18n("Translate this message to %1", targetName));
+        m_translateButton->setToolTip(m_messageTranslated
+                                          ? i18n("Restore the original message text")
+                                          : i18n("Translate this message to %1", targetName));
 
         if (m_translationInProgress)
         {
@@ -1055,9 +1053,9 @@ namespace javelin::gui::messageview
 
         if (m_messageTranslated)
         {
-            m_languageStatusLabel->setText(
-                m_translationWasAutomatic ? i18n("Auto-translated to %1.", targetName)
-                                          : i18n("Message translated to %1.", targetName));
+            m_languageStatusLabel->setText(m_translationWasAutomatic
+                                               ? i18n("Auto-translated to %1.", targetName)
+                                               : i18n("Message translated to %1.", targetName));
             return;
         }
 
@@ -1285,8 +1283,7 @@ namespace javelin::gui::messageview
                     if (chunks.empty())
                     {
                         m_translationInProgress = false;
-                        m_translationError =
-                            i18n("Translation failed: no message text was found.");
+                        m_translationError = i18n("Translation failed: no message text was found.");
                         updateLanguageBanner();
                         return;
                     }
@@ -1411,8 +1408,8 @@ namespace javelin::gui::messageview
         {
             m_detailLabel->setVisible(true);
             m_metadataWidget->setVisible(false);
-            m_titleLabel->setText(i18np("%1 message selected", "%1 messages selected",
-                                        m_multipleMessages.size()));
+            m_titleLabel->setText(
+                i18np("%1 message selected", "%1 messages selected", m_multipleMessages.size()));
             m_detailLabel->clear();
             m_bodyControlsWidget->setVisible(false);
             setActiveView(ActiveView::Multiple);
@@ -1427,8 +1424,7 @@ namespace javelin::gui::messageview
             m_detailLabel->setText(
                 i18n("Select a mailbox in the left pane to populate the message list."));
             m_placeholderTitleLabel->setText(i18n("Choose a mailbox"));
-            m_placeholderDetailLabel->setText(
-                i18n("Choose a mailbox to see its messages here."));
+            m_placeholderDetailLabel->setText(i18n("Choose a mailbox to see its messages here."));
             setActiveView(ActiveView::Placeholder);
             return;
         }
@@ -1438,8 +1434,7 @@ namespace javelin::gui::messageview
             m_detailLabel->setVisible(true);
             m_metadataWidget->setVisible(false);
             m_titleLabel->setText(i18n("Choose a message"));
-            m_detailLabel->setText(
-                i18n("Select a message in the center pane to open it here."));
+            m_detailLabel->setText(i18n("Select a message in the center pane to open it here."));
             m_placeholderTitleLabel->setText(i18n("Choose a message"));
             m_placeholderDetailLabel->setText(i18n("Select a message to read it here."));
             setActiveView(ActiveView::Placeholder);
@@ -1485,13 +1480,11 @@ namespace javelin::gui::messageview
         m_detailLabel->clear();
         m_detailLabel->setVisible(false);
         m_metadataWidget->setVisible(true);
-        m_fromLabel->setText(
-            i18nc("@label email sender", "From: %1", contactAwareSenderLabel()));
-        m_toLabel->setText(i18nc("@label email recipients", "To: %1",
-                                 addressListLabel(m_snapshot->email.to)));
-        m_receivedLabel->setText(
-            i18nc("@label email received date", "Received: %1",
-                  formatReceivedDateTime(m_snapshot->email.receivedAt)));
+        m_fromLabel->setText(i18nc("@label email sender", "From: %1", contactAwareSenderLabel()));
+        m_toLabel->setText(
+            i18nc("@label email recipients", "To: %1", addressListLabel(m_snapshot->email.to)));
+        m_receivedLabel->setText(i18nc("@label email received date", "Received: %1",
+                                       formatReceivedDateTime(m_snapshot->email.receivedAt)));
 
         if (reloadBody && m_snapshot->plainTextBody.has_value())
         {

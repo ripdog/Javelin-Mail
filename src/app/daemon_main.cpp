@@ -55,12 +55,12 @@ int main(int argc, char* argv[])
     parser.setApplicationDescription(i18n("Javelin Mail background daemon"));
     parser.addHelpOption();
     parser.addVersionOption();
-    const QCommandLineOption runtimeOption{
-        QStringLiteral("runtime-directory"), i18n("Private runtime directory."),
-        i18nc("@info:shell command-line value", "directory")};
-    const QCommandLineOption socketOption{
-        QStringLiteral("socket"), i18n("Daemon socket path inside the runtime directory."),
-        i18nc("@info:shell command-line value", "path")};
+    const QCommandLineOption runtimeOption{QStringLiteral("runtime-directory"),
+                                           i18n("Private runtime directory."),
+                                           i18nc("@info:shell command-line value", "directory")};
+    const QCommandLineOption socketOption{QStringLiteral("socket"),
+                                          i18n("Daemon socket path inside the runtime directory."),
+                                          i18nc("@info:shell command-line value", "path")};
     parser.addOption(runtimeOption);
     parser.addOption(socketOption);
     parser.process(application);

@@ -141,8 +141,8 @@ namespace javelin::app
 
         const auto timeout =
             std::clamp<std::int64_t>(delay.count() * 1000, 1, std::numeric_limits<int>::max());
-        Q_EMIT undoableSendScheduled(sendId, i18n("Message scheduled"),
-                                     sendLabel(snapshot.subject), static_cast<int>(timeout));
+        Q_EMIT undoableSendScheduled(sendId, i18n("Message scheduled"), sendLabel(snapshot.subject),
+                                     static_cast<int>(timeout));
         scheduleNext();
         co_return javelin::jmap::submission::SendSummary{
             .composeSessionId = prepared.draft.composeSessionId,
@@ -160,8 +160,7 @@ namespace javelin::app
         if (m_undoManager.state().executing)
             return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::Conflict,
-                .message =
-                    i18n("Unable to cancel a scheduled send while history is changing."),
+                .message = i18n("Unable to cancel a scheduled send while history is changing."),
             };
         const auto found = m_repository.find(sendId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&found))
@@ -217,9 +216,8 @@ namespace javelin::app
                 co_return historyFailure(
                     error->message, javelin::app::undo::HistoryExecutionOutcome::DefinitiveFailure);
             if (!std::get<bool>(rescheduled))
-                co_return historyFailure(
-                    i18n("The scheduled send can no longer be redone."),
-                    javelin::app::undo::HistoryExecutionOutcome::Conflict);
+                co_return historyFailure(i18n("The scheduled send can no longer be redone."),
+                                         javelin::app::undo::HistoryExecutionOutcome::Conflict);
             Q_EMIT undoableSendScheduled(sendId, i18n("Message scheduled"),
                                          sendLabel(history->subject),
                                          static_cast<int>(history->delaySeconds * 1000));
@@ -316,10 +314,9 @@ namespace javelin::app
                 dispatched = true;
                 const auto explanation = i18n(
                     "Unable to undo sending %1 because it has already been submitted.",
-                    send.subject.has_value()
-                        ? i18nc("@item email subject quoted in a sentence", "“%1”",
-                                QString::fromStdString(*send.subject))
-                        : i18n("this message"));
+                    send.subject.has_value() ? i18nc("@item email subject quoted in a sentence",
+                                                     "“%1”", QString::fromStdString(*send.subject))
+                                             : i18n("this message"));
                 static_cast<void>(m_undoManager.setEntryStatus(
                     send.historyEntryId, javelin::app::undo::HistoryEntryStatus::Expired,
                     explanation));

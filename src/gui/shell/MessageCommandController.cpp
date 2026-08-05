@@ -149,18 +149,16 @@ namespace javelin::gui::shell
         const bool move = operation == MessageTransferOperation::Move;
         if (!accountId.has_value() || (!sourceMailboxId.has_value() && !searchTab))
         {
-            Q_EMIT statusMessage(move ? i18n("Select a message to move.")
-                                      : i18n("Select a message to copy."),
-                                 3000);
+            Q_EMIT statusMessage(
+                move ? i18n("Select a message to move.") : i18n("Select a message to copy."), 3000);
             return;
         }
 
         auto selection = selectedActionItems();
         if (selection.empty())
         {
-            Q_EMIT statusMessage(move ? i18n("Select a message to move.")
-                                      : i18n("Select a message to copy."),
-                                 3000);
+            Q_EMIT statusMessage(
+                move ? i18n("Select a message to move.") : i18n("Select a message to copy."), 3000);
             return;
         }
 
@@ -352,8 +350,7 @@ namespace javelin::gui::shell
                 if (index.isValid())
                     m_messageView.setCurrentIndex(index);
                 Q_EMIT messageMetadataChanged(QString::fromStdString(accountId));
-                Q_EMIT statusMessage(flagged ? i18n("Removed star.") : i18n("Added star."),
-                                     5000);
+                Q_EMIT statusMessage(flagged ? i18n("Removed star.") : i18n("Added star."), 5000);
                 submitQueuedMutations(accountId,
                                       summary.queuedMutations.front().patch.operationGroupId);
             });
@@ -395,12 +392,11 @@ namespace javelin::gui::shell
                 if (markedCount == 0)
                     return;
                 Q_EMIT messageMetadataChanged(QString::fromStdString(accountId));
-                Q_EMIT statusMessage(
-                    markedCount == 1
-                        ? i18n("Marked unread.")
-                        : i18np("Marked %1 message unread.", "Marked %1 messages unread.",
-                                markedCount),
-                    5000);
+                Q_EMIT statusMessage(markedCount == 1
+                                         ? i18n("Marked unread.")
+                                         : i18np("Marked %1 message unread.",
+                                                 "Marked %1 messages unread.", markedCount),
+                                     5000);
                 submitQueuedMutations(accountId,
                                       summary.queuedMutations.front().patch.operationGroupId);
             });
@@ -434,10 +430,10 @@ namespace javelin::gui::shell
                     std::get<javelin::app::QueuedMailboxSelectionMutation>(result);
                 if (summary.queuedEmailCount == 0)
                 {
-                    Q_EMIT statusMessage(
-                        searchArchive ? i18n("The selected messages are not in Inbox.")
-                                      : i18n("The selected messages are already archived."),
-                        5000);
+                    Q_EMIT statusMessage(searchArchive
+                                             ? i18n("The selected messages are not in Inbox.")
+                                             : i18n("The selected messages are already archived."),
+                                         5000);
                     return;
                 }
 
@@ -451,12 +447,12 @@ namespace javelin::gui::shell
                 }
                 else
                 {
-                    Q_EMIT statusMessage(
-                        summary.queuedEmailCount == 1
-                            ? i18n("Queued archive.")
-                            : i18np("Queued archive for %1 message.",
-                                    "Queued archive for %1 messages.", summary.queuedEmailCount),
-                        5000);
+                    Q_EMIT statusMessage(summary.queuedEmailCount == 1
+                                             ? i18n("Queued archive.")
+                                             : i18np("Queued archive for %1 message.",
+                                                     "Queued archive for %1 messages.",
+                                                     summary.queuedEmailCount),
+                                         5000);
                 }
                 submitQueuedMutations(accountId,
                                       summary.queuedMutations.front().patch.operationGroupId);
@@ -473,8 +469,7 @@ namespace javelin::gui::shell
             return;
         }
         queueTransfer(std::move(accountId), std::move(sourceMailboxId), trashMailbox->id,
-                      std::move(selection), MessageTransferOperation::Move,
-                      i18n("Queued delete."));
+                      std::move(selection), MessageTransferOperation::Move, i18n("Queued delete."));
     }
 
     void MessageCommandController::queueDestroy(std::string accountId,
@@ -502,12 +497,12 @@ namespace javelin::gui::shell
                 if (selectedCount == 0 || summary.queuedMutations.empty())
                     return;
                 Q_EMIT mailboxMembershipChanged(QString::fromStdString(accountId));
-                Q_EMIT statusMessage(
-                    selectedCount == 1
-                        ? i18n("Queued permanent deletion.")
-                        : i18np("Queued permanent deletion for %1 message.",
-                                "Queued permanent deletion for %1 messages.", selectedCount),
-                    5000);
+                Q_EMIT statusMessage(selectedCount == 1
+                                         ? i18n("Queued permanent deletion.")
+                                         : i18np("Queued permanent deletion for %1 message.",
+                                                 "Queued permanent deletion for %1 messages.",
+                                                 selectedCount),
+                                     5000);
                 submitQueuedMutations(accountId,
                                       summary.queuedMutations.front().patch.operationGroupId);
             });
@@ -548,8 +543,8 @@ namespace javelin::gui::shell
                 : i18np("Permanently delete %1 selected message? This cannot be undone.",
                         "Permanently delete %1 selected messages? This cannot be undone.",
                         selectionItemCount);
-        return QMessageBox::warning(m_dialogParent.data(), i18n("Delete Permanently"),
-                                    prompt, QMessageBox::Yes | QMessageBox::Cancel,
+        return QMessageBox::warning(m_dialogParent.data(), i18n("Delete Permanently"), prompt,
+                                    QMessageBox::Yes | QMessageBox::Cancel,
                                     QMessageBox::Cancel) == QMessageBox::Yes;
     }
 

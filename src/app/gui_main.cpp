@@ -14,6 +14,7 @@
 
 #include <KAboutData>
 #include <KAboutLicense>
+#include <KLocalizedString>
 
 #include <QApplication>
 #include <QCommandLineOption>
@@ -23,7 +24,6 @@
 #include <QEvent>
 #include <QIcon>
 #include <QLabel>
-#include <QLocale>
 #include <QLockFile>
 #include <QMainWindow>
 #include <QMessageBox>
@@ -34,7 +34,6 @@
 #include <QThread>
 #include <QTimer>
 #include <QToolButton>
-#include <QTranslator>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -158,6 +157,7 @@ int main(int argc, char* argv[])
     javelin::app::registerInlineMessageUrlScheme();
 
     ProfilingApplication application{argc, argv};
+    KLocalizedString::setApplicationDomain(QByteArrayLiteral("javelinmail"));
     javelin::app::LogStore::install();
     application.startProfiling();
     QCoreApplication::setOrganizationName(QStringLiteral("Javelin Mail"));
@@ -165,8 +165,8 @@ int main(int argc, char* argv[])
     QCoreApplication::setApplicationName(QStringLiteral("Javelin Mail"));
     QCoreApplication::setApplicationVersion(QStringLiteral(JAVELIN_APP_VERSION));
 
-    KAboutData aboutData(QStringLiteral("javelinmail"), QStringLiteral("Javelin Mail"),
-                         QStringLiteral(JAVELIN_APP_VERSION), QStringLiteral("A JMAP email client"),
+    KAboutData aboutData(QStringLiteral("javelinmail"), i18n("Javelin Mail"),
+                         QStringLiteral(JAVELIN_APP_VERSION), i18n("A JMAP email client"),
                          KAboutLicense::GPL_V3);
     aboutData.setOrganizationDomain("javelin.app");
     KAboutData::setApplicationData(aboutData);
@@ -187,25 +187,14 @@ int main(int argc, char* argv[])
         resourceTimer.start();
     }
 
-    QTranslator translator;
-    for (const QString& locale : QLocale::system().uiLanguages())
-    {
-        const QString baseName = QStringLiteral("Javelin-Mail_") + QLocale(locale).name();
-        if (translator.load(QStringLiteral(":/i18n/") + baseName))
-        {
-            application.installTranslator(&translator);
-            break;
-        }
-    }
-
     QCommandLineParser parser;
     parser.addHelpOption();
     parser.addVersionOption();
     const QCommandLineOption runtimeOption{QStringLiteral("runtime-directory"),
-                                           QStringLiteral("Private runtime directory."),
-                                           QStringLiteral("directory")};
-    const QCommandLineOption socketOption{
-        QStringLiteral("socket"), QStringLiteral("Daemon socket path."), QStringLiteral("path")};
+                                           i18n("Private runtime directory."),
+                                           i18nc("@info:shell command-line value", "directory")};
+    const QCommandLineOption socketOption{QStringLiteral("socket"), i18n("Daemon socket path."),
+                                          i18nc("@info:shell command-line value", "path")};
     parser.addOption(runtimeOption);
     parser.addOption(socketOption);
     parser.process(application);
@@ -325,16 +314,15 @@ int main(int argc, char* argv[])
          .startDaemonIfMissing = false}};
 
     QMainWindow recoveryWindow;
-    recoveryWindow.setWindowTitle(QStringLiteral("Welcome to Javelin Mail"));
+    recoveryWindow.setWindowTitle(i18n("Welcome to Javelin Mail"));
     recoveryWindow.setWindowIcon(application.windowIcon());
     auto* recoveryCentral = new QWidget(&recoveryWindow);
     auto* recoveryLayout = new QVBoxLayout(recoveryCentral);
     auto* recoveryStatus = new QLabel(recoveryCentral);
     recoveryStatus->setWordWrap(true);
-    auto* enableAndStartDaemon =
-        new QPushButton(QStringLiteral("Enable background sync"), recoveryCentral);
-    auto* startDaemon = new QPushButton(QStringLiteral("Start Javelin now"), recoveryCentral);
-    auto* retry = new QPushButton(QStringLiteral("Retry daemon connection"), recoveryCentral);
+    auto* enableAndStartDaemon = new QPushButton(i18n("Enable background sync"), recoveryCentral);
+    auto* startDaemon = new QPushButton(i18n("Start Javelin now"), recoveryCentral);
+    auto* retry = new QPushButton(i18n("Retry daemon connection"), recoveryCentral);
     recoveryLayout->addWidget(recoveryStatus);
     recoveryLayout->addWidget(enableAndStartDaemon);
     recoveryLayout->addWidget(startDaemon);
@@ -352,11 +340,9 @@ int main(int argc, char* argv[])
     {
         recoveryStatus->setText(
             offerDaemonStart
-                ? QStringLiteral(
-                      "Javelin’s background sync service isn’t running yet. Start it once, or "
-                      "enable it so mail stays up to date whenever you sign in.")
-                : QStringLiteral(
-                      "Javelin couldn’t open its background sync service. Please try again."));
+                ? i18n("Javelin’s background sync service isn’t running yet. Start it once, or "
+                       "enable it so mail stays up to date whenever you sign in.")
+                : i18n("Javelin couldn’t open its background sync service. Please try again."));
         enableAndStartDaemon->setVisible(offerDaemonStart && session.canUseSystemdUserService());
         startDaemon->setVisible(offerDaemonStart);
         enableAndStartDaemon->setEnabled(offerDaemonStart);
@@ -392,7 +378,7 @@ int main(int argc, char* argv[])
         auto* taskButton = new QToolButton(mainWindow);
         taskButton->setAutoRaise(true);
         taskButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        taskButton->setToolTip(QStringLiteral("Open Task Center"));
+        taskButton->setToolTip(i18n("Open Task Center"));
         mainWindow->statusBar()->addPermanentWidget(taskButton);
         const auto updateTaskButton = [&, taskButton]
         {
@@ -547,7 +533,7 @@ int main(int argc, char* argv[])
         enableAndStartDaemon->setEnabled(false);
         startDaemon->setEnabled(false);
         retry->setEnabled(false);
-        recoveryStatus->setText(QStringLiteral("Starting Javelin…"));
+        recoveryStatus->setText(i18n("Starting Javelin…"));
         recoveryWindow.show();
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         if (const auto error = session.startDaemon(mode))

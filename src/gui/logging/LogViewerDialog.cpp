@@ -58,8 +58,8 @@ namespace javelin::gui::logging
         m_output->setLineWrapMode(QPlainTextEdit::NoWrap);
         layout->addWidget(m_output, 1);
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
-        auto* clear = buttons->addButton(i18nc("@action:button", "Clear"),
-                                         QDialogButtonBox::ResetRole);
+        auto* clear =
+            buttons->addButton(i18nc("@action:button", "Clear"), QDialogButtonBox::ResetRole);
         connect(clear, &QPushButton::clicked, &javelin::app::LogStore::instance(),
                 &javelin::app::LogStore::clear);
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);

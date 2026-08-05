@@ -272,8 +272,7 @@ namespace javelin::gui::contacts
             m_preference->setRange(0, 100);
             m_preference->setSpecialValueText(QStringLiteral("—"));
             m_preference->setValue(static_cast<int>(m_original.preference.value_or(0)));
-            m_preference->setToolTip(
-                i18n("Preference rank; 1 is preferred and — is unspecified"));
+            m_preference->setToolTip(i18n("Preference rank; 1 is preferred and — is unspecified"));
             m_remove = new QToolButton(this);
             m_remove->setIcon(QIcon::fromTheme(QStringLiteral("list-remove")));
             m_remove->setToolTip(i18n("Remove field"));
@@ -510,9 +509,9 @@ namespace javelin::gui::contacts
                         [this]
                         {
                             bool accepted = false;
-                            const QString principal = QInputDialog::getText(
-                                this, i18n("Principal"), i18n("Principal ID"), QLineEdit::Normal,
-                                QString{}, &accepted);
+                            const QString principal =
+                                QInputDialog::getText(this, i18n("Principal"), i18n("Principal ID"),
+                                                      QLineEdit::Normal, QString{}, &accepted);
                             if (accepted && !principal.trimmed().isEmpty())
                             {
                                 addRow(principal.trimmed(), {});
@@ -1028,10 +1027,8 @@ namespace javelin::gui::contacts
         auto* contactForm = new QFormLayout();
         contactForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
         m_kindEdit = new QComboBox(formWidget);
-        m_kindEdit->addItem(i18nc("@item contact kind", "Person"),
-                            QStringLiteral("individual"));
-        m_kindEdit->addItem(i18nc("@item contact kind", "Organization"),
-                            QStringLiteral("org"));
+        m_kindEdit->addItem(i18nc("@item contact kind", "Person"), QStringLiteral("individual"));
+        m_kindEdit->addItem(i18nc("@item contact kind", "Organization"), QStringLiteral("org"));
         m_kindEdit->addItem(i18nc("@item contact kind", "Group"), QStringLiteral("group"));
         m_nameEdit = new QLineEdit(formWidget);
         m_nameEdit->setObjectName(QStringLiteral("contactsNameEdit"));
@@ -1172,8 +1169,8 @@ namespace javelin::gui::contacts
         if (!accountId.has_value())
         {
             m_addressBooks.clear();
-            mergeComboEntries(*m_addressBookCombo,
-                              {{.label = i18n("All address books"), .id = {}}}, selected);
+            mergeComboEntries(*m_addressBookCombo, {{.label = i18n("All address books"), .id = {}}},
+                              selected);
             reloadContacts();
             return;
         }
@@ -1604,8 +1601,8 @@ namespace javelin::gui::contacts
             starred->setEnabled(!m_busy && canStarSelectedContacts());
             connect(starred, &QAction::triggered, this,
                     &ContactsManagerWidget::toggleContactStarred);
-            auto* addToGroup = menu->addMenu(QIcon::fromTheme(QStringLiteral("list-add")),
-                                             i18n("Add to Group"));
+            auto* addToGroup =
+                menu->addMenu(QIcon::fromTheme(QStringLiteral("list-add")), i18n("Add to Group"));
             populateAddToGroupMenu(*addToGroup);
             auto* removeFromGroup = menu->addMenu(QIcon::fromTheme(QStringLiteral("list-remove")),
                                                   i18n("Remove from Group"));
@@ -1663,8 +1660,8 @@ namespace javelin::gui::contacts
             contact->isImportant ? i18n("Remove from Starred") : i18n("Add to Starred"));
         starred->setEnabled(!m_busy && canEditContact());
         connect(starred, &QAction::triggered, this, &ContactsManagerWidget::toggleContactStarred);
-        auto* addToGroup = menu->addMenu(QIcon::fromTheme(QStringLiteral("list-add")),
-                                         i18n("Add to Group"));
+        auto* addToGroup =
+            menu->addMenu(QIcon::fromTheme(QStringLiteral("list-add")), i18n("Add to Group"));
         populateAddToGroupMenu(*addToGroup);
         auto* removeFromGroup = menu->addMenu(QIcon::fromTheme(QStringLiteral("list-remove")),
                                               i18n("Remove from Group"));
@@ -1674,8 +1671,8 @@ namespace javelin::gui::contacts
                                      i18n("Edit Contact"));
         edit->setEnabled(!m_busy && canEditContact());
         connect(edit, &QAction::triggered, this, &ContactsManagerWidget::beginEditContact);
-        auto* copy = menu->addAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
-                                     i18n("Copy Contact…"));
+        auto* copy =
+            menu->addAction(QIcon::fromTheme(QStringLiteral("edit-copy")), i18n("Copy Contact…"));
         connect(copy, &QAction::triggered, this, &ContactsManagerWidget::copyContact);
         auto* exportAction = menu->addAction(QIcon::fromTheme(QStringLiteral("document-export")),
                                              i18n("Export vCard…"));
@@ -1707,8 +1704,8 @@ namespace javelin::gui::contacts
 
         auto* menu = new QMenu{this};
         menu->setAttribute(Qt::WA_DeleteOnClose);
-        auto* remove = menu->addAction(QIcon::fromTheme(QStringLiteral("edit-delete")),
-                                       i18n("Delete Group"));
+        auto* remove =
+            menu->addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Delete Group"));
         remove->setEnabled(!m_busy && groupIsWritable(*group));
         connect(remove, &QAction::triggered, this, &ContactsManagerWidget::deleteContactGroup);
         menu->popup(m_groupList->viewport()->mapToGlobal(position));
@@ -1751,8 +1748,8 @@ namespace javelin::gui::contacts
             unavailable->setEnabled(false);
         }
         menu.addSeparator();
-        auto* create = menu.addAction(QIcon::fromTheme(QStringLiteral("list-add")),
-                                      i18n("New Group…"));
+        auto* create =
+            menu.addAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("New Group…"));
         create->setEnabled(!m_busy && canCreateGroup());
         connect(create, &QAction::triggered, this, &ContactsManagerWidget::beginCreateGroup);
     }
@@ -1800,10 +1797,10 @@ namespace javelin::gui::contacts
         if (m_busy || !canCreateGroup())
             return;
         bool accepted = false;
-        const QString name = QInputDialog::getText(this, i18n("New Contact Group"),
-                                                   i18n("Group name"), QLineEdit::Normal,
-                                                   QString{}, &accepted)
-                                 .trimmed();
+        const QString name =
+            QInputDialog::getText(this, i18n("New Contact Group"), i18n("Group name"),
+                                  QLineEdit::Normal, QString{}, &accepted)
+                .trimmed();
         if (!accepted || name.isEmpty())
             return;
         std::vector<const javelin::jmap::api::AddressBook*> writableBooks;
@@ -1830,8 +1827,7 @@ namespace javelin::gui::contacts
             for (const auto* book : writableBooks)
                 labels.push_back(QString::fromStdString(book->name));
             const QString selected = QInputDialog::getItem(
-                this, i18n("New Contact Group"), i18n("Address book"), labels, 0, false,
-                &accepted);
+                this, i18n("New Contact Group"), i18n("Address book"), labels, 0, false, &accepted);
             const auto index = labels.indexOf(selected);
             if (!accepted || index < 0)
                 return;
@@ -1886,9 +1882,8 @@ namespace javelin::gui::contacts
             return;
         const auto* group = currentGroup();
         if (group == nullptr || !groupIsWritable(*group) ||
-            QMessageBox::question(
-                this, i18n("Delete Contact Group"),
-                i18n("Delete %1?", QString::fromStdString(group->displayName))) !=
+            QMessageBox::question(this, i18n("Delete Contact Group"),
+                                  i18n("Delete %1?", QString::fromStdString(group->displayName))) !=
                 QMessageBox::Yes)
             return;
 
@@ -2213,8 +2208,8 @@ namespace javelin::gui::contacts
                     m_editorPhotoLabel->setVisible(true);
                 }
                 m_removePhotoButton->setEnabled(true);
-                Q_EMIT statusMessageRequested(
-                    i18n("Photo uploaded; save the contact to apply it."), 5000);
+                Q_EMIT statusMessageRequested(i18n("Photo uploaded; save the contact to apply it."),
+                                              5000);
             });
     }
 
@@ -2355,15 +2350,14 @@ namespace javelin::gui::contacts
         }
         if (destinations.empty())
         {
-            QMessageBox::information(
-                this, i18n("Copy Contact"),
-                i18n("There is no writable destination address book."));
+            QMessageBox::information(this, i18n("Copy Contact"),
+                                     i18n("There is no writable destination address book."));
             return;
         }
         bool accepted = false;
-        const QString selectedAccount = QInputDialog::getItem(this, i18n("Copy Contact"),
-                                                              i18n("Destination account"),
-                                                              accountLabels, 0, false, &accepted);
+        const QString selectedAccount =
+            QInputDialog::getItem(this, i18n("Copy Contact"), i18n("Destination account"),
+                                  accountLabels, 0, false, &accepted);
         const qsizetype accountIndex = accountLabels.indexOf(selectedAccount);
         if (!accepted || accountIndex < 0)
             return;
@@ -2371,9 +2365,9 @@ namespace javelin::gui::contacts
         QStringList bookLabels;
         for (const auto& book : destination.books)
             bookLabels.push_back(QString::fromStdString(book.name));
-        const QString selectedBook = QInputDialog::getItem(
-            this, i18n("Copy Contact"), i18n("Destination address book"),
-            bookLabels, 0, false, &accepted);
+        const QString selectedBook =
+            QInputDialog::getItem(this, i18n("Copy Contact"), i18n("Destination address book"),
+                                  bookLabels, 0, false, &accepted);
         const qsizetype bookIndex = bookLabels.indexOf(selectedBook);
         if (!accepted || bookIndex < 0)
             return;
@@ -2412,9 +2406,9 @@ namespace javelin::gui::contacts
         }
         QString suggestedName = QString::fromStdString(contact->displayName);
         suggestedName.replace(QLatin1Char('/'), QLatin1Char('-'));
-        const QString path = QFileDialog::getSaveFileName(
-            this, i18n("Export vCard"), suggestedName + QStringLiteral(".vcf"),
-            i18n("vCard files (*.vcf)"));
+        const QString path = QFileDialog::getSaveFileName(this, i18n("Export vCard"),
+                                                          suggestedName + QStringLiteral(".vcf"),
+                                                          i18n("vCard files (*.vcf)"));
         if (path.isEmpty())
             return;
         QSaveFile file{path};
@@ -2461,17 +2455,17 @@ namespace javelin::gui::contacts
             for (const auto* book : writableBooks)
                 labels.push_back(QString::fromStdString(book->name));
             bool accepted = false;
-            const QString selected = QInputDialog::getItem(
-                this, i18n("Import vCard"), i18n("Destination address book"),
-                labels, 0, false, &accepted);
+            const QString selected =
+                QInputDialog::getItem(this, i18n("Import vCard"), i18n("Destination address book"),
+                                      labels, 0, false, &accepted);
             const auto index = labels.indexOf(selected);
             if (!accepted || index < 0)
                 return;
             target = writableBooks[static_cast<std::size_t>(index)];
         }
-        const QString path = QFileDialog::getOpenFileName(
-            this, i18n("Import vCard"), QString{},
-            i18n("vCard files (*.vcf *.vcard);;All files (*)"));
+        const QString path =
+            QFileDialog::getOpenFileName(this, i18n("Import vCard"), QString{},
+                                         i18n("vCard files (*.vcf *.vcard);;All files (*)"));
         if (path.isEmpty())
             return;
         QFile file{path};
@@ -2575,9 +2569,9 @@ namespace javelin::gui::contacts
                 labels.push_back(names.join(QStringLiteral(", ")));
             }
             bool accepted = false;
-            const QString selected = QInputDialog::getItem(
-                this, i18n("Duplicate Contacts"), i18n("Duplicate group"),
-                labels, 0, false, &accepted);
+            const QString selected =
+                QInputDialog::getItem(this, i18n("Duplicate Contacts"), i18n("Duplicate group"),
+                                      labels, 0, false, &accepted);
             const auto index = labels.indexOf(selected);
             if (!accepted || index < 0)
                 return;
@@ -2596,10 +2590,9 @@ namespace javelin::gui::contacts
             }
         }
         bool accepted = false;
-        const QString primaryName =
-            QInputDialog::getItem(this, i18n("Merge Duplicate Contacts"),
-                                  i18n("Keep this contact as the primary"),
-                                  candidateNames, 0, false, &accepted);
+        const QString primaryName = QInputDialog::getItem(this, i18n("Merge Duplicate Contacts"),
+                                                          i18n("Keep this contact as the primary"),
+                                                          candidateNames, 0, false, &accepted);
         const auto primaryIndex = candidateNames.indexOf(primaryName);
         if (!accepted || primaryIndex < 0)
             return;
@@ -2655,24 +2648,23 @@ namespace javelin::gui::contacts
         m_refreshInFlight = true;
         Q_EMIT statusMessageRequested(i18n("Refreshing contacts…"), 5000);
         auto task = m_refreshPort.requestContacts(m_ownerAccountId);
-        QCoro::connect(std::move(task), this,
-                       [this](javelin::jmap::contacts::ContactRefreshResult result)
-                       {
-                           m_refreshInFlight = false;
-                           if (const auto* error =
-                                   std::get_if<javelin::jmap::OperationError>(&result))
-                           {
-                               Q_EMIT statusMessageRequested(error->message, 10000);
-                               return;
-                           }
-                           reloadAccounts();
-                           const auto& summary =
-                               std::get<javelin::jmap::contacts::ContactRefreshSummary>(result);
-                           Q_EMIT statusMessageRequested(
-                               i18n("Cached %1 contacts in %2 address books.", summary.contactCount,
-                                    summary.addressBookCount),
-                               5000);
-                       });
+        QCoro::connect(
+            std::move(task), this,
+            [this](javelin::jmap::contacts::ContactRefreshResult result)
+            {
+                m_refreshInFlight = false;
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    Q_EMIT statusMessageRequested(error->message, 10000);
+                    return;
+                }
+                reloadAccounts();
+                const auto& summary =
+                    std::get<javelin::jmap::contacts::ContactRefreshSummary>(result);
+                Q_EMIT statusMessageRequested(i18n("Cached %1 contacts in %2 address books.",
+                                                   summary.contactCount, summary.addressBookCount),
+                                              5000);
+            });
     }
 
     void ContactsManagerWidget::createAddressBook(std::string accountId)
@@ -2773,9 +2765,8 @@ namespace javelin::gui::contacts
                                                &javelin::jmap::cache::ContactAccount::accountId);
         if (account == m_accounts.end() || account->isReadOnly || !book.myRights.mayShare)
         {
-            QMessageBox::information(
-                this, i18n("Address Book Sharing"),
-                i18n("You do not have permission to change sharing."));
+            QMessageBox::information(this, i18n("Address Book Sharing"),
+                                     i18n("You do not have permission to change sharing."));
             return;
         }
         SharingDialog dialog{book.shareWith, this};
@@ -3145,8 +3136,7 @@ namespace javelin::gui::contacts
         };
         for (const auto& email : editorData->emails)
             addCard(fieldTitle(i18nc("@title contact information card", "Email"), email),
-                    QString::fromStdString(email.value),
-                    QString::fromStdString(email.value),
+                    QString::fromStdString(email.value), QString::fromStdString(email.value),
                     QString::fromStdString(editorData->fullName));
         for (const auto& phone : editorData->phones)
             addCard(fieldTitle(i18nc("@title contact information card", "Phone"), phone),

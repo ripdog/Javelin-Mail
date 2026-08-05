@@ -45,8 +45,8 @@ namespace javelin::gui::shell
             std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&result);
         if (accounts == nullptr || accounts->empty())
         {
-            Q_EMIT statusMessage(
-                i18n("The configured server does not support JMAP Contacts."), 10000);
+            Q_EMIT statusMessage(i18n("The configured server does not support JMAP Contacts."),
+                                 10000);
             return;
         }
 

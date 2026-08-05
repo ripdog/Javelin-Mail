@@ -427,8 +427,8 @@ namespace javelin::gui::shell
                     scopePrompt.setWindowTitle(i18n("Edit recurring event"));
                     scopePrompt.setText(
                         i18n("Do you want to edit only this occurrence or the entire series?"));
-                    auto* occurrenceButton = scopePrompt.addButton(
-                        i18n("This occurrence"), QMessageBox::AcceptRole);
+                    auto* occurrenceButton =
+                        scopePrompt.addButton(i18n("This occurrence"), QMessageBox::AcceptRole);
                     auto* seriesButton =
                         scopePrompt.addButton(i18n("Entire series"), QMessageBox::ActionRole);
                     scopePrompt.addButton(QMessageBox::Cancel);

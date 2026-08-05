@@ -195,10 +195,9 @@ namespace javelin::gui::messageview
 
                 QMenu menu(this);
                 auto* sourceAction = menu.addAction(i18n("View Source"));
-                auto* appearanceAction =
-                    menu.addAction(m_darkModeEnabled && m_darkModeEnabled()
-                                       ? i18n("Use Original Colours")
-                                       : i18n("Use Dark Appearance"));
+                auto* appearanceAction = menu.addAction(m_darkModeEnabled && m_darkModeEnabled()
+                                                            ? i18n("Use Original Colours")
+                                                            : i18n("Use Dark Appearance"));
 
                 if (request->editFlags().testFlag(QWebEngineContextMenuRequest::CanCopy))
                 {

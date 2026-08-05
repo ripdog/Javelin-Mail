@@ -136,10 +136,9 @@ namespace javelin::gui::onboarding
         setWizardStyle(QWizard::ModernStyle);
         setOption(QWizard::NoBackButtonOnStartPage);
         setOption(QWizard::NoBackButtonOnLastPage);
-        setButtonText(QWizard::FinishButton, !m_connectionId.isEmpty()
-                                                 ? i18n("Finish Sign-In")
-                                             : m_firstRun ? i18n("Open Javelin")
-                                                          : i18n("Add Account"));
+        setButtonText(QWizard::FinishButton, !m_connectionId.isEmpty() ? i18n("Finish Sign-In")
+                                             : m_firstRun              ? i18n("Open Javelin")
+                                                                       : i18n("Add Account"));
         resize(700, 560);
         setStyleSheet(QStringLiteral(
             "QWizard { background: palette(window); }"
@@ -449,8 +448,8 @@ namespace javelin::gui::onboarding
                         m_callbackServer->close();
                     if (!error.isEmpty())
                     {
-                        m_authenticationStatus->setText(
-                            i18n("Sign-in was cancelled. You can try again or use manual details."));
+                        m_authenticationStatus->setText(i18n(
+                            "Sign-in was cancelled. You can try again or use manual details."));
                         return;
                     }
                     setBusy(true, i18n("Finishing sign-in…"));
@@ -614,9 +613,8 @@ namespace javelin::gui::onboarding
         update.accounts = javelin::gui::settings::GuiSettings::protocolAccounts(accounts);
         if (const auto error = m_settings.update(std::move(update)))
         {
-            QMessageBox::warning(
-                this, i18n("Couldn’t save the account"),
-                i18n("Javelin couldn’t save your account yet. Please try again."));
+            QMessageBox::warning(this, i18n("Couldn’t save the account"),
+                                 i18n("Javelin couldn’t save your account yet. Please try again."));
             return;
         }
         if (m_oauthAuthentication)

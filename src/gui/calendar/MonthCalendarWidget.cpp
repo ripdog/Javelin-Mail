@@ -413,8 +413,7 @@ namespace javelin::gui::calendar
         auto* deleteCalendar = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-delete")),
                                                i18nc("@action:button", "Delete"), &dialog);
         auto* chooseColor = new QPushButton(i18nc("@action:button", "Choose Color…"), &dialog);
-        auto* resetColor =
-            new QPushButton(i18nc("@action:button", "Use Calendar Color"), &dialog);
+        auto* resetColor = new QPushButton(i18nc("@action:button", "Use Calendar Color"), &dialog);
         deleteCalendar->setEnabled(false);
         chooseColor->setEnabled(false);
         resetColor->setEnabled(false);
@@ -440,9 +439,9 @@ namespace javelin::gui::calendar
                     if (m_calendarAccounts.empty())
                         return;
                     bool accepted = false;
-                    const auto name = QInputDialog::getText(
-                        &dialog, i18n("Create Calendar"), i18n("Name:"), QLineEdit::Normal, {},
-                        &accepted);
+                    const auto name =
+                        QInputDialog::getText(&dialog, i18n("Create Calendar"), i18n("Name:"),
+                                              QLineEdit::Normal, {}, &accepted);
                     if (!accepted)
                         return;
                     if (name.trimmed().isEmpty())
@@ -457,18 +456,17 @@ namespace javelin::gui::calendar
                         QStringList names;
                         for (const auto& account : m_calendarAccounts)
                             names.push_back(account.name);
-                        const auto selected = QInputDialog::getItem(
-                            &dialog, i18n("Create Calendar"), i18n("Account:"), names, 0, false,
-                            &accepted);
+                        const auto selected =
+                            QInputDialog::getItem(&dialog, i18n("Create Calendar"),
+                                                  i18n("Account:"), names, 0, false, &accepted);
                         if (!accepted)
                             return;
                         const auto found = std::ranges::find(names, selected);
                         accountIndex =
                             static_cast<std::size_t>(std::distance(names.begin(), found));
                     }
-                    const auto color =
-                        QColorDialog::getColor(palette().color(QPalette::Highlight), &dialog,
-                                               i18n("Calendar Color"));
+                    const auto color = QColorDialog::getColor(palette().color(QPalette::Highlight),
+                                                              &dialog, i18n("Calendar Color"));
                     if (!color.isValid())
                         return;
                     Q_EMIT calendarCreationRequested(
@@ -546,9 +544,9 @@ namespace javelin::gui::calendar
         }
         if (const auto error = m_settings.updateWorkspace(std::move(workspace)))
         {
-            QMessageBox::warning(this, i18n("Manage Calendars"),
-                                 i18n("The calendar colours could not be saved.\n\n%1",
-                                      error->detail));
+            QMessageBox::warning(
+                this, i18n("Manage Calendars"),
+                i18n("The calendar colours could not be saved.\n\n%1", error->detail));
             return;
         }
         m_customCalendarColors = std::move(pendingColors);

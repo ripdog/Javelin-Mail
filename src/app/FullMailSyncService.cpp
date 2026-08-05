@@ -116,10 +116,9 @@ namespace javelin::app
             baseline.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(mailboxId));
             baseline.bindValue(QStringLiteral(":generation"), static_cast<qulonglong>(generation));
             if (!baseline.exec() || !baseline.next())
-                return FullMailboxPageCommit{
-                    baseline.lastError().text().isEmpty()
-                        ? i18n("Offline mailbox generation disappeared.")
-                        : baseline.lastError().text()};
+                return FullMailboxPageCommit{baseline.lastError().text().isEmpty()
+                                                 ? i18n("Offline mailbox generation disappeared.")
+                                                 : baseline.lastError().text()};
             const auto storedQueryState = baseline.value(0).toString().toStdString();
             baseline.finish();
             if (!storedQueryState.empty() && storedQueryState != queryState)
@@ -455,9 +454,9 @@ namespace javelin::app
                     .accountId = configuration.accountId,
                     .kind = WorkKind::FullMailSync,
                     .priority = WorkPriority::Bulk,
-                    .title = i18n("Download all mail in %1",
-                                  mailboxDisplayName(m_connection, configuration.accountId,
-                                                     mailboxId)),
+                    .title =
+                        i18n("Download all mail in %1",
+                             mailboxDisplayName(m_connection, configuration.accountId, mailboxId)),
                     .checkpointJson = QStringLiteral("{}"),
                 }));
                 if (wasDisabled)

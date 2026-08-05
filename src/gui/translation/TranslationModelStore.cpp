@@ -190,22 +190,19 @@ namespace javelin::gui::translation
             if (canonical.isEmpty() ||
                 !canonical.startsWith(root.canonicalPath() + QLatin1Char('/')))
             {
-                return modelError(
-                    TranslationErrorCode::ModelVerificationFailed,
-                    i18n("Refusing to remove a model outside the model store."));
+                return modelError(TranslationErrorCode::ModelVerificationFailed,
+                                  i18n("Refusing to remove a model outside the model store."));
             }
             if (!validateInstalledMetadata(*direction, canonical, nullptr))
             {
-                return modelError(
-                    TranslationErrorCode::ModelVerificationFailed,
-                    i18n("Refusing to remove an unrecognised model directory."));
+                return modelError(TranslationErrorCode::ModelVerificationFailed,
+                                  i18n("Refusing to remove an unrecognised model directory."));
             }
             QDir directory{canonical};
             if (!directory.removeRecursively())
             {
-                return modelError(
-                    TranslationErrorCode::ModelVerificationFailed,
-                    i18n("Could not remove the installed translation model."));
+                return modelError(TranslationErrorCode::ModelVerificationFailed,
+                                  i18n("Could not remove the installed translation model."));
             }
         }
         Q_EMIT installedModelsChanged();
@@ -233,9 +230,8 @@ namespace javelin::gui::translation
     {
         if (!QDir{}.mkpath(m_rootPath))
         {
-            co_return modelError(
-                TranslationErrorCode::ModelDownloadFailed,
-                i18n("Could not create the translation model directory."));
+            co_return modelError(TranslationErrorCode::ModelDownloadFailed,
+                                 i18n("Could not create the translation model directory."));
         }
         const auto temporaryDirectory = QDir{m_rootPath}.filePath(
             QStringLiteral(".install-%1-%2")
@@ -281,9 +277,8 @@ namespace javelin::gui::translation
         const bool hadPrevious = QFileInfo::exists(finalDirectory);
         if (hadPrevious && !QDir{}.rename(finalDirectory, previousDirectory))
         {
-            co_return modelError(
-                TranslationErrorCode::ModelVerificationFailed,
-                i18n("Could not replace the installed translation model."));
+            co_return modelError(TranslationErrorCode::ModelVerificationFailed,
+                                 i18n("Could not replace the installed translation model."));
         }
         if (!QDir{}.rename(temporaryDirectory, finalDirectory))
         {
@@ -291,9 +286,8 @@ namespace javelin::gui::translation
             {
                 QDir{}.rename(previousDirectory, finalDirectory);
             }
-            co_return modelError(
-                TranslationErrorCode::ModelVerificationFailed,
-                i18n("Could not activate the downloaded translation model."));
+            co_return modelError(TranslationErrorCode::ModelVerificationFailed,
+                                 i18n("Could not activate the downloaded translation model."));
         }
         cleanup.dismiss();
         if (hadPrevious)
@@ -349,10 +343,10 @@ namespace javelin::gui::translation
         if (reply->error() != QNetworkReply::NoError || writeFailed)
         {
             compressed.close();
-            co_return modelError(
-                TranslationErrorCode::ModelDownloadFailed,
-                writeFailed ? i18n("The model download exceeded its declared size.")
-                            : reply->errorString());
+            co_return modelError(TranslationErrorCode::ModelDownloadFailed,
+                                 writeFailed
+                                     ? i18n("The model download exceeded its declared size.")
+                                     : reply->errorString());
         }
         if (received != file.compressedSize || !syncFile(compressed))
         {
@@ -393,9 +387,8 @@ namespace javelin::gui::translation
         {
             if (error != nullptr)
             {
-                *error =
-                    modelError(TranslationErrorCode::ModelVerificationFailed,
-                               i18n("The required translation model is not installed."));
+                *error = modelError(TranslationErrorCode::ModelVerificationFailed,
+                                    i18n("The required translation model is not installed."));
             }
             return false;
         }
@@ -531,9 +524,8 @@ namespace javelin::gui::translation
             const auto count = input.read(inputBuffer.data(), inputBuffer.size());
             if (count <= 0)
             {
-                return modelError(
-                    TranslationErrorCode::ModelVerificationFailed,
-                    i18n("Could not read the compressed translation model."));
+                return modelError(TranslationErrorCode::ModelVerificationFailed,
+                                  i18n("Could not read the compressed translation model."));
             }
             ZSTD_inBuffer zstdInput{inputBuffer.constData(), static_cast<size_t>(count), 0};
             while (zstdInput.pos < zstdInput.size)
@@ -543,18 +535,16 @@ namespace javelin::gui::translation
                 remaining = ZSTD_decompressStream(stream, &zstdOutput, &zstdInput);
                 if (ZSTD_isError(remaining) != 0U)
                 {
-                    return modelError(
-                        TranslationErrorCode::ModelVerificationFailed,
-                        i18n("The translation model could not be decompressed."));
+                    return modelError(TranslationErrorCode::ModelVerificationFailed,
+                                      i18n("The translation model could not be decompressed."));
                 }
                 const auto produced = static_cast<qint64>(zstdOutput.pos);
                 written += produced;
                 if (written > maximumSize ||
                     output.write(outputBuffer.constData(), produced) != produced)
                 {
-                    return modelError(
-                        TranslationErrorCode::ModelVerificationFailed,
-                        i18n("The decompressed translation model is invalid."));
+                    return modelError(TranslationErrorCode::ModelVerificationFailed,
+                                      i18n("The decompressed translation model is invalid."));
                 }
                 hash.addData(QByteArrayView{outputBuffer.constData(), produced});
             }
@@ -562,17 +552,15 @@ namespace javelin::gui::translation
         if (remaining != 0 || written != expectedSize ||
             QString::fromLatin1(hash.result().toHex()) != expectedHash || !syncFile(output))
         {
-            return modelError(
-                TranslationErrorCode::ModelVerificationFailed,
-                i18n("The decompressed translation model failed verification."));
+            return modelError(TranslationErrorCode::ModelVerificationFailed,
+                              i18n("The decompressed translation model failed verification."));
         }
         output.close();
         QFile::remove(outputPath);
         if (!QFile::rename(output.fileName(), outputPath))
         {
-            return modelError(
-                TranslationErrorCode::ModelVerificationFailed,
-                i18n("Could not finish installing a translation model file."));
+            return modelError(TranslationErrorCode::ModelVerificationFailed,
+                              i18n("Could not finish installing a translation model file."));
         }
         return std::nullopt;
     }
@@ -588,17 +576,15 @@ namespace javelin::gui::translation
             QSaveFile destination{QDir{directory}.filePath(licenseName)};
             if (!source.open(QIODevice::ReadOnly) || !destination.open(QIODevice::WriteOnly))
             {
-                return modelError(
-                    TranslationErrorCode::ModelVerificationFailed,
-                    i18n("Could not install translation model licence metadata."));
+                return modelError(TranslationErrorCode::ModelVerificationFailed,
+                                  i18n("Could not install translation model licence metadata."));
             }
             const auto contents = source.readAll();
             if (contents.isEmpty() || destination.write(contents) != contents.size() ||
                 !destination.commit())
             {
-                return modelError(
-                    TranslationErrorCode::ModelVerificationFailed,
-                    i18n("Could not install translation model licence metadata."));
+                return modelError(TranslationErrorCode::ModelVerificationFailed,
+                                  i18n("Could not install translation model licence metadata."));
             }
         }
 

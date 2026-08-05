@@ -98,18 +98,16 @@ namespace javelin::app::undo
         }
         if (direction == HistoryExecutionDirection::Recover)
         {
-            co_return failure(
-                HistoryExecutionOutcome::Unknown,
-                i18n("The previous mail history request requires reconciliation."));
+            co_return failure(HistoryExecutionOutcome::Unknown,
+                              i18n("The previous mail history request requires reconciliation."));
         }
 
         const auto& accountId = history->items.front().accountId;
         if (std::ranges::any_of(history->items,
                                 [&](const auto& item) { return item.accountId != accountId; }))
         {
-            co_return failure(
-                HistoryExecutionOutcome::DefinitiveFailure,
-                i18n("A mail history entry spans multiple accounts unexpectedly."));
+            co_return failure(HistoryExecutionOutcome::DefinitiveFailure,
+                              i18n("A mail history entry spans multiple accounts unexpectedly."));
         }
 
         std::vector<std::string> emailIds;
@@ -147,8 +145,8 @@ namespace javelin::app::undo
             {
                 conflicts.push_back({
                     .objectId = QString::fromStdString(item.emailId),
-                    .summary =
-                        i18n("%1 no longer has the expected mailbox or keyword state.", displayName),
+                    .summary = i18n("%1 no longer has the expected mailbox or keyword state.",
+                                    displayName),
                 });
             }
         }
@@ -288,9 +286,9 @@ namespace javelin::app::undo
                 std::get<javelin::jmap::SubmittedEmailMutations>(compensated);
             if (compensationSummary.updatedEmailCount != acceptedEmailIds.size())
             {
-                auto result = failure(
-                    HistoryExecutionOutcome::PartialFailure,
-                    i18n("The server rejected part of the compensation request."));
+                auto result =
+                    failure(HistoryExecutionOutcome::PartialFailure,
+                            i18n("The server rejected part of the compensation request."));
                 result.updatedPayload = *history;
                 co_return result;
             }

@@ -74,8 +74,8 @@ namespace javelin::gui::shell
                             const auto writeResult = watcher->result();
                             if (!writeResult.errorMessage.isEmpty())
                             {
-                                Q_EMIT userInterventionRequired(
-                                    i18n("Failed to save attachment: %1", writeResult.errorMessage));
+                                Q_EMIT userInterventionRequired(i18n(
+                                    "Failed to save attachment: %1", writeResult.errorMessage));
                             }
                             else
                             {
@@ -134,42 +134,40 @@ namespace javelin::gui::shell
 
         Q_EMIT statusMessage(i18n("Downloading attachments..."), 0);
         auto task = downloadAttachments(m_contentPort, accountId, emailId, attachments);
-        QCoro::connect(
-            std::move(task), this,
-            [this, targetDirectory](SaveAllDownloadResult result)
-            {
-                if (!result.errorMessage.isEmpty())
-                {
-                    Q_EMIT userInterventionRequired(result.errorMessage);
-                    return;
-                }
+        QCoro::connect(std::move(task), this,
+                       [this, targetDirectory](SaveAllDownloadResult result)
+                       {
+                           if (!result.errorMessage.isEmpty())
+                           {
+                               Q_EMIT userInterventionRequired(result.errorMessage);
+                               return;
+                           }
 
-                Q_EMIT statusMessage(i18n("Saving attachments..."), 0);
-                auto* watcher = new QFutureWatcher<BatchWriteResult>(this);
-                connect(
-                    watcher, &QFutureWatcher<BatchWriteResult>::finished, this,
-                    [this, watcher]
-                    {
-                        const auto writeResult = watcher->result();
-                        if (!writeResult.errorMessage.isEmpty())
-                        {
-                            Q_EMIT userInterventionRequired(
-                                i18n("Failed to save attachments to %1: %2", writeResult.failedPath,
-                                     writeResult.errorMessage));
-                        }
-                        else
-                        {
-                            Q_EMIT statusMessage(
-                                i18np("Saved %1 attachment.", "Saved %1 attachments.",
-                                      writeResult.savedCount),
-                                5000);
-                        }
-                        watcher->deleteLater();
-                    });
-                watcher->setFuture(QtConcurrent::run(
-                    [targetDirectory, files = std::move(result.files)]
-                    { return writePayloadBatchToDirectory(targetDirectory, files); }));
-            });
+                           Q_EMIT statusMessage(i18n("Saving attachments..."), 0);
+                           auto* watcher = new QFutureWatcher<BatchWriteResult>(this);
+                           connect(watcher, &QFutureWatcher<BatchWriteResult>::finished, this,
+                                   [this, watcher]
+                                   {
+                                       const auto writeResult = watcher->result();
+                                       if (!writeResult.errorMessage.isEmpty())
+                                       {
+                                           Q_EMIT userInterventionRequired(i18n(
+                                               "Failed to save attachments to %1: %2",
+                                               writeResult.failedPath, writeResult.errorMessage));
+                                       }
+                                       else
+                                       {
+                                           Q_EMIT statusMessage(i18np("Saved %1 attachment.",
+                                                                      "Saved %1 attachments.",
+                                                                      writeResult.savedCount),
+                                                                5000);
+                                       }
+                                       watcher->deleteLater();
+                                   });
+                           watcher->setFuture(QtConcurrent::run(
+                               [targetDirectory, files = std::move(result.files)]
+                               { return writePayloadBatchToDirectory(targetDirectory, files); }));
+                       });
     }
 
     void MessageFileController::openAttachment(std::string accountId, std::string emailId,
@@ -256,8 +254,9 @@ namespace javelin::gui::shell
                             const auto writeResult = watcher->result();
                             if (!writeResult.errorMessage.isEmpty())
                             {
-                                Q_EMIT userInterventionRequired(i18n(
-                                    "Failed to prepare message source: %1", writeResult.errorMessage));
+                                Q_EMIT userInterventionRequired(
+                                    i18n("Failed to prepare message source: %1",
+                                         writeResult.errorMessage));
                                 watcher->deleteLater();
                                 return;
                             }

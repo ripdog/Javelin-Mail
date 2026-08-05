@@ -362,3 +362,13 @@ javelin_enable_static_analysis(javelin_composer_gui_tests)
 javelin_enable_sanitizers(javelin_composer_gui_tests)
 target_compile_options(javelin_composer_gui_tests PRIVATE -fexceptions)
 catch_discover_tests(javelin_composer_gui_tests DISCOVERY_MODE PRE_TEST)
+
+foreach(localized_test_target IN ITEMS
+        javelin_translation_tests
+        javelin_jmap_tests
+        javelin_daemon_tests
+        javelin_contacts_gui_tests
+        javelin_composer_gui_tests)
+    target_sources(${localized_test_target} PRIVATE TestLocalization.cpp)
+    target_link_libraries(${localized_test_target} PRIVATE KF6::I18n)
+endforeach()

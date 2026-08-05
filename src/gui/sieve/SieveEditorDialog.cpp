@@ -152,9 +152,9 @@ namespace javelin::gui::sieve
             return;
         if (m_dirty)
         {
-            const auto answer = QMessageBox::question(
-                this, i18n("Discard Changes?"),
-                i18n("This script has unsaved changes. Discard them?"));
+            const auto answer =
+                QMessageBox::question(this, i18n("Discard Changes?"),
+                                      i18n("This script has unsaved changes. Discard them?"));
             if (answer != QMessageBox::Yes)
             {
                 const QSignalBlocker blocker{m_scriptList};
@@ -208,9 +208,8 @@ namespace javelin::gui::sieve
     void SieveEditorDialog::newScript()
     {
         if (m_dirty &&
-            QMessageBox::question(
-                this, i18n("Discard Changes?"),
-                i18n("The current script has unsaved changes. Discard them?")) !=
+            QMessageBox::question(this, i18n("Discard Changes?"),
+                                  i18n("The current script has unsaved changes. Discard them?")) !=
                 QMessageBox::Yes)
             return;
         bool accepted = false;
@@ -232,11 +231,9 @@ namespace javelin::gui::sieve
         if (m_currentRow < 0)
             return;
         const auto script = m_scripts[static_cast<std::size_t>(m_currentRow)];
-        if (QMessageBox::question(
-                this, i18n("Delete Sieve Script?"),
-                i18n("Delete “%1”? This cannot be undone.",
-                     QString::fromStdString(script.name))) !=
-            QMessageBox::Yes)
+        if (QMessageBox::question(this, i18n("Delete Sieve Script?"),
+                                  i18n("Delete “%1”? This cannot be undone.",
+                                       QString::fromStdString(script.name))) != QMessageBox::Yes)
             return;
         if (script.id.empty())
         {

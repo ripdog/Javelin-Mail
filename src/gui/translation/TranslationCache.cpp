@@ -283,7 +283,8 @@ namespace javelin::gui::translation
     {
         return {
             .code = code,
-            .message = i18n("Could not %1: %2", operation, m_database.lastError().text()),
+            .message =
+                i18n("Could not %1: %2", operation.toString(), m_database.lastError().text()),
         };
     }
 } // namespace javelin::gui::translation

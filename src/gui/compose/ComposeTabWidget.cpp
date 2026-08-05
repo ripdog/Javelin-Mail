@@ -349,8 +349,7 @@ namespace javelin::gui::compose
 
                 if (embeddingAllowed && isImageAttachment(attachment))
                 {
-                    auto* attachRadio =
-                        new QRadioButton(i18nc("@option:radio", "Attach"), this);
+                    auto* attachRadio = new QRadioButton(i18nc("@option:radio", "Attach"), this);
                     auto* embedRadio = new QRadioButton(i18nc("@option:radio", "Embed"), this);
                     attachRadio->setChecked(!attachment.inlineDisposition);
                     embedRadio->setChecked(attachment.inlineDisposition);
@@ -980,8 +979,7 @@ namespace javelin::gui::compose
         else
         {
             Q_EMIT statusMessageRequested(
-                i18n("No sender identities are available for configured accounts."),
-                10000);
+                i18n("No sender identities are available for configured accounts."), 10000);
         }
     }
 
@@ -1151,7 +1149,7 @@ namespace javelin::gui::compose
                     QMessageBox::Warning, i18n("Convert to Plain Text"),
                     i18n("This message contains formatting. How should it be converted to plain "
                          "text?"),
-                                    QMessageBox::NoButton, this};
+                    QMessageBox::NoButton, this};
                 QAbstractButton* loseFormatting = warning.addButton(
                     i18nc("@action:button", "Lose Formatting"), QMessageBox::DestructiveRole);
                 QPushButton* addMarkup = warning.addButton(
@@ -1342,8 +1340,8 @@ namespace javelin::gui::compose
         const auto directory = draftAssetDirectory(m_snapshot.composeSessionId);
         if (!QDir{}.mkpath(directory))
         {
-            Q_EMIT statusMessageRequested(
-                i18n("Could not create storage for the pasted image."), 10000);
+            Q_EMIT statusMessageRequested(i18n("Could not create storage for the pasted image."),
+                                          10000);
             return;
         }
 
@@ -1597,8 +1595,7 @@ namespace javelin::gui::compose
 
         if (m_snapshot.to.empty())
         {
-            Q_EMIT statusMessageRequested(i18n("Add at least one recipient before sending."),
-                                          7000);
+            Q_EMIT statusMessageRequested(i18n("Add at least one recipient before sending."), 7000);
             return;
         }
 
@@ -1621,9 +1618,8 @@ namespace javelin::gui::compose
                 const auto& summary = std::get<javelin::jmap::submission::SendSummary>(result);
                 m_snapshot.draftEmailId = summary.draftEmailId;
                 m_closeWithoutPrompt = true;
-                Q_EMIT statusMessageRequested(summary.scheduled ? i18n("Message scheduled.")
-                                                                : i18n("Message sent."),
-                                              7000);
+                Q_EMIT statusMessageRequested(
+                    summary.scheduled ? i18n("Message scheduled.") : i18n("Message sent."), 7000);
                 Q_EMIT closeRequested();
             });
     }

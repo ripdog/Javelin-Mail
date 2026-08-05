@@ -68,8 +68,7 @@ namespace javelin::gui::shell
         m_tabBar.setVisible(tabs.size() > 1);
 
         const auto* active = activeWorkspaceTab(tabs, activeIndex);
-        m_window.setWindowTitle(active == nullptr ? i18n("Javelin Mail")
-                                                  : titleForTab(*active));
+        m_window.setWindowTitle(active == nullptr ? i18n("Javelin Mail") : titleForTab(*active));
     }
 
     QString TabBarPresenter::mailboxTitle(const MailboxTabState& tab) const
@@ -112,10 +111,9 @@ namespace javelin::gui::shell
         {
             accountName = settings.loginEmail;
         }
-        return accountName.isEmpty()
-                   ? title
-                   : i18nc("@title:window tab title and account name", "%1 - %2", title,
-                           accountName);
+        return accountName.isEmpty() ? title
+                                     : i18nc("@title:window tab title and account name", "%1 - %2",
+                                             title, accountName);
     }
 
     QIcon TabBarPresenter::iconForTab(const TabState& tab) const
