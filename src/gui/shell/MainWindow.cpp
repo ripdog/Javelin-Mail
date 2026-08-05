@@ -1547,7 +1547,7 @@ namespace javelin::gui::shell
 
     void MainWindow::openContacts()
     {
-        m_contactsTabController->open(activeAccountId());
+        m_contactsTabController->open();
     }
 
     void MainWindow::openSieveEditor()
@@ -1753,15 +1753,11 @@ namespace javelin::gui::shell
     void MainWindow::updateToolbarForActiveTab()
     {
         const auto context = toolbarContextForActiveTab();
-        const auto selectedAccount = activeAccountId();
         const auto contactAccounts = m_contactReader.listAccounts();
         const auto* contacts =
             std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&contactAccounts);
-        m_contactsAction->setEnabled(
-            contacts != nullptr &&
-            (!selectedAccount.has_value() ||
-             std::ranges::any_of(*contacts, [&selectedAccount](const auto& account)
-                                 { return account.accountId == *selectedAccount; })));
+        m_contactsAction->setEnabled(contacts != nullptr && !contacts->empty());
+        const auto selectedAccount = activeAccountId();
         const auto calendarAccounts = m_calendarReader.accounts();
         const auto* calendars =
             std::get_if<std::vector<javelin::jmap::cache::CalendarAccount>>(&calendarAccounts);

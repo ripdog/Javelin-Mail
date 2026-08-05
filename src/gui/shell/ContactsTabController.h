@@ -80,7 +80,7 @@ namespace javelin::gui::shell
                               QStackedWidget& contentStack, std::vector<TabState>& tabs,
                               QObject* parent = nullptr);
 
-        void open(std::optional<std::string> preferredAccountId);
+        void open();
         [[nodiscard]] bool restore(const PersistedContactsTab& persisted);
         void invoke(const TabState* tab, ContactsTabCommand command);
         void populateAddToGroupMenu(const TabState* tab, QMenu& menu) const;
@@ -101,8 +101,7 @@ namespace javelin::gui::shell
         void searchMailFromRequested(QString accountId, QString email);
 
       private:
-        [[nodiscard]] javelin::gui::contacts::ContactsManagerWidget*
-        materialize(std::string ownerAccountId, QString title);
+        [[nodiscard]] javelin::gui::contacts::ContactsManagerWidget* materialize();
         [[nodiscard]] javelin::gui::contacts::ContactsManagerWidget*
         widgetForTab(const TabState* tab) const;
 

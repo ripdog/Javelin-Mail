@@ -43,7 +43,7 @@ namespace javelin::gui::contacts
                               javelin::jmap::cache::ContactReader& repository,
                               javelin::app::ContactRefreshPort& refreshPort,
                               javelin::app::ContactCommandPort& commandPort,
-                              std::string ownerAccountId, QWidget* parent = nullptr);
+                              QWidget* parent = nullptr);
 
         [[nodiscard]] bool operationInFlight() const;
         [[nodiscard]] bool hasSelectedContact() const;
@@ -115,6 +115,7 @@ namespace javelin::gui::contacts
         [[nodiscard]] std::optional<std::string> currentAccountId() const;
         [[nodiscard]] std::optional<std::string> currentAddressBookId() const;
         [[nodiscard]] const javelin::jmap::cache::ContactAccount* currentAccount() const;
+        [[nodiscard]] std::optional<std::string> ownerAccountId(std::string_view accountId) const;
         [[nodiscard]] const javelin::jmap::contacts::ContactSummary* currentContact() const;
         [[nodiscard]] std::vector<const javelin::jmap::contacts::ContactSummary*>
         selectedContacts() const;
@@ -129,7 +130,6 @@ namespace javelin::gui::contacts
         javelin::jmap::cache::ContactReader& m_repository;
         javelin::app::ContactRefreshPort& m_refreshPort;
         javelin::app::ContactCommandPort& m_commandPort;
-        std::string m_ownerAccountId;
         std::vector<javelin::jmap::cache::ContactAccount> m_accounts;
         std::vector<javelin::jmap::api::AddressBook> m_addressBooks;
         std::vector<javelin::jmap::contacts::ContactSummary> m_contacts;
@@ -137,6 +137,9 @@ namespace javelin::gui::contacts
         std::unordered_set<std::string> m_hiddenAddressBooks;
         bool m_busy = false;
         bool m_refreshInFlight = false;
+        std::size_t m_pendingRefreshes = 0;
+        std::size_t m_refreshedContacts = 0;
+        std::size_t m_refreshedAddressBooks = 0;
         bool m_creating = false;
         QComboBox* m_accountCombo = nullptr;
         QComboBox* m_addressBookCombo = nullptr;

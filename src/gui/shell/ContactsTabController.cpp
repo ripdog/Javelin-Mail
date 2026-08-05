@@ -29,7 +29,7 @@ namespace javelin::gui::shell
     {
     }
 
-    void ContactsTabController::open(std::optional<std::string> preferredAccountId)
+    void ContactsTabController::open()
     {
         for (std::size_t index = 0; index < m_tabs.size(); ++index)
         {
@@ -50,16 +50,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        auto selected = accounts->begin();
-        if (preferredAccountId.has_value())
-        {
-            const auto match = std::ranges::find(*accounts, *preferredAccountId,
-                                                 &javelin::jmap::cache::ContactAccount::accountId);
-            if (match != accounts->end())
-                selected = match;
-        }
-
-        auto* widget = materialize(selected->ownerAccountId, i18n("Contacts"));
+        auto* widget = materialize();
         if (widget == nullptr)
             return;
         const auto index = static_cast<int>(m_tabs.size() - 1);
@@ -69,9 +60,7 @@ namespace javelin::gui::shell
 
     bool ContactsTabController::restore(const PersistedContactsTab& persisted)
     {
-        auto* widget = materialize(persisted.common.accountId, persisted.common.title.isEmpty()
-                                                                   ? i18n("Contacts")
-                                                                   : persisted.common.title);
+        auto* widget = materialize();
         if (widget == nullptr)
             return false;
         widget->restoreViewState(persisted.view);
@@ -212,18 +201,16 @@ namespace javelin::gui::shell
         }
     }
 
-    javelin::gui::contacts::ContactsManagerWidget*
-    ContactsTabController::materialize(std::string ownerAccountId, QString title)
+    javelin::gui::contacts::ContactsManagerWidget* ContactsTabController::materialize()
     {
-        const auto availableAccounts = m_contactRepository.listAccounts(ownerAccountId);
+        const auto availableAccounts = m_contactRepository.listAccounts();
         const auto* accounts =
             std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&availableAccounts);
         if (accounts == nullptr || accounts->empty())
             return nullptr;
 
         auto* widget = new javelin::gui::contacts::ContactsManagerWidget(
-            m_settings, m_contactRepository, m_refreshPort, m_commandPort, ownerAccountId,
-            &m_contentStack);
+            m_settings, m_contactRepository, m_refreshPort, m_commandPort, &m_contentStack);
         connect(widget, &javelin::gui::contacts::ContactsManagerWidget::statusMessageRequested,
                 this, &ContactsTabController::statusMessage);
         connect(widget, &javelin::gui::contacts::ContactsManagerWidget::userInterventionRequired,
@@ -235,11 +222,9 @@ namespace javelin::gui::shell
         connect(widget, &javelin::gui::contacts::ContactsManagerWidget::toolbarStateChanged, this,
                 [this] { Q_EMIT toolbarStateChanged(); });
         m_contentStack.addWidget(widget);
-        m_tabs.push_back(
-            TabState{.content = ContactsTabState{.accountId = std::move(ownerAccountId),
-                                                 .title = std::move(title),
-                                                 .widget = widget,
-                                                 .selection = {}}});
+        m_tabs.push_back(TabState{
+            .content = ContactsTabState{
+                .accountId = {}, .title = i18n("Contacts"), .widget = widget, .selection = {}}});
         return widget;
     }
 
