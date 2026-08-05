@@ -33,6 +33,7 @@
 
 #include <QDebug>
 #include <QNetworkAccessManager>
+#include <QStandardPaths>
 #include <QWebEngineProfile>
 
 #include <algorithm>
@@ -46,6 +47,14 @@ namespace javelin::app
     {
         [[nodiscard]] std::string languageModelPath()
         {
+            const auto installedPath =
+                QStandardPaths::locate(QStandardPaths::GenericDataLocation,
+                                       QStringLiteral("javelinmail/models/fasttext/lid.176.ftz"),
+                                       QStandardPaths::LocateFile);
+            if (!installedPath.isEmpty())
+            {
+                return installedPath.toStdString();
+            }
 #ifdef JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH
             return JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH;
 #else

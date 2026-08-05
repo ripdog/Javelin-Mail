@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QHash>
 #include <QList>
+#include <QStandardPaths>
 #include <QtConcurrent>
 
 #include <translator/parser.h>
@@ -46,8 +47,21 @@ namespace javelin::gui::translation
 
         [[nodiscard]] QString prefixPath(const TranslationModelDirection& direction)
         {
+            auto directoryPath = QStandardPaths::locate(QStandardPaths::GenericDataLocation,
+                                                        QStringLiteral("javelinmail/models/ssplit"),
+                                                        QStandardPaths::LocateDirectory);
 #ifdef JAVELIN_SSPLIT_PREFIX_DIR
-            QDir directory{QStringLiteral(JAVELIN_SSPLIT_PREFIX_DIR)};
+            if (directoryPath.isEmpty())
+            {
+                directoryPath = QStringLiteral(JAVELIN_SSPLIT_PREFIX_DIR);
+            }
+#endif
+            if (directoryPath.isEmpty())
+            {
+                return {};
+            }
+
+            QDir directory{directoryPath};
             auto path = directory.filePath(
                 QStringLiteral("nonbreaking_prefix.%1").arg(direction.mozillaSource));
             if (QFileInfo::exists(path))
@@ -59,7 +73,6 @@ namespace javelin::gui::translation
             {
                 return path;
             }
-#endif
             return {};
         }
 
