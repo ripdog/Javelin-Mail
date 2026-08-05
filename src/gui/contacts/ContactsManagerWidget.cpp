@@ -1044,7 +1044,8 @@ namespace javelin::gui::contacts
         contactForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
         m_kindEdit = new QComboBox(formWidget);
         m_kindEdit->addItem(i18nc("@item contact kind", "Person"), QStringLiteral("individual"));
-        m_kindEdit->addItem(i18nc("@item contact kind", "Organization"), QStringLiteral("org"));
+        m_kindEdit->addItem(i18nc("@item contact kind", "Company or Organization"),
+                            QStringLiteral("org"));
         m_kindEdit->addItem(i18nc("@item contact kind", "Group"), QStringLiteral("group"));
         m_nameEdit = new QLineEdit(formWidget);
         m_nameEdit->setObjectName(QStringLiteral("contactsNameEdit"));
@@ -2256,27 +2257,12 @@ namespace javelin::gui::contacts
             }
             bookId = defaultBook->id;
         }
-        bool accepted = false;
-        const QStringList contactTypes{
-            i18nc("@item contact type", "Individual"),
-            i18nc("@item contact type", "Organization"),
-            i18nc("@item contact type", "Group"),
-        };
-        const QString type = QInputDialog::getItem(this, i18n("Contact Type"), i18n("Type"),
-                                                   contactTypes, 0, false, &accepted);
-        const qsizetype typeIndex = contactTypes.indexOf(type);
-        if (!accepted || typeIndex < 0)
-            return;
-        const QString kind = typeIndex == 2   ? QStringLiteral("group")
-                             : typeIndex == 1 ? QStringLiteral("org")
-                                              : QStringLiteral("individual");
         const QString uid = QUuid::createUuid().toString(QUuid::WithoutBraces);
         const QString document =
-            QStringLiteral("{\n  \"uid\": \"%1\",\n  \"kind\": \"%2\",\n  \"addressBookIds\": "
-                           "{\"%3\": true},\n  \"name\": {\"full\": \"\"}%4\n}")
-                .arg(uid, kind, QString::fromStdString(*bookId),
-                     kind == QStringLiteral("group") ? QStringLiteral(",\n  \"members\": {}")
-                                                     : QString{});
+            QStringLiteral("{\n  \"uid\": \"%1\",\n  \"kind\": \"individual\",\n  "
+                           "\"addressBookIds\": {\"%2\": true},\n  \"name\": {\"full\": "
+                           "\"\"}\n}")
+                .arg(uid, QString::fromStdString(*bookId));
         m_creating = true;
         loadEditorDocument(document);
     }
