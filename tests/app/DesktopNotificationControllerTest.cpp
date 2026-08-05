@@ -166,6 +166,7 @@ TEST_CASE("undoable send notification reports its actionable lifetime and timeou
     CHECK(observer->request->timeoutMs == 12'345);
     CHECK(observer->request->actions ==
           QStringList{QStringLiteral("undo-send:send-1"), QStringLiteral("Undo Send")});
+    CHECK(observer->request->hints.value(QStringLiteral("transient")).toBool());
 }
 
 TEST_CASE("undoable send notification does not gate when delivery or actions are unavailable",

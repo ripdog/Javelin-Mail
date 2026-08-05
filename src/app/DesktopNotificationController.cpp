@@ -256,8 +256,11 @@ namespace javelin::app
         closeUndoableSendNotification(sendId);
         const QStringList actions = {undoActionKey(sendId),
                                      i18nc("@action:button desktop notification", "Undo Send")};
-        const auto sent = m_transport->send(QStringLiteral("mail-send"), title, message, actions,
-                                            notificationHints(urgencyNormal), timeoutMs);
+        // Plasma retains non-transient notifications in history after the popup disappears, so
+        // NotificationClosed is not emitted when their display timeout ends.
+        const auto sent =
+            m_transport->send(QStringLiteral("mail-send"), title, message, actions,
+                              notificationHints(urgencyNormal, true, true), timeoutMs);
         if (std::holds_alternative<QString>(sent))
             return false;
         const auto notificationId = std::get<uint>(sent);
@@ -412,14 +415,16 @@ namespace javelin::app
         return connected;
     }
 
-    QVariantMap
-    DesktopNotificationController::notificationHints(const int urgency,
-                                                     const bool activatesApplication) const
+    QVariantMap DesktopNotificationController::notificationHints(const int urgency,
+                                                                 const bool activatesApplication,
+                                                                 const bool transient) const
     {
         QVariantMap hints;
         if (activatesApplication)
             hints.insert(QStringLiteral("desktop-entry"), QString::fromLatin1(desktopEntryName));
         hints.insert(QStringLiteral("urgency"), urgency);
+        if (transient)
+            hints.insert(QStringLiteral("transient"), true);
         hints.insert(QStringLiteral("sender-pid"),
                      static_cast<qlonglong>(QCoreApplication::applicationPid()));
         return hints;
