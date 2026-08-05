@@ -255,6 +255,7 @@ namespace javelin::protocol
         QString oauthScope = {};
         QString revocationEndpoint = {};
         qint64 tokenExpiresAtEpochSeconds = 0;
+        bool reauthenticationRequired = false;
         std::vector<QString> cachedAccountIds;
 
         friend bool operator==(const AccountSettings&, const AccountSettings&) = default;

@@ -45,6 +45,7 @@ namespace javelin::gui::settings
                 .oauthScope = account.oauthScope.simplified(),
                 .revocationEndpoint = account.revocationEndpoint.trimmed(),
                 .tokenExpiresAtEpochSeconds = account.tokenExpiresAtEpochSeconds,
+                .reauthenticationRequired = account.reauthenticationRequired,
                 .cachedAccountIds = stringList(account.cachedAccountIds),
             });
         }
@@ -226,6 +227,7 @@ namespace javelin::gui::settings
                 .oauthScope = account.oauthScope,
                 .revocationEndpoint = account.revocationEndpoint,
                 .tokenExpiresAtEpochSeconds = account.tokenExpiresAtEpochSeconds,
+                .reauthenticationRequired = account.reauthenticationRequired,
                 .cachedAccountIds = {account.cachedAccountIds.begin(),
                                      account.cachedAccountIds.end()},
             });

@@ -670,6 +670,7 @@ namespace javelin::gui::onboarding
                 .oauthScope = m_authentication->scope,
                 .revocationEndpoint = m_authentication->revocationEndpoint,
                 .tokenExpiresAtEpochSeconds = m_authentication->expiresAtEpochSeconds,
+                .reauthenticationRequired = false,
                 .cachedAccountIds = {},
             });
         }
@@ -697,6 +698,7 @@ namespace javelin::gui::onboarding
             account->oauthScope = m_authentication->scope;
             account->revocationEndpoint = m_authentication->revocationEndpoint;
             account->tokenExpiresAtEpochSeconds = m_authentication->expiresAtEpochSeconds;
+            account->reauthenticationRequired = false;
         }
         if (m_oauthAuthentication)
         {

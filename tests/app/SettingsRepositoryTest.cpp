@@ -222,6 +222,7 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
                         .oauthScope = QStringLiteral("mail offline_access"),
                         .revocationEndpoint = QStringLiteral("https://auth.example.test/revoke"),
                         .tokenExpiresAtEpochSeconds = 1'785'784'100,
+                        .reauthenticationRequired = true,
                         .cachedAccountIds = {}}};
     update.syncedMailboxSelections = std::vector<javelin::protocol::MailboxSelectionSettings>{{
         .accountId = QStringLiteral("account-1"),
@@ -262,6 +263,7 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
     CHECK(reloaded->accounts.front().revocationEndpoint ==
           QStringLiteral("https://auth.example.test/revoke"));
     CHECK(reloaded->accounts.front().tokenExpiresAtEpochSeconds == 1'785'784'100);
+    CHECK(reloaded->accounts.front().reauthenticationRequired);
     REQUIRE(reloaded->syncedMailboxSelections.size() == 1);
     CHECK(reloaded->syncedMailboxSelections.front().mailboxIds.empty());
     REQUIRE(reloaded->notificationMailboxSelections.size() == 1);

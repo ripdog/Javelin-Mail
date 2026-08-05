@@ -180,6 +180,18 @@ namespace javelin::jmap::auth
         return !returnedResource.isEmpty() && returnedResource == expectedResource;
     }
 
+    javelin::app::OAuthRefreshFailureKind
+    detail::refreshFailureKind(const QString& oauthErrorCode)
+    {
+        using Kind = javelin::app::OAuthRefreshFailureKind;
+        return oauthErrorCode == QStringLiteral("invalid_grant") ||
+                       oauthErrorCode == QStringLiteral("invalid_client") ||
+                       oauthErrorCode == QStringLiteral("unauthorized_client") ||
+                       oauthErrorCode == QStringLiteral("invalid_scope")
+                   ? Kind::ReauthenticationRequired
+                   : Kind::Transient;
+    }
+
     namespace
     {
         struct HttpResult
@@ -328,6 +340,14 @@ namespace javelin::jmap::auth
         [[nodiscard]] bool isSecureServerUrl(const QUrl& url)
         {
             return detail::isSecureOAuthUrl(url);
+        }
+
+        [[nodiscard]] std::optional<QString> oauthErrorCode(const QByteArray& body)
+        {
+            const auto error = parseJson<detail::OAuthErrorResponse>(body);
+            return error.has_value() && error->error.has_value()
+                       ? std::optional{QString::fromStdString(*error->error)}
+                       : std::nullopt;
         }
 
         [[nodiscard]] QString oauthErrorText(const QByteArray& body)
@@ -482,6 +502,18 @@ namespace javelin::jmap::auth
                 result += QUrl::toPercentEncoding(value);
             }
             return result;
+        }
+
+        [[nodiscard]] javelin::app::OAuthRefreshResult
+        refreshError(QString error, const javelin::app::OAuthRefreshFailureKind kind)
+        {
+            return {.succeeded = false,
+                    .error = std::move(error),
+                    .failureKind = kind,
+                    .accessToken = {},
+                    .refreshToken = {},
+                    .scope = {},
+                    .expiresAtEpochSeconds = 0};
         }
 
         [[nodiscard]] javelin::app::AccountAuthenticationResult authenticationError(QString error)
@@ -821,6 +853,10 @@ namespace javelin::jmap::auth
             co_return authenticationError(detail);
         }
 
+        if (!token->refreshToken.has_value() || token->refreshToken->empty())
+            co_return authenticationError(QStringLiteral(
+                "The mail service did not issue the refresh token required for background mail."));
+
         qCInfo(oauthLog).noquote()
             << "OAuth token response accepted"
             << "accessTokenPresent=" << !token->accessToken.empty() << "refreshTokenPresent="
@@ -905,15 +941,16 @@ namespace javelin::jmap::auth
         };
     }
 
-    QCoro::Task<javelin::app::AccountAuthenticationResult>
+    QCoro::Task<javelin::app::OAuthRefreshResult>
     AccountOnboardingService::refreshOAuth(javelin::app::OAuthRefreshRequest request)
     {
+        using FailureKind = javelin::app::OAuthRefreshFailureKind;
         if (request.tokenEndpoint.isEmpty() || request.clientId.isEmpty() ||
             request.refreshToken.isEmpty() || request.resourceUrl.isEmpty() ||
             !isSecureServerUrl(QUrl{request.tokenEndpoint}) ||
             !isSecureServerUrl(QUrl{request.resourceUrl}))
-            co_return authenticationError(
-                QStringLiteral("OAuth refresh information is incomplete."));
+            co_return refreshError(QStringLiteral("OAuth refresh information is incomplete."),
+                                   FailureKind::ReauthenticationRequired);
         const auto body = formBody({
             {QStringLiteral("grant_type"), QStringLiteral("refresh_token")},
             {QStringLiteral("refresh_token"), request.refreshToken},
@@ -924,29 +961,29 @@ namespace javelin::jmap::auth
             co_await post(m_networkAccessManager, QUrl{request.tokenEndpoint},
                           QByteArrayLiteral("application/x-www-form-urlencoded"), body);
         const auto token = parseJson<detail::TokenResponse>(response.body);
-        if (response.statusCode < 200 || response.statusCode >= 300 || !token.has_value() ||
-            !validBearerTokenResponse(*token))
-            co_return authenticationError(
-                QStringLiteral("The account session could not be renewed."));
+        if (response.statusCode < 200 || response.statusCode >= 300)
+        {
+            const auto code = oauthErrorCode(response.body);
+            co_return refreshError(
+                response.error.isEmpty() ? oauthErrorText(response.body) : response.error,
+                detail::refreshFailureKind(code.value_or(QString{})));
+        }
+        if (!token.has_value() || !validBearerTokenResponse(*token))
+            co_return refreshError(QStringLiteral("The account session response was invalid."),
+                                   FailureKind::Transient);
 
-        co_return javelin::app::AccountAuthenticationResult{
+        co_return javelin::app::OAuthRefreshResult{
             .succeeded = true,
             .error = {},
-            .sessionUrl = request.sessionUrl,
+            .failureKind = FailureKind::None,
             .accessToken = QString::fromStdString(token->accessToken),
             .refreshToken = token->refreshToken.has_value()
                                 ? QString::fromStdString(*token->refreshToken)
                                 : request.refreshToken,
-            .tokenEndpoint = request.tokenEndpoint,
-            .clientId = request.clientId,
-            .issuer = {},
-            .resourceUrl = request.resourceUrl,
             .scope = effectiveScope(*token, request.scope),
-            .revocationEndpoint = {},
             .expiresAtEpochSeconds = token->expiresIn.has_value()
                                          ? QDateTime::currentSecsSinceEpoch() + *token->expiresIn
                                          : 0,
-            .features = {},
         };
     }
 } // namespace javelin::jmap::auth

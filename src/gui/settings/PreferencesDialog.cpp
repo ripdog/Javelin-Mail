@@ -81,16 +81,21 @@ namespace javelin::gui::settings
 
         [[nodiscard]] QString accountListText(const ConnectionSettings& account)
         {
+            QString text;
             if (!account.displayName.isEmpty() && !account.loginEmail.isEmpty() &&
                 account.displayName.compare(account.loginEmail, Qt::CaseInsensitive) != 0)
             {
-                return QStringLiteral("%1 — %2").arg(account.displayName, account.loginEmail);
+                text = QStringLiteral("%1 — %2").arg(account.displayName, account.loginEmail);
             }
-            if (!account.displayName.isEmpty())
+            else if (!account.displayName.isEmpty())
             {
-                return account.displayName;
+                text = account.displayName;
             }
-            return account.loginEmail.isEmpty() ? i18n("New account") : account.loginEmail;
+            else
+            {
+                text = account.loginEmail.isEmpty() ? i18n("New account") : account.loginEmail;
+            }
+            return account.reauthenticationRequired ? i18n("%1 — Sign-in required", text) : text;
         }
 
         [[nodiscard]] javelin::gui::translation::TranslationProvider

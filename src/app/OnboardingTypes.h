@@ -84,6 +84,24 @@ namespace javelin::app
         QString scope = {};
     };
 
+    enum class OAuthRefreshFailureKind : std::uint8_t
+    {
+        None,
+        Transient,
+        ReauthenticationRequired,
+    };
+
+    struct OAuthRefreshResult
+    {
+        bool succeeded = false;
+        QString error;
+        OAuthRefreshFailureKind failureKind = OAuthRefreshFailureKind::None;
+        QString accessToken;
+        QString refreshToken;
+        QString scope;
+        qint64 expiresAtEpochSeconds = 0;
+    };
+
     struct AccountAuthenticationResult
     {
         bool succeeded = false;

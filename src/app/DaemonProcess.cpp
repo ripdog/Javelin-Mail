@@ -811,8 +811,9 @@ namespace javelin::app
         const auto refreshBefore = QDateTime::currentSecsSinceEpoch() + 300;
         for (const auto& account : m_settingsSnapshot.accounts)
         {
-            if (account.refreshToken.isEmpty() || account.tokenEndpoint.isEmpty() ||
-                account.oauthClientId.isEmpty() || account.tokenExpiresAtEpochSeconds == 0 ||
+            if (account.reauthenticationRequired || account.refreshToken.isEmpty() ||
+                account.tokenEndpoint.isEmpty() || account.oauthClientId.isEmpty() ||
+                account.tokenExpiresAtEpochSeconds == 0 ||
                 account.tokenExpiresAtEpochSeconds > refreshBefore)
             {
                 continue;
@@ -831,8 +832,9 @@ namespace javelin::app
 
         const auto account = std::ranges::find(m_settingsSnapshot.accounts, connectionId,
                                                &protocol::AccountSettings::id);
-        if (account == m_settingsSnapshot.accounts.end() || account->refreshToken.isEmpty() ||
-            account->tokenEndpoint.isEmpty() || account->oauthClientId.isEmpty())
+        if (account == m_settingsSnapshot.accounts.end() || account->reauthenticationRequired ||
+            account->refreshToken.isEmpty() || account->tokenEndpoint.isEmpty() ||
+            account->oauthClientId.isEmpty())
         {
             co_return OAuthRefreshOutcome{};
         }
@@ -896,6 +898,7 @@ namespace javelin::app
             found->refreshToken = result.refreshToken;
             found->oauthScope = result.scope;
             found->tokenExpiresAtEpochSeconds = result.expiresAtEpochSeconds;
+            found->reauthenticationRequired = false;
             ++found->revision;
             protocol::SettingsUpdate update;
             update.accounts = std::move(accounts);
@@ -915,6 +918,24 @@ namespace javelin::app
         {
             qWarning().noquote() << QStringLiteral("OAuth credential refresh failed")
                                  << connectionId << result.error;
+            if (result.failureKind == OAuthRefreshFailureKind::ReauthenticationRequired &&
+                isReady() && found != accounts.end())
+            {
+                found->reauthenticationRequired = true;
+                ++found->revision;
+                protocol::SettingsUpdate update;
+                update.accounts = std::move(accounts);
+                const auto updateResult = handleUpdateSettings(
+                    {.baseRevision = m_settingsSnapshot.revision, .update = std::move(update)});
+                if (!std::holds_alternative<protocol::SettingsUpdated>(updateResult))
+                {
+                    const auto& rejected =
+                        std::get<protocol::SettingsUpdateRejected>(updateResult);
+                    qWarning().noquote()
+                        << QStringLiteral("OAuth reauthentication state was not saved")
+                        << connectionId << rejected.error.detail;
+                }
+            }
         }
         else if (found != accounts.end())
         {

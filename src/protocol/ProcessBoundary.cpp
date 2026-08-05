@@ -480,7 +480,7 @@ namespace javelin::protocol
                                     stringSize(account.oauthIssuer) +
                                     stringSize(account.oauthResource) +
                                     stringSize(account.oauthScope) +
-                                    stringSize(account.revocationEndpoint);
+                                    stringSize(account.revocationEndpoint) + 1;
                             for (const auto& accountId : account.cachedAccountIds)
                                 size += stringSize(accountId);
                         }

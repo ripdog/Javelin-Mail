@@ -17,6 +17,8 @@ namespace javelin::jmap::auth
         [[nodiscard]] bool isSecureOAuthUrl(const QUrl& url);
         [[nodiscard]] bool resourceMetadataMatches(const QString& returnedResource,
                                                    const QString& expectedResource);
+        [[nodiscard]] javelin::app::OAuthRefreshFailureKind
+        refreshFailureKind(const QString& oauthErrorCode);
     }
 
     class AccountOnboardingService final
@@ -30,7 +32,7 @@ namespace javelin::jmap::auth
         startOAuth(javelin::app::OAuthStartRequest request);
         [[nodiscard]] QCoro::Task<javelin::app::AccountAuthenticationResult>
         finishOAuth(javelin::app::OAuthFinishRequest request);
-        [[nodiscard]] QCoro::Task<javelin::app::AccountAuthenticationResult>
+        [[nodiscard]] QCoro::Task<javelin::app::OAuthRefreshResult>
         refreshOAuth(javelin::app::OAuthRefreshRequest request);
         [[nodiscard]] QCoro::Task<javelin::app::AccountAuthenticationResult>
         authenticateManually(javelin::app::ManualAuthenticationRequest request);

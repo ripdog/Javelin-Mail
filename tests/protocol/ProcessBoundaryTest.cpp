@@ -277,6 +277,7 @@ namespace
                      .oauthScope = QStringLiteral("mail offline_access"),
                      .revocationEndpoint = QStringLiteral("https://auth.example.com/revoke"),
                      .tokenExpiresAtEpochSeconds = 1'785'784'100,
+                     .reauthenticationRequired = true,
                      .cachedAccountIds = {QStringLiteral("account-1")},
                  }},
                  .syncedMailboxSelections = std::nullopt,
@@ -306,6 +307,7 @@ namespace
         CHECK(account.oauthScope == QStringLiteral("mail offline_access"));
         CHECK(account.revocationEndpoint == QStringLiteral("https://auth.example.com/revoke"));
         CHECK(account.tokenExpiresAtEpochSeconds == 1'785'784'100);
+        CHECK(account.reauthenticationRequired);
         REQUIRE(handler.receivedSettingsUpdate->update.workspace.has_value());
         CHECK(handler.receivedSettingsUpdate->update.workspace->mainWindowState ==
               QByteArrayLiteral("updated-window-state"));

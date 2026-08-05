@@ -23,6 +23,7 @@ namespace javelin::gui::settings
         QString oauthScope = {};
         QString revocationEndpoint = {};
         qint64 tokenExpiresAtEpochSeconds = 0;
+        bool reauthenticationRequired = false;
         QStringList cachedAccountIds;
     };
 } // namespace javelin::gui::settings

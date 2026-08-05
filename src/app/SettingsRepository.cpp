@@ -30,6 +30,7 @@ namespace javelin::app
         constexpr auto accountOauthScopeKey = "oauthScope";
         constexpr auto accountRevocationEndpointKey = "revocationEndpoint";
         constexpr auto accountTokenExpiresAtKey = "tokenExpiresAt";
+        constexpr auto accountReauthenticationRequiredKey = "reauthenticationRequired";
         constexpr auto accountCachedIdsKey = "cachedAccountIds";
         constexpr auto mailboxIdsKey = "mailboxIds";
         constexpr auto syncedMailboxGroup = "mailboxSync";
@@ -536,6 +537,8 @@ namespace javelin::app
                 .revocationEndpoint =
                     settings.value(settingKey(accountRevocationEndpointKey)).toString().trimmed(),
                 .tokenExpiresAtEpochSeconds = tokenExpiresAtEpochSeconds,
+                .reauthenticationRequired =
+                    settings.value(settingKey(accountReauthenticationRequiredKey), false).toBool(),
                 .cachedAccountIds =
                     toVector(settings.value(settingKey(accountCachedIdsKey)).toStringList()),
             });
@@ -621,6 +624,8 @@ namespace javelin::app
             settings.setValue(settingKey(accountRevocationEndpointKey), account.revocationEndpoint);
             settings.setValue(settingKey(accountTokenExpiresAtKey),
                               account.tokenExpiresAtEpochSeconds);
+            settings.setValue(settingKey(accountReauthenticationRequiredKey),
+                              account.reauthenticationRequired);
             settings.setValue(settingKey(accountCachedIdsKey),
                               toStringList(account.cachedAccountIds));
         }

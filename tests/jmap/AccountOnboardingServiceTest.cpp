@@ -57,6 +57,22 @@ TEST_CASE("OAuth refresh refuses an insecure token endpoint", "[jmap][auth][onbo
 
     CHECK_FALSE(result.succeeded);
     CHECK(result.error == QStringLiteral("OAuth refresh information is incomplete."));
+    CHECK(result.failureKind ==
+          javelin::app::OAuthRefreshFailureKind::ReauthenticationRequired);
+}
+
+TEST_CASE("OAuth refresh errors distinguish expired grants from transient failures",
+          "[jmap][auth][onboarding]")
+{
+    using Kind = javelin::app::OAuthRefreshFailureKind;
+    using javelin::jmap::auth::detail::refreshFailureKind;
+
+    CHECK(refreshFailureKind(QStringLiteral("invalid_grant")) ==
+          Kind::ReauthenticationRequired);
+    CHECK(refreshFailureKind(QStringLiteral("invalid_client")) ==
+          Kind::ReauthenticationRequired);
+    CHECK(refreshFailureKind(QStringLiteral("temporarily_unavailable")) == Kind::Transient);
+    CHECK(refreshFailureKind(QString{}) == Kind::Transient);
 }
 
 TEST_CASE("OAuth metadata URLs require secure endpoint syntax", "[jmap][auth][onboarding]")
