@@ -24,6 +24,7 @@ namespace javelin::app
     [[nodiscard]] PreparedContactSetRequest
     prepareDeleteContactGroup(DeleteContactGroupCommand command);
     [[nodiscard]] PreparedContactCopyRequest prepareCopyContact(CopyContactCommand command);
+    [[nodiscard]] PreparedContactSetRequest prepareCrossConnectionCopy(CopyContactCommand command);
     [[nodiscard]] PreparedContactSetRequest prepareImportContacts(ImportContactsCommand command);
     [[nodiscard]] PreparedContactSetRequest prepareMergeContacts(MergeContactsCommand command);
 } // namespace javelin::app

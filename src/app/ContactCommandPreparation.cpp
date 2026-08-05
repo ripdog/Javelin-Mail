@@ -191,6 +191,23 @@ namespace javelin::app
         return request;
     }
 
+    PreparedContactSetRequest prepareCrossConnectionCopy(CopyContactCommand command)
+    {
+        if (command.destinationAccountId.empty() || command.contactDocument.empty() ||
+            command.destinationAddressBookId.empty())
+            return invalidContactCommand(
+                "Cross-connection contact copying requires a contact and destination.");
+        const auto document = javelin::jmap::contacts::copyContactAcrossAccountsDocument(
+            command.contactDocument, command.destinationAddressBookId);
+        if (const auto* message = std::get_if<std::string_view>(&document))
+            return invalidContactCommand(*message);
+        javelin::jmap::api::ContactCardSetRequest request;
+        request.accountId = std::move(command.destinationAccountId);
+        request.create.emplace("copy-contact", javelin::jmap::api::ContactDocument{
+                                                   .json = std::get<std::string>(document)});
+        return request;
+    }
+
     PreparedContactSetRequest prepareImportContacts(ImportContactsCommand command)
     {
         if (command.accountId.empty() || command.addressBookId.empty() || command.contacts.empty())

@@ -293,6 +293,18 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
     ContactCommandService::copyContact(std::string ownerAccountId, CopyContactCommand command)
     {
+        if (!command.destinationOwnerAccountId.empty() &&
+            command.destinationOwnerAccountId != ownerAccountId)
+        {
+            const auto destinationOwnerAccountId = command.destinationOwnerAccountId;
+            auto prepared = prepareCrossConnectionCopy(std::move(command));
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
+                co_return *error;
+            co_return co_await submitContactCards(
+                destinationOwnerAccountId,
+                std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared)),
+                i18n("Copy contact"));
+        }
         auto prepared = prepareCopyContact(std::move(command));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
             co_return *error;

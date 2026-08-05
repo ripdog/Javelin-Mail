@@ -87,9 +87,11 @@ namespace javelin::app
 
     struct CopyContactCommand
     {
+        std::string destinationOwnerAccountId;
         std::string sourceAccountId;
         std::string destinationAccountId;
         std::string contactId;
+        std::string contactDocument;
         std::string destinationAddressBookId;
     };
 

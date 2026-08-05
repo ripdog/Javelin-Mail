@@ -398,6 +398,27 @@ namespace javelin::jmap::contacts
     }
 
     std::variant<std::string, std::string_view>
+    copyContactAcrossAccountsDocument(const std::string_view json, std::string addressBookId)
+    {
+        if (addressBookId.empty())
+            return std::string_view{"Copying a contact requires a destination address book."};
+        std::string buffer{json};
+        glz::generic value;
+        if (glz::read_json(value, buffer) || !value.is_object())
+            return std::string_view{"The copied contact document is not valid JSON."};
+        auto& object = value.get_object();
+        object.erase("id");
+        object.erase("updated");
+        auto& books = value["addressBookIds"];
+        books.data = glz::generic::object_t{};
+        books[std::move(addressBookId)] = true;
+        std::string copied;
+        if (glz::write_json(value, copied))
+            return std::string_view{"Unable to serialize the copied contact."};
+        return prepareContactDocument(copied, true);
+    }
+
+    std::variant<std::string, std::string_view>
     setContactPhoto(const std::string_view json, std::string blobId, std::string mediaType)
     {
         std::string buffer{json};

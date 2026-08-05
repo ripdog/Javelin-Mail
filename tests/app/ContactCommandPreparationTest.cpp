@@ -164,9 +164,11 @@ TEST_CASE("contact group deletion prepares a typed destroy request", "[app][cont
 TEST_CASE("contact copy commands escape protocol documents safely", "[app][contacts]")
 {
     auto result = javelin::app::prepareCopyContact({
+        .destinationOwnerAccountId = "same-connection",
         .sourceAccountId = "source-account",
         .destinationAccountId = "destination-account",
         .contactId = "contact-\"one",
+        .contactDocument = {},
         .destinationAddressBookId = "book\\one",
     });
     REQUIRE(std::holds_alternative<javelin::jmap::api::ContactCardCopyRequest>(result));
@@ -175,6 +177,27 @@ TEST_CASE("contact copy commands escape protocol documents safely", "[app][conta
     const auto& document = request.create.at("copy-contact").json;
     CHECK(document.find(R"(contact-\"one)") != std::string::npos);
     CHECK(document.find(R"(book\\one)") != std::string::npos);
+}
+
+TEST_CASE("cross-connection contact copies create a standalone destination card", "[app][contacts]")
+{
+    auto result = javelin::app::prepareCrossConnectionCopy({
+        .destinationOwnerAccountId = "destination-connection",
+        .sourceAccountId = "source-account",
+        .destinationAccountId = "destination-account",
+        .contactId = "source-id",
+        .contactDocument =
+            R"({"@type":"Card","version":"1.0","id":"source-id","updated":"2026-08-05T00:00:00Z","uid":"uid-1","kind":"individual","addressBookIds":{"source-book":true},"name":{"full":"Alice"}})",
+        .destinationAddressBookId = "destination-book",
+    });
+    const auto* request = std::get_if<javelin::jmap::api::ContactCardSetRequest>(&result);
+    REQUIRE(request != nullptr);
+    const auto& document = request->create.at("copy-contact").json;
+    CHECK(document.find("source-id") == std::string::npos);
+    CHECK(document.find("updated") == std::string::npos);
+    CHECK(document.find("source-book") == std::string::npos);
+    CHECK(document.find(R"("destination-book":true)") != std::string::npos);
+    CHECK(document.find(R"("uid":"uid-1")") != std::string::npos);
 }
 
 TEST_CASE("contact import commands reject duplicate cached UIDs", "[app][contacts]")

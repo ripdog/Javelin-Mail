@@ -625,6 +625,9 @@ namespace javelin::app
         if (!isReady())
             return protocol::SettingsUpdateRejected{.currentRevision = m_settingsSnapshot.revision,
                                                     .error = notReadyError()};
+        const auto previousAccounts = m_settingsSnapshot.accounts;
+        const auto previousSyncedMailboxes = m_settingsSnapshot.syncedMailboxSelections;
+        const auto previousNotificationMailboxes = m_settingsSnapshot.notificationMailboxSelections;
         const auto reply = m_settingsRepository->update(std::move(request));
         if (const auto* updated = std::get_if<protocol::SettingsUpdated>(&reply))
         {
@@ -635,7 +638,10 @@ namespace javelin::app
                     .currentRevision = m_settingsSnapshot.revision, .error = settingsError(*error)};
             }
             m_settingsSnapshot = std::get<protocol::SettingsSnapshot>(loaded);
-            applySettings();
+            if (m_settingsSnapshot.accounts != previousAccounts ||
+                m_settingsSnapshot.syncedMailboxSelections != previousSyncedMailboxes ||
+                m_settingsSnapshot.notificationMailboxSelections != previousNotificationMailboxes)
+                applySettings();
             onBoundaryEvent(*updated);
         }
         return reply;

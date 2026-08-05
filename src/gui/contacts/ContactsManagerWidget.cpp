@@ -2571,9 +2571,11 @@ namespace javelin::gui::contacts
         const auto& book = destination.books[static_cast<std::size_t>(bookIndex)];
 
         javelin::app::CopyContactCommand command{
+            .destinationOwnerAccountId = destination.account.ownerAccountId,
             .sourceAccountId = *sourceAccountId,
             .destinationAccountId = destination.account.accountId,
             .contactId = contact->id,
+            .contactDocument = contact->document,
             .destinationAddressBookId = book.id,
         };
         setBusy(true);

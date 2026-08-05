@@ -344,9 +344,13 @@ namespace javelin::app
             const auto revision = configuration.settings.revision;
             configuredAccountIds.insert(configuration.accountId);
             const auto accountId = configuration.accountId;
+            const auto previous = m_configurations.find(accountId);
+            const bool configurationChanged =
+                previous == m_configurations.end() || previous->second != configuration;
             m_configurations.insert_or_assign(accountId, std::move(configuration));
             m_errorCoordinator.settingsApplied(connectionId, revision);
-            applyAccountConfiguration(accountId);
+            if (configurationChanged)
+                applyAccountConfiguration(accountId);
         }
 
         for (auto coordinatorIt = m_coordinators.begin(); coordinatorIt != m_coordinators.end();)
