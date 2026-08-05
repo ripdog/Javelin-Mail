@@ -151,6 +151,8 @@ function(javelin_fetch_bergamot)
     )
     FetchContent_MakeAvailable(mozilla_translations)
     target_link_libraries(marian LAPACK::LAPACK)
+    target_compile_options(marian PRIVATE
+        $<$<CXX_COMPILER_ID:GNU>:-Wno-error=array-bounds>)
     if(NOT cblas_cblas_WORKS)
         message(FATAL_ERROR "Marian could not link the required CBLAS implementation")
     endif()
