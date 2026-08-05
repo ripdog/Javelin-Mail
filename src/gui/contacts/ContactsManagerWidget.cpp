@@ -1344,16 +1344,28 @@ namespace javelin::gui::contacts
                 });
                 for (const auto& group : m_groups)
                     if (group.accountId == contactsAccount.accountId)
+                    {
+                        QString label = QString::fromStdString(group.displayName);
+                        if (std::ranges::any_of(m_groups,
+                                                [&group](const auto& candidate)
+                                                {
+                                                    return candidate.accountId != group.accountId &&
+                                                           candidate.displayName ==
+                                                               group.displayName;
+                                                }))
+                            label +=
+                                QStringLiteral(" - ") + accountLabel(m_settings, contactsAccount);
                         rows.push_back({
                             .key = QStringLiteral("group:%1:%2")
                                        .arg(QString::fromStdString(group.accountId),
                                             QString::fromStdString(group.id)),
-                            .label = QString::fromStdString(group.displayName),
+                            .label = std::move(label),
                             .mode = GroupFilterMode::Group,
                             .groupId = QString::fromStdString(group.id),
                             .accountId = QString::fromStdString(group.accountId),
                             .addressBookId = {},
                         });
+                    }
             }
             std::vector<QString> keys;
             keys.reserve(rows.size());
