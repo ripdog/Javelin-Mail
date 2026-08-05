@@ -51,6 +51,7 @@ namespace javelin::app
     class UndoCommandPort;
     class UndoCommandService;
     class DeferredSendRepository;
+    class DeferredSendSubmitter;
     class DeferredSendService;
     class AccountCommandPort;
     class AccountCommandService;
@@ -195,6 +196,7 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::cache::QueryService> m_queryService;
         std::unique_ptr<javelin::jmap::cache::SubmissionRepository> m_submissionRepository;
         std::unique_ptr<javelin::jmap::submission::ComposeService> m_jmapComposeService;
+        std::unique_ptr<DeferredSendSubmitter> m_deferredSendSubmitter;
         std::unique_ptr<ComposeService> m_composeService;
         std::unique_ptr<ComposeCommandService> m_composeCommandService;
         std::unique_ptr<DeferredSendService> m_deferredSendService;

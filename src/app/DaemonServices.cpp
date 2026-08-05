@@ -152,6 +152,8 @@ namespace javelin::app
             std::make_unique<javelin::jmap::cache::SubmissionRepository>(m_databaseConnection);
         m_jmapComposeService = std::make_unique<javelin::jmap::submission::ComposeService>(
             m_databaseConnection, *m_transport, *m_methodTransport, *m_jmapCore);
+        m_deferredSendSubmitter =
+            std::make_unique<ComposeDeferredSendSubmitter>(*m_jmapComposeService);
         m_errorCoordinator = std::make_unique<ApplicationErrorCoordinator>();
         m_mailService = std::make_unique<MailApplicationService>(
             m_databaseConnection, *m_jmapCore, *m_methodTransport,
@@ -171,7 +173,7 @@ namespace javelin::app
         m_commandDispatcher = std::make_unique<CommandDispatcher>(*m_accountRefreshCommandService);
         m_calendarCommandService = std::make_unique<CalendarCommandService>(*m_mailService);
         m_deferredSendService = std::make_unique<DeferredSendService>(
-            *m_deferredSendRepository, *m_jmapComposeService, *m_mailService, *m_undoManager);
+            *m_deferredSendRepository, *m_deferredSendSubmitter, *m_mailService, *m_undoManager);
         m_undoManager->setExecutor(QStringLiteral("deferred_send"), m_deferredSendService.get());
         m_composeService = std::make_unique<ComposeService>(
             *m_jmapComposeService, *m_errorCoordinator, *m_workScheduler, *m_mailService,

@@ -277,6 +277,22 @@ namespace javelin::app
         return query.numRowsAffected() == 1;
     }
 
+    std::variant<bool, javelin::jmap::cache::DatabaseError>
+    DeferredSendRepository::releaseForDispatch(const QString& sendId, const QDateTime& releasedAt)
+    {
+        QSqlQuery query{m_connection.database()};
+        query.prepare(
+            QStringLiteral("UPDATE pending_sends SET due_at=CASE WHEN due_at>:released_at "
+                           "THEN :released_at ELSE due_at END,updated_at=CURRENT_TIMESTAMP "
+                           "WHERE send_id=:send_id AND status='scheduled'"));
+        query.bindValue(QStringLiteral(":released_at"),
+                        releasedAt.toUTC().toString(Qt::ISODateWithMs));
+        query.bindValue(QStringLiteral(":send_id"), sendId);
+        if (!query.exec())
+            return queryError(QStringLiteral("Release pending send for dispatch"), query);
+        return query.numRowsAffected() == 1;
+    }
+
     std::optional<javelin::jmap::cache::DatabaseError>
     DeferredSendRepository::markWaiting(const QString& sendId, const DeferredSendStatus status,
                                         QString error)

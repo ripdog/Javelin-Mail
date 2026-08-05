@@ -250,3 +250,55 @@ TEST_CASE("redo reschedules a cancelled send with a fresh deadline",
     CHECK(rescheduled.status == DeferredSendStatus::Scheduled);
     CHECK(rescheduled.dueAt == freshDueAt);
 }
+
+TEST_CASE("release for dispatch advances only scheduled deadlines and survives reopening",
+          "[app][deferred-send][repository]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const auto path = directory.filePath(QStringLiteral("release.sqlite3"));
+    const auto releasedAt = QDateTime::currentDateTimeUtc();
+
+    {
+        auto database = openDatabase(path);
+        HistoryRepository historyRepository{database};
+        DeferredSendRepository repository{database};
+
+        const auto futureHistory = addHistory(historyRepository, QStringLiteral("future"));
+        const auto futureDueAt = releasedAt.addSecs(30);
+        REQUIRE_FALSE(repository.insert(
+            pending(QStringLiteral("future"), futureHistory.entryId, futureDueAt)));
+        CHECK(requireBool(repository.releaseForDispatch(QStringLiteral("future"), releasedAt)));
+        CHECK(requireSend(repository.find(QStringLiteral("future"))).dueAt == releasedAt);
+
+        const auto pastHistory = addHistory(historyRepository, QStringLiteral("past"));
+        const auto pastDueAt = releasedAt.addSecs(-30);
+        REQUIRE_FALSE(
+            repository.insert(pending(QStringLiteral("past"), pastHistory.entryId, pastDueAt)));
+        CHECK(requireBool(repository.releaseForDispatch(QStringLiteral("past"), releasedAt)));
+        CHECK(requireSend(repository.find(QStringLiteral("past"))).dueAt == pastDueAt);
+
+        const auto cancelledHistory = addHistory(historyRepository, QStringLiteral("cancelled"));
+        REQUIRE_FALSE(repository.insert(
+            pending(QStringLiteral("cancelled"), cancelledHistory.entryId, futureDueAt)));
+        REQUIRE(requireBool(repository.cancelBeforeDispatch(QStringLiteral("cancelled"))));
+        CHECK_FALSE(
+            requireBool(repository.releaseForDispatch(QStringLiteral("cancelled"), releasedAt)));
+
+        const auto dispatchingHistory =
+            addHistory(historyRepository, QStringLiteral("dispatching"));
+        REQUIRE_FALSE(repository.insert(
+            pending(QStringLiteral("dispatching"), dispatchingHistory.entryId, futureDueAt)));
+        REQUIRE(
+            requireBool(repository.claimForDispatch(QStringLiteral("dispatching"), releasedAt)));
+        CHECK_FALSE(
+            requireBool(repository.releaseForDispatch(QStringLiteral("dispatching"), releasedAt)));
+    }
+
+    auto database = openDatabase(path);
+    DeferredSendRepository repository{database};
+    CHECK(requireSend(repository.find(QStringLiteral("future"))).dueAt == releasedAt);
+    CHECK(requireSend(repository.find(QStringLiteral("past"))).dueAt == releasedAt.addSecs(-30));
+}

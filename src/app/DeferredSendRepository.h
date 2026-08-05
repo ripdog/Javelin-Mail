@@ -61,6 +61,8 @@ namespace javelin::app
         cancelBeforeDispatch(const QString& sendId);
         [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
         reschedule(const QString& sendId, const QDateTime& dueAt);
+        [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
+        releaseForDispatch(const QString& sendId, const QDateTime& releasedAt);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         markWaiting(const QString& sendId, DeferredSendStatus status, QString error);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
