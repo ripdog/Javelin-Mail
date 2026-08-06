@@ -2,13 +2,13 @@
 
 ## Status
 
-Proposed design. This document defines the user experience, data ownership, asynchronous execution,
-cache accounting, destructive-operation semantics, and an implementation sequence for a Developer
-Options dialog.
+Approved implementation design. The product and architectural decisions in this document are final.
+Implementation began on 7 August 2026 with the typed diagnostics snapshot, serialized daemon scan,
+remote port, Settings menu entry, and Mailbox Caches dialog page.
 
 ## Goals
 
-The dialog should make Javelin's local state inspectable and repairable without requiring direct
+The dialog must make Javelin's local state inspectable and repairable without requiring direct
 SQLite queries or filesystem surgery.
 
 The initial implementation must:
@@ -27,7 +27,7 @@ The initial implementation must:
 
 ## Non-goals
 
-The first version should not provide:
+The first version does not provide:
 
 - a general SQL console;
 - a filesystem browser embedded in the application;
@@ -41,20 +41,19 @@ The first version should not provide:
 
 ## Entry Point and Lifetime
 
-Add **Developer Options…** to the Settings menu. It should be available in normal builds rather than
-behind a command-line switch: these operations are useful for diagnosis and support, and hiding them
-would make recovery harder.
+Add **Developer Options…** to the Settings menu. It is available in every normal build; no command-line
+switch or environment variable is required.
 
-Use a standalone, resizable `QDialog`, not a page in `PreferencesDialog`. Preferences are applied as
-configuration, whereas this dialog performs immediate inspection and maintenance operations. The
-window should remember its size, splitter position, selected page, and table column widths.
+Use a standalone, resizable `KPageDialog`, not a page in `PreferencesDialog`. Preferences are applied
+as configuration, whereas this dialog performs immediate inspection and maintenance operations. The
+window stores its size, splitter position, selected page, and table column widths.
 
-The dialog may remain open while work runs. Closing it must not cancel destructive work after commit
-has started. Read-only scans may be cancelled when the last interested UI closes.
+The dialog remains open while work runs. Closing it cancels read-only scans after returning any
+completed partial results. Closing it does not cancel destructive work after commit has started.
 
 ## Top-level Layout
 
-Use a `KPageDialog` or equivalent sidebar navigation with these pages:
+Use a `KPageDialog` with these pages:
 
 1. **Mailbox Caches**
 2. **Other Caches**
@@ -66,11 +65,11 @@ A persistent footer contains:
 
 - the current operation and progress;
 - a Cancel button for cancellable scans;
-- a link/button to open the existing Task Center when an operation has become daemon-managed work;
+- an **Open Task Center** button when an operation has become daemon-managed work;
 - Close.
 
-Do not use a modal progress dialog. Long scans should leave the rest of the Developer Options dialog
-usable where doing so is safe.
+Do not use a modal progress dialog. Long scans must leave every unaffected part of the Developer
+Options dialog usable.
 
 A representative Mailbox Caches layout is:
 
@@ -123,10 +122,10 @@ Account display name / login address
   …
 ```
 
-The account header should show both the user-recognizable connection/account name and the JMAP
-account ID in its details, but not use the ID as the primary label.
+The account header must show both the user-recognizable connection/account name and the JMAP
+account ID in its details, but must not use the ID as the primary label.
 
-Recommended columns:
+Required columns:
 
 | Column | Meaning |
 | --- | --- |
@@ -146,9 +145,9 @@ provides:
 - **Refresh metadata**;
 - a text filter matching mailbox name, role, account name, and raw IDs.
 
-`Calculate all` should process mailboxes sequentially by default. Parallel directory walks create
-unnecessary random I/O and make the desktop less responsive. A single low-priority I/O worker is
-sufficient initially.
+`Calculate all` processes mailboxes sequentially on one dedicated low-priority serial I/O worker.
+Parallel directory walks are prohibited because they create unnecessary random I/O and make the
+desktop less responsive.
 
 Rows update progressively as each result arrives. The dialog must never wait for the full account
 scan before displaying partial results.
@@ -156,7 +155,7 @@ scan before displaying partial results.
 ## Mailbox detail panel
 
 Use three vertically stacked sections: Identity, Stored State, and Cache Usage. The details are
-read-only. Every ID and path row should have a Copy action in its context menu.
+read-only. Every ID and path row must have a Copy action in its context menu.
 
 ### Identity and server metadata
 
@@ -179,8 +178,8 @@ Display all fields from the cached `mailboxes` row:
 - rights, expanded into individual booleans;
 - raw `rights_json` in an expandable monospace row.
 
-The rights section should expose every value represented by `MailboxRights`, including rights that
-are false. A developer inspecting permissions should not have to infer omitted values.
+The rights section must expose every value represented by `MailboxRights`, including rights that
+are false. A developer inspecting permissions must not have to infer omitted values.
 
 ### Derived synchronization and materialization state
 
@@ -207,11 +206,12 @@ Display related state that is not part of the base mailbox object:
 - latest cache-invalidation generation relevant to the mailbox, if exposed by the consistency
   subsystem.
 
-Values that are not present should render as an em dash, not an empty string or zero.
+Values that are not present render as an em dash, not an empty string or zero.
 
-Add **Copy mailbox report**. It copies a structured plaintext or JSON report for the selected mailbox.
-Raw IDs are included because this is an explicitly developer-facing action. Message subjects,
-addresses, body content, credentials, OAuth tokens, and attachment names are never included.
+Add two actions: **Copy mailbox report** copies structured plaintext, and **Copy raw mailbox JSON**
+copies the typed record as JSON. Raw IDs are included because these are explicitly developer-facing
+actions. Message subjects, addresses, body content, credentials, OAuth tokens, and attachment names
+are never included.
 
 ## Cache usage presentation
 
@@ -234,9 +234,9 @@ indexes, and deleting rows usually converts pages to free pages rather than shri
 file. Pretending that a mailbox owns an exact number of physical SQLite bytes would be incorrect.
 
 The dialog separately shows global SQLite file statistics on the Other Caches page, including actual
-allocated bytes, WAL bytes, page count, free-list pages, and potentially reclaimable bytes.
+allocated bytes, WAL bytes, page count, free-list pages, and estimated reclaimable bytes.
 
-The estimate should be deterministic and useful for comparison. Calculate it from the byte lengths
+The estimate must be deterministic and useful for comparison. Calculate it from the byte lengths
 of mailbox-attributable values plus a documented per-row/per-index overhead model. Keep the formula
 in one cache-accounting component and version it so tests can assert stable results. Do not issue a
 large number of per-message queries; use set-oriented aggregate SQL.
@@ -256,10 +256,10 @@ Display:
 - **Clear body cache…**.
 
 The vault stores content-addressed objects and hard-linked mailbox projections. Therefore mailbox
-logical totals do not add up to the vault's physical total. The UI should explain this in a tooltip
+logical totals do not add up to the vault's physical total. The UI must explain this in a tooltip
 and in the confirmation dialog.
 
-The scan should deduplicate files by `(device, inode)` and use allocated blocks where the platform
+The scan must deduplicate files by `(device, inode)` and use allocated blocks where the platform
 provides them. The database metadata remains useful for ownership and expected-size calculations,
 while filesystem stats verify what is actually present. A mismatch is diagnostic information, not a
 reason to silently substitute one value for the other.
@@ -294,8 +294,8 @@ The action means "discard rebuildable message-list and message-metadata material
 mailbox". It does not delete the mailbox object, account configuration, user settings, or active
 mutations.
 
-The daemon-side repository should perform one explicit mailbox-reset transaction rather than a
-series of ad hoc table deletes. The reset should:
+The daemon-side repository must perform one explicit mailbox-reset transaction rather than a
+series of ad hoc table deletes. The reset must:
 
 - delete mailbox query windows and their items;
 - invalidate or remove cached confirmed membership for the target mailbox;
@@ -309,7 +309,7 @@ series of ad hoc table deletes. The reset should:
 - mark the mailbox for a fresh query when it is next observed.
 
 When the mailbox is currently visible, refresh it after the reset. Otherwise leave it empty and
-refresh on next observation; clearing a cache should not unexpectedly trigger a large network job
+refresh on next observation; clearing a cache must not unexpectedly trigger a large network job
 for an inactive mailbox.
 
 The completion result reports logical bytes/rows discarded and global SQLite free pages gained. It
@@ -317,7 +317,7 @@ must not claim that the database file shrank. Database compaction is a separate 
 
 ## Clear body cache
 
-The action removes raw MIME retention attributable to the selected mailbox. It should:
+The action removes raw MIME retention attributable to the selected mailbox. It must:
 
 - remove mailbox projection links;
 - remove or downgrade vault retention only where the target mailbox is the owning retention reason;
@@ -390,8 +390,8 @@ Initial supported non-mail cache:
 
 Clearing suspends new translation-cache reads/writes, waits for active cache operations, closes the
 owning SQLite connection, replaces or truncates the cache on a worker thread, migrates a clean
-cache, and resumes the service. In-flight translation network/model work may finish, but its result
-must not write through an obsolete cache generation.
+cache, and resumes the service. In-flight translation network/model work is allowed to finish, but
+its result must not write through an obsolete cache generation.
 
 Downloaded local translation models are not cache entries. They are deliberately downloaded user
 data and already have management UI. Show their total size as **Installed translation models** with
@@ -415,13 +415,13 @@ Show global facts:
 
 `Compact database` is a daemon maintenance operation. It uses the existing `CacheAccessBarrier`,
 pauses database participants, checkpoints, runs `VACUUM`, validates the reopened connection, and
-resumes participants. It should be disabled while a mutation is in an ambiguous or non-interruptible
+resumes participants. It is disabled while a mutation is in an ambiguous or non-interruptible
 commit phase. This operation is not run automatically after per-mailbox clearing.
 
-A future **Reset all local cache…** action may atomically switch to a new cache instance using
-`CacheLocationProvider::replaceCacheInstance()`. It is deliberately out of scope for the first
-version because it requires a complete resync, explicit account/session recovery semantics, and
-careful cleanup of the old instance.
+**Reset all local cache…** is a committed Phase 5 feature. It atomically switches to a new cache
+instance using `CacheLocationProvider::replaceCacheInstance()`, performs a complete resync, preserves
+account/session configuration, and removes the old instance only after the replacement is validated.
+It is not part of the first release of this dialog.
 
 ## Mail vault
 
@@ -454,21 +454,20 @@ Search indexes are rebuildable and stored per account. Show each account index a
 - **Rebuild index**.
 
 Clearing must close the account's index connection before removing/replacing the index database.
-Rebuild is daemon-scheduled, preemptible maintenance work and should appear in Task Center.
+Rebuild is daemon-scheduled, preemptible maintenance work and appears in Task Center.
 
 ## Draft assets
 
 `draft-assets` contains staged inline images and attachments associated with compose sessions. It is
-persistent working data, not a general cache. Do not offer **Clear all**.
-
-Offer an optional **Find orphaned draft assets** diagnostic. Only assets that have no live compose
-session and exceed a conservative age threshold may be removed, with a list shown before deletion.
+persistent working data, not a general cache. The Developer Options dialog does not inspect or delete
+draft assets in the initial implementation. Orphan discovery and retention policy require a separate
+design before they are added.
 
 # Diagnostics Page
 
 The Diagnostics page combines safe inspection and narrowly scoped repair actions.
 
-## Recommended first-version functions
+## First-version functions
 
 ### Copy diagnostic report
 
@@ -485,10 +484,11 @@ Produce a structured report containing:
 - failed maintenance/projection counts;
 - the result of the latest integrity checks.
 
-By default, hash or omit account IDs, mailbox IDs, email addresses, paths containing the username,
-and server URLs. Provide an explicit **Include raw identifiers** checkbox because the dialog is often
-used to prepare bug reports, but never include credentials, access/refresh tokens, cookies, message
-content, subjects, contact data, or attachment names.
+By default, replace account IDs, mailbox IDs, and email addresses with stable per-report hashes;
+replace the user's home directory with `~`; and retain only sanitized server origins. Provide an
+explicit **Include raw identifiers** checkbox because the dialog is often used to prepare bug reports.
+Never include credentials, access/refresh tokens, cookies, message content, subjects, contact data,
+or attachment names.
 
 ### Integrity checks
 
@@ -503,8 +503,8 @@ Offer independently runnable checks:
 - search-index readability;
 - translation-cache readability.
 
-Checks should return typed findings with severity, object kind, sanitized summary, and optional raw
-identifier. Do not make repairs automatically. Each repair action must be explicit and described.
+Checks must return typed findings with severity, object kind, sanitized summary, and a raw identifier
+field that is absent when the finding has no associated object. Do not make repairs automatically. Each repair action must be explicit and described.
 
 ### Background work
 
@@ -517,13 +517,13 @@ Show a compact summary with **Open Task Center**. Useful additions are:
 
 Avoid duplicating the full Task Center in this dialog.
 
-## Useful later additions
+## Explicitly deferred extensions
 
-These are valuable extensions but not required for the initial implementation:
+The following functions are outside the initial implementation and require separate approval before
+they are added:
 
 - **Force mailbox refresh** using the normal account-refresh/materialization ports;
 - **Rebuild selected mailbox cache**, combining SQLite clear with an observed foreground refresh;
-- **Copy raw mailbox record** as JSON;
 - account capability and session endpoint viewer;
 - state-token history and last push-change summary;
 - optimistic journal viewer with mutation lifecycle, affected objects, and generation fences;
@@ -592,14 +592,13 @@ The GUI owns:
 - downloaded translation model information and navigation to translation settings;
 - presentation state and aggregation of GUI-owned and daemon-owned results.
 
-Longer term, translation cache access should move behind a serial worker-owned service so normal
-translation lookup, measurement, and clearing share one connection owner and generation. The first
-implementation may instead suspend the GUI cache on its owning thread, perform filesystem/SQLite
-work on a worker, and reopen it on the owning thread.
+Before translation-cache maintenance is exposed, `TranslationCache` must move behind a serial
+worker-owned service. Normal lookup, measurement, and clearing share one connection owner and one
+cache generation. No temporary suspend/close/reopen path is implemented.
 
 ## Service decomposition
 
-Recommended non-GUI classes:
+Required non-GUI classes:
 
 - `DeveloperDiagnosticsService`: orchestrates snapshots and checks;
 - `MailboxCacheAccounting`: set-oriented SQL accounting and retention graph queries;
@@ -609,7 +608,7 @@ Recommended non-GUI classes:
 - `DeveloperOptionsModel`: GUI model combining asynchronous results;
 - `DeveloperOptionsDialog`: widgets only.
 
-Repository/cache code should provide narrow operations used by these services. Do not place SQL or
+Repository/cache code must provide narrow operations used by these services. Do not place SQL or
 filesystem traversal in the dialog.
 
 # Threading and Responsiveness
@@ -627,9 +626,9 @@ All expensive operations run off the GUI thread:
 - search-index enumeration;
 - translation-cache measurement/clearing.
 
-Use a dedicated low-priority serial I/O executor or `QThreadPool` with a maximum thread count of one
-for scans. Database workers open a connection on the worker thread; a `QSqlDatabase` connection is
-never moved across threads.
+Use one private low-priority serial I/O executor containing exactly one worker thread. It is not the
+application's shared thread pool. Database workers open a connection on that worker thread; a
+`QSqlDatabase` connection is never moved across threads.
 
 Write operations use the existing database write scopes and transactions. Opening an additional
 connection does not replace the application's write coordination.
@@ -705,7 +704,8 @@ operations still require care because they are likely to be pasted into public b
 - credentials and message/contact content are never queryable from this UI;
 - no developer operation logs message IDs at routine log levels unless profiling/debug logging is
   explicitly enabled;
-- copied paths may optionally replace the home directory with `~`.
+- copied and exported paths always replace the home directory with `~` unless **Include raw identifiers**
+  is enabled.
 
 # Testing
 
@@ -781,28 +781,47 @@ This phase is useful without any destructive action and validates the accounting
 4. Add vault verification and garbage collection.
 5. Add WAL checkpoint, quick check, and compaction using `CacheAccessBarrier`.
 
-## Phase 4: Diagnostics
+## Phase 4: Initial diagnostics
 
-1. Add sanitized diagnostic report generation.
-2. Add typed integrity findings.
-3. Add Task Center links and repair actions.
-4. Add selected later diagnostics based on actual support/debugging needs.
+1. Add sanitized diagnostic report generation with stable hashes and sanitized server origins.
+2. Add typed integrity findings for every check listed in the Diagnostics page.
+3. Add **Open Task Center**, retry failed vault projections, replay local maintenance, rebuild a
+   selected search index, and copy job checkpoint/error details.
+4. Do not add any item from Explicitly deferred extensions.
 
-# Decisions and Recommendations
+## Phase 5: Reset all local cache
 
-The design makes the following deliberate choices:
+1. Switch atomically to a new cache instance.
+2. Preserve configured accounts, credentials, and session-discovery inputs.
+3. Complete and validate initial resynchronization against the replacement instance.
+4. Retire the old instance only after validation succeeds.
+5. Add crash-recovery and rollback tests for every transition point.
+
+# Decisions
+
+The design makes the following final choices:
 
 - **Separate dialog, not Preferences page.** Operations are immediate and long-running.
-- **Always available.** Recovery tooling should not require an environment variable.
+- **Always available.** Recovery tooling does not require an environment variable.
 - **Daemon owns mail cache maintenance.** The GUI remains a cache consumer and command issuer.
 - **SQLite mailbox size is explicitly estimated.** Exact physical attribution is undefined in the
   shared database.
 - **Body storage shows logical, shared, and reclaimable bytes.** A single number is misleading with
   content-addressed hard-linked storage.
-- **No automatic database vacuum after clearing.** Clearing should be quick; compaction is explicit.
+- **No automatic database vacuum after clearing.** Clearing remains quick; compaction is explicit.
 - **Offline-policy conflict is resolved in the confirmation.** The default disables offline storage
   before clearing to avoid immediate redownload.
 - **No raw SQL/JMAP consoles.** Typed diagnostics provide the useful information without bypassing
   architecture or exposing secrets.
 - **Read-only inspection ships first.** It establishes trustworthy accounting before destructive
   controls are enabled.
+- **KPageDialog is mandatory.** The dialog uses KDE's page navigation rather than a custom sidebar.
+- **Read scans stop with the dialog.** Completed partial results are retained; destructive commits
+  continue independently.
+- **The scan executor is private and serial.** It owns exactly one low-priority worker thread.
+- **Mailbox reports provide plaintext and JSON as separate actions.**
+- **Diagnostic reports use stable hashes and sanitized server origins by default.**
+- **Draft-asset cleanup is excluded.** It requires its own retention-policy design.
+- **Translation cache maintenance requires the serialized cache-service refactor first.**
+- **The initial feature scope includes mailbox inspection and clearing, translation/database/vault/
+  index maintenance, and the defined minimal Diagnostics page.**

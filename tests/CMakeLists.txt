@@ -295,6 +295,7 @@ add_executable(javelin_daemon_tests
     app/DaemonProcessTest.cpp
     app/DesktopNotificationControllerTest.cpp
     app/DeferredSendServiceTest.cpp
+    app/DeveloperDiagnosticsServiceTest.cpp
     app/MessageSubjectTest.cpp
     app/GuiMailApplicationEventsTest.cpp
     app/MailboxSessionTest.cpp
@@ -311,6 +312,7 @@ target_link_libraries(javelin_daemon_tests
         Catch2::Catch2WithMain
         Qt::Core
         Qt::Network
+        Qt::Sql
         javelin_daemon_core
 )
 javelin_set_project_warnings(javelin_daemon_tests)

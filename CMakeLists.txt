@@ -54,7 +54,7 @@ configure_file(
     @ONLY
 )
 
-find_package(KF6 REQUIRED COMPONENTS Codecs ConfigWidgets XmlGui CoreAddons I18n TextEditor Wallet)
+find_package(KF6 REQUIRED COMPONENTS Codecs ConfigWidgets XmlGui CoreAddons I18n TextEditor Wallet WidgetsAddons)
 find_package(KPim6Mime REQUIRED)
 find_package(KPim6MessageComposer REQUIRED)
 
@@ -139,6 +139,10 @@ javelin_enable_static_analysis(javelin_cache_read)
 javelin_enable_sanitizers(javelin_cache_read)
 
 set(JAVELIN_FORMAT_FILES
+    src/gui/developer/DeveloperOptionsDialog.cpp
+    src/gui/developer/DeveloperOptionsDialog.h
+    tests/app/DeveloperDiagnosticsServiceTest.cpp
+    tests/app/RemoteCodecTest.cpp
     src/protocol/SocketTransport.cpp
     src/jmap/render/HtmlBodyEmbedding.cpp
     src/jmap/submission/DraftInlineImageStorage.cpp
@@ -247,6 +251,9 @@ set(JAVELIN_FORMAT_FILES
     src/app/DeferredSendRepository.h
     src/app/DeferredSendService.cpp
     src/app/DeferredSendService.h
+    src/app/DeveloperDiagnostics.h
+    src/app/DeveloperDiagnosticsService.cpp
+    src/app/DeveloperDiagnosticsService.h
     src/app/DesktopNotificationController.cpp
     src/app/DesktopNotificationController.h
     src/app/FullMailSyncService.cpp
@@ -977,6 +984,8 @@ add_library(javelin_gui STATIC
     src/app/WorkTaskPort.h
     src/gui/IconUtils.cpp
     src/gui/IconUtils.h
+    src/gui/developer/DeveloperOptionsDialog.cpp
+    src/gui/developer/DeveloperOptionsDialog.h
     src/gui/logging/LogViewerDialog.cpp
     src/gui/logging/LogViewerDialog.h
     src/gui/mailboxes/MailboxIconUtils.cpp
@@ -1258,6 +1267,7 @@ target_link_libraries(javelin_gui
         Qt::WebEngineWidgets
         KF6::ConfigWidgets
         KF6::I18n
+        KF6::WidgetsAddons
         KF6::XmlGui
         KF6::TextEditor
         KPim6::MessageComposer
@@ -1304,6 +1314,9 @@ target_compile_options(javelin_calendar_gui PRIVATE -fexceptions)
 
 add_library(javelin_daemon_core STATIC
     src/app/AccountApplicationPorts.h
+    src/app/DeveloperDiagnostics.h
+    src/app/DeveloperDiagnosticsService.cpp
+    src/app/DeveloperDiagnosticsService.h
     src/app/AccountCredentialStore.cpp
     src/app/AccountCredentialStore.h
     src/app/KWalletAccountCredentialStore.cpp
@@ -1516,6 +1529,7 @@ javelin_enable_sanitizers(javelind)
 
 qt_add_executable(javelin
     src/app/CalendarApplicationPorts.h
+    src/app/DeveloperDiagnostics.h
     src/app/LogStore.cpp
     src/app/LogStore.h
     src/app/MailApplicationEventsPorts.h

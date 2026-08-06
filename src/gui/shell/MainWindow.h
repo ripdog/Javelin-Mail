@@ -44,6 +44,7 @@ namespace javelin::app
     class CalendarCommandPort;
     class ComposeCommandPort;
     class ContactCommandPort;
+    class DeveloperDiagnosticsPort;
     class MailCommandPort;
     class SieveCommandPort;
     class AccountRefreshPort;
@@ -80,6 +81,11 @@ namespace javelin::jmap::cache
     class MessageViewReader;
     class QueryReader;
 } // namespace javelin::jmap::cache
+
+namespace javelin::gui::developer
+{
+    class DeveloperOptionsDialog;
+}
 
 namespace javelin::gui::mailboxes
 {
@@ -152,6 +158,7 @@ namespace javelin::gui::shell
                             javelin::gui::translation::TranslationService& translationService,
                             javelin::app::ComposeCommandPort& composeCommandPort,
                             javelin::app::ContactCommandPort& contactCommandPort,
+                            javelin::app::DeveloperDiagnosticsPort& developerDiagnosticsPort,
                             javelin::app::MailCommandPort& mailCommandPort,
                             javelin::app::SieveCommandPort& sieveCommandPort,
                             javelin::app::AccountRefreshPort& accountRefreshPort,
@@ -253,6 +260,7 @@ namespace javelin::gui::shell
         void showMailboxContextMenu(const QPoint& position);
         void showMessageListContextMenu(const QPoint& position);
         void viewSelectedMessageSource();
+        void openDeveloperOptions();
         void openPreferences();
         void reauthenticateConnection(const QString& connectionId);
         void updateAuthenticationPrompt(const QString& accountId,
@@ -293,6 +301,7 @@ namespace javelin::gui::shell
         javelin::gui::translation::TranslationService& m_translationService;
         javelin::app::ComposeCommandPort& m_composeCommandPort;
         javelin::app::ContactCommandPort& m_contactCommandPort;
+        javelin::app::DeveloperDiagnosticsPort& m_developerDiagnosticsPort;
         javelin::app::MailCommandPort& m_mailCommandPort;
         javelin::app::SieveCommandPort& m_sieveCommandPort;
         javelin::app::AccountRefreshPort& m_accountRefreshPort;
@@ -345,6 +354,7 @@ namespace javelin::gui::shell
         QAction* m_refreshAction = nullptr;
         QAction* m_quitAction = nullptr;
         QAction* m_preferencesAction = nullptr;
+        QAction* m_developerOptionsAction = nullptr;
         QAction* m_newMessageAction = nullptr;
         QAction* m_contactsAction = nullptr;
         QAction* m_calendarAction = nullptr;
@@ -386,6 +396,7 @@ namespace javelin::gui::shell
         bool m_paletteRefreshPending = false;
         bool m_modelUpdateInProgress = false;
         bool m_authenticationPromptOpen = false;
+        javelin::gui::developer::DeveloperOptionsDialog* m_developerOptionsDialog = nullptr;
         QSet<QString> m_authenticationRequiredAccountIds;
         QSet<QString> m_authenticationPromptedConnections;
         QStringList m_pendingAuthenticationPrompts;

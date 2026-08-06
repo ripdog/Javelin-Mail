@@ -13,6 +13,7 @@
 #include "app/ContactCommandService.h"
 #include "app/DeferredSendRepository.h"
 #include "app/DeferredSendService.h"
+#include "app/DeveloperDiagnosticsService.h"
 #include "app/FullMailSyncService.h"
 #include "app/LocalMaintenanceService.h"
 #include "app/MailApplicationEventsService.h"
@@ -91,6 +92,8 @@ namespace javelin::app
             std::get<javelin::jmap::cache::DatabaseConnection>(std::move(databaseResult));
         m_databasePath = location.databasePath;
         m_cacheInstanceId = location.instanceId;
+        m_developerDiagnosticsService = std::make_unique<DeveloperDiagnosticsService>(
+            location.databasePath, location.vaultRootPath);
         m_cacheAccessBarrier = std::make_unique<CacheAccessBarrier>();
         m_workScheduler = std::make_unique<WorkScheduler>(m_databaseConnection);
         m_localMaintenanceService =
@@ -404,6 +407,11 @@ namespace javelin::app
     LocalMaintenanceService& DaemonServices::localMaintenanceService()
     {
         return *m_localMaintenanceService;
+    }
+
+    DeveloperDiagnosticsPort& DaemonServices::developerDiagnosticsPort()
+    {
+        return *m_developerDiagnosticsService;
     }
 
     FullMailSyncService& DaemonServices::fullMailSyncService()

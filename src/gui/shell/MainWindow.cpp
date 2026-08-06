@@ -13,6 +13,7 @@
 #include "app/SearchSession.h"
 #include "app/UndoApplicationPorts.h"
 #include "gui/IconUtils.h"
+#include "gui/developer/DeveloperOptionsDialog.h"
 #include "gui/logging/LogViewerDialog.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
 #include "gui/mailboxes/MailboxPropertiesDialog.h"
@@ -256,6 +257,7 @@ namespace javelin::gui::shell
                            javelin::gui::translation::TranslationService& translationService,
                            javelin::app::ComposeCommandPort& composeCommandPort,
                            javelin::app::ContactCommandPort& contactCommandPort,
+                           javelin::app::DeveloperDiagnosticsPort& developerDiagnosticsPort,
                            javelin::app::MailCommandPort& mailCommandPort,
                            javelin::app::SieveCommandPort& sieveCommandPort,
                            javelin::app::AccountRefreshPort& accountRefreshPort,
@@ -272,7 +274,8 @@ namespace javelin::gui::shell
           m_contactIdentityLookup(contactIdentityLookup), m_identityReader(identityReader),
           m_messageViewReader(messageViewReader), m_queryReader(queryReader),
           m_translationService(translationService), m_composeCommandPort(composeCommandPort),
-          m_contactCommandPort(contactCommandPort), m_mailCommandPort(mailCommandPort),
+          m_contactCommandPort(contactCommandPort),
+          m_developerDiagnosticsPort(developerDiagnosticsPort), m_mailCommandPort(mailCommandPort),
           m_sieveCommandPort(sieveCommandPort), m_accountRefreshPort(accountRefreshPort),
           m_onboardingPort(onboardingPort), m_messageContentPort(messageContentPort),
           m_messageListSessionFactory(messageListSessionFactory), m_mailEvents(mailEvents),
@@ -716,6 +719,14 @@ namespace javelin::gui::shell
             KStandardAction::preferences(this, &MainWindow::openPreferences, actionCollection());
         m_preferencesAction->setIcon(
             thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/settings.svg")));
+
+        m_developerOptionsAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("applications-development")),
+                        i18n("Developer Options…"), this);
+        connect(m_developerOptionsAction, &QAction::triggered, this,
+                &MainWindow::openDeveloperOptions);
+        actionCollection()->addAction(QStringLiteral("open_developer_options"),
+                                      m_developerOptionsAction);
 
         m_contactsAction = new QAction(QIcon::fromTheme(QStringLiteral("view-pim-contacts")),
                                        i18n("Contacts"), this);
@@ -2784,6 +2795,21 @@ namespace javelin::gui::shell
         }
 
         return KXmlGuiWindow::eventFilter(watched, event);
+    }
+
+    void MainWindow::openDeveloperOptions()
+    {
+        if (m_developerOptionsDialog == nullptr)
+        {
+            m_developerOptionsDialog = new javelin::gui::developer::DeveloperOptionsDialog(
+                m_developerDiagnosticsPort, this);
+            m_developerOptionsDialog->setAttribute(Qt::WA_DeleteOnClose);
+            connect(m_developerOptionsDialog, &QObject::destroyed, this,
+                    [this] { m_developerOptionsDialog = nullptr; });
+        }
+        m_developerOptionsDialog->show();
+        m_developerOptionsDialog->raise();
+        m_developerOptionsDialog->activateWindow();
     }
 
     void MainWindow::openPreferences()

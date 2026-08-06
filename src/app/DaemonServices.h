@@ -53,6 +53,8 @@ namespace javelin::app
     class DeferredSendRepository;
     class DeferredSendSubmitter;
     class DeferredSendService;
+    class DeveloperDiagnosticsPort;
+    class DeveloperDiagnosticsService;
     class AccountCommandPort;
     class AccountCommandService;
     class ContactCommandPort;
@@ -157,6 +159,7 @@ namespace javelin::app
         [[nodiscard]] CalendarNotificationService& calendarNotificationService();
         [[nodiscard]] WorkScheduler& workScheduler();
         [[nodiscard]] LocalMaintenanceService& localMaintenanceService();
+        [[nodiscard]] DeveloperDiagnosticsPort& developerDiagnosticsPort();
         [[nodiscard]] FullMailSyncService& fullMailSyncService();
         [[nodiscard]] MailIndexService& mailIndexService();
         [[nodiscard]] javelin::app::undo::UndoManager& undoManager();
@@ -226,6 +229,7 @@ namespace javelin::app
         std::unique_ptr<FullMailSyncService> m_fullMailSyncService;
         std::unique_ptr<MailIndexService> m_mailIndexService;
         std::unique_ptr<LocalMaintenanceService> m_localMaintenanceService;
+        std::unique_ptr<DeveloperDiagnosticsService> m_developerDiagnosticsService;
     };
 
 } // namespace javelin::app

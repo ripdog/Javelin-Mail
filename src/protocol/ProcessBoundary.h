@@ -196,7 +196,8 @@ namespace javelin::protocol
         OnboardingRevokeOAuth,
         OnboardingCancelOAuth,
         CalendarSetSubscribed,
-        Last = CalendarSetSubscribed,
+        DeveloperDiagnosticsSnapshot,
+        Last = DeveloperDiagnosticsSnapshot,
     };
 
     struct RemoteActionCommand

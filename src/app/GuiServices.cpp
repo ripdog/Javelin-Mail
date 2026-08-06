@@ -150,6 +150,7 @@ namespace javelin::app
         m_calendarCommands = std::make_unique<RemoteCalendarCommandPort>(*m_remoteClient);
         m_composeCommands = std::make_unique<RemoteComposeCommandPort>(*m_remoteClient);
         m_contactCommands = std::make_unique<RemoteContactCommandPort>(*m_remoteClient);
+        m_developerDiagnostics = std::make_unique<RemoteDeveloperDiagnosticsPort>(*m_remoteClient);
         m_mailCommands = std::make_unique<RemoteMailCommandPort>(*m_remoteClient);
         m_sieveCommands = std::make_unique<RemoteSieveCommandPort>(*m_remoteClient);
         m_accountRefresh = std::make_unique<RemoteAccountRefreshPort>(m_session, *m_remoteClient);
@@ -282,6 +283,10 @@ namespace javelin::app
     UndoCommandPort& GuiServices::undoCommandPort()
     {
         return *m_undoCommands;
+    }
+    DeveloperDiagnosticsPort& GuiServices::developerDiagnosticsPort()
+    {
+        return *m_developerDiagnostics;
     }
     javelin::gui::translation::TranslationService& GuiServices::translationService()
     {

@@ -6,6 +6,7 @@
 #include "app/ComposeApplicationPorts.h"
 #include "app/ContactApplicationPorts.h"
 #include "app/DaemonServices.h"
+#include "app/DeveloperDiagnostics.h"
 #include "app/MailApplicationPorts.h"
 #include "app/MailApplicationService.h"
 #include "app/MessageContentApplicationPorts.h"
@@ -164,6 +165,7 @@ namespace javelin::app
             case Kind::OnboardingAuthenticateManually:
             case Kind::OnboardingRevokeOAuth:
             case Kind::OnboardingCancelOAuth:
+            case Kind::DeveloperDiagnosticsSnapshot:
                 return {};
             }
             return {};
@@ -850,6 +852,8 @@ namespace javelin::app
             return immediate(m_services.workScheduler().list());
         case Kind::WorkSummary:
             return immediate(m_services.workScheduler().summary());
+        case Kind::DeveloperDiagnosticsSnapshot:
+            return launch(m_services.developerDiagnosticsPort().snapshot());
         }
         return reject(id, QStringLiteral("The remote action is unsupported."),
                       javelin::protocol::BoundaryErrorCode::UnsupportedOperation);

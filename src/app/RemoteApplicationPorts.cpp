@@ -697,6 +697,17 @@ namespace javelin::app
         Q_EMIT historyStateChanged(m_state);
     }
 
+    RemoteDeveloperDiagnosticsPort::RemoteDeveloperDiagnosticsPort(RemoteActionClient& client)
+        : m_client(client)
+    {
+    }
+
+    QCoro::Task<DeveloperDiagnosticsResult> RemoteDeveloperDiagnosticsPort::snapshot()
+    {
+        co_return co_await call<DeveloperDiagnosticsResult>(
+            m_client, javelin::protocol::RemoteActionKind::DeveloperDiagnosticsSnapshot);
+    }
+
     RemoteWorkTaskPort::RemoteWorkTaskPort(GuiDaemonSession& session, RemoteActionClient& client)
         : m_session(session), m_client(client)
     {
