@@ -46,6 +46,65 @@ namespace javelin::jmap::api
         std::vector<std::string> notFound;
     };
 
+    struct IdentityChangesResponse
+    {
+        std::string accountId;
+        std::string oldState;
+        std::string newState;
+        bool hasMoreChanges = false;
+        std::vector<std::string> created;
+        std::vector<std::string> updated;
+        std::vector<std::string> destroyed;
+    };
+
+    struct IdentitySetError
+    {
+        std::string type;
+        std::optional<std::string> description;
+        std::vector<std::string> properties;
+    };
+
+    struct IdentitySetCreate
+    {
+        std::string name;
+        std::string email;
+        std::vector<javelin::jmap::domain::EmailAddress> replyTo;
+        std::vector<javelin::jmap::domain::EmailAddress> bcc;
+        std::string textSignature;
+        std::string htmlSignature;
+    };
+
+    struct IdentitySetUpdate
+    {
+        std::optional<std::string> name;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> replyTo;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> bcc;
+        std::optional<std::string> textSignature;
+        std::optional<std::string> htmlSignature;
+    };
+
+    struct IdentitySetRequest
+    {
+        std::string accountId;
+        std::optional<std::string> ifInState;
+        std::unordered_map<std::string, IdentitySetCreate> create;
+        std::unordered_map<std::string, IdentitySetUpdate> update;
+        std::vector<std::string> destroy;
+    };
+
+    struct IdentitySetResponse
+    {
+        std::string accountId;
+        std::string oldState;
+        std::string newState;
+        std::unordered_map<std::string, std::string> created;
+        std::vector<std::string> updated;
+        std::vector<std::string> destroyed;
+        std::unordered_map<std::string, IdentitySetError> notCreated;
+        std::unordered_map<std::string, IdentitySetError> notUpdated;
+        std::unordered_map<std::string, IdentitySetError> notDestroyed;
+    };
+
     struct EmailGetResponse
     {
         std::string accountId;
@@ -334,6 +393,8 @@ namespace javelin::jmap::api
     [[nodiscard]] std::optional<std::string> serializeGetRequest(const GetRequest& request);
     [[nodiscard]] std::optional<std::string> serializeChangesRequest(const ChangesRequest& request);
     [[nodiscard]] std::optional<std::string>
+    serializeIdentitySetRequest(const IdentitySetRequest& request);
+    [[nodiscard]] std::optional<std::string>
     serializeEmailQueryRequest(const EmailQueryRequest& request);
     [[nodiscard]] std::optional<std::string>
     serializeEmailQueryChangesRequest(const EmailQueryChangesRequest& request);
@@ -346,6 +407,10 @@ namespace javelin::jmap::api
 
     [[nodiscard]] ParsedEnvelope<IdentityGetResponse>
     parseIdentityGetResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<IdentityChangesResponse>
+    parseIdentityChangesResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<IdentitySetResponse>
+    parseIdentitySetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<MailboxGetResponse> parseMailboxGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailGetResponse> parseEmailGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<ThreadGetResponse> parseThreadGetResponse(std::string_view json);
@@ -365,6 +430,10 @@ namespace javelin::jmap::api
 
     [[nodiscard]] std::optional<MethodRequest<IdentityGetResponse>>
     identityGet(const GetRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<IdentityChangesResponse>>
+    identityChanges(const ChangesRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<IdentitySetResponse>>
+    identitySet(const IdentitySetRequest& request);
     [[nodiscard]] std::optional<MethodRequest<MailboxGetResponse>>
     mailboxGet(const GetRequest& request);
     [[nodiscard]] std::optional<MethodRequest<EmailGetResponse>>
@@ -395,6 +464,26 @@ namespace javelin::jmap::api
         [[nodiscard]] static ParsedEnvelope<IdentityGetResponse> parse(std::string_view json)
         {
             return parseIdentityGetResponse(json);
+        }
+    };
+
+    template <> struct MethodResponseTraits<IdentityChangesResponse>
+    {
+        static constexpr std::string_view methodName = "Identity/changes";
+
+        [[nodiscard]] static ParsedEnvelope<IdentityChangesResponse> parse(std::string_view json)
+        {
+            return parseIdentityChangesResponse(json);
+        }
+    };
+
+    template <> struct MethodResponseTraits<IdentitySetResponse>
+    {
+        static constexpr std::string_view methodName = "Identity/set";
+
+        [[nodiscard]] static ParsedEnvelope<IdentitySetResponse> parse(std::string_view json)
+        {
+            return parseIdentitySetResponse(json);
         }
     };
 

@@ -3,6 +3,7 @@
 #include "app/AccountApplicationPorts.h"
 #include "app/AccountRefreshApplicationPorts.h"
 #include "app/ComposeApplicationPorts.h"
+#include "app/IdentityApplicationPorts.h"
 #include "app/MailApplicationEventsPorts.h"
 #include "app/MailboxSession.h"
 #include "app/MessageContentApplicationPorts.h"
@@ -14,6 +15,7 @@
 #include "app/UndoApplicationPorts.h"
 #include "gui/IconUtils.h"
 #include "gui/developer/DeveloperOptionsDialog.h"
+#include "gui/identity/IdentityManagerDialog.h"
 #include "gui/logging/LogViewerDialog.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
 #include "gui/mailboxes/MailboxPropertiesDialog.h"
@@ -261,6 +263,7 @@ namespace javelin::gui::shell
                            javelin::app::DeveloperMaintenancePort& developerMaintenancePort,
                            javelin::app::MailCommandPort& mailCommandPort,
                            javelin::app::SieveCommandPort& sieveCommandPort,
+                           javelin::app::IdentityCommandPort& identityCommandPort,
                            javelin::app::AccountRefreshPort& accountRefreshPort,
                            javelin::app::OnboardingPort& onboardingPort,
                            javelin::app::MessageContentPort& messageContentPort,
@@ -278,8 +281,9 @@ namespace javelin::gui::shell
           m_contactCommandPort(contactCommandPort),
           m_developerDiagnosticsPort(developerDiagnosticsPort),
           m_developerMaintenancePort(developerMaintenancePort), m_mailCommandPort(mailCommandPort),
-          m_sieveCommandPort(sieveCommandPort), m_accountRefreshPort(accountRefreshPort),
-          m_onboardingPort(onboardingPort), m_messageContentPort(messageContentPort),
+          m_sieveCommandPort(sieveCommandPort), m_identityCommandPort(identityCommandPort),
+          m_accountRefreshPort(accountRefreshPort), m_onboardingPort(onboardingPort),
+          m_messageContentPort(messageContentPort),
           m_messageListSessionFactory(messageListSessionFactory), m_mailEvents(mailEvents),
           m_messageNavigationPort(messageNavigationPort), m_undoCommandPort(undoCommandPort)
     {
@@ -429,7 +433,7 @@ namespace javelin::gui::shell
                 });
         m_composeTabController = new ComposeTabController(
             m_settings, m_composeCommandPort, m_accountReader, m_identityReader,
-            m_contactIdentityLookup, *m_contentStack, m_tabs, this);
+            m_contactIdentityLookup, m_mailEvents, *m_contentStack, m_tabs, this);
         connect(m_composeTabController, &ComposeTabController::tabReady, this,
                 [this](const int index)
                 {
@@ -450,6 +454,8 @@ namespace javelin::gui::shell
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
         connect(m_composeTabController, &ComposeTabController::toolbarStateChanged, this,
                 &MainWindow::updateToolbarForActiveTab);
+        connect(m_composeTabController, &ComposeTabController::manageIdentitiesRequested, this,
+                &MainWindow::openSendingIdentitiesFor);
         m_messageListTabBindingPresenter = std::make_unique<MessageListTabBindingPresenter>(
             *m_mailboxModel, *m_mailboxView, *m_mailboxSearchEdit, *m_messageModel, *m_mailboxPane);
         m_messageSelectionController = std::make_unique<MessageSelectionController>(
@@ -746,6 +752,13 @@ namespace javelin::gui::shell
                                     i18n("Sieve Rules"), this);
         connect(m_sieveAction, &QAction::triggered, this, &MainWindow::openSieveEditor);
         actionCollection()->addAction(QStringLiteral("open_sieve_editor"), m_sieveAction);
+
+        m_sendingIdentitiesAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-identity")),
+                                                i18n("Sending Identities and Signatures…"), this);
+        connect(m_sendingIdentitiesAction, &QAction::triggered, this,
+                &MainWindow::openSendingIdentities);
+        actionCollection()->addAction(QStringLiteral("open_sending_identities"),
+                                      m_sendingIdentitiesAction);
 
         m_newMessageAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/new-mail.svg")),
@@ -1575,6 +1588,21 @@ namespace javelin::gui::shell
         dialog.exec();
     }
 
+    void MainWindow::openSendingIdentities()
+    {
+        openSendingIdentitiesFor({}, {});
+    }
+
+    void MainWindow::openSendingIdentitiesFor(QString accountId, QString identityId)
+    {
+        javelin::gui::identity::IdentityManagerDialog dialog{
+            m_settings, m_accountReader, m_identityReader, m_identityCommandPort, m_mailEvents,
+            this};
+        if (!accountId.isEmpty() && !identityId.isEmpty())
+            dialog.selectIdentity(accountId.toStdString(), identityId.toStdString());
+        dialog.exec();
+    }
+
     void MainWindow::openCalendar()
     {
         m_calendarTabController->open();
@@ -1787,6 +1815,7 @@ namespace javelin::gui::shell
         {
             const auto state = m_composeTabController->toolbarState(activeTab());
             const QSignalBlocker blocker{m_composeRichTextAction};
+            m_composeSendAction->setEnabled(state.canSend);
             m_composeRichTextAction->setChecked(state.richText);
             m_composeRichTextAction->setEnabled(state.canToggleRichText);
         }

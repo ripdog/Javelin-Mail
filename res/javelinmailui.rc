@@ -1,5 +1,5 @@
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
-<gui name="javelinmail" version="12">
+<gui name="javelinmail" version="13">
   <MenuBar>
     <Menu name="file"><text>&amp;File</text>
       <Action name="compose_new_message"/>
@@ -16,6 +16,7 @@
       <Action name="open_contacts"/>
       <Action name="open_calendar"/>
       <Action name="open_sieve_editor"/>
+      <Action name="open_sending_identities"/>
     </Menu>
     <Menu name="message"><text>&amp;Message</text>
       <Action name="compose_reply"/>

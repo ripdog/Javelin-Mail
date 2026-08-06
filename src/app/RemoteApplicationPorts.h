@@ -7,6 +7,7 @@
 #include "app/ContactApplicationPorts.h"
 #include "app/DeveloperDiagnostics.h"
 #include "app/DeveloperMaintenance.h"
+#include "app/IdentityApplicationPorts.h"
 #include "app/MailApplicationPorts.h"
 #include "app/MessageContentApplicationPorts.h"
 #include "app/MessageListMaterializationPort.h"
@@ -204,6 +205,22 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveActivationResult>
         setSieveScriptActive(std::string ownerAccountId, javelin::jmap::sieve::SieveScript script,
                              bool active, undo::CommandOrigin origin) override;
+
+      private:
+        RemoteActionClient& m_client;
+    };
+
+    class RemoteIdentityCommandPort final : public IdentityCommandPort
+    {
+      public:
+        explicit RemoteIdentityCommandPort(RemoteActionClient& client);
+        [[nodiscard]] QCoro::Task<javelin::jmap::identity::IdentityListResult>
+        requestSenderIdentities(std::string accountId) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::identity::IdentitySaveResult>
+        saveSenderIdentity(std::string accountId,
+                           javelin::jmap::domain::Identity identity) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::identity::IdentityDeleteResult>
+        deleteSenderIdentity(std::string accountId, std::string identityId) override;
 
       private:
         RemoteActionClient& m_client;

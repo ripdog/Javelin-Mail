@@ -16,6 +16,11 @@
 class QStackedWidget;
 class QWidget;
 
+namespace javelin::app
+{
+    class MailApplicationEventsPort;
+}
+
 namespace javelin::jmap::cache
 {
     class AccountReader;
@@ -43,6 +48,7 @@ namespace javelin::gui::shell
     struct ComposeToolbarState
     {
         bool richText = true;
+        bool canSend = false;
         bool canToggleRichText = false;
     };
 
@@ -56,6 +62,7 @@ namespace javelin::gui::shell
                              javelin::jmap::cache::AccountReader& accountReader,
                              javelin::jmap::cache::IdentityReader& identityRepository,
                              javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
+                             javelin::app::MailApplicationEventsPort& mailEvents,
                              QStackedWidget& contentStack, std::vector<TabState>& tabs,
                              QObject* parent = nullptr);
 
@@ -82,6 +89,7 @@ namespace javelin::gui::shell
         void userInterventionRequired(QString message);
         void operationFailed(javelin::jmap::OperationError error);
         void toolbarStateChanged();
+        void manageIdentitiesRequested(QString accountId, QString identityId);
 
       private:
         [[nodiscard]] std::size_t materialize(javelin::jmap::submission::DraftSnapshot snapshot);

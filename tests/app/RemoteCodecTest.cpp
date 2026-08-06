@@ -2,6 +2,7 @@
 #include "app/DeveloperDiagnostics.h"
 #include "app/DeveloperMaintenance.h"
 #include "app/RemoteActionTypes.h"
+#include "jmap/identity/IdentityCommandTypes.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -174,6 +175,50 @@ TEST_CASE("remote codec round-trips developer mailbox clear results",
     CHECK(summary->maintenanceGeneration == 7);
     CHECK(summary->reclaimedBytes == 2048);
     CHECK(summary->offlineStorageDisabled);
+}
+
+TEST_CASE("remote codec round-trips sender Identity signatures and pending creates",
+          "[app][remote-codec][identity]")
+{
+    const javelin::jmap::identity::IdentityListResult result{
+        javelin::jmap::identity::IdentitySnapshot{
+            .identities = {{.id = "identity-1",
+                            .name = "Alice",
+                            .email = "alice@example.test",
+                            .replyTo = {{.name = "Replies", .email = "reply@example.test"}},
+                            .bcc = {},
+                            .textSignature = "Regards,\nAlice",
+                            .htmlSignature = "<p>Regards,<br>Alice</p>",
+                            .mayDelete = false}},
+            .pendingCreates = {{.creationId = "creation-1",
+                                .mutationId = "mutation-1",
+                                .identity = {.id = {},
+                                             .name = "Alice Work",
+                                             .email = "alice@example.test",
+                                             .replyTo = {},
+                                             .bcc = {},
+                                             .textSignature = "Work",
+                                             .htmlSignature = "<p>Work</p>",
+                                             .mayDelete = true},
+                                .status = "unknown",
+                                .errorJson = std::nullopt}},
+        }};
+
+    const auto encoded = javelin::app::remote::encode(result);
+    const auto* payload = std::get_if<QByteArray>(&encoded);
+    REQUIRE(payload != nullptr);
+    const auto decoded =
+        javelin::app::remote::decodeValue<javelin::jmap::identity::IdentityListResult>(*payload);
+    const auto* decodedResult = std::get_if<javelin::jmap::identity::IdentityListResult>(&decoded);
+    REQUIRE(decodedResult != nullptr);
+    const auto* snapshot = std::get_if<javelin::jmap::identity::IdentitySnapshot>(decodedResult);
+    REQUIRE(snapshot != nullptr);
+    REQUIRE(snapshot->identities.size() == 1);
+    CHECK(snapshot->identities.front().htmlSignature ==
+          std::optional<std::string>{"<p>Regards,<br>Alice</p>"});
+    REQUIRE(snapshot->pendingCreates.size() == 1);
+    CHECK(snapshot->pendingCreates.front().identity.id.empty());
+    CHECK(snapshot->pendingCreates.front().status == "unknown");
 }
 
 TEST_CASE("remote codec rejects trailing data", "[app][remote-codec]")

@@ -508,6 +508,35 @@ namespace javelin::app
             std::move(script), active, origin);
     }
 
+    RemoteIdentityCommandPort::RemoteIdentityCommandPort(RemoteActionClient& client)
+        : m_client(client)
+    {
+    }
+
+    QCoro::Task<javelin::jmap::identity::IdentityListResult>
+    RemoteIdentityCommandPort::requestSenderIdentities(std::string accountId)
+    {
+        return call<javelin::jmap::identity::IdentityListResult>(
+            m_client, javelin::protocol::RemoteActionKind::IdentityList, std::move(accountId));
+    }
+
+    QCoro::Task<javelin::jmap::identity::IdentitySaveResult>
+    RemoteIdentityCommandPort::saveSenderIdentity(std::string accountId,
+                                                  javelin::jmap::domain::Identity identity)
+    {
+        return call<javelin::jmap::identity::IdentitySaveResult>(
+            m_client, javelin::protocol::RemoteActionKind::IdentitySave, std::move(accountId),
+            std::move(identity));
+    }
+
+    QCoro::Task<javelin::jmap::identity::IdentityDeleteResult>
+    RemoteIdentityCommandPort::deleteSenderIdentity(std::string accountId, std::string identityId)
+    {
+        return call<javelin::jmap::identity::IdentityDeleteResult>(
+            m_client, javelin::protocol::RemoteActionKind::IdentityDelete, std::move(accountId),
+            std::move(identityId));
+    }
+
     RemoteAccountRefreshPort::RemoteAccountRefreshPort(GuiDaemonSession& session,
                                                        RemoteActionClient& client)
         : m_session(session), m_client(client)

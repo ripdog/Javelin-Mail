@@ -23,11 +23,13 @@ namespace javelin::jmap::cache
         {
             return CachedAccount{
                 .accountId = query.value(0).toString().toStdString(),
-                .name = query.value(1).toString().toStdString(),
-                .isPersonal = query.value(2).toInt() != 0,
-                .isReadOnly = query.value(3).toInt() != 0,
-                .isPrimary = query.value(4).toInt() != 0,
-                .hasMailCapability = query.value(5).toInt() != 0,
+                .name = query.value(2).toString().toStdString(),
+                .isPersonal = query.value(3).toInt() != 0,
+                .isReadOnly = query.value(4).toInt() != 0,
+                .isPrimary = query.value(5).toInt() != 0,
+                .hasMailCapability = query.value(6).toInt() != 0,
+                .ownerAccountId = query.value(1).toString().toStdString(),
+                .hasSubmissionCapability = query.value(7).toInt() != 0,
             };
         }
 
@@ -39,16 +41,18 @@ namespace javelin::jmap::cache
             if (ownerAccountId.has_value())
             {
                 query.prepare(QStringLiteral(
-                    "SELECT account_id, name, is_personal, is_read_only, is_primary, "
-                    "cap_mail FROM accounts WHERE owner_account_id = :owner_account_id "
+                    "SELECT account_id, owner_account_id, name, is_personal, is_read_only, "
+                    "is_primary, cap_mail, cap_submission FROM accounts "
+                    "WHERE owner_account_id = :owner_account_id "
                     "ORDER BY is_primary DESC, name, account_id"));
                 query.bindValue(QStringLiteral(":owner_account_id"), *ownerAccountId);
             }
             else
             {
                 query.prepare(QStringLiteral(
-                    "SELECT account_id, name, is_personal, is_read_only, is_primary, "
-                    "cap_mail FROM accounts ORDER BY is_primary DESC, name, account_id"));
+                    "SELECT account_id, owner_account_id, name, is_personal, is_read_only, "
+                    "is_primary, cap_mail, cap_submission FROM accounts "
+                    "ORDER BY is_primary DESC, name, account_id"));
             }
             if (!query.exec())
                 return makeQueryError(operation, query);
@@ -91,8 +95,8 @@ namespace javelin::jmap::cache
 
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
-            "SELECT account_id, name, is_personal, is_read_only, is_primary, cap_mail "
-            "FROM accounts WHERE account_id = :account_id"));
+            "SELECT account_id, owner_account_id, name, is_personal, is_read_only, is_primary, "
+            "cap_mail, cap_submission FROM accounts WHERE account_id = :account_id"));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
         if (!query.exec())

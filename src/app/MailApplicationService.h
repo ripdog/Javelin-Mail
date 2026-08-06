@@ -238,6 +238,7 @@ namespace javelin::app
         void accountStatusChanged(const QString& accountId,
                                   javelin::app::AccountSyncCoordinator::Status status);
         void sessionCapabilitiesChanged(const QString& ownerAccountId);
+        void senderIdentityStateChanged(const QString& ownerAccountId);
         void cacheCommitted(javelin::app::MailCacheChange change);
         void calendarCacheCommitted(javelin::app::CalendarCacheChange change);
         void notificationRaised(const QString& accountId, const QString& mailboxId,

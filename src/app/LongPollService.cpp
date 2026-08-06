@@ -190,6 +190,7 @@ namespace javelin::app
         m_pendingStateChanges.clear();
         m_pendingCalendarStateChanges.clear();
         m_pendingContactStateChanges.clear();
+        m_pendingIdentityStateChanges.clear();
         m_authenticationRecoveryInFlight = false;
         m_refreshDebounceTimer.stop();
         m_queuedRefreshDemand = {};
@@ -234,8 +235,9 @@ namespace javelin::app
         };
         merge(m_pendingCalendarStateChanges, std::move(routed.calendarStates));
         merge(m_pendingContactStateChanges, std::move(routed.contactStates));
+        merge(m_pendingIdentityStateChanges, std::move(routed.identityStates));
         if (!m_pendingStateChanges.empty() || !m_pendingCalendarStateChanges.empty() ||
-            !m_pendingContactStateChanges.empty())
+            !m_pendingContactStateChanges.empty() || !m_pendingIdentityStateChanges.empty())
             scheduleDebouncedRefresh();
         co_return;
     }
@@ -299,14 +301,17 @@ namespace javelin::app
 
         bool calendarCapable = false;
         bool contactsCapable = false;
+        bool identitiesCapable = false;
         std::vector<std::string> groupwareAccountIds;
         for (const auto& [accountId, account] : session->value().accounts)
         {
             const bool accountHasCalendar = account.accountCapabilities.calendars.has_value();
             const bool accountHasContacts = account.accountCapabilities.contacts.has_value();
+            const bool accountHasIdentities = account.accountCapabilities.submission;
             calendarCapable = calendarCapable || accountHasCalendar;
             contactsCapable = contactsCapable || accountHasContacts;
-            if (accountHasCalendar || accountHasContacts)
+            identitiesCapable = identitiesCapable || accountHasIdentities;
+            if (accountHasCalendar || accountHasContacts || accountHasIdentities)
                 groupwareAccountIds.push_back(accountId);
         }
         std::ranges::sort(groupwareAccountIds);
@@ -332,14 +337,17 @@ namespace javelin::app
             .groupwareAccountIds = std::move(groupwareAccountIds),
             .calendarCapable = calendarCapable,
             .contactsCapable = contactsCapable,
+            .identitiesCapable = identitiesCapable,
         };
     }
 
     QCoro::Task<void> AccountSyncCoordinator::runLoop(std::shared_ptr<RunContext> runContext)
     {
-        auto types =
-            subscribedStateChangeTypes({.calendar = runContext->configuration.calendarCapable,
-                                        .contacts = runContext->configuration.contactsCapable});
+        auto types = subscribedStateChangeTypes({
+            .calendar = runContext->configuration.calendarCapable,
+            .contacts = runContext->configuration.contactsCapable,
+            .identities = runContext->configuration.identitiesCapable,
+        });
         javelin::jmap::sync::StateChangeSubscription subscription{
             .accountId = runContext->configuration.accountId,
             .lastState = m_lastEventId,
@@ -764,7 +772,10 @@ namespace javelin::app
                 { Q_EMIT calendarStateChanged(ownerAccountId, states); });
         process(m_pendingContactStateChanges, [this, &ownerAccountId](const auto& states)
                 { Q_EMIT contactStateChanged(ownerAccountId, states); });
-        if (!m_pendingCalendarStateChanges.empty() || !m_pendingContactStateChanges.empty())
+        process(m_pendingIdentityStateChanges, [this, &ownerAccountId](const auto& states)
+                { Q_EMIT identityStateChanged(ownerAccountId, states); });
+        if (!m_pendingCalendarStateChanges.empty() || !m_pendingContactStateChanges.empty() ||
+            !m_pendingIdentityStateChanges.empty())
             m_refreshDebounceTimer.start();
     }
 

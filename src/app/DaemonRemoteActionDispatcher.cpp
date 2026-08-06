@@ -8,6 +8,7 @@
 #include "app/DaemonServices.h"
 #include "app/DeveloperDiagnostics.h"
 #include "app/DeveloperMaintenance.h"
+#include "app/IdentityApplicationPorts.h"
 #include "app/MailApplicationPorts.h"
 #include "app/MailApplicationService.h"
 #include "app/MessageContentApplicationPorts.h"
@@ -120,6 +121,9 @@ namespace javelin::app
             case Kind::SieveDelete:
             case Kind::SieveActivate:
                 return {Domain::History};
+            case Kind::IdentitySave:
+            case Kind::IdentityDelete:
+                return {Domain::SenderIdentities};
             case Kind::AccountBootstrap:
                 return {Domain::MailboxTree, Domain::MailQueryWindows, Domain::MessageMetadata,
                         Domain::Contacts, Domain::Calendars};
@@ -157,6 +161,7 @@ namespace javelin::app
             case Kind::SieveList:
             case Kind::SieveGet:
             case Kind::SieveValidate:
+            case Kind::IdentityList:
             case Kind::MailboxObserve:
             case Kind::MailboxUnobserve:
             case Kind::UndoSnapshot:
@@ -733,6 +738,30 @@ namespace javelin::app
                 {
                     return launch(m_services.sieveCommandPort().setSieveScriptActive(
                         std::move(accountId), std::move(script), active, origin));
+                });
+        case Kind::IdentityList:
+            return decodeAndApply<std::string>(
+                command.payload, invalidPayload,
+                [&](std::string accountId)
+                {
+                    return launch(m_services.identityCommandPort().requestSenderIdentities(
+                        std::move(accountId)));
+                });
+        case Kind::IdentitySave:
+            return decodeAndApply<std::string, javelin::jmap::domain::Identity>(
+                command.payload, invalidPayload,
+                [&](std::string accountId, javelin::jmap::domain::Identity identity)
+                {
+                    return launch(m_services.identityCommandPort().saveSenderIdentity(
+                        std::move(accountId), std::move(identity)));
+                });
+        case Kind::IdentityDelete:
+            return decodeAndApply<std::string, std::string>(
+                command.payload, invalidPayload,
+                [&](std::string accountId, std::string identityId)
+                {
+                    return launch(m_services.identityCommandPort().deleteSenderIdentity(
+                        std::move(accountId), std::move(identityId)));
                 });
         case Kind::AccountBootstrap:
             return decodeAndApply<AccountBootstrapIntent>(

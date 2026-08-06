@@ -48,6 +48,7 @@ namespace javelin::app
     class DeveloperMaintenancePort;
     class MailCommandPort;
     class SieveCommandPort;
+    class IdentityCommandPort;
     class AccountRefreshPort;
     class MessageContentPort;
     class MessageListSessionFactoryPort;
@@ -163,6 +164,7 @@ namespace javelin::gui::shell
                             javelin::app::DeveloperMaintenancePort& developerMaintenancePort,
                             javelin::app::MailCommandPort& mailCommandPort,
                             javelin::app::SieveCommandPort& sieveCommandPort,
+                            javelin::app::IdentityCommandPort& identityCommandPort,
                             javelin::app::AccountRefreshPort& accountRefreshPort,
                             javelin::app::OnboardingPort& onboardingPort,
                             javelin::app::MessageContentPort& messageContentPort,
@@ -204,6 +206,8 @@ namespace javelin::gui::shell
         void openContacts();
         void openCalendar();
         void openSieveEditor();
+        void openSendingIdentities();
+        void openSendingIdentitiesFor(QString accountId, QString identityId);
         void composeReply();
         void composeReplyAll();
         void composeForward();
@@ -307,6 +311,7 @@ namespace javelin::gui::shell
         javelin::app::DeveloperMaintenancePort& m_developerMaintenancePort;
         javelin::app::MailCommandPort& m_mailCommandPort;
         javelin::app::SieveCommandPort& m_sieveCommandPort;
+        javelin::app::IdentityCommandPort& m_identityCommandPort;
         javelin::app::AccountRefreshPort& m_accountRefreshPort;
         javelin::app::OnboardingPort& m_onboardingPort;
         javelin::app::MessageContentPort& m_messageContentPort;
@@ -362,6 +367,7 @@ namespace javelin::gui::shell
         QAction* m_contactsAction = nullptr;
         QAction* m_calendarAction = nullptr;
         QAction* m_sieveAction = nullptr;
+        QAction* m_sendingIdentitiesAction = nullptr;
         QAction* m_replyAction = nullptr;
         QAction* m_replyAllAction = nullptr;
         QAction* m_forwardAction = nullptr;

@@ -1,5 +1,6 @@
 #include "gui/shell/ComposeTabController.h"
 
+#include "app/MailApplicationEventsPorts.h"
 #include "gui/compose/ComposeTabWidget.h"
 #include "gui/compose/ComposeUiPreferences.h"
 #include "gui/settings/ConnectionSettingsAdapter.h"
@@ -28,11 +29,27 @@ namespace javelin::gui::shell
         javelin::jmap::cache::AccountReader& accountReader,
         javelin::jmap::cache::IdentityReader& identityRepository,
         javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
-        QStackedWidget& contentStack, std::vector<TabState>& tabs, QObject* parent)
+        javelin::app::MailApplicationEventsPort& mailEvents, QStackedWidget& contentStack,
+        std::vector<TabState>& tabs, QObject* parent)
         : QObject(parent), m_settings(settings), m_composeCommandPort(composeCommandPort),
           m_accountReader(accountReader), m_identityRepository(identityRepository),
           m_contactIdentityLookup(contactIdentityLookup), m_contentStack(contentStack), m_tabs(tabs)
     {
+        connect(&mailEvents, &javelin::app::MailApplicationEventsPort::cacheInvalidated, this,
+                [this](const javelin::app::MailCacheInvalidation& invalidation)
+                {
+                    if (!invalidation.change.identitiesChanged)
+                        return;
+                    for (auto& tab : m_tabs)
+                    {
+                        auto* composeTab = std::get_if<ComposeTabState>(&tab.content);
+                        if (composeTab != nullptr && composeTab->widget != nullptr)
+                        {
+                            composeTab->widget->reloadSenderIdentities(
+                                invalidation.change.accountId);
+                        }
+                    }
+                });
     }
 
     void ComposeTabController::open(javelin::jmap::submission::OpenComposeRequest request)
@@ -161,6 +178,7 @@ namespace javelin::gui::shell
             return {};
         return {
             .richText = widget->richTextEnabled(),
+            .canSend = widget->canSend(),
             .canToggleRichText = !widget->operationInFlight(),
         };
     }
@@ -264,6 +282,10 @@ namespace javelin::gui::shell
                 &ComposeTabController::statusMessage);
         connect(widget, &javelin::gui::compose::ComposeTabWidget::toolbarStateChanged, this,
                 &ComposeTabController::toolbarStateChanged);
+        connect(widget, &javelin::gui::compose::ComposeTabWidget::manageIdentitiesRequested, this,
+                &ComposeTabController::manageIdentitiesRequested);
+        connect(widget, &javelin::gui::compose::ComposeTabWidget::manageIdentitiesRequested, this,
+                &ComposeTabController::manageIdentitiesRequested);
         connect(widget, &javelin::gui::compose::ComposeTabWidget::userInterventionRequired, this,
                 &ComposeTabController::userInterventionRequired);
         connect(widget, &javelin::gui::compose::ComposeTabWidget::closeRequested, this,

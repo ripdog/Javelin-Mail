@@ -79,6 +79,8 @@ namespace javelin::app
                                   const javelin::jmap::sync::AccountTypeStateMap& changedStates);
         void contactStateChanged(const QString& ownerAccountId,
                                  const javelin::jmap::sync::AccountTypeStateMap& changedStates);
+        void identityStateChanged(const QString& ownerAccountId,
+                                  const javelin::jmap::sync::AccountTypeStateMap& changedStates);
         void notificationRaised(const QString& accountId, const QString& mailboxId,
                                 const QString& threadId, const QString& emailId,
                                 const QString& mailboxName, const QString& title,
@@ -99,6 +101,7 @@ namespace javelin::app
             std::vector<std::string> groupwareAccountIds;
             bool calendarCapable = false;
             bool contactsCapable = false;
+            bool identitiesCapable = false;
         };
 
         struct RunContext
@@ -204,6 +207,7 @@ namespace javelin::app
         std::unordered_map<std::string, std::string> m_pendingStateChanges;
         javelin::jmap::sync::AccountTypeStateMap m_pendingCalendarStateChanges;
         javelin::jmap::sync::AccountTypeStateMap m_pendingContactStateChanges;
+        javelin::jmap::sync::AccountTypeStateMap m_pendingIdentityStateChanges;
         std::size_t m_generation = 0;
         Status m_status = Status::Disconnected;
         bool m_shouldCatchUpRefreshOnReconnect = false;

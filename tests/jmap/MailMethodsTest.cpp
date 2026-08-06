@@ -49,6 +49,94 @@ TEST_CASE("changes requests serialize typed state-token inputs", "[jmap][method]
     CHECK(*json == R"({"accountId":"u1","sinceState":"state-1","maxChanges":100})");
 }
 
+TEST_CASE("identity set creates serialize server-backed signature variants",
+          "[jmap][method][mail][identity]")
+{
+    const auto json = javelin::jmap::api::serializeIdentitySetRequest({
+        .accountId = "u1",
+        .ifInState = "identity-state-1",
+        .create =
+            {
+                {"signature-work",
+                 javelin::jmap::api::IdentitySetCreate{
+                     .name = "Johnson Clark",
+                     .email = "johnson@example.com",
+                     .replyTo = {},
+                     .bcc = {{{.name = std::nullopt, .email = "johnson+archive@example.com"}}},
+                     .textSignature = "Regards,\nJohnson",
+                     .htmlSignature = "<p>Regards,<br>Johnson</p>",
+                 }},
+            },
+        .update = {},
+        .destroy = {},
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(
+        *json ==
+        R"({"accountId":"u1","ifInState":"identity-state-1","create":{"signature-work":{"name":"Johnson Clark","email":"johnson@example.com","replyTo":[],"bcc":[{"email":"johnson+archive@example.com"}],"textSignature":"Regards,\nJohnson","htmlSignature":"<p>Regards,<br>Johnson</p>"}}})");
+}
+
+TEST_CASE("identity set updates never serialize immutable email", "[jmap][method][mail][identity]")
+{
+    const auto json = javelin::jmap::api::serializeIdentitySetRequest({
+        .accountId = "u1",
+        .ifInState = std::nullopt,
+        .create = {},
+        .update =
+            {
+                {"identity-1",
+                 javelin::jmap::api::IdentitySetUpdate{
+                     .name = "Johnson",
+                     .replyTo = std::vector<javelin::jmap::domain::EmailAddress>{},
+                     .bcc = std::vector<javelin::jmap::domain::EmailAddress>{},
+                     .textSignature = "-- \nJohnson",
+                     .htmlSignature = "<p>Johnson</p>",
+                 }},
+            },
+        .destroy = {"identity-old"},
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(json->find(R"("identity-1":{"name":"Johnson")") != std::string::npos);
+    CHECK(json->find(R"("textSignature":"-- \nJohnson")") != std::string::npos);
+    CHECK(json->find(R"("destroy":["identity-old"])") != std::string::npos);
+    CHECK(json->find(R"("email")") == std::string::npos);
+}
+
+TEST_CASE("identity changes responses preserve incremental ids", "[jmap][method][mail][identity]")
+{
+    const auto result = javelin::jmap::api::parseIdentityChangesResponse(
+        R"({"accountId":"u1","oldState":"i1","newState":"i2","hasMoreChanges":false,"created":["identity-new"],"updated":["identity-updated"],"destroyed":["identity-old"]})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->oldState == "i1");
+    CHECK(result.value->newState == "i2");
+    CHECK(result.value->created == std::vector<std::string>{"identity-new"});
+    CHECK(result.value->updated == std::vector<std::string>{"identity-updated"});
+    CHECK(result.value->destroyed == std::vector<std::string>{"identity-old"});
+}
+
+TEST_CASE("identity set responses retain structured per-object errors",
+          "[jmap][method][mail][identity]")
+{
+    const auto result = javelin::jmap::api::parseIdentitySetResponse(
+        R"({"accountId":"u1","oldState":"i1","newState":"i2","created":{"signature-work":{"id":"identity-2"}},"updated":{"identity-1":null},"destroyed":["identity-old"],"notCreated":{"blocked":{"type":"forbiddenFrom","description":"Address is not permitted","properties":["email"]}},"notUpdated":{"missing":{"type":"notFound"}},"notDestroyed":{}})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->created.at("signature-work") == "identity-2");
+    CHECK(result.value->updated == std::vector<std::string>{"identity-1"});
+    CHECK(result.value->destroyed == std::vector<std::string>{"identity-old"});
+    REQUIRE(result.value->notCreated.contains("blocked"));
+    CHECK(result.value->notCreated.at("blocked").type == "forbiddenFrom");
+    CHECK(result.value->notCreated.at("blocked").description ==
+          std::optional<std::string>{"Address is not permitted"});
+    CHECK(result.value->notCreated.at("blocked").properties == std::vector<std::string>{"email"});
+    CHECK(result.value->notUpdated.at("missing").type == "notFound");
+}
+
 TEST_CASE("email query requests serialize mailbox-scoped sort windows", "[jmap][method][mail]")
 {
     const auto json = javelin::jmap::api::serializeEmailQueryRequest({

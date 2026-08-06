@@ -28,7 +28,7 @@ namespace javelin::jmap::sync
     [[nodiscard]] inline bool isGroupwareStateType(const std::string_view type)
     {
         return type == "Calendar" || type == "CalendarEvent" || type == "AddressBook" ||
-               type == "ContactCard";
+               type == "ContactCard" || type == "Identity";
     }
 
     [[nodiscard]] inline AccountTypeStateMap

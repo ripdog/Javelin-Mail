@@ -265,6 +265,12 @@ namespace javelin::app
             return QStringLiteral("sieve_delete");
         case Kind::SieveActivate:
             return QStringLiteral("sieve_activate");
+        case Kind::IdentityList:
+            return QStringLiteral("identity_list");
+        case Kind::IdentitySave:
+            return QStringLiteral("identity_save");
+        case Kind::IdentityDelete:
+            return QStringLiteral("identity_delete");
         case Kind::AccountBootstrap:
             return QStringLiteral("account_bootstrap");
         case Kind::MessageContent:

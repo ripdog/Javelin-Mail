@@ -154,6 +154,7 @@ namespace javelin::app
         m_developerMaintenance = std::make_unique<RemoteDeveloperMaintenancePort>(*m_remoteClient);
         m_mailCommands = std::make_unique<RemoteMailCommandPort>(*m_remoteClient);
         m_sieveCommands = std::make_unique<RemoteSieveCommandPort>(*m_remoteClient);
+        m_identityCommands = std::make_unique<RemoteIdentityCommandPort>(*m_remoteClient);
         m_accountRefresh = std::make_unique<RemoteAccountRefreshPort>(m_session, *m_remoteClient);
         m_messageContent = std::make_unique<RemoteMessageContentPort>(*m_remoteClient);
         m_materialization = std::make_unique<RemoteMessageListMaterializationPort>(*m_remoteClient);
@@ -260,6 +261,10 @@ namespace javelin::app
     SieveCommandPort& GuiServices::sieveCommandPort()
     {
         return *m_sieveCommands;
+    }
+    IdentityCommandPort& GuiServices::identityCommandPort()
+    {
+        return *m_identityCommands;
     }
     AccountRefreshPort& GuiServices::accountRefreshPort()
     {

@@ -19,6 +19,8 @@ namespace javelin::jmap::cache
         bool isReadOnly = false;
         bool isPrimary = false;
         bool hasMailCapability = false;
+        std::string ownerAccountId;
+        bool hasSubmissionCapability = false;
     };
 
     class AccountReader

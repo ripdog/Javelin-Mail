@@ -147,6 +147,8 @@ add_executable(javelin_jmap_tests
     jmap/HtmlBodyEmbeddingTest.cpp
     jmap/HtmlMessageDocumentBuilderTest.cpp
     jmap/HtmlTextExtractorTest.cpp
+    jmap/IdentityRepositoryTest.cpp
+    jmap/IdentityServiceTest.cpp
     jmap/InlineMessageUrlTest.cpp
     jmap/JmapCoreMessageContentTest.cpp
     jmap/JmapCoreTest.cpp
@@ -214,6 +216,8 @@ add_executable(javelin_jmap_tests
     gui/GuiSettingsTest.cpp
     gui/ComposeTabPolicyTest.cpp
     gui/ComposeBodyConverterTest.cpp
+    gui/IdentityPresentationTest.cpp
+    gui/SignatureTrackingPolicyTest.cpp
     gui/MailboxSelectionTest.cpp
     gui/MailboxSortTest.cpp
     gui/MessageActionPolicyTest.cpp
@@ -242,6 +246,8 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/gui/shell/ComposeTabPolicy.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/compose/ComposeBodyConverter.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/compose/ComposeUiPreferences.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/compose/IdentityPresentation.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/compose/SignatureTrackingPolicy.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/mailboxes/MailboxSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageActionSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageListModel.cpp

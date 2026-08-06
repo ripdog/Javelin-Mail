@@ -1,16 +1,38 @@
 #include "app/StateChangePolicy.h"
+#include "jmap/sync/StateChangeSource.h"
 
 #include <catch2/catch_test_macros.hpp>
 
 TEST_CASE("state-change subscriptions include supported groupware data types", "[app][sync]")
 {
-    CHECK(javelin::app::subscribedStateChangeTypes({.calendar = false, .contacts = false}) ==
+    CHECK(javelin::app::subscribedStateChangeTypes(
+              {.calendar = false, .contacts = false, .identities = false}) ==
           std::vector<std::string>{"Email", "Mailbox"});
-    CHECK(javelin::app::subscribedStateChangeTypes({.calendar = false, .contacts = true}) ==
-          std::vector<std::string>{"Email", "Mailbox", "AddressBook", "ContactCard"});
-    CHECK(javelin::app::subscribedStateChangeTypes({.calendar = true, .contacts = true}) ==
-          std::vector<std::string>{"Email", "Mailbox", "Calendar", "CalendarEvent", "AddressBook",
-                                   "ContactCard"});
+    CHECK(javelin::app::subscribedStateChangeTypes(
+              {.calendar = false, .contacts = true, .identities = true}) ==
+          std::vector<std::string>{"Email", "Mailbox", "Identity", "AddressBook", "ContactCard"});
+    CHECK(javelin::app::subscribedStateChangeTypes(
+              {.calendar = true, .contacts = true, .identities = true}) ==
+          std::vector<std::string>{"Email", "Mailbox", "Identity", "Calendar", "CalendarEvent",
+                                   "AddressBook", "ContactCard"});
+}
+
+TEST_CASE("secondary Identity changes survive subscription filtering", "[app][sync][identity]")
+{
+    const javelin::jmap::sync::StateChangeSubscription subscription{
+        .accountId = "owner-account",
+        .lastState = {},
+        .types = {"Email", "Mailbox", "Identity"},
+        .groupwareAccountIds = {"owner-account", "identity-account"},
+    };
+    const auto filtered = javelin::jmap::sync::subscribedStateChanges(
+        subscription,
+        {{"owner-account", {{"Email", "mail-2"}}},
+         {"identity-account", {{"Identity", "identity-2"}, {"Email", "secondary-mail-2"}}}});
+
+    CHECK(filtered == javelin::jmap::sync::AccountTypeStateMap{
+                          {"owner-account", {{"Email", "mail-2"}}},
+                          {"identity-account", {{"Identity", "identity-2"}}}});
 }
 
 TEST_CASE("contact state changes are routed away from mail refresh", "[app][sync]")
@@ -18,7 +40,10 @@ TEST_CASE("contact state changes are routed away from mail refresh", "[app][sync
     auto routed = javelin::app::routeStateChanges(
         {
             {"mail-account",
-             {{"Email", "mail-2"}, {"Mailbox", "boxes-2"}, {"CalendarEvent", "calendar-2"}}},
+             {{"Email", "mail-2"},
+              {"Mailbox", "boxes-2"},
+              {"Identity", "identities-2"},
+              {"CalendarEvent", "calendar-2"}}},
             {"contacts-account", {{"AddressBook", "books-2"}, {"ContactCard", "contacts-2"}}},
         },
         "mail-account");
@@ -30,6 +55,8 @@ TEST_CASE("contact state changes are routed away from mail refresh", "[app][sync
     CHECK(routed.contactStates ==
           javelin::jmap::sync::AccountTypeStateMap{
               {"contacts-account", {{"AddressBook", "books-2"}, {"ContactCard", "contacts-2"}}}});
+    CHECK(routed.identityStates == javelin::jmap::sync::AccountTypeStateMap{
+                                       {"mail-account", {{"Identity", "identities-2"}}}});
 }
 
 TEST_CASE("unfinished contact refresh jobs are restored after restart", "[app][sync]")

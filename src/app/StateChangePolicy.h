@@ -17,6 +17,7 @@ namespace javelin::app
     {
         bool calendar = false;
         bool contacts = false;
+        bool identities = false;
     };
 
     struct RoutedStateChanges
@@ -24,12 +25,15 @@ namespace javelin::app
         std::unordered_map<std::string, std::string> mailStates;
         javelin::jmap::sync::AccountTypeStateMap calendarStates;
         javelin::jmap::sync::AccountTypeStateMap contactStates;
+        javelin::jmap::sync::AccountTypeStateMap identityStates;
     };
 
     [[nodiscard]] inline std::vector<std::string>
     subscribedStateChangeTypes(const StateChangeCapabilities capabilities)
     {
         std::vector<std::string> types{"Email", "Mailbox"};
+        if (capabilities.identities)
+            types.emplace_back("Identity");
         if (capabilities.calendar)
         {
             types.emplace_back("Calendar");
@@ -111,6 +115,12 @@ namespace javelin::app
                 {
                     routed.contactStates[accountId].insert_or_assign(std::move(type),
                                                                      std::move(state));
+                    continue;
+                }
+                if (type == "Identity")
+                {
+                    routed.identityStates[accountId].insert_or_assign(std::move(type),
+                                                                      std::move(state));
                     continue;
                 }
                 if (accountId == primaryAccountId)

@@ -16,6 +16,7 @@
 #include "app/DeveloperDiagnosticsService.h"
 #include "app/DeveloperMaintenanceService.h"
 #include "app/FullMailSyncService.h"
+#include "app/IdentityCommandService.h"
 #include "app/LocalMaintenanceService.h"
 #include "app/MailApplicationEventsService.h"
 #include "app/MailApplicationService.h"
@@ -50,9 +51,12 @@
 #include "jmap/cache/SubmissionRepository.h"
 #include "jmap/calendar/CalendarService.h"
 #include "jmap/contacts/ContactService.h"
+#include "jmap/identity/IdentityService.h"
 #include "jmap/sieve/SieveService.h"
 #include "jmap/submission/ComposeService.h"
 #include "jmap/sync/MutationJournal.h"
+
+#include <QCoroTask>
 
 #include <cstdint>
 #include <memory>
@@ -149,6 +153,8 @@ namespace javelin::app
             m_databaseConnection, *m_methodTransport);
         m_sieveService = std::make_unique<javelin::jmap::sieve::SieveService>(
             m_databaseConnection, *m_transport, *m_methodTransport);
+        m_identityService = std::make_unique<javelin::jmap::identity::IdentityService>(
+            m_databaseConnection, *m_methodTransport);
         m_identityRepository =
             std::make_unique<javelin::jmap::cache::IdentityRepository>(m_databaseConnection);
         m_messageViewService =
@@ -174,6 +180,35 @@ namespace javelin::app
             { m_fullMailSyncService->requestMailboxResync(accountId, mailboxId); });
         m_mailCommandService = std::make_unique<MailCommandService>(*m_mailService);
         m_sieveCommandService = std::make_unique<SieveCommandService>(*m_mailService);
+        m_identityCommandService = std::make_unique<IdentityCommandService>(
+            *m_identityService, *m_accountRepository, *m_mailService, *m_errorCoordinator,
+            *m_workScheduler, *m_mailService);
+        const auto refreshIdentityAccount = [this](const QString& accountId)
+        {
+            auto task = m_identityCommandService->requestSenderIdentities(accountId.toStdString());
+            QCoro::connect(std::move(task), m_mailService.get(), [](const auto&) {});
+        };
+        const auto refreshOwnedIdentityAccounts =
+            [this, refreshIdentityAccount](const QString& ownerAccountId)
+        {
+            const auto accounts = m_accountRepository->listOwnedBy(ownerAccountId.toStdString());
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&accounts))
+            {
+                qWarning().noquote()
+                    << "Could not enumerate sender Identity accounts" << error->message;
+                return;
+            }
+            for (const auto& account :
+                 std::get<std::vector<javelin::jmap::cache::CachedAccount>>(accounts))
+            {
+                if (account.hasSubmissionCapability)
+                    refreshIdentityAccount(QString::fromStdString(account.accountId));
+            }
+        };
+        QObject::connect(m_mailService.get(), &MailApplicationService::senderIdentityStateChanged,
+                         m_mailService.get(), refreshIdentityAccount);
+        QObject::connect(m_mailService.get(), &MailApplicationService::sessionCapabilitiesChanged,
+                         m_mailService.get(), refreshOwnedIdentityAccounts);
         m_accountRefreshCommandService =
             std::make_unique<AccountRefreshCommandService>(*m_mailService);
         m_messageContentCommandService =
@@ -346,6 +381,11 @@ namespace javelin::app
     SieveCommandPort& DaemonServices::sieveCommandPort()
     {
         return *m_sieveCommandService;
+    }
+
+    IdentityCommandPort& DaemonServices::identityCommandPort()
+    {
+        return *m_identityCommandService;
     }
 
     AccountRefreshPort& DaemonServices::accountRefreshPort()

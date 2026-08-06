@@ -114,8 +114,11 @@ TEST_CASE("application errors are deduplicated and rearmed after recovery")
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDirectory.path());
 
     StubAccountReader accountReader;
-    accountReader.accounts.push_back(
-        {.accountId = "account-a", .name = "Personal mail", .isPrimary = true});
+    accountReader.accounts.push_back({.accountId = "account-a",
+                                      .name = "Personal mail",
+                                      .isPrimary = true,
+                                      .ownerAccountId = "account-a",
+                                      .hasSubmissionCapability = true});
     javelin::app::ApplicationErrorCoordinator coordinator{accountReader};
     const javelin::app::AccountConnectionSettings settings{
         .connectionId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),

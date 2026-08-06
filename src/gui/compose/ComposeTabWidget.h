@@ -3,6 +3,7 @@
 #include "app/ComposeApplicationPorts.h"
 #include "jmap/submission/ComposeTypes.h"
 
+#include <QTextCursor>
 #include <QWidget>
 
 #include <optional>
@@ -20,6 +21,7 @@ class QHBoxLayout;
 class QImage;
 class QLabel;
 class QLineEdit;
+class QMenu;
 class QScrollArea;
 class QTabWidget;
 class QTimer;
@@ -71,6 +73,7 @@ namespace javelin::gui::compose
         [[nodiscard]] bool isEmptyDraft() const;
         [[nodiscard]] bool closeWithoutPrompt() const;
         [[nodiscard]] bool operationInFlight() const;
+        [[nodiscard]] bool canSend() const;
         [[nodiscard]] bool richTextEnabled() const;
 
         void saveDraftAndClose();
@@ -80,6 +83,7 @@ namespace javelin::gui::compose
         void attachFiles();
         void saveDraft();
         void sendMessage();
+        void reloadSenderIdentities(const QString& changedAccountId = {});
 
       protected:
         void dragEnterEvent(QDragEnterEvent* event) override;
@@ -93,6 +97,7 @@ namespace javelin::gui::compose
         void userInterventionRequired(const QString& message);
         void closeRequested();
         void toolbarStateChanged();
+        void manageIdentitiesRequested(QString accountId, QString identityId);
 
       private:
         enum class DeferredOperation
@@ -106,7 +111,14 @@ namespace javelin::gui::compose
         void setupUi();
         void createToolbarActions();
         void loadIdentities();
+        void refreshSignatureMenu();
         void applySnapshotToUi();
+        void initializeSignatureTracking();
+        void replaceTrackedSignatureForIndex(int index, bool forceInsert = false);
+        void removeTrackedSignature();
+        [[nodiscard]] QString signaturePlainTextForIndex(int index) const;
+        [[nodiscard]] QString signatureHtmlForIndex(int index) const;
+        [[nodiscard]] int defaultSignatureInsertionPosition() const;
         void populateAttachments();
         void refreshPreview();
         void syncSnapshotFromUi();
@@ -147,10 +159,19 @@ namespace javelin::gui::compose
         bool m_operationInFlight = false;
         bool m_closeWithoutPrompt = false;
         bool m_closeAfterSave = false;
+        bool m_signatureProgrammaticEdit = false;
+        bool m_signatureTracked = false;
+        bool m_signatureCustom = false;
+        bool m_signatureExplicitlyRemoved = false;
+        int m_signatureInsertionPosition = 0;
+        int m_previousIdentityIndex = -1;
+        QTextCursor m_signatureCursor;
         std::size_t m_pendingInlineImageJobs = 0;
         DeferredOperation m_deferredOperation = DeferredOperation::None;
         QTimer* m_autosaveTimer = nullptr;
         QComboBox* m_fromCombo = nullptr;
+        QToolButton* m_signatureButton = nullptr;
+        QMenu* m_signatureMenu = nullptr;
         QLineEdit* m_toEdit = nullptr;
         QLineEdit* m_ccEdit = nullptr;
         QLineEdit* m_bccEdit = nullptr;

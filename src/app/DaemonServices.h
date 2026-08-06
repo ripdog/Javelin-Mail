@@ -40,6 +40,8 @@ namespace javelin::app
     class MailCommandService;
     class SieveCommandPort;
     class SieveCommandService;
+    class IdentityCommandPort;
+    class IdentityCommandService;
     class AccountRefreshPort;
     class AccountRefreshCommandService;
     class MessageContentPort;
@@ -115,6 +117,10 @@ namespace javelin::jmap::sieve
 {
     class SieveService;
 }
+namespace javelin::jmap::identity
+{
+    class IdentityService;
+}
 
 namespace javelin::app
 {
@@ -148,6 +154,7 @@ namespace javelin::app
         [[nodiscard]] ComposeCommandPort& composeCommandPort();
         [[nodiscard]] MailCommandPort& mailCommandPort();
         [[nodiscard]] SieveCommandPort& sieveCommandPort();
+        [[nodiscard]] IdentityCommandPort& identityCommandPort();
         [[nodiscard]] AccountRefreshPort& accountRefreshPort();
         [[nodiscard]] MessageContentPort& messageContentPort();
         [[nodiscard]] MessageListSessionFactoryPort& messageListSessionFactory();
@@ -199,6 +206,7 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::calendar::CalendarService> m_calendarService;
         std::unique_ptr<CalendarCommandService> m_calendarCommandService;
         std::unique_ptr<javelin::jmap::sieve::SieveService> m_sieveService;
+        std::unique_ptr<javelin::jmap::identity::IdentityService> m_identityService;
         std::unique_ptr<javelin::jmap::cache::IdentityRepository> m_identityRepository;
         std::unique_ptr<javelin::jmap::cache::MessageViewService> m_messageViewService;
         std::unique_ptr<javelin::jmap::cache::QueryService> m_queryService;
@@ -212,6 +220,7 @@ namespace javelin::app
         std::unique_ptr<MailApplicationService> m_mailService;
         std::unique_ptr<MailCommandService> m_mailCommandService;
         std::unique_ptr<SieveCommandService> m_sieveCommandService;
+        std::unique_ptr<IdentityCommandService> m_identityCommandService;
         std::unique_ptr<AccountRefreshCommandService> m_accountRefreshCommandService;
         std::unique_ptr<MessageContentCommandService> m_messageContentCommandService;
         std::unique_ptr<MailApplicationEventsService> m_mailApplicationEventsService;

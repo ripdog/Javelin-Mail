@@ -37,7 +37,8 @@ namespace
     }
 
     void seedAccount(javelin::jmap::cache::DatabaseConnection& connection, const QString& accountId,
-                     const QString& name, const bool isPrimary, const bool hasMailCapability = true)
+                     const QString& name, const bool isPrimary, const bool hasMailCapability = true,
+                     const bool hasSubmissionCapability = false, const QString& ownerAccountId = {})
     {
         QSqlQuery query{connection.database()};
         query.prepare(QStringLiteral(
@@ -55,8 +56,9 @@ namespace
         query.bindValue(QStringLiteral(":is_personal"), 1);
         query.bindValue(QStringLiteral(":is_read_only"), 0);
         query.bindValue(QStringLiteral(":cap_mail"), hasMailCapability ? 1 : 0);
-        query.bindValue(QStringLiteral(":cap_submission"), 0);
-        query.bindValue(QStringLiteral(":owner_account_id"), accountId);
+        query.bindValue(QStringLiteral(":cap_submission"), hasSubmissionCapability ? 1 : 0);
+        query.bindValue(QStringLiteral(":owner_account_id"),
+                        ownerAccountId.isEmpty() ? accountId : ownerAccountId);
         REQUIRE(query.exec());
     }
 
@@ -79,7 +81,8 @@ TEST_CASE("account read repository uses a GUI read-only connection", "[jmap][cac
     auto writer = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(writerResult));
     seedAccount(writer, QStringLiteral("work"), QStringLiteral("Work"), false);
     seedAccount(writer, QStringLiteral("personal"), QStringLiteral("Personal"), true);
-    seedAccount(writer, QStringLiteral("directory"), QStringLiteral("Directory"), false, false);
+    seedAccount(writer, QStringLiteral("directory"), QStringLiteral("Directory"), false, false,
+                true, QStringLiteral("personal"));
     writer = {};
 
     auto readerResult = javelin::jmap::cache::GuiDatabaseFactory{
@@ -101,6 +104,8 @@ TEST_CASE("account read repository uses a GUI read-only connection", "[jmap][cac
     CHECK(accounts.front().hasMailCapability);
     CHECK(accounts.at(1).accountId == "directory");
     CHECK_FALSE(accounts.at(1).hasMailCapability);
+    CHECK(accounts.at(1).hasSubmissionCapability);
+    CHECK(accounts.at(1).ownerAccountId == "personal");
     CHECK(accounts.back().accountId == "work");
 
     const auto personalResult = repository.findById("personal");
@@ -118,6 +123,8 @@ TEST_CASE("account read repository uses a GUI read-only connection", "[jmap][cac
         std::get<std::optional<javelin::jmap::cache::CachedAccount>>(directoryResult);
     REQUIRE(directory.has_value());
     CHECK_FALSE(directory->hasMailCapability);
+    CHECK(directory->hasSubmissionCapability);
+    CHECK(directory->ownerAccountId == "personal");
 
     const auto missingResult = repository.findById("missing");
     REQUIRE(

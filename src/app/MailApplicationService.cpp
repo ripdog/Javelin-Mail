@@ -2905,6 +2905,17 @@ namespace javelin::app
                     static_cast<void>(changedStates);
                     scheduleContactRefresh(ownerAccountId.toStdString());
                 });
+        connect(&coordinator, &AccountSyncCoordinator::identityStateChanged, this,
+                [this](const QString& ownerAccountId, const auto& changedStates)
+                {
+                    static_cast<void>(ownerAccountId);
+                    for (const auto& [changedAccountId, states] : changedStates)
+                    {
+                        if (states.contains("Identity"))
+                            Q_EMIT senderIdentityStateChanged(
+                                QString::fromStdString(changedAccountId));
+                    }
+                });
         connect(&coordinator, &AccountSyncCoordinator::calendarStateChanged, this,
                 [this](const QString& ownerAccountId, const auto& changedStates)
                 {

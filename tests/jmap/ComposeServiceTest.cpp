@@ -109,9 +109,34 @@ namespace
         return session;
     }
 
+    [[nodiscard]] javelin::jmap::api::Session
+    secondarySessionFor(const std::string& ownerAccountId, const std::string& targetAccountId,
+                        const std::string& apiUrl)
+    {
+        auto session = sessionFor(ownerAccountId, apiUrl);
+        session.accounts.at(ownerAccountId).accountCapabilities.submission = false;
+        session.accounts.emplace(targetAccountId, javelin::jmap::api::Account{
+                                                      .id = targetAccountId,
+                                                      .name = targetAccountId,
+                                                      .isPersonal = false,
+                                                      .isReadOnly = false,
+                                                      .accountCapabilities =
+                                                          {
+                                                              .mail = true,
+                                                              .submission = true,
+                                                              .contacts = std::nullopt,
+                                                              .calendars = std::nullopt,
+                                                          },
+                                                  });
+        session.primaryAccounts.submissionAccountId = targetAccountId;
+        return session;
+    }
+
     void seedAccount(javelin::jmap::cache::DatabaseConnection& connection,
                      const std::string& accountId, const std::string& apiUrl,
-                     const std::string& identityId, const std::string& fromAddress)
+                     const std::string& identityId, const std::string& fromAddress,
+                     std::optional<std::string> textSignature = std::nullopt,
+                     std::optional<std::string> htmlSignature = std::nullopt)
     {
         javelin::jmap::cache::SessionRepository sessions{connection};
         REQUIRE_FALSE(sessions.replace(accountId, sessionFor(accountId, apiUrl)).has_value());
@@ -159,8 +184,8 @@ namespace
                                               .email = fromAddress,
                                               .replyTo = {},
                                               .bcc = {},
-                                              .textSignature = std::nullopt,
-                                              .htmlSignature = std::nullopt,
+                                              .textSignature = std::move(textSignature),
+                                              .htmlSignature = std::move(htmlSignature),
                                               .mayDelete = false,
                                           },
                                       })
@@ -186,6 +211,55 @@ namespace
     }
 
 } // namespace
+
+TEST_CASE("compose uses owner credentials for a secondary submission account",
+          "[jmap][submission][compose][multi-account]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("compose-secondary-account-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(
+        sessions
+            .replace("owner-account", secondarySessionFor("owner-account", "sending-account",
+                                                          "https://example.test/jmap"))
+            .has_value());
+
+    FakeTransport transport;
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral(
+            R"({"methodResponses":[["Identity/get",{"accountId":"sending-account","state":"i1","list":[{"id":"identity-1","name":"Alice","email":"alice@example.test","replyTo":null,"bcc":null,"textSignature":"","htmlSignature":"","mayDelete":true}],"notFound":[]},"identities"]],"sessionState":"s2"})"),
+    });
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::JmapCore core{connection, transport, methodTransport};
+    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+
+    const auto result = QCoro::waitFor(service.loadSenderIdentities(
+        {
+            .sessionUrl = "https://example.test/session",
+            .loginEmail = "shared-login@example.test",
+            .apiKey = "owner-secret",
+        },
+        "sending-account"));
+
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::domain::Identity>>(result));
+    REQUIRE(transport.requests.size() == 1);
+    QByteArray authorization;
+    for (const auto& header : transport.requests.front().headers)
+    {
+        if (header.name.compare("Authorization", Qt::CaseInsensitive) == 0)
+            authorization = header.value;
+    }
+    CHECK(authorization == QByteArrayLiteral("Bearer owner-secret"));
+    CHECK(transport.requests.front().body.contains("\"accountId\":\"sending-account\""));
+}
 
 TEST_CASE("new compose sessions use the requested editor mode", "[jmap][submission][compose]")
 {
@@ -226,6 +300,51 @@ TEST_CASE("new compose sessions use the requested editor mode", "[jmap][submissi
     REQUIRE(std::holds_alternative<javelin::jmap::submission::DraftSnapshot>(result));
     CHECK(std::get<javelin::jmap::submission::DraftSnapshot>(result).editorMode ==
           javelin::jmap::submission::BodyEditorMode::PlainText);
+    CHECK(transport.requests.empty());
+}
+
+TEST_CASE("new compose sessions place the selected Identity signature after an empty authored area",
+          "[jmap][submission][compose][signature]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("compose-identity-signature-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    seedAccount(connection, "account-2", "https://account-2.example.test/jmap", "identity-2",
+                "sender@example.test", "Regards,\nAlice", "<p>Regards,<br>Alice</p>");
+
+    FakeTransport transport;
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::JmapCore core{connection, transport, methodTransport};
+    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+
+    const auto result = QCoro::waitFor(service.open(
+        {
+            .sessionUrl = "https://account-2.example.test/.well-known/jmap",
+            .loginEmail = "shared-login@example.test",
+            .apiKey = "account-2-secret",
+        },
+        {
+            .accountId = "account-2",
+            .mode = javelin::jmap::submission::ComposeMode::NewMessage,
+            .initialEditorMode = javelin::jmap::submission::BodyEditorMode::RichText,
+            .referenceEmailId = std::nullopt,
+            .draftEmailId = std::nullopt,
+            .initialTo = {},
+            .useExistingWorkingCopy = false,
+            .composeSessionId = "signature-compose",
+        }));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::submission::DraftSnapshot>(result));
+    const auto& snapshot = std::get<javelin::jmap::submission::DraftSnapshot>(result);
+    CHECK(snapshot.identityId == "identity-2");
+    CHECK(snapshot.plainTextBody == "\nRegards,\nAlice");
+    CHECK(snapshot.htmlBody == "<p><br/></p><p>Regards,<br>Alice</p>");
     CHECK(transport.requests.empty());
 }
 

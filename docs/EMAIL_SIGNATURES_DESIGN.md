@@ -2,9 +2,9 @@
 
 ## Status
 
-This document defines Javelin's intended email-signature implementation. JMAP `Identity` objects are
-the sole authoritative store for signatures. SQLite contains only the disposable synchronized cache
-and optimistic mutation state required to present and edit them.
+Implemented in August 2026. This document defines Javelin's email-signature implementation. JMAP
+`Identity` objects are the sole authoritative store for signatures. SQLite contains only the
+disposable synchronized cache and optimistic mutation state required to present and edit them.
 
 There is no local signature library, no imported copy of a server signature, and no signature body in
 `QSettings`.
@@ -58,26 +58,23 @@ not part of the initial signature implementation and would not duplicate signatu
 
 ## Current implementation
 
-Javelin already:
+Javelin now:
 
-- parses `Identity.textSignature`, `Identity.htmlSignature`, and `mayDelete`;
-- caches those fields in the `identities` SQLite table;
-- reads identities through the GUI's read-only `IdentityReader`;
-- passes the chosen `identityId` to EmailSubmission; and
-- inserts the first available identity's server signature when opening a new message.
-
-The current implementation is incomplete in several important ways:
-
-- only `Identity/get` exists; there is no `Identity/set` or `Identity/changes` implementation;
-- identities are loaded on demand by compose rather than maintained as a synchronized cache domain;
-- the From selector deduplicates identities by email address;
-- new messages always start from the first sender identity;
-- replies and forwards do not receive the selected identity's signature;
-- changing identity does not safely replace an automatically inserted signature; and
-- there is no user interface for creating, duplicating, editing, or deleting identities.
-
-The email-address deduplication is directly incompatible with RFC 8621's multiple-identity model and
-must be removed.
+- implements typed `Identity/get`, `Identity/changes`, and `Identity/set`, including structured
+  per-object SetErrors;
+- synchronizes Identity state at account startup and from push notifications, with incremental
+  pagination and safe full-refresh fallback;
+- stores confirmed identities, state tokens, optimistic updates/deletes, and pending creates in the
+  disposable SQLite cache;
+- supports identities belonging to secondary JMAP submission accounts while using the configured
+  owner account for credentials and session state;
+- exposes every confirmed identity in compose, including duplicate-email signature variants;
+- provides a standalone server-backed identity and signature manager for create, duplicate, edit,
+  delete, revert, and refresh operations;
+- inserts the selected identity signature exactly once for new messages, replies, reply-all, and
+  forwards, while preserving existing drafts and working copies verbatim; and
+- tracks automatically inserted signatures so unmodified signatures follow identity and format
+  changes without overwriting user-customized or explicitly removed content.
 
 ## Storage and synchronization
 

@@ -4,7 +4,9 @@
 #include "gui/compose/ComposeBodyConverter.h"
 #include "gui/compose/ComposeUiPreferences.h"
 #include "gui/compose/ComposerInlineImageCodec.h"
+#include "gui/compose/IdentityPresentation.h"
 #include "gui/compose/JavelinComposerEdit.h"
+#include "gui/compose/SignatureTrackingPolicy.h"
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/GuiSettings.h"
@@ -42,6 +44,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLoggingCategory>
+#include <QMenu>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QMimeDatabase>
@@ -89,6 +92,10 @@ namespace javelin::gui::compose
         constexpr auto previewTabIndex = 1;
         constexpr auto senderIdentityIdRole = Qt::UserRole;
         constexpr auto senderAccountIdRole = Qt::UserRole + 1;
+        constexpr auto senderEmailRole = Qt::UserRole + 2;
+        constexpr auto senderTextSignatureRole = Qt::UserRole + 3;
+        constexpr auto senderHtmlSignatureRole = Qt::UserRole + 4;
+        constexpr auto senderBccRole = Qt::UserRole + 5;
 
         struct ImageInsertTiming
         {
@@ -561,24 +568,6 @@ namespace javelin::gui::compose
             std::function<void(bool)> m_embedAction;
         };
 
-        [[nodiscard]] QString identityDisplayText(const javelin::jmap::domain::Identity& identity,
-                                                  const QString& accountDisplayName)
-        {
-            const auto identityText =
-                !identity.name.empty()
-                    ? QStringLiteral("%1 <%2>").arg(QString::fromStdString(identity.name),
-                                                    QString::fromStdString(identity.email))
-                    : QString::fromStdString(identity.email);
-            return accountDisplayName.isEmpty()
-                       ? identityText
-                       : QStringLiteral("%1 — %2").arg(identityText, accountDisplayName);
-        }
-
-        [[nodiscard]] bool isWildcardSenderIdentity(const javelin::jmap::domain::Identity& identity)
-        {
-            return identity.email.starts_with("*@");
-        }
-
         [[nodiscard]] std::optional<javelin::app::AccountConnectionSettings>
         liveSettings(const javelin::gui::settings::GuiSettings& guiSettings,
                      const std::string_view accountId, QString* errorMessage = nullptr)
@@ -620,17 +609,34 @@ namespace javelin::gui::compose
         m_autosaveTimer->setInterval(350);
         connect(m_autosaveTimer, &QTimer::timeout, this, &ComposeTabWidget::persistWorkingCopy);
 
-        connect(m_fromCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
-                [this](int)
+        connect(
+            m_fromCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
+            [this](const int index)
+            {
+                if (m_syncingUi)
                 {
-                    if (m_syncingUi)
-                    {
-                        return;
-                    }
+                    return;
+                }
 
-                    syncSnapshotFromUi();
-                    scheduleWorkingCopySave();
-                });
+                if (m_previousIdentityIndex >= 0)
+                {
+                    const auto previousAutomaticBcc =
+                        m_fromCombo->itemData(m_previousIdentityIndex, senderBccRole).toString();
+                    if (m_bccEdit->text().trimmed() == previousAutomaticBcc.trimmed())
+                    {
+                        const auto nextAutomaticBcc =
+                            m_fromCombo->itemData(index, senderBccRole).toString();
+                        m_bccEdit->setText(nextAutomaticBcc);
+                        setOptionalRecipientVisible(m_bccRow, m_bccButton,
+                                                    !nextAutomaticBcc.isEmpty());
+                    }
+                }
+                replaceTrackedSignatureForIndex(index);
+                m_previousIdentityIndex = index;
+                syncSnapshotFromUi();
+                scheduleWorkingCopySave();
+                Q_EMIT toolbarStateChanged();
+            });
         for (auto* edit : {m_toEdit, m_ccEdit, m_bccEdit, m_subjectEdit})
         {
             connect(edit, &QLineEdit::textChanged, this,
@@ -660,6 +666,16 @@ namespace javelin::gui::compose
                     {
                         scheduleWorkingCopySave();
                     }
+                });
+        connect(m_richTextEdit->document(), &QTextDocument::contentsChange, this,
+                [this](const int position, const int removed, const int added)
+                {
+                    if (m_syncingUi || m_signatureProgrammaticEdit || !m_signatureTracked)
+                        return;
+                    if (changeTouchesTrackedSignature({.start = m_signatureCursor.selectionStart(),
+                                                       .end = m_signatureCursor.selectionEnd()},
+                                                      position, removed, added))
+                        m_signatureCustom = true;
                 });
         connect(m_richTextEdit, &QTextEdit::currentCharFormatChanged, this,
                 [this](const QTextCharFormat& format)
@@ -725,6 +741,15 @@ namespace javelin::gui::compose
     bool ComposeTabWidget::operationInFlight() const
     {
         return m_operationInFlight;
+    }
+
+    bool ComposeTabWidget::canSend() const
+    {
+        const auto index = m_fromCombo->currentIndex();
+        if (m_operationInFlight || index < 0)
+            return false;
+        return !m_fromCombo->itemData(index, senderAccountIdRole).toString().isEmpty() &&
+               !m_fromCombo->itemData(index, senderIdentityIdRole).toString().isEmpty();
     }
 
     bool ComposeTabWidget::richTextEnabled() const
@@ -812,8 +837,18 @@ namespace javelin::gui::compose
         auto* fromLabel = new QLabel(i18nc("@label email sender", "From"), headerWidget);
         fromLabel->setMinimumWidth(52);
         m_fromCombo = new QComboBox(headerWidget);
+        m_signatureButton = new QToolButton(headerWidget);
+        m_signatureButton->setText(i18n("Signature"));
+        m_signatureButton->setIcon(QIcon::fromTheme(QStringLiteral("mail-signature")));
+        m_signatureButton->setPopupMode(QToolButton::InstantPopup);
+        m_signatureButton->setAutoRaise(true);
+        m_signatureMenu = new QMenu(m_signatureButton);
+        m_signatureButton->setMenu(m_signatureMenu);
+        connect(m_signatureMenu, &QMenu::aboutToShow, this,
+                &ComposeTabWidget::refreshSignatureMenu);
         fromRow->addWidget(fromLabel);
         fromRow->addWidget(m_fromCombo, 1);
+        fromRow->addWidget(m_signatureButton);
         headerLayout->addLayout(fromRow);
 
         auto* toRow = new QHBoxLayout();
@@ -1006,9 +1041,19 @@ namespace javelin::gui::compose
         mailAccountIds.reserve(accounts->size());
         for (const auto& account : *accounts)
         {
-            if (account.hasMailCapability)
+            if (account.hasMailCapability && account.hasSubmissionCapability)
                 mailAccountIds.insert(account.accountId);
         }
+
+        struct SenderIdentityOption
+        {
+            QString accountId;
+            QString accountDisplayName;
+            javelin::jmap::domain::Identity identity;
+        };
+        std::vector<SenderIdentityOption> options;
+        std::unordered_map<std::string, std::size_t> identityCountByEmail;
+        std::unordered_set<std::string> accountsWithIdentities;
 
         m_fromCombo->clear();
         for (const auto& connection : m_settings.accounts())
@@ -1030,46 +1075,23 @@ namespace javelin::gui::compose
 
                 const auto& identities =
                     std::get<std::vector<javelin::jmap::domain::Identity>>(identitiesResult);
-                std::vector<const javelin::jmap::domain::Identity*> uniqueIdentities;
-                std::unordered_map<std::string, std::size_t> identityIndexByEmail;
+                bool hasSenderIdentity = false;
                 for (const auto& identity : identities)
                 {
                     if (isWildcardSenderIdentity(identity))
-                    {
                         continue;
-                    }
-
+                    hasSenderIdentity = true;
                     auto emailKey = QString::fromStdString(identity.email)
                                         .trimmed()
                                         .toCaseFolded()
                                         .toStdString();
-                    const auto existing = identityIndexByEmail.find(emailKey);
-                    if (existing == identityIndexByEmail.end())
-                    {
-                        identityIndexByEmail.emplace(std::move(emailKey), uniqueIdentities.size());
-                        uniqueIdentities.push_back(&identity);
-                    }
-                    else if (cachedAccountId == selectedAccountId &&
-                             QString::fromStdString(identity.id) == selectedIdentityId)
-                    {
-                        uniqueIdentities[existing->second] = &identity;
-                    }
-                }
-
-                const bool hasSenderIdentity = !uniqueIdentities.empty();
-                for (const auto* identity : uniqueIdentities)
-                {
-                    const int index = m_fromCombo->count();
-                    m_fromCombo->addItem(identityDisplayText(*identity, accountDisplayName));
-                    m_fromCombo->setItemData(index, QString::fromStdString(identity->id),
-                                             senderIdentityIdRole);
-                    m_fromCombo->setItemData(index, cachedAccountId, senderAccountIdRole);
-                    if (cachedAccountId == selectedAccountId &&
-                        QString::fromStdString(identity->id) == selectedIdentityId)
-                    {
-                        selectedIndex = index;
-                    }
-                    ++optionCount;
+                    ++identityCountByEmail[emailKey];
+                    accountsWithIdentities.insert(accountId);
+                    options.push_back({
+                        .accountId = cachedAccountId,
+                        .accountDisplayName = accountDisplayName,
+                        .identity = identity,
+                    });
                 }
 
                 if (!hasSenderIdentity && !m_identityLoadsStarted.contains(accountId) &&
@@ -1096,9 +1118,52 @@ namespace javelin::gui::compose
             }
         }
 
+        const bool includeAccountName = accountsWithIdentities.size() > 1;
+        for (const auto& option : options)
+        {
+            const auto emailKey = QString::fromStdString(option.identity.email)
+                                      .trimmed()
+                                      .toCaseFolded()
+                                      .toStdString();
+            const int index = m_fromCombo->count();
+            m_fromCombo->addItem(
+                composeIdentityDisplayText(option.identity, option.accountDisplayName,
+                                           identityCountByEmail[emailKey], includeAccountName));
+            m_fromCombo->setItemData(index, QString::fromStdString(option.identity.id),
+                                     senderIdentityIdRole);
+            m_fromCombo->setItemData(index, option.accountId, senderAccountIdRole);
+            m_fromCombo->setItemData(index, QString::fromStdString(option.identity.email),
+                                     senderEmailRole);
+            m_fromCombo->setItemData(index,
+                                     option.identity.textSignature.has_value()
+                                         ? QString::fromStdString(*option.identity.textSignature)
+                                         : QString{},
+                                     senderTextSignatureRole);
+            m_fromCombo->setItemData(index,
+                                     option.identity.htmlSignature.has_value()
+                                         ? QString::fromStdString(*option.identity.htmlSignature)
+                                         : QString{},
+                                     senderHtmlSignatureRole);
+            m_fromCombo->setItemData(index, formatAddresses(option.identity.bcc), senderBccRole);
+            if (option.accountId == selectedAccountId &&
+                QString::fromStdString(option.identity.id) == selectedIdentityId)
+            {
+                selectedIndex = index;
+            }
+        }
+        optionCount = static_cast<int>(options.size());
+
         if (selectedIndex >= 0)
         {
             m_fromCombo->setCurrentIndex(selectedIndex);
+        }
+        else if (!selectedIdentityId.isEmpty())
+        {
+            m_fromCombo->setPlaceholderText(i18n("Sender identity unavailable — choose another"));
+            m_fromCombo->setCurrentIndex(-1);
+            Q_EMIT statusMessageRequested(i18n("The draft's sender identity is no longer "
+                                               "available. Choose another sender before sending."),
+                                          10000);
         }
         else if (optionCount > 0)
         {
@@ -1109,6 +1174,210 @@ namespace javelin::gui::compose
             Q_EMIT statusMessageRequested(
                 i18n("No sender identities are available for configured accounts."), 10000);
         }
+        m_previousIdentityIndex = m_fromCombo->currentIndex();
+    }
+
+    void ComposeTabWidget::reloadSenderIdentities(const QString& changedAccountId)
+    {
+        const auto selectedAccountId = m_fromCombo->currentData(senderAccountIdRole).toString();
+        const bool replaceNativeSignature =
+            (changedAccountId.isEmpty() || changedAccountId == selectedAccountId) &&
+            m_signatureTracked && !m_signatureCustom && !m_signatureExplicitlyRemoved;
+        loadIdentities();
+        const auto selectedIdentityStillAvailable =
+            m_fromCombo->currentIndex() >= 0 &&
+            m_fromCombo->currentData(senderAccountIdRole).toString().toStdString() ==
+                m_snapshot.accountId &&
+            m_fromCombo->currentData(senderIdentityIdRole).toString().toStdString() ==
+                m_snapshot.identityId;
+        if (replaceNativeSignature && selectedIdentityStillAvailable)
+            replaceTrackedSignatureForIndex(m_fromCombo->currentIndex(), true);
+        Q_EMIT toolbarStateChanged();
+    }
+
+    QString ComposeTabWidget::signaturePlainTextForIndex(const int index) const
+    {
+        if (index < 0 || index >= m_fromCombo->count())
+            return {};
+        const auto text = m_fromCombo->itemData(index, senderTextSignatureRole).toString();
+        const auto html = m_fromCombo->itemData(index, senderHtmlSignatureRole).toString();
+        if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RichText &&
+            !html.isEmpty())
+            return plainTextFromHtml(html);
+        if (!text.isEmpty())
+            return text;
+        return html.isEmpty() ? QString{} : plainTextFromHtml(html);
+    }
+
+    QString ComposeTabWidget::signatureHtmlForIndex(const int index) const
+    {
+        if (index < 0 || index >= m_fromCombo->count())
+            return {};
+        const auto html = m_fromCombo->itemData(index, senderHtmlSignatureRole).toString();
+        if (!html.isEmpty())
+            return html;
+        const auto text = m_fromCombo->itemData(index, senderTextSignatureRole).toString();
+        return text.isEmpty() ? QString{} : htmlFromPlainText(text);
+    }
+
+    int ComposeTabWidget::defaultSignatureInsertionPosition() const
+    {
+        if (m_signatureInsertionPosition >= 0 &&
+            m_signatureInsertionPosition <= m_richTextEdit->document()->characterCount() - 1)
+            return m_signatureInsertionPosition;
+
+        for (auto block = m_richTextEdit->document()->begin(); block.isValid();
+             block = block.next())
+        {
+            const auto format = block.blockFormat();
+            if (std::abs(format.leftMargin() - 40.0) < 0.01 &&
+                std::abs(format.rightMargin() - 40.0) < 0.01)
+                return block.position();
+            if (block.text().contains(QStringLiteral("---------- Forwarded message ----------")))
+                return block.position();
+        }
+        return std::max(0, m_richTextEdit->document()->characterCount() - 1);
+    }
+
+    void ComposeTabWidget::initializeSignatureTracking()
+    {
+        m_signatureTracked = false;
+        m_signatureCustom = false;
+        m_signatureExplicitlyRemoved = false;
+        m_signatureInsertionPosition = -1;
+        const auto signature = signaturePlainTextForIndex(m_fromCombo->currentIndex());
+        if (signature.trimmed().isEmpty())
+        {
+            m_signatureInsertionPosition = defaultSignatureInsertionPosition();
+            return;
+        }
+        auto cursor = m_richTextEdit->document()->find(signature);
+        if (cursor.isNull())
+        {
+            m_signatureInsertionPosition = defaultSignatureInsertionPosition();
+            return;
+        }
+        m_signatureCursor = cursor;
+        m_signatureInsertionPosition = cursor.selectionStart();
+        m_signatureTracked = true;
+    }
+
+    void ComposeTabWidget::replaceTrackedSignatureForIndex(const int index, const bool forceInsert)
+    {
+        if (!shouldReplaceTrackedSignature(m_signatureTracked, m_signatureCustom,
+                                           m_signatureExplicitlyRemoved, forceInsert))
+            return;
+
+        const auto plain = signaturePlainTextForIndex(index);
+        const auto html = signatureHtmlForIndex(index);
+        const bool wasTracked = m_signatureTracked;
+        const bool hadExplicitRemoval = m_signatureExplicitlyRemoved;
+        const int start =
+            wasTracked ? m_signatureCursor.selectionStart() : defaultSignatureInsertionPosition();
+        m_signatureProgrammaticEdit = true;
+        QTextCursor cursor{m_richTextEdit->document()};
+        cursor.setPosition(start);
+        if (wasTracked)
+        {
+            cursor.setPosition(m_signatureCursor.selectionEnd(), QTextCursor::KeepAnchor);
+            cursor.removeSelectedText();
+        }
+        else if (forceInsert && !hadExplicitRemoval && (!plain.isEmpty() || !html.isEmpty()))
+        {
+            if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RichText)
+                cursor.insertHtml(QStringLiteral("<p><br/></p>"));
+            else
+            {
+                const auto body = m_richTextEdit->toPlainText();
+                cursor.insertText(body.isEmpty() ? QStringLiteral("\n") : QStringLiteral("\n\n"));
+            }
+        }
+        const int insertionStart = cursor.position();
+        if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RichText)
+        {
+            if (!html.isEmpty())
+                cursor.insertHtml(html);
+        }
+        else if (!plain.isEmpty())
+            cursor.insertText(plain);
+        const int insertionEnd = cursor.position();
+        m_signatureProgrammaticEdit = false;
+
+        m_signatureInsertionPosition = insertionStart;
+        m_signatureTracked = insertionEnd > insertionStart;
+        m_signatureCustom = false;
+        m_signatureExplicitlyRemoved = false;
+        if (m_signatureTracked)
+        {
+            m_signatureCursor = QTextCursor{m_richTextEdit->document()};
+            m_signatureCursor.setPosition(insertionStart);
+            m_signatureCursor.setPosition(insertionEnd, QTextCursor::KeepAnchor);
+        }
+        scheduleWorkingCopySave();
+    }
+
+    void ComposeTabWidget::removeTrackedSignature()
+    {
+        if (!m_signatureTracked)
+        {
+            m_signatureExplicitlyRemoved = true;
+            return;
+        }
+        m_signatureInsertionPosition = m_signatureCursor.selectionStart();
+        m_signatureProgrammaticEdit = true;
+        auto cursor = m_signatureCursor;
+        cursor.removeSelectedText();
+        m_signatureProgrammaticEdit = false;
+        m_signatureTracked = false;
+        m_signatureCustom = false;
+        m_signatureExplicitlyRemoved = true;
+        scheduleWorkingCopySave();
+    }
+
+    void ComposeTabWidget::refreshSignatureMenu()
+    {
+        m_signatureMenu->clear();
+        auto* useIdentity = m_signatureMenu->addAction(i18n("Use Identity Signature"));
+        connect(useIdentity, &QAction::triggered, this,
+                [this]
+                {
+                    m_signatureExplicitlyRemoved = false;
+                    m_signatureCustom = false;
+                    replaceTrackedSignatureForIndex(m_fromCombo->currentIndex(), true);
+                });
+        auto* noSignature = m_signatureMenu->addAction(i18n("No Signature for This Message"));
+        connect(noSignature, &QAction::triggered, this, &ComposeTabWidget::removeTrackedSignature);
+
+        const auto email = m_fromCombo->currentData(senderEmailRole).toString();
+        if (!email.isEmpty())
+        {
+            auto* variants = m_signatureMenu->addMenu(i18n("Signature Variant"));
+            for (int index = 0; index < m_fromCombo->count(); ++index)
+            {
+                if (m_fromCombo->itemData(index, senderEmailRole)
+                        .toString()
+                        .compare(email, Qt::CaseInsensitive) != 0)
+                    continue;
+                auto* action = variants->addAction(m_fromCombo->itemText(index));
+                action->setCheckable(true);
+                action->setChecked(index == m_fromCombo->currentIndex());
+                connect(action, &QAction::triggered, this,
+                        [this, index] { m_fromCombo->setCurrentIndex(index); });
+            }
+        }
+
+        m_signatureMenu->addSeparator();
+        const auto openIdentityManager = [this]
+        {
+            Q_EMIT manageIdentitiesRequested(
+                m_fromCombo->currentData(senderAccountIdRole).toString(),
+                m_fromCombo->currentData(senderIdentityIdRole).toString());
+        };
+        auto* editCurrent = m_signatureMenu->addAction(i18n("Edit Current Signature…"));
+        editCurrent->setEnabled(m_fromCombo->currentIndex() >= 0);
+        connect(editCurrent, &QAction::triggered, this, openIdentityManager);
+        auto* manage = m_signatureMenu->addAction(i18n("Manage Identities and Signatures…"));
+        connect(manage, &QAction::triggered, this, openIdentityManager);
     }
 
     void ComposeTabWidget::applySnapshotToUi()
@@ -1138,6 +1407,7 @@ namespace javelin::gui::compose
         {
             m_fromCombo->setCurrentIndex(identityIndex);
         }
+        m_previousIdentityIndex = m_fromCombo->currentIndex();
 
         m_toEdit->setText(formatAddresses(m_snapshot.to));
         m_ccEdit->setText(formatAddresses(m_snapshot.cc));
@@ -1168,6 +1438,10 @@ namespace javelin::gui::compose
         setOptionalRecipientVisible(m_bccRow, m_bccButton, !m_snapshot.bcc.empty());
         populateAttachments();
         m_syncingUi = false;
+        initializeSignatureTracking();
+        QTextCursor cursor{m_richTextEdit->document()};
+        cursor.setPosition(0);
+        m_richTextEdit->setTextCursor(cursor);
     }
 
     void ComposeTabWidget::populateAttachments()
@@ -1262,6 +1536,20 @@ namespace javelin::gui::compose
         }
 
         const bool plainTextMode = !richText;
+        const bool restoreNativeSignature =
+            m_signatureTracked && !m_signatureCustom && !m_signatureExplicitlyRemoved;
+        const int selectedIdentityIndex = m_fromCombo->currentIndex();
+        const auto removeNativeSignature = [this, restoreNativeSignature]
+        {
+            if (!restoreNativeSignature)
+                return;
+            m_signatureInsertionPosition = m_signatureCursor.selectionStart();
+            m_signatureProgrammaticEdit = true;
+            auto signatureCursor = m_signatureCursor;
+            signatureCursor.removeSelectedText();
+            m_signatureProgrammaticEdit = false;
+            m_signatureTracked = false;
+        };
         if (plainTextMode &&
             m_snapshot.editorMode != javelin::jmap::submission::BodyEditorMode::PlainText)
         {
@@ -1290,6 +1578,7 @@ namespace javelin::gui::compose
                 Q_UNUSED(loseFormatting);
             }
 
+            removeNativeSignature();
             m_syncingUi = true;
             m_richTextEdit->forcePlainTextMarkup(useMarkup);
             m_richTextEdit->switchToPlainText();
@@ -1299,11 +1588,14 @@ namespace javelin::gui::compose
         else if (richText &&
                  m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::PlainText)
         {
+            removeNativeSignature();
             m_syncingUi = true;
             m_richTextEdit->activateRichText();
             m_snapshot.editorMode = javelin::jmap::submission::BodyEditorMode::RichText;
             m_syncingUi = false;
         }
+        if (restoreNativeSignature)
+            replaceTrackedSignatureForIndex(selectedIdentityIndex, true);
 
         if (const auto error = ComposeUiPreferences::setRichTextDefault(m_settings, richText))
         {
@@ -1356,6 +1648,7 @@ namespace javelin::gui::compose
     {
         m_operationInFlight = busy;
         m_fromCombo->setEnabled(!busy);
+        m_signatureButton->setEnabled(!busy);
         m_toEdit->setEnabled(!busy);
         m_ccEdit->setEnabled(!busy);
         m_bccEdit->setEnabled(!busy);
@@ -1932,6 +2225,12 @@ namespace javelin::gui::compose
     {
         if (m_operationInFlight)
         {
+            return;
+        }
+        if (!canSend())
+        {
+            Q_EMIT statusMessageRequested(
+                i18n("Choose an available sender identity before sending."), 10000);
             return;
         }
         if (m_pendingInlineImageJobs != 0)

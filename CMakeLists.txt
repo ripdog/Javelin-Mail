@@ -232,6 +232,9 @@ set(JAVELIN_FORMAT_FILES
     src/app/SieveApplicationPorts.h
     src/app/SieveCommandService.cpp
     src/app/SieveCommandService.h
+    src/app/IdentityApplicationPorts.h
+    src/app/IdentityCommandService.cpp
+    src/app/IdentityCommandService.h
     src/app/UndoApplicationPorts.h
     src/app/UndoCommandService.cpp
     src/app/UndoCommandService.h
@@ -342,6 +345,14 @@ set(JAVELIN_FORMAT_FILES
     src/gui/mailboxes/MailboxTreeView.h
     src/gui/compose/ComposeTabWidget.cpp
     src/gui/compose/ComposeTabWidget.h
+    src/gui/compose/IdentityPresentation.cpp
+    src/gui/compose/IdentityPresentation.h
+    src/gui/compose/SignatureTrackingPolicy.cpp
+    src/gui/compose/SignatureTrackingPolicy.h
+    src/gui/compose/SendingIdentitiesDialog.cpp
+    src/gui/compose/SendingIdentitiesDialog.h
+    src/gui/identity/IdentityManagerDialog.cpp
+    src/gui/identity/IdentityManagerDialog.h
     src/gui/compose/ComposeUiPreferences.cpp
     src/gui/compose/ComposeUiPreferences.h
     src/gui/compose/ComposerInlineImageCodec.cpp
@@ -656,6 +667,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/EmailRepositoryTest.cpp
     tests/jmap/HtmlMessageDocumentBuilderTest.cpp
     tests/jmap/HtmlTextExtractorTest.cpp
+    tests/jmap/IdentityRepositoryTest.cpp
     tests/jmap/InlineMessageUrlTest.cpp
     tests/jmap/JmapCoreMessageContentTest.cpp
     tests/jmap/JmapCoreTest.cpp
@@ -852,6 +864,11 @@ add_library(javelin_jmap STATIC
     src/jmap/contacts/ContactMutationJournal.h
     src/jmap/calendar/CalendarMutationJournal.cpp
     src/jmap/calendar/CalendarMutationJournal.h
+    src/jmap/identity/IdentityCommandTypes.h
+    src/jmap/identity/IdentityMutationJournal.cpp
+    src/jmap/identity/IdentityMutationJournal.h
+    src/jmap/identity/IdentityService.cpp
+    src/jmap/identity/IdentityService.h
     src/jmap/contacts/AddressBookMutationJournal.cpp
     src/jmap/contacts/AddressBookMutationJournal.h
     src/jmap/sync/RefreshNotificationPlanner.cpp
@@ -1004,6 +1021,14 @@ add_library(javelin_gui STATIC
     src/gui/mailboxes/MailboxSort.h
     src/gui/compose/ComposeTabWidget.cpp
     src/gui/compose/ComposeTabWidget.h
+    src/gui/compose/IdentityPresentation.cpp
+    src/gui/compose/IdentityPresentation.h
+    src/gui/compose/SignatureTrackingPolicy.cpp
+    src/gui/compose/SignatureTrackingPolicy.h
+    src/gui/compose/SendingIdentitiesDialog.cpp
+    src/gui/compose/SendingIdentitiesDialog.h
+    src/gui/identity/IdentityManagerDialog.cpp
+    src/gui/identity/IdentityManagerDialog.h
     src/gui/compose/ComposeUiPreferences.cpp
     src/gui/compose/ComposeUiPreferences.h
     src/gui/compose/ComposerInlineImageCodec.cpp
@@ -1371,6 +1396,9 @@ add_library(javelin_daemon_core STATIC
     src/app/SieveApplicationPorts.h
     src/app/SieveCommandService.cpp
     src/app/SieveCommandService.h
+    src/app/IdentityApplicationPorts.h
+    src/app/IdentityCommandService.cpp
+    src/app/IdentityCommandService.h
     src/app/UndoApplicationPorts.h
     src/app/UndoCommandService.cpp
     src/app/UndoCommandService.h

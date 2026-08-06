@@ -1987,6 +1987,25 @@ namespace javelin::jmap::cache
                                 "r.account_id=em.account_id AND r.email_id=em.email_id"),
                         },
                 },
+                MigrationStep{
+                    .version = 41,
+                    .name = QStringLiteral("identity_create_projections"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE identity_create_projections ("
+                                "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON "
+                                "DELETE CASCADE,creation_id TEXT NOT NULL,mutation_id TEXT NOT "
+                                "NULL "
+                                "UNIQUE,email_address TEXT NOT NULL,name TEXT NOT NULL DEFAULT '',"
+                                "reply_to_json TEXT NOT NULL DEFAULT '[]',bcc_json TEXT NOT NULL "
+                                "DEFAULT '[]',text_signature TEXT,html_signature TEXT,PRIMARY KEY("
+                                "account_id,creation_id),FOREIGN KEY(mutation_id) REFERENCES "
+                                "mutation_journal(mutation_id) ON DELETE CASCADE) STRICT"),
+                            QStringLiteral("CREATE INDEX idx_identity_create_projection_account ON "
+                                           "identity_create_projections(account_id,creation_id)"),
+                        },
+                },
             },
         };
     }

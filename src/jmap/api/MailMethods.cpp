@@ -31,6 +31,59 @@ namespace
         std::vector<std::string> notFound;
     };
 
+    struct RawIdentitySetCreate
+    {
+        std::string name;
+        std::string email;
+        std::vector<javelin::jmap::domain::EmailAddress> replyTo;
+        std::vector<javelin::jmap::domain::EmailAddress> bcc;
+        std::string textSignature;
+        std::string htmlSignature;
+    };
+
+    struct RawIdentitySetUpdate
+    {
+        std::optional<std::string> name;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> replyTo;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> bcc;
+        std::optional<std::string> textSignature;
+        std::optional<std::string> htmlSignature;
+    };
+
+    struct RawIdentitySetRequest
+    {
+        std::string accountId;
+        std::optional<std::string> ifInState;
+        std::optional<std::unordered_map<std::string, RawIdentitySetCreate>> create;
+        std::optional<std::unordered_map<std::string, RawIdentitySetUpdate>> update;
+        std::optional<std::vector<std::string>> destroy;
+    };
+
+    struct RawIdentitySetCreated
+    {
+        std::string id;
+    };
+
+    struct RawIdentitySetError
+    {
+        std::string type;
+        std::optional<std::string> description;
+        std::vector<std::string> properties;
+    };
+
+    struct RawIdentitySetResponse
+    {
+        std::string accountId;
+        std::optional<std::string> oldState;
+        std::string newState;
+        std::optional<std::unordered_map<std::string, RawIdentitySetCreated>> created;
+        std::optional<std::unordered_map<std::string, glz::generic>> updated;
+        std::optional<std::vector<std::string>> destroyed;
+        std::optional<std::unordered_map<std::string, RawIdentitySetError>> notCreated;
+        std::optional<std::unordered_map<std::string, RawIdentitySetError>> notUpdated;
+        std::optional<std::unordered_map<std::string, RawIdentitySetError>> notDestroyed;
+    };
+
     struct RawEmailGetResponse
     {
         std::string accountId;
@@ -328,6 +381,58 @@ template <> struct glz::meta<RawIdentityGetResponse>
 
     static constexpr auto value = glz::object("accountId", &T::accountId, "state", &T::state,
                                               "list", &T::list, "notFound", &T::notFound);
+};
+
+template <> struct glz::meta<RawIdentitySetCreate>
+{
+    using T = RawIdentitySetCreate;
+
+    static constexpr auto value =
+        glz::object("name", &T::name, "email", &T::email, "replyTo", &T::replyTo, "bcc", &T::bcc,
+                    "textSignature", &T::textSignature, "htmlSignature", &T::htmlSignature);
+};
+
+template <> struct glz::meta<RawIdentitySetUpdate>
+{
+    using T = RawIdentitySetUpdate;
+
+    static constexpr auto value =
+        glz::object("name", &T::name, "replyTo", &T::replyTo, "bcc", &T::bcc, "textSignature",
+                    &T::textSignature, "htmlSignature", &T::htmlSignature);
+};
+
+template <> struct glz::meta<RawIdentitySetRequest>
+{
+    using T = RawIdentitySetRequest;
+
+    static constexpr auto value =
+        glz::object("accountId", &T::accountId, "ifInState", &T::ifInState, "create", &T::create,
+                    "update", &T::update, "destroy", &T::destroy);
+};
+
+template <> struct glz::meta<RawIdentitySetCreated>
+{
+    using T = RawIdentitySetCreated;
+
+    static constexpr auto value = glz::object("id", &T::id);
+};
+
+template <> struct glz::meta<RawIdentitySetError>
+{
+    using T = RawIdentitySetError;
+
+    static constexpr auto value =
+        glz::object("type", &T::type, "description", &T::description, "properties", &T::properties);
+};
+
+template <> struct glz::meta<RawIdentitySetResponse>
+{
+    using T = RawIdentitySetResponse;
+
+    static constexpr auto value = glz::object(
+        "accountId", &T::accountId, "oldState", &T::oldState, "newState", &T::newState, "created",
+        &T::created, "updated", &T::updated, "destroyed", &T::destroyed, "notCreated",
+        &T::notCreated, "notUpdated", &T::notUpdated, "notDestroyed", &T::notDestroyed);
 };
 
 template <> struct glz::meta<RawEmailGetResponse>
@@ -752,6 +857,56 @@ namespace javelin::jmap::api
         });
     }
 
+    std::optional<std::string> serializeIdentitySetRequest(const IdentitySetRequest& request)
+    {
+        std::optional<std::unordered_map<std::string, RawIdentitySetCreate>> create;
+        if (!request.create.empty())
+        {
+            std::unordered_map<std::string, RawIdentitySetCreate> values;
+            values.reserve(request.create.size());
+            for (const auto& [creationId, identity] : request.create)
+            {
+                values.emplace(creationId, RawIdentitySetCreate{
+                                               .name = identity.name,
+                                               .email = identity.email,
+                                               .replyTo = identity.replyTo,
+                                               .bcc = identity.bcc,
+                                               .textSignature = identity.textSignature,
+                                               .htmlSignature = identity.htmlSignature,
+                                           });
+            }
+            create = std::move(values);
+        }
+
+        std::optional<std::unordered_map<std::string, RawIdentitySetUpdate>> update;
+        if (!request.update.empty())
+        {
+            std::unordered_map<std::string, RawIdentitySetUpdate> values;
+            values.reserve(request.update.size());
+            for (const auto& [identityId, identity] : request.update)
+            {
+                values.emplace(identityId, RawIdentitySetUpdate{
+                                               .name = identity.name,
+                                               .replyTo = identity.replyTo,
+                                               .bcc = identity.bcc,
+                                               .textSignature = identity.textSignature,
+                                               .htmlSignature = identity.htmlSignature,
+                                           });
+            }
+            update = std::move(values);
+        }
+
+        return serializeMethod(RawIdentitySetRequest{
+            .accountId = request.accountId,
+            .ifInState = request.ifInState,
+            .create = std::move(create),
+            .update = std::move(update),
+            .destroy = request.destroy.empty()
+                           ? std::nullopt
+                           : std::optional<std::vector<std::string>>{request.destroy},
+        });
+    }
+
     [[nodiscard]] RawEmailQueryFilter toRawEmailQueryFilter(const EmailQueryFilter& filter)
     {
         std::vector<RawEmailQueryFilter> conditions;
@@ -999,6 +1154,85 @@ namespace javelin::jmap::api
                 },
             .error = std::nullopt,
         };
+    }
+
+    ParsedEnvelope<IdentityChangesResponse> parseIdentityChangesResponse(std::string_view json)
+    {
+        const auto parsed = parseMethod<RawChangesResponse>(json);
+        if (!parsed.ok())
+        {
+            return {.value = std::nullopt, .error = parsed.error};
+        }
+
+        return {
+            .value =
+                IdentityChangesResponse{
+                    .accountId = std::move(parsed.value->accountId),
+                    .oldState = std::move(parsed.value->oldState),
+                    .newState = std::move(parsed.value->newState),
+                    .hasMoreChanges = parsed.value->hasMoreChanges,
+                    .created = std::move(parsed.value->created),
+                    .updated = std::move(parsed.value->updated),
+                    .destroyed = std::move(parsed.value->destroyed),
+                },
+            .error = std::nullopt,
+        };
+    }
+
+    ParsedEnvelope<IdentitySetResponse> parseIdentitySetResponse(std::string_view json)
+    {
+        const auto parsed = parseMethod<RawIdentitySetResponse>(json);
+        if (!parsed.ok())
+        {
+            return {.value = std::nullopt, .error = parsed.error};
+        }
+
+        IdentitySetResponse response{
+            .accountId = std::move(parsed.value->accountId),
+            .oldState = parsed.value->oldState.value_or(std::string{}),
+            .newState = std::move(parsed.value->newState),
+            .created = {},
+            .updated = {},
+            .destroyed = parsed.value->destroyed.value_or(std::vector<std::string>{}),
+            .notCreated = {},
+            .notUpdated = {},
+            .notDestroyed = {},
+        };
+
+        for (auto& [creationId, created] : parsed.value->created.value_or(
+                 std::unordered_map<std::string, RawIdentitySetCreated>{}))
+        {
+            response.created.emplace(std::move(creationId), std::move(created.id));
+        }
+        for (const auto& [identityId, ignored] :
+             parsed.value->updated.value_or(std::unordered_map<std::string, glz::generic>{}))
+        {
+            static_cast<void>(ignored);
+            response.updated.push_back(identityId);
+        }
+
+        const auto appendErrors = [](auto& destination, auto source)
+        {
+            for (auto& [id, error] : source)
+            {
+                destination.emplace(std::move(id), IdentitySetError{
+                                                       .type = std::move(error.type),
+                                                       .description = std::move(error.description),
+                                                       .properties = std::move(error.properties),
+                                                   });
+            }
+        };
+        appendErrors(response.notCreated,
+                     parsed.value->notCreated.value_or(
+                         std::unordered_map<std::string, RawIdentitySetError>{}));
+        appendErrors(response.notUpdated,
+                     parsed.value->notUpdated.value_or(
+                         std::unordered_map<std::string, RawIdentitySetError>{}));
+        appendErrors(response.notDestroyed,
+                     parsed.value->notDestroyed.value_or(
+                         std::unordered_map<std::string, RawIdentitySetError>{}));
+
+        return {.value = std::move(response), .error = std::nullopt};
     }
 
     ParsedEnvelope<MailboxGetResponse> parseMailboxGetResponse(std::string_view json)
@@ -1411,6 +1645,29 @@ namespace javelin::jmap::api
 
         return MethodRequest<IdentityGetResponse>{
             .name = "Identity/get",
+            .arguments = *arguments,
+        };
+    }
+
+    std::optional<MethodRequest<IdentityChangesResponse>>
+    identityChanges(const ChangesRequest& request)
+    {
+        const auto arguments = serializeChangesRequest(request);
+        if (!arguments.has_value())
+            return std::nullopt;
+        return MethodRequest<IdentityChangesResponse>{
+            .name = "Identity/changes",
+            .arguments = *arguments,
+        };
+    }
+
+    std::optional<MethodRequest<IdentitySetResponse>> identitySet(const IdentitySetRequest& request)
+    {
+        const auto arguments = serializeIdentitySetRequest(request);
+        if (!arguments.has_value())
+            return std::nullopt;
+        return MethodRequest<IdentitySetResponse>{
+            .name = "Identity/set",
             .arguments = *arguments,
         };
     }

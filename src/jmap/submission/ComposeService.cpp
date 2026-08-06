@@ -8,6 +8,7 @@
 #include "jmap/api/Session.h"
 #include "jmap/api/Transport.h"
 #include "jmap/auth/AccessTokenResolver.h"
+#include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/ComposeSessionRepository.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/IdentityRepository.h"
@@ -81,16 +82,36 @@ namespace javelin::jmap::submission
             };
         }
 
-        [[nodiscard]] std::variant<javelin::jmap::api::Session, javelin::jmap::OperationError>
+        struct CachedSessionContext
+        {
+            std::string ownerAccountId;
+            javelin::jmap::api::Session session;
+        };
+
+        [[nodiscard]] std::variant<CachedSessionContext, javelin::jmap::OperationError>
         loadCachedSession(javelin::jmap::cache::DatabaseConnection& connection,
                           const std::string_view accountId)
         {
-            javelin::jmap::cache::SessionRepository sessionRepository{connection};
-            const auto result = sessionRepository.load(accountId);
-            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
-            {
+            javelin::jmap::cache::AccountRepository accountRepository{connection};
+            const auto accountResult = accountRepository.findById(accountId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&accountResult))
                 return javelin::jmap::operationError(*error);
+            const auto& account =
+                std::get<std::optional<javelin::jmap::cache::CachedAccount>>(accountResult);
+            if (!account.has_value())
+            {
+                return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::NotFound,
+                    .message = QStringLiteral("The selected JMAP account is unavailable."),
+                };
             }
+            const auto ownerAccountId =
+                account->ownerAccountId.empty() ? account->accountId : account->ownerAccountId;
+            javelin::jmap::cache::SessionRepository sessionRepository{connection};
+            const auto result = sessionRepository.load(ownerAccountId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                return javelin::jmap::operationError(*error);
 
             const auto& session = std::get<std::optional<javelin::jmap::api::Session>>(result);
             if (!session.has_value())
@@ -100,8 +121,19 @@ namespace javelin::jmap::submission
                         QStringLiteral("No cached JMAP session is available for this account."),
                 };
             }
+            if (!session->accounts.contains(std::string{accountId}))
+            {
+                return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::NotFound,
+                    .message =
+                        QStringLiteral("The selected account is absent from its JMAP session."),
+                };
+            }
 
-            return *session;
+            return CachedSessionContext{
+                .ownerAccountId = ownerAccountId,
+                .session = *session,
+            };
         }
 
         [[nodiscard]] std::variant<std::string, javelin::jmap::OperationError>
@@ -318,6 +350,48 @@ namespace javelin::jmap::submission
             return paragraphs.join(QLatin1Char('\n')).toStdString();
         }
 
+        [[nodiscard]] std::string plainSignature(const javelin::jmap::domain::Identity& identity)
+        {
+            if (identity.textSignature.has_value() && !identity.textSignature->empty())
+                return *identity.textSignature;
+            if (identity.htmlSignature.has_value() && !identity.htmlSignature->empty())
+                return strippedPlainText(*identity.htmlSignature);
+            return {};
+        }
+
+        [[nodiscard]] std::string htmlSignature(const javelin::jmap::domain::Identity& identity)
+        {
+            if (identity.htmlSignature.has_value() && !identity.htmlSignature->empty())
+                return *identity.htmlSignature;
+            if (identity.textSignature.has_value() && !identity.textSignature->empty())
+                return htmlFromText(*identity.textSignature);
+            return {};
+        }
+
+        [[nodiscard]] std::string initialPlainBody(const javelin::jmap::domain::Identity& identity,
+                                                   const std::string_view generatedContent = {})
+        {
+            const auto signature = plainSignature(identity);
+            if (signature.empty())
+                return std::string{generatedContent};
+            return QStringLiteral("\n%1%2")
+                .arg(QString::fromStdString(signature),
+                     QString::fromStdString(std::string{generatedContent}))
+                .toStdString();
+        }
+
+        [[nodiscard]] std::string initialHtmlBody(const javelin::jmap::domain::Identity& identity,
+                                                  const std::string_view generatedContent = {})
+        {
+            const auto signature = htmlSignature(identity);
+            if (signature.empty())
+                return std::string{generatedContent};
+            return QStringLiteral("<p><br/></p>%1%2")
+                .arg(QString::fromStdString(signature),
+                     QString::fromStdString(std::string{generatedContent}))
+                .toStdString();
+        }
+
         [[nodiscard]] std::vector<DraftAttachment> draftAttachmentsFromMessage(
             const std::vector<javelin::jmap::cache::MessageAttachment>& attachments)
         {
@@ -450,7 +524,8 @@ namespace javelin::jmap::submission
             {
                 co_return *error;
             }
-            const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
+            const auto& sessionContext = std::get<CachedSessionContext>(sessionResult);
+            const auto& session = sessionContext.session;
 
             if (!session.capabilities.submission)
             {
@@ -476,7 +551,7 @@ namespace javelin::jmap::submission
             }
             const auto handle = builder.call(*request, "identities");
             const auto envelopeResult = co_await methodCaller.call(
-                buildApiRequestContext(settings, accountId, session), builder);
+                buildApiRequestContext(settings, sessionContext.ownerAccountId, session), builder);
             if (const auto* error =
                     std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
             {
@@ -509,14 +584,15 @@ namespace javelin::jmap::submission
                 co_return javelin::jmap::operationError(*error);
             }
 
-            const auto& identities =
-                std::get<javelin::jmap::api::IdentityGetResponse>(identityResult).list;
-            if (const auto error = identityRepository.replaceAll(accountId, identities))
+            const auto& identityResponse =
+                std::get<javelin::jmap::api::IdentityGetResponse>(identityResult);
+            if (const auto error = identityRepository.replaceAll(accountId, identityResponse.list,
+                                                                 identityResponse.state))
             {
                 co_return javelin::jmap::operationError(*error);
             }
 
-            co_return identities;
+            co_return identityResponse.list;
         }
 
         [[nodiscard]] std::string uploadUrlForAccount(const std::string_view templateUrl,
@@ -541,10 +617,10 @@ namespace javelin::jmap::submission
         [[nodiscard]] QCoro::Task<std::variant<UploadSummary, javelin::jmap::OperationError>>
         uploadAttachment(javelin::jmap::api::AbstractTransport& transport,
                          javelin::jmap::LiveConnectionSettings settings,
-                         javelin::jmap::api::Session session, std::string accountId,
-                         DraftAttachment attachment, QByteArray body)
+                         javelin::jmap::api::Session session, std::string ownerAccountId,
+                         std::string accountId, DraftAttachment attachment, QByteArray body)
         {
-            const auto tokenResult = resolveAccessToken(buildCredentials(settings, accountId));
+            const auto tokenResult = resolveAccessToken(buildCredentials(settings, ownerAccountId));
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&tokenResult))
             {
                 co_return *error;
@@ -573,7 +649,7 @@ namespace javelin::jmap::submission
                 .body = body,
                 .authentication =
                     javelin::jmap::api::BearerAuthentication{
-                        .accountId = accountId,
+                        .accountId = ownerAccountId,
                         .accessToken = std::get<std::string>(tokenResult),
                     },
                 .cancellation = {},
@@ -911,12 +987,8 @@ namespace javelin::jmap::submission
             .cc = {},
             .bcc = availableSenderIdentities.front().bcc,
             .subject = std::nullopt,
-            .plainTextBody =
-                availableSenderIdentities.front().textSignature.value_or(std::string{}),
-            .htmlBody = availableSenderIdentities.front().htmlSignature.value_or(
-                availableSenderIdentities.front().textSignature.has_value()
-                    ? htmlFromText(*availableSenderIdentities.front().textSignature)
-                    : std::string{}),
+            .plainTextBody = initialPlainBody(availableSenderIdentities.front()),
+            .htmlBody = initialHtmlBody(availableSenderIdentities.front()),
             .threading = {},
             .attachments = {},
         };
@@ -986,8 +1058,12 @@ namespace javelin::jmap::submission
                                                                   : messageSnapshot->email.from;
             snapshot.subject =
                 trimSubjectPrefix(messageSnapshot->email.subject.value_or(std::string{}), "Re:");
-            snapshot.plainTextBody = buildReplyPlainText(messageSnapshot->email, plainBody);
-            snapshot.htmlBody = buildReplyHtml(messageSnapshot->email, htmlBody);
+            snapshot.plainTextBody =
+                initialPlainBody(selectedIdentity.value_or(availableSenderIdentities.front()),
+                                 buildReplyPlainText(messageSnapshot->email, plainBody));
+            snapshot.htmlBody =
+                initialHtmlBody(selectedIdentity.value_or(availableSenderIdentities.front()),
+                                buildReplyHtml(messageSnapshot->email, htmlBody));
             snapshot.threading.inReplyTo = messageSnapshot->email.messageId;
             snapshot.threading.references = messageSnapshot->email.references;
             snapshot.threading.references.insert(snapshot.threading.references.end(),
@@ -1009,8 +1085,12 @@ namespace javelin::jmap::submission
                                                excludedEmails);
             snapshot.subject =
                 trimSubjectPrefix(messageSnapshot->email.subject.value_or(std::string{}), "Re:");
-            snapshot.plainTextBody = buildReplyPlainText(messageSnapshot->email, plainBody);
-            snapshot.htmlBody = buildReplyHtml(messageSnapshot->email, htmlBody);
+            snapshot.plainTextBody =
+                initialPlainBody(selectedIdentity.value_or(availableSenderIdentities.front()),
+                                 buildReplyPlainText(messageSnapshot->email, plainBody));
+            snapshot.htmlBody =
+                initialHtmlBody(selectedIdentity.value_or(availableSenderIdentities.front()),
+                                buildReplyHtml(messageSnapshot->email, htmlBody));
             snapshot.threading.inReplyTo = messageSnapshot->email.messageId;
             snapshot.threading.references = messageSnapshot->email.references;
             snapshot.threading.references.insert(snapshot.threading.references.end(),
@@ -1021,8 +1101,12 @@ namespace javelin::jmap::submission
         case ComposeMode::Forward:
             snapshot.subject =
                 trimSubjectPrefix(messageSnapshot->email.subject.value_or(std::string{}), "Fwd:");
-            snapshot.plainTextBody = buildForwardPlainText(messageSnapshot->email, plainBody);
-            snapshot.htmlBody = buildForwardHtml(messageSnapshot->email, htmlBody);
+            snapshot.plainTextBody =
+                initialPlainBody(selectedIdentity.value_or(availableSenderIdentities.front()),
+                                 buildForwardPlainText(messageSnapshot->email, plainBody));
+            snapshot.htmlBody =
+                initialHtmlBody(selectedIdentity.value_or(availableSenderIdentities.front()),
+                                buildForwardHtml(messageSnapshot->email, htmlBody));
             snapshot.attachments = draftAttachmentsFromMessage(messageSnapshot->attachments);
             break;
         case ComposeMode::EditDraft:
@@ -1179,7 +1263,8 @@ namespace javelin::jmap::submission
         {
             co_return *error;
         }
-        const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
+        const auto& sessionContext = std::get<CachedSessionContext>(sessionResult);
+        const auto& session = sessionContext.session;
 
         const auto draftsMailbox = findMailboxByRole(m_connection, snapshot.accountId, "drafts");
         if (!draftsMailbox.has_value())
@@ -1253,8 +1338,8 @@ namespace javelin::jmap::submission
             }
 
             const auto uploadResult = co_await uploadAttachment(
-                m_resourceTransport, settings, session, snapshot.accountId, attachment,
-                stagedPayloads[index].value_or(QByteArray{}));
+                m_resourceTransport, settings, session, sessionContext.ownerAccountId,
+                snapshot.accountId, attachment, stagedPayloads[index].value_or(QByteArray{}));
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&uploadResult))
             {
                 co_return *error;
@@ -1382,7 +1467,7 @@ namespace javelin::jmap::submission
         builder.useCore().useMail();
         const auto handle = builder.call(*methodRequest, "draft-save");
         const auto result = co_await methodCaller.call(
-            buildApiRequestContext(settings, snapshot.accountId, session), builder);
+            buildApiRequestContext(settings, sessionContext.ownerAccountId, session), builder);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
         {
             if (const auto transitionError =
@@ -1480,7 +1565,8 @@ namespace javelin::jmap::submission
                 const auto destroyHandle =
                     destroyBuilder.call(*destroyRequest, "draft-replace-destroy");
                 const auto destroyResult = co_await methodCaller.call(
-                    buildApiRequestContext(settings, snapshot.accountId, session), destroyBuilder);
+                    buildApiRequestContext(settings, sessionContext.ownerAccountId, session),
+                    destroyBuilder);
                 if (std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(destroyResult))
                 {
                     const javelin::jmap::api::ResponseReader destroyReader{
@@ -1644,7 +1730,8 @@ namespace javelin::jmap::submission
         {
             co_return *error;
         }
-        const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
+        const auto& sessionContext = std::get<CachedSessionContext>(sessionResult);
+        const auto& session = sessionContext.session;
 
         const auto draftsMailbox =
             findMailboxByRole(m_connection, draftSummary.accountId, "drafts");
@@ -1841,7 +1928,7 @@ namespace javelin::jmap::submission
 
         const auto handle = builder.call(*request, "send-message");
         const auto result = co_await methodCaller.call(
-            buildApiRequestContext(settings, draftSummary.accountId, session), builder, {},
+            buildApiRequestContext(settings, sessionContext.ownerAccountId, session), builder, {},
             std::move(dispatched));
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
         {
