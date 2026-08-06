@@ -98,4 +98,18 @@ TEST_CASE("account read repository uses a GUI read-only connection", "[jmap][cac
     CHECK(accounts.front().accountId == "personal");
     CHECK(accounts.front().isPrimary);
     CHECK(accounts.back().accountId == "work");
+
+    const auto personalResult = repository.findById("personal");
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::CachedAccount>>(personalResult));
+    const auto& personal =
+        std::get<std::optional<javelin::jmap::cache::CachedAccount>>(personalResult);
+    REQUIRE(personal.has_value());
+    CHECK(personal->name == "Personal");
+
+    const auto missingResult = repository.findById("missing");
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::CachedAccount>>(missingResult));
+    CHECK_FALSE(
+        std::get<std::optional<javelin::jmap::cache::CachedAccount>>(missingResult).has_value());
 }

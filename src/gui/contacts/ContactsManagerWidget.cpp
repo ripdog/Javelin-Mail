@@ -591,7 +591,7 @@ namespace javelin::gui::contacts
                 guiSettings.accountForCachedId(QString::fromStdString(account.accountId));
             if (!settings.displayName.isEmpty())
                 return settings.displayName;
-            return account.name.empty() ? QString::fromStdString(account.accountId)
+            return account.name.empty() ? i18n("Unnamed account")
                                         : QString::fromStdString(account.name);
         }
 
@@ -3087,7 +3087,7 @@ namespace javelin::gui::contacts
                 books.push_back(QString::fromStdString(book->name));
         }
         const QString accountName = account == m_accounts.end()
-                                        ? QString::fromStdString(contact.accountId)
+                                        ? i18n("Unknown account")
                                         : accountLabel(m_settings, *account);
         return books.isEmpty() ? accountName
                                : i18nc("@info contact account and address books", "%1 — %2",

@@ -19,6 +19,8 @@ namespace javelin::jmap::cache
         listAll() const override;
         [[nodiscard]] std::variant<std::vector<CachedAccount>, DatabaseError>
         listOwnedBy(std::string_view ownerAccountId) const override;
+        [[nodiscard]] std::variant<std::optional<CachedAccount>, DatabaseError>
+        findById(std::string_view accountId) const override;
         [[nodiscard]] std::optional<DatabaseError> removeMany(const QStringList& accountIds);
         [[nodiscard]] std::optional<DatabaseError>
         removeConfiguredAccount(const QString& loginEmail, const QString& sessionUrl,

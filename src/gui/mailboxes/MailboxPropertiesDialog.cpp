@@ -28,7 +28,8 @@ namespace javelin::gui::mailboxes
     } // namespace
 
     MailboxPropertiesDialog::MailboxPropertiesDialog(
-        QString accountId, const javelin::jmap::cache::MailboxTreeItem& mailbox, QWidget* parent)
+        QString accountName, QString parentMailboxName,
+        const javelin::jmap::cache::MailboxTreeItem& mailbox, QWidget* parent)
         : QDialog(parent)
     {
         setWindowTitle(i18n("%1 Properties", QString::fromStdString(mailbox.name)));
@@ -40,11 +41,9 @@ namespace javelin::gui::mailboxes
         auto* identityLayout = new QFormLayout(identityGroup);
         addValue(*identityLayout, i18n("Name:"), QString::fromStdString(mailbox.name),
                  identityGroup);
-        addValue(*identityLayout, i18n("JMAP ID:"), QString::fromStdString(mailbox.id),
-                 identityGroup);
-        addValue(*identityLayout, i18n("Account JMAP ID:"), std::move(accountId), identityGroup);
-        addValue(*identityLayout, i18n("Parent JMAP ID:"),
-                 mailbox.parentId.has_value() ? QString::fromStdString(*mailbox.parentId)
+        addValue(*identityLayout, i18n("Account:"), std::move(accountName), identityGroup);
+        addValue(*identityLayout, i18n("Parent:"),
+                 mailbox.parentId.has_value() ? std::move(parentMailboxName)
                                               : i18nc("@item no mailbox parent", "None"),
                  identityGroup);
         addValue(*identityLayout, i18n("Role:"),

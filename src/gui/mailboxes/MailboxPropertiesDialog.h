@@ -11,7 +11,7 @@ namespace javelin::gui::mailboxes
     class MailboxPropertiesDialog final : public QDialog
     {
       public:
-        MailboxPropertiesDialog(QString accountId,
+        MailboxPropertiesDialog(QString accountName, QString parentMailboxName,
                                 const javelin::jmap::cache::MailboxTreeItem& mailbox,
                                 QWidget* parent = nullptr);
     };

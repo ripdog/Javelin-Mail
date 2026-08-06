@@ -10,6 +10,7 @@ namespace javelin::app
     {
         std::string connectionId;
         std::uint64_t revision = 0;
+        std::string displayName = {};
         std::string sessionUrl;
         std::string loginEmail;
         std::string apiKey;

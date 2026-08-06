@@ -2,6 +2,7 @@
 
 #include "jmap/cache/Database.h"
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -28,6 +29,8 @@ namespace javelin::jmap::cache
         listAll() const = 0;
         [[nodiscard]] virtual std::variant<std::vector<CachedAccount>, DatabaseError>
         listOwnedBy(std::string_view ownerAccountId) const = 0;
+        [[nodiscard]] virtual std::variant<std::optional<CachedAccount>, DatabaseError>
+        findById(std::string_view accountId) const = 0;
     };
 
     class AccountReadRepository final : public AccountReader
@@ -39,6 +42,8 @@ namespace javelin::jmap::cache
         listAll() const override;
         [[nodiscard]] std::variant<std::vector<CachedAccount>, DatabaseError>
         listOwnedBy(std::string_view ownerAccountId) const override;
+        [[nodiscard]] std::variant<std::optional<CachedAccount>, DatabaseError>
+        findById(std::string_view accountId) const override;
 
       private:
         ReadOnlyDatabaseConnection& m_connection;

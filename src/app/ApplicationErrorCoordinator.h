@@ -11,6 +11,11 @@
 #include <string_view>
 #include <unordered_set>
 
+namespace javelin::jmap::cache
+{
+    class AccountReader;
+}
+
 namespace javelin::app
 {
 
@@ -19,7 +24,8 @@ namespace javelin::app
         Q_OBJECT
 
       public:
-        explicit ApplicationErrorCoordinator(QObject* parent = nullptr);
+        explicit ApplicationErrorCoordinator(javelin::jmap::cache::AccountReader& accountReader,
+                                             QObject* parent = nullptr);
 
         void reportFailure(const AccountConnectionSettings& settings, std::string_view accountId,
                            QString operation, const javelin::jmap::OperationError& error);
@@ -40,13 +46,17 @@ namespace javelin::app
         [[nodiscard]] static QString incidentKey(std::string_view connectionId,
                                                  javelin::jmap::OperationErrorCode code);
         [[nodiscard]] static QString userTitle(const javelin::jmap::OperationError& error);
-        [[nodiscard]] static QString userMessage(const QString& accountId, const QString& operation,
+        [[nodiscard]] QString accountName(const AccountConnectionSettings& settings,
+                                          std::string_view accountId) const;
+        [[nodiscard]] static QString userMessage(const QString& accountName,
+                                                 const QString& operation,
                                                  const javelin::jmap::OperationError& error);
         void persistAuthenticationPause(std::string_view connectionId, std::uint64_t revision);
         void clearAuthenticationPause(std::string_view connectionId);
         [[nodiscard]] std::optional<std::uint64_t>
         blockedRevision(std::string_view connectionId) const;
 
+        javelin::jmap::cache::AccountReader& m_accountReader;
         std::unordered_set<std::string> m_activeIncidents;
     };
 

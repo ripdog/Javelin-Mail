@@ -91,6 +91,31 @@ namespace javelin::jmap::cache
         return accounts;
     }
 
+    std::variant<std::optional<CachedAccount>, DatabaseError>
+    AccountRepository::findById(const std::string_view accountId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(
+            QStringLiteral("SELECT account_id, name, is_personal, is_read_only, is_primary "
+                           "FROM accounts WHERE account_id = :account_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Read cached account"), query);
+        if (!query.next())
+            return std::optional<CachedAccount>{};
+        return std::optional{CachedAccount{
+            .accountId = query.value(0).toString().toStdString(),
+            .name = query.value(1).toString().toStdString(),
+            .isPersonal = query.value(2).toInt() != 0,
+            .isReadOnly = query.value(3).toInt() != 0,
+            .isPrimary = query.value(4).toInt() != 0,
+        }};
+    }
+
     std::optional<DatabaseError> AccountRepository::removeMany(const QStringList& accountIds)
     {
         if (const auto error = m_connection.validate())

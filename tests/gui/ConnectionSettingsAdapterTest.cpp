@@ -32,6 +32,7 @@ TEST_CASE("connection settings adapt into redacted application account settings"
 
     CHECK(actual.connectionId == "connection");
     CHECK(actual.revision == 42);
+    CHECK(actual.displayName == "Personal");
     CHECK(actual.sessionUrl == "https://mail.example.test/.well-known/jmap");
     CHECK(actual.loginEmail == "ada@example.test");
     CHECK(actual.apiKey.empty());

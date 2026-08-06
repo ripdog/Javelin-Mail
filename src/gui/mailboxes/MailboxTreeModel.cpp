@@ -588,7 +588,7 @@ namespace javelin::gui::mailboxes
             accountNode->displayName =
                 !configuredName.isEmpty()
                     ? configuredName.toStdString()
-                    : (account.name.empty() ? account.accountId : account.name);
+                    : (account.name.empty() ? i18n("Unnamed account").toStdString() : account.name);
             // mailboxId left empty — this is an account-level node.
 
             const auto mailboxIt = mailboxesByAccount.find(account.accountId);

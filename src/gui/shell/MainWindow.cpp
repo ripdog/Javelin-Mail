@@ -3058,7 +3058,31 @@ namespace javelin::gui::shell
                     return;
                 }
 
-                javelin::gui::mailboxes::MailboxPropertiesDialog dialog{accountId, *mailbox, this};
+                auto accountName = m_settings.accountForCachedId(accountId).displayName;
+                if (accountName.isEmpty())
+                {
+                    const auto accountResult = m_accountReader.findById(accountId.toStdString());
+                    if (const auto* account =
+                            std::get_if<std::optional<javelin::jmap::cache::CachedAccount>>(
+                                &accountResult);
+                        account != nullptr && account->has_value())
+                        accountName = QString::fromStdString((*account)->name);
+                }
+                if (accountName.isEmpty())
+                    accountName = i18n("Unnamed account");
+
+                QString parentName;
+                if (mailbox->parentId.has_value())
+                {
+                    const auto parentMailbox = std::ranges::find(
+                        mailboxes, *mailbox->parentId, &javelin::jmap::cache::MailboxTreeItem::id);
+                    parentName = parentMailbox == mailboxes.cend()
+                                     ? i18n("Unavailable")
+                                     : QString::fromStdString(parentMailbox->name);
+                }
+
+                javelin::gui::mailboxes::MailboxPropertiesDialog dialog{
+                    std::move(accountName), std::move(parentName), *mailbox, this};
                 dialog.exec();
             });
         menu.exec(m_mailboxView->viewport()->mapToGlobal(position));

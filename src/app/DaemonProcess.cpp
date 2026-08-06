@@ -53,6 +53,7 @@ namespace javelin::app
         {
             return {.connectionId = settings.id.toStdString(),
                     .revision = settings.revision,
+                    .displayName = settings.displayName.toStdString(),
                     .sessionUrl = settings.sessionUrl.toStdString(),
                     .loginEmail = settings.loginEmail.toStdString(),
                     .apiKey = credentials.accessToken.toStdString(),

@@ -154,7 +154,7 @@ namespace javelin::app
             m_databaseConnection, *m_transport, *m_methodTransport, *m_jmapCore);
         m_deferredSendSubmitter =
             std::make_unique<ComposeDeferredSendSubmitter>(*m_jmapComposeService);
-        m_errorCoordinator = std::make_unique<ApplicationErrorCoordinator>();
+        m_errorCoordinator = std::make_unique<ApplicationErrorCoordinator>(*m_accountRepository);
         m_mailService = std::make_unique<MailApplicationService>(
             m_databaseConnection, *m_jmapCore, *m_methodTransport,
             *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns, *m_accountRepository,

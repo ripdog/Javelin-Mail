@@ -1,5 +1,7 @@
 #include "app/ApplicationErrorCoordinator.h"
 
+#include "jmap/cache/AccountReadRepository.h"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <QMessageLogContext>
@@ -17,6 +19,36 @@ namespace
         if (type == QtWarningMsg)
             capturedWarning = message;
     }
+
+    class StubAccountReader final : public javelin::jmap::cache::AccountReader
+    {
+      public:
+        std::vector<javelin::jmap::cache::CachedAccount> accounts;
+
+        [[nodiscard]] std::variant<std::vector<javelin::jmap::cache::CachedAccount>,
+                                   javelin::jmap::cache::DatabaseError>
+        listAll() const override
+        {
+            return accounts;
+        }
+
+        [[nodiscard]] std::variant<std::vector<javelin::jmap::cache::CachedAccount>,
+                                   javelin::jmap::cache::DatabaseError>
+        listOwnedBy(std::string_view) const override
+        {
+            return accounts;
+        }
+
+        [[nodiscard]] std::variant<std::optional<javelin::jmap::cache::CachedAccount>,
+                                   javelin::jmap::cache::DatabaseError>
+        findById(const std::string_view accountId) const override
+        {
+            const auto found = std::ranges::find(accounts, accountId,
+                                                 &javelin::jmap::cache::CachedAccount::accountId);
+            return found == accounts.end() ? std::optional<javelin::jmap::cache::CachedAccount>{}
+                                           : std::optional{*found};
+        }
+    };
 
     class WarningCapture final
     {
@@ -41,7 +73,8 @@ namespace
 
 TEST_CASE("application errors log all available diagnostic context")
 {
-    javelin::app::ApplicationErrorCoordinator coordinator;
+    StubAccountReader accountReader;
+    javelin::app::ApplicationErrorCoordinator coordinator{accountReader};
     const javelin::app::AccountConnectionSettings settings{
         .connectionId = "connection-a",
         .revision = 1,
@@ -80,10 +113,14 @@ TEST_CASE("application errors are deduplicated and rearmed after recovery")
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDirectory.path());
 
-    javelin::app::ApplicationErrorCoordinator coordinator;
+    StubAccountReader accountReader;
+    accountReader.accounts.push_back(
+        {.accountId = "account-a", .name = "Personal mail", .isPrimary = true});
+    javelin::app::ApplicationErrorCoordinator coordinator{accountReader};
     const javelin::app::AccountConnectionSettings settings{
         .connectionId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
         .revision = 4,
+        .displayName = "Configured personal mail",
         .sessionUrl = "https://example.test/jmap",
         .loginEmail = "user@example.test",
         .apiKey = "secret",
@@ -108,6 +145,9 @@ TEST_CASE("application errors are deduplicated and rearmed after recovery")
     coordinator.reportFailure(settings, "account-a", QStringLiteral("Synchronize mail"), timeout);
     coordinator.reportFailure(settings, "account-a", QStringLiteral("Synchronize mail"), timeout);
     CHECK(incidents == 1);
+    CHECK(userMessage.contains(QStringLiteral("Configured personal mail")));
+    CHECK_FALSE(userMessage.contains(QStringLiteral("Personal mail")));
+    CHECK_FALSE(userMessage.contains(QStringLiteral("account-a")));
     CHECK_FALSE(userMessage.contains(QStringLiteral("diagnostic timeout")));
 
     coordinator.reportSuccess(settings.connectionId);
@@ -133,8 +173,9 @@ TEST_CASE("authentication pause persists until a newer connection revision is ap
         .tokenEndpoint = {},
         .oauthClientId = {},
     };
+    StubAccountReader accountReader;
     {
-        javelin::app::ApplicationErrorCoordinator coordinator;
+        javelin::app::ApplicationErrorCoordinator coordinator{accountReader};
         coordinator.reportFailure(
             settings, "account-a", QStringLiteral("Synchronize contacts"),
             {.code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
@@ -142,7 +183,7 @@ TEST_CASE("authentication pause persists until a newer connection revision is ap
         CHECK(coordinator.authenticationPaused(settings.connectionId, settings.revision));
     }
 
-    javelin::app::ApplicationErrorCoordinator restored;
+    javelin::app::ApplicationErrorCoordinator restored{accountReader};
     CHECK(restored.authenticationPaused(settings.connectionId, settings.revision));
     restored.settingsApplied(settings.connectionId, settings.revision);
     CHECK(restored.authenticationPaused(settings.connectionId, settings.revision));

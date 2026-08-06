@@ -862,8 +862,8 @@ namespace javelin::gui::settings
             const auto accountName =
                 !configuredAccount.displayName.isEmpty()
                     ? configuredAccount.displayName
-                    : QString::fromStdString(account.name.empty() ? account.accountId
-                                                                  : account.name);
+                    : (account.name.empty() ? i18n("Unnamed account")
+                                            : QString::fromStdString(account.name));
             m_mailboxSyncAccount->addItem(accountName, accountId);
             m_syncedMailboxIds.insert(accountId, m_settings.syncedMailboxIds(accountId));
             m_notificationMailboxIds.insert(accountId,

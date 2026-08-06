@@ -1,5 +1,7 @@
 #include "app/ApplicationErrorCoordinator.h"
 
+#include "jmap/cache/AccountReadRepository.h"
+
 #include <KLocalizedString>
 
 #include <QDebug>
@@ -41,7 +43,9 @@ namespace javelin::app
         }
     } // namespace
 
-    ApplicationErrorCoordinator::ApplicationErrorCoordinator(QObject* parent) : QObject(parent)
+    ApplicationErrorCoordinator::ApplicationErrorCoordinator(
+        javelin::jmap::cache::AccountReader& accountReader, QObject* parent)
+        : QObject(parent), m_accountReader(accountReader)
     {
     }
 
@@ -68,8 +72,9 @@ namespace javelin::app
             Q_EMIT authenticationPauseChanged(connectionKey(settings.connectionId), true);
         }
 
-        const auto account = QString::fromStdString(std::string{accountId});
-        Q_EMIT incidentRaised(connectionKey(settings.connectionId), account, userTitle(error),
+        const auto account = accountName(settings, accountId);
+        Q_EMIT incidentRaised(connectionKey(settings.connectionId),
+                              QString::fromStdString(std::string{accountId}), userTitle(error),
                               userMessage(account, operation, error), authentication,
                               authentication);
     }
@@ -133,11 +138,35 @@ namespace javelin::app
         return i18n("Javelin Mail error");
     }
 
-    QString ApplicationErrorCoordinator::userMessage(const QString& accountId,
+    QString ApplicationErrorCoordinator::accountName(const AccountConnectionSettings& settings,
+                                                     const std::string_view accountId) const
+    {
+        const auto displayName = QString::fromStdString(settings.displayName).trimmed();
+        if (!displayName.isEmpty())
+            return displayName;
+
+        if (!accountId.empty())
+        {
+            const auto result = m_accountReader.findById(accountId);
+            if (const auto* account =
+                    std::get_if<std::optional<javelin::jmap::cache::CachedAccount>>(&result);
+                account != nullptr && account->has_value())
+            {
+                const auto name = QString::fromStdString((*account)->name).trimmed();
+                if (!name.isEmpty())
+                    return name;
+            }
+        }
+
+        const auto loginEmail = QString::fromStdString(settings.loginEmail).trimmed();
+        return loginEmail.isEmpty() ? i18n("this account") : loginEmail;
+    }
+
+    QString ApplicationErrorCoordinator::userMessage(const QString& accountName,
                                                      const QString& operation,
                                                      const javelin::jmap::OperationError& error)
     {
-        const auto account = accountId.isEmpty() ? i18n("this account") : accountId;
+        const auto account = accountName.isEmpty() ? i18n("this account") : accountName;
         if (javelin::jmap::isAuthenticationError(error))
             return i18n("Authentication failed for %1. Update and save its connection settings to "
                         "resume synchronization.",

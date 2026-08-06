@@ -44,7 +44,7 @@ namespace javelin::gui::shell
                 settings.accountForCachedId(QString::fromStdString(account.accountId));
             if (!configured.displayName.isEmpty())
                 return configured.displayName;
-            return account.name.empty() ? QString::fromStdString(account.accountId)
+            return account.name.empty() ? i18n("Unnamed account")
                                         : QString::fromStdString(account.name);
         }
     } // namespace

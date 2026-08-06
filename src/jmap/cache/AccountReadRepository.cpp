@@ -82,4 +82,23 @@ namespace javelin::jmap::cache
                             QString::fromStdString(std::string{ownerAccountId}));
     }
 
+    std::variant<std::optional<CachedAccount>, DatabaseError>
+    AccountReadRepository::findById(const std::string_view accountId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(
+            QStringLiteral("SELECT account_id, name, is_personal, is_read_only, is_primary "
+                           "FROM accounts WHERE account_id = :account_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Read cached account"), query);
+        if (!query.next())
+            return std::optional<CachedAccount>{};
+        return std::optional{readAccount(query)};
+    }
+
 } // namespace javelin::jmap::cache
