@@ -32,6 +32,7 @@ namespace javelin::gui::settings
 
 namespace javelin::gui::contacts
 {
+    class BirthdayEditor;
     class ContactFieldEditor;
 
     class ContactsManagerWidget final : public QWidget
@@ -145,6 +146,7 @@ namespace javelin::gui::contacts
         std::vector<javelin::jmap::api::AddressBook> m_addressBooks;
         std::vector<javelin::jmap::contacts::ContactSummary> m_contacts;
         std::vector<javelin::jmap::contacts::ContactSummary> m_groups;
+        std::optional<javelin::jmap::contacts::ContactSummary> m_optimisticContact;
         bool m_busy = false;
         bool m_refreshInFlight = false;
         std::size_t m_pendingRefreshes = 0;
@@ -182,10 +184,11 @@ namespace javelin::gui::contacts
         ContactFieldEditor* m_addressesEdit = nullptr;
         QListWidget* m_membersEdit = nullptr;
         QToolButton* m_groupContactDetailsToggle = nullptr;
-        QLineEdit* m_birthdayEdit = nullptr;
+        BirthdayEditor* m_birthdayEdit = nullptr;
         QPlainTextEdit* m_notesEdit = nullptr;
         QListWidget* m_addressBooksEdit = nullptr;
         QToolButton* m_advancedToggle = nullptr;
+        QWidget* m_advancedDetails = nullptr;
         QLabel* m_editorLocation = nullptr;
         QPushButton* m_saveButton = nullptr;
         QPushButton* m_uploadPhotoButton = nullptr;

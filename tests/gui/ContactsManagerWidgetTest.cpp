@@ -5,8 +5,10 @@
 #include "jmap/cache/SessionRepository.h"
 
 #include <QAction>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QDateEdit>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
@@ -14,6 +16,7 @@
 #include <QStackedWidget>
 #include <QTemporaryDir>
 #include <QToolButton>
+#include <QWidget>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -353,7 +356,8 @@ TEST_CASE("Fastmail-style rights allow editing and deleting group cards",
     auto* kind = widget.findChild<QComboBox*>(QStringLiteral("contactsKindEdit"));
     auto* organization = widget.findChild<QLineEdit*>(QStringLiteral("contactsOrganizationEdit"));
     auto* title = widget.findChild<QLineEdit*>(QStringLiteral("contactsTitleEdit"));
-    auto* birthday = widget.findChild<QLineEdit*>(QStringLiteral("contactsBirthdayEdit"));
+    auto* birthday = widget.findChild<QDateEdit*>(QStringLiteral("contactsBirthdayEdit"));
+    auto* birthdayEditor = widget.findChild<QWidget*>(QStringLiteral("contactsBirthdayEditor"));
     auto* members = widget.findChild<QListWidget*>(QStringLiteral("contactsMembersEdit"));
     auto* groupDetails =
         widget.findChild<QToolButton*>(QStringLiteral("contactsGroupContactDetailsToggle"));
@@ -367,6 +371,7 @@ TEST_CASE("Fastmail-style rights allow editing and deleting group cards",
     REQUIRE(organization != nullptr);
     REQUIRE(title != nullptr);
     REQUIRE(birthday != nullptr);
+    REQUIRE(birthdayEditor != nullptr);
     REQUIRE(members != nullptr);
     REQUIRE(groupDetails != nullptr);
     REQUIRE(emails != nullptr);
@@ -412,7 +417,7 @@ TEST_CASE("Fastmail-style rights allow editing and deleting group cards",
     CHECK(kind->currentData().toString() == QStringLiteral("group"));
     CHECK(organization->isHidden());
     CHECK(title->isHidden());
-    CHECK(birthday->isHidden());
+    CHECK(birthdayEditor->isHidden());
     CHECK_FALSE(members->isHidden());
     CHECK_FALSE(groupDetails->isHidden());
     CHECK(emails->isHidden());
@@ -484,6 +489,170 @@ TEST_CASE("Creating a group uses the full editor and exits it after saving",
     CHECK(details->currentIndex() == 1);
 }
 
+TEST_CASE("Contact editor uses a birthday picker and keeps address books advanced",
+          "[gui][contacts][editor]")
+{
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contacts-manager-birthday-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    if (const auto error = sessions.replace("a1", session()))
+        FAIL(error->message.toStdString());
+    auto alice = contact("Alice", "a@x.test");
+    alice.document =
+        R"({"id":"card-1","uid":"uid-card-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Alice"},"emails":{"email-1":{"address":"a@x.test"}},"anniversaries":{"birthday":{"kind":"birth","date":{"year":1990,"month":4,"day":5}}}})";
+    javelin::jmap::cache::ContactRepository repository{connection};
+    REQUIRE_FALSE(
+        repository.replaceAll("a1", {book("book-1", "Personal")}, {alice}, "b1", "c1").has_value());
+
+    RefreshPort refresh;
+    CommandPort commands;
+    commands.saveContactResult = javelin::jmap::contacts::ContactMutationSummary{
+        .accountId = "a1",
+        .newState = "c2",
+        .createdId = std::nullopt,
+        .createdIds = {},
+        .receipt = {},
+    };
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    javelin::gui::contacts::ContactsManagerWidget widget{settings, repository, refresh, commands};
+    auto* contacts = widget.findChild<QListWidget*>(QStringLiteral("contactsContactList"));
+    auto* birthday = widget.findChild<QDateEdit*>(QStringLiteral("contactsBirthdayEdit"));
+    auto* advancedToggle = widget.findChild<QToolButton*>(QStringLiteral("contactsAdvancedToggle"));
+    auto* advancedDetails = widget.findChild<QWidget*>(QStringLiteral("contactsAdvancedDetails"));
+    auto* addressBooks = widget.findChild<QListWidget*>(QStringLiteral("contactsAddressBooksEdit"));
+    auto* save = widget.findChild<QPushButton*>(QStringLiteral("contactsSaveButton"));
+    REQUIRE(contacts != nullptr);
+    REQUIRE(birthday != nullptr);
+    REQUIRE(advancedToggle != nullptr);
+    REQUIRE(advancedDetails != nullptr);
+    REQUIRE(addressBooks != nullptr);
+    REQUIRE(save != nullptr);
+
+    contacts->setCurrentRow(0);
+    widget.beginEditContact();
+    CHECK(birthday->calendarPopup());
+    CHECK(birthday->date() == QDate(1990, 4, 5));
+    const auto* birthdayToggle = birthday->parentWidget()->findChild<QCheckBox*>();
+    REQUIRE(birthdayToggle != nullptr);
+    CHECK(birthdayToggle->checkState() == Qt::Checked);
+    CHECK(advancedDetails->isAncestorOf(addressBooks));
+    CHECK(advancedDetails->isHidden());
+    advancedToggle->click();
+    CHECK_FALSE(advancedDetails->isHidden());
+
+    birthday->setDate(QDate(1991, 6, 7));
+    save->click();
+    QCoreApplication::processEvents();
+    REQUIRE(commands.lastSaveContactCommand.has_value());
+    CHECK(commands.lastSaveContactCommand->contact.birthday == "1991-06-07");
+}
+
+TEST_CASE("Contact field labels and preference order follow the visible rows",
+          "[gui][contacts][editor][fields]")
+{
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contacts-manager-fields-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    if (const auto error = sessions.replace("a1", session()))
+        FAIL(error->message.toStdString());
+    auto alice = contact("Alice", "other@example.test");
+    alice.document =
+        R"({"id":"card-1","uid":"uid-card-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Alice"},"emails":{"other":{"address":"other@example.test","label":"Assistant","pref":1},"work":{"address":"work@example.test","label":"Office","pref":2,"contexts":{"work":true}}}})";
+    javelin::jmap::cache::ContactRepository repository{connection};
+    REQUIRE_FALSE(
+        repository.replaceAll("a1", {book("book-1", "Personal")}, {alice}, "b1", "c1").has_value());
+
+    RefreshPort refresh;
+    CommandPort commands;
+    commands.saveContactResult = javelin::jmap::contacts::ContactMutationSummary{
+        .accountId = "a1",
+        .newState = "c2",
+        .createdId = std::nullopt,
+        .createdIds = {},
+        .receipt = {},
+    };
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    javelin::gui::contacts::ContactsManagerWidget widget{settings, repository, refresh, commands};
+    auto* contacts = widget.findChild<QListWidget*>(QStringLiteral("contactsContactList"));
+    auto* emails = widget.findChild<QWidget*>(QStringLiteral("contactsEmailsEdit"));
+    auto* save = widget.findChild<QPushButton*>(QStringLiteral("contactsSaveButton"));
+    REQUIRE(contacts != nullptr);
+    REQUIRE(emails != nullptr);
+    REQUIRE(save != nullptr);
+
+    contacts->setCurrentRow(0);
+    widget.beginEditContact();
+    const auto values = emails->findChildren<QLineEdit*>(QStringLiteral("contactFieldValue"));
+    REQUIRE(values.size() == 2);
+    QWidget* otherRow = nullptr;
+    QWidget* workRow = nullptr;
+    for (auto* value : values)
+    {
+        if (value->text() == QStringLiteral("other@example.test"))
+            otherRow = value->parentWidget();
+        else if (value->text() == QStringLiteral("work@example.test"))
+            workRow = value->parentWidget();
+    }
+    REQUIRE(otherRow != nullptr);
+    REQUIRE(workRow != nullptr);
+    auto* otherLabel = otherRow->findChild<QLineEdit*>(QStringLiteral("contactFieldLabel"));
+    auto* workLabel = workRow->findChild<QLineEdit*>(QStringLiteral("contactFieldLabel"));
+    auto* moveOtherDown = otherRow->findChild<QToolButton*>(QStringLiteral("contactFieldMoveDown"));
+    REQUIRE(otherLabel != nullptr);
+    REQUIRE(workLabel != nullptr);
+    REQUIRE(moveOtherDown != nullptr);
+    CHECK_FALSE(otherLabel->isHidden());
+    CHECK(workLabel->isHidden());
+
+    auto* addField = emails->findChild<QPushButton*>(QStringLiteral("contactFieldAdd"));
+    REQUIRE(addField != nullptr);
+    addField->click();
+    QLineEdit* newValue = nullptr;
+    for (auto* value : emails->findChildren<QLineEdit*>(QStringLiteral("contactFieldValue")))
+    {
+        if (value->text().isEmpty())
+        {
+            newValue = value;
+            break;
+        }
+    }
+    REQUIRE(newValue != nullptr);
+    auto* newType =
+        newValue->parentWidget()->findChild<QComboBox*>(QStringLiteral("contactFieldType"));
+    auto* newLabel =
+        newValue->parentWidget()->findChild<QLineEdit*>(QStringLiteral("contactFieldLabel"));
+    REQUIRE(newType != nullptr);
+    REQUIRE(newLabel != nullptr);
+    CHECK_FALSE(newLabel->isHidden());
+    newType->setCurrentIndex(newType->findData(QStringLiteral("work")));
+    CHECK(newLabel->isHidden());
+    newType->setCurrentIndex(newType->findData(QStringLiteral("")));
+    CHECK_FALSE(newLabel->isHidden());
+
+    moveOtherDown->click();
+    save->click();
+    QCoreApplication::processEvents();
+    REQUIRE(commands.lastSaveContactCommand.has_value());
+    const auto& savedEmails = commands.lastSaveContactCommand->contact.emails;
+    REQUIRE(savedEmails.size() == 2);
+    CHECK(savedEmails[0].value == "work@example.test");
+    CHECK(savedEmails[0].preference == std::optional<std::uint32_t>{1});
+    CHECK(savedEmails[0].label == std::optional<std::string>{"Office"});
+    CHECK(savedEmails[1].value == "other@example.test");
+    CHECK(savedEmails[1].preference == std::optional<std::uint32_t>{2});
+    CHECK(savedEmails[1].label == std::optional<std::string>{"Assistant"});
+}
+
 TEST_CASE("Saving a contact exits the editor after both edits and creates", "[gui][contacts][save]")
 {
     QTemporaryDir directory;
@@ -549,7 +718,40 @@ TEST_CASE("Saving a contact exits the editor after both edits and creates", "[gu
     QCoreApplication::processEvents();
     REQUIRE(commands.lastSaveContactCommand.has_value());
     CHECK_FALSE(commands.lastSaveContactCommand->contactId.has_value());
+    CHECK_FALSE(commands.lastSaveContactCommand->contact.uid.empty());
     CHECK(commands.lastSaveContactCommand->contact.fullName == "Bob");
+    CHECK(details->currentIndex() == 1);
+    REQUIRE(contacts->count() == 2);
+    QListWidgetItem* bob = nullptr;
+    for (int row = 0; row < contacts->count(); ++row)
+    {
+        if (contacts->item(row)->data(Qt::UserRole).toString() == QStringLiteral("card-2"))
+        {
+            bob = contacts->item(row);
+            break;
+        }
+    }
+    REQUIRE(bob != nullptr);
+    CHECK(bob->text() == QStringLiteral("Bob"));
+    CHECK(contacts->currentItem() == bob);
+
+    widget.requestRefresh();
+    QCoreApplication::processEvents();
+    REQUIRE(contacts->count() == 2);
+    QListWidgetItem* refreshedBob = nullptr;
+    for (int row = 0; row < contacts->count(); ++row)
+    {
+        if (contacts->item(row)->data(Qt::UserRole).toString() == QStringLiteral("card-2"))
+        {
+            refreshedBob = contacts->item(row);
+            break;
+        }
+    }
+    REQUIRE(refreshedBob != nullptr);
+    contacts->setCurrentRow(0);
+    contacts->setCurrentItem(refreshedBob, QItemSelectionModel::ClearAndSelect);
+    QCoreApplication::processEvents();
+    CHECK(contacts->currentItem() == refreshedBob);
     CHECK(details->currentIndex() == 1);
 }
 
