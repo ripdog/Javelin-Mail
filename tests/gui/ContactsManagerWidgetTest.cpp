@@ -668,7 +668,7 @@ TEST_CASE("Saving a contact exits the editor after both edits and creates", "[gu
     javelin::jmap::cache::ContactRepository repository{connection};
     REQUIRE_FALSE(repository
                       .replaceAll("a1", {book("book-1", "Personal")},
-                                  {contact("Alice", "a@x.test")}, "b1", "c1")
+                                  {contact("Alice", "a@x.test"), group()}, "b1", "c1")
                       .has_value());
 
     RefreshPort refresh;
@@ -682,14 +682,28 @@ TEST_CASE("Saving a contact exits the editor after both edits and creates", "[gu
     };
     javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
     javelin::gui::contacts::ContactsManagerWidget widget{settings, repository, refresh, commands};
+    auto* groups = widget.findChild<QListWidget*>(QStringLiteral("contactsGroupList"));
     auto* contacts = widget.findChild<QListWidget*>(QStringLiteral("contactsContactList"));
     auto* details = widget.findChild<QStackedWidget*>(QStringLiteral("contactsDetailStack"));
     auto* name = widget.findChild<QLineEdit*>(QStringLiteral("contactsNameEdit"));
     auto* save = widget.findChild<QPushButton*>(QStringLiteral("contactsSaveButton"));
+    REQUIRE(groups != nullptr);
     REQUIRE(contacts != nullptr);
     REQUIRE(details != nullptr);
     REQUIRE(name != nullptr);
     REQUIRE(save != nullptr);
+    REQUIRE(contacts->count() == 1);
+
+    for (int row = 0; row < groups->count(); ++row)
+    {
+        if (groups->item(row)->text() == QStringLiteral("Friends"))
+        {
+            groups->setCurrentRow(row);
+            break;
+        }
+    }
+    REQUIRE(groups->currentItem() != nullptr);
+    REQUIRE(groups->currentItem()->text() == QStringLiteral("Friends"));
     REQUIRE(contacts->count() == 1);
 
     contacts->setCurrentRow(0);
@@ -702,6 +716,20 @@ TEST_CASE("Saving a contact exits the editor after both edits and creates", "[gu
     CHECK(commands.lastSaveContactCommand->contactId == std::optional<std::string>{"card-1"});
     CHECK(commands.lastSaveContactCommand->contact.fullName == "Alice edited");
     CHECK(details->currentIndex() == 1);
+    REQUIRE(groups->currentItem() != nullptr);
+    CHECK(groups->currentItem()->text() == QStringLiteral("Friends"));
+
+    for (int row = 0; row < groups->count(); ++row)
+    {
+        if (groups->item(row)->text() == QStringLiteral("Personal") &&
+            groups->item(row)->flags().testFlag(Qt::ItemIsSelectable))
+        {
+            groups->setCurrentRow(row);
+            break;
+        }
+    }
+    REQUIRE(groups->currentItem() != nullptr);
+    REQUIRE(groups->currentItem()->text() == QStringLiteral("Personal"));
 
     commands.lastSaveContactCommand.reset();
     commands.saveContactResult = javelin::jmap::contacts::ContactMutationSummary{
@@ -721,6 +749,8 @@ TEST_CASE("Saving a contact exits the editor after both edits and creates", "[gu
     CHECK_FALSE(commands.lastSaveContactCommand->contact.uid.empty());
     CHECK(commands.lastSaveContactCommand->contact.fullName == "Bob");
     CHECK(details->currentIndex() == 1);
+    REQUIRE(groups->currentItem() != nullptr);
+    CHECK(groups->currentItem()->text() == QStringLiteral("Personal"));
     REQUIRE(contacts->count() == 2);
     QListWidgetItem* bob = nullptr;
     for (int row = 0; row < contacts->count(); ++row)
@@ -737,6 +767,8 @@ TEST_CASE("Saving a contact exits the editor after both edits and creates", "[gu
 
     widget.requestRefresh();
     QCoreApplication::processEvents();
+    REQUIRE(groups->currentItem() != nullptr);
+    CHECK(groups->currentItem()->text() == QStringLiteral("Personal"));
     REQUIRE(contacts->count() == 2);
     QListWidgetItem* refreshedBob = nullptr;
     for (int row = 0; row < contacts->count(); ++row)

@@ -1884,25 +1884,6 @@ namespace javelin::gui::contacts
         if (preview.has_value() && (cachedContact == nullptr || !cachedContact->has_value()))
             m_optimisticContact = *preview;
 
-        if (kind != "group")
-        {
-            {
-                QSignalBlocker filterBlocker{m_filterEdit};
-                m_filterEdit->clear();
-            }
-            QSignalBlocker groupBlocker{m_groupList};
-            for (int row = 0; row < m_groupList->count(); ++row)
-            {
-                auto* item = m_groupList->item(row);
-                if (static_cast<GroupFilterMode>(item->data(groupFilterModeRole).toInt()) ==
-                    GroupFilterMode::All)
-                {
-                    m_groupList->setCurrentItem(item);
-                    break;
-                }
-            }
-        }
-
         m_detailStack->setCurrentIndex(0);
         reloadContacts();
 
