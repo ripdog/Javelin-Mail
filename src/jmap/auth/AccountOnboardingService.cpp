@@ -194,6 +194,13 @@ namespace javelin::jmap::auth
                    : Kind::Transient;
     }
 
+    bool detail::isUsableOAuthRefreshRequest(const javelin::app::OAuthRefreshRequest& request)
+    {
+        return !request.tokenEndpoint.isEmpty() && !request.clientId.isEmpty() &&
+               !request.refreshToken.isEmpty() && isSecureOAuthUrl(QUrl{request.tokenEndpoint}) &&
+               (request.resourceUrl.isEmpty() || isSecureOAuthUrl(QUrl{request.resourceUrl}));
+    }
+
     namespace
     {
         struct HttpResult
@@ -1026,18 +1033,17 @@ namespace javelin::jmap::auth
     AccountOnboardingService::refreshOAuth(javelin::app::OAuthRefreshRequest request)
     {
         using FailureKind = javelin::app::OAuthRefreshFailureKind;
-        if (request.tokenEndpoint.isEmpty() || request.clientId.isEmpty() ||
-            request.refreshToken.isEmpty() || request.resourceUrl.isEmpty() ||
-            !isSecureServerUrl(QUrl{request.tokenEndpoint}) ||
-            !isSecureServerUrl(QUrl{request.resourceUrl}))
+        if (!detail::isUsableOAuthRefreshRequest(request))
             co_return refreshError(QStringLiteral("OAuth refresh information is incomplete."),
                                    FailureKind::ReauthenticationRequired);
-        const auto body = formBody({
+        std::vector<std::pair<QString, QString>> fields{
             {QStringLiteral("grant_type"), QStringLiteral("refresh_token")},
             {QStringLiteral("refresh_token"), request.refreshToken},
             {QStringLiteral("client_id"), request.clientId},
-            {QStringLiteral("resource"), request.resourceUrl},
-        });
+        };
+        if (!request.resourceUrl.isEmpty())
+            fields.emplace_back(QStringLiteral("resource"), request.resourceUrl);
+        const auto body = formBody(fields);
         const auto response =
             co_await post(m_networkAccessManager, QUrl{request.tokenEndpoint},
                           QByteArrayLiteral("application/x-www-form-urlencoded"), body);

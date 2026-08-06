@@ -60,6 +60,24 @@ TEST_CASE("OAuth refresh refuses an insecure token endpoint", "[jmap][auth][onbo
     CHECK(result.failureKind == javelin::app::OAuthRefreshFailureKind::ReauthenticationRequired);
 }
 
+TEST_CASE("OAuth refresh accepts legacy grants without a resource indicator",
+          "[jmap][auth][onboarding]")
+{
+    javelin::app::OAuthRefreshRequest request{
+        .sessionUrl = QStringLiteral("https://mail.example.com/.well-known/jmap"),
+        .tokenEndpoint = QStringLiteral("https://auth.example.com/token"),
+        .clientId = QStringLiteral("javelin"),
+        .refreshToken = QStringLiteral("refresh-token"),
+        .resourceUrl = {},
+        .scope = {},
+    };
+
+    CHECK(javelin::jmap::auth::detail::isUsableOAuthRefreshRequest(request));
+
+    request.resourceUrl = QStringLiteral("http://mail.example.com/jmap");
+    CHECK_FALSE(javelin::jmap::auth::detail::isUsableOAuthRefreshRequest(request));
+}
+
 TEST_CASE("OAuth refresh errors distinguish expired grants from transient failures",
           "[jmap][auth][onboarding]")
 {

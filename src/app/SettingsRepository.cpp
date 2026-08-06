@@ -54,7 +54,7 @@ namespace javelin::app
         constexpr auto workspaceColorKey = "color";
         constexpr auto legacyWindowGroup = "mainWindow";
         constexpr auto legacyCalendarColorsKey = "calendar/colorOverrides";
-        constexpr int settingsSchemaVersion = 4;
+        constexpr int settingsSchemaVersion = 5;
         constexpr int workspaceFormatVersion = 1;
         constexpr int maximumAccounts = 256;
         constexpr int maximumSelections = 256;
@@ -400,12 +400,13 @@ namespace javelin::app
                 settings, SettingsRepositoryErrorCode::ReadFailed, settingKey(schemaVersionKey)))
             return error;
         const bool hasSchema = settings.contains(settingKey(schemaVersionKey));
+        unsigned int storedSchemaVersion = 0;
         if (hasSchema)
         {
             bool ok = false;
             const auto version = settings.value(settingKey(schemaVersionKey)).toUInt(&ok);
-            if (!ok ||
-                (version != 1 && version != 2 && version != 3 && version != settingsSchemaVersion))
+            if (!ok || (version != 1 && version != 2 && version != 3 && version != 4 &&
+                        version != settingsSchemaVersion))
             {
                 return SettingsRepositoryError{
                     .code = SettingsRepositoryErrorCode::UnsupportedSchema,
@@ -414,6 +415,7 @@ namespace javelin::app
             }
             if (version == settingsSchemaVersion)
                 return std::nullopt;
+            storedSchemaVersion = version;
         }
 
         if (const auto error = migrateLegacyCredentials())
@@ -427,6 +429,17 @@ namespace javelin::app
                                            .detail = error->detail};
         }
         auto migrated = std::get<javelin::protocol::SettingsSnapshot>(legacy);
+        if (storedSchemaVersion == 4)
+        {
+            for (auto& account : migrated.accounts)
+            {
+                if (account.reauthenticationRequired && account.oauthResource.isEmpty() &&
+                    !account.tokenEndpoint.isEmpty() && !account.oauthClientId.isEmpty())
+                {
+                    account.reauthenticationRequired = false;
+                }
+            }
+        }
         migrated.schemaVersion = settingsSchemaVersion;
         migrated.revision = {};
         if (const auto error = writeSnapshot(migrated, false))

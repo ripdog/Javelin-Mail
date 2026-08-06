@@ -117,11 +117,11 @@ TEST_CASE("settings repository creates and persists its schema identity", "[app]
     const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
     REQUIRE(snapshot != nullptr);
     CHECK(snapshot->revision.value == 0);
-    CHECK(snapshot->schemaVersion == 4);
+    CHECK(snapshot->schemaVersion == 5);
     CHECK(snapshot->undoSendDelaySeconds == 10);
 
     QSettings persisted{path, QSettings::IniFormat};
-    CHECK(persisted.value(QStringLiteral("settings/schemaVersion")).toUInt() == 4);
+    CHECK(persisted.value(QStringLiteral("settings/schemaVersion")).toUInt() == 5);
     CHECK(persisted.value(QStringLiteral("settings/revision")).toULongLong() == 0);
 }
 
@@ -170,7 +170,7 @@ TEST_CASE("settings repository migrates the complete legacy operational shape", 
     CHECK(snapshot->workspace.calendarColorOverrides.front().color == QStringLiteral("#123456"));
 
     QSettings migrated{path, QSettings::IniFormat};
-    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 4);
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 5);
     CHECK(migrated.value(QStringLiteral("settings/revision")).toULongLong() == 0);
     CHECK_FALSE(migrated.value(QStringLiteral("translation/enabled")).toBool());
     CHECK(migrated.value(QStringLiteral("translation/targetLanguage")).toString() ==
@@ -209,14 +209,51 @@ TEST_CASE("settings repository migrates schema one workspace state", "[app][sett
     const auto result = repository.load();
     const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
     REQUIRE(snapshot != nullptr);
-    CHECK(snapshot->schemaVersion == 4);
+    CHECK(snapshot->schemaVersion == 5);
     CHECK(snapshot->revision.value == 0);
     CHECK(javelin::gui::shell::deserializeMainWindowState(snapshot->workspace.mainWindowState, {})
               .activeTabIndex == 4);
 
     QSettings migrated{path, QSettings::IniFormat};
-    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 4);
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 5);
     CHECK_FALSE(migrated.contains(QStringLiteral("mainWindow/activeTabIndex")));
+}
+
+TEST_CASE("schema four migration retries legacy OAuth grants blocked by missing resources",
+          "[app][settings][oauth]")
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("schema-four-oauth.ini"));
+    QSettings settings{path, QSettings::IniFormat};
+    settings.setValue(QStringLiteral("settings/schemaVersion"), 4);
+    settings.beginGroup(QStringLiteral("accounts"));
+    settings.beginWriteArray(QStringLiteral("size"), 1);
+    settings.setArrayIndex(0);
+    settings.setValue(QStringLiteral("id"), QStringLiteral("connection-1"));
+    settings.setValue(QStringLiteral("sessionUrl"),
+                      QStringLiteral("https://mail.example.test/.well-known/jmap"));
+    settings.setValue(QStringLiteral("loginEmail"), QStringLiteral("user@example.test"));
+    settings.setValue(QStringLiteral("tokenEndpoint"),
+                      QStringLiteral("https://auth.example.test/token"));
+    settings.setValue(QStringLiteral("oauthClientId"), QStringLiteral("client-id"));
+    settings.setValue(QStringLiteral("oauthResource"), QString{});
+    settings.setValue(QStringLiteral("reauthenticationRequired"), true);
+    settings.endArray();
+    settings.endGroup();
+    settings.sync();
+    REQUIRE(settings.status() == QSettings::NoError);
+
+    auto repository = repositoryFor(path);
+    const auto result = repository.load();
+    const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
+    REQUIRE(snapshot != nullptr);
+    CHECK(snapshot->schemaVersion == 5);
+    REQUIRE(snapshot->accounts.size() == 1);
+    CHECK_FALSE(snapshot->accounts.front().reauthenticationRequired);
+
+    QSettings migrated{path, QSettings::IniFormat};
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 5);
 }
 
 TEST_CASE("settings updates require the current revision and round-trip typed values",

@@ -431,7 +431,7 @@ namespace javelin::protocol
     struct SettingsSnapshot
     {
         SettingsRevision revision;
-        std::uint32_t schemaVersion = 4;
+        std::uint32_t schemaVersion = 5;
         std::vector<AccountSettings> accounts;
         std::vector<MailboxSelectionSettings> syncedMailboxSelections;
         std::vector<MailboxSelectionSettings> notificationMailboxSelections;
