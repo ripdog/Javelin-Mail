@@ -101,7 +101,10 @@ and received time, so read/flag keyword-only changes update their rows without `
 mailbox windows stale and partial. The object and mailbox counts still commit immediately, but an
 open affected view performs targeted query reconciliation because an external insertion's exact
 position is not proven by `Email/changes` and `Email/get`. Unaffected mailboxes are never scanned.
-Successful local mutations do not automatically refresh active mailbox or search tabs.
+Successful local mutations do not automatically refresh active mailbox or search tabs. A complete
+`locallyProjected` mailbox window satisfies normal materialization directly from effective SQLite
+state. GUI presentation staleness never upgrades that request into a forced server query; only an
+explicit user refresh may request server reconciliation, and the daemon still owns the transport.
 
 Every `/changes` materialization must account for each requested ID exactly once in either the
 corresponding `/get` list or `notFound`. A `notFound` ID is a late tombstone and is removed locally.

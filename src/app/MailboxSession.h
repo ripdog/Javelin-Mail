@@ -35,7 +35,7 @@ namespace javelin::app
         void updateMetadata(QString title, std::optional<std::string> role);
 
         void loadCachedPage(bool forceReload = false) override;
-        void refresh() override;
+        void refresh(MessageListRefreshMode mode = MessageListRefreshMode::Materialize) override;
         void markStale() override;
         void setSort(javelin::jmap::query::EmailListSort sort) override;
         void reveal(std::string emailId);

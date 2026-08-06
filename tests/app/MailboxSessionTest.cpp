@@ -164,9 +164,11 @@ TEST_CASE("mailbox cache commit terminates its visible refresh", "[app][mailbox-
     QObject::connect(&session, &javelin::app::MessageListSession::refreshFailed, &session,
                      [&failureCount](const javelin::jmap::OperationError&) { ++failureCount; });
 
+    session.markStale();
     session.refresh();
     REQUIRE(session.page().refreshInFlight);
     REQUIRE(materialization.lastMailboxIntent.has_value());
+    CHECK_FALSE(materialization.lastMailboxIntent->forceRefresh);
 
     events.publish({
         .epoch = 1,
@@ -197,6 +199,27 @@ TEST_CASE("mailbox cache commit terminates its visible refresh", "[app][mailbox-
 
     CHECK_FALSE(session.page().refreshInFlight);
     CHECK(failureCount == 0);
+}
+
+TEST_CASE("explicit mailbox refresh requests server reconciliation", "[app][mailbox-session]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("mailbox-session-explicit-refresh-test"));
+    PendingMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::MailboxSession session{
+        "account-1", "mailbox-1",     QStringLiteral("Inbox"), std::optional<std::string>{"inbox"},
+        {},          context.queries, materialization,         100,
+        events};
+
+    session.refresh(javelin::app::MessageListRefreshMode::RefreshFromServer);
+    REQUIRE(materialization.lastMailboxIntent.has_value());
+    CHECK(materialization.lastMailboxIntent->forceRefresh);
+
+    materialization.complete(javelin::jmap::OperationError{
+        .message = QStringLiteral("Expected explicit refresh test completion."),
+    });
+    drainEvents();
 }
 
 TEST_CASE("obsolete mailbox completion cannot alter a new page", "[app][mailbox-session]")

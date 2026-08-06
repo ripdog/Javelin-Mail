@@ -7,6 +7,11 @@
 #include "app/MessageListMaterializationPort.h"
 #include "app/RemoteCodec.h"
 #include "jmap/cache/Database.h"
+#include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxRepository.h"
+#include "jmap/cache/MailboxWindowRepository.h"
+#include "jmap/cache/QueryService.h"
+#include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include <QCoroTask>
 #include <catch2/catch_test_macros.hpp>
@@ -459,6 +464,173 @@ TEST_CASE("completed offline mailbox pages materialize without server access",
     CHECK(summary->representativeCount == 25);
     CHECK(summary->total == std::optional<std::size_t>{150});
     CHECK(summary->queryState == "state-current");
+}
+
+TEST_CASE("optimistic archive publishes and materializes both mailboxes locally",
+          "[app][daemon][mail][optimistic]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+
+    const auto locationResult =
+        javelin::app::CacheLocationProvider{temporaryDirectory.path()}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(locationResult));
+    javelin::app::DaemonServices services{std::get<javelin::app::CacheLocation>(locationResult)};
+    auto& connection = services.databaseConnection();
+
+    QSqlQuery seed{connection.database()};
+    REQUIRE(seed.exec(QStringLiteral(
+        "INSERT INTO accounts(account_id,email_address,session_url,is_primary,cap_mail) "
+        "VALUES('account-1','user@example.test','http://127.0.0.1:9/jmap',1,1)")));
+
+    const javelin::jmap::domain::MailboxRights rights{
+        .mayReadItems = true,
+        .mayAddItems = true,
+        .mayRemoveItems = true,
+        .maySetSeen = true,
+        .maySetKeywords = true,
+    };
+    javelin::jmap::domain::Mailbox inbox;
+    inbox.id = "inbox";
+    inbox.name = "Inbox";
+    inbox.role = "inbox";
+    inbox.totalEmails = 1;
+    inbox.totalThreads = 1;
+    inbox.isSubscribed = true;
+    inbox.myRights = rights;
+    javelin::jmap::domain::Mailbox archive;
+    archive.id = "archive";
+    archive.name = "Archive";
+    archive.role = "archive";
+    archive.isSubscribed = true;
+    archive.myRights = rights;
+    javelin::jmap::cache::MailboxRepository mailboxes{connection};
+    REQUIRE_FALSE(mailboxes.replaceAll("account-1", {inbox, archive}).has_value());
+
+    javelin::jmap::domain::Email email;
+    email.id = "email-1";
+    email.threadId = "thread-1";
+    email.mailboxIds = {"inbox"};
+    email.receivedAt = "2026-08-06T04:00:00Z";
+    email.subject = "Projected message";
+    email.preview = "Projection test";
+    javelin::jmap::cache::EmailRepository emails{connection};
+    REQUIRE_FALSE(emails.replaceAll("account-1", {email}).has_value());
+
+    const auto inboxQueryKey = javelin::jmap::sync::mailboxQueryKey({
+        .mailboxId = "inbox",
+        .sortProperty = "receivedAt",
+        .isAscending = false,
+        .collapseThreads = true,
+    });
+    const auto archiveQueryKey = javelin::jmap::sync::mailboxQueryKey({
+        .mailboxId = "archive",
+        .sortProperty = "receivedAt",
+        .isAscending = false,
+        .collapseThreads = true,
+    });
+    javelin::jmap::cache::MailboxWindowRepository windows{connection};
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "inbox",
+                          .queryKey = inboxQueryKey,
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 1,
+                          .total = 1,
+                          .queryState = "query-state-1",
+                          .emailIds = {"email-1"},
+                      })
+                      .has_value());
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "archive",
+                          .queryKey = archiveQueryKey,
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 0,
+                          .total = 0,
+                          .queryState = "query-state-1",
+                          .emailIds = {},
+                      })
+                      .has_value());
+
+    std::vector<javelin::app::MailCacheChange> cacheChanges;
+    QObject::connect(&services.mailService(), &javelin::app::MailApplicationService::cacheCommitted,
+                     &services.mailService(), [&cacheChanges](javelin::app::MailCacheChange change)
+                     { cacheChanges.push_back(std::move(change)); });
+
+    const auto queued = services.mailService().queueMailboxSelectionMutation({
+        .accountId = "account-1",
+        .selection = {javelin::app::SelectedEmail{.emailId = "email-1"}},
+        .operation = javelin::app::MailboxSelectionOperation::Archive,
+        .sourceMailboxId = "inbox",
+        .destinationMailboxId = std::nullopt,
+    });
+    const auto* summary = std::get_if<javelin::app::QueuedMailboxSelectionMutation>(&queued);
+    REQUIRE(summary != nullptr);
+    CHECK(summary->queuedEmailCount == 1);
+    REQUIRE(cacheChanges.size() == 1);
+    CHECK(cacheChanges.front().optimisticProjection);
+    CHECK(cacheChanges.front().mailboxIds.size() == 2);
+    CHECK(cacheChanges.front().mailboxIds.contains(QStringLiteral("inbox")));
+    CHECK(cacheChanges.front().mailboxIds.contains(QStringLiteral("archive")));
+
+    javelin::jmap::cache::QueryService queries{connection};
+    const auto inboxPageResult = queries.loadMailboxWindow("account-1", inboxQueryKey, 0, 100, {});
+    const auto* inboxPage =
+        std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&inboxPageResult);
+    REQUIRE(inboxPage != nullptr);
+    REQUIRE(inboxPage->has_value());
+    CHECK((*inboxPage)->coverage == javelin::jmap::cache::QueryWindowCoverage::LocallyProjected);
+    CHECK((*inboxPage)->items.empty());
+
+    const auto archivePageResult =
+        queries.loadMailboxWindow("account-1", archiveQueryKey, 0, 100, {});
+    const auto* archivePage =
+        std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&archivePageResult);
+    REQUIRE(archivePage != nullptr);
+    REQUIRE(archivePage->has_value());
+    CHECK((*archivePage)->coverage == javelin::jmap::cache::QueryWindowCoverage::LocallyProjected);
+    REQUIRE((*archivePage)->items.size() == 1);
+    CHECK((*archivePage)->items.front().emailId == "email-1");
+
+    services.mailService().applySettings({javelin::app::AccountSyncConfiguration{
+        .settings = {.connectionId = "connection-1",
+                     .revision = 0,
+                     .sessionUrl = "http://127.0.0.1:9/jmap",
+                     .loginEmail = "user@example.test",
+                     .apiKey = "secret",
+                     .refreshToken = {},
+                     .tokenEndpoint = {},
+                     .oauthClientId = {}},
+        .accountId = "account-1",
+        .mailboxIds = {"inbox", "archive"},
+        .fullSyncMailboxIds = {},
+        .notificationMailboxIds = {},
+    }});
+
+    const auto materialized = QCoro::waitFor(services.mailService().requestMailboxWindow({
+        .accountId = "account-1",
+        .mailboxId = "archive",
+        .offset = 0,
+        .limit = 100,
+        .sort = {},
+        .forceRefresh = false,
+        .anchor = std::nullopt,
+        .anchorOffset = 1,
+    }));
+    const auto* materializedSummary =
+        std::get_if<javelin::app::MailboxWindowSummary>(&materialized);
+    REQUIRE(materializedSummary != nullptr);
+    CHECK(materializedSummary->representativeCount == 1);
+    CHECK(materializedSummary->total == std::optional<std::size_t>{1});
 }
 
 TEST_CASE("daemon rejects requests after shutdown without pretending to be offline",

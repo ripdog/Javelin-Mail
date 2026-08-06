@@ -42,6 +42,12 @@ namespace javelin::app
         return ((total - 1) / step) * step;
     }
 
+    enum class MessageListRefreshMode
+    {
+        Materialize,
+        RefreshFromServer,
+    };
+
     struct MessageListPage
     {
         std::size_t offset = 0;
@@ -71,7 +77,7 @@ namespace javelin::app
         [[nodiscard]] virtual QString title() const = 0;
         [[nodiscard]] virtual const MessageListPage& page() const = 0;
         virtual void loadCachedPage(bool forceReload = false) = 0;
-        virtual void refresh() = 0;
+        virtual void refresh(MessageListRefreshMode mode = MessageListRefreshMode::Materialize) = 0;
         virtual void markStale() = 0;
         virtual void setSort(javelin::jmap::query::EmailListSort sort) = 0;
         [[nodiscard]] virtual bool goToPage(std::size_t pageIndex) = 0;

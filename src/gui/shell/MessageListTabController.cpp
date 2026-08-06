@@ -114,13 +114,14 @@ namespace javelin::gui::shell
         return true;
     }
 
-    bool MessageListTabController::refresh(TabState& tab)
+    bool MessageListTabController::refresh(TabState& tab,
+                                           const javelin::app::MessageListRefreshMode mode)
     {
         auto* session = messageListSession(tab);
         if (session == nullptr)
             return false;
 
-        session->refresh();
+        session->refresh(mode);
         return true;
     }
 

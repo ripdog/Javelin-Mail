@@ -76,7 +76,9 @@ namespace javelin::gui::shell
                                 std::optional<std::string_view> refreshedMailboxId = std::nullopt);
         void markSearchTabsStaleForAccount(std::vector<TabState>& tabs, std::string_view accountId);
         [[nodiscard]] bool loadCachedPage(TabState& tab, bool forceReload = false);
-        [[nodiscard]] bool refresh(TabState& tab);
+        [[nodiscard]] bool refresh(TabState& tab,
+                                   javelin::app::MessageListRefreshMode mode =
+                                       javelin::app::MessageListRefreshMode::Materialize);
         [[nodiscard]] bool goToPreviousPage(TabState& tab);
         [[nodiscard]] bool goToNextPage(TabState& tab);
         [[nodiscard]] bool goToPage(TabState& tab, std::size_t pageIndex);

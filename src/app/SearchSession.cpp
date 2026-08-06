@@ -188,7 +188,7 @@ namespace javelin::app
         reloadProjectedPage();
     }
 
-    void SearchSession::refresh()
+    void SearchSession::refresh(const MessageListRefreshMode)
     {
         if (m_mode == SearchMode::Local)
         {

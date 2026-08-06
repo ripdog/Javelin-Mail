@@ -43,7 +43,7 @@ namespace javelin::app
         [[nodiscard]] const std::string& sessionId() const;
 
         void loadCachedPage(bool forceReload = false) override;
-        void refresh() override;
+        void refresh(MessageListRefreshMode mode = MessageListRefreshMode::Materialize) override;
         void promoteToOnline();
         void close();
         void refreshAfterMutation();

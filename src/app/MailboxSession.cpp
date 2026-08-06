@@ -200,7 +200,7 @@ namespace javelin::app
         m_page.stale = !javelin::jmap::cache::isDisplayCurrent(page.coverage, page.materialization);
     }
 
-    void MailboxSession::refresh()
+    void MailboxSession::refresh(const MessageListRefreshMode mode)
     {
         if (m_page.refreshInFlight)
             return;
@@ -216,7 +216,7 @@ namespace javelin::app
             .offset = offset,
             .limit = m_pageSize,
             .sort = m_sort,
-            .forceRefresh = m_page.stale,
+            .forceRefresh = mode == MessageListRefreshMode::RefreshFromServer,
             .anchor = m_page.anchor,
             .anchorOffset = m_anchorOffset,
         });

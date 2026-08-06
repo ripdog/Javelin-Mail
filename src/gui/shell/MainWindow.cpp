@@ -463,8 +463,6 @@ namespace javelin::gui::shell
         connect(m_messageContentController, &MessageContentController::contentUnavailable, this,
                 [this](const javelin::jmap::MessageContentUnavailable& unavailable)
                 {
-                    markTabsStaleForAccount(unavailable.accountId);
-                    refreshActiveTabFromServer();
                     const auto message =
                         i18n("%1 Refreshing the current view…", unavailable.message);
                     m_messageViewContainer->setErrorState(message);
@@ -1146,9 +1144,8 @@ namespace javelin::gui::shell
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
         connect(m_messageCommandController, &MessageCommandController::mailboxMembershipChanged,
                 this,
-                [this](const QString& accountId)
+                [this](const QString&)
                 {
-                    markTabsStaleForAccount(accountId.toStdString());
                     refreshMessageListPreservingSelection();
                     refreshSelectionFromModels();
                     updateEmptyStates();
@@ -1172,24 +1169,15 @@ namespace javelin::gui::shell
             m_messageCommandController, &MessageCommandController::emailMutationsSubmitted, this,
             [this](const EmailMutationSubmissionSummary& summary)
             {
-                if (summary.failedEmailCount > 0)
-                {
-                    markTabsStaleForAccount(summary.accountId);
-                    refreshActiveTabFromServer();
-                    presentError(javelin::jmap::OperationError{
-                        .message =
-                            i18np("The server rejected %1 email mutation. The mailbox has been "
-                                  "refreshed to restore the server state.",
-                                  "The server rejected %1 email mutations. The mailbox has been "
-                                  "refreshed to restore the server state.",
-                                  summary.failedEmailCount),
-                    });
+                if (summary.failedEmailCount == 0)
                     return;
-                }
-                if (summary.updatedEmailCount == 0)
-                    return;
-                markTabsStaleForAccount(summary.accountId);
-                refreshActiveTabFromServer();
+                presentError(javelin::jmap::OperationError{
+                    .message = i18np("The server rejected %1 email mutation. The confirmed mailbox "
+                                     "state has been restored.",
+                                     "The server rejected %1 email mutations. The confirmed "
+                                     "mailbox state has been restored.",
+                                     summary.failedEmailCount),
+                });
             });
 
         connect(m_mailboxModel, &javelin::gui::mailboxes::MailboxTreeModel::emailsDropped, this,
@@ -2092,7 +2080,10 @@ namespace javelin::gui::shell
         if (m_messageListTabController->pageStale(*tab) ||
             (refreshRemote && tabKind(*tab) == TabKind::Mailbox))
         {
-            static_cast<void>(m_messageListTabController->refresh(*tab));
+            const auto mode = refreshRemote && tabKind(*tab) == TabKind::Mailbox
+                                  ? javelin::app::MessageListRefreshMode::RefreshFromServer
+                                  : javelin::app::MessageListRefreshMode::Materialize;
+            static_cast<void>(m_messageListTabController->refresh(*tab, mode));
         }
     }
 
@@ -2115,7 +2106,8 @@ namespace javelin::gui::shell
         }
 
         auto& tab = m_tabs[tabIndex];
-        if (m_messageListTabController->refresh(tab))
+        if (m_messageListTabController->refresh(
+                tab, javelin::app::MessageListRefreshMode::RefreshFromServer))
             return;
 
         if (m_contactsTabController->refresh(&tab))

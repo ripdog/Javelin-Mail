@@ -724,22 +724,31 @@ namespace javelin::app
             if (const auto* cached =
                     std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
                         &cachedResult);
-                cached != nullptr && cached->has_value() &&
-                javelin::jmap::cache::isPaginationAuthoritative((*cached)->coverage,
-                                                                (*cached)->materialization) &&
-                (!offlineState.has_value() || (*cached)->queryState == *offlineState))
+                cached != nullptr && cached->has_value())
             {
-                co_return MailboxWindowSummary{
-                    .accountId = std::move(intent.accountId),
-                    .mailboxId = std::move(intent.mailboxId),
-                    .offset = intent.offset,
-                    .limit = intent.limit,
-                    .position = (*cached)->position,
-                    .returnedLimit = (*cached)->returnedLimit,
-                    .representativeCount = (*cached)->items.size(),
-                    .total = (*cached)->total,
-                    .queryState = (*cached)->queryState,
-                };
+                const bool projectedDisplayCurrent =
+                    (*cached)->coverage ==
+                        javelin::jmap::cache::QueryWindowCoverage::LocallyProjected &&
+                    javelin::jmap::cache::isDisplayCurrent((*cached)->coverage,
+                                                           (*cached)->materialization);
+                const bool authoritativeCurrent =
+                    javelin::jmap::cache::isPaginationAuthoritative((*cached)->coverage,
+                                                                    (*cached)->materialization) &&
+                    (!offlineState.has_value() || (*cached)->queryState == *offlineState);
+                if (projectedDisplayCurrent || authoritativeCurrent)
+                {
+                    co_return MailboxWindowSummary{
+                        .accountId = std::move(intent.accountId),
+                        .mailboxId = std::move(intent.mailboxId),
+                        .offset = intent.offset,
+                        .limit = intent.limit,
+                        .position = (*cached)->position,
+                        .returnedLimit = (*cached)->returnedLimit,
+                        .representativeCount = (*cached)->items.size(),
+                        .total = (*cached)->total,
+                        .queryState = (*cached)->queryState,
+                    };
+                }
             }
         }
         if (offlineState.has_value())
@@ -1063,8 +1072,7 @@ namespace javelin::app
         auto mutations = plan.mutations;
         for (auto& mutation : mutations)
             mutation.operationGroupId = operationGroupId.toStdString();
-        auto queuedResult =
-            m_jmapCore.queueEmailMailboxMutations(intent.accountId, std::move(mutations));
+        auto queuedResult = queueExactEmailMutations(intent.accountId, std::move(mutations));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queuedResult))
         {
             if (const auto discardError = m_undoManager.discardNormal(prepared->entryId))
@@ -1219,7 +1227,7 @@ namespace javelin::app
                 .destroy = mutation == SelectedMessageMutation::Destroy,
             });
         }
-        auto queuedResult = m_jmapCore.queueEmailMailboxMutations(accountId, std::move(mutations));
+        auto queuedResult = queueExactEmailMutations(accountId, std::move(mutations));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queuedResult))
         {
             if (prepared.has_value())
@@ -1300,7 +1308,7 @@ namespace javelin::app
             return javelin::jmap::operationError(*error);
         auto prepared =
             std::get<std::optional<javelin::app::undo::HistoryEntry>>(std::move(preparedResult));
-        auto queuedResult = m_jmapCore.queueEmailMailboxMutation(accountId, std::move(mutation));
+        auto queuedResult = queueExactEmailMutation(accountId, std::move(mutation));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queuedResult))
         {
             if (prepared.has_value())
@@ -1369,7 +1377,7 @@ namespace javelin::app
             return javelin::jmap::operationError(*error);
         auto prepared =
             std::get<std::optional<javelin::app::undo::HistoryEntry>>(std::move(preparedResult));
-        auto queuedResult = m_jmapCore.queueEmailMailboxMutation(accountId, std::move(mutation));
+        auto queuedResult = queueExactEmailMutation(accountId, std::move(mutation));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queuedResult))
         {
             if (prepared.has_value())
@@ -1404,6 +1412,11 @@ namespace javelin::app
     javelin::jmap::QueuedEmailMutationsResult MailApplicationService::queueExactEmailMutations(
         std::string accountId, std::vector<javelin::jmap::EmailMailboxMutation> mutations)
     {
+        auto result = m_jmapCore.queueEmailMailboxMutations(accountId, std::move(mutations));
+        const auto* queued = std::get_if<std::vector<javelin::jmap::QueuedEmailMutation>>(&result);
+        if (queued == nullptr)
+            return result;
+
         QStringList affectedMailboxIds;
         const auto appendMailboxIds = [&affectedMailboxIds](const auto& mailboxIds)
         {
@@ -1414,27 +1427,23 @@ namespace javelin::app
                     affectedMailboxIds.push_back(value);
             }
         };
-        for (const auto& mutation : mutations)
+        for (const auto& mutation : *queued)
         {
-            appendMailboxIds(mutation.addMailboxIds);
-            appendMailboxIds(mutation.removeMailboxIds);
-            if (mutation.authoritativeMailboxIds.has_value())
-                appendMailboxIds(*mutation.authoritativeMailboxIds);
+            appendMailboxIds(mutation.patch.addMailboxIds);
+            appendMailboxIds(mutation.patch.removeMailboxIds);
+            if (mutation.patch.authoritativeMailboxIds.has_value())
+                appendMailboxIds(*mutation.patch.authoritativeMailboxIds);
         }
 
-        auto result = m_jmapCore.queueEmailMailboxMutations(accountId, std::move(mutations));
-        if (std::holds_alternative<std::vector<javelin::jmap::QueuedEmailMutation>>(result))
-        {
-            Q_EMIT cacheCommitted(MailCacheChange{
-                .accountId = QString::fromStdString(accountId),
-                .mailboxIds = std::move(affectedMailboxIds),
-                .queryWindows = {},
-                .searchWindows = {},
-                .mailboxTreeChanged = false,
-                .hasNewMail = false,
-                .optimisticProjection = true,
-            });
-        }
+        Q_EMIT cacheCommitted(MailCacheChange{
+            .accountId = QString::fromStdString(accountId),
+            .mailboxIds = std::move(affectedMailboxIds),
+            .queryWindows = {},
+            .searchWindows = {},
+            .mailboxTreeChanged = false,
+            .hasNewMail = false,
+            .optimisticProjection = true,
+        });
         return result;
     }
 
@@ -1590,11 +1599,14 @@ namespace javelin::app
                 .message = accountSynchronizationNotConfigured(),
             };
         const ForegroundWorkScope foreground{m_workScheduler};
-        co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
-                                QStringLiteral("Load message content"),
-                                co_await m_jmapCore.refreshMessageContent(
-                                    toLiveConnectionSettings(configuration->second.settings),
-                                    accountId, std::move(emailId)));
+        auto result = observeResult(m_errorCoordinator, configuration->second.settings, accountId,
+                                    QStringLiteral("Load message content"),
+                                    co_await m_jmapCore.refreshMessageContent(
+                                        toLiveConnectionSettings(configuration->second.settings),
+                                        accountId, std::move(emailId)));
+        if (std::holds_alternative<javelin::jmap::MessageContentUnavailable>(result))
+            static_cast<void>(requestAccountSynchronization(accountId));
+        co_return result;
     }
 
     QCoro::Task<javelin::jmap::AttachmentDownloadResult>
