@@ -1,5 +1,5 @@
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
-<gui name="javelinmail" version="10">
+<gui name="javelinmail" version="11">
   <MenuBar>
     <Menu name="file"><text>&amp;File</text>
       <Action name="compose_new_message"/>
@@ -59,6 +59,8 @@
     <Action name="compose_send"/>
     <Action name="compose_save_draft"/>
     <Action name="compose_attach_files"/>
+    <Separator/>
+    <Action name="compose_rich_text"/>
   </ToolBar>
   <ToolBar name="contactsToolBar"><text>Contacts Toolbar</text>
     <Action name="contact_new"/>

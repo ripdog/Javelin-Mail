@@ -364,6 +364,7 @@ namespace javelin::gui::shell
         QAction* m_composeSendAction = nullptr;
         QAction* m_composeSaveDraftAction = nullptr;
         QAction* m_composeAttachFilesAction = nullptr;
+        QAction* m_composeRichTextAction = nullptr;
         QAction* m_contactNewAction = nullptr;
         QAction* m_contactEditAction = nullptr;
         QAction* m_contactDeleteAction = nullptr;

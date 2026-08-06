@@ -443,6 +443,8 @@ namespace javelin::gui::shell
                 &MainWindow::presentUserInterventionError);
         connect(m_composeTabController, &ComposeTabController::operationFailed, this,
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
+        connect(m_composeTabController, &ComposeTabController::toolbarStateChanged, this,
+                &MainWindow::updateToolbarForActiveTab);
         m_messageListTabBindingPresenter = std::make_unique<MessageListTabBindingPresenter>(
             *m_mailboxModel, *m_mailboxView, *m_mailboxSearchEdit, *m_messageModel, *m_mailboxPane);
         m_messageSelectionController = std::make_unique<MessageSelectionController>(
@@ -865,6 +867,16 @@ namespace javelin::gui::shell
                 [this] { m_composeTabController->attachFiles(activeTab()); });
         actionCollection()->addAction(QStringLiteral("compose_attach_files"),
                                       m_composeAttachFilesAction);
+
+        m_composeRichTextAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("preferences-desktop-font")),
+                        i18nc("@action:button compose mode", "Rich Text"), this);
+        m_composeRichTextAction->setCheckable(true);
+        m_composeRichTextAction->setToolTip(
+            i18nc("@info:tooltip", "Toggle rich text editing mode"));
+        connect(m_composeRichTextAction, &QAction::toggled, this, [this](const bool enabled)
+                { m_composeTabController->setRichTextEnabled(activeTab(), enabled); });
+        actionCollection()->addAction(QStringLiteral("compose_rich_text"), m_composeRichTextAction);
 
         const auto invokeContact = [this](const ContactsTabCommand command)
         { m_contactsTabController->invoke(activeTab(), command); };
@@ -1758,6 +1770,13 @@ namespace javelin::gui::shell
         setToolBarVisible(QStringLiteral("composeToolBar"), context == ToolbarContext::Compose);
         setToolBarVisible(QStringLiteral("contactsToolBar"), context == ToolbarContext::Contacts);
         setToolBarVisible(QStringLiteral("calendarToolBar"), context == ToolbarContext::Calendar);
+        if (context == ToolbarContext::Compose)
+        {
+            const auto state = m_composeTabController->toolbarState(activeTab());
+            const QSignalBlocker blocker{m_composeRichTextAction};
+            m_composeRichTextAction->setChecked(state.richText);
+            m_composeRichTextAction->setEnabled(state.canToggleRichText);
+        }
         if (context == ToolbarContext::Contacts)
         {
             const auto state = m_contactsTabController->toolbarState(activeTab());

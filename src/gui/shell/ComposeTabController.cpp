@@ -147,6 +147,24 @@ namespace javelin::gui::shell
             widget->attachFiles();
     }
 
+    void ComposeTabController::setRichTextEnabled(const TabState* tab, const bool enabled)
+    {
+        if (auto* widget = composeWidgetForTab(tab); widget != nullptr)
+            widget->setRichTextEnabled(enabled);
+        Q_EMIT toolbarStateChanged();
+    }
+
+    ComposeToolbarState ComposeTabController::toolbarState(const TabState* tab) const
+    {
+        const auto* widget = composeWidgetForTab(tab);
+        if (widget == nullptr)
+            return {};
+        return {
+            .richText = widget->richTextEnabled(),
+            .canToggleRichText = !widget->operationInFlight(),
+        };
+    }
+
     QWidget* ComposeTabController::contentWidgetForTab(const TabState* tab) const
     {
         return composeWidgetForTab(tab);
@@ -244,6 +262,8 @@ namespace javelin::gui::shell
                 });
         connect(widget, &javelin::gui::compose::ComposeTabWidget::statusMessageRequested, this,
                 &ComposeTabController::statusMessage);
+        connect(widget, &javelin::gui::compose::ComposeTabWidget::toolbarStateChanged, this,
+                &ComposeTabController::toolbarStateChanged);
         connect(widget, &javelin::gui::compose::ComposeTabWidget::userInterventionRequired, this,
                 &ComposeTabController::userInterventionRequired);
         connect(widget, &javelin::gui::compose::ComposeTabWidget::closeRequested, this,

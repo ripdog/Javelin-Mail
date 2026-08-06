@@ -40,6 +40,12 @@ namespace javelin::gui::shell
 {
     struct PersistedComposeTab;
 
+    struct ComposeToolbarState
+    {
+        bool richText = true;
+        bool canToggleRichText = false;
+    };
+
     class ComposeTabController final : public QObject
     {
         Q_OBJECT
@@ -64,6 +70,8 @@ namespace javelin::gui::shell
         void sendMessage(const TabState* tab);
         void saveDraft(const TabState* tab);
         void attachFiles(const TabState* tab);
+        void setRichTextEnabled(const TabState* tab, bool enabled);
+        [[nodiscard]] ComposeToolbarState toolbarState(const TabState* tab) const;
         [[nodiscard]] QWidget* contentWidgetForTab(const TabState* tab) const;
 
       Q_SIGNALS:
@@ -73,6 +81,7 @@ namespace javelin::gui::shell
         void statusMessage(QString message, int durationMilliseconds);
         void userInterventionRequired(QString message);
         void operationFailed(javelin::jmap::OperationError error);
+        void toolbarStateChanged();
 
       private:
         [[nodiscard]] std::size_t materialize(javelin::jmap::submission::DraftSnapshot snapshot);

@@ -71,8 +71,10 @@ namespace javelin::gui::compose
         [[nodiscard]] bool isEmptyDraft() const;
         [[nodiscard]] bool closeWithoutPrompt() const;
         [[nodiscard]] bool operationInFlight() const;
+        [[nodiscard]] bool richTextEnabled() const;
 
         void saveDraftAndClose();
+        void setRichTextEnabled(bool enabled);
 
       public Q_SLOTS:
         void attachFiles();
@@ -90,6 +92,7 @@ namespace javelin::gui::compose
         void statusMessageRequested(const QString& message, int timeoutMs = 5000);
         void userInterventionRequired(const QString& message);
         void closeRequested();
+        void toolbarStateChanged();
 
       private:
         void setupUi();
@@ -153,7 +156,6 @@ namespace javelin::gui::compose
         QScrollArea* m_attachmentScrollArea = nullptr;
         QWidget* m_attachmentStrip = nullptr;
         QHBoxLayout* m_attachmentStripLayout = nullptr;
-        QAction* m_richTextAction = nullptr;
         QAction* m_codeAction = nullptr;
         QAction* m_insertImageAction = nullptr;
     };

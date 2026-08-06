@@ -24,10 +24,12 @@
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
+#include <QDialog>
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
+#include <QElapsedTimer>
 #include <QFileDialog>
 #include <QFileIconProvider>
 #include <QFileInfo>
@@ -37,6 +39,7 @@
 #include <QImage>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLoggingCategory>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QMimeDatabase>
@@ -68,10 +71,12 @@
 #include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <unordered_map>
 
 namespace javelin::gui::compose
 {
+    Q_LOGGING_CATEGORY(logComposeImage, "gui.compose.image")
 
     namespace
     {
@@ -80,6 +85,13 @@ namespace javelin::gui::compose
         constexpr auto previewTabIndex = 1;
         constexpr auto senderIdentityIdRole = Qt::UserRole;
         constexpr auto senderAccountIdRole = Qt::UserRole + 1;
+
+        struct ImageInsertTiming
+        {
+            QElapsedTimer elapsed;
+            std::optional<qint64> acceptedAtMilliseconds;
+            QMetaObject::Connection documentChangeConnection;
+        };
 
         [[nodiscard]] QString defaultTitleForMode(const javelin::jmap::submission::ComposeMode mode)
         {
@@ -567,6 +579,16 @@ namespace javelin::gui::compose
         return m_operationInFlight;
     }
 
+    bool ComposeTabWidget::richTextEnabled() const
+    {
+        return m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RichText;
+    }
+
+    void ComposeTabWidget::setRichTextEnabled(const bool enabled)
+    {
+        switchBodyFormat(enabled);
+    }
+
     void ComposeTabWidget::saveDraftAndClose()
     {
         startSaveDraft(true);
@@ -766,14 +788,6 @@ namespace javelin::gui::compose
             return action;
         };
 
-        m_richTextAction = new QAction(QIcon::fromTheme(QStringLiteral("format-text-rich")),
-                                       i18nc("@action:button compose mode", "Rich Text"), this);
-        m_richTextAction->setCheckable(true);
-        m_actionCollection->addAction(QStringLiteral("javelin_rich_text"), m_richTextAction);
-        m_formatToolbar->addAction(m_richTextAction);
-        m_formatToolbar->addSeparator();
-        connect(m_richTextAction, &QAction::toggled, this, &ComposeTabWidget::switchBodyFormat);
-
         addKdeAction(QStringLiteral("format_heading_level"));
         addKdeAction(QStringLiteral("format_list_style"));
         addKdeAction(QStringLiteral("format_font_family"));
@@ -959,7 +973,6 @@ namespace javelin::gui::compose
         const QSignalBlocker subjectBlocker{m_subjectEdit};
         const QSignalBlocker richBlocker{m_richTextEdit};
         const QSignalBlocker tabBlocker{m_editorTabs};
-        const QSignalBlocker richTextBlocker{m_richTextAction};
 
         int identityIndex = -1;
         for (int index = 0; index < m_fromCombo->count(); ++index)
@@ -1001,7 +1014,6 @@ namespace javelin::gui::compose
         {
             setEditorHtml(QString::fromStdString(m_snapshot.htmlBody));
         }
-        m_richTextAction->setChecked(!plainTextMode);
         m_editorTabs->setTabVisible(previewTabIndex, !plainTextMode);
         m_editorTabs->setCurrentIndex(richEditorTabIndex);
         setOptionalRecipientVisible(m_ccRow, m_ccButton, !m_snapshot.cc.empty());
@@ -1123,8 +1135,7 @@ namespace javelin::gui::compose
 
                 if (warning.clickedButton() == cancel || warning.clickedButton() == nullptr)
                 {
-                    const QSignalBlocker blocker{m_richTextAction};
-                    m_richTextAction->setChecked(true);
+                    Q_EMIT toolbarStateChanged();
                     return;
                 }
                 useMarkup = warning.clickedButton() == addMarkup;
@@ -1154,6 +1165,7 @@ namespace javelin::gui::compose
         m_editorTabs->setCurrentIndex(richEditorTabIndex);
         m_editorTabs->setTabVisible(previewTabIndex, !plainTextMode);
 
+        Q_EMIT toolbarStateChanged();
         populateAttachments();
         updateEditorModeUi();
         syncSnapshotFromUi();
@@ -1203,6 +1215,7 @@ namespace javelin::gui::compose
         m_editorTabs->setEnabled(!busy);
         updateEditorModeUi();
         populateAttachments();
+        Q_EMIT toolbarStateChanged();
     }
 
     void ComposeTabWidget::updateEditorModeUi()
@@ -1211,13 +1224,9 @@ namespace javelin::gui::compose
             m_editorTabs->currentIndex() == richEditorTabIndex &&
             m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RichText;
         const bool actionsEnabled = !m_operationInFlight && richMode;
-        {
-            const QSignalBlocker blocker{m_richTextAction};
-            m_richTextAction->setChecked(m_snapshot.editorMode ==
-                                         javelin::jmap::submission::BodyEditorMode::RichText);
-        }
+        m_formatToolbar->setVisible(m_snapshot.editorMode ==
+                                    javelin::jmap::submission::BodyEditorMode::RichText);
         m_formatToolbar->setEnabled(!m_operationInFlight);
-        m_richTextAction->setEnabled(!m_operationInFlight);
         m_richTextEdit->setEnableActions(actionsEnabled);
         m_codeAction->setEnabled(actionsEnabled);
         m_insertImageAction->setEnabled(actionsEnabled);
@@ -1330,9 +1339,70 @@ namespace javelin::gui::compose
     void ComposeTabWidget::insertImage()
     {
         const auto insertionPosition = m_richTextEdit->textCursor().selectionStart();
-        const auto documentRevision = m_richTextEdit->document()->revision();
+        auto* document = m_richTextEdit->document();
+        const auto documentRevision = document->revision();
+        auto timing = std::make_shared<ImageInsertTiming>();
+        timing->elapsed.start();
+
+        qCInfo(logComposeImage).noquote()
+            << "insert dialog opened"
+            << "documentRevision" << documentRevision << "insertionPosition" << insertionPosition;
+
+        timing->documentChangeConnection =
+            connect(document, &QTextDocument::contentsChange, this,
+                    [timing](const int position, const int removed, const int added)
+                    {
+                        const auto elapsedMilliseconds = timing->elapsed.elapsed();
+                        const auto postAcceptMilliseconds =
+                            timing->acceptedAtMilliseconds.has_value()
+                                ? elapsedMilliseconds - *timing->acceptedAtMilliseconds
+                                : -1;
+                        qCInfo(logComposeImage).noquote()
+                            << "editor document changed"
+                            << "elapsedMs" << elapsedMilliseconds << "postAcceptMs"
+                            << postAcceptMilliseconds << "position" << position << "removed"
+                            << removed << "added" << added;
+                        QObject::disconnect(timing->documentChangeConnection);
+                    });
+
+        QTimer::singleShot(
+            0, this,
+            [this, timing]
+            {
+                auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                if (dialog == nullptr)
+                {
+                    qCWarning(logComposeImage)
+                        << "insert dialog instrumentation could not find the active modal dialog";
+                    return;
+                }
+                connect(
+                    dialog, &QDialog::accepted, this,
+                    [timing]
+                    {
+                        timing->acceptedAtMilliseconds = timing->elapsed.elapsed();
+                        qCInfo(logComposeImage).noquote()
+                            << "insert dialog accepted"
+                            << "elapsedMs" << *timing->acceptedAtMilliseconds;
+                    },
+                    Qt::SingleShotConnection);
+            });
+
         m_richTextEdit->composerControler()->slotAddImage();
-        if (m_richTextEdit->document()->revision() != documentRevision)
+        QObject::disconnect(timing->documentChangeConnection);
+
+        const auto elapsedMilliseconds = timing->elapsed.elapsed();
+        const auto postAcceptMilliseconds =
+            timing->acceptedAtMilliseconds.has_value()
+                ? elapsedMilliseconds - *timing->acceptedAtMilliseconds
+                : -1;
+        const bool documentChanged = document->revision() != documentRevision;
+        qCInfo(logComposeImage).noquote()
+            << "KDE image insertion returned"
+            << "elapsedMs" << elapsedMilliseconds << "postAcceptMs" << postAcceptMilliseconds
+            << "documentChanged" << documentChanged << "documentRevision" << document->revision();
+
+        if (documentChanged)
         {
             adoptInsertedComposerImage(insertionPosition);
         }
@@ -1340,6 +1410,8 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::adoptInsertedComposerImage(const int insertionPosition)
     {
+        QElapsedTimer totalElapsed;
+        totalElapsed.start();
         auto* document = m_richTextEdit->document();
         const auto block = document->findBlock(insertionPosition);
         QTextFragment insertedFragment;
@@ -1356,9 +1428,17 @@ namespace javelin::gui::compose
         }
         if (!insertedFragment.isValid())
         {
+            qCWarning(logComposeImage).noquote()
+                << "inserted image adoption failed to locate the image fragment"
+                << "elapsedMs" << totalElapsed.elapsed() << "insertionPosition"
+                << insertionPosition;
             Q_EMIT statusMessageRequested(i18n("The inserted image could not be tracked."), 10000);
             return;
         }
+        qCInfo(logComposeImage).noquote()
+            << "inserted image fragment located"
+            << "elapsedMs" << totalElapsed.elapsed() << "fragmentPosition"
+            << insertedFragment.position() << "fragmentLength" << insertedFragment.length();
 
         auto imageFormat = insertedFragment.charFormat().toImageFormat();
         const auto originalResourceName = imageFormat.name();
@@ -1366,9 +1446,17 @@ namespace javelin::gui::compose
             document->resource(QTextDocument::ImageResource, QUrl{originalResourceName}));
         if (image.isNull())
         {
+            qCWarning(logComposeImage).noquote()
+                << "inserted image adoption could not retrieve the document resource"
+                << "elapsedMs" << totalElapsed.elapsed() << "resourceName" << originalResourceName;
             Q_EMIT statusMessageRequested(i18n("The inserted image could not be loaded."), 10000);
             return;
         }
+        qCInfo(logComposeImage).noquote()
+            << "inserted image resource retrieved"
+            << "elapsedMs" << totalElapsed.elapsed() << "width" << image.width() << "height"
+            << image.height() << "decodedBytes" << image.sizeInBytes() << "resourceName"
+            << originalResourceName;
 
         QTextCursor imageCursor{document};
         imageCursor.setPosition(insertedFragment.position());
@@ -1378,6 +1466,9 @@ namespace javelin::gui::compose
         const auto directory = draftAssetDirectory(m_snapshot.composeSessionId);
         if (!QDir{}.mkpath(directory))
         {
+            qCWarning(logComposeImage).noquote()
+                << "inserted image adoption could not create draft storage"
+                << "elapsedMs" << totalElapsed.elapsed();
             imageCursor.removeSelectedText();
             Q_EMIT statusMessageRequested(i18n("Could not create storage for the inserted image."),
                                           10000);
@@ -1386,25 +1477,39 @@ namespace javelin::gui::compose
         const auto filePath =
             QDir{directory}.filePath(QStringLiteral("inserted-%1.png")
                                          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QElapsedTimer pngSaveElapsed;
+        pngSaveElapsed.start();
         if (!image.save(filePath, "PNG"))
         {
+            qCWarning(logComposeImage).noquote()
+                << "inserted image PNG save failed"
+                << "saveMs" << pngSaveElapsed.elapsed() << "totalMs" << totalElapsed.elapsed();
             imageCursor.removeSelectedText();
             Q_EMIT statusMessageRequested(i18n("Could not save the inserted image."), 10000);
             return;
         }
+        const QFileInfo storedFile{filePath};
+        qCInfo(logComposeImage).noquote()
+            << "inserted image PNG saved"
+            << "saveMs" << pngSaveElapsed.elapsed() << "totalMs" << totalElapsed.elapsed()
+            << "encodedBytes" << storedFile.size();
 
+        QElapsedTimer resourceRenameElapsed;
+        resourceRenameElapsed.start();
         const auto contentId = newContentId();
         const auto resourceName = composerEditorResourceName(contentId);
         document->addResource(QTextDocument::ImageResource, QUrl{resourceName}, image);
         imageFormat.setName(resourceName);
         imageCursor.setCharFormat(imageFormat);
+        qCInfo(logComposeImage).noquote()
+            << "inserted image resource renamed"
+            << "renameMs" << resourceRenameElapsed.elapsed() << "totalMs" << totalElapsed.elapsed();
 
         auto displayName = QFileInfo{originalResourceName}.fileName();
         if (displayName.isEmpty())
         {
             displayName = QStringLiteral("image.png");
         }
-        const QFileInfo storedFile{filePath};
         m_snapshot.attachments.push_back(javelin::jmap::submission::DraftAttachment{
             .localFilePath = filePath.toStdString(),
             .displayName = displayName.toStdString(),
@@ -1415,8 +1520,14 @@ namespace javelin::gui::compose
             .contentId = contentId,
             .contentHash = std::nullopt,
         });
+        QElapsedTimer attachmentUiElapsed;
+        attachmentUiElapsed.start();
         populateAttachments();
         scheduleWorkingCopySave();
+        qCInfo(logComposeImage).noquote()
+            << "inserted image adoption complete"
+            << "attachmentUiMs" << attachmentUiElapsed.elapsed() << "totalMs"
+            << totalElapsed.elapsed() << "attachmentCount" << m_snapshot.attachments.size();
     }
 
     void ComposeTabWidget::removeAttachmentAt(const std::size_t index)
