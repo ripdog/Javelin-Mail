@@ -113,6 +113,22 @@ namespace javelin::jmap::cache
                                       refQuery);
             }
 
+            QSqlQuery mailboxRefs{database};
+            mailboxRefs.prepare(QStringLiteral(
+                "INSERT OR IGNORE INTO mail_vault_mailbox_refs(account_id,email_id,mailbox_id) "
+                "SELECT account_id,email_id,mailbox_id FROM email_mailboxes WHERE "
+                "account_id=:account_id AND email_id=:email_id"));
+            mailboxRefs.bindValue(QStringLiteral(":account_id"),
+                                  QString::fromStdString(std::string{accountId}));
+            mailboxRefs.bindValue(QStringLiteral(":email_id"),
+                                  QString::fromStdString(source.emailId));
+            if (!mailboxRefs.exec())
+            {
+                transaction.rollback();
+                return makeQueryError(QStringLiteral("Record mail vault mailbox references"),
+                                      mailboxRefs);
+            }
+
             QSqlQuery projectionQuery{database};
             projectionQuery.prepare(QStringLiteral(
                 "INSERT INTO "
@@ -312,9 +328,10 @@ namespace javelin::jmap::cache
             projectionQuery.prepare(QStringLiteral(
                 "SELECT account_id,email_id,mailbox_id FROM mail_vault_projection_jobs WHERE "
                 "content_hash=:content_hash AND operation='link' AND mailbox_id IS NOT NULL "
-                "UNION SELECT em.account_id,em.email_id,em.mailbox_id FROM email_mailboxes em "
-                "JOIN mail_vault_email_refs r ON r.account_id=em.account_id AND "
-                "r.email_id=em.email_id WHERE r.content_hash=:content_hash"));
+                "UNION SELECT mr.account_id,mr.email_id,mr.mailbox_id FROM "
+                "mail_vault_mailbox_refs mr JOIN mail_vault_email_refs r ON "
+                "r.account_id=mr.account_id AND r.email_id=mr.email_id WHERE "
+                "r.content_hash=:content_hash"));
             projectionQuery.bindValue(QStringLiteral(":content_hash"),
                                       QString::fromStdString(object.contentHash));
             if (!projectionQuery.exec())

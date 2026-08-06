@@ -44,6 +44,7 @@ namespace javelin::app
 
         void applySettings(std::vector<FullSyncAccountConfiguration> configurations);
         void requestCatchUp(std::string_view accountId);
+        void requestMailboxResync(std::string_view accountId, std::string_view mailboxId);
 
       Q_SIGNALS:
         void mailboxWindowCommitted(QString accountId, QString mailboxId, quint64 offset,

@@ -7,6 +7,7 @@
 #include "app/ContactApplicationPorts.h"
 #include "app/DaemonServices.h"
 #include "app/DeveloperDiagnostics.h"
+#include "app/DeveloperMaintenance.h"
 #include "app/MailApplicationPorts.h"
 #include "app/MailApplicationService.h"
 #include "app/MessageContentApplicationPorts.h"
@@ -144,6 +145,8 @@ namespace javelin::app
             case Kind::WorkResume:
             case Kind::WorkRetry:
                 return {Domain::BackgroundJobs};
+            case Kind::DeveloperMailboxClear:
+                return {Domain::MailQueryWindows, Domain::MessageMetadata, Domain::MessageContent};
             case Kind::CalendarReadCached:
             case Kind::CalendarReadAccounts:
             case Kind::CalendarReadCalendars:
@@ -854,6 +857,14 @@ namespace javelin::app
             return immediate(m_services.workScheduler().summary());
         case Kind::DeveloperDiagnosticsSnapshot:
             return launch(m_services.developerDiagnosticsPort().snapshot());
+        case Kind::DeveloperMailboxClear:
+            return decodeAndApply<DeveloperMailboxClearCommand>(
+                command.payload, invalidPayload,
+                [&](DeveloperMailboxClearCommand clearCommand)
+                {
+                    return launch(m_services.developerMaintenancePort().clearMailboxCache(
+                        std::move(clearCommand)));
+                });
         }
         return reject(id, QStringLiteral("The remote action is unsupported."),
                       javelin::protocol::BoundaryErrorCode::UnsupportedOperation);

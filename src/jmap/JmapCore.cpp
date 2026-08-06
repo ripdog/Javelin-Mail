@@ -943,6 +943,12 @@ namespace javelin::jmap
             co_return *validationError;
         }
 
+        javelin::jmap::sync::ConsistencyDomainRepository consistency{*m_impl->databaseConnection};
+        const auto refreshFence =
+            consistency.captureRefresh({.accountId = accountId, .dataType = "Email"});
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&refreshFence))
+            co_return operationError(*error);
+
         javelin::jmap::cache::RawMessageSourceRepository sourceRepository{
             *m_impl->databaseConnection};
         const auto emailResult =
@@ -1013,6 +1019,18 @@ namespace javelin::jmap
                 };
             }
             co_return error->error;
+        }
+
+        const auto currentFence =
+            consistency.isCurrent(std::get<javelin::jmap::sync::RefreshFence>(refreshFence));
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&currentFence))
+            co_return operationError(*error);
+        if (!std::get<bool>(currentFence))
+        {
+            co_return OperationError{
+                .message = QStringLiteral(
+                    "The message download was superseded by local cache maintenance."),
+            };
         }
 
         auto payload = std::get<QByteArray>(std::move(downloadResult));

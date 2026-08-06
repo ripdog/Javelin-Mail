@@ -492,9 +492,10 @@ namespace javelin::app
         QSqlQuery retention{m_connection.database()};
         if (!retention.exec(QStringLiteral(
                 "UPDATE mail_vault_email_refs AS r SET retention=CASE WHEN EXISTS(SELECT 1 FROM "
-                "email_mailboxes em JOIN offline_mailbox_scopes s ON s.account_id=em.account_id "
-                "AND s.mailbox_id=em.mailbox_id AND s.desired=1 WHERE em.account_id=r.account_id "
-                "AND em.email_id=r.email_id) THEN 'full_sync' ELSE 'evictable' END")))
+                "mail_vault_mailbox_refs mr JOIN offline_mailbox_scopes s ON "
+                "s.account_id=mr.account_id AND s.mailbox_id=mr.mailbox_id AND s.desired=1 WHERE "
+                "mr.account_id=r.account_id AND mr.email_id=r.email_id) THEN 'full_sync' ELSE "
+                "'evictable' END")))
             logDatabaseFailure(QStringLiteral("Update mail retention"), retention);
         schedulePump();
     }
@@ -603,6 +604,45 @@ namespace javelin::app
             query.bindValue(QStringLiteral(":id"), QString::fromStdString(id));
             if (!query.exec())
                 logDatabaseFailure(QStringLiteral("Queue full mailbox catch-up"), query);
+        }
+        schedulePump();
+    }
+
+    void FullMailSyncService::requestMailboxResync(const std::string_view accountId,
+                                                   const std::string_view mailboxId)
+    {
+        const auto id = jobId(accountId, mailboxId);
+        const auto scope = m_scopes.find(id);
+        if (scope == m_scopes.end())
+            return;
+
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
+        QSqlQuery desired{m_connection.database()};
+        desired.prepare(QStringLiteral(
+            "SELECT desired FROM offline_mailbox_scopes WHERE account_id=:account AND "
+            "mailbox_id=:mailbox"));
+        desired.bindValue(QStringLiteral(":account"),
+                          QString::fromStdString(std::string{accountId}));
+        desired.bindValue(QStringLiteral(":mailbox"),
+                          QString::fromStdString(std::string{mailboxId}));
+        if (!desired.exec() || !desired.next() || !desired.value(0).toBool())
+            return;
+
+        if (m_runningAccounts.contains(std::string{accountId}))
+        {
+            m_dirtyAccounts.insert(std::string{accountId});
+            return;
+        }
+
+        QSqlQuery queue{m_connection.database()};
+        queue.prepare(QStringLiteral(
+            "UPDATE background_jobs SET status='queued',pause_requested=0,error_text=NULL,"
+            "updated_at=CURRENT_TIMESTAMP WHERE job_id=:id AND status<>'running'"));
+        queue.bindValue(QStringLiteral(":id"), QString::fromStdString(id));
+        if (!queue.exec())
+        {
+            logDatabaseFailure(QStringLiteral("Queue full mailbox resynchronization"), queue);
+            return;
         }
         schedulePump();
     }

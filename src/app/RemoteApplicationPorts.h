@@ -6,6 +6,7 @@
 #include "app/ComposeApplicationPorts.h"
 #include "app/ContactApplicationPorts.h"
 #include "app/DeveloperDiagnostics.h"
+#include "app/DeveloperMaintenance.h"
 #include "app/MailApplicationPorts.h"
 #include "app/MessageContentApplicationPorts.h"
 #include "app/MessageListMaterializationPort.h"
@@ -283,6 +284,17 @@ namespace javelin::app
       public:
         explicit RemoteDeveloperDiagnosticsPort(RemoteActionClient& client);
         [[nodiscard]] QCoro::Task<DeveloperDiagnosticsResult> snapshot() override;
+
+      private:
+        RemoteActionClient& m_client;
+    };
+
+    class RemoteDeveloperMaintenancePort final : public DeveloperMaintenancePort
+    {
+      public:
+        explicit RemoteDeveloperMaintenancePort(RemoteActionClient& client);
+        [[nodiscard]] QCoro::Task<DeveloperMailboxClearResult>
+        clearMailboxCache(DeveloperMailboxClearCommand command) override;
 
       private:
         RemoteActionClient& m_client;

@@ -1,5 +1,7 @@
 #include "app/MailApplicationService.h"
+
 #include "app/ApplicationErrorCoordinator.h"
+#include "app/MailboxMaintenanceRegistry.h"
 #include "app/StateChangePolicy.h"
 #include "app/WorkScheduler.h"
 #include "app/undo/HistoryTypes.h"
@@ -43,6 +45,26 @@ namespace javelin::app
         [[nodiscard]] QString accountSynchronizationNotConfigured()
         {
             return i18n("Account synchronization is not configured.");
+        }
+
+        [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
+        emailMaintenanceActive(javelin::jmap::cache::DatabaseConnection& connection,
+                               const MailboxMaintenanceRegistry& registry,
+                               const std::string_view accountId, const std::string_view emailId)
+        {
+            javelin::jmap::cache::EmailRepository emails{connection};
+            const auto found = emails.find(accountId, emailId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&found))
+                return *error;
+            const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(found);
+            if (!email.has_value())
+                return false;
+            QStringList mailboxIds;
+            mailboxIds.reserve(static_cast<qsizetype>(email->mailboxIds.size()));
+            for (const auto& mailboxId : email->mailboxIds)
+                mailboxIds.push_back(QString::fromStdString(mailboxId));
+            return registry.isActiveForEmail(QString::fromStdString(std::string{accountId}),
+                                             mailboxIds);
         }
 
         [[nodiscard]] QStringList
@@ -269,6 +291,7 @@ namespace javelin::app
         javelin::jmap::calendar::CalendarService& calendarService,
         javelin::jmap::sieve::SieveService& sieveService,
         ApplicationErrorCoordinator& errorCoordinator, WorkScheduler& workScheduler,
+        MailboxMaintenanceRegistry& mailboxMaintenanceRegistry,
         javelin::app::undo::UndoManager& undoManager, QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection), m_jmapCore(jmapCore),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
@@ -276,7 +299,7 @@ namespace javelin::app
           m_queryService(queryService), m_contactService(contactService),
           m_calendarService(calendarService), m_sieveService(sieveService),
           m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler),
-          m_undoManager(undoManager)
+          m_mailboxMaintenanceRegistry(mailboxMaintenanceRegistry), m_undoManager(undoManager)
     {
         connect(&contactRepository, &javelin::jmap::cache::ContactRepository::contactsChanged, this,
                 [this](const QString& accountId)
@@ -689,6 +712,13 @@ namespace javelin::app
     QCoro::Task<MailboxWindowResult>
     MailApplicationService::requestMailboxWindow(MailboxWindowIntent intent)
     {
+        if (m_mailboxMaintenanceRegistry.isActive(QString::fromStdString(intent.accountId),
+                                                  QString::fromStdString(intent.mailboxId)))
+        {
+            co_return javelin::jmap::OperationError{
+                .message = i18n("The mailbox cache is being cleared."),
+            };
+        }
         const auto configuration = m_configurations.find(intent.accountId);
         if (configuration == m_configurations.end())
         {
@@ -1593,6 +1623,14 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::MessageContentRefreshResult>
     MailApplicationService::requestMessageContent(std::string accountId, std::string emailId)
     {
+        const auto maintenance = emailMaintenanceActive(
+            m_databaseConnection, m_mailboxMaintenanceRegistry, accountId, emailId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&maintenance))
+            co_return javelin::jmap::operationError(*error);
+        if (std::get<bool>(maintenance))
+            co_return javelin::jmap::OperationError{
+                .message = i18n("The mailbox cache is being cleared."),
+            };
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -1613,6 +1651,14 @@ namespace javelin::app
     MailApplicationService::requestAttachment(std::string accountId, std::string emailId,
                                               std::string partId)
     {
+        const auto maintenance = emailMaintenanceActive(
+            m_databaseConnection, m_mailboxMaintenanceRegistry, accountId, emailId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&maintenance))
+            co_return javelin::jmap::operationError(*error);
+        if (std::get<bool>(maintenance))
+            co_return javelin::jmap::OperationError{
+                .message = i18n("The mailbox cache is being cleared."),
+            };
         const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
@@ -1629,6 +1675,14 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::MessageSourceDownloadResult>
     MailApplicationService::requestMessageSource(std::string accountId, std::string emailId)
     {
+        const auto maintenance = emailMaintenanceActive(
+            m_databaseConnection, m_mailboxMaintenanceRegistry, accountId, emailId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&maintenance))
+            co_return javelin::jmap::operationError(*error);
+        if (std::get<bool>(maintenance))
+            co_return javelin::jmap::OperationError{
+                .message = i18n("The mailbox cache is being cleared."),
+            };
         const ForegroundWorkScope foreground{m_workScheduler};
         co_return co_await m_jmapCore.loadCachedMessageSource(std::move(accountId),
                                                               std::move(emailId));

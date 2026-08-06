@@ -243,6 +243,15 @@ namespace javelin::jmap::cache
                 "content_hash,operation) SELECT :account_id,:email_id,:mailbox_id,"
                 "r.content_hash,:operation FROM mail_vault_email_refs r WHERE "
                 "r.account_id=:account_id AND r.email_id=:email_id"));
+            QSqlQuery insertVaultMailboxRef{database};
+            insertVaultMailboxRef.prepare(QStringLiteral(
+                "INSERT OR IGNORE INTO mail_vault_mailbox_refs(account_id,email_id,mailbox_id) "
+                "SELECT :account_id,:email_id,:mailbox_id WHERE EXISTS(SELECT 1 FROM "
+                "mail_vault_email_refs WHERE account_id=:account_id AND email_id=:email_id)"));
+            QSqlQuery deleteVaultMailboxRef{database};
+            deleteVaultMailboxRef.prepare(QStringLiteral(
+                "DELETE FROM mail_vault_mailbox_refs WHERE account_id=:account_id AND "
+                "email_id=:email_id AND mailbox_id=:mailbox_id"));
             QSqlQuery addressQuery{database};
             addressQuery.prepare(QStringLiteral(
                 "INSERT INTO email_addresses ("
@@ -355,8 +364,19 @@ namespace javelin::jmap::cache
                     if (!nextMailboxIds.contains(mailboxId))
                     {
                         if (const auto error = queueProjection(mailboxId, QStringLiteral("unlink")))
-                        {
                             return error;
+                        deleteVaultMailboxRef.bindValue(
+                            QStringLiteral(":account_id"),
+                            QString::fromStdString(std::string{accountId}));
+                        deleteVaultMailboxRef.bindValue(QStringLiteral(":email_id"),
+                                                        QString::fromStdString(email.id));
+                        deleteVaultMailboxRef.bindValue(QStringLiteral(":mailbox_id"),
+                                                        QString::fromStdString(mailboxId));
+                        if (!deleteVaultMailboxRef.exec())
+                        {
+                            return makeQueryError(
+                                QStringLiteral("Delete mail vault mailbox reference"),
+                                deleteVaultMailboxRef);
                         }
                     }
                 }
@@ -365,8 +385,19 @@ namespace javelin::jmap::cache
                     if (!previousMailboxIds.contains(mailboxId))
                     {
                         if (const auto error = queueProjection(mailboxId, QStringLiteral("link")))
-                        {
                             return error;
+                        insertVaultMailboxRef.bindValue(
+                            QStringLiteral(":account_id"),
+                            QString::fromStdString(std::string{accountId}));
+                        insertVaultMailboxRef.bindValue(QStringLiteral(":email_id"),
+                                                        QString::fromStdString(email.id));
+                        insertVaultMailboxRef.bindValue(QStringLiteral(":mailbox_id"),
+                                                        QString::fromStdString(mailboxId));
+                        if (!insertVaultMailboxRef.exec())
+                        {
+                            return makeQueryError(
+                                QStringLiteral("Insert mail vault mailbox reference"),
+                                insertVaultMailboxRef);
                         }
                     }
                 }
@@ -738,6 +769,10 @@ namespace javelin::jmap::cache
             "DELETE FROM email_mailboxes "
             "WHERE account_id = :account_id AND mailbox_id = :mailbox_id AND email_id = "
             ":email_id"));
+        QSqlQuery deleteVaultMailboxRef{m_connection.database()};
+        deleteVaultMailboxRef.prepare(
+            QStringLiteral("DELETE FROM mail_vault_mailbox_refs WHERE account_id=:account_id AND "
+                           "mailbox_id=:mailbox_id AND email_id=:email_id"));
         QSqlQuery projectionQuery{m_connection.database()};
         projectionQuery.prepare(QStringLiteral(
             "INSERT INTO mail_vault_projection_jobs(account_id,email_id,mailbox_id,content_hash,"
@@ -763,6 +798,18 @@ namespace javelin::jmap::cache
             if (!deleteQuery.exec())
                 return makeQueryError(QStringLiteral("Remove email from mailbox"), deleteQuery);
             deleteQuery.finish();
+            deleteVaultMailboxRef.bindValue(QStringLiteral(":account_id"),
+                                            QString::fromStdString(std::string{accountId}));
+            deleteVaultMailboxRef.bindValue(QStringLiteral(":mailbox_id"),
+                                            QString::fromStdString(std::string{mailboxId}));
+            deleteVaultMailboxRef.bindValue(QStringLiteral(":email_id"),
+                                            QString::fromStdString(emailId));
+            if (!deleteVaultMailboxRef.exec())
+            {
+                return makeQueryError(QStringLiteral("Remove mail vault mailbox reference"),
+                                      deleteVaultMailboxRef);
+            }
+            deleteVaultMailboxRef.finish();
         }
         return std::nullopt;
     }

@@ -45,6 +45,7 @@ namespace javelin::app
     class ComposeCommandPort;
     class ContactCommandPort;
     class DeveloperDiagnosticsPort;
+    class DeveloperMaintenancePort;
     class MailCommandPort;
     class SieveCommandPort;
     class AccountRefreshPort;
@@ -159,6 +160,7 @@ namespace javelin::gui::shell
                             javelin::app::ComposeCommandPort& composeCommandPort,
                             javelin::app::ContactCommandPort& contactCommandPort,
                             javelin::app::DeveloperDiagnosticsPort& developerDiagnosticsPort,
+                            javelin::app::DeveloperMaintenancePort& developerMaintenancePort,
                             javelin::app::MailCommandPort& mailCommandPort,
                             javelin::app::SieveCommandPort& sieveCommandPort,
                             javelin::app::AccountRefreshPort& accountRefreshPort,
@@ -302,6 +304,7 @@ namespace javelin::gui::shell
         javelin::app::ComposeCommandPort& m_composeCommandPort;
         javelin::app::ContactCommandPort& m_contactCommandPort;
         javelin::app::DeveloperDiagnosticsPort& m_developerDiagnosticsPort;
+        javelin::app::DeveloperMaintenancePort& m_developerMaintenancePort;
         javelin::app::MailCommandPort& m_mailCommandPort;
         javelin::app::SieveCommandPort& m_sieveCommandPort;
         javelin::app::AccountRefreshPort& m_accountRefreshPort;

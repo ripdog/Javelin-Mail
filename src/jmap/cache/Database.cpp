@@ -1965,6 +1965,28 @@ namespace javelin::jmap::cache
                             QStringLiteral("DROP TABLE IF EXISTS translation_cache"),
                         },
                 },
+                MigrationStep{
+                    .version = 40,
+                    .name = QStringLiteral("mail_vault_mailbox_refs"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE mail_vault_mailbox_refs (account_id TEXT NOT NULL,"
+                                "email_id TEXT NOT NULL,mailbox_id TEXT NOT NULL,PRIMARY KEY("
+                                "account_id,email_id,mailbox_id),FOREIGN KEY(account_id,email_id) "
+                                "REFERENCES mail_vault_email_refs(account_id,email_id) ON DELETE "
+                                "CASCADE) STRICT"),
+                            QStringLiteral(
+                                "CREATE INDEX idx_mail_vault_mailbox_refs_mailbox ON "
+                                "mail_vault_mailbox_refs(account_id,mailbox_id,email_id)"),
+                            QStringLiteral(
+                                "INSERT INTO "
+                                "mail_vault_mailbox_refs(account_id,email_id,mailbox_id) "
+                                "SELECT em.account_id,em.email_id,em.mailbox_id FROM "
+                                "email_mailboxes em JOIN mail_vault_email_refs r ON "
+                                "r.account_id=em.account_id AND r.email_id=em.email_id"),
+                        },
+                },
             },
         };
     }

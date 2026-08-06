@@ -55,6 +55,9 @@ namespace javelin::app
     class DeferredSendService;
     class DeveloperDiagnosticsPort;
     class DeveloperDiagnosticsService;
+    class DeveloperMaintenancePort;
+    class DeveloperMaintenanceService;
+    class MailboxMaintenanceRegistry;
     class AccountCommandPort;
     class AccountCommandService;
     class ContactCommandPort;
@@ -160,6 +163,7 @@ namespace javelin::app
         [[nodiscard]] WorkScheduler& workScheduler();
         [[nodiscard]] LocalMaintenanceService& localMaintenanceService();
         [[nodiscard]] DeveloperDiagnosticsPort& developerDiagnosticsPort();
+        [[nodiscard]] DeveloperMaintenancePort& developerMaintenancePort();
         [[nodiscard]] FullMailSyncService& fullMailSyncService();
         [[nodiscard]] MailIndexService& mailIndexService();
         [[nodiscard]] javelin::app::undo::UndoManager& undoManager();
@@ -174,6 +178,7 @@ namespace javelin::app
         QString m_databasePath;
         QUuid m_cacheInstanceId;
         std::unique_ptr<CacheAccessBarrier> m_cacheAccessBarrier;
+        std::unique_ptr<MailboxMaintenanceRegistry> m_mailboxMaintenanceRegistry;
         std::unique_ptr<javelin::app::undo::HistoryRepository> m_historyRepository;
         std::unique_ptr<javelin::app::undo::UndoManager> m_undoManager;
         std::unique_ptr<DeferredSendRepository> m_deferredSendRepository;
@@ -230,6 +235,7 @@ namespace javelin::app
         std::unique_ptr<MailIndexService> m_mailIndexService;
         std::unique_ptr<LocalMaintenanceService> m_localMaintenanceService;
         std::unique_ptr<DeveloperDiagnosticsService> m_developerDiagnosticsService;
+        std::unique_ptr<DeveloperMaintenanceService> m_developerMaintenanceService;
     };
 
 } // namespace javelin::app

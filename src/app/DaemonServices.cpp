@@ -14,12 +14,14 @@
 #include "app/DeferredSendRepository.h"
 #include "app/DeferredSendService.h"
 #include "app/DeveloperDiagnosticsService.h"
+#include "app/DeveloperMaintenanceService.h"
 #include "app/FullMailSyncService.h"
 #include "app/LocalMaintenanceService.h"
 #include "app/MailApplicationEventsService.h"
 #include "app/MailApplicationService.h"
 #include "app/MailCommandService.h"
 #include "app/MailIndexService.h"
+#include "app/MailboxMaintenanceRegistry.h"
 #include "app/MessageContentCommandService.h"
 #include "app/MessageListSessionFactoryService.h"
 #include "app/MessageNavigationCoordinator.h"
@@ -95,6 +97,7 @@ namespace javelin::app
         m_developerDiagnosticsService = std::make_unique<DeveloperDiagnosticsService>(
             location.databasePath, location.vaultRootPath);
         m_cacheAccessBarrier = std::make_unique<CacheAccessBarrier>();
+        m_mailboxMaintenanceRegistry = std::make_unique<MailboxMaintenanceRegistry>();
         m_workScheduler = std::make_unique<WorkScheduler>(m_databaseConnection);
         m_localMaintenanceService =
             std::make_unique<LocalMaintenanceService>(m_databaseConnection, *m_workScheduler);
@@ -162,7 +165,13 @@ namespace javelin::app
             m_databaseConnection, *m_jmapCore, *m_methodTransport,
             *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns, *m_accountRepository,
             *m_queryService, *m_contactRepository, *m_contactService, *m_calendarService,
-            *m_sieveService, *m_errorCoordinator, *m_workScheduler, *m_undoManager);
+            *m_sieveService, *m_errorCoordinator, *m_workScheduler, *m_mailboxMaintenanceRegistry,
+            *m_undoManager);
+        m_developerMaintenanceService = std::make_unique<DeveloperMaintenanceService>(
+            location.databasePath, location.vaultRootPath, *m_mailboxMaintenanceRegistry,
+            *m_mailService,
+            [this](const std::string_view accountId, const std::string_view mailboxId)
+            { m_fullMailSyncService->requestMailboxResync(accountId, mailboxId); });
         m_mailCommandService = std::make_unique<MailCommandService>(*m_mailService);
         m_sieveCommandService = std::make_unique<SieveCommandService>(*m_mailService);
         m_accountRefreshCommandService =
@@ -412,6 +421,11 @@ namespace javelin::app
     DeveloperDiagnosticsPort& DaemonServices::developerDiagnosticsPort()
     {
         return *m_developerDiagnosticsService;
+    }
+
+    DeveloperMaintenancePort& DaemonServices::developerMaintenancePort()
+    {
+        return *m_developerMaintenanceService;
     }
 
     FullMailSyncService& DaemonServices::fullMailSyncService()

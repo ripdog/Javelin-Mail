@@ -142,6 +142,7 @@ set(JAVELIN_FORMAT_FILES
     src/gui/developer/DeveloperOptionsDialog.cpp
     src/gui/developer/DeveloperOptionsDialog.h
     tests/app/DeveloperDiagnosticsServiceTest.cpp
+    tests/app/DeveloperMaintenanceServiceTest.cpp
     tests/gui/DeveloperOptionsDialogTest.cpp
     tests/app/RemoteCodecTest.cpp
     src/protocol/SocketTransport.cpp
@@ -255,6 +256,11 @@ set(JAVELIN_FORMAT_FILES
     src/app/DeveloperDiagnostics.h
     src/app/DeveloperDiagnosticsService.cpp
     src/app/DeveloperDiagnosticsService.h
+    src/app/DeveloperMaintenance.h
+    src/app/DeveloperMaintenanceService.cpp
+    src/app/DeveloperMaintenanceService.h
+    src/app/MailboxMaintenanceRegistry.cpp
+    src/app/MailboxMaintenanceRegistry.h
     src/app/DesktopNotificationController.cpp
     src/app/DesktopNotificationController.h
     src/app/FullMailSyncService.cpp
@@ -1318,6 +1324,11 @@ add_library(javelin_daemon_core STATIC
     src/app/DeveloperDiagnostics.h
     src/app/DeveloperDiagnosticsService.cpp
     src/app/DeveloperDiagnosticsService.h
+    src/app/DeveloperMaintenance.h
+    src/app/DeveloperMaintenanceService.cpp
+    src/app/DeveloperMaintenanceService.h
+    src/app/MailboxMaintenanceRegistry.cpp
+    src/app/MailboxMaintenanceRegistry.h
     src/app/AccountCredentialStore.cpp
     src/app/AccountCredentialStore.h
     src/app/KWalletAccountCredentialStore.cpp
@@ -1531,6 +1542,7 @@ javelin_enable_sanitizers(javelind)
 qt_add_executable(javelin
     src/app/CalendarApplicationPorts.h
     src/app/DeveloperDiagnostics.h
+    src/app/DeveloperMaintenance.h
     src/app/LogStore.cpp
     src/app/LogStore.h
     src/app/MailApplicationEventsPorts.h

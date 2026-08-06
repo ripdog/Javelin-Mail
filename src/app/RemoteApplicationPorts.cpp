@@ -708,6 +708,19 @@ namespace javelin::app
             m_client, javelin::protocol::RemoteActionKind::DeveloperDiagnosticsSnapshot);
     }
 
+    RemoteDeveloperMaintenancePort::RemoteDeveloperMaintenancePort(RemoteActionClient& client)
+        : m_client(client)
+    {
+    }
+
+    QCoro::Task<DeveloperMailboxClearResult>
+    RemoteDeveloperMaintenancePort::clearMailboxCache(DeveloperMailboxClearCommand command)
+    {
+        co_return co_await call<DeveloperMailboxClearResult>(
+            m_client, javelin::protocol::RemoteActionKind::DeveloperMailboxClear,
+            std::move(command));
+    }
+
     RemoteWorkTaskPort::RemoteWorkTaskPort(GuiDaemonSession& session, RemoteActionClient& client)
         : m_session(session), m_client(client)
     {

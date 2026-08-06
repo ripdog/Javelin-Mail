@@ -118,17 +118,18 @@ namespace javelin::app
             objects.prepare(QStringLiteral(
                 "SELECT DISTINCT o.content_hash,o.relative_path,o.size,EXISTS("
                 "SELECT 1 FROM mail_vault_email_refs other_ref "
-                "LEFT JOIN email_mailboxes other_membership ON "
+                "LEFT JOIN mail_vault_mailbox_refs other_membership ON "
                 "other_membership.account_id=other_ref.account_id AND "
                 "other_membership.email_id=other_ref.email_id "
                 "WHERE other_ref.content_hash=o.content_hash AND "
                 "(other_membership.account_id IS NULL OR "
                 "other_membership.account_id<>:account OR "
                 "other_membership.mailbox_id<>:mailbox)) "
-                "FROM mail_vault_email_refs r "
+                "FROM mail_vault_mailbox_refs mailbox_ref "
+                "JOIN mail_vault_email_refs r ON r.account_id=mailbox_ref.account_id AND "
+                "r.email_id=mailbox_ref.email_id "
                 "JOIN mail_vault_objects o ON o.content_hash=r.content_hash "
-                "JOIN email_mailboxes em ON em.account_id=r.account_id AND em.email_id=r.email_id "
-                "WHERE em.account_id=:account AND em.mailbox_id=:mailbox"));
+                "WHERE mailbox_ref.account_id=:account AND mailbox_ref.mailbox_id=:mailbox"));
             objects.bindValue(QStringLiteral(":account"), accountId);
             objects.bindValue(QStringLiteral(":mailbox"), mailboxId);
             if (!objects.exec())
@@ -314,9 +315,8 @@ namespace javelin::app
                 QSqlQuery vaultCounts{connection.database()};
                 vaultCounts.prepare(QStringLiteral(
                     "SELECT "
-                    "(SELECT COUNT(*) FROM mail_vault_email_refs r JOIN email_mailboxes em ON "
-                    "em.account_id=r.account_id AND em.email_id=r.email_id WHERE "
-                    "em.account_id=:account AND em.mailbox_id=:mailbox),"
+                    "(SELECT COUNT(*) FROM mail_vault_mailbox_refs r WHERE "
+                    "r.account_id=:account AND r.mailbox_id=:mailbox),"
                     "(SELECT COUNT(*) FROM mail_vault_projection_jobs j WHERE "
                     "j.account_id=:account AND j.mailbox_id=:mailbox AND j.status='pending'),"
                     "(SELECT COUNT(*) FROM mail_vault_projection_jobs j WHERE "

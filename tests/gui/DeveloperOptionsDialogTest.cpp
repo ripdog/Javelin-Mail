@@ -1,8 +1,10 @@
 #include "gui/developer/DeveloperOptionsDialog.h"
 #include "app/DeveloperDiagnostics.h"
+#include "app/DeveloperMaintenance.h"
 
 #include <QAbstractItemModel>
 #include <QCoreApplication>
+#include <QPushButton>
 #include <QTreeView>
 
 #include <catch2/catch_test_macros.hpp>
@@ -27,6 +29,20 @@ namespace
 
       private:
         javelin::app::DeveloperDiagnosticsSnapshot m_snapshot;
+    };
+
+    class FakeDeveloperMaintenancePort final : public javelin::app::DeveloperMaintenancePort
+    {
+      public:
+        [[nodiscard]] QCoro::Task<javelin::app::DeveloperMailboxClearResult>
+        clearMailboxCache(javelin::app::DeveloperMailboxClearCommand command) override
+        {
+            co_return javelin::app::DeveloperMailboxClearSummary{
+                .accountId = std::move(command.accountId),
+                .mailboxId = std::move(command.mailboxId),
+                .kind = command.kind,
+            };
+        }
     };
 
     [[nodiscard]] javelin::app::DeveloperMailboxRecord
@@ -76,7 +92,8 @@ TEST_CASE("developer mailbox table sorts numerically within each account",
                 QStringLiteral("Alpha large"), 2048),
     };
     FakeDeveloperDiagnosticsPort diagnostics{std::move(snapshot)};
-    javelin::gui::developer::DeveloperOptionsDialog dialog{diagnostics};
+    FakeDeveloperMaintenancePort maintenance;
+    javelin::gui::developer::DeveloperOptionsDialog dialog{diagnostics, maintenance};
 
     auto* view = dialog.findChild<QTreeView*>();
     REQUIRE(view != nullptr);
@@ -84,6 +101,14 @@ TEST_CASE("developer mailbox table sorts numerically within each account",
     REQUIRE(model != nullptr);
     processEventsUntilLoaded(*model);
     REQUIRE(model->rowCount() == 2);
+    auto* clearSqlite =
+        dialog.findChild<QPushButton*>(QStringLiteral("developerClearSqliteButton"));
+    auto* clearBodies =
+        dialog.findChild<QPushButton*>(QStringLiteral("developerClearBodiesButton"));
+    REQUIRE(clearSqlite != nullptr);
+    REQUIRE(clearBodies != nullptr);
+    CHECK(clearSqlite->isEnabled());
+    CHECK(clearBodies->isEnabled());
 
     view->sortByColumn(1, Qt::DescendingOrder);
     QCoreApplication::processEvents();

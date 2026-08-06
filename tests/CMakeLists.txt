@@ -295,6 +295,7 @@ add_executable(javelin_daemon_tests
     app/DaemonProcessTest.cpp
     app/DesktopNotificationControllerTest.cpp
     app/DeferredSendServiceTest.cpp
+    app/DeveloperMaintenanceServiceTest.cpp
     app/DeveloperDiagnosticsServiceTest.cpp
     app/MessageSubjectTest.cpp
     app/GuiMailApplicationEventsTest.cpp

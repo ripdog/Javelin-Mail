@@ -50,6 +50,7 @@ namespace javelin::app::undo
 namespace javelin::app
 {
     class ApplicationErrorCoordinator;
+    class MailboxMaintenanceRegistry;
     class WorkScheduler;
 
     class MailboxObservation;
@@ -92,6 +93,7 @@ namespace javelin::app
                                javelin::jmap::sieve::SieveService& sieveService,
                                ApplicationErrorCoordinator& errorCoordinator,
                                WorkScheduler& workScheduler,
+                               MailboxMaintenanceRegistry& mailboxMaintenanceRegistry,
                                javelin::app::undo::UndoManager& undoManager,
                                QObject* parent = nullptr);
 
@@ -288,6 +290,7 @@ namespace javelin::app
         javelin::jmap::sieve::SieveService& m_sieveService;
         ApplicationErrorCoordinator& m_errorCoordinator;
         WorkScheduler& m_workScheduler;
+        MailboxMaintenanceRegistry& m_mailboxMaintenanceRegistry;
         javelin::jmap::auth::AccessTokenRefreshHandler m_authenticationRefreshHandler;
         javelin::app::undo::UndoManager& m_undoManager;
         struct VisibleCalendarRange

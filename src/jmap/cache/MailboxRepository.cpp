@@ -286,11 +286,42 @@ namespace javelin::jmap::cache
         if (mailboxIds.empty())
             return std::nullopt;
 
+        QSqlQuery projectionQuery{m_connection.database()};
+        projectionQuery.prepare(QStringLiteral(
+            "INSERT INTO mail_vault_projection_jobs(account_id,email_id,mailbox_id,content_hash,"
+            "operation) SELECT mr.account_id,mr.email_id,mr.mailbox_id,r.content_hash,'unlink' "
+            "FROM mail_vault_mailbox_refs mr JOIN mail_vault_email_refs r ON "
+            "r.account_id=mr.account_id AND r.email_id=mr.email_id WHERE "
+            "mr.account_id=:account_id AND mr.mailbox_id=:mailbox_id"));
+        QSqlQuery ownershipQuery{m_connection.database()};
+        ownershipQuery.prepare(
+            QStringLiteral("DELETE FROM mail_vault_mailbox_refs WHERE account_id=:account_id AND "
+                           "mailbox_id=:mailbox_id"));
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "DELETE FROM mailboxes WHERE account_id = :account_id AND mailbox_id = :mailbox_id"));
         for (const auto& mailboxId : mailboxIds)
         {
+            projectionQuery.bindValue(QStringLiteral(":account_id"),
+                                      QString::fromStdString(std::string{accountId}));
+            projectionQuery.bindValue(QStringLiteral(":mailbox_id"),
+                                      QString::fromStdString(mailboxId));
+            if (!projectionQuery.exec())
+            {
+                return makeQueryError(QStringLiteral("Queue deleted mailbox body projections"),
+                                      projectionQuery);
+            }
+            projectionQuery.finish();
+            ownershipQuery.bindValue(QStringLiteral(":account_id"),
+                                     QString::fromStdString(std::string{accountId}));
+            ownershipQuery.bindValue(QStringLiteral(":mailbox_id"),
+                                     QString::fromStdString(mailboxId));
+            if (!ownershipQuery.exec())
+            {
+                return makeQueryError(QStringLiteral("Delete mailbox body ownership"),
+                                      ownershipQuery);
+            }
+            ownershipQuery.finish();
             query.bindValue(QStringLiteral(":account_id"),
                             QString::fromStdString(std::string{accountId}));
             query.bindValue(QStringLiteral(":mailbox_id"), QString::fromStdString(mailboxId));

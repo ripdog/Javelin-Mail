@@ -258,6 +258,7 @@ namespace javelin::gui::shell
                            javelin::app::ComposeCommandPort& composeCommandPort,
                            javelin::app::ContactCommandPort& contactCommandPort,
                            javelin::app::DeveloperDiagnosticsPort& developerDiagnosticsPort,
+                           javelin::app::DeveloperMaintenancePort& developerMaintenancePort,
                            javelin::app::MailCommandPort& mailCommandPort,
                            javelin::app::SieveCommandPort& sieveCommandPort,
                            javelin::app::AccountRefreshPort& accountRefreshPort,
@@ -275,7 +276,8 @@ namespace javelin::gui::shell
           m_messageViewReader(messageViewReader), m_queryReader(queryReader),
           m_translationService(translationService), m_composeCommandPort(composeCommandPort),
           m_contactCommandPort(contactCommandPort),
-          m_developerDiagnosticsPort(developerDiagnosticsPort), m_mailCommandPort(mailCommandPort),
+          m_developerDiagnosticsPort(developerDiagnosticsPort),
+          m_developerMaintenancePort(developerMaintenancePort), m_mailCommandPort(mailCommandPort),
           m_sieveCommandPort(sieveCommandPort), m_accountRefreshPort(accountRefreshPort),
           m_onboardingPort(onboardingPort), m_messageContentPort(messageContentPort),
           m_messageListSessionFactory(messageListSessionFactory), m_mailEvents(mailEvents),
@@ -2802,7 +2804,7 @@ namespace javelin::gui::shell
         if (m_developerOptionsDialog == nullptr)
         {
             m_developerOptionsDialog = new javelin::gui::developer::DeveloperOptionsDialog(
-                m_developerDiagnosticsPort, this);
+                m_developerDiagnosticsPort, m_developerMaintenancePort, this);
             m_developerOptionsDialog->setAttribute(Qt::WA_DeleteOnClose);
             connect(m_developerOptionsDialog, &QObject::destroyed, this,
                     [this] { m_developerOptionsDialog = nullptr; });

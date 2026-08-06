@@ -3,8 +3,10 @@
 ## Status
 
 Approved implementation design. The product and architectural decisions in this document are final.
-Implementation began on 7 August 2026 with the typed diagnostics snapshot, serialized daemon scan,
-remote port, Settings menu entry, and Mailbox Caches dialog page.
+Phases 1 and 2 were implemented on 7 August 2026. The dialog now provides typed asynchronous mailbox
+inspection plus independent SQLite and body-cache clearing, mailbox-scoped maintenance exclusion,
+generation fences, offline-storage conflict handling, vault ownership tracking, explicit
+confirmation, invalidation, remeasurement, and deferred reclamation for leased objects.
 
 ## Goals
 
@@ -754,7 +756,7 @@ Verify:
 
 # Implementation Sequence
 
-## Phase 1: Read-only mailbox inspection
+## Phase 1: Read-only mailbox inspection — implemented
 
 1. Define typed snapshot/accounting result structures and codecs.
 2. Add daemon `DeveloperDiagnosticsService` and remote reader port.
@@ -765,7 +767,7 @@ Verify:
 
 This phase is useful without any destructive action and validates the accounting semantics first.
 
-## Phase 2: Safe mailbox clearing
+## Phase 2: Safe mailbox clearing — implemented
 
 1. Add mailbox-scoped maintenance/generation locking.
 2. Add the explicit mailbox-reset repository operation.

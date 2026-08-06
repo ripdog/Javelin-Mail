@@ -319,6 +319,8 @@ namespace javelin::app
             return QStringLiteral("onboarding_cancel_oauth");
         case Kind::DeveloperDiagnosticsSnapshot:
             return QStringLiteral("developer_diagnostics_snapshot");
+        case Kind::DeveloperMailboxClear:
+            return QStringLiteral("developer_mailbox_clear");
         }
         return QStringLiteral("unknown");
     }

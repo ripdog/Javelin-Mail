@@ -1,5 +1,6 @@
 #include "app/RemoteCodec.h"
 #include "app/DeveloperDiagnostics.h"
+#include "app/DeveloperMaintenance.h"
 #include "app/RemoteActionTypes.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -139,6 +140,40 @@ TEST_CASE("remote codec round-trips developer mailbox diagnostics",
     CHECK(decodedMailbox.offlineExpectedTotal == 42);
     CHECK(decodedMailbox.usage.reclaimableBodyBytes == 6144);
     CHECK(decodedMailbox.usage.activeBodyLeases == 2);
+}
+
+TEST_CASE("remote codec round-trips developer mailbox clear results",
+          "[app][remote-codec][developer-maintenance]")
+{
+    const javelin::app::DeveloperMailboxClearResult result{
+        javelin::app::DeveloperMailboxClearSummary{
+            .accountId = QStringLiteral("account-1"),
+            .mailboxId = QStringLiteral("inbox"),
+            .kind = javelin::app::DeveloperMailboxCacheKind::Bodies,
+            .maintenanceGeneration = 7,
+            .rowsDiscarded = 8,
+            .projectionsRemoved = 3,
+            .logicalBytesReleased = 4096,
+            .reclaimedBytes = 2048,
+            .deferredBytes = 1024,
+            .offlineStorageDisabled = true,
+        }};
+
+    const auto encoded = javelin::app::remote::encode(result);
+    const auto* payload = std::get_if<QByteArray>(&encoded);
+    REQUIRE(payload != nullptr);
+
+    const auto decoded =
+        javelin::app::remote::decodeValue<javelin::app::DeveloperMailboxClearResult>(*payload);
+    const auto* decodedResult = std::get_if<javelin::app::DeveloperMailboxClearResult>(&decoded);
+    REQUIRE(decodedResult != nullptr);
+    const auto* summary = std::get_if<javelin::app::DeveloperMailboxClearSummary>(decodedResult);
+    REQUIRE(summary != nullptr);
+    CHECK(summary->accountId == QStringLiteral("account-1"));
+    CHECK(summary->kind == javelin::app::DeveloperMailboxCacheKind::Bodies);
+    CHECK(summary->maintenanceGeneration == 7);
+    CHECK(summary->reclaimedBytes == 2048);
+    CHECK(summary->offlineStorageDisabled);
 }
 
 TEST_CASE("remote codec rejects trailing data", "[app][remote-codec]")
