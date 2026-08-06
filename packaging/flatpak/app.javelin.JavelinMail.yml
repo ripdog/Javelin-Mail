@@ -40,6 +40,58 @@ modules:
         url: https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.34/OpenBLAS-0.3.34.tar.gz
         sha256: cd7e129868320cc2d033afa920e31202dfe0b8066a5b66661900ccc0f197dfed
 
+  - name: gpgme
+    buildsystem: autotools
+    config-opts:
+      - --disable-static
+    sources:
+      - type: archive
+        url: https://gnupg.org/ftp/gcrypt/gpgme/gpgme-2.1.2.tar.bz2
+        sha256: 0687a95b299871c4141f507c0f740de6b429c9ac067d0fa4e062e3264df5fb77
+
+  - name: gpgmepp
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: archive
+        url: https://gnupg.org/ftp/gcrypt/gpgmepp/gpgmepp-2.1.0.tar.xz
+        sha256: 57f804468f0204504b172c6b139cb05124b4263be7ad514932c7c4c5062a16e2
+
+  - name: qgpgme
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+      - -DBUILD_WITH_QT5=OFF
+    sources:
+      - type: archive
+        url: https://gnupg.org/ftp/gcrypt/qgpgme/qgpgme-2.2.0.tar.xz
+        sha256: 3c6290ff5bfeab981bb48b2951703761f1dbea640cb637beb3560d5fefb0e0b3
+
+  - name: openldap
+    buildsystem: autotools
+    config-opts:
+      - --disable-slapd
+      - --disable-static
+      - --enable-shared
+      - --with-tls=openssl
+    sources:
+      - type: archive
+        url: https://www.openldap.org/software/download/OpenLDAP/openldap-release/openldap-2.6.10.tgz
+        sha256: c065f04aad42737aebd60b2fe4939704ac844266bc0aeaa1609f0cad987be516
+
+  - name: akonadi
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+      - -DBUILD_TOOLS=OFF
+      - -DDATABASE_BACKEND=SQLITE
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/akonadi.git
+        commit: 7dda0c9f3039a4e3c5fdcb1fd7dae299671a1c00
+        disable-shallow-clone: true
+
   - name: kmime
     buildsystem: cmake-ninja
     config-opts:
@@ -48,6 +100,205 @@ modules:
       - type: archive
         url: https://download.kde.org/stable/release-service/26.04.2/src/kmime-26.04.2.tar.xz
         sha256: 7473522f42d84684cd71fe7549cc668a1fcfd91716a72860dc9bcbaa8569ed6d
+
+  - name: grantleetheme
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/grantleetheme.git
+        commit: afde076aa0ae177156ac5423c35b62e5ea760809
+        disable-shallow-clone: true
+
+  - name: qtkeychain
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_WITH_QT6=ON
+      - -DBUILD_TRANSLATIONS=OFF
+      - -DBUILD_TESTING=OFF
+      - -DCMAKE_INSTALL_LIBDIR=/app/lib
+    sources:
+      - type: archive
+        url: https://github.com/frankosterfeld/qtkeychain/archive/refs/tags/0.15.0.tar.gz
+        sha256: f4254dc8f0933b06d90672d683eab08ef770acd8336e44dfa030ce041dc2ca22
+
+  - name: ktextaddons
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+      - -DBUILD_DESIGNERPLUGIN=OFF
+      - -DBERGAMOT_TRANSLATOR_PLUGIN=OFF
+      - -DSPEAK_TO_TEXT_VOSK_PLUGIN=OFF
+    sources:
+      - type: archive
+        url: https://download.kde.org/stable/ktextaddons/ktextaddons-2.1.2.tar.xz
+        sha256: f3b4448904f1656d6d7cd5a557d22fe1c50624eb32ed369f34726beff9ce0589
+
+  - name: akonadi-contacts
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/akonadi-contacts.git
+        commit: 34e0cd577b33ccdf9ecacba7fee55429cb02ed37
+        disable-shallow-clone: true
+
+  - name: akonadi-mime
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/akonadi-mime.git
+        commit: 0cb924b47363ee4a419fcfeeedf6879e3edf6ecd
+        disable-shallow-clone: true
+
+  - name: boost-headers
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+      - -DBUILD_SHARED_LIBS=ON
+      - -DBOOST_INCLUDE_LIBRARIES=graph;pfr
+    sources:
+      - type: archive
+        url: https://github.com/boostorg/boost/releases/download/boost-1.88.0/boost-1.88.0-cmake.tar.xz
+        sha256: f48b48390380cfb94a629872346e3a81370dc498896f16019ade727ab72eb1ec
+
+  - name: libkleo
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/libkleo.git
+        commit: d0543d84bab62c4aa095ff61c37a2fdfee8de710
+        disable-shallow-clone: true
+
+  - name: libkgapi
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/libkgapi.git
+        commit: 375c0c1fd8a88b3abb4a7c4111d43d35f97fc62e
+        disable-shallow-clone: true
+
+  - name: ksmtp
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/ksmtp.git
+        commit: 9413931e6749df2ec35bfd0907dad6f02272fba3
+        disable-shallow-clone: true
+
+  - name: kmailtransport
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/kmailtransport.git
+        commit: 5026f6a236c18e737e19feb8c49390006095da60
+        disable-shallow-clone: true
+
+  - name: kpimtextedit
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+      - -DBUILD_DESIGNERPLUGIN=OFF
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/kpimtextedit.git
+        commit: e72432e781a158cf3c90af60e43ea52fb1d5ccec
+        disable-shallow-clone: true
+
+  - name: kidentitymanagement
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/kidentitymanagement.git
+        commit: 61a0371b6bd32c074fad58fd835648534562535c
+        disable-shallow-clone: true
+
+  - name: kldap
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/kldap.git
+        commit: e6645c8f516eea8b63bdab86c89b47faa2e4c0b3
+        disable-shallow-clone: true
+
+  - name: kimap
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/kimap.git
+        commit: 55c8d5c493a9e9b116c68a6c701992973776fc3b
+        disable-shallow-clone: true
+
+  - name: kmbox
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/kmbox.git
+        commit: 12c6bfe5bd33c0ae08dfa400e9b3a6fee45ca0e4
+        disable-shallow-clone: true
+
+  - name: libkdepim
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+      - -DBUILD_DESIGNERPLUGIN=OFF
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/libkdepim.git
+        commit: ce5bdf05bd4861072a566fffa24d94607d454502
+        disable-shallow-clone: true
+
+  - name: pimcommon
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+      - -DFORCE_DISABLE_AKONADI_SEARCH=ON
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/pimcommon.git
+        commit: 655594ee9765899eb0ad8b1847cdace493cf9891
+        disable-shallow-clone: true
+
+  - name: libgravatar
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/libgravatar.git
+        commit: 7abb325ba333aaadba20848505ae588a8f81d590
+        disable-shallow-clone: true
+
+  - name: messagelib
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+      - -DFORCE_DISABLE_AKONADI_SEARCH=ON
+    sources:
+      - type: git
+        url: https://invent.kde.org/pim/messagelib.git
+        commit: 58b48987cc8201d54bf451adedd396d63ac36c6c
+        disable-shallow-clone: true
 
   - name: javelin-mail
     buildsystem: simple
