@@ -2,6 +2,7 @@
 
 #include "app/ComposeApplicationPorts.h"
 #include "gui/compose/ComposeBodyConverter.h"
+#include "gui/compose/ComposeUiPreferences.h"
 #include "gui/compose/ComposerInlineImageCodec.h"
 #include "gui/compose/JavelinComposerEdit.h"
 #include "gui/messageview/HtmlMessageView.h"
@@ -18,7 +19,6 @@
 #include <KLocalizedString>
 #include <KPIMTextEdit/RichTextComposerControler>
 #include <KPIMTextEdit/RichTextComposerImages>
-#include <MessageComposer/TextPart>
 
 #include <QAbstractButton>
 #include <QAction>
@@ -50,14 +50,20 @@
 #include <QStringList>
 #include <QStyle>
 #include <QTabWidget>
+#include <QTextBlock>
 #include <QTextCharFormat>
 #include <QTextCursor>
+#include <QTextDocument>
 #include <QTextEdit>
+#include <QTextFragment>
+#include <QTextImageFormat>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QUrl>
 #include <QUuid>
 #include <QVBoxLayout>
+#include <QVariant>
 
 #include <algorithm>
 #include <cstddef>
@@ -72,8 +78,6 @@ namespace javelin::gui::compose
 
         constexpr auto richEditorTabIndex = 0;
         constexpr auto previewTabIndex = 1;
-        constexpr auto htmlFormatIndex = 0;
-        constexpr auto plainTextFormatIndex = 1;
         constexpr auto senderIdentityIdRole = Qt::UserRole;
         constexpr auto senderAccountIdRole = Qt::UserRole + 1;
 
@@ -467,19 +471,20 @@ namespace javelin::gui::compose
                     syncSnapshotFromUi();
                     scheduleWorkingCopySave();
                 });
-        connect(m_bodyFormatCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
-                &ComposeTabWidget::switchBodyFormat);
         for (auto* edit : {m_toEdit, m_ccEdit, m_bccEdit, m_subjectEdit})
         {
             connect(edit, &QLineEdit::textChanged, this,
-                    [this](const QString&)
+                    [this, edit](const QString&)
                     {
                         if (m_syncingUi)
                         {
                             return;
                         }
 
-                        syncSnapshotFromUi();
+                        if (edit == m_subjectEdit)
+                        {
+                            updateTabTitle();
+                        }
                         scheduleWorkingCopySave();
                     });
         }
@@ -491,14 +496,10 @@ namespace javelin::gui::compose
         connect(m_richTextEdit, &QTextEdit::textChanged, this,
                 [this]
                 {
-                    if (m_syncingUi)
+                    if (!m_syncingUi)
                     {
-                        return;
+                        scheduleWorkingCopySave();
                     }
-
-                    syncSnapshotFromUi();
-                    refreshPreview();
-                    scheduleWorkingCopySave();
                 });
         connect(m_richTextEdit, &QTextEdit::currentCharFormatChanged, this,
                 [this](const QTextCharFormat& format)
@@ -641,15 +642,8 @@ namespace javelin::gui::compose
         auto* fromLabel = new QLabel(i18nc("@label email sender", "From"), headerWidget);
         fromLabel->setMinimumWidth(52);
         m_fromCombo = new QComboBox(headerWidget);
-        auto* formatLabel = new QLabel(i18n("Format"), headerWidget);
-        m_bodyFormatCombo = new QComboBox(headerWidget);
-        m_bodyFormatCombo->addItem(i18nc("@item message body format", "HTML"));
-        m_bodyFormatCombo->addItem(i18nc("@item message body format", "Plain text"));
         fromRow->addWidget(fromLabel);
         fromRow->addWidget(m_fromCombo, 1);
-        fromRow->addSpacing(8);
-        fromRow->addWidget(formatLabel);
-        fromRow->addWidget(m_bodyFormatCombo);
         headerLayout->addLayout(fromRow);
 
         auto* toRow = new QHBoxLayout();
@@ -771,6 +765,14 @@ namespace javelin::gui::compose
             }
             return action;
         };
+
+        m_richTextAction = new QAction(QIcon::fromTheme(QStringLiteral("format-text-rich")),
+                                       i18nc("@action:button compose mode", "Rich Text"), this);
+        m_richTextAction->setCheckable(true);
+        m_actionCollection->addAction(QStringLiteral("javelin_rich_text"), m_richTextAction);
+        m_formatToolbar->addAction(m_richTextAction);
+        m_formatToolbar->addSeparator();
+        connect(m_richTextAction, &QAction::toggled, this, &ComposeTabWidget::switchBodyFormat);
 
         addKdeAction(QStringLiteral("format_heading_level"));
         addKdeAction(QStringLiteral("format_list_style"));
@@ -957,7 +959,7 @@ namespace javelin::gui::compose
         const QSignalBlocker subjectBlocker{m_subjectEdit};
         const QSignalBlocker richBlocker{m_richTextEdit};
         const QSignalBlocker tabBlocker{m_editorTabs};
-        const QSignalBlocker formatBlocker{m_bodyFormatCombo};
+        const QSignalBlocker richTextBlocker{m_richTextAction};
 
         int identityIndex = -1;
         for (int index = 0; index < m_fromCombo->count(); ++index)
@@ -999,7 +1001,7 @@ namespace javelin::gui::compose
         {
             setEditorHtml(QString::fromStdString(m_snapshot.htmlBody));
         }
-        m_bodyFormatCombo->setCurrentIndex(plainTextMode ? plainTextFormatIndex : htmlFormatIndex);
+        m_richTextAction->setChecked(!plainTextMode);
         m_editorTabs->setTabVisible(previewTabIndex, !plainTextMode);
         m_editorTabs->setCurrentIndex(richEditorTabIndex);
         setOptionalRecipientVisible(m_ccRow, m_ccButton, !m_snapshot.cc.empty());
@@ -1076,17 +1078,14 @@ namespace javelin::gui::compose
             [[fallthrough]];
         case javelin::jmap::submission::BodyEditorMode::RichText:
         {
-            MessageComposer::TextPart textPart;
-            m_richTextEdit->fillComposerTextPart(&textPart);
             const auto html = stableEditorHtml();
             reconcileInlineAttachmentReferences(html);
             m_snapshot.htmlBody = html.toStdString();
-            m_snapshot.plainTextBody = textPart.cleanPlainText().toStdString();
+            m_snapshot.plainTextBody = m_richTextEdit->toCleanPlainText().toStdString();
             break;
         }
         case javelin::jmap::submission::BodyEditorMode::PlainText:
-            m_snapshot.plainTextBody =
-                m_richTextEdit->composerControler()->toCleanPlainText().toStdString();
+            m_snapshot.plainTextBody = m_richTextEdit->toCleanPlainText().toStdString();
             m_snapshot.htmlBody.clear();
             break;
         }
@@ -1095,14 +1094,14 @@ namespace javelin::gui::compose
         updateTabTitle();
     }
 
-    void ComposeTabWidget::switchBodyFormat(const int index)
+    void ComposeTabWidget::switchBodyFormat(const bool richText)
     {
         if (m_syncingUi)
         {
             return;
         }
 
-        const bool plainTextMode = index == plainTextFormatIndex;
+        const bool plainTextMode = !richText;
         if (plainTextMode &&
             m_snapshot.editorMode != javelin::jmap::submission::BodyEditorMode::PlainText)
         {
@@ -1124,8 +1123,8 @@ namespace javelin::gui::compose
 
                 if (warning.clickedButton() == cancel || warning.clickedButton() == nullptr)
                 {
-                    const QSignalBlocker blocker{m_bodyFormatCombo};
-                    m_bodyFormatCombo->setCurrentIndex(htmlFormatIndex);
+                    const QSignalBlocker blocker{m_richTextAction};
+                    m_richTextAction->setChecked(true);
                     return;
                 }
                 useMarkup = warning.clickedButton() == addMarkup;
@@ -1138,7 +1137,7 @@ namespace javelin::gui::compose
             m_snapshot.editorMode = javelin::jmap::submission::BodyEditorMode::PlainText;
             m_syncingUi = false;
         }
-        else if (!plainTextMode &&
+        else if (richText &&
                  m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::PlainText)
         {
             m_syncingUi = true;
@@ -1147,6 +1146,11 @@ namespace javelin::gui::compose
             m_syncingUi = false;
         }
 
+        if (const auto error = ComposeUiPreferences::setRichTextDefault(m_settings, richText))
+        {
+            Q_EMIT statusMessageRequested(
+                i18n("Could not remember the compose format: %1", error->detail), 10000);
+        }
         m_editorTabs->setCurrentIndex(richEditorTabIndex);
         m_editorTabs->setTabVisible(previewTabIndex, !plainTextMode);
 
@@ -1189,7 +1193,6 @@ namespace javelin::gui::compose
     {
         m_operationInFlight = busy;
         m_fromCombo->setEnabled(!busy);
-        m_bodyFormatCombo->setEnabled(!busy);
         m_toEdit->setEnabled(!busy);
         m_ccEdit->setEnabled(!busy);
         m_bccEdit->setEnabled(!busy);
@@ -1208,7 +1211,13 @@ namespace javelin::gui::compose
             m_editorTabs->currentIndex() == richEditorTabIndex &&
             m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RichText;
         const bool actionsEnabled = !m_operationInFlight && richMode;
-        m_formatToolbar->setEnabled(actionsEnabled);
+        {
+            const QSignalBlocker blocker{m_richTextAction};
+            m_richTextAction->setChecked(m_snapshot.editorMode ==
+                                         javelin::jmap::submission::BodyEditorMode::RichText);
+        }
+        m_formatToolbar->setEnabled(!m_operationInFlight);
+        m_richTextAction->setEnabled(!m_operationInFlight);
         m_richTextEdit->setEnableActions(actionsEnabled);
         m_codeAction->setEnabled(actionsEnabled);
         m_insertImageAction->setEnabled(actionsEnabled);
@@ -1289,8 +1298,6 @@ namespace javelin::gui::compose
         });
         insertEmbeddedImage(m_snapshot.attachments.size() - 1);
         populateAttachments();
-        refreshPreview();
-        syncSnapshotFromUi();
         scheduleWorkingCopySave();
     }
 
@@ -1322,13 +1329,94 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::insertImage()
     {
-        const auto filePath = QFileDialog::getOpenFileName(
-            this, i18n("Insert Image"), QString{},
-            i18n("Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp);;All Files (*)"));
-        if (!filePath.isEmpty())
+        const auto insertionPosition = m_richTextEdit->textCursor().selectionStart();
+        const auto documentRevision = m_richTextEdit->document()->revision();
+        m_richTextEdit->composerControler()->slotAddImage();
+        if (m_richTextEdit->document()->revision() != documentRevision)
         {
-            addInlineImagePath(filePath);
+            adoptInsertedComposerImage(insertionPosition);
         }
+    }
+
+    void ComposeTabWidget::adoptInsertedComposerImage(const int insertionPosition)
+    {
+        auto* document = m_richTextEdit->document();
+        const auto block = document->findBlock(insertionPosition);
+        QTextFragment insertedFragment;
+        for (auto fragment = block.begin(); !fragment.atEnd(); ++fragment)
+        {
+            const auto candidate = fragment.fragment();
+            if (candidate.isValid() && candidate.position() <= insertionPosition &&
+                insertionPosition < candidate.position() + candidate.length() &&
+                candidate.charFormat().isImageFormat())
+            {
+                insertedFragment = candidate;
+                break;
+            }
+        }
+        if (!insertedFragment.isValid())
+        {
+            Q_EMIT statusMessageRequested(i18n("The inserted image could not be tracked."), 10000);
+            return;
+        }
+
+        auto imageFormat = insertedFragment.charFormat().toImageFormat();
+        const auto originalResourceName = imageFormat.name();
+        const auto image = qvariant_cast<QImage>(
+            document->resource(QTextDocument::ImageResource, QUrl{originalResourceName}));
+        if (image.isNull())
+        {
+            Q_EMIT statusMessageRequested(i18n("The inserted image could not be loaded."), 10000);
+            return;
+        }
+
+        QTextCursor imageCursor{document};
+        imageCursor.setPosition(insertedFragment.position());
+        imageCursor.setPosition(insertedFragment.position() + insertedFragment.length(),
+                                QTextCursor::KeepAnchor);
+
+        const auto directory = draftAssetDirectory(m_snapshot.composeSessionId);
+        if (!QDir{}.mkpath(directory))
+        {
+            imageCursor.removeSelectedText();
+            Q_EMIT statusMessageRequested(i18n("Could not create storage for the inserted image."),
+                                          10000);
+            return;
+        }
+        const auto filePath =
+            QDir{directory}.filePath(QStringLiteral("inserted-%1.png")
+                                         .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        if (!image.save(filePath, "PNG"))
+        {
+            imageCursor.removeSelectedText();
+            Q_EMIT statusMessageRequested(i18n("Could not save the inserted image."), 10000);
+            return;
+        }
+
+        const auto contentId = newContentId();
+        const auto resourceName = composerEditorResourceName(contentId);
+        document->addResource(QTextDocument::ImageResource, QUrl{resourceName}, image);
+        imageFormat.setName(resourceName);
+        imageCursor.setCharFormat(imageFormat);
+
+        auto displayName = QFileInfo{originalResourceName}.fileName();
+        if (displayName.isEmpty())
+        {
+            displayName = QStringLiteral("image.png");
+        }
+        const QFileInfo storedFile{filePath};
+        m_snapshot.attachments.push_back(javelin::jmap::submission::DraftAttachment{
+            .localFilePath = filePath.toStdString(),
+            .displayName = displayName.toStdString(),
+            .mediaType = QStringLiteral("image/png").toStdString(),
+            .size = static_cast<std::uint64_t>(storedFile.size()),
+            .blobId = std::nullopt,
+            .inlineDisposition = true,
+            .contentId = contentId,
+            .contentHash = std::nullopt,
+        });
+        populateAttachments();
+        scheduleWorkingCopySave();
     }
 
     void ComposeTabWidget::removeAttachmentAt(const std::size_t index)
@@ -1401,13 +1489,10 @@ namespace javelin::gui::compose
         }
 
         const auto resourceName = composerEditorResourceName(*attachment.contentId);
-        if (!m_richTextEdit->toCleanHtml().contains(resourceName))
-        {
-            const auto width = std::min(image.width(), 720);
-            const auto height = image.width() > 0 ? image.height() * width / image.width() : -1;
-            m_richTextEdit->composerControler()->composerImages()->addImageHelper(
-                resourceName, image, width, height);
-        }
+        const auto width = std::min(image.width(), 720);
+        const auto height = image.width() > 0 ? image.height() * width / image.width() : -1;
+        m_richTextEdit->composerControler()->composerImages()->addImageHelper(resourceName, image,
+                                                                              width, height);
     }
 
     void ComposeTabWidget::removeEmbeddedImageReference(const std::string& contentId)

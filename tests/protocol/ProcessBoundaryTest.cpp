@@ -98,6 +98,7 @@ namespace
                              .undoSendDelaySeconds = 10,
                              .workspace = {.formatVersion = 1,
                                            .mainWindowState = QByteArrayLiteral("window-state"),
+                                           .composeRichTextDefault = false,
                                            .calendarColorOverrides = {
                                                {.calendarId = QStringLiteral("calendar-1"),
                                                 .color = QStringLiteral("#123456")}}}}};
@@ -255,6 +256,7 @@ namespace
         CHECK(settingsSnapshot.revision.value == 5);
         CHECK(settingsSnapshot.schemaVersion == 3);
         CHECK(settingsSnapshot.workspace.mainWindowState == QByteArrayLiteral("window-state"));
+        CHECK_FALSE(settingsSnapshot.workspace.composeRichTextDefault);
         REQUIRE(settingsSnapshot.workspace.calendarColorOverrides.size() == 1);
         CHECK(settingsSnapshot.workspace.calendarColorOverrides.front().calendarId ==
               QStringLiteral("calendar-1"));
@@ -292,6 +294,7 @@ namespace
                  .workspace = WorkspaceSettings{
                      .formatVersion = 1,
                      .mainWindowState = QByteArrayLiteral("updated-window-state"),
+                     .composeRichTextDefault = true,
                      .calendarColorOverrides = {{.calendarId = QStringLiteral("calendar-2"),
                                                  .color = QStringLiteral("#abcdef")}}}}});
         REQUIRE(std::holds_alternative<SettingsUpdated>(settingsUpdate));
@@ -315,6 +318,7 @@ namespace
         REQUIRE(handler.receivedSettingsUpdate->update.workspace.has_value());
         CHECK(handler.receivedSettingsUpdate->update.workspace->mainWindowState ==
               QByteArrayLiteral("updated-window-state"));
+        CHECK(handler.receivedSettingsUpdate->update.workspace->composeRichTextDefault);
         REQUIRE(handler.receivedSettingsUpdate->update.workspace->calendarColorOverrides.size() ==
                 1);
         CHECK(handler.receivedSettingsUpdate->update.workspace->calendarColorOverrides.front()

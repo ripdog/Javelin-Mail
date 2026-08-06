@@ -1,4 +1,5 @@
 #include "gui/settings/GuiSettings.h"
+#include "gui/compose/ComposeUiPreferences.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -77,6 +78,25 @@ TEST_CASE("GUI settings keep absent mailbox selections empty", "[gui][settings][
     javelin::gui::settings::GuiSettings settings{std::move(snapshot)};
     CHECK(settings.syncedMailboxIds(QStringLiteral("account-1")).isEmpty());
     CHECK(settings.notificationMailboxIds(QStringLiteral("account-1")).isEmpty());
+}
+
+TEST_CASE("compose format preference persists through workspace settings",
+          "[gui][settings][compose]")
+{
+    javelin::protocol::SettingsSnapshot snapshot;
+    snapshot.revision = {.value = 9};
+    snapshot.workspace.composeRichTextDefault = false;
+    javelin::gui::settings::GuiSettings settings{std::move(snapshot)};
+
+    CHECK_FALSE(javelin::gui::compose::ComposeUiPreferences::richTextDefault(settings));
+    REQUIRE_FALSE(javelin::gui::compose::ComposeUiPreferences::setRichTextDefault(settings, true)
+                      .has_value());
+    CHECK(javelin::gui::compose::ComposeUiPreferences::richTextDefault(settings));
+    CHECK(settings.snapshot().revision.value == 10);
+
+    REQUIRE_FALSE(javelin::gui::compose::ComposeUiPreferences::setRichTextDefault(settings, true)
+                      .has_value());
+    CHECK(settings.snapshot().revision.value == 10);
 }
 
 TEST_CASE("GUI settings ignore identical workspace updates", "[gui][settings][workspace]")

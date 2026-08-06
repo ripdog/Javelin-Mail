@@ -299,6 +299,7 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
     update.workspace = javelin::protocol::WorkspaceSettings{
         .formatVersion = 1,
         .mainWindowState = QByteArrayLiteral("workspace-state"),
+        .composeRichTextDefault = false,
         .calendarColorOverrides = {{.calendarId = QStringLiteral("calendar-2"),
                                     .color = QStringLiteral("#abcdef")}},
     };
@@ -334,6 +335,7 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
     CHECK(reloaded->notificationMailboxSelections.front().mailboxIds.empty());
     CHECK(reloaded->undoSendDelaySeconds == 45);
     CHECK(reloaded->workspace.mainWindowState == QByteArrayLiteral("workspace-state"));
+    CHECK_FALSE(reloaded->workspace.composeRichTextDefault);
     REQUIRE(reloaded->workspace.calendarColorOverrides.size() == 1);
     CHECK(reloaded->workspace.calendarColorOverrides.front().calendarId ==
           QStringLiteral("calendar-2"));

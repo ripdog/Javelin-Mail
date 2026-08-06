@@ -2,6 +2,10 @@
 
 #include "gui/compose/ComposeBodyConverter.h"
 
+#include <KPIMTextEdit/MarkupDirector>
+#include <KPIMTextEdit/PlainTextMarkupBuilder>
+#include <KPIMTextEdit/RichTextComposerControler>
+#include <MessageComposer/MessageComposerSettings>
 #include <MessageComposer/TextPart>
 
 #include <QMimeData>
@@ -13,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace javelin::gui::compose
 {
@@ -202,6 +207,24 @@ namespace javelin::gui::compose
     QString JavelinComposerEdit::toCleanHtml() const
     {
         return quotedHtml(MessageComposer::RichTextComposerNg::toCleanHtml(), *document());
+    }
+
+    QString JavelinComposerEdit::toCleanPlainText() const
+    {
+        QString plainText;
+        if (composerControler()->isFormattingUsed() &&
+            MessageComposer::MessageComposerSettings::self()->improvePlainTextOfHtmlMessage())
+        {
+            KPIMTextEdit::PlainTextMarkupBuilder builder;
+            KPIMTextEdit::MarkupDirector director{&builder};
+            director.processDocument(document());
+            plainText = composerControler()->toCleanPlainText(builder.getResult());
+        }
+        else
+        {
+            plainText = composerControler()->toCleanPlainText();
+        }
+        return quotedPlainText(std::move(plainText), *document());
     }
 
     void JavelinComposerEdit::insertFromMimeData(const QMimeData* source)

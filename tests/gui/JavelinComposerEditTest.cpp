@@ -166,6 +166,7 @@ TEST_CASE("reply quotation survives KDE body generation", "[gui][compose][compos
     CHECK(textPart.cleanPlainText().contains(QStringLiteral("> Seth here")));
     CHECK(textPart.cleanPlainText().contains(QStringLiteral(">      *  Quoted item")));
     CHECK(textPart.cleanPlainText().contains(QStringLiteral("> After list")));
+    CHECK(editor.toCleanPlainText() == textPart.cleanPlainText());
 
     javelin::gui::compose::JavelinComposerEdit reopenedEditor;
     reopenedEditor.activateRichText();

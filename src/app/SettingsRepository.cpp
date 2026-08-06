@@ -49,6 +49,7 @@ namespace javelin::app
         constexpr auto workspaceGroup = "workspace";
         constexpr auto workspaceFormatVersionKey = "formatVersion";
         constexpr auto workspaceWindowStateKey = "mainWindowState";
+        constexpr auto workspaceComposeRichTextDefaultKey = "composeRichTextDefault";
         constexpr auto workspaceCalendarColorsKey = "calendarColorOverrides";
         constexpr auto workspaceCalendarIdKey = "calendarId";
         constexpr auto workspaceColorKey = "color";
@@ -223,6 +224,8 @@ namespace javelin::app
             }
             workspace.mainWindowState =
                 settings.value(settingKey(workspaceWindowStateKey)).toByteArray();
+            workspace.composeRichTextDefault =
+                settings.value(settingKey(workspaceComposeRichTextDefaultKey), true).toBool();
             if (workspace.mainWindowState.size() > maximumWorkspaceBytes)
             {
                 settings.endGroup();
@@ -741,6 +744,8 @@ namespace javelin::app
         settings.beginGroup(settingKey(workspaceGroup));
         settings.setValue(settingKey(workspaceFormatVersionKey), snapshot.workspace.formatVersion);
         settings.setValue(settingKey(workspaceWindowStateKey), snapshot.workspace.mainWindowState);
+        settings.setValue(settingKey(workspaceComposeRichTextDefaultKey),
+                          snapshot.workspace.composeRichTextDefault);
         settings.beginWriteArray(
             settingKey(workspaceCalendarColorsKey),
             static_cast<int>(snapshot.workspace.calendarColorOverrides.size()));

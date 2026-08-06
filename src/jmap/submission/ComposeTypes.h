@@ -69,6 +69,7 @@ namespace javelin::jmap::submission
     {
         std::string accountId;
         ComposeMode mode = ComposeMode::NewMessage;
+        BodyEditorMode initialEditorMode = BodyEditorMode::RichText;
         std::optional<std::string> referenceEmailId;
         std::optional<std::string> draftEmailId;
         std::vector<javelin::jmap::domain::EmailAddress> initialTo;

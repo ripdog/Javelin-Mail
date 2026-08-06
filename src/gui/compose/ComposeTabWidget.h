@@ -99,7 +99,7 @@ namespace javelin::gui::compose
         void populateAttachments();
         void refreshPreview();
         void syncSnapshotFromUi();
-        void switchBodyFormat(int index);
+        void switchBodyFormat(bool richText);
         void setOptionalRecipientVisible(QWidget* row, QToolButton* button, bool visible);
         void scheduleWorkingCopySave();
         void persistWorkingCopy();
@@ -111,6 +111,7 @@ namespace javelin::gui::compose
         void addInlineImagePath(const QString& filePath);
         void addPastedInlineImage(const QImage& image);
         void insertImage();
+        void adoptInsertedComposerImage(int insertionPosition);
         void removeAttachmentAt(std::size_t index);
         void setAttachmentEmbedded(std::size_t index, bool embedded);
         void insertEmbeddedImage(std::size_t index);
@@ -136,7 +137,6 @@ namespace javelin::gui::compose
         bool m_closeAfterSave = false;
         QTimer* m_autosaveTimer = nullptr;
         QComboBox* m_fromCombo = nullptr;
-        QComboBox* m_bodyFormatCombo = nullptr;
         QLineEdit* m_toEdit = nullptr;
         QLineEdit* m_ccEdit = nullptr;
         QLineEdit* m_bccEdit = nullptr;
@@ -153,6 +153,7 @@ namespace javelin::gui::compose
         QScrollArea* m_attachmentScrollArea = nullptr;
         QWidget* m_attachmentStrip = nullptr;
         QHBoxLayout* m_attachmentStripLayout = nullptr;
+        QAction* m_richTextAction = nullptr;
         QAction* m_codeAction = nullptr;
         QAction* m_insertImageAction = nullptr;
     };

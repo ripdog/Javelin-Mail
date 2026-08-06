@@ -27,6 +27,7 @@ namespace javelin::gui::compose
 
         void fillComposerTextPart(MessageComposer::TextPart* textPart);
         [[nodiscard]] QString toCleanHtml() const;
+        [[nodiscard]] QString toCleanPlainText() const;
 
       Q_SIGNALS:
         void attachmentPathsRequested(const QStringList& filePaths);

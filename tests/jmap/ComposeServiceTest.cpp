@@ -187,6 +187,48 @@ namespace
 
 } // namespace
 
+TEST_CASE("new compose sessions use the requested editor mode", "[jmap][submission][compose]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("compose-editor-mode-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    seedAccount(connection, "account-2", "https://account-2.example.test/jmap", "identity-2",
+                "sender@example.test");
+
+    FakeTransport transport;
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::JmapCore core{connection, transport, methodTransport};
+    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+
+    const auto result = QCoro::waitFor(service.open(
+        {
+            .sessionUrl = "https://account-2.example.test/.well-known/jmap",
+            .loginEmail = "shared-login@example.test",
+            .apiKey = "account-2-secret",
+        },
+        {
+            .accountId = "account-2",
+            .mode = javelin::jmap::submission::ComposeMode::NewMessage,
+            .initialEditorMode = javelin::jmap::submission::BodyEditorMode::PlainText,
+            .referenceEmailId = std::nullopt,
+            .draftEmailId = std::nullopt,
+            .initialTo = {},
+            .useExistingWorkingCopy = true,
+            .composeSessionId = std::nullopt,
+        }));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::submission::DraftSnapshot>(result));
+    CHECK(std::get<javelin::jmap::submission::DraftSnapshot>(result).editorMode ==
+          javelin::jmap::submission::BodyEditorMode::PlainText);
+    CHECK(transport.requests.empty());
+}
+
 TEST_CASE("plain text compose creates no HTML body alternative", "[jmap][submission][plain-text]")
 {
     ensureApplication();

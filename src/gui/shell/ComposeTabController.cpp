@@ -1,6 +1,7 @@
 #include "gui/shell/ComposeTabController.h"
 
 #include "gui/compose/ComposeTabWidget.h"
+#include "gui/compose/ComposeUiPreferences.h"
 #include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/GuiSettings.h"
 #include "gui/shell/MainWindowStateStore.h"
@@ -45,6 +46,10 @@ namespace javelin::gui::shell
             return;
         }
 
+        request.initialEditorMode =
+            javelin::gui::compose::ComposeUiPreferences::richTextDefault(m_settings)
+                ? javelin::jmap::submission::BodyEditorMode::RichText
+                : javelin::jmap::submission::BodyEditorMode::PlainText;
         auto task = m_composeCommandPort.open(
             javelin::gui::settings::toAccountConnectionSettings(settings), std::move(request));
         QCoro::connect(

@@ -301,6 +301,7 @@ namespace javelin::protocol
     {
         std::uint32_t formatVersion = 1;
         QByteArray mainWindowState;
+        bool composeRichTextDefault = true;
         std::vector<CalendarColorOverride> calendarColorOverrides;
 
         friend bool operator==(const WorkspaceSettings&, const WorkspaceSettings&) = default;

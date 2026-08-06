@@ -328,6 +328,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/mailboxes/MailboxTreeView.h
     src/gui/compose/ComposeTabWidget.cpp
     src/gui/compose/ComposeTabWidget.h
+    src/gui/compose/ComposeUiPreferences.cpp
+    src/gui/compose/ComposeUiPreferences.h
     src/gui/compose/ComposerInlineImageCodec.cpp
     src/gui/compose/ComposerInlineImageCodec.h
     src/gui/compose/JavelinComposerEdit.cpp
@@ -986,6 +988,8 @@ add_library(javelin_gui STATIC
     src/gui/mailboxes/MailboxSort.h
     src/gui/compose/ComposeTabWidget.cpp
     src/gui/compose/ComposeTabWidget.h
+    src/gui/compose/ComposeUiPreferences.cpp
+    src/gui/compose/ComposeUiPreferences.h
     src/gui/compose/ComposerInlineImageCodec.cpp
     src/gui/compose/ComposerInlineImageCodec.h
     src/gui/compose/JavelinComposerEdit.cpp

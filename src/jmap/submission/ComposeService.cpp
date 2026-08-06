@@ -905,7 +905,7 @@ namespace javelin::jmap::submission
             .accountId = request.accountId,
             .draftEmailId = std::nullopt,
             .mode = request.mode,
-            .editorMode = BodyEditorMode::RichText,
+            .editorMode = request.initialEditorMode,
             .identityId = availableSenderIdentities.front().id,
             .to = std::move(request.initialTo),
             .cc = {},

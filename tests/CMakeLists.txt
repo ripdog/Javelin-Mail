@@ -241,6 +241,7 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/gui/shell/FocusedCommandRouter.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/shell/ComposeTabPolicy.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/compose/ComposeBodyConverter.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/compose/ComposeUiPreferences.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/mailboxes/MailboxSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageActionSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageListModel.cpp

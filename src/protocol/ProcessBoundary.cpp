@@ -523,6 +523,7 @@ namespace javelin::protocol
                     if (value.update.workspace.has_value())
                     {
                         size += sizeof(value.update.workspace->formatVersion) +
+                                sizeof(value.update.workspace->composeRichTextDefault) +
                                 static_cast<std::size_t>(
                                     value.update.workspace->mainWindowState.size());
                         for (const auto& overrideValue :
