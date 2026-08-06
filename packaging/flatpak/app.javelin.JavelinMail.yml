@@ -36,8 +36,8 @@ modules:
   - name: openblas
     buildsystem: simple
     build-commands:
-      - make -j${FLATPAK_BUILDER_N_JOBS} DYNAMIC_ARCH=1 NO_STATIC=1 NO_LAPACK=1 USE_OPENMP=0 shared
-      - make PREFIX=/app NO_STATIC=1 NO_LAPACK=1 install
+      - make -j${FLATPAK_BUILDER_N_JOBS} DYNAMIC_ARCH=1 NO_STATIC=1 USE_OPENMP=0 shared
+      - make PREFIX=/app NO_STATIC=1 install
     sources:
       - type: archive
         url: https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.34/OpenBLAS-0.3.34.tar.gz
