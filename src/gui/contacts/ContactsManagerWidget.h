@@ -116,7 +116,10 @@ namespace javelin::gui::contacts
         void setDefaultAddressBook(std::string accountId, javelin::jmap::api::AddressBook book);
         void setAddressBookSubscription(std::string accountId, javelin::jmap::api::AddressBook book,
                                         bool subscribed);
-        void editAddressBookSharing(std::string accountId, javelin::jmap::api::AddressBook book);
+        [[nodiscard]] bool
+        canSetAddressBookSubscription(std::string_view accountId,
+                                      const javelin::jmap::api::AddressBook& book,
+                                      bool subscribed) const;
         void applyAddressBookMutation(javelin::app::AddressBookCommand command,
                                       QString progressMessage);
         void setBusy(bool busy);

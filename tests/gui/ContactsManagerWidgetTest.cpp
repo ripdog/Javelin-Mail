@@ -382,6 +382,31 @@ TEST_CASE("Fastmail-style rights allow editing and deleting group cards",
     CHECK(widget.canEditGroup());
     CHECK(widget.canDeleteGroup());
 
+    QMenu addressBookMenu;
+    widget.populateAddressBookMenu(addressBookMenu);
+    QAction* fastmailBookAction = nullptr;
+    bool inFastmailSection = false;
+    for (auto* action : addressBookMenu.actions())
+    {
+        if (action->isSeparator())
+        {
+            inFastmailSection = action->text() == QStringLiteral("Fastmail");
+            continue;
+        }
+        if (inFastmailSection && action->text() == QStringLiteral("Personal"))
+        {
+            fastmailBookAction = action;
+            break;
+        }
+    }
+    REQUIRE(fastmailBookAction != nullptr);
+    CHECK(fastmailBookAction->isChecked());
+    CHECK_FALSE(fastmailBookAction->isEnabled());
+    CHECK_FALSE(fastmailBookAction->toolTip().isEmpty());
+    fastmailBookAction->setChecked(false);
+    QCoreApplication::processEvents();
+    CHECK_FALSE(commands.lastAddressBookCommand.has_value());
+
     widget.beginEditGroup();
     CHECK(details->currentIndex() == 3);
     CHECK(kind->currentData().toString() == QStringLiteral("group"));
