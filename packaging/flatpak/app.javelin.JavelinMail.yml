@@ -66,6 +66,7 @@ modules:
     config-opts:
       - -DBUILD_TESTING=OFF
       - -DBUILD_WITH_QT5=OFF
+      - -DCMAKE_DISABLE_FIND_PACKAGE_Doxygen=ON
     sources:
       - type: archive
         url: https://gnupg.org/ftp/gcrypt/qgpgme/qgpgme-2.2.0.tar.xz
