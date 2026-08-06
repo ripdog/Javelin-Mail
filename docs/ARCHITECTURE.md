@@ -13,8 +13,8 @@ release validation are tracked in
 [DAEMON_GUI_IMPLEMENTATION_PLAN.md](DAEMON_GUI_IMPLEMENTATION_PLAN.md). Cross-cutting invariants live
 in the focused documents for [optimistic consistency](OPTIMISTIC_CONSISTENCY.md),
 [offline mail](OFFLINE_MAIL_ARCHITECTURE.md), [query windows](QUERY_WINDOWS.md),
-[database access](DATABASE_ACCESS.md), [Undo/Redo](UNDO_REDO.md), and
-[message rendering](RENDERING.md).
+[database access](DATABASE_ACCESS.md), [Undo/Redo](UNDO_REDO.md),
+[email signatures](EMAIL_SIGNATURES_DESIGN.md), and [message rendering](RENDERING.md).
 
 Javelin targets Qt 6.6 or newer, KDE Frameworks 6, and C++23. Glaze provides typed JSON parsing at
 the JMAP boundary; QCoro provides coroutine-based Qt networking. KDE Plasma is the primary desktop
