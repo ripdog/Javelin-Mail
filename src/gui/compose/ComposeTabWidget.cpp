@@ -30,10 +30,12 @@
 #include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileIconProvider>
 #include <QFileInfo>
 #include <QFrame>
+#include <QFutureWatcher>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QImage>
@@ -67,12 +69,14 @@
 #include <QUuid>
 #include <QVBoxLayout>
 #include <QVariant>
+#include <QtConcurrentRun>
 
 #include <algorithm>
 #include <cstddef>
 #include <functional>
 #include <memory>
 #include <unordered_map>
+#include <utility>
 
 namespace javelin::gui::compose
 {
@@ -90,8 +94,43 @@ namespace javelin::gui::compose
         {
             QElapsedTimer elapsed;
             std::optional<qint64> acceptedAtMilliseconds;
+            QString sourceFilePath;
             QMetaObject::Connection documentChangeConnection;
         };
+
+        struct PreparedInlineImage
+        {
+            QString filePath;
+            QString displayName;
+            QString mediaType;
+            QString error;
+            qint64 size = 0;
+            qint64 processingMilliseconds = 0;
+            bool reencoded = false;
+
+            [[nodiscard]] bool succeeded() const
+            {
+                return error.isEmpty();
+            }
+        };
+
+        [[nodiscard]] QString imageDialogSourceFilePath(const QDialog& dialog)
+        {
+            for (const auto* lineEdit : dialog.findChildren<QLineEdit*>())
+            {
+                const auto value = lineEdit->text().trimmed();
+                if (value.isEmpty())
+                    continue;
+
+                const auto url =
+                    QUrl::fromUserInput(value, QDir::currentPath(), QUrl::AssumeLocalFile);
+                const auto path = url.isLocalFile() ? url.toLocalFile() : value;
+                const QFileInfo file{path};
+                if (file.exists() && file.isFile())
+                    return file.absoluteFilePath();
+            }
+            return {};
+        }
 
         [[nodiscard]] QString defaultTitleForMode(const javelin::jmap::submission::ComposeMode mode)
         {
@@ -330,6 +369,115 @@ namespace javelin::gui::compose
         {
             return QDir{QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)}.filePath(
                 QStringLiteral("draft-assets/%1").arg(QString::fromStdString(composeSessionId)));
+        }
+
+        [[nodiscard]] bool canPreserveInlineImage(const QString& mediaType)
+        {
+            return mediaType == QStringLiteral("image/png") ||
+                   mediaType == QStringLiteral("image/jpeg") ||
+                   mediaType == QStringLiteral("image/gif");
+        }
+
+        [[nodiscard]] PreparedInlineImage prepareInlineImage(QString sourceFilePath, QImage image,
+                                                             QString destinationDirectory,
+                                                             QString assetId)
+        {
+            QElapsedTimer elapsed;
+            elapsed.start();
+
+            PreparedInlineImage result;
+            if (!QDir{}.mkpath(destinationDirectory))
+            {
+                result.error = QStringLiteral("Could not create storage for the inserted image.");
+                result.processingMilliseconds = elapsed.elapsed();
+                return result;
+            }
+
+            const QFileInfo sourceFile{sourceFilePath};
+            const auto sourceMediaType = sourceFile.exists() && sourceFile.isFile()
+                                             ? detectedMediaType(sourceFilePath)
+                                             : QString{};
+            if (!sourceMediaType.isEmpty() && canPreserveInlineImage(sourceMediaType))
+            {
+                const auto suffix =
+                    sourceMediaType == QStringLiteral("image/jpeg")  ? QStringLiteral("jpg")
+                    : sourceMediaType == QStringLiteral("image/gif") ? QStringLiteral("gif")
+                                                                     : QStringLiteral("png");
+                result.filePath = QDir{destinationDirectory}.filePath(
+                    QStringLiteral("inserted-%1.%2").arg(assetId, suffix));
+                if (!QFile::copy(sourceFile.absoluteFilePath(), result.filePath))
+                {
+                    result.error = QStringLiteral("Could not stage the inserted image.");
+                    result.filePath.clear();
+                    result.processingMilliseconds = elapsed.elapsed();
+                    return result;
+                }
+                result.displayName = sourceFile.fileName();
+                result.mediaType = sourceMediaType;
+            }
+            else
+            {
+                result.reencoded = true;
+                result.filePath = QDir{destinationDirectory}.filePath(
+                    QStringLiteral("inserted-%1.png").arg(assetId));
+                if (!image.save(result.filePath, "PNG"))
+                {
+                    result.error = QStringLiteral("Could not encode the inserted image as PNG.");
+                    result.filePath.clear();
+                    result.processingMilliseconds = elapsed.elapsed();
+                    return result;
+                }
+                const auto sourceBaseName = sourceFile.completeBaseName().trimmed();
+                result.displayName = sourceBaseName.isEmpty()
+                                         ? QStringLiteral("image.png")
+                                         : QStringLiteral("%1.png").arg(sourceBaseName);
+                result.mediaType = QStringLiteral("image/png");
+            }
+
+            result.size = QFileInfo{result.filePath}.size();
+            result.processingMilliseconds = elapsed.elapsed();
+            return result;
+        }
+
+        [[nodiscard]] bool documentContainsImageResource(const QTextDocument& document,
+                                                         const QString& resourceName)
+        {
+            for (auto block = document.begin(); block.isValid(); block = block.next())
+            {
+                for (auto fragment = block.begin(); !fragment.atEnd(); ++fragment)
+                {
+                    const auto textFragment = fragment.fragment();
+                    if (textFragment.isValid() && textFragment.charFormat().isImageFormat() &&
+                        textFragment.charFormat().toImageFormat().name() == resourceName)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        void removeImageResource(QTextDocument& document, const QString& resourceName)
+        {
+            for (auto block = document.begin(); block.isValid(); block = block.next())
+            {
+                for (auto fragment = block.begin(); !fragment.atEnd(); ++fragment)
+                {
+                    const auto textFragment = fragment.fragment();
+                    if (!textFragment.isValid() || !textFragment.charFormat().isImageFormat() ||
+                        textFragment.charFormat().toImageFormat().name() != resourceName)
+                    {
+                        continue;
+                    }
+
+                    QTextCursor cursor{&document};
+                    cursor.setPosition(textFragment.position());
+                    cursor.setPosition(textFragment.position() + textFragment.length(),
+                                       QTextCursor::KeepAnchor);
+                    cursor.removeSelectedText();
+                    return;
+                }
+            }
         }
 
         class DraftAttachmentChip : public QWidget
@@ -1193,6 +1341,9 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::persistWorkingCopy()
     {
+        if (m_pendingInlineImageJobs != 0)
+            return;
+
         syncSnapshotFromUi();
         if (const auto error = m_composeCommandPort.storeWorkingCopy(m_snapshot))
         {
@@ -1378,12 +1529,14 @@ namespace javelin::gui::compose
                 }
                 connect(
                     dialog, &QDialog::accepted, this,
-                    [timing]
+                    [timing, dialog]
                     {
                         timing->acceptedAtMilliseconds = timing->elapsed.elapsed();
+                        timing->sourceFilePath = imageDialogSourceFilePath(*dialog);
                         qCInfo(logComposeImage).noquote()
                             << "insert dialog accepted"
-                            << "elapsedMs" << *timing->acceptedAtMilliseconds;
+                            << "elapsedMs" << *timing->acceptedAtMilliseconds << "sourceFile"
+                            << timing->sourceFilePath;
                     },
                     Qt::SingleShotConnection);
             });
@@ -1404,14 +1557,15 @@ namespace javelin::gui::compose
 
         if (documentChanged)
         {
-            adoptInsertedComposerImage(insertionPosition);
+            adoptInsertedComposerImage(insertionPosition, timing->sourceFilePath);
         }
     }
 
-    void ComposeTabWidget::adoptInsertedComposerImage(const int insertionPosition)
+    void ComposeTabWidget::adoptInsertedComposerImage(const int insertionPosition,
+                                                      const QString& sourceFilePath)
     {
-        QElapsedTimer totalElapsed;
-        totalElapsed.start();
+        QElapsedTimer dispatchElapsed;
+        dispatchElapsed.start();
         auto* document = m_richTextEdit->document();
         const auto block = document->findBlock(insertionPosition);
         QTextFragment insertedFragment;
@@ -1430,15 +1584,11 @@ namespace javelin::gui::compose
         {
             qCWarning(logComposeImage).noquote()
                 << "inserted image adoption failed to locate the image fragment"
-                << "elapsedMs" << totalElapsed.elapsed() << "insertionPosition"
+                << "elapsedMs" << dispatchElapsed.elapsed() << "insertionPosition"
                 << insertionPosition;
             Q_EMIT statusMessageRequested(i18n("The inserted image could not be tracked."), 10000);
             return;
         }
-        qCInfo(logComposeImage).noquote()
-            << "inserted image fragment located"
-            << "elapsedMs" << totalElapsed.elapsed() << "fragmentPosition"
-            << insertedFragment.position() << "fragmentLength" << insertedFragment.length();
 
         auto imageFormat = insertedFragment.charFormat().toImageFormat();
         const auto originalResourceName = imageFormat.name();
@@ -1448,86 +1598,121 @@ namespace javelin::gui::compose
         {
             qCWarning(logComposeImage).noquote()
                 << "inserted image adoption could not retrieve the document resource"
-                << "elapsedMs" << totalElapsed.elapsed() << "resourceName" << originalResourceName;
+                << "elapsedMs" << dispatchElapsed.elapsed() << "resourceName"
+                << originalResourceName;
             Q_EMIT statusMessageRequested(i18n("The inserted image could not be loaded."), 10000);
             return;
         }
-        qCInfo(logComposeImage).noquote()
-            << "inserted image resource retrieved"
-            << "elapsedMs" << totalElapsed.elapsed() << "width" << image.width() << "height"
-            << image.height() << "decodedBytes" << image.sizeInBytes() << "resourceName"
-            << originalResourceName;
 
-        QTextCursor imageCursor{document};
-        imageCursor.setPosition(insertedFragment.position());
-        imageCursor.setPosition(insertedFragment.position() + insertedFragment.length(),
-                                QTextCursor::KeepAnchor);
-
-        const auto directory = draftAssetDirectory(m_snapshot.composeSessionId);
-        if (!QDir{}.mkpath(directory))
-        {
-            qCWarning(logComposeImage).noquote()
-                << "inserted image adoption could not create draft storage"
-                << "elapsedMs" << totalElapsed.elapsed();
-            imageCursor.removeSelectedText();
-            Q_EMIT statusMessageRequested(i18n("Could not create storage for the inserted image."),
-                                          10000);
-            return;
-        }
-        const auto filePath =
-            QDir{directory}.filePath(QStringLiteral("inserted-%1.png")
-                                         .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
-        QElapsedTimer pngSaveElapsed;
-        pngSaveElapsed.start();
-        if (!image.save(filePath, "PNG"))
-        {
-            qCWarning(logComposeImage).noquote()
-                << "inserted image PNG save failed"
-                << "saveMs" << pngSaveElapsed.elapsed() << "totalMs" << totalElapsed.elapsed();
-            imageCursor.removeSelectedText();
-            Q_EMIT statusMessageRequested(i18n("Could not save the inserted image."), 10000);
-            return;
-        }
-        const QFileInfo storedFile{filePath};
-        qCInfo(logComposeImage).noquote()
-            << "inserted image PNG saved"
-            << "saveMs" << pngSaveElapsed.elapsed() << "totalMs" << totalElapsed.elapsed()
-            << "encodedBytes" << storedFile.size();
-
-        QElapsedTimer resourceRenameElapsed;
-        resourceRenameElapsed.start();
         const auto contentId = newContentId();
         const auto resourceName = composerEditorResourceName(contentId);
         document->addResource(QTextDocument::ImageResource, QUrl{resourceName}, image);
         imageFormat.setName(resourceName);
+        QTextCursor imageCursor{document};
+        imageCursor.setPosition(insertedFragment.position());
+        imageCursor.setPosition(insertedFragment.position() + insertedFragment.length(),
+                                QTextCursor::KeepAnchor);
         imageCursor.setCharFormat(imageFormat);
-        qCInfo(logComposeImage).noquote()
-            << "inserted image resource renamed"
-            << "renameMs" << resourceRenameElapsed.elapsed() << "totalMs" << totalElapsed.elapsed();
 
-        auto displayName = QFileInfo{originalResourceName}.fileName();
-        if (displayName.isEmpty())
-        {
-            displayName = QStringLiteral("image.png");
-        }
-        m_snapshot.attachments.push_back(javelin::jmap::submission::DraftAttachment{
-            .localFilePath = filePath.toStdString(),
-            .displayName = displayName.toStdString(),
-            .mediaType = QStringLiteral("image/png").toStdString(),
-            .size = static_cast<std::uint64_t>(storedFile.size()),
-            .blobId = std::nullopt,
-            .inlineDisposition = true,
-            .contentId = contentId,
-            .contentHash = std::nullopt,
-        });
-        QElapsedTimer attachmentUiElapsed;
-        attachmentUiElapsed.start();
-        populateAttachments();
-        scheduleWorkingCopySave();
+        const auto destinationDirectory = draftAssetDirectory(m_snapshot.composeSessionId);
+        const auto assetId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        auto* watcher = new QFutureWatcher<PreparedInlineImage>(this);
+        ++m_pendingInlineImageJobs;
+        Q_EMIT toolbarStateChanged();
+
+        connect(watcher, &QFutureWatcher<PreparedInlineImage>::finished, this,
+                [this, watcher, resourceName, contentId]
+                {
+                    const auto result = watcher->result();
+                    watcher->deleteLater();
+
+                    const bool stillReferenced =
+                        documentContainsImageResource(*m_richTextEdit->document(), resourceName);
+                    if (!result.succeeded())
+                    {
+                        qCWarning(logComposeImage).noquote()
+                            << "inserted image preparation failed"
+                            << "processingMs" << result.processingMilliseconds << "error"
+                            << result.error;
+                        if (stillReferenced)
+                            removeImageResource(*m_richTextEdit->document(), resourceName);
+                        if (m_deferredOperation == DeferredOperation::Send)
+                            m_deferredOperation = DeferredOperation::None;
+                        Q_EMIT statusMessageRequested(
+                            i18n("The inserted image could not be prepared."), 10000);
+                        finishInlineImagePreparation();
+                        return;
+                    }
+
+                    if (!stillReferenced)
+                    {
+                        QFile::remove(result.filePath);
+                        qCInfo(logComposeImage).noquote()
+                            << "prepared image discarded because it was removed from the editor"
+                            << "processingMs" << result.processingMilliseconds;
+                        finishInlineImagePreparation();
+                        return;
+                    }
+
+                    m_snapshot.attachments.push_back(javelin::jmap::submission::DraftAttachment{
+                        .localFilePath = result.filePath.toStdString(),
+                        .displayName = result.displayName.toStdString(),
+                        .mediaType = result.mediaType.toStdString(),
+                        .size = static_cast<std::uint64_t>(result.size),
+                        .blobId = std::nullopt,
+                        .inlineDisposition = true,
+                        .contentId = contentId,
+                        .contentHash = std::nullopt,
+                    });
+                    populateAttachments();
+                    qCInfo(logComposeImage).noquote()
+                        << "inserted image preparation complete"
+                        << "processingMs" << result.processingMilliseconds << "reencoded"
+                        << result.reencoded << "encodedBytes" << result.size << "mediaType"
+                        << result.mediaType << "attachmentCount" << m_snapshot.attachments.size();
+                    finishInlineImagePreparation();
+                });
+
+        watcher->setFuture(QtConcurrent::run(
+            [sourceFilePath, image, destinationDirectory, assetId]
+            { return prepareInlineImage(sourceFilePath, image, destinationDirectory, assetId); }));
         qCInfo(logComposeImage).noquote()
-            << "inserted image adoption complete"
-            << "attachmentUiMs" << attachmentUiElapsed.elapsed() << "totalMs"
-            << totalElapsed.elapsed() << "attachmentCount" << m_snapshot.attachments.size();
+            << "inserted image preparation dispatched"
+            << "dispatchMs" << dispatchElapsed.elapsed() << "width" << image.width() << "height"
+            << image.height() << "decodedBytes" << image.sizeInBytes() << "sourceFile"
+            << sourceFilePath;
+    }
+
+    void ComposeTabWidget::finishInlineImagePreparation()
+    {
+        if (m_pendingInlineImageJobs == 0)
+            return;
+
+        --m_pendingInlineImageJobs;
+        Q_EMIT toolbarStateChanged();
+        if (m_pendingInlineImageJobs != 0)
+            return;
+
+        scheduleWorkingCopySave();
+        const auto deferredOperation = std::exchange(m_deferredOperation, DeferredOperation::None);
+        QTimer::singleShot(0, this,
+                           [this, deferredOperation]
+                           {
+                               switch (deferredOperation)
+                               {
+                               case DeferredOperation::None:
+                                   break;
+                               case DeferredOperation::SaveDraft:
+                                   startSaveDraft(false);
+                                   break;
+                               case DeferredOperation::SaveDraftAndClose:
+                                   startSaveDraft(true);
+                                   break;
+                               case DeferredOperation::Send:
+                                   startSend();
+                                   break;
+                               }
+                           });
     }
 
     void ComposeTabWidget::removeAttachmentAt(const std::size_t index)
@@ -1671,6 +1856,13 @@ namespace javelin::gui::compose
         {
             return;
         }
+        if (m_pendingInlineImageJobs != 0)
+        {
+            m_deferredOperation = closeAfterSave ? DeferredOperation::SaveDraftAndClose
+                                                 : DeferredOperation::SaveDraft;
+            Q_EMIT statusMessageRequested(i18n("Finishing image processing before saving…"), 10000);
+            return;
+        }
 
         syncSnapshotFromUi();
         QString errorMessage;
@@ -1740,6 +1932,13 @@ namespace javelin::gui::compose
     {
         if (m_operationInFlight)
         {
+            return;
+        }
+        if (m_pendingInlineImageJobs != 0)
+        {
+            m_deferredOperation = DeferredOperation::Send;
+            Q_EMIT statusMessageRequested(i18n("Finishing image processing before sending…"),
+                                          10000);
             return;
         }
 

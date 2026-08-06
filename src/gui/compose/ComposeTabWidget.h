@@ -95,6 +95,14 @@ namespace javelin::gui::compose
         void toolbarStateChanged();
 
       private:
+        enum class DeferredOperation
+        {
+            None,
+            SaveDraft,
+            SaveDraftAndClose,
+            Send,
+        };
+
         void setupUi();
         void createToolbarActions();
         void loadIdentities();
@@ -114,7 +122,8 @@ namespace javelin::gui::compose
         void addInlineImagePath(const QString& filePath);
         void addPastedInlineImage(const QImage& image);
         void insertImage();
-        void adoptInsertedComposerImage(int insertionPosition);
+        void adoptInsertedComposerImage(int insertionPosition, const QString& sourceFilePath);
+        void finishInlineImagePreparation();
         void removeAttachmentAt(std::size_t index);
         void setAttachmentEmbedded(std::size_t index, bool embedded);
         void insertEmbeddedImage(std::size_t index);
@@ -138,6 +147,8 @@ namespace javelin::gui::compose
         bool m_operationInFlight = false;
         bool m_closeWithoutPrompt = false;
         bool m_closeAfterSave = false;
+        std::size_t m_pendingInlineImageJobs = 0;
+        DeferredOperation m_deferredOperation = DeferredOperation::None;
         QTimer* m_autosaveTimer = nullptr;
         QComboBox* m_fromCombo = nullptr;
         QLineEdit* m_toEdit = nullptr;
