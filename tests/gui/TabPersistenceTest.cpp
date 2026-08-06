@@ -96,6 +96,16 @@ TEST_CASE("mailbox tab restoration creates a cache-only initial page", "[gui][ta
     CHECK(plan.selection.selectedEmailIds.empty());
 }
 
+TEST_CASE("active tab restoration follows the persisted tab identity", "[gui][tabs][persistence]")
+{
+    using javelin::gui::shell::resolveRestoredActiveTabIndex;
+
+    CHECK(resolveRestoredActiveTabIndex(2, {0, std::nullopt, 1, 2}) == std::optional<int>{1});
+    CHECK(resolveRestoredActiveTabIndex(1, {0, std::nullopt, 1, 2}) == std::optional<int>{0});
+    CHECK(resolveRestoredActiveTabIndex(0, {std::nullopt, 0, 1}) == std::optional<int>{0});
+    CHECK_FALSE(resolveRestoredActiveTabIndex(0, {}).has_value());
+}
+
 TEST_CASE("search tab restoration transfers persisted session state", "[gui][tabs][persistence]")
 {
     auto persisted = javelin::gui::shell::PersistedSearchTab{

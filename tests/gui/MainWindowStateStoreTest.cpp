@@ -83,7 +83,7 @@ TEST_CASE("main window state round-trips every tab type")
         .composeSessionId = "compose-session",
     });
     expected.tabs.emplace_back(PersistedContactsTab{
-        .common = {.accountId = "account", .title = QStringLiteral("Contacts"), .selection = {}},
+        .common = {.accountId = {}, .title = QStringLiteral("Contacts"), .selection = {}},
         .view =
             {
                 .accountId = "contacts-account",
@@ -97,7 +97,7 @@ TEST_CASE("main window state round-trips every tab type")
             },
     });
     expected.tabs.emplace_back(PersistedCalendarTab{
-        .common = {.accountId = "account", .title = QStringLiteral("Calendar"), .selection = {}},
+        .common = {.accountId = {}, .title = QStringLiteral("Calendar"), .selection = {}},
         .displayedMonth = QDate{2026, 7, 1},
     });
 
@@ -128,9 +128,33 @@ TEST_CASE("main window state round-trips every tab type")
 
     CHECK(std::get<PersistedComposeTab>(actual.tabs[2]).composeSessionId == "compose-session");
     const auto& contacts = std::get<PersistedContactsTab>(actual.tabs[3]);
+    CHECK(contacts.common.accountId.empty());
     CHECK(contacts.view.filter == QStringLiteral("Ada"));
     CHECK((contacts.view.selectedContactKeys == std::vector<std::string>{"one", "two"}));
-    CHECK((std::get<PersistedCalendarTab>(actual.tabs[4]).displayedMonth == QDate{2026, 7, 1}));
+    const auto& calendar = std::get<PersistedCalendarTab>(actual.tabs[4]);
+    CHECK(calendar.common.accountId.empty());
+    CHECK((calendar.displayedMonth == QDate{2026, 7, 1}));
+}
+
+TEST_CASE("main window state rejects account-bound tabs without an account")
+{
+    PersistedMainWindowState state;
+    state.tabs.emplace_back(PersistedMailboxTab{
+        .common = {.accountId = {}, .title = QStringLiteral("Inbox"), .selection = {}},
+        .mailboxId = "inbox",
+        .mailboxRole = "inbox",
+        .offset = 0,
+    });
+    state.tabs.emplace_back(PersistedSearchTab{
+        .common = {.accountId = {}, .title = QStringLiteral("Search"), .selection = {}},
+        .search = {},
+    });
+    state.tabs.emplace_back(PersistedComposeTab{
+        .common = {.accountId = {}, .title = QStringLiteral("Compose"), .selection = {}},
+        .composeSessionId = "compose-session",
+    });
+
+    CHECK(deserializeMainWindowState(serializeMainWindowState(state), {}).tabs.empty());
 }
 
 TEST_CASE("main window state ignores invalid tab records")

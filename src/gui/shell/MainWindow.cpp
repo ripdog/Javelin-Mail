@@ -3162,8 +3162,11 @@ namespace javelin::gui::shell
 
         m_tabs.clear();
         m_tabs.reserve(state.tabs.size());
+        std::vector<std::optional<int>> restoredTabIndices;
+        restoredTabIndices.reserve(state.tabs.size());
         for (auto& tab : state.tabs)
         {
+            const auto tabCountBeforeRestore = m_tabs.size();
             std::visit(
                 [this](auto& persisted)
                 {
@@ -3180,6 +3183,10 @@ namespace javelin::gui::shell
                         m_calendarTabController->open(persisted.displayedMonth);
                 },
                 tab);
+            restoredTabIndices.push_back(
+                m_tabs.size() > tabCountBeforeRestore
+                    ? std::optional<int>{static_cast<int>(tabCountBeforeRestore)}
+                    : std::nullopt);
         }
 
         if (m_tabs.empty())
@@ -3205,7 +3212,8 @@ namespace javelin::gui::shell
             return;
         }
 
-        m_activeTabIndex = std::clamp(state.activeTabIndex, 0, static_cast<int>(m_tabs.size() - 1));
+        m_activeTabIndex =
+            resolveRestoredActiveTabIndex(state.activeTabIndex, restoredTabIndices).value_or(0);
         updateTabBar();
         activateTab(*m_activeTabIndex, false);
         refreshTabFromServer(static_cast<std::size_t>(*m_activeTabIndex));

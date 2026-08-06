@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace javelin::gui::shell
 {
@@ -60,4 +61,7 @@ namespace javelin::gui::shell
     [[nodiscard]] MailboxTabRestorePlan planMailboxTabRestore(const PersistedMailboxTab& tab,
                                                               std::size_t pageSize);
     [[nodiscard]] SearchTabRestorePlan planSearchTabRestore(PersistedSearchTab tab);
+    [[nodiscard]] std::optional<int>
+    resolveRestoredActiveTabIndex(int persistedActiveTabIndex,
+                                  const std::vector<std::optional<int>>& restoredTabIndices);
 } // namespace javelin::gui::shell
