@@ -170,11 +170,13 @@ to decide product behavior.
 | `ContactCard/copy` move/copy workflows | Destination and optional source projections are one operation group | Destination and source outcomes reconcile independently, preserving RFC 8620 non-atomic copy semantics |
 | `CalendarEvent/set` | Event and visible occurrence projection | Full ranges are rebased; stale recurrence expansions are suppressed until the base event is confirmed |
 | `SieveScript/set` | Complete effective script-list projection | Full script snapshots are correlated and rebased |
+| `Identity/set` | Updates and destroys project into confirmed Identity rows; creates use separate pending projections until a server ID exists | Full or incremental Identity refreshes reconcile exact updates and destroys; uncertain creates remain visibly pending rather than masquerading as confirmed identities |
 | Draft `Email/set` replacement | New local draft is projected before dispatch; old draft remains hidden | Lost creates remain unknown and duplicate saves for that compose session are blocked |
 | `EmailSubmission/set` send | Draft moves to the Sent projection before dispatch | Submission and implicit Email changes are tracked as dependent mutations; ambiguity preserves the Sent projection |
 
-Uploads, downloads, Sieve validation, identity reads, and other procedural calls do not own
-persistent JMAP object state and therefore do not create optimistic records.
+Uploads, downloads, Sieve validation, Identity reads, and other procedural calls do not own
+persistent JMAP object state and therefore do not create optimistic records. Identity create,
+update, and destroy operations are stateful `Identity/set` mutations and follow the policy above.
 
 Calendar recurrence expansion remains server-owned. While a recurring CalendarEvent mutation is
 active, the cache uses one local anchor occurrence and suppresses stale expanded occurrences. The
