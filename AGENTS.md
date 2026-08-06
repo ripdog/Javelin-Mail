@@ -4,7 +4,8 @@
 
 - Do not run Git commands in parallel or run concurrent configure, build, or test commands against the same build directory.
 - Use the Qt 6/C++23 codebase directly. Do not add legacy fallbacks or accept old and new data shapes unless an explicit migration requires it.
-- Read `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT.md`, and any relevant subsystem document before changing an architectural boundary.
+- Build, test, run, packaging, and analysis instructions live in `docs/DEVELOPMENT.md`. Read it before invoking build tools; do not guess commands or bypass the documented scripts.
+- Read `docs/ARCHITECTURE.md` and any relevant subsystem document before changing an architectural boundary.
 - Commit meaningful changes at the end of the task.
 
 ## Source of Truth
@@ -19,7 +20,7 @@
 - The daemon owns JMAP transports, writable repositories, canonical settings, background work, authentication, and stateful application commands.
 - The GUI renders cache state and sends typed commands over IPC. It must not perform JMAP operations or writable mail-cache access directly.
 - The internal JMAP library owns protocol validity, typed wire/domain data, cache primitives, sync primitives, and exact policy-neutral mutations.
-- The application coordination layer interprets user intent, expands selections, orchestrates multi-object work, and owns partial-failure policy.
+- The daemon-side application coordination layer interprets typed GUI commands, expands selections, orchestrates multi-object work, and owns workflow and partial-failure policy. It must not drift into either the GUI or the protocol library.
 - Keep transport and raw JMAP JSON out of GUI and product-policy code. Use Glaze for JMAP wire JSON and typed structures across boundaries.
 - Keep protocol, cache, sync, and application policy testable without starting Qt Widgets.
 
