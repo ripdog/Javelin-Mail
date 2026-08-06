@@ -90,9 +90,6 @@ namespace javelin::gui::shell
                                                        const QString& prefix)
         {
             return {
-                .accountId = settings.value(settingKey(prefix, QStringLiteral("accountId")))
-                                 .toString()
-                                 .toStdString(),
                 .title = settings.value(settingKey(prefix, QStringLiteral("title"))).toString(),
                 .selection =
                     {
@@ -102,11 +99,16 @@ namespace javelin::gui::shell
             };
         }
 
+        [[nodiscard]] std::string readAccountId(const QVariantMap& settings, const QString& prefix)
+        {
+            return settings.value(settingKey(prefix, QStringLiteral("accountId")))
+                .toString()
+                .toStdString();
+        }
+
         void writeCommonTab(QVariantMap& settings, const QString& prefix,
                             const PersistedTabCommon& common)
         {
-            settings.insert(settingKey(prefix, QStringLiteral("accountId")),
-                            QString::fromStdString(common.accountId));
             settings.insert(settingKey(prefix, QStringLiteral("title")), common.title);
             writeOptionalString(settings, prefix, QStringLiteral("threadId"),
                                 common.selection.threadId);
@@ -124,7 +126,8 @@ namespace javelin::gui::shell
 
             if (type == QStringLiteral("mailbox"))
             {
-                if (common.accountId.empty())
+                const auto accountId = readAccountId(settings, prefix);
+                if (accountId.empty())
                     return std::nullopt;
                 const auto mailboxId =
                     settings.value(settingKey(prefix, QStringLiteral("mailboxId")))
@@ -134,6 +137,7 @@ namespace javelin::gui::shell
                     return std::nullopt;
                 return PersistedMailboxTab{
                     .common = std::move(common),
+                    .accountId = accountId,
                     .mailboxId = mailboxId,
                     .mailboxRole = optionalString(settings, prefix, QStringLiteral("mailboxRole")),
                     .offset = static_cast<std::size_t>(
@@ -143,16 +147,19 @@ namespace javelin::gui::shell
             }
             if (type == QStringLiteral("search"))
             {
-                if (common.accountId.empty())
+                const auto accountId = readAccountId(settings, prefix);
+                if (accountId.empty())
                     return std::nullopt;
                 return PersistedSearchTab{
                     .common = std::move(common),
+                    .accountId = accountId,
                     .search = javelin::gui::search::readSearchSessionSettings(settings, prefix),
                 };
             }
             if (type == QStringLiteral("compose"))
             {
-                if (common.accountId.empty())
+                const auto accountId = readAccountId(settings, prefix);
+                if (accountId.empty())
                     return std::nullopt;
                 const auto composeSessionId =
                     settings.value(settingKey(prefix, QStringLiteral("composeSessionId")))
@@ -162,6 +169,7 @@ namespace javelin::gui::shell
                     return std::nullopt;
                 return PersistedComposeTab{
                     .common = std::move(common),
+                    .accountId = accountId,
                     .composeSessionId = composeSessionId,
                 };
             }
@@ -234,6 +242,8 @@ namespace javelin::gui::shell
                     {
                         settings.insert(settingKey(prefix, QStringLiteral("type")),
                                         QStringLiteral("mailbox"));
+                        settings.insert(settingKey(prefix, QStringLiteral("accountId")),
+                                        QString::fromStdString(value.accountId));
                         settings.insert(settingKey(prefix, QStringLiteral("mailboxId")),
                                         QString::fromStdString(value.mailboxId));
                         writeOptionalString(settings, prefix, QStringLiteral("mailboxRole"),
@@ -243,6 +253,8 @@ namespace javelin::gui::shell
                     }
                     else if constexpr (std::is_same_v<Tab, PersistedSearchTab>)
                     {
+                        settings.insert(settingKey(prefix, QStringLiteral("accountId")),
+                                        QString::fromStdString(value.accountId));
                         javelin::gui::search::writeSearchSessionSettings(settings, prefix,
                                                                          value.search);
                     }
@@ -250,6 +262,8 @@ namespace javelin::gui::shell
                     {
                         settings.insert(settingKey(prefix, QStringLiteral("type")),
                                         QStringLiteral("compose"));
+                        settings.insert(settingKey(prefix, QStringLiteral("accountId")),
+                                        QString::fromStdString(value.accountId));
                         settings.insert(settingKey(prefix, QStringLiteral("composeSessionId")),
                                         QString::fromStdString(value.composeSessionId));
                     }

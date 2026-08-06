@@ -27,7 +27,6 @@ namespace
     [[nodiscard]] javelin::gui::shell::TabState contactsTab()
     {
         return {.content = javelin::gui::shell::ContactsTabState{
-                    .accountId = "account-a",
                     .title = QStringLiteral("Contacts"),
                     .selection = {},
                 }};

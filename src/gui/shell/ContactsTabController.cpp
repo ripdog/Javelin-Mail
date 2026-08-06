@@ -222,9 +222,11 @@ namespace javelin::gui::shell
         connect(widget, &javelin::gui::contacts::ContactsManagerWidget::toolbarStateChanged, this,
                 [this] { Q_EMIT toolbarStateChanged(); });
         m_contentStack.addWidget(widget);
-        m_tabs.push_back(TabState{
-            .content = ContactsTabState{
-                .accountId = {}, .title = i18n("Contacts"), .widget = widget, .selection = {}}});
+        m_tabs.push_back(TabState{.content = ContactsTabState{
+                                      .title = i18n("Contacts"),
+                                      .widget = widget,
+                                      .selection = {},
+                                  }});
         return widget;
     }
 

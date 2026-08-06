@@ -56,6 +56,10 @@ namespace javelin::gui::shell
     [[nodiscard]] PersistedMailboxTab
     persistMailboxTab(const MailboxTabPersistenceSnapshot& snapshot);
     [[nodiscard]] PersistedSearchTab persistSearchTab(const SearchTabPersistenceSnapshot& snapshot);
+    [[nodiscard]] PersistedContactsTab
+    persistContactsTab(const ContactsTabState& tab, javelin::gui::contacts::ContactsViewState view);
+    [[nodiscard]] PersistedCalendarTab persistCalendarTab(const CalendarTabState& tab,
+                                                          QDate displayedMonth);
     [[nodiscard]] PersistedTab persistTab(const TabState& tab);
 
     [[nodiscard]] MailboxTabRestorePlan planMailboxTabRestore(const PersistedMailboxTab& tab,

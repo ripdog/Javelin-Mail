@@ -37,10 +37,10 @@ TEST_CASE("main window state round-trips every tab type")
     expected.tabs.emplace_back(PersistedMailboxTab{
         .common =
             {
-                .accountId = "account",
                 .title = QStringLiteral("Inbox"),
                 .selection = {.threadId = "thread", .emailId = "email"},
             },
+        .accountId = "account",
         .mailboxId = "inbox",
         .mailboxRole = "inbox",
         .offset = 200,
@@ -48,10 +48,10 @@ TEST_CASE("main window state round-trips every tab type")
     expected.tabs.emplace_back(PersistedSearchTab{
         .common =
             {
-                .accountId = "account",
                 .title = QStringLiteral("Search"),
                 .selection = {},
             },
+        .accountId = "account",
         .search =
             {
                 .criteria = {.text = "needle", .from = "sender@example.test"},
@@ -79,11 +79,12 @@ TEST_CASE("main window state round-trips every tab type")
             },
     });
     expected.tabs.emplace_back(PersistedComposeTab{
-        .common = {.accountId = "account", .title = QStringLiteral("Compose"), .selection = {}},
+        .common = {.title = QStringLiteral("Compose"), .selection = {}},
+        .accountId = "account",
         .composeSessionId = "compose-session",
     });
     expected.tabs.emplace_back(PersistedContactsTab{
-        .common = {.accountId = {}, .title = QStringLiteral("Contacts"), .selection = {}},
+        .common = {.title = QStringLiteral("Contacts"), .selection = {}},
         .view =
             {
                 .accountId = "contacts-account",
@@ -97,7 +98,7 @@ TEST_CASE("main window state round-trips every tab type")
             },
     });
     expected.tabs.emplace_back(PersistedCalendarTab{
-        .common = {.accountId = {}, .title = QStringLiteral("Calendar"), .selection = {}},
+        .common = {.title = QStringLiteral("Calendar"), .selection = {}},
         .displayedMonth = QDate{2026, 7, 1},
     });
 
@@ -111,13 +112,14 @@ TEST_CASE("main window state round-trips every tab type")
     REQUIRE(actual.tabs.size() == expected.tabs.size());
 
     const auto& mailbox = std::get<PersistedMailboxTab>(actual.tabs[0]);
-    CHECK(mailbox.common.accountId == "account");
+    CHECK(mailbox.accountId == "account");
     CHECK(mailbox.common.selection.threadId == std::optional<std::string>{"thread"});
     CHECK(mailbox.mailboxId == "inbox");
     CHECK(mailbox.mailboxRole == std::optional<std::string>{"inbox"});
     CHECK(mailbox.offset == 200);
 
     const auto& search = std::get<PersistedSearchTab>(actual.tabs[1]);
+    CHECK(search.accountId == "account");
     CHECK(search.search.criteria.text == std::optional<std::string>{"needle"});
     CHECK(search.search.criteria.from == std::optional<std::string>{"sender@example.test"});
     CHECK(search.search.restored.page.offset == 20);
@@ -126,31 +128,55 @@ TEST_CASE("main window state round-trips every tab type")
     CHECK(search.search.restored.mode == javelin::app::SearchMode::Online);
     CHECK(search.search.restored.sessionId == "search-session");
 
-    CHECK(std::get<PersistedComposeTab>(actual.tabs[2]).composeSessionId == "compose-session");
+    const auto& compose = std::get<PersistedComposeTab>(actual.tabs[2]);
+    CHECK(compose.accountId == "account");
+    CHECK(compose.composeSessionId == "compose-session");
     const auto& contacts = std::get<PersistedContactsTab>(actual.tabs[3]);
-    CHECK(contacts.common.accountId.empty());
     CHECK(contacts.view.filter == QStringLiteral("Ada"));
     CHECK((contacts.view.selectedContactKeys == std::vector<std::string>{"one", "two"}));
     const auto& calendar = std::get<PersistedCalendarTab>(actual.tabs[4]);
-    CHECK(calendar.common.accountId.empty());
     CHECK((calendar.displayedMonth == QDate{2026, 7, 1}));
+}
+
+TEST_CASE("main window state accepts legacy account keys on workspace tabs")
+{
+    const QVariantMap settings{
+        {QStringLiteral("tabs/size"), 2},
+        {QStringLiteral("tabs/1/type"), QStringLiteral("contacts")},
+        {QStringLiteral("tabs/1/accountId"), QStringLiteral("legacy-contacts-account")},
+        {QStringLiteral("tabs/1/title"), QStringLiteral("Contacts")},
+        {QStringLiteral("tabs/2/type"), QStringLiteral("calendar")},
+        {QStringLiteral("tabs/2/accountId"), QStringLiteral("legacy-calendar-account")},
+        {QStringLiteral("tabs/2/title"), QStringLiteral("Calendar")},
+        {QStringLiteral("tabs/2/displayedMonth"), QStringLiteral("2026-08-01")},
+    };
+
+    const auto state = deserializeMainWindowState(encodeSettings(settings), {});
+
+    REQUIRE(state.tabs.size() == 2);
+    CHECK(std::holds_alternative<PersistedContactsTab>(state.tabs[0]));
+    const auto& calendar = std::get<PersistedCalendarTab>(state.tabs[1]);
+    CHECK((calendar.displayedMonth == QDate{2026, 8, 1}));
 }
 
 TEST_CASE("main window state rejects account-bound tabs without an account")
 {
     PersistedMainWindowState state;
     state.tabs.emplace_back(PersistedMailboxTab{
-        .common = {.accountId = {}, .title = QStringLiteral("Inbox"), .selection = {}},
+        .common = {.title = QStringLiteral("Inbox"), .selection = {}},
+        .accountId = {},
         .mailboxId = "inbox",
         .mailboxRole = "inbox",
         .offset = 0,
     });
     state.tabs.emplace_back(PersistedSearchTab{
-        .common = {.accountId = {}, .title = QStringLiteral("Search"), .selection = {}},
+        .common = {.title = QStringLiteral("Search"), .selection = {}},
+        .accountId = {},
         .search = {},
     });
     state.tabs.emplace_back(PersistedComposeTab{
-        .common = {.accountId = {}, .title = QStringLiteral("Compose"), .selection = {}},
+        .common = {.title = QStringLiteral("Compose"), .selection = {}},
+        .accountId = {},
         .composeSessionId = "compose-session",
     });
 

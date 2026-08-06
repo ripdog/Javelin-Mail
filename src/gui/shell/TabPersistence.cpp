@@ -52,39 +52,25 @@ namespace javelin::gui::shell
                     return PersistedComposeTab{
                         .common =
                             {
-                                .accountId = content.accountId,
                                 .title = content.title,
                                 .selection = persistSelection(content.selection),
                             },
+                        .accountId = content.accountId,
                         .composeSessionId = content.composeSessionId,
                     };
                 }
                 else if constexpr (std::is_same_v<Content, ContactsTabState>)
                 {
-                    return PersistedContactsTab{
-                        .common =
-                            {
-                                .accountId = content.accountId,
-                                .title = content.title,
-                                .selection = persistSelection(content.selection),
-                            },
-                        .view = content.widget != nullptr
-                                    ? content.widget->viewState()
-                                    : javelin::gui::contacts::ContactsViewState{},
-                    };
+                    return persistContactsTab(content,
+                                              content.widget != nullptr
+                                                  ? content.widget->viewState()
+                                                  : javelin::gui::contacts::ContactsViewState{});
                 }
                 else
                 {
-                    return PersistedCalendarTab{
-                        .common =
-                            {
-                                .accountId = {},
-                                .title = content.title,
-                                .selection = persistSelection(content.selection),
-                            },
-                        .displayedMonth =
-                            content.widget != nullptr ? content.widget->displayedMonth() : QDate{},
-                    };
+                    return persistCalendarTab(content, content.widget != nullptr
+                                                           ? content.widget->displayedMonth()
+                                                           : QDate{});
                 }
             },
             tab.content);

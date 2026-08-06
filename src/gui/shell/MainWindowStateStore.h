@@ -24,7 +24,6 @@ namespace javelin::gui::shell
 
     struct PersistedTabCommon
     {
-        std::string accountId;
         QString title;
         PersistedTabSelection selection;
     };
@@ -32,6 +31,7 @@ namespace javelin::gui::shell
     struct PersistedMailboxTab
     {
         PersistedTabCommon common;
+        std::string accountId;
         std::string mailboxId;
         std::optional<std::string> mailboxRole;
         std::size_t offset = 0;
@@ -40,12 +40,14 @@ namespace javelin::gui::shell
     struct PersistedSearchTab
     {
         PersistedTabCommon common;
+        std::string accountId;
         javelin::gui::search::PersistedSearchState search;
     };
 
     struct PersistedComposeTab
     {
         PersistedTabCommon common;
+        std::string accountId;
         std::string composeSessionId;
     };
 

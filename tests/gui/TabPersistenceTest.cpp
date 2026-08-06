@@ -23,7 +23,7 @@ TEST_CASE("mailbox tab persistence preserves identity position and selection",
         .offset = 300,
     });
 
-    CHECK(persisted.common.accountId == "account-a");
+    CHECK(persisted.accountId == "account-a");
     CHECK(persisted.common.title == QStringLiteral("Archive"));
     CHECK(persisted.common.selection.threadId == std::optional<std::string>{"thread-a"});
     CHECK(persisted.common.selection.emailId == std::optional<std::string>{"email-a"});
@@ -74,10 +74,10 @@ TEST_CASE("mailbox tab restoration creates a cache-only initial page", "[gui][ta
         {
             .common =
                 {
-                    .accountId = "account-a",
                     .title = {},
                     .selection = {.threadId = "thread-a", .emailId = "email-a"},
                 },
+            .accountId = "account-a",
             .mailboxId = "archive",
             .mailboxRole = "archive",
             .offset = 200,
@@ -96,6 +96,56 @@ TEST_CASE("mailbox tab restoration creates a cache-only initial page", "[gui][ta
     CHECK(plan.selection.selectedEmailIds.empty());
 }
 
+TEST_CASE("workspace tab runtime states survive persistence round trip", "[gui][tabs][persistence]")
+{
+    using namespace javelin::gui::shell;
+
+    const TabState contactsTab{
+        .content =
+            ContactsTabState{
+                .title = QStringLiteral("Contacts"),
+                .widget = nullptr,
+                .selection = {},
+            },
+    };
+    const TabState calendarTab{
+        .content =
+            CalendarTabState{
+                .title = QStringLiteral("Calendar"),
+                .widget = nullptr,
+                .selection = {},
+            },
+    };
+
+    PersistedMainWindowState state;
+    state.tabs.push_back(persistContactsTab(std::get<ContactsTabState>(contactsTab.content),
+                                            {
+                                                .accountId = "contacts-account",
+                                                .addressBookId = "address-book",
+                                                .contactId = "contact",
+                                                .filter = QStringLiteral("Ada"),
+                                                .sortMode = 0,
+                                                .groupFilterMode = 0,
+                                                .groupId = {},
+                                                .selectedContactKeys = {},
+                                            }));
+    state.tabs.push_back(
+        persistCalendarTab(std::get<CalendarTabState>(calendarTab.content), QDate{2026, 8, 1}));
+
+    const auto restored = deserializeMainWindowState(serializeMainWindowState(state), {});
+
+    REQUIRE(restored.tabs.size() == 2);
+    const auto& contacts = std::get<PersistedContactsTab>(restored.tabs[0]);
+    CHECK(contacts.common.title == QStringLiteral("Contacts"));
+    CHECK(contacts.view.accountId == "contacts-account");
+    CHECK(contacts.view.addressBookId == "address-book");
+    CHECK(contacts.view.contactId == "contact");
+    CHECK(contacts.view.filter == QStringLiteral("Ada"));
+    const auto& calendar = std::get<PersistedCalendarTab>(restored.tabs[1]);
+    CHECK(calendar.common.title == QStringLiteral("Calendar"));
+    CHECK((calendar.displayedMonth == QDate{2026, 8, 1}));
+}
+
 TEST_CASE("active tab restoration follows the persisted tab identity", "[gui][tabs][persistence]")
 {
     using javelin::gui::shell::resolveRestoredActiveTabIndex;
@@ -111,10 +161,10 @@ TEST_CASE("search tab restoration transfers persisted session state", "[gui][tab
     auto persisted = javelin::gui::shell::PersistedSearchTab{
         .common =
             {
-                .accountId = "account-a",
                 .title = QStringLiteral("Search"),
                 .selection = {.threadId = "thread-a", .emailId = "email-a"},
             },
+        .accountId = "account-a",
         .search =
             {
                 .criteria = {.subject = "report"},

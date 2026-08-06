@@ -21,10 +21,10 @@ namespace javelin::gui::shell
         return {
             .common =
                 {
-                    .accountId = snapshot.accountId,
                     .title = snapshot.title,
                     .selection = persistSelection(snapshot.selection),
                 },
+            .accountId = snapshot.accountId,
             .mailboxId = snapshot.mailboxId,
             .mailboxRole = snapshot.mailboxRole,
             .offset = snapshot.offset,
@@ -36,10 +36,10 @@ namespace javelin::gui::shell
         return {
             .common =
                 {
-                    .accountId = snapshot.accountId,
                     .title = snapshot.title,
                     .selection = persistSelection(snapshot.selection),
                 },
+            .accountId = snapshot.accountId,
             .search =
                 {
                     .criteria = snapshot.criteria,
@@ -53,11 +53,36 @@ namespace javelin::gui::shell
         };
     }
 
+    PersistedContactsTab persistContactsTab(const ContactsTabState& tab,
+                                            javelin::gui::contacts::ContactsViewState view)
+    {
+        return {
+            .common =
+                {
+                    .title = tab.title,
+                    .selection = persistSelection(tab.selection),
+                },
+            .view = std::move(view),
+        };
+    }
+
+    PersistedCalendarTab persistCalendarTab(const CalendarTabState& tab, QDate displayedMonth)
+    {
+        return {
+            .common =
+                {
+                    .title = tab.title,
+                    .selection = persistSelection(tab.selection),
+                },
+            .displayedMonth = std::move(displayedMonth),
+        };
+    }
+
     MailboxTabRestorePlan planMailboxTabRestore(const PersistedMailboxTab& tab,
                                                 const std::size_t pageSize)
     {
         return {
-            .accountId = tab.common.accountId,
+            .accountId = tab.accountId,
             .mailboxId = tab.mailboxId,
             .title = tab.common.title.isEmpty() ? QString::fromStdString(tab.mailboxId)
                                                 : tab.common.title,
@@ -93,7 +118,7 @@ namespace javelin::gui::shell
     SearchTabRestorePlan planSearchTabRestore(PersistedSearchTab tab)
     {
         return {
-            .accountId = std::move(tab.common.accountId),
+            .accountId = std::move(tab.accountId),
             .criteria = std::move(tab.search.criteria),
             .restored = std::move(tab.search.restored),
             .selection =

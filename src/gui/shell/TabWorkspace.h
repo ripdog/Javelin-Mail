@@ -62,7 +62,6 @@ namespace javelin::gui::shell
 
     struct ContactsTabState
     {
-        std::string accountId;
         QString title;
         javelin::gui::contacts::ContactsManagerWidget* widget = nullptr;
         TabSelectionState selection;
