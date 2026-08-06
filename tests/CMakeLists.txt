@@ -324,6 +324,7 @@ catch_discover_tests(javelin_daemon_tests)
 add_executable(javelin_contacts_gui_tests
     gui/ContactsGuiTestMain.cpp
     gui/ContactsManagerWidgetTest.cpp
+    gui/DeveloperOptionsDialogTest.cpp
 )
 target_include_directories(javelin_contacts_gui_tests
     PRIVATE

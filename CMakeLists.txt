@@ -142,6 +142,7 @@ set(JAVELIN_FORMAT_FILES
     src/gui/developer/DeveloperOptionsDialog.cpp
     src/gui/developer/DeveloperOptionsDialog.h
     tests/app/DeveloperDiagnosticsServiceTest.cpp
+    tests/gui/DeveloperOptionsDialogTest.cpp
     tests/app/RemoteCodecTest.cpp
     src/protocol/SocketTransport.cpp
     src/jmap/render/HtmlBodyEmbedding.cpp

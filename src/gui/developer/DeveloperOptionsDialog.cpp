@@ -45,6 +45,44 @@ namespace javelin::gui::developer
         };
 
         constexpr int mailboxIndexRole = Qt::UserRole + 1;
+        constexpr int sortValueRole = Qt::UserRole + 2;
+
+        class MailboxSortFilterProxyModel final : public QSortFilterProxyModel
+        {
+          public:
+            using QSortFilterProxyModel::QSortFilterProxyModel;
+
+          protected:
+            [[nodiscard]] bool lessThan(const QModelIndex& left,
+                                        const QModelIndex& right) const override
+            {
+                if (!left.parent().isValid() && !right.parent().isValid())
+                {
+                    const bool sourceOrder = left.row() < right.row();
+                    return sortOrder() == Qt::AscendingOrder ? sourceOrder : !sourceOrder;
+                }
+
+                if (left.column() == SqliteColumn || left.column() == BodiesColumn ||
+                    left.column() == ReclaimableColumn)
+                {
+                    const auto leftValue = left.data(sortValueRole).toULongLong();
+                    const auto rightValue = right.data(sortValueRole).toULongLong();
+                    if (leftValue != rightValue)
+                        return leftValue < rightValue;
+                }
+
+                const int columnComparison =
+                    QString::localeAwareCompare(left.data().toString(), right.data().toString());
+                if (columnComparison != 0)
+                    return columnComparison < 0;
+
+                const auto leftMailbox = left.siblingAtColumn(MailboxColumn).data().toString();
+                const auto rightMailbox = right.siblingAtColumn(MailboxColumn).data().toString();
+                const int mailboxComparison =
+                    QString::localeAwareCompare(leftMailbox, rightMailbox);
+                return mailboxComparison == 0 ? left.row() < right.row() : mailboxComparison < 0;
+            }
+        };
 
         [[nodiscard]] QString bytes(const std::uint64_t value)
         {
@@ -167,7 +205,7 @@ namespace javelin::gui::developer
         setFaceType(KPageDialog::List);
         setStandardButtons(QDialogButtonBox::Close);
         setModal(false);
-        resize(1100, 720);
+        resize(2200, 1440);
 
         auto* page = new QWidget(this);
         auto* pageLayout = new QVBoxLayout(page);
@@ -186,7 +224,7 @@ namespace javelin::gui::developer
         m_mailboxModel->setHorizontalHeaderLabels({i18n("Mailbox"), i18n("SQLite"), i18n("Bodies"),
                                                    i18n("Reclaimable"), i18n("Offline"),
                                                    i18n("Measured")});
-        m_filterModel = new QSortFilterProxyModel(this);
+        m_filterModel = new MailboxSortFilterProxyModel(this);
         m_filterModel->setSourceModel(m_mailboxModel);
         m_filterModel->setFilterKeyColumn(-1);
         m_filterModel->setFilterCaseSensitivity(Qt::CaseInsensitive);
@@ -198,6 +236,7 @@ namespace javelin::gui::developer
         m_mailboxView->setUniformRowHeights(true);
         m_mailboxView->setSelectionBehavior(QAbstractItemView::SelectRows);
         m_mailboxView->setSelectionMode(QAbstractItemView::SingleSelection);
+        m_mailboxView->setSortingEnabled(true);
         m_mailboxView->header()->setStretchLastSection(false);
         m_mailboxView->header()->setSectionResizeMode(MailboxColumn, QHeaderView::Stretch);
         for (int column = SqliteColumn; column < ColumnCount; ++column)
@@ -287,9 +326,18 @@ namespace javelin::gui::developer
             name->setData(static_cast<qulonglong>(index), mailboxIndexRole);
             name->setToolTip(QStringLiteral("%1\n%2").arg(mailbox.mailboxId, mailbox.accountId));
             row.push_back(name);
-            row.push_back(new QStandardItem(bytes(mailbox.usage.sqliteEstimatedBytes)));
-            row.push_back(new QStandardItem(bytes(mailbox.usage.logicalBodyBytes)));
-            row.push_back(new QStandardItem(bytes(mailbox.usage.reclaimableBodyBytes)));
+            auto* sqliteUsage = new QStandardItem(bytes(mailbox.usage.sqliteEstimatedBytes));
+            sqliteUsage->setData(static_cast<qulonglong>(mailbox.usage.sqliteEstimatedBytes),
+                                 sortValueRole);
+            row.push_back(sqliteUsage);
+            auto* bodyUsage = new QStandardItem(bytes(mailbox.usage.logicalBodyBytes));
+            bodyUsage->setData(static_cast<qulonglong>(mailbox.usage.logicalBodyBytes),
+                               sortValueRole);
+            row.push_back(bodyUsage);
+            auto* reclaimableUsage = new QStandardItem(bytes(mailbox.usage.reclaimableBodyBytes));
+            reclaimableUsage->setData(static_cast<qulonglong>(mailbox.usage.reclaimableBodyBytes),
+                                      sortValueRole);
+            row.push_back(reclaimableUsage);
             row.push_back(new QStandardItem(mailbox.offlineDesired
                                                 ? display(mailbox.offlineStatus)
                                                 : i18nc("offline mailbox status", "No")));
@@ -340,19 +388,30 @@ namespace javelin::gui::developer
     {
         const KConfigGroup settings{KSharedConfig::openConfig(),
                                     QStringLiteral("DeveloperOptions")};
-        const QByteArray geometry = settings.readEntry(QStringLiteral("Geometry"), QByteArray{});
+        const QByteArray geometry = settings.readEntry(QStringLiteral("GeometryV2"), QByteArray{});
         if (!geometry.isEmpty())
             restoreGeometry(geometry);
         const QByteArray header = settings.readEntry(QStringLiteral("MailboxHeader"), QByteArray{});
         if (!header.isEmpty())
             m_mailboxView->header()->restoreState(header);
+        const int sortColumn = settings.readEntry(QStringLiteral("MailboxSortColumn"),
+                                                  static_cast<int>(MailboxColumn));
+        const auto sortOrder = static_cast<Qt::SortOrder>(settings.readEntry(
+            QStringLiteral("MailboxSortOrder"), static_cast<int>(Qt::AscendingOrder)));
+        m_mailboxView->sortByColumn(
+            sortColumn >= MailboxColumn && sortColumn < ColumnCount ? sortColumn : MailboxColumn,
+            sortOrder == Qt::DescendingOrder ? Qt::DescendingOrder : Qt::AscendingOrder);
     }
 
     void DeveloperOptionsDialog::saveUiState() const
     {
         KConfigGroup settings{KSharedConfig::openConfig(), QStringLiteral("DeveloperOptions")};
-        settings.writeEntry(QStringLiteral("Geometry"), saveGeometry());
+        settings.writeEntry(QStringLiteral("GeometryV2"), saveGeometry());
         settings.writeEntry(QStringLiteral("MailboxHeader"), m_mailboxView->header()->saveState());
+        settings.writeEntry(QStringLiteral("MailboxSortColumn"),
+                            m_mailboxView->header()->sortIndicatorSection());
+        settings.writeEntry(QStringLiteral("MailboxSortOrder"),
+                            static_cast<int>(m_mailboxView->header()->sortIndicatorOrder()));
         settings.sync();
     }
 
