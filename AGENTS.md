@@ -1,188 +1,78 @@
 # AGENTS.md
 
-## General instructions
-Do not run git commands in parallel - you will hit git lock file contention.
-When building, use the cmake debug preset always.
-Tokens are precious - do not do wasteful things like re-reading files after clang-format, run rebuilds after formatting. Do not read files already in your context - edit boldly. The edit tool will stop you making invalid edits.
-If you have made meaningful changes during your turn, always commit at the end.
+## Working Rules
 
-This repository is for a Qt Widgets JMAP email client. Treat it as a modern-only codebase:
+- Do not run Git commands in parallel or run concurrent configure, build, or test commands against the same build directory.
+- Use the Qt 6/C++23 codebase directly. Do not add legacy fallbacks or accept old and new data shapes unless an explicit migration requires it.
+- Read `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT.md`, and any relevant subsystem document before changing an architectural boundary.
+- Commit meaningful changes at the end of the task.
 
-- Target Qt 6 and C++23 directly.
-- Do not add fallbacks for older Qt, older compilers, or alternate protocol paths.
-- Do not preserve legacy patterns "just in case".
-- Prefer removing obsolete code over abstracting around it.
-- In this greenfield codebase, "no fallbacks" also means no dual config keys, no alternate database readers, no compatibility dictionary lookups, and no code that accepts both old and new shapes unless a live migration step explicitly requires it.
+## Source of Truth
 
-## Source Of Truth
+- JMAP behavior follows `specs/rfc8620.txt`, `specs/rfc8621.txt`, and applicable extension specifications. The specification wins over implementation convenience.
+- `docs/ARCHITECTURE.md` defines process and component ownership.
+- `docs/OPTIMISTIC_CONSISTENCY.md` defines persistent mutation and refresh behavior.
+- Unsupported capabilities must fail clearly rather than silently selecting an alternate protocol path.
 
-- JMAP behavior must follow the specifications in [`specs/rfc8620.txt`](/home/ripdog/CLionProjects/Javelin-Mail/specs/rfc8620.txt) and [`specs/rfc8621.txt`](/home/ripdog/CLionProjects/Javelin-Mail/specs/rfc8621.txt).
-- If implementation convenience conflicts with the spec, the spec wins.
-- Keep protocol logic inside the internal JMAP library. The GUI must not construct raw JMAP JSON or understand transport details.
-- JMAP capabilities must be negotiated explicitly. Unsupported server features should fail clearly and early rather than degrading into alternate code paths.
+## Architecture
 
-## Programming Preferences
+- The daemon owns JMAP transports, writable repositories, canonical settings, background work, authentication, and stateful application commands.
+- The GUI renders cache state and sends typed commands over IPC. It must not perform JMAP operations or writable mail-cache access directly.
+- The internal JMAP library owns protocol validity, typed wire/domain data, cache primitives, sync primitives, and exact policy-neutral mutations.
+- The application coordination layer interprets user intent, expands selections, orchestrates multi-object work, and owns partial-failure policy.
+- Keep transport and raw JMAP JSON out of GUI and product-policy code. Use Glaze for JMAP wire JSON and typed structures across boundaries.
+- Keep protocol, cache, sync, and application policy testable without starting Qt Widgets.
 
-- Use modern C++23 idioms aggressively: RAII, value semantics, move semantics, `enum class`, `std::optional`, `std::variant`, `std::span`, `std::chrono`, designated helper structs where they improve clarity.
-- Prefer explicit ownership. Use stack values first, `std::unique_ptr` for exclusive heap ownership, and Qt parent ownership only where QObject lifetime is naturally hierarchical.
-- Avoid shared ownership unless it is required by the design and documented at the point of use.
-- Use typed signal/slot connections only. Do not use string-based `SIGNAL` or `SLOT`.
-- Prefer narrow, strongly typed APIs over loosely structured data bags.
-- Keep headers clean. Minimize transitive includes and prefer forward declarations where valid.
-- Prefer free functions and small focused classes over monolithic managers.
-- Avoid global mutable state. If singleton-like process services are required, keep them explicit in the bootstrap layer.
-- Do not block the GUI thread for I/O, database access, HTML processing, translation, or network calls.
+## State, Memory, and Async Work
 
-## Qt And Async Conventions
+- SQLite is the immediate local data plane. Do not create a second in-memory source of truth or optimistic object store in the GUI.
+- Keep long-lived models lightweight; retain IDs and summaries and load full objects only for active views.
+- Offline-selected mailboxes are complete mirrors. Raw MIME and attachments belong in the filesystem vault, not SQLite BLOBs; other mailboxes remain bounded online-first working sets.
+- Do not block the GUI thread for I/O, database work, HTML processing, translation, or networking.
+- Use Qt asynchronous transports with QCoro where appropriate. Do not use nested callback pyramids, local event loops, or ad hoc polling state machines.
+- Use model/view for large datasets rather than duplicating them in item widgets.
 
-- Networking must use `QNetworkAccessManager` with QCoro coroutines.
-- Do not write callback pyramids, nested lambdas, ad hoc state machines, or local event-loop hacks for async work.
-- Parse JSON with `stephenberry/glaze` into typed protocol/domain structures. Do not pass `QJsonObject` through the application as a de facto domain model.
-- Use Qt model/view properly. Avoid item-based widgets for large mail datasets.
-- Prefer `QAbstractItemModel`-based models backed by the cache rather than in-memory duplication.
-- Use `QProperty`/bindable properties where they simplify state propagation cleanly.
+## C++ and Qt Conventions
 
-### Qt String and Keyword Conventions
+- Prefer strong types, value semantics, explicit ownership, narrow APIs, and small focused classes.
+- Use stack ownership first, `std::unique_ptr` for exclusive heap ownership, and QObject parent ownership only for natural QObject hierarchies. Avoid shared ownership unless the design requires it.
+- Use typed signal/slot connections and the Qt macro keywords required by `QT_NO_KEYWORDS`.
+- Follow the compiler-enforced Qt string rules: use `QStringLiteral`, `QString::fromStdString`, and explicit Latin-1 forms rather than implicit ASCII conversions.
+- Keep headers minimally coupled and avoid global mutable state outside explicit bootstrap-owned services.
 
-KDE cmake settings enable `QT_NO_CAST_FROM_ASCII` and `QT_NO_KEYWORDS`. All code must comply:
+## Optimistic Consistency
 
-- **Never pass raw string literals (`"..."`) to Qt APIs.** Use `QStringLiteral("...")` for compile-time string literals passed to `QString`-accepting parameters (e.g., `query.prepare()`, `query.bindValue()`, `query.exec()`, `QDir::filePath()`, `QDate::toString()`).
-- **For `QString::replace()` with single characters**, use `QLatin1String` for the search argument: `str.replace(QLatin1String("&"), QStringLiteral("&amp;"))`.
-- **For `std::string` → `QString` conversion**, use `QString::fromStdString()`.
-- **Use macro-based Qt keywords**, not the keyword forms: `Q_SIGNALS:` not `signals:`, `Q_SLOTS:` not `slots:`, `Q_EMIT` not `emit`.
-- **In test assertions**, compare `QString` against `QStringLiteral(...)`, not raw string literals: `CHECK(value == QStringLiteral("expected"))`.
+- Every persistent JMAP mutation must use the optimistic-consistency subsystem; do not add direct `/set` or `/copy` cache-writing paths around it.
+- Persist the mutation and materialize its projection atomically. Reconciliation, cache updates, state tokens, and consistency generations must also commit atomically.
+- Treat ambiguous transport outcomes as `unknown`, not success or rejection. Rebase active projections over refreshed confirmed state so stale snapshots never flash old state back into the UI.
+- Use exact RFC 8620 PatchObject paths for changed map entries rather than replacing whole maps.
+- New mutations require deterministic coverage for projection, success, rejection, ambiguity, stale-refresh rebasing, and crash/retry recovery.
 
-## Memory And Cache Policy
+## Change Safety
 
-- The application is expected to run continuously for notifications, so memory pressure matters at all times.
-- `QSqlDatabase` is the local system of record for synced state, not a secondary convenience cache.
-- Persist enough server state locally to minimize redundant JMAP round-trips and to support fast startup.
-- Mailboxes explicitly selected for synchronization are complete offline mirrors, including raw
-  MIME sources and attachments. Other mailboxes remain online-first working sets. Keep the mirror
-  bounded to explicit user selection and make bulk retrieval preemptible by foreground work.
-- Keep only active UI state and short-lived working sets in memory.
-- Raw MIME for complete-offline mailboxes belongs in the filesystem vault, never as SQLite BLOBs.
-  Parsed bodies and rendered artifacts remain short-lived; the rebuildable search index stores only
-  normalized searchable text.
-- Favor IDs and lightweight summaries in long-lived models. Fetch full objects only when a view needs them.
+For any non-trivial change:
 
-## Library Boundary
+1. Identify the invariant being changed before editing.
+2. Search for every reader, writer, serializer, validator, test, and persisted representation of that invariant.
+3. Prefer changing the type or data model over using empty values, sentinels, or special cases.
+4. Test through the real production path, including restart, failure, ordering, or concurrency where relevant.
+5. After implementation, perform a separate regression review: assume the change is wrong and look for distant consequences.
+6. Run focused tests, the affected production build, and the full normal test suite before committing.
 
-- JMAP code lives in an internal library with no dependency on widgets or WebEngine.
-- The GUI layer may consume typed entities, view models, commands, and service interfaces from the JMAP library, but it must not know raw protocol method names or JSON wire layouts.
-- Keep transport, sync, cache, and domain logic testable without starting a GUI.
-- Authentication, token refresh, and secret storage policy belong to the non-GUI service layers, not to ad hoc dialog code.
+Do not treat the named file or visible symptom as the full scope of the task.
 
-### Application Coordination Boundary
+## Build and Verification
 
-- Keep application and product logic out of the internal JMAP library. The library owns JMAP
-  protocol mechanics, typed protocol/domain data, capability handling, cache primitives, sync
-  primitives, and exact mutations requested by its callers.
-- The application coordination layer owns interpretation of user intent and UI context. This
-  includes workflow policy, multi-object orchestration, selection expansion, role-based actions,
-  batching decisions, partial-failure policy, refresh coordination, and deciding which exact JMAP
-  or cache mutations implement an application command.
-- Prefer typed, policy-neutral library APIs. For example, the library may apply an explicit email
-  mailbox patch containing mailbox IDs to add and remove; it must not decide what "move from a
-  search tab" or another UI-specific command means.
-- GUI code should raise typed application commands and render their outcomes. It must not bypass
-  the coordination layer to assemble protocol operations or embed cross-service workflow policy.
-- When responsibility is ambiguous, place protocol validity and transactional cache integrity in
-  the JMAP library, application semantics and orchestration in the coordination layer, and visual
-  interaction only in the GUI.
+- In the shared checkout, use `scripts/check-debug.sh` so configuration, compilation, and tests are serialized.
+- Before building or testing, create `/tmp/javelin-mail-xdg-runtime` with mode `0700` and set `XDG_RUNTIME_DIR` to it.
+- During implementation, build the narrowest relevant target and run focused tests. Use `scripts/check-debug.sh --full` for final verification.
+- Prefer deterministic fixtures and scripted transports over live network tests.
+- Keep changes warning-free and `clang-format` clean. Do not run clang-format on non-C++ files.
+- Use the sanitizer and static-analysis workflows described in `docs/DEVELOPMENT.md` when the risk profile warrants them; CI runs the normal sanitizer suite.
+- Do not terminate Ninja merely because compilation is slow. Let interrupted processes exit before starting another build.
 
-### Optimistic Consistency Foundation
+## User-Facing and Diagnostic Messages
 
-All stateful JMAP actions must build on the architecture in
-[`docs/OPTIMISTIC_CONSISTENCY.md`](/home/ripdog/CLionProjects/Javelin-Mail/docs/OPTIMISTIC_CONSISTENCY.md).
-Do not add a direct `/set` or `/copy` path that writes the cache outside this subsystem.
-
-- SQLite renders the effective state: confirmed server state plus active mutation projections.
-  The GUI must not keep a second optimistic object store.
-- Persist every mutation before dispatch with a typed service adapter and the generic lifecycle:
-  `pending`, `in_flight`, `accepted`, `rejected`, or `unknown`.
-- Append a mutation and materialize its projection atomically with
-  `MutationProjectionTransaction`. Accept/reject reconciliation, cache changes, state tokens, and
-  consistency-generation changes must likewise be one transaction.
-- Treat transport ambiguity as `unknown`, never success or rejection. Startup recovery converts
-  leftover `in_flight` records to `unknown`.
-- A refresh must capture a per-account, per-data-type generation fence. It may commit only if still
-  causally current, unless its typed adapter rebases every active projection into the same cache
-  transaction.
-- Stale server snapshots must never make an optimistic object flash back to its old state. Rebase
-  `pending`, `in_flight`, and `unknown` projections over refreshed confirmed state.
-- Retire an unknown mutation only when a server snapshot proves the requested outcome. If a lost
-  create response cannot be correlated safely, preserve uncertainty and block duplicate submission
-  of the same logical command.
-- Definitive per-object JMAP failures restore the confirmed state immediately. Partial successes
-  and failures reconcile independently.
-- Use exact RFC 8620 PatchObject paths for changed map entries. Do not replace whole collection
-  properties when the user changed only one membership or keyword.
-- Cross-account or cross-type workflows are application-owned operation groups with explicit
-  dependencies and partial-failure policy; typed JMAP adapters remain policy-neutral.
-- Procedural operations such as uploads, downloads, validation, and reads do not need optimistic
-  records unless they mutate persistent JMAP object state.
-
-Every new mutation requires deterministic tests for projection, success, rejection, ambiguous
-transport outcome, stale refresh rebasing, and crash/retry safety.
-
-## Static Analysis And Quality Gates
-
-- Keep the codebase `clang-format` clean. Do NOT run clang-format on non-code, such as CMakeLists.txt
-- Run `clang-tidy` regularly and fix warnings instead of normalizing them.
-- Run clazy for Qt-specific issues and treat findings seriously.
-- Use AddressSanitizer in debug/test workflows by default where supported.
-- Add narrowly scoped suppressions only when the warning is understood and the reason is documented.
-- New code should compile warning-free under the project warning policy.
-
-## Testing Expectations
-
-- Unit-test the internal JMAP library with Catch2.
-- Before configuring, building, or running tests, create `/tmp/javelin-mail-xdg-runtime` with
-  permissions `0700` and run the command with
-  `XDG_RUNTIME_DIR=/tmp/javelin-mail-xdg-runtime`. Catch2 test discovery starts Qt and otherwise
-  fails when the inherited runtime directory is unavailable. Treat this setup as part of the test
-  harness, not as a build or test failure worth reporting.
-- Prefer deterministic tests over network-dependent tests.
-- Protocol parsing, state transitions, cache reconciliation, query windows, and notification flows should all be testable from canned data.
-- Regressions around sync state, cache eviction, and background notification behavior require tests.
-- Add a fake or scripted JMAP test harness once the transport layer exists so sync and long-poll behavior can be tested beyond static fixtures.
-
-## Build And Dependency Preferences
-
-- Use CMake as the single build entrypoint.
-- Debug and sanitizer builds require `ccache`; verify it is available before starting substantial
-  compilation work.
-- Never run concurrent configure, build, or test commands against the same CMake binary directory.
-  In the shared repository workspace, use `scripts/check-debug.sh` so these operations are
-  serialized. Truly concurrent work requires separate worktrees and build directories; those may
-  safely share the per-user ccache.
-- During implementation, build the narrowest relevant target and run selected tests with
-  `scripts/check-debug.sh --target <target> --tests <regex>`. Use
-  `scripts/check-debug.sh --full` only for final verification.
-- Do not terminate Ninja merely because a build is taking longer than expected. If a build must be
-  stopped, allow the process to handle an interrupt and exit before starting another build.
-- Prefer explicit targets with clear dependency boundaries.
-- External dependencies should be introduced deliberately and kept minimal.
-- Use `FetchContent` for project-managed third-party dependencies when reproducibility matters.
-- Keep static analysis, sanitizer, and formatting support wired into the build or documented scripts early, not as an afterthought.
-
-## Change Discipline
-
-- Make focused changes with a clear architectural reason.
-- Do not sneak protocol, storage, and UI concerns into the same class.
-- When adding a new subsystem, create the intended boundary first, then implement within it.
-- Update documentation when architecture or workflow expectations change.
-
-## User-Facing And Diagnostic Messages
-
-- Do not emit routine internal lifecycle or procedural messages merely to narrate what the
-  application just did (for example, connection restarts, cache updates, or task completion).
-- Console diagnostics should explain a useful state or outcome, with relevant identifiers or
-  values when they help debugging. Prefer messages such as `Update watched mailboxes to Inbox,
-  Sent` over implementation narration such as `Updated watched mailboxes without restarting the
-  state-change source`.
-- UI status messages should be reserved for user-actionable progress, errors, and meaningful
-  outcomes. Do not surface background autosave or other internal housekeeping notifications.
-- Never turn an implementation instruction into product copy or a status label. User requests are
-  design input for the change, not text that should appear in the application.
+- Reserve UI status messages for actionable progress, errors, and meaningful outcomes; do not narrate internal housekeeping.
+- Diagnostics should describe useful state or outcomes and include relevant identifiers when they aid debugging.
+- Never turn an implementation instruction into product copy or a status label.
