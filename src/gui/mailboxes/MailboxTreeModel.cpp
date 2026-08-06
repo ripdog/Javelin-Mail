@@ -515,6 +515,8 @@ namespace javelin::gui::mailboxes
             mailboxesByAccount;
         for (const auto& account : *accounts)
         {
+            if (!account.hasMailCapability)
+                continue;
             if (m_options.accountId.has_value() && account.accountId != *m_options.accountId)
                 continue;
             const auto mailboxResult = m_mailboxReader.listMailboxTree(account.accountId);
@@ -574,6 +576,8 @@ namespace javelin::gui::mailboxes
 
         for (const auto& account : accounts)
         {
+            if (!account.hasMailCapability)
+                continue;
             if (m_options.accountId.has_value() && account.accountId != *m_options.accountId)
             {
                 continue;

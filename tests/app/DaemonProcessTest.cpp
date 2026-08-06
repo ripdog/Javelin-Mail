@@ -3,6 +3,7 @@
 #include "app/DaemonRemoteActionDispatcher.h"
 #include "app/DaemonServices.h"
 #include "app/MailApplicationService.h"
+#include "app/MailboxTreeCacheRead.h"
 #include "app/MessageListMaterializationPort.h"
 #include "app/RemoteCodec.h"
 #include "jmap/cache/Database.h"
@@ -257,9 +258,9 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
     REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
     auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
     QSqlQuery seed{connection.database()};
-    REQUIRE(seed.exec(
-        QStringLiteral("INSERT INTO accounts(account_id,email_address,session_url,is_primary) "
-                       "VALUES('account-1','user@example.test','https://example.test/jmap',1)")));
+    REQUIRE(seed.exec(QStringLiteral(
+        "INSERT INTO accounts(account_id,email_address,session_url,is_primary,cap_mail) "
+        "VALUES('account-1','user@example.test','https://example.test/jmap',1,1)")));
     REQUIRE(seed.exec(QStringLiteral("INSERT INTO mailboxes(account_id,mailbox_id,name,role) "
                                      "VALUES('account-1','archive','Archive','archive')")));
 
@@ -621,4 +622,108 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
     const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reused);
     REQUIRE(rejected != nullptr);
     CHECK(rejected->error.code == javelin::protocol::BoundaryErrorCode::InvalidRequest);
+}
+
+TEST_CASE("daemon configures only cached JMAP accounts with the Mail capability",
+          "[app][daemon][settings][capabilities]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+
+    const auto runtimeDirectory = temporaryDirectory.filePath(QStringLiteral("runtime"));
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    const auto settingsPath = temporaryDirectory.filePath(QStringLiteral("settings.ini"));
+    REQUIRE(QDir{}.mkpath(runtimeDirectory));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+    REQUIRE(QFile::setPermissions(runtimeDirectory, QFileDevice::ReadOwner |
+                                                        QFileDevice::WriteOwner |
+                                                        QFileDevice::ExeOwner));
+
+    javelin::app::DaemonProcess process{optionsFor(runtimeDirectory, cacheRoot, settingsPath)};
+    const auto startupError = process.start();
+    INFO((startupError.has_value() ? startupError->detail.toStdString() : std::string{"no error"}));
+    REQUIRE_FALSE(startupError.has_value());
+
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("daemon-mail-capability-test"),
+        .databasePath = process.databasePath(),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    QSqlQuery seed{connection.database()};
+    REQUIRE(seed.exec(QStringLiteral(
+        "INSERT INTO accounts(account_id,email_address,session_url,is_primary,name,cap_mail) "
+        "VALUES('mail-account','user@example.test','https://example.test/jmap',1,'Mail',1)")));
+    REQUIRE(seed.exec(QStringLiteral(
+        "INSERT INTO accounts(account_id,email_address,session_url,is_primary,name,cap_mail) "
+        "VALUES('principal-account','','',0,'',0)")));
+    REQUIRE(seed.exec(QStringLiteral("INSERT INTO mailboxes(account_id,mailbox_id,name,role) "
+                                     "VALUES('mail-account','inbox','Inbox','inbox')")));
+    REQUIRE(seed.exec(QStringLiteral("INSERT INTO mailboxes(account_id,mailbox_id,name,role) "
+                                     "VALUES('principal-account','unexpected','Unexpected','')")));
+
+    const auto treeResult = javelin::app::loadMailboxTreeCache(process.databasePath());
+    const auto* tree = std::get_if<javelin::app::MailboxTreeCacheSnapshot>(&treeResult);
+    REQUIRE(tree != nullptr);
+    REQUIRE(tree->accounts.size() == 1);
+    CHECK(tree->accounts.front().accountId == "mail-account");
+    CHECK(tree->mailboxesByAccount.contains("mail-account"));
+    CHECK_FALSE(tree->mailboxesByAccount.contains("principal-account"));
+
+    const auto connectionId = QStringLiteral("mail-capability-connection");
+    REQUIRE_FALSE(testCredentialStore()
+                      ->store(connectionId, {.accessToken = QStringLiteral("secret"),
+                                             .refreshToken = {},
+                                             .registrationAccessToken = {}})
+                      .has_value());
+    const auto currentSettings = process.handleGetSettings({});
+    const auto* current = std::get_if<javelin::protocol::SettingsSnapshotReply>(&currentSettings);
+    REQUIRE(current != nullptr);
+    const auto update = process.handleUpdateSettings({
+        .baseRevision = current->snapshot.revision,
+        .update = {.accounts = std::vector{javelin::protocol::AccountSettings{
+                       .id = connectionId,
+                       .revision = 0,
+                       .displayName = QStringLiteral("Example"),
+                       .sessionUrl = QStringLiteral("https://example.test/jmap"),
+                       .loginEmail = QStringLiteral("user@example.test"),
+                       .tokenEndpoint = {},
+                       .oauthClientId = {},
+                       .hasCredentials = true,
+                       .credentialHandle = {},
+                       .tokenExpiresAtEpochSeconds = 0,
+                       .cachedAccountIds = {QStringLiteral("mail-account"),
+                                            QStringLiteral("principal-account")},
+                   }},
+                   .syncedMailboxSelections =
+                       std::vector{javelin::protocol::MailboxSelectionSettings{
+                                       .accountId = QStringLiteral("mail-account"),
+                                       .mailboxIds = {QStringLiteral("inbox")},
+                                   },
+                                   javelin::protocol::MailboxSelectionSettings{
+                                       .accountId = QStringLiteral("principal-account"),
+                                       .mailboxIds = {QStringLiteral("unexpected")},
+                                   }},
+                   .notificationMailboxSelections =
+                       std::vector<javelin::protocol::MailboxSelectionSettings>{},
+                   .remoteContentSenders = std::nullopt,
+                   .remoteContentDomains = std::nullopt,
+                   .appearance = std::nullopt,
+                   .attachments = std::nullopt,
+                   .undoSendDelaySeconds = std::nullopt,
+                   .workspace = std::nullopt},
+    });
+    REQUIRE(std::holds_alternative<javelin::protocol::SettingsUpdated>(update));
+
+    QSqlQuery configuredScopes{connection.database()};
+    REQUIRE(configuredScopes.exec(QStringLiteral(
+        "SELECT account_id FROM offline_mailbox_scopes WHERE desired=1 ORDER BY account_id")));
+    REQUIRE(configuredScopes.next());
+    CHECK(configuredScopes.value(0).toString() == QStringLiteral("mail-account"));
+    CHECK_FALSE(configuredScopes.next());
+
+    process.stop();
+    REQUIRE_FALSE(testCredentialStore()->remove(connectionId).has_value());
 }

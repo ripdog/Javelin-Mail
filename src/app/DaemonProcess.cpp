@@ -20,6 +20,7 @@
 #include "app/undo/UndoManager.h"
 
 #include "jmap/auth/AccountOnboardingService.h"
+#include "jmap/cache/AccountRepository.h"
 
 #include <QCoroTask>
 
@@ -86,9 +87,26 @@ namespace javelin::app
             return result;
         }
 
+        [[nodiscard]] bool
+        shouldConfigureMailAccount(javelin::jmap::cache::AccountReader& accountReader,
+                                   const QString& accountId)
+        {
+            const auto cached = accountReader.findById(accountId.toStdString());
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cached))
+            {
+                qWarning().noquote() << QStringLiteral("Could not inspect JMAP account capability")
+                                     << accountId << error->message;
+                return true;
+            }
+            const auto& account =
+                std::get<std::optional<javelin::jmap::cache::CachedAccount>>(cached);
+            return !account.has_value() || account->hasMailCapability;
+        }
+
         [[nodiscard]] std::vector<AccountSyncConfiguration>
         accountConfigurations(const SettingsSnapshot& snapshot,
-                              AccountCredentialStore& credentialStore)
+                              AccountCredentialStore& credentialStore,
+                              javelin::jmap::cache::AccountReader& accountReader)
         {
             std::vector<AccountSyncConfiguration> result;
             for (const auto& account : snapshot.accounts)
@@ -129,7 +147,10 @@ namespace javelin::app
                     });
                 };
                 for (const auto& accountId : account.cachedAccountIds)
-                    appendConfiguration(accountId);
+                {
+                    if (shouldConfigureMailAccount(accountReader, accountId))
+                        appendConfiguration(accountId);
+                }
                 if (account.cachedAccountIds.empty())
                     appendConfiguration(account.id);
             }
@@ -1063,7 +1084,8 @@ namespace javelin::app
                                  .arg(m_settingsSnapshot.accounts.size() == 1 ? QString{}
                                                                               : QStringLiteral("s"))
                                  .arg(completeSettings);
-        const auto configurations = accountConfigurations(m_settingsSnapshot, *m_credentialStore);
+        const auto configurations = accountConfigurations(m_settingsSnapshot, *m_credentialStore,
+                                                          m_services->accountRepository());
         std::vector<FullSyncAccountConfiguration> fullSync;
         std::vector<std::string> accountIds;
         fullSync.reserve(configurations.size());

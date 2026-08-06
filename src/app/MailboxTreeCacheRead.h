@@ -46,13 +46,15 @@ namespace javelin::app
             return *error;
         }
 
-        MailboxTreeCacheSnapshot snapshot{
-            .accounts = std::get<std::vector<javelin::jmap::cache::CachedAccount>>(
-                std::move(accountsResult)),
-            .mailboxesByAccount = {},
-        };
-        for (const auto& account : snapshot.accounts)
+        const auto& cachedAccounts =
+            std::get<std::vector<javelin::jmap::cache::CachedAccount>>(accountsResult);
+        MailboxTreeCacheSnapshot snapshot;
+        snapshot.accounts.reserve(cachedAccounts.size());
+        for (const auto& account : cachedAccounts)
         {
+            if (!account.hasMailCapability)
+                continue;
+            snapshot.accounts.push_back(account);
             if (accountId.has_value() && account.accountId != *accountId)
                 continue;
             auto mailboxesResult = mailboxReader.listMailboxTree(account.accountId);
