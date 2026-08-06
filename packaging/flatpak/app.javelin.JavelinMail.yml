@@ -6,6 +6,9 @@ base: io.qt.qtwebengine.BaseApp
 base-version: '6.10'
 command: javelin-flatpak
 
+build-options:
+  strip: true
+
 finish-args:
   - --share=ipc
   - --share=network
@@ -305,7 +308,7 @@ modules:
     build-commands:
       - test -f /app/include/QtWebEngineCore/QWebEngineUrlSchemeHandler
       - cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-Wno-error=maybe-uninitialized -DCMAKE_INSTALL_PREFIX=/app -DBUILD_TESTING=OFF -DJAVELIN_ENABLE_LOCAL_DATA_INSTALL=OFF -DJAVELIN_INSTALL_SYSTEMD_USER_SERVICE=OFF -DFETCHCONTENT_SOURCE_DIR_GLAZE=/run/build/javelin-mail/third-party/glaze -DFETCHCONTENT_SOURCE_DIR_FASTTEXT=/run/build/javelin-mail/third-party/fastText -DFETCHCONTENT_SOURCE_DIR_MOZILLA_TRANSLATIONS=/run/build/javelin-mail/third-party/mozilla-translations
-      - cmake --build build --parallel 2
+      - cmake --build build --parallel ${FLATPAK_BUILDER_N_JOBS}
       - cmake --install build
       - install -Dm755 packaging/flatpak/javelin-flatpak /app/bin/javelin-flatpak
       - rm -rf /app/include /app/lib/cmake /app/lib/pkgconfig

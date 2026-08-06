@@ -56,12 +56,27 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v5
 
+      # Bootstrap the corrected cache namespace from the most recent cache
+      # created by the old SHA-first key. Remove this step after migration.
+      - name: Restore existing Flatpak cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .flatpak-builder
+          key: flatpak-builder-x86_64-${{ github.run_id }}-x86_64
+          restore-keys: |
+            flatpak-builder-x86_64-
+            flatpak-builder-
+
       - name: Build Flatpak bundle
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6.7
         with:
           bundle: Javelin-Mail.flatpak
           manifest-path: packaging/flatpak/app.javelin.JavelinMail.yml
-          cache-key: flatpak-builder-${{ github.sha }}
+          restore-cache: false
+          # The action appends the architecture. Starting the key with its
+          # restore prefix lets each run consume the latest successful cache;
+          # the unique run ID ensures the updated cache is saved afterwards.
+          cache-key: flatpak-builder-x86_64-${{ github.run_id }}
 
   appimage:
     name: AppImage
