@@ -422,9 +422,9 @@ namespace javelin::gui::shell
                                                 .from = normalizedEmail.toStdString()},
                                             true);
                 });
-        m_composeTabController =
-            new ComposeTabController(m_settings, m_composeCommandPort, m_identityReader,
-                                     m_contactIdentityLookup, *m_contentStack, m_tabs, this);
+        m_composeTabController = new ComposeTabController(
+            m_settings, m_composeCommandPort, m_accountReader, m_identityReader,
+            m_contactIdentityLookup, *m_contentStack, m_tabs, this);
         connect(m_composeTabController, &ComposeTabController::tabReady, this,
                 [this](const int index)
                 {

@@ -857,6 +857,9 @@ namespace javelin::gui::settings
         }
         for (const auto& account : *accounts)
         {
+            if (!account.hasMailCapability)
+                continue;
+
             const auto accountId = QString::fromStdString(account.accountId);
             const auto configuredAccount = m_settings.accountForCachedId(accountId);
             const auto accountName =

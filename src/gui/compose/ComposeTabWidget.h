@@ -37,8 +37,9 @@ namespace javelin::gui::settings
 
 namespace javelin::jmap::cache
 {
+    class AccountReader;
     class IdentityReader;
-}
+} // namespace javelin::jmap::cache
 
 namespace javelin::jmap::contacts
 {
@@ -57,6 +58,7 @@ namespace javelin::gui::compose
       public:
         ComposeTabWidget(javelin::gui::settings::GuiSettings& settings,
                          javelin::app::ComposeCommandPort& composeCommandPort,
+                         javelin::jmap::cache::AccountReader& accountReader,
                          javelin::jmap::cache::IdentityReader& identityRepository,
                          javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
                          javelin::jmap::submission::DraftSnapshot snapshot,
@@ -123,6 +125,7 @@ namespace javelin::gui::compose
 
         javelin::gui::settings::GuiSettings& m_settings;
         javelin::app::ComposeCommandPort& m_composeCommandPort;
+        javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::IdentityReader& m_identityRepository;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         javelin::jmap::submission::DraftSnapshot m_snapshot;

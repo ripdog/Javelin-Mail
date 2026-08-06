@@ -8,6 +8,7 @@
 #include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/GuiSettings.h"
 #include "gui/widgets/EmailAddressLineEdit.h"
+#include "jmap/cache/AccountReadRepository.h"
 #include "jmap/cache/IdentityReader.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 
@@ -436,12 +437,13 @@ namespace javelin::gui::compose
     ComposeTabWidget::ComposeTabWidget(
         javelin::gui::settings::GuiSettings& settings,
         javelin::app::ComposeCommandPort& composeCommandPort,
+        javelin::jmap::cache::AccountReader& accountReader,
         javelin::jmap::cache::IdentityReader& identityRepository,
         javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
         javelin::jmap::submission::DraftSnapshot snapshot, QWidget* parent)
         : QWidget(parent), m_settings(settings), m_composeCommandPort(composeCommandPort),
-          m_identityRepository(identityRepository), m_contactIdentityLookup(contactIdentityLookup),
-          m_snapshot(std::move(snapshot))
+          m_accountReader(accountReader), m_identityRepository(identityRepository),
+          m_contactIdentityLookup(contactIdentityLookup), m_snapshot(std::move(snapshot))
     {
         setAcceptDrops(true);
         setupUi();
@@ -826,6 +828,24 @@ namespace javelin::gui::compose
         int selectedIndex = -1;
         int optionCount = 0;
 
+        const auto accountsResult = m_accountReader.listAll();
+        const auto* accounts =
+            std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult);
+        if (accounts == nullptr)
+        {
+            const auto& error = std::get<javelin::jmap::cache::DatabaseError>(accountsResult);
+            Q_EMIT statusMessageRequested(error.message, 10000);
+            return;
+        }
+
+        std::unordered_set<std::string> mailAccountIds;
+        mailAccountIds.reserve(accounts->size());
+        for (const auto& account : *accounts)
+        {
+            if (account.hasMailCapability)
+                mailAccountIds.insert(account.accountId);
+        }
+
         m_fromCombo->clear();
         for (const auto& connection : m_settings.accounts())
         {
@@ -834,6 +854,8 @@ namespace javelin::gui::compose
             for (const auto& cachedAccountId : connection.cachedAccountIds)
             {
                 const auto accountId = cachedAccountId.toStdString();
+                if (!mailAccountIds.contains(accountId))
+                    continue;
                 const auto identitiesResult = m_identityRepository.listByAccount(accountId);
                 if (const auto* error =
                         std::get_if<javelin::jmap::cache::DatabaseError>(&identitiesResult))

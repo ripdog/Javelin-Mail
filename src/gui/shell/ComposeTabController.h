@@ -18,8 +18,9 @@ class QWidget;
 
 namespace javelin::jmap::cache
 {
+    class AccountReader;
     class IdentityReader;
-}
+} // namespace javelin::jmap::cache
 
 namespace javelin::jmap::contacts
 {
@@ -46,6 +47,7 @@ namespace javelin::gui::shell
       public:
         ComposeTabController(javelin::gui::settings::GuiSettings& settings,
                              javelin::app::ComposeCommandPort& composeCommandPort,
+                             javelin::jmap::cache::AccountReader& accountReader,
                              javelin::jmap::cache::IdentityReader& identityRepository,
                              javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
                              QStackedWidget& contentStack, std::vector<TabState>& tabs,
@@ -85,6 +87,7 @@ namespace javelin::gui::shell
 
         javelin::gui::settings::GuiSettings& m_settings;
         javelin::app::ComposeCommandPort& m_composeCommandPort;
+        javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::IdentityReader& m_identityRepository;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         QStackedWidget& m_contentStack;
