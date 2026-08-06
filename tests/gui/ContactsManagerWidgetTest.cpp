@@ -6,12 +6,14 @@
 
 #include <QAction>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
 #include <QPushButton>
 #include <QStackedWidget>
 #include <QTemporaryDir>
+#include <QToolButton>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -58,17 +60,18 @@ namespace
     }
 
     [[nodiscard]] javelin::jmap::api::AddressBook book(std::string id, std::string name,
-                                                       const bool subscribed = true)
+                                                       const bool subscribed = true,
+                                                       const bool mayDelete = true)
     {
-        return {
-            .id = std::move(id),
-            .name = std::move(name),
-            .description = std::nullopt,
-            .sortOrder = 0,
-            .isDefault = true,
-            .isSubscribed = subscribed,
-            .shareWith = std::nullopt,
-            .myRights = {.mayRead = true, .mayWrite = true, .mayShare = false, .mayDelete = true}};
+        return {.id = std::move(id),
+                .name = std::move(name),
+                .description = std::nullopt,
+                .sortOrder = 0,
+                .isDefault = true,
+                .isSubscribed = subscribed,
+                .shareWith = std::nullopt,
+                .myRights = {
+                    .mayRead = true, .mayWrite = true, .mayShare = false, .mayDelete = mayDelete}};
     }
 
     [[nodiscard]] javelin::jmap::contacts::ContactSummary
@@ -145,6 +148,8 @@ namespace
       public:
         std::string lastOwnerAccountId;
         std::optional<javelin::app::AddressBookCommand> lastAddressBookCommand;
+        std::optional<javelin::app::SaveContactCommand> lastSaveContactCommand;
+        javelin::jmap::contacts::ContactMutationResult saveContactResult = unused();
 
         QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         mutateAddressBook(std::string ownerAccountId,
@@ -167,9 +172,11 @@ namespace
             };
         }
         QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
-        saveContact(std::string, javelin::app::SaveContactCommand) override
+        saveContact(std::string ownerAccountId, javelin::app::SaveContactCommand command) override
         {
-            co_return unused();
+            lastOwnerAccountId = std::move(ownerAccountId);
+            lastSaveContactCommand = std::move(command);
+            co_return saveContactResult;
         }
         QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         setContactsStarred(std::string, javelin::app::SetContactsStarredCommand) override
@@ -298,6 +305,227 @@ TEST_CASE("Contacts refresh merges rows without disturbing selection or editor d
     CHECK(groups->isEnabled());
     CHECK(contacts->isEnabled());
     CHECK(save->isEnabled());
+}
+
+TEST_CASE("Fastmail-style rights allow editing and deleting group cards",
+          "[gui][contacts][groups][rights]")
+{
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contacts-manager-fastmail-group-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    if (const auto error = sessions.replace("a1", session("a1", "Stalwart", "user@example.test")))
+        FAIL(error->message.toStdString());
+    if (const auto error =
+            sessions.replace("u74ee43a3", session("u74ee43a3", "Fastmail", "user@fastmail.test")))
+        FAIL(error->message.toStdString());
+    javelin::jmap::cache::ContactRepository repository{connection};
+    REQUIRE_FALSE(
+        repository
+            .replaceAll("a1", {book("c", "Personal")},
+                        {contact("Alice", "alice@example.test", "a1", "card-1", "uid-card-1", "c")},
+                        "b1", "c1")
+            .has_value());
+    REQUIRE_FALSE(repository
+                      .replaceAll("u74ee43a3", {book("RBk", "Personal", true, false)},
+                                  {group("Friends", "u74ee43a3", "group-1", "uid-group-1", "RBk")},
+                                  "b2", "c2")
+                      .has_value());
+
+    RefreshPort refresh;
+    CommandPort commands;
+    commands.saveContactResult = javelin::jmap::contacts::ContactMutationSummary{
+        .accountId = "u74ee43a3",
+        .newState = "c2",
+        .createdId = std::nullopt,
+        .createdIds = {},
+        .receipt = {},
+    };
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    javelin::gui::contacts::ContactsManagerWidget widget{settings, repository, refresh, commands};
+    auto* groups = widget.findChild<QListWidget*>(QStringLiteral("contactsGroupList"));
+    auto* contacts = widget.findChild<QListWidget*>(QStringLiteral("contactsContactList"));
+    auto* details = widget.findChild<QStackedWidget*>(QStringLiteral("contactsDetailStack"));
+    auto* kind = widget.findChild<QComboBox*>(QStringLiteral("contactsKindEdit"));
+    auto* organization = widget.findChild<QLineEdit*>(QStringLiteral("contactsOrganizationEdit"));
+    auto* title = widget.findChild<QLineEdit*>(QStringLiteral("contactsTitleEdit"));
+    auto* birthday = widget.findChild<QLineEdit*>(QStringLiteral("contactsBirthdayEdit"));
+    auto* members = widget.findChild<QListWidget*>(QStringLiteral("contactsMembersEdit"));
+    auto* groupDetails =
+        widget.findChild<QToolButton*>(QStringLiteral("contactsGroupContactDetailsToggle"));
+    auto* emails = widget.findChild<QWidget*>(QStringLiteral("contactsEmailsEdit"));
+    auto* name = widget.findChild<QLineEdit*>(QStringLiteral("contactsNameEdit"));
+    auto* save = widget.findChild<QPushButton*>(QStringLiteral("contactsSaveButton"));
+    REQUIRE(groups != nullptr);
+    REQUIRE(contacts != nullptr);
+    REQUIRE(details != nullptr);
+    REQUIRE(kind != nullptr);
+    REQUIRE(organization != nullptr);
+    REQUIRE(title != nullptr);
+    REQUIRE(birthday != nullptr);
+    REQUIRE(members != nullptr);
+    REQUIRE(groupDetails != nullptr);
+    REQUIRE(emails != nullptr);
+    REQUIRE(name != nullptr);
+    REQUIRE(save != nullptr);
+
+    for (int row = 0; row < groups->count(); ++row)
+        if (groups->item(row)->text() == QStringLiteral("Friends"))
+            groups->setCurrentRow(row);
+    REQUIRE(contacts->count() == 1);
+    CHECK(contacts->currentItem()->text() == QStringLiteral("Alice"));
+    CHECK(contacts->currentItem()->data(Qt::UserRole + 12).toString() == QStringLiteral("a1"));
+    CHECK(widget.canEditGroup());
+    CHECK(widget.canDeleteGroup());
+
+    widget.beginEditGroup();
+    CHECK(details->currentIndex() == 3);
+    CHECK(kind->currentData().toString() == QStringLiteral("group"));
+    CHECK(organization->isHidden());
+    CHECK(title->isHidden());
+    CHECK(birthday->isHidden());
+    CHECK_FALSE(members->isHidden());
+    CHECK_FALSE(groupDetails->isHidden());
+    CHECK(emails->isHidden());
+    groupDetails->setChecked(true);
+    CHECK_FALSE(emails->isHidden());
+
+    name->setText(QStringLiteral("Friends edited"));
+    save->click();
+    QCoreApplication::processEvents();
+    REQUIRE(commands.lastSaveContactCommand.has_value());
+    CHECK(commands.lastOwnerAccountId == "u74ee43a3");
+    CHECK(commands.lastSaveContactCommand->accountId == "u74ee43a3");
+    CHECK(commands.lastSaveContactCommand->contactId == std::optional<std::string>{"group-1"});
+    CHECK(commands.lastSaveContactCommand->contact.kind == "group");
+    CHECK(commands.lastSaveContactCommand->contact.fullName == "Friends edited");
+    CHECK(details->currentIndex() == 1);
+}
+
+TEST_CASE("Creating a group uses the full editor and exits it after saving",
+          "[gui][contacts][groups][create]")
+{
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contacts-manager-create-group-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    if (const auto error = sessions.replace("a1", session()))
+        FAIL(error->message.toStdString());
+    javelin::jmap::cache::ContactRepository repository{connection};
+    REQUIRE_FALSE(repository
+                      .replaceAll("a1", {book("book-1", "Personal")},
+                                  {contact("Alice", "a@x.test")}, "b1", "c1")
+                      .has_value());
+
+    RefreshPort refresh;
+    CommandPort commands;
+    commands.saveContactResult = javelin::jmap::contacts::ContactMutationSummary{
+        .accountId = "a1",
+        .newState = "c2",
+        .createdId = std::string{"group-2"},
+        .createdIds = {{.creationId = "new-contact", .serverId = "group-2"}},
+        .receipt = {},
+    };
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    javelin::gui::contacts::ContactsManagerWidget widget{settings, repository, refresh, commands};
+    auto* details = widget.findChild<QStackedWidget*>(QStringLiteral("contactsDetailStack"));
+    auto* kind = widget.findChild<QComboBox*>(QStringLiteral("contactsKindEdit"));
+    auto* name = widget.findChild<QLineEdit*>(QStringLiteral("contactsNameEdit"));
+    auto* save = widget.findChild<QPushButton*>(QStringLiteral("contactsSaveButton"));
+    REQUIRE(details != nullptr);
+    REQUIRE(kind != nullptr);
+    REQUIRE(name != nullptr);
+    REQUIRE(save != nullptr);
+
+    widget.beginCreateGroup();
+    CHECK(details->currentIndex() == 3);
+    CHECK(kind->currentData().toString() == QStringLiteral("group"));
+    name->setText(QStringLiteral("Project Team"));
+    save->click();
+    QCoreApplication::processEvents();
+
+    REQUIRE(commands.lastSaveContactCommand.has_value());
+    CHECK_FALSE(commands.lastSaveContactCommand->contactId.has_value());
+    CHECK(commands.lastSaveContactCommand->contact.kind == "group");
+    CHECK(commands.lastSaveContactCommand->contact.fullName == "Project Team");
+    CHECK(details->currentIndex() == 1);
+}
+
+TEST_CASE("Saving a contact exits the editor after both edits and creates", "[gui][contacts][save]")
+{
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contacts-manager-save-view-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    if (const auto error = sessions.replace("a1", session()))
+        FAIL(error->message.toStdString());
+    javelin::jmap::cache::ContactRepository repository{connection};
+    REQUIRE_FALSE(repository
+                      .replaceAll("a1", {book("book-1", "Personal")},
+                                  {contact("Alice", "a@x.test")}, "b1", "c1")
+                      .has_value());
+
+    RefreshPort refresh;
+    CommandPort commands;
+    commands.saveContactResult = javelin::jmap::contacts::ContactMutationSummary{
+        .accountId = "a1",
+        .newState = "c2",
+        .createdId = std::nullopt,
+        .createdIds = {},
+        .receipt = {},
+    };
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    javelin::gui::contacts::ContactsManagerWidget widget{settings, repository, refresh, commands};
+    auto* contacts = widget.findChild<QListWidget*>(QStringLiteral("contactsContactList"));
+    auto* details = widget.findChild<QStackedWidget*>(QStringLiteral("contactsDetailStack"));
+    auto* name = widget.findChild<QLineEdit*>(QStringLiteral("contactsNameEdit"));
+    auto* save = widget.findChild<QPushButton*>(QStringLiteral("contactsSaveButton"));
+    REQUIRE(contacts != nullptr);
+    REQUIRE(details != nullptr);
+    REQUIRE(name != nullptr);
+    REQUIRE(save != nullptr);
+    REQUIRE(contacts->count() == 1);
+
+    contacts->setCurrentRow(0);
+    widget.beginEditContact();
+    REQUIRE(details->currentIndex() == 3);
+    name->setText(QStringLiteral("Alice edited"));
+    save->click();
+    QCoreApplication::processEvents();
+    REQUIRE(commands.lastSaveContactCommand.has_value());
+    CHECK(commands.lastSaveContactCommand->contactId == std::optional<std::string>{"card-1"});
+    CHECK(commands.lastSaveContactCommand->contact.fullName == "Alice edited");
+    CHECK(details->currentIndex() == 1);
+
+    commands.lastSaveContactCommand.reset();
+    commands.saveContactResult = javelin::jmap::contacts::ContactMutationSummary{
+        .accountId = "a1",
+        .newState = "c3",
+        .createdId = std::string{"card-2"},
+        .createdIds = {{.creationId = "new-contact", .serverId = "card-2"}},
+        .receipt = {},
+    };
+    widget.beginCreateContact();
+    REQUIRE(details->currentIndex() == 3);
+    name->setText(QStringLiteral("Bob"));
+    save->click();
+    QCoreApplication::processEvents();
+    REQUIRE(commands.lastSaveContactCommand.has_value());
+    CHECK_FALSE(commands.lastSaveContactCommand->contactId.has_value());
+    CHECK(commands.lastSaveContactCommand->contact.fullName == "Bob");
+    CHECK(details->currentIndex() == 1);
 }
 
 TEST_CASE("Contacts address book subscriptions drive the group list across servers",

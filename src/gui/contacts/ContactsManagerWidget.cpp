@@ -722,6 +722,18 @@ namespace javelin::gui::contacts
         return canCreateContact();
     }
 
+    bool ContactsManagerWidget::canEditGroup() const
+    {
+        const auto* group = currentGroup();
+        return group != nullptr && groupIsWritable(*group);
+    }
+
+    bool ContactsManagerWidget::canDeleteGroup() const
+    {
+        const auto* group = currentGroup();
+        return group != nullptr && groupIsWritable(*group);
+    }
+
     bool ContactsManagerWidget::canStarSelectedContacts() const
     {
         const auto* account = currentAccount();
@@ -1040,9 +1052,10 @@ namespace javelin::gui::contacts
         heading->setFont(headingFont);
         formLayout->addWidget(heading);
 
-        auto* contactForm = new QFormLayout();
-        contactForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+        m_contactForm = new QFormLayout();
+        m_contactForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
         m_kindEdit = new QComboBox(formWidget);
+        m_kindEdit->setObjectName(QStringLiteral("contactsKindEdit"));
         m_kindEdit->addItem(i18nc("@item contact kind", "Person"), QStringLiteral("individual"));
         m_kindEdit->addItem(i18nc("@item contact kind", "Company or Organization"),
                             QStringLiteral("org"));
@@ -1051,46 +1064,68 @@ namespace javelin::gui::contacts
         m_nameEdit->setObjectName(QStringLiteral("contactsNameEdit"));
         m_nameEdit->setPlaceholderText(i18n("Full name"));
         m_organizationEdit = new QLineEdit(formWidget);
+        m_organizationEdit->setObjectName(QStringLiteral("contactsOrganizationEdit"));
         m_organizationEdit->setPlaceholderText(i18n("Company or organization"));
         m_titleEdit = new QLineEdit(formWidget);
+        m_titleEdit->setObjectName(QStringLiteral("contactsTitleEdit"));
         m_titleEdit->setPlaceholderText(i18n("Role or job title"));
-        contactForm->addRow(i18n("Type"), m_kindEdit);
-        contactForm->addRow(i18n("Name"), m_nameEdit);
-        contactForm->addRow(i18n("Organization"), m_organizationEdit);
-        contactForm->addRow(i18n("Title"), m_titleEdit);
-
-        m_emailsEdit = new ContactFieldEditor(i18n("Email address"), true, formWidget);
-        m_phonesEdit = new ContactFieldEditor(i18n("Phone number"), false, formWidget);
-        m_addressesEdit = new ContactFieldEditor(i18n("Postal address"), false, formWidget);
-        contactForm->addRow(i18n("Emails"), m_emailsEdit);
-        contactForm->addRow(i18n("Phones"), m_phonesEdit);
-        contactForm->addRow(i18n("Addresses"), m_addressesEdit);
+        m_contactForm->addRow(i18n("Type"), m_kindEdit);
+        m_contactForm->addRow(i18n("Name"), m_nameEdit);
+        m_contactForm->addRow(i18n("Organization"), m_organizationEdit);
+        m_contactForm->addRow(i18n("Title"), m_titleEdit);
 
         m_membersEdit = new QListWidget(formWidget);
+        m_membersEdit->setObjectName(QStringLiteral("contactsMembersEdit"));
         m_membersEdit->setMaximumHeight(180);
-        contactForm->addRow(i18n("Group members"), m_membersEdit);
-        const auto updateGroupFields = [this, contactForm]
-        {
-            const bool isGroup = m_kindEdit->currentData().toString() == QStringLiteral("group");
-            m_membersEdit->setVisible(isGroup);
-            if (auto* label = contactForm->labelForField(m_membersEdit))
-                label->setVisible(isGroup);
-        };
-        connect(m_kindEdit, qOverload<int>(&QComboBox::currentIndexChanged), this,
-                [updateGroupFields] { updateGroupFields(); });
-        updateGroupFields();
+        m_contactForm->addRow(i18n("Group members"), m_membersEdit);
+
+        m_groupContactDetailsToggle = new QToolButton(formWidget);
+        m_groupContactDetailsToggle->setObjectName(
+            QStringLiteral("contactsGroupContactDetailsToggle"));
+        m_groupContactDetailsToggle->setText(i18n("Group contact details"));
+        m_groupContactDetailsToggle->setCheckable(true);
+        m_groupContactDetailsToggle->setArrowType(Qt::RightArrow);
+        m_groupContactDetailsToggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        m_contactForm->addRow(m_groupContactDetailsToggle);
+
+        m_emailsEdit = new ContactFieldEditor(i18n("Email address"), true, formWidget);
+        m_emailsEdit->setObjectName(QStringLiteral("contactsEmailsEdit"));
+        m_phonesEdit = new ContactFieldEditor(i18n("Phone number"), false, formWidget);
+        m_phonesEdit->setObjectName(QStringLiteral("contactsPhonesEdit"));
+        m_addressesEdit = new ContactFieldEditor(i18n("Postal address"), false, formWidget);
+        m_addressesEdit->setObjectName(QStringLiteral("contactsAddressesEdit"));
+        m_contactForm->addRow(i18n("Emails"), m_emailsEdit);
+        m_contactForm->addRow(i18n("Phones"), m_phonesEdit);
+        m_contactForm->addRow(i18n("Addresses"), m_addressesEdit);
 
         m_birthdayEdit = new QLineEdit(formWidget);
+        m_birthdayEdit->setObjectName(QStringLiteral("contactsBirthdayEdit"));
         m_birthdayEdit->setPlaceholderText(QStringLiteral("YYYY-MM-DD"));
         m_notesEdit = new QPlainTextEdit(formWidget);
         m_notesEdit->setPlaceholderText(i18n("Notes"));
         m_notesEdit->setMaximumHeight(100);
         m_addressBooksEdit = new QListWidget(formWidget);
         m_addressBooksEdit->setMaximumHeight(110);
-        contactForm->addRow(i18n("Birthday"), m_birthdayEdit);
-        contactForm->addRow(i18n("Notes"), m_notesEdit);
-        contactForm->addRow(i18n("Address books"), m_addressBooksEdit);
-        formLayout->addLayout(contactForm);
+        m_contactForm->addRow(i18n("Birthday"), m_birthdayEdit);
+        m_contactForm->addRow(i18n("Notes"), m_notesEdit);
+        m_contactForm->addRow(i18n("Address books"), m_addressBooksEdit);
+        formLayout->addLayout(m_contactForm);
+
+        connect(m_kindEdit, qOverload<int>(&QComboBox::currentIndexChanged), this,
+                [this]
+                {
+                    if (m_kindEdit->currentData().toString() == QStringLiteral("group"))
+                        m_groupContactDetailsToggle->setChecked(false);
+                    updateEditorKindFields();
+                });
+        connect(m_groupContactDetailsToggle, &QToolButton::toggled, this,
+                [this](const bool expanded)
+                {
+                    m_groupContactDetailsToggle->setArrowType(expanded ? Qt::DownArrow
+                                                                       : Qt::RightArrow);
+                    updateEditorKindFields();
+                });
+        updateEditorKindFields();
 
         m_advancedToggle = new QToolButton(formWidget);
         m_advancedToggle->setText(i18n("Advanced and unusual fields"));
@@ -1661,29 +1696,120 @@ namespace javelin::gui::contacts
             Q_EMIT toolbarStateChanged(m_busy, false);
             return;
         }
-        const auto listedBooks = m_repository.listAddressBooks(contact->accountId);
+        showReadOnlyContact(*contact, true);
+    }
+
+    void ContactsManagerWidget::showReadOnlyContact(
+        const javelin::jmap::contacts::ContactSummary& contact, const bool contactActions)
+    {
+        const auto listedBooks = m_repository.listAddressBooks(contact.accountId);
         if (const auto* books =
                 std::get_if<std::vector<javelin::jmap::api::AddressBook>>(&listedBooks))
             m_addressBooks = *books;
-        m_viewTitle->setText(QString::fromStdString(contact->displayName));
-        m_viewLocation->setText(contactLocationLabel(*contact));
+        m_viewTitle->setText(QString::fromStdString(contact.displayName));
+        m_viewLocation->setText(contactLocationLabel(contact));
+        const bool isGroup = contact.kind == "group";
+        m_starButton->setVisible(!isGroup);
         m_starButton->setIcon(javelin::gui::themedSvgIcon(
-            contact->isImportant ? QStringLiteral(":/icons/thunderbird-icons/starred.svg")
-                                 : QStringLiteral(":/icons/thunderbird-icons/star.svg"),
-            m_starButton->palette().color(QPalette::Active, contact->isImportant
+            contact.isImportant ? QStringLiteral(":/icons/thunderbird-icons/starred.svg")
+                                : QStringLiteral(":/icons/thunderbird-icons/star.svg"),
+            m_starButton->palette().color(QPalette::Active, contact.isImportant
                                                                 ? QPalette::Highlight
                                                                 : QPalette::ButtonText)));
-        m_starButton->setToolTip(contact->isImportant ? i18n("Remove from Starred")
-                                                      : i18n("Add to Starred"));
+        m_starButton->setToolTip(contact.isImportant ? i18n("Remove from Starred")
+                                                     : i18n("Add to Starred"));
         m_starButton->setAccessibleName(m_starButton->toolTip());
-        m_starButton->setEnabled(!m_busy && canEditContact());
-        populateContactCards(*contact);
-        showContactPhoto(*contact);
+        m_starButton->setEnabled(!isGroup && contactActions && !m_busy && canEditContact());
+        populateContactCards(contact);
+        showContactPhoto(contact);
         if (auto* document = m_detailStack->widget(1)->findChild<QPlainTextEdit*>(
                 QStringLiteral("contactDocumentView")))
-            document->setPlainText(QString::fromStdString(contact->document));
+            document->setPlainText(QString::fromStdString(contact.document));
         m_detailStack->setCurrentIndex(1);
-        Q_EMIT toolbarStateChanged(m_busy, true);
+        Q_EMIT toolbarStateChanged(m_busy, contactActions);
+    }
+
+    void ContactsManagerWidget::showSavedContact(std::string accountId, std::string contactId,
+                                                 std::string kind, std::string document)
+    {
+        const auto preview = javelin::jmap::contacts::summarizeContact(
+            accountId,
+            javelin::jmap::api::ContactCard{
+                .id = contactId, .uid = {}, .kind = {}, .document = std::move(document)});
+        m_detailStack->setCurrentIndex(0);
+        reloadContacts();
+
+        if (kind == "group")
+        {
+            for (int row = 0; row < m_groupList->count(); ++row)
+            {
+                auto* item = m_groupList->item(row);
+                if (item->data(groupIdRole).toString().toStdString() == contactId &&
+                    item->data(groupAccountIdRole).toString().toStdString() == accountId)
+                {
+                    m_groupList->setCurrentItem(item);
+                    break;
+                }
+            }
+            if (preview.has_value())
+            {
+                showReadOnlyContact(*preview, false);
+                return;
+            }
+        }
+        else
+        {
+            const auto selectSavedItem = [this, &accountId, &contactId]() -> bool
+            {
+                for (int row = 0; row < m_contactList->count(); ++row)
+                {
+                    auto* item = m_contactList->item(row);
+                    if (item->data(Qt::UserRole).toString().toStdString() == contactId &&
+                        item->data(contactAccountIdRole).toString().toStdString() == accountId)
+                    {
+                        m_contactList->setCurrentItem(item, QItemSelectionModel::ClearAndSelect);
+                        return true;
+                    }
+                }
+                return false;
+            };
+            bool savedItemSelected = selectSavedItem();
+            if (!savedItemSelected)
+            {
+                m_filterEdit->clear();
+                for (int row = 0; row < m_groupList->count(); ++row)
+                {
+                    auto* item = m_groupList->item(row);
+                    if (static_cast<GroupFilterMode>(item->data(groupFilterModeRole).toInt()) ==
+                        GroupFilterMode::All)
+                    {
+                        m_groupList->setCurrentItem(item);
+                        break;
+                    }
+                }
+                savedItemSelected = selectSavedItem();
+            }
+            if (preview.has_value())
+            {
+                showReadOnlyContact(*preview, savedItemSelected);
+                return;
+            }
+            if (savedItemSelected)
+            {
+                showSelectedContact();
+                return;
+            }
+        }
+
+        const auto cached = m_repository.findContact(accountId, contactId);
+        if (const auto* found =
+                std::get_if<std::optional<javelin::jmap::contacts::ContactSummary>>(&cached);
+            found != nullptr && found->has_value())
+            showReadOnlyContact(**found, kind != "group" && currentContact() != nullptr &&
+                                             currentContact()->id == contactId &&
+                                             currentContact()->accountId == accountId);
+        else
+            showSelectedContact();
     }
 
     void ContactsManagerWidget::rebuildMultipleSelectionSummary(
@@ -1879,9 +2005,13 @@ namespace javelin::gui::contacts
 
         auto* menu = new QMenu{this};
         menu->setAttribute(Qt::WA_DeleteOnClose);
+        auto* edit =
+            menu->addAction(QIcon::fromTheme(QStringLiteral("document-edit")), i18n("Edit Group"));
+        edit->setEnabled(!m_busy && canEditGroup());
+        connect(edit, &QAction::triggered, this, &ContactsManagerWidget::beginEditGroup);
         auto* remove =
             menu->addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Delete Group"));
-        remove->setEnabled(!m_busy && groupIsWritable(*group));
+        remove->setEnabled(!m_busy && canDeleteGroup());
         connect(remove, &QAction::triggered, this, &ContactsManagerWidget::deleteContactGroup);
         menu->popup(m_groupList->viewport()->mapToGlobal(position));
     }
@@ -1999,21 +2129,23 @@ namespace javelin::gui::contacts
     {
         if (m_busy || !canCreateGroup())
             return;
-        bool accepted = false;
-        const QString name =
-            QInputDialog::getText(this, i18n("New Contact Group"), i18n("Group name"),
-                                  QLineEdit::Normal, QString{}, &accepted)
-                .trimmed();
-        if (!accepted || name.isEmpty())
+        const auto accountId = currentAccountId();
+        if (!accountId.has_value())
             return;
+        const auto listedBooks = m_repository.listAddressBooks(*accountId);
+        const auto* accountBooks =
+            std::get_if<std::vector<javelin::jmap::api::AddressBook>>(&listedBooks);
+        if (accountBooks == nullptr)
+            return;
+        m_addressBooks = *accountBooks;
+
         std::vector<const javelin::jmap::api::AddressBook*> writableBooks;
         for (const auto& book : m_addressBooks)
-        {
             if (book.myRights.mayWrite)
                 writableBooks.push_back(&book);
-        }
         if (writableBooks.empty())
             return;
+
         const javelin::jmap::api::AddressBook* target = nullptr;
         if (const auto selected = currentAddressBookId(); selected.has_value())
         {
@@ -2026,6 +2158,7 @@ namespace javelin::gui::contacts
             target = writableBooks.front();
         if (target == nullptr)
         {
+            bool accepted = false;
             QStringList labels;
             for (const auto* book : writableBooks)
                 labels.push_back(QString::fromStdString(book->name));
@@ -2036,21 +2169,19 @@ namespace javelin::gui::contacts
                 return;
             target = writableBooks[static_cast<std::size_t>(index)];
         }
-        const auto accountId = currentAccountId();
-        if (!accountId.has_value())
-            return;
-        setBusy(true);
-        auto task = m_commandPort.createContactGroup(
-            ownerAccountId(*accountId).value_or(std::string{}),
-            {.accountId = *accountId, .addressBookId = target->id, .name = name.toStdString()});
-        QCoro::connect(std::move(task), this,
-                       [this](javelin::jmap::contacts::ContactMutationResult result)
-                       {
-                           setBusy(false);
-                           if (const auto* error =
-                                   std::get_if<javelin::jmap::OperationError>(&result))
-                               Q_EMIT statusMessageRequested(error->message, 10000);
-                       });
+
+        const QString uid = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        const QString document =
+            QStringLiteral("{\n  \"uid\": \"%1\",\n  \"kind\": \"group\",\n  "
+                           "\"addressBookIds\": {\"%2\": true},\n  \"name\": {\"full\": "
+                           "\"\"},\n  \"members\": {}\n}")
+                .arg(uid, QString::fromStdString(target->id));
+        m_creating = true;
+        m_editingGroup = true;
+        m_editingAccountId = *accountId;
+        m_editingContactId.reset();
+        loadEditorDocument(document);
+        m_nameEdit->setFocus();
     }
 
     void ContactsManagerWidget::setContactGroupMembership(std::string groupId,
@@ -2139,6 +2270,28 @@ namespace javelin::gui::contacts
                        });
     }
 
+    void ContactsManagerWidget::updateEditorKindFields()
+    {
+        if (m_contactForm == nullptr || m_kindEdit == nullptr)
+            return;
+        const auto setRowVisible = [this](QWidget* field, const bool visible)
+        {
+            field->setVisible(visible);
+            if (auto* label = m_contactForm->labelForField(field))
+                label->setVisible(visible);
+        };
+        const bool isGroup = m_kindEdit->currentData().toString() == QStringLiteral("group");
+        setRowVisible(m_organizationEdit, !isGroup);
+        setRowVisible(m_titleEdit, !isGroup);
+        setRowVisible(m_membersEdit, isGroup);
+        m_groupContactDetailsToggle->setVisible(isGroup);
+        const bool showContactDetails = !isGroup || m_groupContactDetailsToggle->isChecked();
+        setRowVisible(m_emailsEdit, showContactDetails);
+        setRowVisible(m_phonesEdit, showContactDetails);
+        setRowVisible(m_addressesEdit, showContactDetails);
+        setRowVisible(m_birthdayEdit, !isGroup);
+    }
+
     void ContactsManagerWidget::loadEditorDocument(const QString& document)
     {
         const auto parsed = javelin::jmap::contacts::contactEditorData(document.toStdString());
@@ -2153,6 +2306,9 @@ namespace javelin::gui::contacts
         if (kindIndex < 0)
             kindIndex = 0;
         m_kindEdit->setCurrentIndex(kindIndex);
+        if (editorData->kind == "group")
+            m_groupContactDetailsToggle->setChecked(false);
+        updateEditorKindFields();
         m_nameEdit->setText(QString::fromStdString(editorData->fullName));
         m_organizationEdit->setText(QString::fromStdString(editorData->organization));
         m_titleEdit->setText(QString::fromStdString(editorData->title));
@@ -2221,7 +2377,8 @@ namespace javelin::gui::contacts
         }
         m_advancedToggle->setChecked(false);
         javelin::jmap::contacts::ContactSummary location{
-            .accountId = currentAccountId().value_or(std::string{}),
+            .accountId = m_editingAccountId.empty() ? currentAccountId().value_or(std::string{})
+                                                    : m_editingAccountId,
             .id = {},
             .uid = {},
             .kind = editorData->kind,
@@ -2239,6 +2396,9 @@ namespace javelin::gui::contacts
     void ContactsManagerWidget::beginCreateContact()
     {
         if (m_busy || !canCreateContact())
+            return;
+        const auto accountId = currentAccountId();
+        if (!accountId.has_value())
             return;
         auto bookId = currentAddressBookId();
         if (!bookId.has_value())
@@ -2264,7 +2424,11 @@ namespace javelin::gui::contacts
                            "\"\"}\n}")
                 .arg(uid, QString::fromStdString(*bookId));
         m_creating = true;
+        m_editingGroup = false;
+        m_editingAccountId = *accountId;
+        m_editingContactId.reset();
         loadEditorDocument(document);
+        m_nameEdit->setFocus();
     }
 
     void ContactsManagerWidget::beginEditContact()
@@ -2274,19 +2438,57 @@ namespace javelin::gui::contacts
         const auto* contact = currentContact();
         if (contact == nullptr)
             return;
+        const auto listedBooks = m_repository.listAddressBooks(contact->accountId);
+        if (const auto* books =
+                std::get_if<std::vector<javelin::jmap::api::AddressBook>>(&listedBooks))
+            m_addressBooks = *books;
         m_creating = false;
+        m_editingGroup = false;
+        m_editingAccountId = contact->accountId;
+        m_editingContactId = contact->id;
         loadEditorDocument(QString::fromStdString(contact->document));
+    }
+
+    void ContactsManagerWidget::beginEditGroup()
+    {
+        if (m_busy || !canEditGroup())
+            return;
+        const auto* group = currentGroup();
+        if (group == nullptr)
+            return;
+        const auto listedBooks = m_repository.listAddressBooks(group->accountId);
+        const auto* books = std::get_if<std::vector<javelin::jmap::api::AddressBook>>(&listedBooks);
+        if (books == nullptr)
+            return;
+        m_addressBooks = *books;
+        m_creating = false;
+        m_editingGroup = true;
+        m_editingAccountId = group->accountId;
+        m_editingContactId = group->id;
+        loadEditorDocument(QString::fromStdString(group->document));
     }
 
     void ContactsManagerWidget::cancelEdit()
     {
+        const bool wasEditingGroup = m_editingGroup;
+        m_creating = false;
+        m_editingGroup = false;
+        m_editingAccountId.clear();
+        m_editingContactId.reset();
+        if (wasEditingGroup)
+        {
+            if (const auto* group = currentGroup())
+            {
+                showReadOnlyContact(*group, false);
+                return;
+            }
+        }
         showSelectedContact();
     }
 
     void ContactsManagerWidget::saveContact()
     {
-        const auto accountId = currentAccountId();
-        if (!accountId.has_value())
+        if (m_editingAccountId.empty())
             return;
         javelin::jmap::contacts::ContactEditorData editor;
         editor.kind = m_kindEdit->currentData().toString().toStdString();
@@ -2305,10 +2507,12 @@ namespace javelin::gui::contacts
             if (item->checkState() == Qt::Checked)
                 editor.addressBookIds.push_back(item->data(Qt::UserRole).toString().toStdString());
         }
-        const auto* account = currentAccount();
-        if (account == nullptr || !javelin::jmap::contacts::contactActionRights(
-                                       account->isReadOnly, m_addressBooks, editor.addressBookIds)
-                                       .mayModify)
+        const auto account = std::ranges::find(m_accounts, m_editingAccountId,
+                                               &javelin::jmap::cache::ContactAccount::accountId);
+        if (account == m_accounts.end() ||
+            !javelin::jmap::contacts::contactActionRights(account->isReadOnly, m_addressBooks,
+                                                          editor.addressBookIds)
+                 .mayModify)
         {
             QMessageBox::information(
                 this, i18n("Read-only Contact"),
@@ -2324,32 +2528,54 @@ namespace javelin::gui::contacts
                     editor.members.push_back(item->data(Qt::UserRole).toString().toStdString());
             }
         }
-        std::optional<std::string> contactId;
-        if (!m_creating)
+        if (!m_creating && !m_editingContactId.has_value())
+            return;
+
+        std::string previewDocument = editor.document;
+        const auto applied = javelin::jmap::contacts::applyContactEditorData(editor, m_creating);
+        if (const auto* appliedDocument = std::get_if<std::string>(&applied))
         {
-            const auto* contact = currentContact();
-            if (contact == nullptr)
-                return;
-            contactId = contact->id;
+            const auto prepared =
+                javelin::jmap::contacts::prepareContactDocument(*appliedDocument, m_creating);
+            previewDocument = std::holds_alternative<std::string>(prepared)
+                                  ? std::get<std::string>(prepared)
+                                  : *appliedDocument;
         }
+
+        const std::string accountId = m_editingAccountId;
+        const std::optional<std::string> contactId = m_editingContactId;
+        const std::string kind = editor.kind;
         javelin::app::SaveContactCommand command{
-            .accountId = *accountId,
-            .contactId = std::move(contactId),
+            .accountId = accountId,
+            .contactId = contactId,
             .contact = std::move(editor),
         };
         const auto owner = ownerAccountId(command.accountId).value_or(std::string{});
         setBusy(true);
         auto task = m_commandPort.saveContact(owner, std::move(command));
-        QCoro::connect(std::move(task), this,
-                       [this](javelin::jmap::contacts::ContactMutationResult result)
-                       {
-                           setBusy(false);
-                           if (const auto* error =
-                                   std::get_if<javelin::jmap::OperationError>(&result))
-                           {
-                               Q_EMIT statusMessageRequested(error->message, 10000);
-                           }
-                       });
+        QCoro::connect(
+            std::move(task), this,
+            [this, accountId, contactId, kind, previewDocument = std::move(previewDocument)](
+                javelin::jmap::contacts::ContactMutationResult result)
+            {
+                setBusy(false);
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    Q_EMIT statusMessageRequested(error->message, 10000);
+                    return;
+                }
+                const auto& summary =
+                    std::get<javelin::jmap::contacts::ContactMutationSummary>(result);
+                const auto savedId = contactId.has_value() ? contactId : summary.createdId;
+                m_creating = false;
+                m_editingGroup = false;
+                m_editingAccountId.clear();
+                m_editingContactId.reset();
+                if (savedId.has_value())
+                    showSavedContact(accountId, *savedId, kind, previewDocument);
+                else
+                    showSelectedContact();
+            });
     }
 
     void ContactsManagerWidget::uploadPhoto()
@@ -2473,19 +2699,19 @@ namespace javelin::gui::contacts
         }
         if (!photo->blobId.has_value())
             return;
-        const auto accountId = currentAccountId();
-        if (!accountId.has_value())
-            return;
+        const std::string accountId = contact.accountId;
         const std::string contactId = contact.id;
         auto task = m_commandPort.downloadContactMedia(
-            ownerAccountId(*accountId).value_or(std::string{}), *accountId, *photo->blobId,
+            ownerAccountId(accountId).value_or(std::string{}), accountId, *photo->blobId,
             photo->mediaType.value_or("application/octet-stream"));
         QCoro::connect(
             std::move(task), this,
             [this, contactId, show](javelin::jmap::contacts::ContactDownloadResult result)
             {
                 const auto* selected = currentContact();
-                if (selected == nullptr || selected->id != contactId)
+                const auto* selectedGroup = currentGroup();
+                if ((selected == nullptr || selected->id != contactId) &&
+                    (selectedGroup == nullptr || selectedGroup->id != contactId))
                     return;
                 if (const auto* media =
                         std::get_if<javelin::jmap::contacts::DownloadedContactMedia>(&result))
@@ -3166,11 +3392,15 @@ namespace javelin::gui::contacts
     bool ContactsManagerWidget::groupIsWritable(
         const javelin::jmap::contacts::ContactSummary& group) const
     {
-        const auto* account = currentAccount();
-        return account != nullptr && account->accountId == group.accountId &&
-               javelin::jmap::contacts::contactActionRights(account->isReadOnly, m_addressBooks,
-                                                            group.addressBookIds)
-                   .mayModify;
+        const auto account = std::ranges::find(m_accounts, group.accountId,
+                                               &javelin::jmap::cache::ContactAccount::accountId);
+        if (account == m_accounts.end())
+            return false;
+        const auto listedBooks = m_repository.listAddressBooks(group.accountId);
+        const auto* books = std::get_if<std::vector<javelin::jmap::api::AddressBook>>(&listedBooks);
+        return books != nullptr && javelin::jmap::contacts::contactActionRights(
+                                       account->isReadOnly, *books, group.addressBookIds)
+                                       .mayModify;
     }
 
     void ContactsManagerWidget::showAddressBookManager()
@@ -3383,7 +3613,38 @@ namespace javelin::gui::contacts
             layout->addWidget(content);
             m_cardLayout->addWidget(card);
         };
-        if (!editorData->organization.empty() || !editorData->title.empty())
+        if (editorData->kind == "group" && !editorData->members.empty())
+        {
+            std::unordered_map<std::string, QString> memberNames;
+            for (const auto& account : m_accounts)
+            {
+                const auto listed = m_repository.listContacts(account.accountId);
+                const auto* contacts =
+                    std::get_if<std::vector<javelin::jmap::contacts::ContactSummary>>(&listed);
+                if (contacts == nullptr)
+                    continue;
+                for (const auto& member : *contacts)
+                {
+                    if (member.kind != "group" &&
+                        std::ranges::contains(editorData->members, member.uid) &&
+                        !memberNames.contains(member.uid))
+                        memberNames.emplace(member.uid, QString::fromStdString(member.displayName));
+                }
+            }
+            QStringList members;
+            for (const auto& uid : editorData->members)
+            {
+                if (const auto found = memberNames.find(uid); found != memberNames.end())
+                    members.push_back(found->second);
+                else
+                    members.push_back(
+                        i18n("%1 (currently unavailable)", QString::fromStdString(uid)));
+            }
+            addCard(i18nc("@title contact information card", "Members"),
+                    members.join(QLatin1Char('\n')));
+        }
+        if (editorData->kind != "group" &&
+            (!editorData->organization.empty() || !editorData->title.empty()))
         {
             QStringList identity;
             if (!editorData->organization.empty())
@@ -3416,7 +3677,7 @@ namespace javelin::gui::contacts
         for (const auto& address : editorData->addresses)
             addCard(fieldTitle(i18nc("@title contact information card", "Address"), address),
                     QString::fromStdString(address.value));
-        if (!editorData->birthday.empty())
+        if (editorData->kind != "group" && !editorData->birthday.empty())
             addCard(i18nc("@title contact information card", "Birthday"),
                     QString::fromStdString(editorData->birthday));
         if (!editorData->notes.empty())

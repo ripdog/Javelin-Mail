@@ -13,6 +13,7 @@
 #include <vector>
 
 class QComboBox;
+class QFormLayout;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -51,6 +52,8 @@ namespace javelin::gui::contacts
         [[nodiscard]] bool canEditContact() const;
         [[nodiscard]] bool canDeleteContact() const;
         [[nodiscard]] bool canCreateGroup() const;
+        [[nodiscard]] bool canEditGroup() const;
+        [[nodiscard]] bool canDeleteGroup() const;
         [[nodiscard]] bool canStarSelectedContacts() const;
         [[nodiscard]] bool canAddSelectedContactToGroup() const;
         [[nodiscard]] bool canRemoveSelectedContactFromGroup() const;
@@ -66,6 +69,7 @@ namespace javelin::gui::contacts
         void beginCreateContact();
         void beginCreateGroup();
         void beginEditContact();
+        void beginEditGroup();
         void deleteContact();
         void copyContact();
         void importVCard();
@@ -88,6 +92,11 @@ namespace javelin::gui::contacts
         void reloadAddressBooks();
         void reloadContacts();
         void showSelectedContact();
+        void showReadOnlyContact(const javelin::jmap::contacts::ContactSummary& contact,
+                                 bool contactActions);
+        void showSavedContact(std::string accountId, std::string contactId, std::string kind,
+                              std::string document);
+        void updateEditorKindFields();
         void rebuildMultipleSelectionSummary(
             const std::vector<const javelin::jmap::contacts::ContactSummary*>& contacts);
         void showGroupContextMenu(const QPoint& position);
@@ -139,6 +148,9 @@ namespace javelin::gui::contacts
         std::size_t m_refreshedContacts = 0;
         std::size_t m_refreshedAddressBooks = 0;
         bool m_creating = false;
+        bool m_editingGroup = false;
+        std::string m_editingAccountId;
+        std::optional<std::string> m_editingContactId;
         QComboBox* m_accountCombo = nullptr;
         QComboBox* m_addressBookCombo = nullptr;
         QComboBox* m_sortCombo = nullptr;
@@ -157,6 +169,7 @@ namespace javelin::gui::contacts
         QWidget* m_cardContainer = nullptr;
         QVBoxLayout* m_cardLayout = nullptr;
         QPlainTextEdit* m_documentEdit = nullptr;
+        QFormLayout* m_contactForm = nullptr;
         QComboBox* m_kindEdit = nullptr;
         QLineEdit* m_nameEdit = nullptr;
         QLineEdit* m_organizationEdit = nullptr;
@@ -165,6 +178,7 @@ namespace javelin::gui::contacts
         ContactFieldEditor* m_phonesEdit = nullptr;
         ContactFieldEditor* m_addressesEdit = nullptr;
         QListWidget* m_membersEdit = nullptr;
+        QToolButton* m_groupContactDetailsToggle = nullptr;
         QLineEdit* m_birthdayEdit = nullptr;
         QPlainTextEdit* m_notesEdit = nullptr;
         QListWidget* m_addressBooksEdit = nullptr;
