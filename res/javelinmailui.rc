@@ -63,6 +63,7 @@
     <Action name="compose_send"/>
     <Action name="compose_save_draft"/>
     <Action name="compose_attach_files"/>
+    <Action name="compose_signature"/>
     <Separator/>
     <Action name="compose_rich_text"/>
   </ToolBar>

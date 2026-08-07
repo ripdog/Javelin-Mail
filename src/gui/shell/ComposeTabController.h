@@ -13,6 +13,7 @@
 #include <optional>
 #include <vector>
 
+class QMenu;
 class QStackedWidget;
 class QWidget;
 
@@ -49,6 +50,7 @@ namespace javelin::gui::shell
     {
         bool richText = true;
         bool canSend = false;
+        bool canUseSignature = false;
         bool canToggleRichText = false;
     };
 
@@ -79,6 +81,7 @@ namespace javelin::gui::shell
         void attachFiles(const TabState* tab);
         void setRichTextEnabled(const TabState* tab, bool enabled);
         [[nodiscard]] ComposeToolbarState toolbarState(const TabState* tab) const;
+        [[nodiscard]] QMenu* signatureMenuForTab(const TabState* tab) const;
         [[nodiscard]] QWidget* contentWidgetForTab(const TabState* tab) const;
 
       Q_SIGNALS:

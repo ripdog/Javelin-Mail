@@ -622,13 +622,12 @@ namespace javelin::gui::compose
                 {
                     const auto previousAutomaticBcc =
                         m_fromCombo->itemData(m_previousIdentityIndex, senderBccRole).toString();
-                    if (m_bccEdit->text().trimmed() == previousAutomaticBcc.trimmed())
+                    if (recipientText(RecipientType::Bcc).trimmed() ==
+                        previousAutomaticBcc.trimmed())
                     {
                         const auto nextAutomaticBcc =
                             m_fromCombo->itemData(index, senderBccRole).toString();
-                        m_bccEdit->setText(nextAutomaticBcc);
-                        setOptionalRecipientVisible(m_bccRow, m_bccButton,
-                                                    !nextAutomaticBcc.isEmpty());
+                        setRecipientText(RecipientType::Bcc, nextAutomaticBcc);
                     }
                 }
                 replaceTrackedSignatureForIndex(index);
@@ -637,23 +636,16 @@ namespace javelin::gui::compose
                 scheduleWorkingCopySave();
                 Q_EMIT toolbarStateChanged();
             });
-        for (auto* edit : {m_toEdit, m_ccEdit, m_bccEdit, m_subjectEdit})
-        {
-            connect(edit, &QLineEdit::textChanged, this,
-                    [this, edit](const QString&)
+        connect(m_subjectEdit, &QLineEdit::textChanged, this,
+                [this](const QString&)
+                {
+                    if (m_syncingUi)
                     {
-                        if (m_syncingUi)
-                        {
-                            return;
-                        }
-
-                        if (edit == m_subjectEdit)
-                        {
-                            updateTabTitle();
-                        }
-                        scheduleWorkingCopySave();
-                    });
-        }
+                        return;
+                    }
+                    updateTabTitle();
+                    scheduleWorkingCopySave();
+                });
 
         connect(m_richTextEdit, &JavelinComposerEdit::attachmentPathsRequested, this,
                 &ComposeTabWidget::addAttachmentPaths);
@@ -728,9 +720,10 @@ namespace javelin::gui::compose
     {
         const auto subject = m_subjectEdit->text().trimmed();
         const auto body = m_richTextEdit->toPlainText();
-        return subject.isEmpty() && m_toEdit->text().trimmed().isEmpty() &&
-               m_ccEdit->text().trimmed().isEmpty() && m_bccEdit->text().trimmed().isEmpty() &&
-               body.trimmed().isEmpty() && m_snapshot.attachments.empty();
+        return subject.isEmpty() && recipientText(RecipientType::To).trimmed().isEmpty() &&
+               recipientText(RecipientType::Cc).trimmed().isEmpty() &&
+               recipientText(RecipientType::Bcc).trimmed().isEmpty() && body.trimmed().isEmpty() &&
+               m_snapshot.attachments.empty();
     }
 
     bool ComposeTabWidget::closeWithoutPrompt() const
@@ -755,6 +748,11 @@ namespace javelin::gui::compose
     bool ComposeTabWidget::richTextEnabled() const
     {
         return m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RichText;
+    }
+
+    QMenu* ComposeTabWidget::signatureMenu() const
+    {
+        return m_signatureMenu;
     }
 
     void ComposeTabWidget::setRichTextEnabled(const bool enabled)
@@ -834,91 +832,30 @@ namespace javelin::gui::compose
         headerLayout->setSpacing(4);
 
         auto* fromRow = new QHBoxLayout();
-        auto* fromLabel = new QLabel(i18nc("@label email sender", "From"), headerWidget);
-        fromLabel->setMinimumWidth(52);
+        m_fromLabel = new QLabel(i18nc("@label email sender", "From"), headerWidget);
         m_fromCombo = new QComboBox(headerWidget);
-        m_signatureButton = new QToolButton(headerWidget);
-        m_signatureButton->setText(i18n("Signature"));
-        m_signatureButton->setIcon(QIcon::fromTheme(QStringLiteral("mail-signature")));
-        m_signatureButton->setPopupMode(QToolButton::InstantPopup);
-        m_signatureButton->setAutoRaise(true);
-        m_signatureMenu = new QMenu(m_signatureButton);
-        m_signatureButton->setMenu(m_signatureMenu);
-        connect(m_signatureMenu, &QMenu::aboutToShow, this,
-                &ComposeTabWidget::refreshSignatureMenu);
-        fromRow->addWidget(fromLabel);
+        fromRow->addWidget(m_fromLabel);
         fromRow->addWidget(m_fromCombo, 1);
-        fromRow->addWidget(m_signatureButton);
         headerLayout->addLayout(fromRow);
 
-        auto* toRow = new QHBoxLayout();
-        auto* toLabel = new QLabel(i18nc("@label email recipients", "To"), headerWidget);
-        toLabel->setMinimumWidth(52);
-        m_toEdit = new widgets::EmailAddressLineEdit(true, headerWidget);
-        m_toEdit->setPlaceholderText(QStringLiteral("alice@example.com, Bob <bob@example.com>"));
-        m_ccButton = new QToolButton(headerWidget);
-        m_ccButton->setText(i18nc("@action:button show carbon-copy field", "Cc"));
-        m_ccButton->setCheckable(true);
-        m_ccButton->setAutoRaise(true);
-        m_bccButton = new QToolButton(headerWidget);
-        m_bccButton->setText(i18nc("@action:button show blind-carbon-copy field", "Bcc"));
-        m_bccButton->setCheckable(true);
-        m_bccButton->setAutoRaise(true);
-        toRow->addWidget(toLabel);
-        toRow->addWidget(m_toEdit, 1);
-        toRow->addWidget(m_ccButton);
-        toRow->addWidget(m_bccButton);
-        headerLayout->addLayout(toRow);
+        m_signatureMenu = new QMenu(this);
+        connect(m_signatureMenu, &QMenu::aboutToShow, this,
+                &ComposeTabWidget::refreshSignatureMenu);
 
-        m_ccRow = new QWidget(headerWidget);
-        auto* ccRowLayout = new QHBoxLayout(m_ccRow);
-        ccRowLayout->setContentsMargins(0, 0, 0, 0);
-        auto* ccLabel = new QLabel(i18nc("@label email carbon-copy recipients", "Cc"), m_ccRow);
-        ccLabel->setMinimumWidth(52);
-        m_ccEdit = new widgets::EmailAddressLineEdit(true, m_ccRow);
-        m_ccEdit->setPlaceholderText(i18nc("@info:placeholder", "Optional"));
-        ccRowLayout->addWidget(ccLabel);
-        ccRowLayout->addWidget(m_ccEdit, 1);
-        headerLayout->addWidget(m_ccRow);
-
-        m_bccRow = new QWidget(headerWidget);
-        auto* bccRowLayout = new QHBoxLayout(m_bccRow);
-        bccRowLayout->setContentsMargins(0, 0, 0, 0);
-        auto* bccLabel =
-            new QLabel(i18nc("@label email blind-carbon-copy recipients", "Bcc"), m_bccRow);
-        bccLabel->setMinimumWidth(52);
-        m_bccEdit = new widgets::EmailAddressLineEdit(true, m_bccRow);
-        m_bccEdit->setPlaceholderText(i18nc("@info:placeholder", "Optional"));
-        bccRowLayout->addWidget(bccLabel);
-        bccRowLayout->addWidget(m_bccEdit, 1);
-        headerLayout->addWidget(m_bccRow);
-        connect(m_ccButton, &QToolButton::toggled, this,
-                [this](const bool visible)
-                {
-                    setOptionalRecipientVisible(m_ccRow, m_ccButton, visible);
-                    if (visible)
-                    {
-                        m_ccEdit->setFocus();
-                    }
-                });
-        connect(m_bccButton, &QToolButton::toggled, this,
-                [this](const bool visible)
-                {
-                    setOptionalRecipientVisible(m_bccRow, m_bccButton, visible);
-                    if (visible)
-                    {
-                        m_bccEdit->setFocus();
-                    }
-                });
+        m_recipientRowsLayout = new QVBoxLayout();
+        m_recipientRowsLayout->setContentsMargins(0, 0, 0, 0);
+        m_recipientRowsLayout->setSpacing(4);
+        headerLayout->addLayout(m_recipientRowsLayout);
+        addRecipientRow(RecipientType::To);
 
         auto* subjectRow = new QHBoxLayout();
-        auto* subjectLabel = new QLabel(i18nc("@label email subject", "Subject"), headerWidget);
-        subjectLabel->setMinimumWidth(52);
+        m_subjectLabel = new QLabel(i18nc("@label email subject", "Subject"), headerWidget);
         m_subjectEdit = new QLineEdit(headerWidget);
         m_subjectEdit->setPlaceholderText(i18n("Add a subject"));
-        subjectRow->addWidget(subjectLabel);
+        subjectRow->addWidget(m_subjectLabel);
         subjectRow->addWidget(m_subjectEdit, 1);
         headerLayout->addLayout(subjectRow);
+        updateRecipientRowWidths();
 
         rootLayout->addWidget(headerWidget);
 
@@ -1384,9 +1321,6 @@ namespace javelin::gui::compose
     {
         m_syncingUi = true;
         const QSignalBlocker fromBlocker{m_fromCombo};
-        const QSignalBlocker toBlocker{m_toEdit};
-        const QSignalBlocker ccBlocker{m_ccEdit};
-        const QSignalBlocker bccBlocker{m_bccEdit};
         const QSignalBlocker subjectBlocker{m_subjectEdit};
         const QSignalBlocker richBlocker{m_richTextEdit};
         const QSignalBlocker tabBlocker{m_editorTabs};
@@ -1409,9 +1343,7 @@ namespace javelin::gui::compose
         }
         m_previousIdentityIndex = m_fromCombo->currentIndex();
 
-        m_toEdit->setText(formatAddresses(m_snapshot.to));
-        m_ccEdit->setText(formatAddresses(m_snapshot.cc));
-        m_bccEdit->setText(formatAddresses(m_snapshot.bcc));
+        resetRecipientRows();
         m_subjectEdit->setText(m_snapshot.subject.has_value()
                                    ? QString::fromStdString(*m_snapshot.subject)
                                    : QString{});
@@ -1434,8 +1366,6 @@ namespace javelin::gui::compose
         }
         m_editorTabs->setTabVisible(previewTabIndex, !plainTextMode);
         m_editorTabs->setCurrentIndex(richEditorTabIndex);
-        setOptionalRecipientVisible(m_ccRow, m_ccButton, !m_snapshot.cc.empty());
-        setOptionalRecipientVisible(m_bccRow, m_bccButton, !m_snapshot.bcc.empty());
         populateAttachments();
         m_syncingUi = false;
         initializeSignatureTracking();
@@ -1497,9 +1427,9 @@ namespace javelin::gui::compose
                 Q_EMIT accountChanged(QString::fromStdString(m_snapshot.accountId));
             }
         }
-        m_snapshot.to = parseAddresses(m_toEdit->text());
-        m_snapshot.cc = parseAddresses(m_ccEdit->text());
-        m_snapshot.bcc = parseAddresses(m_bccEdit->text());
+        m_snapshot.to = recipientAddresses(RecipientType::To);
+        m_snapshot.cc = recipientAddresses(RecipientType::Cc);
+        m_snapshot.bcc = recipientAddresses(RecipientType::Bcc);
         m_snapshot.subject =
             m_subjectEdit->text().trimmed().isEmpty()
                 ? std::nullopt
@@ -1613,12 +1543,155 @@ namespace javelin::gui::compose
         scheduleWorkingCopySave();
     }
 
-    void ComposeTabWidget::setOptionalRecipientVisible(QWidget* row, QToolButton* button,
-                                                       const bool visible)
+    void ComposeTabWidget::addRecipientRow(const RecipientType type, const QString& text)
     {
-        const QSignalBlocker blocker{button};
-        button->setChecked(visible);
-        row->setVisible(visible);
+        auto* rowWidget = new QWidget(this);
+        auto* rowLayout = new QHBoxLayout(rowWidget);
+        rowLayout->setContentsMargins(0, 0, 0, 0);
+        rowLayout->setSpacing(6);
+
+        auto* typeCombo = new QComboBox(rowWidget);
+        typeCombo->addItem(i18nc("@label email recipients", "To"),
+                           static_cast<int>(RecipientType::To));
+        typeCombo->addItem(i18nc("@label email carbon-copy recipients", "Cc"),
+                           static_cast<int>(RecipientType::Cc));
+        typeCombo->addItem(i18nc("@label email blind-carbon-copy recipients", "Bcc"),
+                           static_cast<int>(RecipientType::Bcc));
+        const auto typeIndex = typeCombo->findData(static_cast<int>(type));
+        if (typeIndex >= 0)
+            typeCombo->setCurrentIndex(typeIndex);
+
+        auto* edit = new widgets::EmailAddressLineEdit(true, rowWidget);
+        edit->setPlaceholderText(QStringLiteral("alice@example.com, Bob <bob@example.com>"));
+        edit->setText(text);
+        rowLayout->addWidget(typeCombo);
+        rowLayout->addWidget(edit, 1);
+        m_recipientRowsLayout->addWidget(rowWidget);
+        m_recipientRows.push_back({.widget = rowWidget, .typeCombo = typeCombo, .edit = edit});
+
+        if (m_headerLabelWidth > 0)
+            typeCombo->setFixedWidth(m_headerLabelWidth);
+
+        connect(typeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
+                [this](const int)
+                {
+                    if (!m_syncingUi)
+                        scheduleWorkingCopySave();
+                });
+        connect(edit, &QLineEdit::textChanged, this,
+                [this](const QString&)
+                {
+                    if (m_syncingUi)
+                        return;
+                    ensureTrailingRecipientRow();
+                    scheduleWorkingCopySave();
+                });
+    }
+
+    void ComposeTabWidget::resetRecipientRows()
+    {
+        for (const auto& row : m_recipientRows)
+            delete row.widget;
+        m_recipientRows.clear();
+
+        if (!m_snapshot.to.empty())
+            addRecipientRow(RecipientType::To, formatAddresses(m_snapshot.to));
+        if (!m_snapshot.cc.empty())
+            addRecipientRow(RecipientType::Cc, formatAddresses(m_snapshot.cc));
+        if (!m_snapshot.bcc.empty())
+            addRecipientRow(RecipientType::Bcc, formatAddresses(m_snapshot.bcc));
+        ensureTrailingRecipientRow();
+        updateRecipientRowWidths();
+    }
+
+    void ComposeTabWidget::ensureTrailingRecipientRow()
+    {
+        if (m_recipientRows.empty() || !m_recipientRows.back().edit->text().trimmed().isEmpty())
+            addRecipientRow(RecipientType::To);
+    }
+
+    void ComposeTabWidget::setRecipientText(const RecipientType type, const QString& text)
+    {
+        RecipientRow* target = nullptr;
+        for (auto& row : m_recipientRows)
+        {
+            if (row.typeCombo->currentData().toInt() == static_cast<int>(type))
+            {
+                target = &row;
+                break;
+            }
+        }
+
+        if (target == nullptr && text.trimmed().isEmpty())
+            return;
+
+        if (target == nullptr)
+        {
+            if (!m_recipientRows.empty() && m_recipientRows.back().edit->text().trimmed().isEmpty())
+            {
+                target = &m_recipientRows.back();
+                const auto typeIndex = target->typeCombo->findData(static_cast<int>(type));
+                if (typeIndex >= 0)
+                    target->typeCombo->setCurrentIndex(typeIndex);
+            }
+            else
+            {
+                addRecipientRow(type);
+                target = &m_recipientRows.back();
+            }
+        }
+
+        const bool previousSyncing = m_syncingUi;
+        m_syncingUi = true;
+        target->edit->setText(text);
+        for (auto& row : m_recipientRows)
+        {
+            if (&row != target && row.typeCombo->currentData().toInt() == static_cast<int>(type))
+                row.edit->clear();
+        }
+        m_syncingUi = previousSyncing;
+        ensureTrailingRecipientRow();
+    }
+
+    QString ComposeTabWidget::recipientText(const RecipientType type) const
+    {
+        QStringList values;
+        for (const auto& row : m_recipientRows)
+        {
+            if (row.typeCombo->currentData().toInt() != static_cast<int>(type))
+                continue;
+            const auto text = row.edit->text().trimmed();
+            if (!text.isEmpty())
+                values.push_back(text);
+        }
+        return values.join(QStringLiteral(", "));
+    }
+
+    std::vector<javelin::jmap::domain::EmailAddress>
+    ComposeTabWidget::recipientAddresses(const RecipientType type) const
+    {
+        std::vector<javelin::jmap::domain::EmailAddress> addresses;
+        for (const auto& row : m_recipientRows)
+        {
+            if (row.typeCombo->currentData().toInt() != static_cast<int>(type))
+                continue;
+            const auto parsed = parseAddresses(row.edit->text());
+            addresses.insert(addresses.end(), parsed.begin(), parsed.end());
+        }
+        return addresses;
+    }
+
+    void ComposeTabWidget::updateRecipientRowWidths()
+    {
+        if (m_fromLabel == nullptr || m_subjectLabel == nullptr || m_recipientRows.empty())
+            return;
+        m_headerLabelWidth =
+            std::max({m_fromLabel->sizeHint().width(), m_subjectLabel->sizeHint().width(),
+                      m_recipientRows.front().typeCombo->sizeHint().width()});
+        m_fromLabel->setFixedWidth(m_headerLabelWidth);
+        m_subjectLabel->setFixedWidth(m_headerLabelWidth);
+        for (const auto& row : m_recipientRows)
+            row.typeCombo->setFixedWidth(m_headerLabelWidth);
     }
 
     void ComposeTabWidget::scheduleWorkingCopySave()
@@ -1648,12 +1721,11 @@ namespace javelin::gui::compose
     {
         m_operationInFlight = busy;
         m_fromCombo->setEnabled(!busy);
-        m_signatureButton->setEnabled(!busy);
-        m_toEdit->setEnabled(!busy);
-        m_ccEdit->setEnabled(!busy);
-        m_bccEdit->setEnabled(!busy);
-        m_ccButton->setEnabled(!busy);
-        m_bccButton->setEnabled(!busy);
+        for (const auto& row : m_recipientRows)
+        {
+            row.typeCombo->setEnabled(!busy);
+            row.edit->setEnabled(!busy);
+        }
         m_subjectEdit->setEnabled(!busy);
         m_richTextEdit->setEnabled(!busy);
         m_editorTabs->setEnabled(!busy);
@@ -2251,7 +2323,7 @@ namespace javelin::gui::compose
             return;
         }
 
-        if (m_snapshot.to.empty())
+        if (m_snapshot.to.empty() && m_snapshot.cc.empty() && m_snapshot.bcc.empty())
         {
             Q_EMIT statusMessageRequested(i18n("Add at least one recipient before sending."), 7000);
             return;

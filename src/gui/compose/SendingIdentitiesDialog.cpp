@@ -213,6 +213,7 @@ namespace javelin::gui::compose
         auto* listButtons = new QHBoxLayout;
         m_newButton =
             new QPushButton(QIcon::fromTheme(QStringLiteral("list-add")), i18n("New…"), listPane);
+        m_newButton->setObjectName(QStringLiteral("identityNewButton"));
         m_duplicateButton = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-copy")),
                                             i18n("Duplicate"), listPane);
         m_deleteButton = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-delete")),
@@ -638,7 +639,9 @@ namespace javelin::gui::compose
                 accountCombo->setCurrentIndex(index);
         }
         auto* nameEdit = new QLineEdit(&dialog);
+        nameEdit->setObjectName(QStringLiteral("identityNewNameEdit"));
         auto* emailEdit = new QLineEdit(&dialog);
+        emailEdit->setObjectName(QStringLiteral("identityNewEmailEdit"));
         const auto accountId = accountCombo->currentData().toString().toStdString();
         const auto existing = m_identityReader.listByAccount(accountId);
         if (const auto* identities =
@@ -683,6 +686,7 @@ namespace javelin::gui::compose
         presentIdentity(selectedAccount, identity, false, identity);
         m_editorDirty = true;
         updateActions();
+        saveCurrentIdentity();
     }
 
     void SendingIdentitiesDialog::duplicateCurrentIdentity()
@@ -739,18 +743,20 @@ namespace javelin::gui::compose
         }
 
         const auto accountId = m_editorAccountId;
+        const auto revertIdentity = m_revertIdentity;
         setBusy(true);
         auto task = m_commandPort.saveSenderIdentity(accountId, identity);
         QCoro::connect(
             std::move(task), this,
-            [this, accountId, identity](javelin::jmap::identity::IdentitySaveResult result)
+            [this, accountId, identity,
+             revertIdentity](javelin::jmap::identity::IdentitySaveResult result)
             {
                 setBusy(false);
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
                     QMessageBox::critical(this, i18n("Unable to Save Identity"), error->message);
                     reloadTree();
-                    presentIdentity(accountId, identity, false, m_revertIdentity);
+                    presentIdentity(accountId, identity, false, revertIdentity);
                     m_editorDirty = true;
                     updateActions();
                     return;

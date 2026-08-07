@@ -27,6 +27,7 @@ class QTabWidget;
 class QTimer;
 class QToolBar;
 class QToolButton;
+class QVBoxLayout;
 
 namespace javelin::gui::messageview
 {
@@ -75,6 +76,7 @@ namespace javelin::gui::compose
         [[nodiscard]] bool operationInFlight() const;
         [[nodiscard]] bool canSend() const;
         [[nodiscard]] bool richTextEnabled() const;
+        [[nodiscard]] QMenu* signatureMenu() const;
 
         void saveDraftAndClose();
         void setRichTextEnabled(bool enabled);
@@ -100,6 +102,20 @@ namespace javelin::gui::compose
         void manageIdentitiesRequested(QString accountId, QString identityId);
 
       private:
+        enum class RecipientType
+        {
+            To,
+            Cc,
+            Bcc,
+        };
+
+        struct RecipientRow
+        {
+            QWidget* widget = nullptr;
+            QComboBox* typeCombo = nullptr;
+            QLineEdit* edit = nullptr;
+        };
+
         enum class DeferredOperation
         {
             None,
@@ -123,7 +139,14 @@ namespace javelin::gui::compose
         void refreshPreview();
         void syncSnapshotFromUi();
         void switchBodyFormat(bool richText);
-        void setOptionalRecipientVisible(QWidget* row, QToolButton* button, bool visible);
+        void addRecipientRow(RecipientType type, const QString& text = {});
+        void resetRecipientRows();
+        void ensureTrailingRecipientRow();
+        void setRecipientText(RecipientType type, const QString& text);
+        [[nodiscard]] QString recipientText(RecipientType type) const;
+        [[nodiscard]] std::vector<javelin::jmap::domain::EmailAddress>
+        recipientAddresses(RecipientType type) const;
+        void updateRecipientRowWidths();
         void scheduleWorkingCopySave();
         void persistWorkingCopy();
         void setBusy(bool busy);
@@ -170,16 +193,13 @@ namespace javelin::gui::compose
         DeferredOperation m_deferredOperation = DeferredOperation::None;
         QTimer* m_autosaveTimer = nullptr;
         QComboBox* m_fromCombo = nullptr;
-        QToolButton* m_signatureButton = nullptr;
         QMenu* m_signatureMenu = nullptr;
-        QLineEdit* m_toEdit = nullptr;
-        QLineEdit* m_ccEdit = nullptr;
-        QLineEdit* m_bccEdit = nullptr;
         QLineEdit* m_subjectEdit = nullptr;
-        QWidget* m_ccRow = nullptr;
-        QWidget* m_bccRow = nullptr;
-        QToolButton* m_ccButton = nullptr;
-        QToolButton* m_bccButton = nullptr;
+        QVBoxLayout* m_recipientRowsLayout = nullptr;
+        std::vector<RecipientRow> m_recipientRows;
+        QLabel* m_fromLabel = nullptr;
+        QLabel* m_subjectLabel = nullptr;
+        int m_headerLabelWidth = 0;
         QToolBar* m_formatToolbar = nullptr;
         KActionCollection* m_actionCollection = nullptr;
         JavelinComposerEdit* m_richTextEdit = nullptr;

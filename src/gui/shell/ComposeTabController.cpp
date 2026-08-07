@@ -179,8 +179,15 @@ namespace javelin::gui::shell
         return {
             .richText = widget->richTextEnabled(),
             .canSend = widget->canSend(),
+            .canUseSignature = !widget->operationInFlight(),
             .canToggleRichText = !widget->operationInFlight(),
         };
+    }
+
+    QMenu* ComposeTabController::signatureMenuForTab(const TabState* tab) const
+    {
+        const auto* widget = composeWidgetForTab(tab);
+        return widget != nullptr ? widget->signatureMenu() : nullptr;
     }
 
     QWidget* ComposeTabController::contentWidgetForTab(const TabState* tab) const

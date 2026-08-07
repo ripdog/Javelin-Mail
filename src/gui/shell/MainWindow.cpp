@@ -916,6 +916,11 @@ namespace javelin::gui::shell
         actionCollection()->addAction(QStringLiteral("compose_attach_files"),
                                       m_composeAttachFilesAction);
 
+        m_composeSignatureAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-signature")),
+                                               i18n("Signature"), this);
+        actionCollection()->addAction(QStringLiteral("compose_signature"),
+                                      m_composeSignatureAction);
+
         m_composeRichTextAction =
             new QAction(QIcon::fromTheme(QStringLiteral("preferences-desktop-font")),
                         i18nc("@action:button compose mode", "Rich Text"), this);
@@ -1901,6 +1906,9 @@ namespace javelin::gui::shell
             const auto state = m_composeTabController->toolbarState(activeTab());
             const QSignalBlocker blocker{m_composeRichTextAction};
             m_composeSendAction->setEnabled(state.canSend);
+            auto* signatureMenu = m_composeTabController->signatureMenuForTab(activeTab());
+            m_composeSignatureAction->setMenu(signatureMenu);
+            m_composeSignatureAction->setEnabled(state.canUseSignature && signatureMenu != nullptr);
             m_composeRichTextAction->setChecked(state.richText);
             m_composeRichTextAction->setEnabled(state.canToggleRichText);
         }
