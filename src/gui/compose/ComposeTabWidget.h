@@ -80,6 +80,7 @@ namespace javelin::gui::compose
 
         void saveDraftAndClose();
         void setRichTextEnabled(bool enabled);
+        void editCurrentSignature();
 
       public Q_SLOTS:
         void attachFiles();

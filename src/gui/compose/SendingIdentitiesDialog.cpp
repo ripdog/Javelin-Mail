@@ -216,6 +216,7 @@ namespace javelin::gui::compose
         m_newButton->setObjectName(QStringLiteral("identityNewButton"));
         m_duplicateButton = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-copy")),
                                             i18n("Duplicate"), listPane);
+        m_duplicateButton->setObjectName(QStringLiteral("identityDuplicateButton"));
         m_deleteButton = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-delete")),
                                          i18n("Delete"), listPane);
         m_refreshButton = new QPushButton(QIcon::fromTheme(QStringLiteral("view-refresh")),
@@ -628,6 +629,7 @@ namespace javelin::gui::compose
         auto* layout = new QVBoxLayout(&dialog);
         auto* form = new QFormLayout;
         auto* accountCombo = new QComboBox(&dialog);
+        accountCombo->setObjectName(QStringLiteral("identityNewAccountCombo"));
         for (const auto& account : m_accounts)
         {
             accountCombo->addItem(account.displayName, QString::fromStdString(account.accountId));
@@ -642,14 +644,27 @@ namespace javelin::gui::compose
         nameEdit->setObjectName(QStringLiteral("identityNewNameEdit"));
         auto* emailEdit = new QLineEdit(&dialog);
         emailEdit->setObjectName(QStringLiteral("identityNewEmailEdit"));
-        const auto accountId = accountCombo->currentData().toString().toStdString();
-        const auto existing = m_identityReader.listByAccount(accountId);
-        if (const auto* identities =
-                std::get_if<std::vector<javelin::jmap::domain::Identity>>(&existing);
-            identities != nullptr && !identities->empty())
+        const auto applyDefaultEmail = [this, accountCombo, emailEdit]
         {
-            emailEdit->setText(QString::fromStdString(identities->front().email));
-        }
+            const auto accountId = accountCombo->currentData().toString();
+            const auto existing = m_identityReader.listByAccount(accountId.toStdString());
+            if (const auto* identities =
+                    std::get_if<std::vector<javelin::jmap::domain::Identity>>(&existing))
+            {
+                const auto firstSender =
+                    std::ranges::find_if(*identities, [](const auto& identity)
+                                         { return !isWildcardSenderIdentity(identity); });
+                if (firstSender != identities->end())
+                {
+                    emailEdit->setText(QString::fromStdString(firstSender->email));
+                    return;
+                }
+            }
+            emailEdit->setText(m_settings.accountForCachedId(accountId).loginEmail);
+        };
+        connect(accountCombo, qOverload<int>(&QComboBox::currentIndexChanged), &dialog,
+                [applyDefaultEmail](const int) { applyDefaultEmail(); });
+        applyDefaultEmail();
         form->addRow(i18n("Account:"), accountCombo);
         form->addRow(i18n("Display name:"), nameEdit);
         form->addRow(i18n("Email address:"), emailEdit);
@@ -704,6 +719,7 @@ namespace javelin::gui::compose
         presentIdentity(m_editorAccountId, duplicate, false, duplicate);
         m_editorDirty = true;
         updateActions();
+        saveCurrentIdentity();
     }
 
     void SendingIdentitiesDialog::saveCurrentIdentity()

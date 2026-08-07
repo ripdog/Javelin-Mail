@@ -80,6 +80,7 @@ namespace javelin::gui::shell
         void saveDraft(const TabState* tab);
         void attachFiles(const TabState* tab);
         void setRichTextEnabled(const TabState* tab, bool enabled);
+        void editCurrentSignature(const TabState* tab);
         [[nodiscard]] ComposeToolbarState toolbarState(const TabState* tab) const;
         [[nodiscard]] QMenu* signatureMenuForTab(const TabState* tab) const;
         [[nodiscard]] QWidget* contentWidgetForTab(const TabState* tab) const;

@@ -74,6 +74,7 @@
 #include <KActionCollection>
 #include <KLocalizedString>
 #include <KStandardAction>
+#include <KToolBar>
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 8, 0)
 #include <KColorSchemeManager>
@@ -556,6 +557,13 @@ namespace javelin::gui::shell
         setupGUI(KXmlGuiWindow::ToolBar | KXmlGuiWindow::Keys | KXmlGuiWindow::Save |
                      KXmlGuiWindow::Create,
                  QStringLiteral("javelinmailui.rc"));
+        if (auto* composeToolBar = toolBar(QStringLiteral("composeToolBar"));
+            composeToolBar != nullptr)
+        {
+            if (auto* signatureButton = qobject_cast<QToolButton*>(
+                    composeToolBar->widgetForAction(m_composeSignatureAction)))
+                signatureButton->setPopupMode(QToolButton::MenuButtonPopup);
+        }
         updateToolbarForActiveTab();
         connectSelection();
         connect(&m_messageNavigationPort, &javelin::app::MessageNavigationPort::routeRequested,
@@ -918,6 +926,8 @@ namespace javelin::gui::shell
 
         m_composeSignatureAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-signature")),
                                                i18n("Signature"), this);
+        connect(m_composeSignatureAction, &QAction::triggered, this,
+                [this] { m_composeTabController->editCurrentSignature(activeTab()); });
         actionCollection()->addAction(QStringLiteral("compose_signature"),
                                       m_composeSignatureAction);
 

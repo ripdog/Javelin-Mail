@@ -755,6 +755,14 @@ namespace javelin::gui::compose
         return m_signatureMenu;
     }
 
+    void ComposeTabWidget::editCurrentSignature()
+    {
+        if (!canSend())
+            return;
+        Q_EMIT manageIdentitiesRequested(m_fromCombo->currentData(senderAccountIdRole).toString(),
+                                         m_fromCombo->currentData(senderIdentityIdRole).toString());
+    }
+
     void ComposeTabWidget::setRichTextEnabled(const bool enabled)
     {
         switchBodyFormat(enabled);
@@ -1304,17 +1312,11 @@ namespace javelin::gui::compose
         }
 
         m_signatureMenu->addSeparator();
-        const auto openIdentityManager = [this]
-        {
-            Q_EMIT manageIdentitiesRequested(
-                m_fromCombo->currentData(senderAccountIdRole).toString(),
-                m_fromCombo->currentData(senderIdentityIdRole).toString());
-        };
         auto* editCurrent = m_signatureMenu->addAction(i18n("Edit Current Signature…"));
         editCurrent->setEnabled(m_fromCombo->currentIndex() >= 0);
-        connect(editCurrent, &QAction::triggered, this, openIdentityManager);
+        connect(editCurrent, &QAction::triggered, this, &ComposeTabWidget::editCurrentSignature);
         auto* manage = m_signatureMenu->addAction(i18n("Manage Identities and Signatures…"));
-        connect(manage, &QAction::triggered, this, openIdentityManager);
+        connect(manage, &QAction::triggered, this, &ComposeTabWidget::editCurrentSignature);
     }
 
     void ComposeTabWidget::applySnapshotToUi()

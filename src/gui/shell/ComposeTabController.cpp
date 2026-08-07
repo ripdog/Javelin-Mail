@@ -171,6 +171,12 @@ namespace javelin::gui::shell
         Q_EMIT toolbarStateChanged();
     }
 
+    void ComposeTabController::editCurrentSignature(const TabState* tab)
+    {
+        if (auto* widget = composeWidgetForTab(tab); widget != nullptr)
+            widget->editCurrentSignature();
+    }
+
     ComposeToolbarState ComposeTabController::toolbarState(const TabState* tab) const
     {
         const auto* widget = composeWidgetForTab(tab);
@@ -179,7 +185,7 @@ namespace javelin::gui::shell
         return {
             .richText = widget->richTextEnabled(),
             .canSend = widget->canSend(),
-            .canUseSignature = !widget->operationInFlight(),
+            .canUseSignature = widget->canSend(),
             .canToggleRichText = !widget->operationInFlight(),
         };
     }
@@ -289,8 +295,6 @@ namespace javelin::gui::shell
                 &ComposeTabController::statusMessage);
         connect(widget, &javelin::gui::compose::ComposeTabWidget::toolbarStateChanged, this,
                 &ComposeTabController::toolbarStateChanged);
-        connect(widget, &javelin::gui::compose::ComposeTabWidget::manageIdentitiesRequested, this,
-                &ComposeTabController::manageIdentitiesRequested);
         connect(widget, &javelin::gui::compose::ComposeTabWidget::manageIdentitiesRequested, this,
                 &ComposeTabController::manageIdentitiesRequested);
         connect(widget, &javelin::gui::compose::ComposeTabWidget::userInterventionRequired, this,
