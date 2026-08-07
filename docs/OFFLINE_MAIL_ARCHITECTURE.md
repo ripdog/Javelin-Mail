@@ -51,6 +51,16 @@ fetches additions plus updates to objects already known locally, and ignores cha
 the cached prefix. Later state-change refreshes update the same Email rows and effective membership.
 Raw message bodies are downloaded only after metadata enumeration completes.
 
+The `fetching` phase is itself durable. Restarting the daemon during body hydration does not repeat
+the full `Email/query`/`Email/get` crawl: after the normal foreground reconnect catch-up, the offline
+job reconciles its generation membership against current `email_mailboxes` and derives remaining
+work from Emails without a vault reference matching their current `blobId`. This naturally includes
+new mail and messages moved into any position in the mailbox while Javelin was offline. Hydration
+rechecks membership after each download pass and promotes the generation to `complete` only in the
+same transaction that verifies no current mailbox Email is missing its matching raw source. Mail
+arriving during hydration therefore extends the same generation instead of creating a transient
+false-complete state.
+
 Complete mailboxes paginate locally from effective membership. Partial synchronized mailboxes use
 their durable contiguous window prefix, while notification-only and visible online mailboxes retain
 bounded server query windows. Optimistic mailbox changes invalidate affected windows

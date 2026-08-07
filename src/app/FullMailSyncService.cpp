@@ -345,6 +345,267 @@ namespace javelin::app
                                            maximumFullMailboxPageSize);
         }
 
+        struct OfflineBodyWork
+        {
+            QString error;
+            std::uint64_t totalUnits = 0;
+            std::uint64_t totalBytes = 0;
+            std::uint64_t missingBytes = 0;
+            std::vector<std::pair<std::string, std::uint64_t>> downloads;
+        };
+
+        [[nodiscard]] QString
+        reconcileOfflineMailboxMembership(javelin::jmap::cache::DatabaseConnection& connection,
+                                          const std::string_view accountId,
+                                          const std::string_view mailboxId)
+        {
+            auto& database = connection.database();
+            QSqlQuery addMembership{database};
+            addMembership.prepare(QStringLiteral(
+                "INSERT INTO offline_mailbox_membership(account_id,mailbox_id,email_id,generation,"
+                "position) SELECT s.account_id,s.mailbox_id,em.email_id,s.generation,"
+                "COALESCE((SELECT MAX(existing.position)+1 FROM offline_mailbox_membership "
+                "existing WHERE existing.account_id=s.account_id AND "
+                "existing.mailbox_id=s.mailbox_id AND existing.generation=s.generation),0)+"
+                "ROW_NUMBER() OVER (ORDER BY em.email_id)-1 FROM offline_mailbox_scopes s INNER "
+                "JOIN email_mailboxes em ON em.account_id=s.account_id AND "
+                "em.mailbox_id=s.mailbox_id WHERE s.account_id=:account AND "
+                "s.mailbox_id=:mailbox AND s.desired=1 AND s.status IN ('fetching','complete') "
+                "AND NOT EXISTS(SELECT 1 FROM offline_mailbox_membership existing WHERE "
+                "existing.account_id=s.account_id AND existing.mailbox_id=s.mailbox_id AND "
+                "existing.generation=s.generation AND existing.email_id=em.email_id)"));
+            addMembership.bindValue(QStringLiteral(":account"),
+                                    QString::fromStdString(std::string{accountId}));
+            addMembership.bindValue(QStringLiteral(":mailbox"),
+                                    QString::fromStdString(std::string{mailboxId}));
+            if (!addMembership.exec())
+                return QStringLiteral("Extend offline mailbox membership: ") +
+                       addMembership.lastError().text();
+
+            QSqlQuery removeMembership{database};
+            removeMembership.prepare(QStringLiteral(
+                "DELETE FROM offline_mailbox_membership AS om WHERE om.account_id=:account AND "
+                "om.mailbox_id=:mailbox AND om.generation=(SELECT generation FROM "
+                "offline_mailbox_scopes WHERE account_id=:account AND mailbox_id=:mailbox AND "
+                "desired=1 AND status IN ('fetching','complete')) AND NOT EXISTS(SELECT 1 FROM "
+                "email_mailboxes em WHERE em.account_id=om.account_id AND "
+                "em.mailbox_id=om.mailbox_id AND em.email_id=om.email_id)"));
+            removeMembership.bindValue(QStringLiteral(":account"),
+                                       QString::fromStdString(std::string{accountId}));
+            removeMembership.bindValue(QStringLiteral(":mailbox"),
+                                       QString::fromStdString(std::string{mailboxId}));
+            if (!removeMembership.exec())
+                return QStringLiteral("Prune offline mailbox membership: ") +
+                       removeMembership.lastError().text();
+
+            QSqlQuery retain{database};
+            retain.prepare(QStringLiteral(
+                "UPDATE mail_vault_email_refs SET retention='full_sync' WHERE account_id=:account "
+                "AND email_id IN (SELECT email_id FROM email_mailboxes WHERE account_id=:account "
+                "AND mailbox_id=:mailbox)"));
+            retain.bindValue(QStringLiteral(":account"),
+                             QString::fromStdString(std::string{accountId}));
+            retain.bindValue(QStringLiteral(":mailbox"),
+                             QString::fromStdString(std::string{mailboxId}));
+            if (!retain.exec())
+                return QStringLiteral("Retain synchronized mailbox changes: ") +
+                       retain.lastError().text();
+
+            QSqlQuery advanceScope{database};
+            advanceScope.prepare(QStringLiteral(
+                "UPDATE offline_mailbox_scopes SET email_state=COALESCE((SELECT state_token FROM "
+                "sync_state WHERE account_id=:account AND object_type='Email' AND query_key=''),"
+                "email_state),expected_total=(SELECT COUNT(*) FROM email_mailboxes WHERE "
+                "account_id=:account AND mailbox_id=:mailbox),completed_total=(SELECT COUNT(*) "
+                "FROM email_mailboxes WHERE account_id=:account AND mailbox_id=:mailbox),"
+                "estimated_bytes=(SELECT COALESCE(SUM(e.size),0) FROM email_mailboxes m JOIN "
+                "emails e ON e.account_id=m.account_id AND e.email_id=m.email_id WHERE "
+                "m.account_id=:account AND m.mailbox_id=:mailbox),completed_bytes=(SELECT "
+                "COALESCE(SUM(e.size),0) FROM email_mailboxes m JOIN emails e ON "
+                "e.account_id=m.account_id AND e.email_id=m.email_id JOIN mail_vault_email_refs r "
+                "ON r.account_id=e.account_id AND r.email_id=e.email_id AND r.blob_id=e.blob_id "
+                "WHERE m.account_id=:account AND m.mailbox_id=:mailbox),updated_at="
+                "CURRENT_TIMESTAMP WHERE account_id=:account AND mailbox_id=:mailbox AND desired=1 "
+                "AND status IN ('fetching','complete')"));
+            advanceScope.bindValue(QStringLiteral(":account"),
+                                   QString::fromStdString(std::string{accountId}));
+            advanceScope.bindValue(QStringLiteral(":mailbox"),
+                                   QString::fromStdString(std::string{mailboxId}));
+            if (!advanceScope.exec())
+                return QStringLiteral("Advance offline mailbox baseline: ") +
+                       advanceScope.lastError().text();
+            return {};
+        }
+
+        [[nodiscard]] OfflineBodyWork
+        offlineBodyWork(javelin::jmap::cache::DatabaseConnection& connection,
+                        const std::string_view accountId, const std::string_view mailboxId)
+        {
+            OfflineBodyWork work;
+            QSqlQuery totals{connection.database()};
+            totals.prepare(QStringLiteral(
+                "SELECT COUNT(*),COALESCE(SUM(e.size),0) FROM email_mailboxes m JOIN emails e ON "
+                "e.account_id=m.account_id AND e.email_id=m.email_id WHERE m.account_id=:account "
+                "AND m.mailbox_id=:mailbox"));
+            totals.bindValue(QStringLiteral(":account"),
+                             QString::fromStdString(std::string{accountId}));
+            totals.bindValue(QStringLiteral(":mailbox"),
+                             QString::fromStdString(std::string{mailboxId}));
+            if (!totals.exec() || !totals.next())
+            {
+                work.error = QStringLiteral("Read offline mailbox body totals: ") +
+                             totals.lastError().text();
+                return work;
+            }
+            work.totalUnits = totals.value(0).toULongLong();
+            work.totalBytes = totals.value(1).toULongLong();
+            totals.finish();
+
+            QSqlQuery missing{connection.database()};
+            missing.prepare(QStringLiteral(
+                "SELECT e.email_id,e.size FROM email_mailboxes m JOIN emails e ON "
+                "e.account_id=m.account_id AND e.email_id=m.email_id LEFT JOIN "
+                "mail_vault_email_refs r ON r.account_id=e.account_id AND r.email_id=e.email_id "
+                "AND r.blob_id=e.blob_id WHERE m.account_id=:account AND m.mailbox_id=:mailbox AND "
+                "r.email_id IS NULL ORDER BY e.received_at DESC,e.email_id"));
+            missing.bindValue(QStringLiteral(":account"),
+                              QString::fromStdString(std::string{accountId}));
+            missing.bindValue(QStringLiteral(":mailbox"),
+                              QString::fromStdString(std::string{mailboxId}));
+            if (!missing.exec())
+            {
+                work.error = QStringLiteral("Read missing offline mailbox bodies: ") +
+                             missing.lastError().text();
+                return work;
+            }
+            while (missing.next())
+            {
+                const auto size = missing.value(1).toULongLong();
+                work.missingBytes += size;
+                work.downloads.emplace_back(missing.value(0).toString().toStdString(), size);
+            }
+            return work;
+        }
+
+        struct OfflineCompletionResult
+        {
+            QString error;
+            bool complete = false;
+            std::uint64_t totalUnits = 0;
+            std::uint64_t totalBytes = 0;
+        };
+
+        [[nodiscard]] OfflineCompletionResult
+        tryCompleteOfflineMailbox(javelin::jmap::cache::DatabaseConnection& connection,
+                                  const std::string_view accountId,
+                                  const std::string_view mailboxId, const std::uint64_t generation)
+        {
+            auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                connection, QStringLiteral("Complete offline mailbox hydration"));
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+                return {.error = error->message};
+            auto transaction =
+                std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+
+            if (const auto error =
+                    reconcileOfflineMailboxMembership(connection, accountId, mailboxId);
+                !error.isEmpty())
+            {
+                transaction.rollback();
+                return {.error = error};
+            }
+
+            QSqlQuery missing{connection.database()};
+            missing.prepare(QStringLiteral(
+                "SELECT EXISTS(SELECT 1 FROM email_mailboxes m JOIN emails e ON "
+                "e.account_id=m.account_id AND e.email_id=m.email_id LEFT JOIN "
+                "mail_vault_email_refs r ON r.account_id=e.account_id AND r.email_id=e.email_id "
+                "AND r.blob_id=e.blob_id WHERE m.account_id=:account AND m.mailbox_id=:mailbox AND "
+                "r.email_id IS NULL)"));
+            missing.bindValue(QStringLiteral(":account"),
+                              QString::fromStdString(std::string{accountId}));
+            missing.bindValue(QStringLiteral(":mailbox"),
+                              QString::fromStdString(std::string{mailboxId}));
+            if (!missing.exec() || !missing.next())
+            {
+                const auto error = QStringLiteral("Verify offline mailbox hydration: ") +
+                                   missing.lastError().text();
+                transaction.rollback();
+                return {.error = error};
+            }
+            if (missing.value(0).toBool())
+            {
+                if (const auto error = transaction.commit())
+                    return {.error = error->message};
+                return {};
+            }
+
+            QSqlQuery totals{connection.database()};
+            totals.prepare(QStringLiteral(
+                "SELECT COALESCE(expected_total,0),COALESCE(estimated_bytes,0) FROM "
+                "offline_mailbox_scopes WHERE account_id=:account AND mailbox_id=:mailbox AND "
+                "desired=1 AND generation=:generation"));
+            totals.bindValue(QStringLiteral(":account"),
+                             QString::fromStdString(std::string{accountId}));
+            totals.bindValue(QStringLiteral(":mailbox"),
+                             QString::fromStdString(std::string{mailboxId}));
+            totals.bindValue(QStringLiteral(":generation"), static_cast<qulonglong>(generation));
+            if (!totals.exec() || !totals.next())
+            {
+                const auto error = totals.lastError().text().isEmpty()
+                                       ? QStringLiteral("Offline mailbox totals are unavailable.")
+                                       : totals.lastError().text();
+                transaction.rollback();
+                return {.error = error};
+            }
+            const auto totalUnits = totals.value(0).toULongLong();
+            const auto totalBytes = totals.value(1).toULongLong();
+
+            QSqlQuery complete{connection.database()};
+            complete.prepare(QStringLiteral(
+                "UPDATE offline_mailbox_scopes SET status='complete',completed_generation="
+                ":generation,completed_bytes=COALESCE(estimated_bytes,completed_bytes),"
+                "latest_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE account_id=:account AND "
+                "mailbox_id=:mailbox AND desired=1 AND generation=:generation AND status IN "
+                "('fetching','complete')"));
+            complete.bindValue(QStringLiteral(":generation"), static_cast<qulonglong>(generation));
+            complete.bindValue(QStringLiteral(":account"),
+                               QString::fromStdString(std::string{accountId}));
+            complete.bindValue(QStringLiteral(":mailbox"),
+                               QString::fromStdString(std::string{mailboxId}));
+            if (!complete.exec() || complete.numRowsAffected() != 1)
+            {
+                const auto error = complete.lastError().text().isEmpty()
+                                       ? QStringLiteral("Offline mailbox generation changed before "
+                                                        "hydration completed.")
+                                       : complete.lastError().text();
+                transaction.rollback();
+                return {.error = error};
+            }
+
+            QSqlQuery retention{connection.database()};
+            retention.prepare(QStringLiteral(
+                "UPDATE mail_vault_email_refs SET retention='full_sync' WHERE account_id=:account "
+                "AND email_id IN (SELECT email_id FROM email_mailboxes WHERE account_id=:account "
+                "AND mailbox_id=:mailbox)"));
+            retention.bindValue(QStringLiteral(":account"),
+                                QString::fromStdString(std::string{accountId}));
+            retention.bindValue(QStringLiteral(":mailbox"),
+                                QString::fromStdString(std::string{mailboxId}));
+            if (!retention.exec())
+            {
+                const auto error =
+                    QStringLiteral("Retain synchronized mail: ") + retention.lastError().text();
+                transaction.rollback();
+                return {.error = error};
+            }
+            if (const auto error = transaction.commit())
+                return {.error = error->message};
+            return {
+                .error = {}, .complete = true, .totalUnits = totalUnits, .totalBytes = totalBytes};
+        }
+
         [[nodiscard]] QString
         mailboxDisplayName(javelin::jmap::cache::DatabaseConnection& connection,
                            const std::string_view accountId, const std::string_view mailboxId)
@@ -502,86 +763,37 @@ namespace javelin::app
 
     void FullMailSyncService::requestCatchUp(const std::string_view accountId)
     {
-        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         if (m_runningAccounts.contains(std::string{accountId}))
         {
             m_dirtyAccounts.insert(std::string{accountId});
             return;
         }
+
         for (const auto& [id, scope] : m_scopes)
         {
             if (scope.accountId != accountId)
                 continue;
-            QSqlQuery addMembership{m_connection.database()};
-            addMembership.prepare(QStringLiteral(
-                "INSERT INTO offline_mailbox_membership(account_id,mailbox_id,email_id,generation,"
-                "position) SELECT s.account_id,s.mailbox_id,em.email_id,s.generation,"
-                "COALESCE((SELECT MAX(existing.position)+1 FROM offline_mailbox_membership "
-                "existing WHERE existing.account_id=s.account_id AND "
-                "existing.mailbox_id=s.mailbox_id AND existing.generation=s.generation),0)+"
-                "ROW_NUMBER() OVER (ORDER BY em.email_id)-1 FROM offline_mailbox_scopes s INNER "
-                "JOIN email_mailboxes em ON em.account_id=s.account_id AND "
-                "em.mailbox_id=s.mailbox_id WHERE s.account_id=:account AND "
-                "s.mailbox_id=:mailbox AND s.status='complete' AND NOT EXISTS(SELECT 1 FROM "
-                "offline_mailbox_membership existing WHERE existing.account_id=s.account_id AND "
-                "existing.mailbox_id=s.mailbox_id AND existing.generation=s.generation AND "
-                "existing.email_id=em.email_id)"));
-            addMembership.bindValue(QStringLiteral(":account"),
-                                    QString::fromStdString(scope.accountId));
-            addMembership.bindValue(QStringLiteral(":mailbox"),
-                                    QString::fromStdString(scope.mailboxId));
-            if (!addMembership.exec())
+
+            auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                m_connection, QStringLiteral("Reconcile offline mailbox catch-up"));
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
             {
-                logDatabaseFailure(QStringLiteral("Extend offline mailbox membership"),
-                                   addMembership);
+                qWarning().noquote() << "Reconcile offline mailbox catch-up" << error->message;
                 continue;
             }
-            QSqlQuery removeMembership{m_connection.database()};
-            removeMembership.prepare(QStringLiteral(
-                "DELETE FROM offline_mailbox_membership AS om WHERE om.account_id=:account AND "
-                "om.mailbox_id=:mailbox AND om.generation=(SELECT generation FROM "
-                "offline_mailbox_scopes WHERE account_id=:account AND mailbox_id=:mailbox AND "
-                "status='complete') AND NOT EXISTS(SELECT 1 FROM email_mailboxes em WHERE "
-                "em.account_id=om.account_id AND em.mailbox_id=om.mailbox_id AND "
-                "em.email_id=om.email_id)"));
-            removeMembership.bindValue(QStringLiteral(":account"),
-                                       QString::fromStdString(scope.accountId));
-            removeMembership.bindValue(QStringLiteral(":mailbox"),
-                                       QString::fromStdString(scope.mailboxId));
-            if (!removeMembership.exec())
+            auto transaction =
+                std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+
+            if (const auto error = reconcileOfflineMailboxMembership(m_connection, scope.accountId,
+                                                                     scope.mailboxId);
+                !error.isEmpty())
             {
-                logDatabaseFailure(QStringLiteral("Prune offline mailbox membership"),
-                                   removeMembership);
+                qWarning().noquote() << error;
+                transaction.rollback();
                 continue;
             }
-            QSqlQuery advanceScope{m_connection.database()};
-            advanceScope.prepare(QStringLiteral(
-                "UPDATE offline_mailbox_scopes SET email_state=COALESCE((SELECT state_token FROM "
-                "sync_state WHERE account_id=:account AND object_type='Email' AND query_key=''),"
-                "email_state),expected_total=(SELECT COUNT(*) FROM email_mailboxes WHERE "
-                "account_id=:account AND mailbox_id=:mailbox),completed_total=(SELECT COUNT(*) "
-                "FROM email_mailboxes WHERE account_id=:account AND mailbox_id=:mailbox),"
-                "updated_at=CURRENT_TIMESTAMP WHERE account_id=:account AND mailbox_id=:mailbox "
-                "AND status='complete'"));
-            advanceScope.bindValue(QStringLiteral(":account"),
-                                   QString::fromStdString(scope.accountId));
-            advanceScope.bindValue(QStringLiteral(":mailbox"),
-                                   QString::fromStdString(scope.mailboxId));
-            if (!advanceScope.exec())
-            {
-                logDatabaseFailure(QStringLiteral("Advance offline mailbox baseline"),
-                                   advanceScope);
-                continue;
-            }
-            QSqlQuery retain{m_connection.database()};
-            retain.prepare(QStringLiteral(
-                "UPDATE mail_vault_email_refs SET retention='full_sync' WHERE "
-                "account_id=:account AND email_id IN (SELECT email_id FROM email_mailboxes WHERE "
-                "account_id=:account AND mailbox_id=:mailbox)"));
-            retain.bindValue(QStringLiteral(":account"), QString::fromStdString(scope.accountId));
-            retain.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(scope.mailboxId));
-            if (!retain.exec())
-                logDatabaseFailure(QStringLiteral("Retain synchronized mailbox changes"), retain);
+
             QSqlQuery missing{m_connection.database()};
             missing.prepare(QStringLiteral(
                 "SELECT EXISTS(SELECT 1 FROM email_mailboxes m JOIN emails e ON "
@@ -592,18 +804,48 @@ namespace javelin::app
             missing.bindValue(QStringLiteral(":account"), QString::fromStdString(scope.accountId));
             missing.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(scope.mailboxId));
             if (!missing.exec() || !missing.next())
+            {
+                logDatabaseFailure(QStringLiteral("Inspect offline mailbox catch-up"), missing);
+                transaction.rollback();
                 continue;
+            }
             const bool hasMissingSource = missing.value(0).toBool();
             missing.finish();
-            if (!hasMissingSource)
-                continue;
-            QSqlQuery query{m_connection.database()};
-            query.prepare(QStringLiteral(
-                "UPDATE background_jobs SET status='queued',updated_at=CURRENT_TIMESTAMP WHERE "
-                "job_id=:id AND status IN ('complete','failed')"));
-            query.bindValue(QStringLiteral(":id"), QString::fromStdString(id));
-            if (!query.exec())
-                logDatabaseFailure(QStringLiteral("Queue full mailbox catch-up"), query);
+
+            if (hasMissingSource)
+            {
+                QSqlQuery fetching{m_connection.database()};
+                fetching.prepare(QStringLiteral(
+                    "UPDATE offline_mailbox_scopes SET status='fetching',updated_at="
+                    "CURRENT_TIMESTAMP WHERE account_id=:account AND mailbox_id=:mailbox AND "
+                    "desired=1 AND status='complete'"));
+                fetching.bindValue(QStringLiteral(":account"),
+                                   QString::fromStdString(scope.accountId));
+                fetching.bindValue(QStringLiteral(":mailbox"),
+                                   QString::fromStdString(scope.mailboxId));
+                if (!fetching.exec())
+                {
+                    logDatabaseFailure(QStringLiteral("Resume offline mailbox hydration"),
+                                       fetching);
+                    transaction.rollback();
+                    continue;
+                }
+
+                QSqlQuery queue{m_connection.database()};
+                queue.prepare(QStringLiteral(
+                    "UPDATE background_jobs SET status='queued',updated_at=CURRENT_TIMESTAMP WHERE "
+                    "job_id=:id AND status IN ('complete','failed') AND pause_requested=0"));
+                queue.bindValue(QStringLiteral(":id"), QString::fromStdString(id));
+                if (!queue.exec())
+                {
+                    logDatabaseFailure(QStringLiteral("Queue full mailbox catch-up"), queue);
+                    transaction.rollback();
+                    continue;
+                }
+            }
+
+            if (const auto error = transaction.commit())
+                qWarning().noquote() << "Commit offline mailbox catch-up" << error->message;
         }
         schedulePump();
     }
@@ -734,20 +976,39 @@ namespace javelin::app
             co_return;
         }
 
-        const bool hasCompletedBaseline = !state.value(2).isNull();
         const QString scopeStatus = state.value(0).toString();
+        const bool hasCompletedGeneration = !state.value(2).isNull();
         std::uint64_t generation = state.value(1).toULongLong();
-        progress.completedUnits = state.value(4).toULongLong();
-        if (!state.value(3).isNull())
-            progress.totalUnits = state.value(3).toULongLong();
-        progress.detail = scopeStatus == QStringLiteral("enumerating")
-                              ? i18n("Reading mailbox contents")
-                              : i18n("Downloading complete messages");
+        const bool resumeBodyHydration = scopeStatus == QStringLiteral("fetching");
+        const bool completedBaseline =
+            scopeStatus == QStringLiteral("complete") && hasCompletedGeneration;
+        if ((resumeBodyHydration && generation == 0) ||
+            (scopeStatus == QStringLiteral("complete") && !hasCompletedGeneration))
+        {
+            state.finish();
+            static_cast<void>(
+                m_scheduler.update(scope.jobId, WorkStatus::Failed, progress, QStringLiteral("{}"),
+                                   i18n("Offline mailbox synchronization state is inconsistent.")));
+            co_return;
+        }
+
+        const bool needsEnumeration = !resumeBodyHydration && !completedBaseline;
+        if (needsEnumeration)
+        {
+            progress.completedUnits = state.value(4).toULongLong();
+            if (!state.value(3).isNull())
+                progress.totalUnits = state.value(3).toULongLong();
+            progress.detail = i18n("Reading mailbox contents");
+        }
+        else
+        {
+            progress.detail = i18n("Downloading complete messages");
+        }
         state.finish();
         static_cast<void>(
             m_scheduler.update(scope.jobId, WorkStatus::Running, progress,
                                checkpoint(scopeStatus, progress.completedUnits, generation)));
-        if (!hasCompletedBaseline)
+        if (needsEnumeration)
         {
             const bool resumeEnumeration =
                 scopeStatus == QStringLiteral("enumerating") && generation != 0;
@@ -1012,136 +1273,241 @@ namespace javelin::app
             }
         }
 
-        QSqlQuery totals{m_connection.database()};
-        totals.prepare(QStringLiteral(
-            "SELECT COALESCE(SUM(e.size),0),COUNT(*) FROM email_mailboxes m JOIN emails "
-            "e ON e.account_id=m.account_id AND e.email_id=m.email_id LEFT JOIN "
-            "mail_vault_email_refs r ON r.account_id=e.account_id AND r.email_id=e.email_id AND "
-            "r.blob_id=e.blob_id WHERE m.account_id=:account AND m.mailbox_id=:mailbox AND "
-            "r.email_id IS NULL"));
-        totals.bindValue(QStringLiteral(":account"), QString::fromStdString(scope.accountId));
-        totals.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(scope.mailboxId));
-        if (!totals.exec() || !totals.next())
-        {
-            static_cast<void>(m_scheduler.update(scope.jobId, WorkStatus::Failed, progress,
-                                                 QStringLiteral("{}"), totals.lastError().text()));
-            co_return;
-        }
-        const std::uint64_t remainingBytes = totals.value(0).toULongLong();
-        const std::uint64_t missingCount = totals.value(1).toULongLong();
-        totals.finish();
-        if (!hasDiskSpace(scope.accountId, scope.mailboxId, remainingBytes))
-        {
-            progress.totalBytes = remainingBytes;
-            progress.totalUnits = missingCount;
-            progress.detail = i18n("Waiting for free disk space");
-            static_cast<void>(
-                m_scheduler.update(scope.jobId, WorkStatus::WaitingForSpace, progress));
-            QTimer::singleShot(std::chrono::minutes{1}, this,
-                               [this, id = scope.jobId]()
-                               {
-                                   const auto current = m_scheduler.find(id);
-                                   const auto* record =
-                                       std::get_if<std::optional<WorkRecord>>(&current);
-                                   if (record != nullptr && record->has_value() &&
-                                       (*record)->status == WorkStatus::WaitingForSpace &&
-                                       !(*record)->pauseRequested)
-                                   {
-                                       static_cast<void>(m_scheduler.update(
-                                           id, WorkStatus::Queued, (*record)->progress,
-                                           (*record)->checkpointJson));
-                                   }
-                               });
-            co_return;
-        }
-
-        progress = {.completedUnits = 0,
-                    .totalUnits = missingCount,
-                    .completedBytes = 0,
-                    .totalBytes = remainingBytes,
-                    .detail = i18n("Downloading complete messages")};
         QElapsedTimer progressPersistenceTimer;
         progressPersistenceTimer.start();
-        QSqlQuery missing{m_connection.database()};
-        missing.prepare(QStringLiteral(
-            "SELECT e.email_id,e.size FROM email_mailboxes m JOIN emails e ON "
-            "e.account_id=m.account_id AND e.email_id=m.email_id LEFT JOIN mail_vault_email_refs r "
-            "ON r.account_id=e.account_id AND r.email_id=e.email_id AND r.blob_id=e.blob_id WHERE "
-            "m.account_id=:account AND m.mailbox_id=:mailbox AND "
-            "r.email_id IS NULL ORDER BY e.received_at DESC,e.email_id"));
-        missing.bindValue(QStringLiteral(":account"), QString::fromStdString(scope.accountId));
-        missing.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(scope.mailboxId));
-        if (!missing.exec())
+        std::uint64_t completedTotalUnits = 0;
+        std::uint64_t completedTotalBytes = 0;
+        while (true)
         {
-            static_cast<void>(m_scheduler.update(scope.jobId, WorkStatus::Failed, progress,
-                                                 QStringLiteral("{}"), missing.lastError().text()));
-            co_return;
-        }
-        std::vector<std::pair<std::string, std::uint64_t>> downloads;
-        while (missing.next())
-            downloads.emplace_back(missing.value(0).toString().toStdString(),
-                                   missing.value(1).toULongLong());
-        missing.finish();
-
-        for (const auto& [emailId, size] : downloads)
-        {
-            if (!co_await waitForBackgroundNetwork(scope.jobId))
+            OfflineBodyWork work;
+            auto prepareResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                m_connection, QStringLiteral("Prepare offline mailbox hydration"));
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&prepareResult))
             {
-                static_cast<void>(m_scheduler.pause(scope.jobId));
+                static_cast<void>(m_scheduler.update(scope.jobId, WorkStatus::Failed, progress,
+                                                     QStringLiteral("{}"), error->message));
                 co_return;
             }
-            const auto result = co_await m_core.refreshMessageContent(
-                liveSettings(*accountSettings), scope.accountId, emailId);
-            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+            auto prepare =
+                std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(prepareResult));
+            if (const auto error = reconcileOfflineMailboxMembership(m_connection, scope.accountId,
+                                                                     scope.mailboxId);
+                !error.isEmpty())
+            {
+                prepare.rollback();
+                static_cast<void>(m_scheduler.update(scope.jobId, WorkStatus::Failed, progress,
+                                                     QStringLiteral("{}"), error));
+                co_return;
+            }
+            work = offlineBodyWork(m_connection, scope.accountId, scope.mailboxId);
+            if (!work.error.isEmpty())
+            {
+                prepare.rollback();
+                static_cast<void>(m_scheduler.update(scope.jobId, WorkStatus::Failed, progress,
+                                                     QStringLiteral("{}"), work.error));
+                co_return;
+            }
+            if (!work.downloads.empty())
+            {
+                QSqlQuery fetching{m_connection.database()};
+                fetching.prepare(QStringLiteral(
+                    "UPDATE offline_mailbox_scopes SET status='fetching',updated_at="
+                    "CURRENT_TIMESTAMP WHERE account_id=:account AND mailbox_id=:mailbox AND "
+                    "desired=1 AND generation=:generation AND status='complete'"));
+                fetching.bindValue(QStringLiteral(":account"),
+                                   QString::fromStdString(scope.accountId));
+                fetching.bindValue(QStringLiteral(":mailbox"),
+                                   QString::fromStdString(scope.mailboxId));
+                fetching.bindValue(QStringLiteral(":generation"),
+                                   static_cast<qulonglong>(generation));
+                if (!fetching.exec())
+                {
+                    const auto error = fetching.lastError().text();
+                    prepare.rollback();
+                    static_cast<void>(m_scheduler.update(scope.jobId, WorkStatus::Failed, progress,
+                                                         QStringLiteral("{}"), error));
+                    co_return;
+                }
+            }
+            if (const auto error = prepare.commit())
+            {
+                static_cast<void>(m_scheduler.update(scope.jobId, WorkStatus::Failed, progress,
+                                                     QStringLiteral("{}"), error->message));
+                co_return;
+            }
+
+            const auto missingUnits = static_cast<std::uint64_t>(work.downloads.size());
+            progress = {
+                .completedUnits =
+                    work.totalUnits >= missingUnits ? work.totalUnits - missingUnits : 0,
+                .totalUnits = work.totalUnits,
+                .completedBytes =
+                    work.totalBytes >= work.missingBytes ? work.totalBytes - work.missingBytes : 0,
+                .totalBytes = work.totalBytes,
+                .detail = i18n("Downloading complete messages"),
+            };
+            static_cast<void>(m_scheduler.update(
+                scope.jobId, WorkStatus::Running, progress,
+                checkpoint(QStringLiteral("fetching"), progress.completedUnits, generation)));
+
+            if (work.downloads.empty())
+            {
+                const auto completion = tryCompleteOfflineMailbox(m_connection, scope.accountId,
+                                                                  scope.mailboxId, generation);
+                if (!completion.error.isEmpty())
+                {
+                    static_cast<void>(m_scheduler.update(
+                        scope.jobId, WorkStatus::Failed, progress,
+                        checkpoint(QStringLiteral("fetching"), progress.completedUnits, generation),
+                        completion.error));
+                    co_return;
+                }
+                if (completion.complete)
+                {
+                    completedTotalUnits = completion.totalUnits;
+                    completedTotalBytes = completion.totalBytes;
+                    break;
+                }
+                continue;
+            }
+
+            if (!hasDiskSpace(scope.accountId, scope.mailboxId, work.missingBytes))
+            {
+                progress.detail = i18n("Waiting for free disk space");
+                static_cast<void>(
+                    m_scheduler.update(scope.jobId, WorkStatus::WaitingForSpace, progress));
+                QTimer::singleShot(std::chrono::minutes{1}, this,
+                                   [this, id = scope.jobId]()
+                                   {
+                                       const auto current = m_scheduler.find(id);
+                                       const auto* record =
+                                           std::get_if<std::optional<WorkRecord>>(&current);
+                                       if (record != nullptr && record->has_value() &&
+                                           (*record)->status == WorkStatus::WaitingForSpace &&
+                                           !(*record)->pauseRequested)
+                                       {
+                                           static_cast<void>(m_scheduler.update(
+                                               id, WorkStatus::Queued, (*record)->progress,
+                                               (*record)->checkpointJson));
+                                       }
+                                   });
+                co_return;
+            }
+
+            for (const auto& [emailId, size] : work.downloads)
+            {
+                if (!co_await waitForBackgroundNetwork(scope.jobId))
+                {
+                    static_cast<void>(m_scheduler.pause(scope.jobId));
+                    co_return;
+                }
+                const auto result = co_await m_core.refreshMessageContent(
+                    liveSettings(*accountSettings), scope.accountId, emailId);
+                if (const auto* unavailable =
+                        std::get_if<javelin::jmap::MessageContentUnavailable>(&result))
+                {
+                    static_cast<void>(m_scheduler.update(
+                        scope.jobId, WorkStatus::Failed, progress,
+                        checkpoint(QStringLiteral("fetching"), progress.completedUnits, generation),
+                        unavailable->message));
+                    co_return;
+                }
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    static_cast<void>(m_scheduler.update(
+                        scope.jobId, WorkStatus::Failed, progress,
+                        checkpoint(QStringLiteral("fetching"), progress.completedUnits, generation),
+                        error->message));
+                    co_return;
+                }
+                ++progress.completedUnits;
+                progress.completedBytes += size;
+                if (progressPersistenceTimer.elapsed() >= 1000 ||
+                    (progress.totalUnits.has_value() &&
+                     progress.completedUnits == *progress.totalUnits))
+                {
+                    auto persistResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                        m_connection, QStringLiteral("Persist offline mailbox body progress"));
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::cache::DatabaseError>(&persistResult))
+                    {
+                        static_cast<void>(
+                            m_scheduler.update(scope.jobId, WorkStatus::Failed, progress,
+                                               checkpoint(QStringLiteral("fetching"),
+                                                          progress.completedUnits, generation),
+                                               error->message));
+                        co_return;
+                    }
+                    auto persist = std::get<javelin::jmap::cache::DatabaseTransaction>(
+                        std::move(persistResult));
+                    QSqlQuery saveScope{m_connection.database()};
+                    saveScope.prepare(QStringLiteral(
+                        "UPDATE offline_mailbox_scopes SET completed_bytes=:completed,"
+                        "estimated_bytes=:total,updated_at=CURRENT_TIMESTAMP WHERE "
+                        "account_id=:account AND mailbox_id=:mailbox AND desired=1 AND "
+                        "generation=:generation AND status='fetching'"));
+                    saveScope.bindValue(QStringLiteral(":completed"),
+                                        static_cast<qulonglong>(progress.completedBytes));
+                    saveScope.bindValue(QStringLiteral(":total"),
+                                        static_cast<qulonglong>(work.totalBytes));
+                    saveScope.bindValue(QStringLiteral(":account"),
+                                        QString::fromStdString(scope.accountId));
+                    saveScope.bindValue(QStringLiteral(":mailbox"),
+                                        QString::fromStdString(scope.mailboxId));
+                    saveScope.bindValue(QStringLiteral(":generation"),
+                                        static_cast<qulonglong>(generation));
+                    if (!saveScope.exec())
+                    {
+                        const auto error = saveScope.lastError().text();
+                        persist.rollback();
+                        static_cast<void>(
+                            m_scheduler.update(scope.jobId, WorkStatus::Failed, progress,
+                                               checkpoint(QStringLiteral("fetching"),
+                                                          progress.completedUnits, generation),
+                                               error));
+                        co_return;
+                    }
+                    if (const auto error = persist.commit())
+                    {
+                        static_cast<void>(
+                            m_scheduler.update(scope.jobId, WorkStatus::Failed, progress,
+                                               checkpoint(QStringLiteral("fetching"),
+                                                          progress.completedUnits, generation),
+                                               error->message));
+                        co_return;
+                    }
+                    static_cast<void>(
+                        m_scheduler.update(scope.jobId, WorkStatus::Running, progress,
+                                           checkpoint(QStringLiteral("fetching"),
+                                                      progress.completedUnits, generation)));
+                    progressPersistenceTimer.restart();
+                }
+            }
+
+            const auto completion = tryCompleteOfflineMailbox(m_connection, scope.accountId,
+                                                              scope.mailboxId, generation);
+            if (!completion.error.isEmpty())
             {
                 static_cast<void>(m_scheduler.update(
                     scope.jobId, WorkStatus::Failed, progress,
                     checkpoint(QStringLiteral("fetching"), progress.completedUnits, generation),
-                    error->message));
+                    completion.error));
                 co_return;
             }
-            ++progress.completedUnits;
-            progress.completedBytes += size;
-            if (progressPersistenceTimer.elapsed() >= 1000 ||
-                (progress.totalUnits.has_value() &&
-                 progress.completedUnits == *progress.totalUnits))
+            if (completion.complete)
             {
-                static_cast<void>(m_scheduler.update(
-                    scope.jobId, WorkStatus::Running, progress,
-                    checkpoint(QStringLiteral("fetching"), progress.completedUnits, generation)));
-                progressPersistenceTimer.restart();
+                completedTotalUnits = completion.totalUnits;
+                completedTotalBytes = completion.totalBytes;
+                break;
             }
         }
 
-        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
-        QSqlQuery complete{m_connection.database()};
-        complete.prepare(QStringLiteral(
-            "UPDATE offline_mailbox_scopes SET status='complete',completed_generation=:generation,"
-            "completed_bytes=completed_bytes+:bytes,latest_error=NULL,updated_at=CURRENT_TIMESTAMP "
-            "WHERE account_id=:account AND mailbox_id=:mailbox"));
-        complete.bindValue(QStringLiteral(":generation"), static_cast<qulonglong>(generation));
-        complete.bindValue(QStringLiteral(":bytes"),
-                           static_cast<qulonglong>(progress.completedBytes));
-        complete.bindValue(QStringLiteral(":account"), QString::fromStdString(scope.accountId));
-        complete.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(scope.mailboxId));
-        if (!complete.exec())
-        {
-            static_cast<void>(m_scheduler.update(scope.jobId, WorkStatus::Failed, progress,
-                                                 QStringLiteral("{}"),
-                                                 complete.lastError().text()));
-            co_return;
-        }
-        QSqlQuery retention{m_connection.database()};
-        retention.prepare(QStringLiteral(
-            "UPDATE mail_vault_email_refs SET retention='full_sync' WHERE account_id=:account AND "
-            "email_id IN (SELECT email_id FROM email_mailboxes WHERE account_id=:account "
-            "AND mailbox_id=:mailbox)"));
-        retention.bindValue(QStringLiteral(":account"), QString::fromStdString(scope.accountId));
-        retention.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(scope.mailboxId));
-        if (!retention.exec())
-            logDatabaseFailure(QStringLiteral("Retain synchronized mail"), retention);
-
-        progress.detail = i18n("Available offline");
+        progress = {.completedUnits = completedTotalUnits,
+                    .totalUnits = completedTotalUnits,
+                    .completedBytes = completedTotalBytes,
+                    .totalBytes = completedTotalBytes,
+                    .detail = i18n("Available offline")};
         static_cast<void>(m_scheduler.update(
             scope.jobId, WorkStatus::Complete, progress,
             checkpoint(QStringLiteral("complete"), progress.completedUnits, generation)));

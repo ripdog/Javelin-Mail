@@ -303,6 +303,7 @@ add_executable(javelin_daemon_tests
     app/DeferredSendServiceTest.cpp
     app/DeveloperMaintenanceServiceTest.cpp
     app/DeveloperDiagnosticsServiceTest.cpp
+    app/FullMailSyncServiceTest.cpp
     app/MessageSubjectTest.cpp
     app/GuiMailApplicationEventsTest.cpp
     app/MailboxSessionTest.cpp
