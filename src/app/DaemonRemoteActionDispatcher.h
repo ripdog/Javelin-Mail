@@ -10,6 +10,7 @@
 #include <QObject>
 
 #include <chrono>
+#include <cstddef>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -51,10 +52,17 @@ namespace javelin::app
       private:
         struct ReplayEntry
         {
-            javelin::protocol::RemoteActionCommand command;
-            javelin::protocol::CommandReply reply;
+            javelin::protocol::CommandId id;
+            javelin::protocol::RemoteActionKind kind =
+                javelin::protocol::RemoteActionKind::RemoveConfiguredAccount;
+            QByteArray payloadDigest;
+            std::optional<javelin::protocol::CommandReply> reply;
             bool pending = false;
+            bool repeatable = false;
+            bool terminalResultExpired = false;
+            std::size_t retainedResultBytes = 0;
             std::chrono::steady_clock::time_point startedAt;
+            std::optional<std::chrono::steady_clock::time_point> completedAt;
         };
 
         [[nodiscard]] javelin::protocol::CommandReply
@@ -74,6 +82,10 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<RemoteUndoExecutionResult> performUndo(bool redo);
         void complete(const javelin::protocol::OperationId& operation, QByteArray result);
         void fail(const javelin::protocol::OperationId& operation, QString detail);
+        void setReplayReply(ReplayEntry& entry,
+                            std::optional<javelin::protocol::CommandReply> reply);
+        void eraseReplay(const QString& key);
+        void expireReplayResult(ReplayEntry& entry);
         void trimReplays();
 
         [[nodiscard]] static QString replayKey(const javelin::protocol::CommandId& id);
@@ -87,6 +99,7 @@ namespace javelin::app
         RevocationRequestHydrator m_revocationRequestHydrator;
         std::unordered_map<QString, ReplayEntry> m_replays;
         std::deque<QString> m_replayOrder;
+        std::size_t m_replayResultBytes = 0;
         std::unordered_map<QString, std::unique_ptr<MailboxObservation>> m_mailboxObservations;
     };
 } // namespace javelin::app

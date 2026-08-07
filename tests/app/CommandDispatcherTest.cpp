@@ -136,3 +136,23 @@ TEST_CASE("command dispatcher preserves direct rejection without advancing the e
           javelin::protocol::BoundaryErrorCode::NoUsableAccountConfiguration);
     CHECK(dispatcher.currentEpoch().value == 0);
 }
+
+TEST_CASE("command dispatcher bounds refresh replay history", "[app][protocol][replay]")
+{
+    FakeRefreshPort refreshPort;
+    javelin::app::CommandDispatcher dispatcher{refreshPort};
+    const auto firstId = javelin::protocol::CommandId{.value = QUuid::createUuid()};
+
+    REQUIRE(std::holds_alternative<javelin::protocol::CommandAccepted>(
+        dispatcher.dispatch(refreshRequest(firstId))));
+    for (int index = 1; index < 513; ++index)
+    {
+        REQUIRE(std::holds_alternative<javelin::protocol::CommandAccepted>(
+            dispatcher.dispatch(refreshRequest({.value = QUuid::createUuid()}))));
+    }
+    CHECK(refreshPort.synchronizationRequests == 513);
+
+    REQUIRE(std::holds_alternative<javelin::protocol::CommandAccepted>(
+        dispatcher.dispatch(refreshRequest(firstId))));
+    CHECK(refreshPort.synchronizationRequests == 514);
+}

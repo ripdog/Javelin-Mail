@@ -3,6 +3,7 @@
 #include "app/AccountRefreshApplicationPorts.h"
 #include "protocol/ProcessBoundary.h"
 
+#include <deque>
 #include <map>
 
 namespace javelin::app
@@ -36,6 +37,7 @@ namespace javelin::app
         protocol::BoundaryLimits m_limits;
         protocol::InvalidationEpoch m_epoch;
         std::map<QString, ReplayEntry> m_replays;
+        std::deque<QString> m_replayOrder;
         protocol::BoundaryEventSink* m_eventSink = nullptr;
     };
 } // namespace javelin::app

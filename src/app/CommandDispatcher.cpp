@@ -58,6 +58,13 @@ namespace javelin::app
             .immediateResult = std::nullopt,
         };
         m_replays.emplace(key, ReplayEntry{.request = std::move(request), .reply = reply});
+        m_replayOrder.push_back(key);
+        constexpr std::size_t maximumReplayEntries = 512;
+        while (m_replays.size() > maximumReplayEntries && !m_replayOrder.empty())
+        {
+            m_replays.erase(m_replayOrder.front());
+            m_replayOrder.pop_front();
+        }
         return reply;
     }
 

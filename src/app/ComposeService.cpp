@@ -276,6 +276,7 @@ namespace javelin::app
     {
         const ForegroundWorkScope foreground{m_workScheduler};
         const auto accountId = snapshot.accountId;
+        const auto composeSessionId = snapshot.composeSessionId;
         auto prepared =
             co_await m_service.prepareSend(toLiveConnectionSettings(settings), std::move(snapshot));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
@@ -292,7 +293,10 @@ namespace javelin::app
             m_errorCoordinator.reportFailure(settings, accountId, QStringLiteral("Send message"),
                                              *error);
         else
+        {
             m_errorCoordinator.reportSuccess(settings.connectionId);
+            m_lastSavedSnapshots.erase(composeSessionId);
+        }
         co_return result;
     }
 
@@ -326,7 +330,10 @@ namespace javelin::app
     std::optional<javelin::jmap::OperationError>
     ComposeService::discard(const std::string_view composeSessionId)
     {
-        return m_service.discard(composeSessionId);
+        auto result = m_service.discard(composeSessionId);
+        if (!result.has_value())
+            m_lastSavedSnapshots.erase(std::string{composeSessionId});
+        return result;
     }
 
 } // namespace javelin::app

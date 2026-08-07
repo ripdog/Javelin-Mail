@@ -14,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 
 namespace javelin::app
@@ -110,6 +111,8 @@ namespace javelin::app
 
         void submitPending(const QString& pendingKey);
         void retryPending();
+        void scheduleAcknowledgement(const javelin::protocol::CommandId& commandId);
+        void submitAcknowledgement(const QString& acknowledgedKey);
         void complete(const javelin::protocol::OperationId& operation, QByteArray result);
         void fail(const javelin::protocol::OperationId& operation,
                   const javelin::protocol::BoundaryError& error);
@@ -119,5 +122,7 @@ namespace javelin::app
 
         GuiDaemonSession& m_session;
         std::unordered_map<QString, std::unique_ptr<PendingCall>> m_pending;
+        std::unordered_set<QString> m_pendingAcknowledgements;
+        std::unordered_set<QString> m_acknowledgementsInFlight;
     };
 } // namespace javelin::app

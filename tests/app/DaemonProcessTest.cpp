@@ -782,6 +782,22 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
     CHECK(workAccepted->changedDomains ==
           std::vector{javelin::protocol::ChangedDomain::BackgroundJobs});
 
+    const auto differentJobId = javelin::app::remote::encode(std::string{"different-job"});
+    REQUIRE(std::holds_alternative<QByteArray>(differentJobId));
+    const auto changedPayloadReplay = dispatcher.dispatch({
+        .id = workAccepted->id,
+        .command =
+            javelin::protocol::RemoteActionCommand{
+                .kind = javelin::protocol::RemoteActionKind::WorkRetry,
+                .payload = std::get<QByteArray>(differentJobId),
+            },
+    });
+    const auto* changedPayloadRejected =
+        std::get_if<javelin::protocol::CommandRejected>(&changedPayloadReplay);
+    REQUIRE(changedPayloadRejected != nullptr);
+    CHECK(changedPayloadRejected->error.code ==
+          javelin::protocol::BoundaryErrorCode::InvalidRequest);
+
     dispatcher.releaseGuiResources();
     const auto reused = dispatcher.dispatch({
         .id = commandId,
@@ -794,6 +810,29 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
     const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reused);
     REQUIRE(rejected != nullptr);
     CHECK(rejected->error.code == javelin::protocol::BoundaryErrorCode::InvalidRequest);
+
+    const auto acknowledgementPayload =
+        javelin::app::remote::encode(commandId.value.toString(QUuid::WithoutBraces));
+    REQUIRE(std::holds_alternative<QByteArray>(acknowledgementPayload));
+    const auto acknowledgement = dispatcher.dispatch({
+        .id = {.value = QUuid::createUuid()},
+        .command =
+            javelin::protocol::RemoteActionCommand{
+                .kind = javelin::protocol::RemoteActionKind::AcknowledgeRemoteActionResult,
+                .payload = std::get<QByteArray>(acknowledgementPayload),
+            },
+    });
+    REQUIRE(std::holds_alternative<javelin::protocol::CommandAccepted>(acknowledgement));
+
+    const auto reusedAfterAcknowledgement = dispatcher.dispatch({
+        .id = commandId,
+        .command =
+            javelin::protocol::RemoteActionCommand{
+                .kind = javelin::protocol::RemoteActionKind::WorkList,
+                .payload = {},
+            },
+    });
+    CHECK(std::holds_alternative<javelin::protocol::CommandAccepted>(reusedAfterAcknowledgement));
 }
 
 TEST_CASE("daemon configures only cached JMAP accounts with the Mail capability",

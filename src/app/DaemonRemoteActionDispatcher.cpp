@@ -23,8 +23,10 @@
 
 #include <QCoroTask>
 
+#include <QCryptographicHash>
 #include <QTimer>
 
+#include <algorithm>
 #include <type_traits>
 #include <utility>
 
@@ -65,6 +67,64 @@ namespace javelin::app
         [[nodiscard]] std::variant<QByteArray, QString> encodeEmptyResult()
         {
             return encodeResult(std::monostate{});
+        }
+
+        constexpr std::size_t maximumReplayEntries = 4096;
+        constexpr std::size_t maximumReplayResultBytes = 32 * 1024 * 1024;
+        constexpr auto replayResultLifetime = std::chrono::minutes{10};
+        constexpr auto repeatableReplayLifetime = std::chrono::hours{1};
+
+        [[nodiscard]] QByteArray
+        commandDigest(const javelin::protocol::RemoteActionCommand& command)
+        {
+            return QCryptographicHash::hash(command.payload, QCryptographicHash::Sha256);
+        }
+
+        [[nodiscard]] bool canRepeatForReplay(const javelin::protocol::RemoteActionKind kind)
+        {
+            using Kind = javelin::protocol::RemoteActionKind;
+            switch (kind)
+            {
+            case Kind::CalendarReadCached:
+            case Kind::CalendarReadAccounts:
+            case Kind::CalendarReadCalendars:
+            case Kind::CalendarRequestRange:
+            case Kind::ComposeLoadSenderIdentities:
+            case Kind::ComposeLoadWorkingCopy:
+            case Kind::ComposeStoreWorkingCopy:
+            case Kind::ContactRequestRefresh:
+            case Kind::ContactDownloadMedia:
+            case Kind::SieveList:
+            case Kind::SieveGet:
+            case Kind::SieveValidate:
+            case Kind::IdentityList:
+            case Kind::AccountBootstrap:
+            case Kind::MessageContent:
+            case Kind::AttachmentDownload:
+            case Kind::MessageSource:
+            case Kind::MailboxWindow:
+            case Kind::SearchWindow:
+            case Kind::SearchRetire:
+            case Kind::UndoSnapshot:
+            case Kind::WorkList:
+            case Kind::WorkSummary:
+            case Kind::OnboardingDiscover:
+            case Kind::DeveloperDiagnosticsSnapshot:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        [[nodiscard]] std::size_t
+        replayResultBytes(const std::optional<javelin::protocol::CommandReply>& reply)
+        {
+            if (!reply.has_value())
+                return 0;
+            const auto* accepted = std::get_if<javelin::protocol::CommandAccepted>(&*reply);
+            if (accepted == nullptr || !accepted->immediateResult.has_value())
+                return 0;
+            return static_cast<std::size_t>(accepted->immediateResult->size());
         }
 
         [[nodiscard]] std::vector<javelin::protocol::ChangedDomain>
@@ -174,6 +234,7 @@ namespace javelin::app
             case Kind::OnboardingRevokeOAuth:
             case Kind::OnboardingCancelOAuth:
             case Kind::DeveloperDiagnosticsSnapshot:
+            case Kind::AcknowledgeRemoteActionResult:
                 return {};
             }
             return {};
@@ -213,19 +274,75 @@ namespace javelin::app
             return reject(id, QStringLiteral("The request is not a remote action."),
                           javelin::protocol::BoundaryErrorCode::UnsupportedOperation);
 
+        using Kind = javelin::protocol::RemoteActionKind;
+        if (remoteCommand->kind == Kind::AcknowledgeRemoteActionResult)
+        {
+            auto decoded = decodeArguments<QString>(remoteCommand->payload);
+            if (const auto* error = std::get_if<QString>(&decoded))
+                return reject(id, *error);
+            const auto targetKey = std::get<0>(std::get<std::tuple<QString>>(std::move(decoded)));
+            if (const auto replay = m_replays.find(targetKey); replay != m_replays.end())
+            {
+                if (replay->second.pending)
+                    return reject(id, QStringLiteral("The remote action is still pending."),
+                                  javelin::protocol::BoundaryErrorCode::Busy);
+                eraseReplay(targetKey);
+            }
+            const auto encoded = encodeEmptyResult();
+            if (const auto* error = std::get_if<QString>(&encoded))
+                return reject(id, *error);
+            return acceptImmediate(id, remoteCommand->kind, std::get<QByteArray>(encoded));
+        }
+
         const auto key = replayKey(id);
+        const auto digest = commandDigest(*remoteCommand);
         if (const auto replay = m_replays.find(key); replay != m_replays.end())
         {
-            if (replay->second.command == *remoteCommand)
+            if (replay->second.kind != remoteCommand->kind ||
+                replay->second.payloadDigest != digest)
+                return reject(id, QStringLiteral("The command identifier was reused."));
+
+            if (replay->second.reply.has_value())
             {
                 PerformanceMetrics::recordEvent(
                     QStringLiteral("daemon"), QStringLiteral("remote_action_admission"),
                     QStringLiteral("replay"),
                     QStringLiteral("kind=%1").arg(
                         PerformanceMetrics::remoteActionName(remoteCommand->kind)));
-                return replay->second.reply;
+                return *replay->second.reply;
             }
-            return reject(id, QStringLiteral("The command identifier was reused."));
+
+            if (!replay->second.repeatable)
+                return reject(id,
+                              QStringLiteral("The command replay result is no longer available."),
+                              javelin::protocol::BoundaryErrorCode::InvalidRequest);
+
+            auto reply = dispatchRemote(id, *remoteCommand);
+            const bool pending =
+                std::holds_alternative<javelin::protocol::CommandAccepted>(reply) &&
+                std::get<javelin::protocol::CommandAccepted>(reply).operation.has_value() &&
+                !std::get<javelin::protocol::CommandAccepted>(reply).immediateResult.has_value();
+            replay->second.startedAt = startedAt;
+            replay->second.pending = pending;
+            replay->second.completedAt =
+                pending ? std::nullopt : std::optional{std::chrono::steady_clock::now()};
+            replay->second.terminalResultExpired = false;
+            setReplayReply(replay->second, reply);
+            PerformanceMetrics::recordEvent(
+                QStringLiteral("daemon"), QStringLiteral("remote_action_admission"),
+                QStringLiteral("replay_reexecuted"),
+                QStringLiteral("kind=%1").arg(
+                    PerformanceMetrics::remoteActionName(remoteCommand->kind)));
+            trimReplays();
+            return reply;
+        }
+
+        trimReplays();
+        if (m_replays.size() >= maximumReplayEntries)
+        {
+            return reject(id,
+                          QStringLiteral("Too many remote actions are awaiting replay cleanup."),
+                          javelin::protocol::BoundaryErrorCode::Busy);
         }
 
         auto reply = dispatchRemote(id, *remoteCommand);
@@ -244,10 +361,21 @@ namespace javelin::app
                 .arg(PerformanceMetrics::remoteActionName(remoteCommand->kind))
                 .arg(pending)
                 .arg(remoteCommand->payload.size()));
-        m_replays.emplace(key, ReplayEntry{.command = *remoteCommand,
-                                           .reply = reply,
-                                           .pending = pending,
-                                           .startedAt = startedAt});
+        auto [inserted, wasInserted] = m_replays.emplace(
+            key,
+            ReplayEntry{.id = id,
+                        .kind = remoteCommand->kind,
+                        .payloadDigest = digest,
+                        .reply = std::nullopt,
+                        .pending = pending,
+                        .repeatable = canRepeatForReplay(remoteCommand->kind),
+                        .terminalResultExpired = false,
+                        .retainedResultBytes = 0,
+                        .startedAt = startedAt,
+                        .completedAt = pending ? std::nullopt
+                                               : std::optional{std::chrono::steady_clock::now()}});
+        Q_ASSERT(wasInserted);
+        setReplayReply(inserted->second, reply);
         m_replayOrder.push_back(key);
         trimReplays();
         return reply;
@@ -894,6 +1022,10 @@ namespace javelin::app
                     return launch(m_services.developerMaintenancePort().clearMailboxCache(
                         std::move(clearCommand)));
                 });
+        case Kind::AcknowledgeRemoteActionResult:
+            return reject(id,
+                          QStringLiteral("Remote action acknowledgements are handled directly."),
+                          javelin::protocol::BoundaryErrorCode::UnsupportedOperation);
         }
         return reject(id, QStringLiteral("The remote action is unsupported."),
                       javelin::protocol::BoundaryErrorCode::UnsupportedOperation);
@@ -973,17 +1105,22 @@ namespace javelin::app
                     std::chrono::steady_clock::now() - replay->second.startedAt),
                 QStringLiteral("completed"),
                 QStringLiteral("kind=%1 result_bytes=%2")
-                    .arg(PerformanceMetrics::remoteActionName(replay->second.command.kind))
+                    .arg(PerformanceMetrics::remoteActionName(replay->second.kind))
                     .arg(result.size()));
-            if (auto* accepted =
-                    std::get_if<javelin::protocol::CommandAccepted>(&replay->second.reply))
+            if (replay->second.reply.has_value())
             {
-                accepted->operation = std::nullopt;
-                accepted->epoch = m_currentEpoch();
-                accepted->changedDomains = admissionDomains(replay->second.command.kind);
-                accepted->immediateResult = result;
+                auto updated = *replay->second.reply;
+                if (auto* accepted = std::get_if<javelin::protocol::CommandAccepted>(&updated))
+                {
+                    accepted->operation = std::nullopt;
+                    accepted->epoch = m_currentEpoch();
+                    accepted->changedDomains = admissionDomains(replay->second.kind);
+                    accepted->immediateResult = result;
+                    setReplayReply(replay->second, std::move(updated));
+                }
             }
             replay->second.pending = false;
+            replay->second.completedAt = std::chrono::steady_clock::now();
             trimReplays();
         }
         m_eventSink.onBoundaryEvent(javelin::protocol::OperationCompleted{
@@ -1009,13 +1146,14 @@ namespace javelin::app
                     std::chrono::steady_clock::now() - replay->second.startedAt),
                 QStringLiteral("failed"),
                 QStringLiteral("kind=%1 code=%2")
-                    .arg(PerformanceMetrics::remoteActionName(replay->second.command.kind))
+                    .arg(PerformanceMetrics::remoteActionName(replay->second.kind))
                     .arg(static_cast<int>(error.code)));
-            replay->second.reply = javelin::protocol::CommandRejected{
-                .id = {.value = operation.value},
-                .error = error,
-            };
+            setReplayReply(replay->second, javelin::protocol::CommandRejected{
+                                               .id = {.value = operation.value},
+                                               .error = error,
+                                           });
             replay->second.pending = false;
+            replay->second.completedAt = std::chrono::steady_clock::now();
             trimReplays();
         }
         m_eventSink.onBoundaryEvent(javelin::protocol::OperationFailed{
@@ -1024,24 +1162,125 @@ namespace javelin::app
         });
     }
 
+    void DaemonRemoteActionDispatcher::setReplayReply(
+        ReplayEntry& entry, std::optional<javelin::protocol::CommandReply> reply)
+    {
+        Q_ASSERT(m_replayResultBytes >= entry.retainedResultBytes);
+        m_replayResultBytes -= entry.retainedResultBytes;
+        entry.reply = std::move(reply);
+        entry.retainedResultBytes = replayResultBytes(entry.reply);
+        m_replayResultBytes += entry.retainedResultBytes;
+    }
+
+    void DaemonRemoteActionDispatcher::eraseReplay(const QString& key)
+    {
+        const auto replay = m_replays.find(key);
+        if (replay == m_replays.end())
+            return;
+        Q_ASSERT(m_replayResultBytes >= replay->second.retainedResultBytes);
+        m_replayResultBytes -= replay->second.retainedResultBytes;
+        m_replays.erase(replay);
+        std::erase(m_replayOrder, key);
+    }
+
+    void DaemonRemoteActionDispatcher::expireReplayResult(ReplayEntry& entry)
+    {
+        if (entry.pending)
+            return;
+        entry.terminalResultExpired = true;
+        setReplayReply(
+            entry,
+            javelin::protocol::CommandRejected{
+                .id = entry.id,
+                .error = {.code = javelin::protocol::BoundaryErrorCode::InvalidRequest,
+                          .field = QStringLiteral("command.remote.result"),
+                          .detail = QStringLiteral("The command completed, but its replay result "
+                                                   "was released before acknowledgement. The "
+                                                   "command was not repeated.")},
+            });
+    }
+
     void DaemonRemoteActionDispatcher::trimReplays()
     {
-        constexpr std::size_t maximumReplayEntries = 4096;
-        while (m_replays.size() > maximumReplayEntries && !m_replayOrder.empty())
+        const auto now = std::chrono::steady_clock::now();
+        std::vector<QString> eraseKeys;
+        eraseKeys.reserve(m_replayOrder.size());
+        for (const auto& key : m_replayOrder)
         {
-            const auto key = std::move(m_replayOrder.front());
-            m_replayOrder.pop_front();
             const auto replay = m_replays.find(key);
-            if (replay == m_replays.end())
+            if (replay == m_replays.end() || replay->second.pending ||
+                !replay->second.completedAt.has_value())
                 continue;
-            if (replay->second.pending)
+
+            const auto age = now - *replay->second.completedAt;
+            if (replay->second.terminalResultExpired)
+                continue;
+            if (replay->second.repeatable && age >= repeatableReplayLifetime)
             {
-                m_replayOrder.push_back(std::move(key));
-                if (m_replayOrder.size() == m_replays.size())
-                    break;
+                eraseKeys.push_back(key);
                 continue;
             }
-            m_replays.erase(replay);
+            if (age < replayResultLifetime)
+                continue;
+
+            if (replay->second.reply.has_value() &&
+                std::holds_alternative<javelin::protocol::CommandRejected>(*replay->second.reply))
+            {
+                eraseKeys.push_back(key);
+            }
+            else if (replay->second.repeatable)
+            {
+                setReplayReply(replay->second, std::nullopt);
+            }
+            else
+            {
+                expireReplayResult(replay->second);
+            }
+        }
+        for (const auto& key : eraseKeys)
+            eraseReplay(key);
+
+        while (m_replayResultBytes > maximumReplayResultBytes)
+        {
+            bool released = false;
+            for (const auto& key : m_replayOrder)
+            {
+                const auto replay = m_replays.find(key);
+                if (replay == m_replays.end() || replay->second.pending ||
+                    replay->second.retainedResultBytes == 0)
+                    continue;
+                if (replay->second.repeatable)
+                    setReplayReply(replay->second, std::nullopt);
+                else
+                    expireReplayResult(replay->second);
+                released = true;
+                break;
+            }
+            if (!released)
+                break;
+        }
+
+        while (m_replays.size() >= maximumReplayEntries)
+        {
+            std::optional<QString> candidate;
+            for (const auto& key : m_replayOrder)
+            {
+                const auto replay = m_replays.find(key);
+                if (replay == m_replays.end() || replay->second.pending)
+                    continue;
+                const bool rejected = replay->second.reply.has_value() &&
+                                      std::holds_alternative<javelin::protocol::CommandRejected>(
+                                          *replay->second.reply);
+                if (replay->second.repeatable ||
+                    (rejected && !replay->second.terminalResultExpired))
+                {
+                    candidate = key;
+                    break;
+                }
+            }
+            if (!candidate.has_value())
+                break;
+            eraseReplay(*candidate);
         }
     }
 

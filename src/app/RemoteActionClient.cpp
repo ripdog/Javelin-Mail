@@ -79,6 +79,7 @@ namespace javelin::app
         if (const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reply))
         {
             metrics.finish(QStringLiteral("rejected"));
+            scheduleAcknowledgement(commandId);
             return error(rejected->error);
         }
         const auto& accepted = std::get<javelin::protocol::CommandAccepted>(reply);
@@ -91,7 +92,9 @@ namespace javelin::app
             };
         }
         metrics.finish(QStringLiteral("completed"));
-        return *accepted.immediateResult;
+        auto result = *accepted.immediateResult;
+        scheduleAcknowledgement(commandId);
+        return result;
     }
 
     QFuture<RemoteActionClient::RawResult>
@@ -233,11 +236,66 @@ namespace javelin::app
         }
         for (const auto& pendingKey : keys)
             submitPending(pendingKey);
+
+        keys.clear();
+        keys.reserve(m_pendingAcknowledgements.size());
+        for (const auto& acknowledgedKey : m_pendingAcknowledgements)
+            keys.push_back(acknowledgedKey);
+        for (const auto& acknowledgedKey : keys)
+            submitAcknowledgement(acknowledgedKey);
+    }
+
+    void RemoteActionClient::scheduleAcknowledgement(const javelin::protocol::CommandId& commandId)
+    {
+        const auto acknowledgedKey = key(commandId.value);
+        m_pendingAcknowledgements.insert(acknowledgedKey);
+        QTimer::singleShot(0, this,
+                           [this, acknowledgedKey] { submitAcknowledgement(acknowledgedKey); });
+    }
+
+    void RemoteActionClient::submitAcknowledgement(const QString& acknowledgedKey)
+    {
+        if (!m_session.isReady() || !m_pendingAcknowledgements.contains(acknowledgedKey) ||
+            m_acknowledgementsInFlight.contains(acknowledgedKey))
+            return;
+
+        auto encoded = remote::encode(acknowledgedKey);
+        if (std::holds_alternative<remote::CodecError>(encoded))
+        {
+            m_pendingAcknowledgements.erase(acknowledgedKey);
+            return;
+        }
+
+        m_acknowledgementsInFlight.insert(acknowledgedKey);
+        auto* watcher = new QFutureWatcher<javelin::protocol::CommandReply>(this);
+        connect(watcher, &QFutureWatcherBase::finished, this,
+                [this, watcher, acknowledgedKey]
+                {
+                    const auto reply = watcher->result();
+                    watcher->deleteLater();
+                    m_acknowledgementsInFlight.erase(acknowledgedKey);
+                    if (std::holds_alternative<javelin::protocol::CommandAccepted>(reply))
+                    {
+                        m_pendingAcknowledgements.erase(acknowledgedKey);
+                        return;
+                    }
+                    const auto& rejected = std::get<javelin::protocol::CommandRejected>(reply);
+                    if (rejected.error.code !=
+                            javelin::protocol::BoundaryErrorCode::TransportUnavailable &&
+                        rejected.error.code != javelin::protocol::BoundaryErrorCode::Busy)
+                    {
+                        m_pendingAcknowledgements.erase(acknowledgedKey);
+                    }
+                });
+        watcher->setFuture(m_session.submitRemoteActionAsync(
+            javelin::protocol::RemoteActionKind::AcknowledgeRemoteActionResult,
+            std::get<QByteArray>(std::move(encoded))));
     }
 
     void RemoteActionClient::complete(const javelin::protocol::OperationId& operation,
                                       QByteArray result)
     {
+        scheduleAcknowledgement({.value = operation.value});
         const auto found = m_pending.find(key(operation.value));
         if (found == m_pending.end())
             return;
@@ -257,6 +315,7 @@ namespace javelin::app
     void RemoteActionClient::fail(const javelin::protocol::OperationId& operation,
                                   const javelin::protocol::BoundaryError& boundaryError)
     {
+        scheduleAcknowledgement({.value = operation.value});
         const auto found = m_pending.find(key(operation.value));
         if (found == m_pending.end())
             return;
@@ -278,6 +337,8 @@ namespace javelin::app
     {
         auto pending = std::move(m_pending);
         m_pending.clear();
+        m_pendingAcknowledgements.clear();
+        m_acknowledgementsInFlight.clear();
         for (auto& [pendingKey, call] : pending)
         {
             Q_UNUSED(pendingKey)
