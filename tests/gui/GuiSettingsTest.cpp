@@ -26,7 +26,8 @@ TEST_CASE("GUI settings reject stale revisions before applying an update",
     CHECK(settings.undoSendDelaySeconds() == 20);
 }
 
-TEST_CASE("GUI settings expose daemon snapshots without reading QSettings", "[gui][settings]")
+TEST_CASE("GUI settings expose account and mailbox values from the daemon snapshot",
+          "[gui][settings]")
 {
     javelin::protocol::SettingsSnapshot snapshot;
     snapshot.accounts.push_back({

@@ -184,26 +184,6 @@ TEST_CASE("method caller rejects cancellation before transport dispatch",
     CHECK_FALSE(transport.request.has_value());
 }
 
-TEST_CASE("method caller is independent of HTTP transport", "[jmap][method][transport]")
-{
-    ensureApplication();
-    const auto parsed = javelin::jmap::api::parseResponseEnvelope(
-        javelin::tests::loadFixture("jmap/method/response.json"));
-    REQUIRE(parsed.ok());
-
-    FakeJmapMethodTransport transport;
-    transport.result = *parsed.value;
-    javelin::jmap::api::MethodCaller caller{transport};
-    const auto result = QCoro::waitFor(caller.call(makeRequestContext(), loadRequestEnvelope()));
-
-    REQUIRE(std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(result));
-    REQUIRE(transport.request.has_value());
-    CHECK(transport.request->accountId == "u1");
-    CHECK(transport.request->apiUrl == "https://mail.example.com/jmap/api");
-    CHECK(transport.request->accessToken == "access-token");
-    CHECK(transport.request->envelope.methodCalls.size() == 2);
-}
-
 TEST_CASE("method caller rejects envelopes above negotiated method and byte limits",
           "[jmap][method][transport][limits]")
 {

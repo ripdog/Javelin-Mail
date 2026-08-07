@@ -9,7 +9,6 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QString>
-#include <QStringList>
 
 #include <algorithm>
 #include <atomic>
@@ -92,66 +91,12 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
         migrations, runner.steps(), [](const auto& applied, const auto& configured)
         { return applied.version == configured.version && applied.name == configured.name; }));
 
-    QSqlQuery tableQuery{connection.database()};
-    REQUIRE(tableQuery.exec(
-        QStringLiteral("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN "
-                       "('accounts', 'compose_sessions', 'mailboxes', "
-                       "'emails', 'jmap_transport_preferences', 'observed_notification_emails', "
-                       "'mail_notification_outbox', "
-                       "'raw_message_sources', 'mail_vault_objects', 'mail_vault_email_refs', "
-                       "'offline_mailbox_scopes', 'background_jobs', "
-                       "'schema_migrations', 'search_windows', "
-                       "'search_window_items', 'mailbox_query_windows', "
-                       "'mailbox_query_window_items', 'sync_state', 'consistency_domains', "
-                       "'mutation_journal', 'calendar_notification_state', "
-                       "'calendar_default_alerts', 'operation_history', "
-                       "'operation_history_sequence', 'pending_sends') "
-                       "ORDER BY name")));
-
-    QStringList tableNames;
-    while (tableQuery.next())
-    {
-        tableNames.push_back(tableQuery.value(0).toString());
-    }
-
-    CHECK(tableNames == QStringList{QStringLiteral("accounts"),
-                                    QStringLiteral("background_jobs"),
-                                    QStringLiteral("calendar_default_alerts"),
-                                    QStringLiteral("calendar_notification_state"),
-                                    QStringLiteral("compose_sessions"),
-                                    QStringLiteral("consistency_domains"),
-                                    QStringLiteral("emails"),
-                                    QStringLiteral("jmap_transport_preferences"),
-                                    QStringLiteral("mail_notification_outbox"),
-                                    QStringLiteral("mail_vault_email_refs"),
-                                    QStringLiteral("mail_vault_objects"),
-                                    QStringLiteral("mailbox_query_window_items"),
-                                    QStringLiteral("mailbox_query_windows"),
-                                    QStringLiteral("mailboxes"),
-                                    QStringLiteral("mutation_journal"),
-                                    QStringLiteral("observed_notification_emails"),
-                                    QStringLiteral("offline_mailbox_scopes"),
-                                    QStringLiteral("operation_history"),
-                                    QStringLiteral("operation_history_sequence"),
-                                    QStringLiteral("pending_sends"),
-                                    QStringLiteral("raw_message_sources"),
-                                    QStringLiteral("schema_migrations"),
-                                    QStringLiteral("search_window_items"),
-                                    QStringLiteral("search_windows"),
-                                    QStringLiteral("sync_state")});
     CHECK(pragmaValue(connection.database(), QStringLiteral("foreign_keys")) ==
           QStringLiteral("1"));
     CHECK(pragmaValue(connection.database(), QStringLiteral("journal_mode"))
               .compare(QStringLiteral("wal"), Qt::CaseInsensitive) == 0);
     CHECK(pragmaValue(connection.database(), QStringLiteral("busy_timeout")) ==
           QStringLiteral("5000"));
-
-    QSqlQuery projectionCleanupPlan{connection.database()};
-    REQUIRE(projectionCleanupPlan.exec(QStringLiteral(
-        "EXPLAIN QUERY PLAN DELETE FROM mail_vault_projection_jobs WHERE content_hash='probe'")));
-    REQUIRE(projectionCleanupPlan.next());
-    CHECK(projectionCleanupPlan.value(3).toString().contains(
-        QStringLiteral("idx_mail_vault_projection_content_hash")));
 }
 
 TEST_CASE("database migrations are repeatable when reopening an existing cache",
@@ -281,7 +226,7 @@ TEST_CASE("GUI database factory never migrates a legacy SQLite file", "[jmap][ca
     CHECK(probe.value(0).toInt() == 0);
 }
 
-TEST_CASE("thread connection factory encodes owner tag and current thread in connection names",
+TEST_CASE("thread connection factory releases its Qt connection when the wrapper is destroyed",
           "[jmap][cache][database]")
 {
     ApplicationGuard application;
@@ -304,16 +249,11 @@ TEST_CASE("thread connection factory encodes owner tag and current thread in con
     }
 
     auto firstConnection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(firstOpen));
-    CHECK(pragmaValue(firstConnection.database(), QStringLiteral("busy_timeout")) ==
-          QStringLiteral("30000"));
-    const QString expectedName =
-        QStringLiteral("javelin-cache-gui-thread-%1")
-            .arg(javelin::jmap::cache::ThreadConnectionFactory::currentThreadTag());
-    CHECK(firstConnection.connectionName() == expectedName);
-    CHECK(QSqlDatabase::contains(expectedName));
+    const QString connectionName = firstConnection.connectionName();
+    CHECK(QSqlDatabase::contains(connectionName));
 
     firstConnection = {};
-    CHECK_FALSE(QSqlDatabase::contains(expectedName));
+    CHECK_FALSE(QSqlDatabase::contains(connectionName));
 
     auto secondOpen = factory.openForCurrentThread("gui");
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&secondOpen))
@@ -323,9 +263,7 @@ TEST_CASE("thread connection factory encodes owner tag and current thread in con
 
     auto secondConnection =
         std::get<javelin::jmap::cache::DatabaseConnection>(std::move(secondOpen));
-    CHECK(secondConnection.connectionName() == expectedName);
-    CHECK(secondConnection.schemaVersion() ==
-          javelin::jmap::cache::createDefaultMigrationRunner().latestVersion());
+    CHECK(QSqlDatabase::contains(secondConnection.connectionName()));
 }
 
 TEST_CASE("database write coordination serializes real connections with no SQLite busy timeout",

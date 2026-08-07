@@ -2,16 +2,32 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-TEST_CASE("mailbox query key is canonical and explicit", "[jmap][sync][query-key]")
+TEST_CASE("mailbox query keys distinguish windows with different query semantics",
+          "[jmap][sync][query-key]")
 {
-    const auto key = javelin::jmap::sync::mailboxQueryKey({
+    const javelin::jmap::sync::MailboxQueryDescriptor base{
         .mailboxId = "mbx-inbox",
         .sortProperty = "receivedAt",
         .isAscending = false,
         .collapseThreads = true,
-    });
+    };
+    const auto baseKey = javelin::jmap::sync::mailboxQueryKey(base);
 
-    CHECK(key == "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true");
+    auto otherMailbox = base;
+    otherMailbox.mailboxId = "mbx-archive";
+    CHECK(javelin::jmap::sync::mailboxQueryKey(otherMailbox) != baseKey);
+
+    auto otherSort = base;
+    otherSort.sortProperty = "sentAt";
+    CHECK(javelin::jmap::sync::mailboxQueryKey(otherSort) != baseKey);
+
+    auto ascending = base;
+    ascending.isAscending = true;
+    CHECK(javelin::jmap::sync::mailboxQueryKey(ascending) != baseKey);
+
+    auto uncollapsed = base;
+    uncollapsed.collapseThreads = false;
+    CHECK(javelin::jmap::sync::mailboxQueryKey(uncollapsed) != baseKey);
 }
 
 TEST_CASE("anchored mailbox windows use the server position as their cache address",

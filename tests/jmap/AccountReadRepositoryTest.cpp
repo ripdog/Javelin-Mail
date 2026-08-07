@@ -64,7 +64,7 @@ namespace
 
 } // namespace
 
-TEST_CASE("account read repository uses a GUI read-only connection", "[jmap][cache]")
+TEST_CASE("account read repository returns cached account metadata", "[jmap][cache]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);

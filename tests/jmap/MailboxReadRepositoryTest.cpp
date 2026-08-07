@@ -89,7 +89,7 @@ namespace
 
 } // namespace
 
-TEST_CASE("mailbox read repository uses a GUI read-only connection", "[jmap][cache]")
+TEST_CASE("mailbox read repository returns cached mailbox tree metadata", "[jmap][cache]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);

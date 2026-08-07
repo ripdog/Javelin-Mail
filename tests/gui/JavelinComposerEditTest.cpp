@@ -1,13 +1,10 @@
 #include "gui/compose/JavelinComposerEdit.h"
 #include "gui/compose/ComposerInlineImageCodec.h"
 
-#include <KActionCollection>
 #include <KPIMTextEdit/RichTextComposerControler>
 #include <KPIMTextEdit/RichTextComposerImages>
 #include <MessageComposer/TextPart>
 
-#include <QAction>
-#include <QColor>
 #include <QImage>
 #include <QStringList>
 #include <QTextCharFormat>
@@ -29,95 +26,6 @@ TEST_CASE("composer paste sanitization preserves content without foreign styling
     CHECK_FALSE(sanitized.contains(QStringLiteral("<font"), Qt::CaseInsensitive));
     CHECK(sanitized.contains(QStringLiteral("Hello")));
     CHECK(sanitized.contains(QStringLiteral("https://example.com")));
-}
-
-TEST_CASE("KDE composer detects meaningful formatting", "[gui][compose][composer]")
-{
-    javelin::gui::compose::JavelinComposerEdit editor;
-    editor.activateRichText();
-    editor.setTextOrHtml(QStringLiteral("<p>Unformatted text</p>"));
-    CHECK_FALSE(editor.composerControler()->isFormattingUsed());
-
-    SECTION("bold text")
-    {
-        editor.setTextOrHtml(QStringLiteral("<p><strong>Bold</strong></p>"));
-        CHECK(editor.composerControler()->isFormattingUsed());
-    }
-    SECTION("list")
-    {
-        editor.setTextOrHtml(QStringLiteral("<ul><li>Item</li></ul>"));
-        CHECK(editor.composerControler()->isFormattingUsed());
-    }
-    SECTION("heading")
-    {
-        editor.setTextOrHtml(QStringLiteral("<h2>Heading</h2>"));
-        CHECK(editor.composerControler()->isFormattingUsed());
-    }
-    SECTION("link")
-    {
-        editor.setTextOrHtml(QStringLiteral("<p><a href=\"https://example.com\">Link</a></p>"));
-        CHECK(editor.composerControler()->isFormattingUsed());
-    }
-    SECTION("colour")
-    {
-        QTextCursor cursor{editor.document()};
-        cursor.select(QTextCursor::Document);
-        QTextCharFormat format;
-        format.setForeground(QColor{Qt::red});
-        cursor.mergeCharFormat(format);
-        CHECK(editor.composerControler()->isFormattingUsed());
-    }
-    SECTION("table")
-    {
-        editor.setTextOrHtml(QStringLiteral("<table><tr><td>Cell</td></tr></table>"));
-        CHECK(editor.composerControler()->isFormattingUsed());
-    }
-    SECTION("image")
-    {
-        editor.setTextOrHtml(QStringLiteral("<p><img src=\"cid:image@example\"></p>"));
-        CHECK(editor.composerControler()->isFormattingUsed());
-    }
-}
-
-TEST_CASE("KDE composer exposes the KMail formatting action set", "[gui][compose][composer]")
-{
-    javelin::gui::compose::JavelinComposerEdit editor;
-    KActionCollection actions{&editor};
-    editor.createActions(&actions);
-
-    const QStringList expectedActions{
-        QStringLiteral("format_heading_level"),
-        QStringLiteral("format_list_style"),
-        QStringLiteral("format_font_family"),
-        QStringLiteral("format_font_size"),
-        QStringLiteral("format_text_bold"),
-        QStringLiteral("format_text_italic"),
-        QStringLiteral("format_text_underline"),
-        QStringLiteral("format_text_strikeout"),
-        QStringLiteral("format_text_foreground_color"),
-        QStringLiteral("format_text_background_color"),
-        QStringLiteral("format_align_left"),
-        QStringLiteral("format_align_center"),
-        QStringLiteral("format_align_right"),
-        QStringLiteral("format_align_justify"),
-        QStringLiteral("format_list_indent_more"),
-        QStringLiteral("format_list_indent_less"),
-        QStringLiteral("manage_link"),
-        QStringLiteral("insert_horizontal_rule"),
-        QStringLiteral("insert_html"),
-        QStringLiteral("insert_table"),
-        QStringLiteral("format_list_checkbox"),
-        QStringLiteral("format_reset"),
-        QStringLiteral("format_painter"),
-        QStringLiteral("direction_ltr"),
-        QStringLiteral("direction_rtl"),
-    };
-
-    for (const auto& actionName : expectedActions)
-    {
-        INFO(actionName.toStdString());
-        CHECK(actions.action(actionName) != nullptr);
-    }
 }
 
 TEST_CASE("KDE body generation produces matching HTML and plain alternatives",

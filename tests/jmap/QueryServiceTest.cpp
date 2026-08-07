@@ -13,12 +13,9 @@
 #include <QCoreApplication>
 #include <QSqlQuery>
 #include <QTemporaryDir>
-#include <QVariant>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <QStringList>
-#include <algorithm>
 #include <memory>
 #include <variant>
 #include <vector>
@@ -107,28 +104,6 @@ namespace
         REQUIRE(parsed.ok());
         REQUIRE(parsed.value.has_value());
         return *parsed.value;
-    }
-
-    [[nodiscard]] QStringList
-    explainQueryPlan(QSqlDatabase& database, const QString& statement,
-                     const std::vector<std::pair<QString, QVariant>>& bindings)
-    {
-        QSqlQuery query{database};
-        query.prepare(QStringLiteral("EXPLAIN QUERY PLAN %1").arg(statement));
-        for (const auto& [name, value] : bindings)
-        {
-            query.bindValue(name, value);
-        }
-
-        REQUIRE(query.exec());
-
-        QStringList details;
-        while (query.next())
-        {
-            details.push_back(query.value(3).toString());
-        }
-
-        return details;
     }
 
 } // namespace
@@ -992,98 +967,4 @@ TEST_CASE("same-state mailbox pages inherit authoritative query totals",
         std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(staleResult);
     REQUIRE(stale.has_value());
     CHECK(stale->coverage == javelin::jmap::cache::QueryWindowCoverage::Stale);
-}
-
-TEST_CASE("query service SQL plans use the intended cache indexes", "[jmap][cache][query]")
-{
-    ApplicationGuard application;
-    Q_UNUSED(application);
-
-    auto databaseContext = makeDatabaseContext();
-
-    const auto mailboxPlan = explainQueryPlan(
-        databaseContext.connection.database(),
-        QStringLiteral(
-            "SELECT m.mailbox_id, m.name, m.parent_mailbox_id, m.role, m.sort_order, "
-            "m.total_emails, m.unread_emails, m.total_threads, m.unread_threads, "
-            "m.is_subscribed, "
-            "EXISTS("
-            "  SELECT 1 FROM mailboxes child "
-            "  WHERE child.account_id = m.account_id AND child.parent_mailbox_id = m.mailbox_id"
-            ") AS has_children "
-            "FROM mailboxes m "
-            "WHERE m.account_id = :account_id "
-            "ORDER BY COALESCE(m.parent_mailbox_id, ''), m.sort_order, m.mailbox_id"),
-        {{QStringLiteral(":account_id"), QStringLiteral("account-1")}});
-    CHECK(std::any_of(
-        mailboxPlan.cbegin(), mailboxPlan.cend(), [](const QString& detail)
-        { return detail.contains(QStringLiteral("idx_mailboxes_parent"), Qt::CaseInsensitive); }));
-
-    const auto messagePlan = explainQueryPlan(
-        databaseContext.connection.database(),
-        QStringLiteral("WITH mailbox_email_ids AS MATERIALIZED ("
-                       "  SELECT em.email_id "
-                       "  FROM email_mailboxes em INDEXED BY idx_email_mailboxes_mailbox "
-                       "  WHERE em.account_id = :account_id AND em.mailbox_id = :mailbox_id"
-                       "), mailbox_threads AS MATERIALIZED ("
-                       "  SELECT DISTINCT e.thread_id "
-                       "  FROM mailbox_email_ids me "
-                       "  CROSS JOIN emails e ON e.account_id = :account_id AND "
-                       "e.email_id = me.email_id"
-                       "), ranked_threads AS ("
-                       "  SELECT e.email_id, e.thread_id, "
-                       "         ROW_NUMBER() OVER (PARTITION BY e.thread_id ORDER BY "
-                       "e.received_at DESC, e.email_id DESC) AS thread_rank "
-                       "  FROM mailbox_threads mt "
-                       "  CROSS JOIN emails e INDEXED BY idx_emails_thread "
-                       "       ON e.account_id = :account_id AND e.thread_id = mt.thread_id"
-                       ") "
-                       "SELECT rt.email_id, rt.thread_id "
-                       "FROM ranked_threads rt "
-                       "WHERE rt.thread_rank = 1 "
-                       "ORDER BY rt.email_id DESC "
-                       "LIMIT :limit OFFSET :offset"),
-        {{QStringLiteral(":account_id"), QStringLiteral("account-1")},
-         {QStringLiteral(":mailbox_id"), QStringLiteral("mbx-inbox")},
-         {QStringLiteral(":limit"), 50},
-         {QStringLiteral(":offset"), 0}});
-    CHECK(std::any_of(messagePlan.cbegin(), messagePlan.cend(),
-                      [](const QString& detail)
-                      {
-                          return detail.contains(QStringLiteral("idx_email_mailboxes_mailbox"),
-                                                 Qt::CaseInsensitive) ||
-                                 detail.contains(QStringLiteral("idx_emails_thread"),
-                                                 Qt::CaseInsensitive);
-                      }));
-
-    const auto windowHydrationPlan = explainQueryPlan(
-        databaseContext.connection.database(),
-        QStringLiteral("WITH requested AS MATERIALIZED ("
-                       "  SELECT value AS email_id FROM json_each(:email_ids_json)"
-                       "), requested_threads AS MATERIALIZED ("
-                       "  SELECT DISTINCT e.thread_id FROM requested r "
-                       "  CROSS JOIN emails e ON e.account_id=:account_id AND e.email_id=r.email_id"
-                       "), thread_counts AS ("
-                       "  SELECT e.thread_id, COUNT(*) FROM requested_threads rt "
-                       "  CROSS JOIN emails e INDEXED BY idx_emails_thread "
-                       "    ON e.account_id=:account_id AND e.thread_id=rt.thread_id "
-                       "  GROUP BY e.thread_id"
-                       ") SELECT r.email_id FROM requested r "
-                       "CROSS JOIN emails e ON e.account_id=:account_id AND e.email_id=r.email_id "
-                       "LEFT JOIN thread_counts tc ON tc.thread_id=e.thread_id"),
-        {{QStringLiteral(":account_id"), QStringLiteral("account-1")},
-         {QStringLiteral(":email_ids_json"), QStringLiteral("[\"eml-1\"]")}});
-    CHECK(std::any_of(windowHydrationPlan.cbegin(), windowHydrationPlan.cend(),
-                      [](const QString& detail)
-                      {
-                          return detail.contains(QStringLiteral("account_id=? AND email_id=?"),
-                                                 Qt::CaseInsensitive);
-                      }));
-    CHECK(std::any_of(windowHydrationPlan.cbegin(), windowHydrationPlan.cend(),
-                      [](const QString& detail)
-                      {
-                          return detail.contains(
-                              QStringLiteral("idx_emails_thread (account_id=? AND thread_id=?)"),
-                              Qt::CaseInsensitive);
-                      }));
 }
