@@ -329,6 +329,10 @@ namespace javelin::app
             return QStringLiteral("developer_mailbox_clear");
         case Kind::AcknowledgeRemoteActionResult:
             return QStringLiteral("acknowledge_remote_action_result");
+        case Kind::DeveloperLogSetSubscribed:
+            return QStringLiteral("developer_log_set_subscribed");
+        case Kind::DeveloperLogClear:
+            return QStringLiteral("developer_log_clear");
         }
         return QStringLiteral("unknown");
     }

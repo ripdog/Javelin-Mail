@@ -5,6 +5,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QSqlQuery>
 #include <QTemporaryDir>
@@ -191,6 +192,47 @@ TEST_CASE("mail vault storage is not failed by stale metadata projection work",
     REQUIRE(status.next());
     CHECK(status.value(0).toString() == QStringLiteral("complete"));
     CHECK(status.value(1).isNull());
+}
+
+TEST_CASE("mail vault promotes streamed incoming files by content hash",
+          "[jmap][cache][vault][streaming]")
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const javelin::jmap::cache::MailVault vault{directory.path()};
+    const QByteArray payload = QByteArrayLiteral("streamed raw MIME payload");
+
+    const auto prepared = vault.prepareIncoming();
+    REQUIRE(std::holds_alternative<QString>(prepared));
+    const QString incomingPath = std::get<QString>(prepared);
+    QFile incoming{incomingPath};
+    REQUIRE(incoming.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    REQUIRE(incoming.write(payload) == payload.size());
+    incoming.close();
+
+    const auto installed = vault.installIncoming(incomingPath);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::MailVaultObject>(installed));
+    const auto object = std::get<javelin::jmap::cache::MailVaultObject>(installed);
+    CHECK(object.size == static_cast<std::uint64_t>(payload.size()));
+    CHECK_FALSE(QFileInfo::exists(incomingPath));
+    const QString objectPath = QDir(vault.rootPath()).filePath(object.relativePath);
+    REQUIRE(QFileInfo::exists(objectPath));
+    QFile stored{objectPath};
+    REQUIRE(stored.open(QIODevice::ReadOnly));
+    CHECK(stored.readAll() == payload);
+
+    const auto stalePrepared = vault.prepareIncoming();
+    REQUIRE(std::holds_alternative<QString>(stalePrepared));
+    const QString stalePath = std::get<QString>(stalePrepared);
+    const QString unrelatedPath =
+        QDir(QFileInfo(stalePath).absolutePath()).filePath(QStringLiteral("keep.txt"));
+    QFile unrelated{unrelatedPath};
+    REQUIRE(unrelated.open(QIODevice::WriteOnly));
+    REQUIRE(unrelated.write("keep") == 4);
+    unrelated.close();
+    CHECK_FALSE(vault.cleanupIncoming().has_value());
+    CHECK_FALSE(QFileInfo::exists(stalePath));
+    CHECK(QFileInfo::exists(unrelatedPath));
 }
 
 TEST_CASE("mail vault leases prevent eviction and release on disconnect",

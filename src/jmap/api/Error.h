@@ -15,6 +15,7 @@ namespace javelin::jmap::api
         Cancelled,
         NetworkFailure,
         HttpFailure,
+        LocalIoFailure,
         ResponseDecodingFailed,
     };
 

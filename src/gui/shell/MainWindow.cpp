@@ -267,6 +267,7 @@ namespace javelin::gui::shell
                            javelin::app::ContactCommandPort& contactCommandPort,
                            javelin::app::DeveloperDiagnosticsPort& developerDiagnosticsPort,
                            javelin::app::DeveloperMaintenancePort& developerMaintenancePort,
+                           javelin::app::DaemonLogPort& daemonLogPort,
                            javelin::app::MailCommandPort& mailCommandPort,
                            javelin::app::SieveCommandPort& sieveCommandPort,
                            javelin::app::IdentityCommandPort& identityCommandPort,
@@ -286,10 +287,10 @@ namespace javelin::gui::shell
           m_translationService(translationService), m_composeCommandPort(composeCommandPort),
           m_contactCommandPort(contactCommandPort),
           m_developerDiagnosticsPort(developerDiagnosticsPort),
-          m_developerMaintenancePort(developerMaintenancePort), m_mailCommandPort(mailCommandPort),
-          m_sieveCommandPort(sieveCommandPort), m_identityCommandPort(identityCommandPort),
-          m_accountRefreshPort(accountRefreshPort), m_onboardingPort(onboardingPort),
-          m_messageContentPort(messageContentPort),
+          m_developerMaintenancePort(developerMaintenancePort), m_daemonLogPort(daemonLogPort),
+          m_mailCommandPort(mailCommandPort), m_sieveCommandPort(sieveCommandPort),
+          m_identityCommandPort(identityCommandPort), m_accountRefreshPort(accountRefreshPort),
+          m_onboardingPort(onboardingPort), m_messageContentPort(messageContentPort),
           m_messageListSessionFactory(messageListSessionFactory), m_mailEvents(mailEvents),
           m_messageNavigationPort(messageNavigationPort), m_undoCommandPort(undoCommandPort)
     {
@@ -1048,7 +1049,8 @@ namespace javelin::gui::shell
         connect(logAction, &QAction::triggered, this,
                 [this]
                 {
-                    auto* dialog = new javelin::gui::logging::LogViewerDialog(this);
+                    auto* dialog =
+                        new javelin::gui::logging::LogViewerDialog(m_daemonLogPort, this);
                     dialog->setAttribute(Qt::WA_DeleteOnClose);
                     dialog->show();
                 });

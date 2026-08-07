@@ -214,7 +214,7 @@ int main(int argc, char* argv[])
         .runtimeDirectory = runtime,
         .socketPath = socketPath + QStringLiteral(".activation"),
         .limits = {},
-        .protocol = {.major = 5, .minor = 4},
+        .protocol = {.major = 5, .minor = 5},
         .expectedBuild =
             javelin::protocol::BuildIdentity{.application = QStringLiteral("Javelin-Mail"),
                                              .revision = QStringLiteral(JAVELIN_APP_VERSION)},
@@ -307,7 +307,7 @@ int main(int argc, char* argv[])
          .socketPath = socketPath,
          .daemonExecutable =
              QDir{QCoreApplication::applicationDirPath()}.filePath(QStringLiteral("javelind")),
-         .protocol = {.major = 5, .minor = 4},
+         .protocol = {.major = 5, .minor = 5},
          .build = {.application = QStringLiteral("Javelin-Mail"),
                    .revision = QStringLiteral(JAVELIN_APP_VERSION)},
          .startTimeoutMilliseconds = 5000,
@@ -369,11 +369,12 @@ int main(int argc, char* argv[])
             services->identityReader(), services->messageViewReader(), services->queryReader(),
             services->translationService(), services->composeCommandPort(),
             services->contactCommandPort(), services->developerDiagnosticsPort(),
-            services->developerMaintenancePort(), services->mailCommandPort(),
-            services->sieveCommandPort(), services->identityCommandPort(),
-            services->accountRefreshPort(), services->onboardingPort(),
-            services->messageContentPort(), services->messageListSessionFactory(),
-            services->mailEvents(), services->messageNavigationPort(), services->undoCommandPort());
+            services->developerMaintenancePort(), services->daemonLogPort(),
+            services->mailCommandPort(), services->sieveCommandPort(),
+            services->identityCommandPort(), services->accountRefreshPort(),
+            services->onboardingPort(), services->messageContentPort(),
+            services->messageListSessionFactory(), services->mailEvents(),
+            services->messageNavigationPort(), services->undoCommandPort());
         mainWindow->setAttribute(Qt::WA_DeleteOnClose);
 
         auto* taskButton = new QToolButton(mainWindow);

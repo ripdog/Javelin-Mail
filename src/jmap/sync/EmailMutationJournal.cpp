@@ -275,6 +275,13 @@ namespace javelin::jmap::sync
             {.accountId = std::string{accountId}, .dataType = "Email"}, status, limit));
     }
 
+    std::variant<std::vector<EmailMutationRecord>, javelin::jmap::cache::DatabaseError>
+    EmailMutationJournal::listActive(const std::string_view accountId) const
+    {
+        return typedRecords(
+            m_repository.listActive({.accountId = std::string{accountId}, .dataType = "Email"}));
+    }
+
     std::optional<javelin::jmap::cache::DatabaseError>
     EmailMutationJournal::transition(const std::string_view mutationId, const MutationStatus status,
                                      const std::optional<std::string_view> acceptedState,

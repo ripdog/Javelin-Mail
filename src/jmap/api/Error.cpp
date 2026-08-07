@@ -34,6 +34,8 @@ namespace javelin::jmap::api
             return "network_failure";
         case TransportErrorCode::HttpFailure:
             return "http_failure";
+        case TransportErrorCode::LocalIoFailure:
+            return "local_io_failure";
         case TransportErrorCode::ResponseDecodingFailed:
             return "response_decoding_failed";
         }

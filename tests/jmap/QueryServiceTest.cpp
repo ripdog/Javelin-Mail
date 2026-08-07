@@ -313,6 +313,12 @@ TEST_CASE("offline mailbox coverage exposes only the published crawl generation 
     CHECK(std::ranges::none_of(page,
                                [](const auto& item) { return item.emailId == "old-window-only"; }));
 
+    const auto representativeResult =
+        queries.listOfflineMailboxRepresentativeIds("account-1", "mbx-inbox", 7, 10);
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(representativeResult));
+    CHECK(std::get<std::vector<std::string>>(representativeResult) ==
+          std::vector<std::string>{"staged-newest", "staged-second", "projected-addition"});
+
     REQUIRE(setup.exec(QStringLiteral(
         "UPDATE offline_mailbox_scopes SET status='fetching' WHERE account_id='account-1' "
         "AND mailbox_id='mbx-inbox'")));

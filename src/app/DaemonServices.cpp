@@ -46,6 +46,7 @@
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/IdentityRepository.h"
+#include "jmap/cache/MailVault.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/SubmissionRepository.h"
@@ -57,6 +58,8 @@
 #include "jmap/sync/MutationJournal.h"
 
 #include <QCoroTask>
+
+#include <QDebug>
 
 #include <cstdint>
 #include <memory>
@@ -96,6 +99,10 @@ namespace javelin::app
 
         m_databaseConnection =
             std::get<javelin::jmap::cache::DatabaseConnection>(std::move(databaseResult));
+        if (const auto cleanupError =
+                javelin::jmap::cache::MailVault::forDatabase(m_databaseConnection)
+                    .cleanupIncoming())
+            qWarning().noquote() << cleanupError->message;
         m_databasePath = location.databasePath;
         m_cacheInstanceId = location.instanceId;
         m_developerDiagnosticsService = std::make_unique<DeveloperDiagnosticsService>(

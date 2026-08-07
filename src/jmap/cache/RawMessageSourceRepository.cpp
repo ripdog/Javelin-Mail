@@ -68,7 +68,16 @@ namespace javelin::jmap::cache
         {
             return vaultError(*error);
         }
-        const auto& installed = std::get<MailVaultObject>(installedResult);
+        return upsertInstalled(accountId, source.emailId, source.blobId,
+                               std::get<MailVaultObject>(installedResult));
+    }
+
+    std::optional<DatabaseError> RawMessageSourceRepository::upsertInstalled(
+        const std::string_view accountId, const std::string_view emailId,
+        const std::string_view blobId, const MailVaultObject& installed)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
 
         {
             auto transactionResult = DatabaseTransaction::begin(
@@ -102,8 +111,10 @@ namespace javelin::jmap::cache
                 "updated_at=CURRENT_TIMESTAMP"));
             refQuery.bindValue(QStringLiteral(":account_id"),
                                QString::fromStdString(std::string{accountId}));
-            refQuery.bindValue(QStringLiteral(":email_id"), QString::fromStdString(source.emailId));
-            refQuery.bindValue(QStringLiteral(":blob_id"), QString::fromStdString(source.blobId));
+            refQuery.bindValue(QStringLiteral(":email_id"),
+                               QString::fromStdString(std::string{emailId}));
+            refQuery.bindValue(QStringLiteral(":blob_id"),
+                               QString::fromStdString(std::string{blobId}));
             refQuery.bindValue(QStringLiteral(":hash"),
                                QString::fromStdString(installed.contentHash));
             if (!refQuery.exec())
@@ -121,7 +132,7 @@ namespace javelin::jmap::cache
             mailboxRefs.bindValue(QStringLiteral(":account_id"),
                                   QString::fromStdString(std::string{accountId}));
             mailboxRefs.bindValue(QStringLiteral(":email_id"),
-                                  QString::fromStdString(source.emailId));
+                                  QString::fromStdString(std::string{emailId}));
             if (!mailboxRefs.exec())
             {
                 transaction.rollback();
@@ -141,7 +152,7 @@ namespace javelin::jmap::cache
             projectionQuery.bindValue(QStringLiteral(":account_id"),
                                       QString::fromStdString(std::string{accountId}));
             projectionQuery.bindValue(QStringLiteral(":email_id"),
-                                      QString::fromStdString(source.emailId));
+                                      QString::fromStdString(std::string{emailId}));
             if (!projectionQuery.exec())
             {
                 transaction.rollback();
@@ -208,6 +219,41 @@ namespace javelin::jmap::cache
 
         static_cast<void>(replayProjectionJobs());
         return std::nullopt;
+    }
+
+    std::variant<std::optional<std::string>, DatabaseError>
+    RawMessageSourceRepository::findBlobId(const std::string_view accountId,
+                                           const std::string_view emailId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT blob_id FROM mail_vault_email_refs WHERE account_id=:account_id AND "
+            "email_id=:email_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":email_id"), QString::fromStdString(std::string{emailId}));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Read raw message source reference"), query);
+        if (query.next())
+            return std::optional<std::string>{query.value(0).toString().toStdString()};
+        query.finish();
+
+        QSqlQuery legacyQuery{m_connection.database()};
+        legacyQuery.prepare(QStringLiteral(
+            "SELECT blob_id FROM raw_message_sources WHERE account_id=:account_id AND "
+            "email_id=:email_id"));
+        legacyQuery.bindValue(QStringLiteral(":account_id"),
+                              QString::fromStdString(std::string{accountId}));
+        legacyQuery.bindValue(QStringLiteral(":email_id"),
+                              QString::fromStdString(std::string{emailId}));
+        if (!legacyQuery.exec())
+            return makeQueryError(QStringLiteral("Read legacy raw source reference"), legacyQuery);
+        if (!legacyQuery.next())
+            return std::optional<std::string>{std::nullopt};
+        return std::optional<std::string>{legacyQuery.value(0).toString().toStdString()};
     }
 
     std::variant<std::optional<RawMessageSource>, DatabaseError>

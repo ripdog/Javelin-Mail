@@ -749,6 +749,23 @@ TEST_CASE("socket endpoint runs the transport-neutral typed surface", "[protocol
     CHECK(invalidation->searchWindows.front().queryKey == QStringLiteral("search-1"));
 
     sink.received.reset();
+    endpoint.publishEvent(DaemonLogEntries{
+        .entries = {{.timestampMilliseconds = 123456789,
+                     .level = 2,
+                     .subsystem = QStringLiteral("daemon.sync"),
+                     .message = QStringLiteral("downloaded message")}},
+    });
+    processUntil([&sink] { return sink.received.has_value(); });
+    REQUIRE(sink.received.has_value());
+    const auto* logEntries = std::get_if<DaemonLogEntries>(&*sink.received);
+    REQUIRE(logEntries != nullptr);
+    REQUIRE(logEntries->entries.size() == 1);
+    CHECK(logEntries->entries.front().timestampMilliseconds == 123456789);
+    CHECK(logEntries->entries.front().level == 2);
+    CHECK(logEntries->entries.front().subsystem == QStringLiteral("daemon.sync"));
+    CHECK(logEntries->entries.front().message == QStringLiteral("downloaded message"));
+
+    sink.received.reset();
     endpoint.publishEvent(DaemonShutdownRequested{});
     processUntil([&sink] { return sink.received.has_value(); });
     REQUIRE(sink.received.has_value());

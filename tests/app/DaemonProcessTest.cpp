@@ -2,6 +2,7 @@
 #include "app/CacheLocationProvider.h"
 #include "app/DaemonRemoteActionDispatcher.h"
 #include "app/DaemonServices.h"
+#include "app/LogStore.h"
 #include "app/MailApplicationService.h"
 #include "app/MailboxTreeCacheRead.h"
 #include "app/MessageListMaterializationPort.h"
@@ -77,6 +78,111 @@ namespace
         };
     }
 } // namespace
+
+TEST_CASE("daemon log store enforces a bounded history", "[app][daemon][logging]")
+{
+    auto& logs = javelin::app::LogStore::instance();
+    logs.clear();
+    logs.setMaximumEntries(3);
+    for (int index = 0; index < 5; ++index)
+    {
+        logs.append({.timestamp = QDateTime::currentDateTime(),
+                     .level = QtInfoMsg,
+                     .subsystem = QStringLiteral("test"),
+                     .message = QString::number(index)});
+    }
+    const auto entries = logs.entries();
+    REQUIRE(entries.size() == 3);
+    CHECK(entries.at(0).message == QStringLiteral("2"));
+    CHECK(entries.at(2).message == QStringLiteral("4"));
+    logs.clear();
+    logs.setMaximumEntries(10000);
+}
+
+TEST_CASE("daemon log subscription publishes history and live entries", "[app][daemon][logging]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+
+    auto locationResult = javelin::app::CacheLocationProvider{cacheRoot}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(locationResult));
+    javelin::app::DaemonServices services{
+        std::get<javelin::app::CacheLocation>(std::move(locationResult))};
+
+    struct EventSink final : javelin::protocol::BoundaryEventSink
+    {
+        void onBoundaryEvent(const javelin::protocol::BoundaryEvent& event) override
+        {
+            if (const auto* logs = std::get_if<javelin::protocol::DaemonLogEntries>(&event))
+                events.push_back(*logs);
+        }
+        std::vector<javelin::protocol::DaemonLogEntries> events;
+    } eventSink;
+
+    javelin::app::DaemonRemoteActionDispatcher dispatcher{
+        services,
+        eventSink,
+        [] { return javelin::protocol::InvalidationEpoch{.value = 1}; },
+        []() -> std::optional<javelin::protocol::BoundaryError> { return std::nullopt; },
+        [](javelin::app::AccountAuthenticationResult result) { return result; },
+        [](javelin::app::AccountConnectionSettings settings)
+            -> std::variant<javelin::app::AccountConnectionSettings, QString> { return settings; },
+        [](javelin::app::OAuthRevocationRequest request)
+            -> std::variant<javelin::app::OAuthRevocationRequest, QString> { return request; }};
+
+    auto& store = javelin::app::LogStore::instance();
+    store.clear();
+    store.setMaximumEntries(1000);
+    store.append({.timestamp = QDateTime::fromMSecsSinceEpoch(10),
+                  .level = QtInfoMsg,
+                  .subsystem = QStringLiteral("daemon.test"),
+                  .message = QStringLiteral("historical")});
+
+    const auto subscribePayload = javelin::app::remote::encode(true);
+    REQUIRE(std::holds_alternative<QByteArray>(subscribePayload));
+    const auto subscribe = dispatcher.dispatch({
+        .id = {.value = QUuid::createUuid()},
+        .command =
+            javelin::protocol::RemoteActionCommand{
+                .kind = javelin::protocol::RemoteActionKind::DeveloperLogSetSubscribed,
+                .payload = std::get<QByteArray>(subscribePayload),
+            },
+    });
+    REQUIRE(std::holds_alternative<javelin::protocol::CommandAccepted>(subscribe));
+    REQUIRE(eventSink.events.size() == 1);
+    REQUIRE(eventSink.events.front().entries.size() == 1);
+    CHECK(eventSink.events.front().entries.front().message == QStringLiteral("historical"));
+
+    store.append({.timestamp = QDateTime::fromMSecsSinceEpoch(20),
+                  .level = QtWarningMsg,
+                  .subsystem = QStringLiteral("daemon.test"),
+                  .message = QStringLiteral("live")});
+    REQUIRE(eventSink.events.size() == 2);
+    REQUIRE(eventSink.events.back().entries.size() == 1);
+    CHECK(eventSink.events.back().entries.front().message == QStringLiteral("live"));
+
+    const auto unsubscribePayload = javelin::app::remote::encode(false);
+    REQUIRE(std::holds_alternative<QByteArray>(unsubscribePayload));
+    const auto unsubscribe = dispatcher.dispatch({
+        .id = {.value = QUuid::createUuid()},
+        .command =
+            javelin::protocol::RemoteActionCommand{
+                .kind = javelin::protocol::RemoteActionKind::DeveloperLogSetSubscribed,
+                .payload = std::get<QByteArray>(unsubscribePayload),
+            },
+    });
+    REQUIRE(std::holds_alternative<javelin::protocol::CommandAccepted>(unsubscribe));
+    store.append({.timestamp = QDateTime::fromMSecsSinceEpoch(30),
+                  .level = QtInfoMsg,
+                  .subsystem = QStringLiteral("daemon.test"),
+                  .message = QStringLiteral("after unsubscribe")});
+    CHECK(eventSink.events.size() == 2);
+    store.clear();
+}
 
 TEST_CASE("daemon process migrates settings before exposing readiness", "[app][daemon]")
 {

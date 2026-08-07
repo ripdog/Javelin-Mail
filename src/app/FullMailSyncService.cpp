@@ -42,6 +42,7 @@ namespace javelin::app
     {
         constexpr std::size_t canonicalWindowSize = 100;
         constexpr std::size_t maximumFullMailboxPageSize = 500;
+        constexpr std::size_t offlineBodyBatchSize = 256;
 
         [[nodiscard]] std::string jobId(const std::string_view accountId,
                                         const std::string_view mailboxId)
@@ -295,22 +296,27 @@ namespace javelin::app
             lastWindow.finish();
             const auto lastOffset =
                 ((*coverage)->representativeCount - 1) / canonicalWindowSize * canonicalWindowSize;
+            const auto itemsResult = queries.listOfflineMailboxRepresentativeIds(
+                accountId, mailboxId, generation, (*coverage)->representativeCount - firstOffset,
+                firstOffset);
+            const auto* items = std::get_if<std::vector<std::string>>(&itemsResult);
+            if (items == nullptr)
+                return FullMailboxPageCommit{
+                    std::get<javelin::jmap::cache::DatabaseError>(itemsResult).message};
+
             javelin::jmap::cache::MailboxWindowRepository windows{connection};
             FullMailboxPageCommit result{(*coverage)->representativeCount};
             for (std::size_t offset = firstOffset; offset <= lastOffset;
                  offset += canonicalWindowSize)
             {
-                const auto itemsResult = queries.listOfflineMailboxMessages(
-                    accountId, mailboxId, generation, canonicalWindowSize, offset);
-                const auto* items =
-                    std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&itemsResult);
-                if (items == nullptr)
-                    return FullMailboxPageCommit{
-                        std::get<javelin::jmap::cache::DatabaseError>(itemsResult).message};
+                const auto itemOffset = offset - firstOffset;
+                const auto count = itemOffset < items->size()
+                                       ? std::min(canonicalWindowSize, items->size() - itemOffset)
+                                       : 0;
                 std::vector<std::string> representativeIds;
-                representativeIds.reserve(items->size());
-                for (const auto& item : *items)
-                    representativeIds.push_back(item.emailId);
+                representativeIds.reserve(count);
+                for (std::size_t index = 0; index < count; ++index)
+                    representativeIds.push_back((*items)[itemOffset + index]);
                 if (const auto error = windows.replace({
                         .accountId = accountId,
                         .mailboxId = mailboxId,
@@ -351,6 +357,7 @@ namespace javelin::app
             QString error;
             std::uint64_t totalUnits = 0;
             std::uint64_t totalBytes = 0;
+            std::uint64_t missingUnits = 0;
             std::uint64_t missingBytes = 0;
             std::vector<std::pair<std::string, std::uint64_t>> downloads;
         };
@@ -462,29 +469,53 @@ namespace javelin::app
             work.totalBytes = totals.value(1).toULongLong();
             totals.finish();
 
+            QSqlQuery missingTotals{connection.database()};
+            missingTotals.prepare(QStringLiteral(
+                "SELECT COUNT(*),COALESCE(SUM(e.size),0) FROM email_mailboxes m JOIN emails e ON "
+                "e.account_id=m.account_id AND e.email_id=m.email_id LEFT JOIN "
+                "mail_vault_email_refs r ON r.account_id=e.account_id AND r.email_id=e.email_id "
+                "AND r.blob_id=e.blob_id WHERE m.account_id=:account AND m.mailbox_id=:mailbox AND "
+                "r.email_id IS NULL"));
+            missingTotals.bindValue(QStringLiteral(":account"),
+                                    QString::fromStdString(std::string{accountId}));
+            missingTotals.bindValue(QStringLiteral(":mailbox"),
+                                    QString::fromStdString(std::string{mailboxId}));
+            if (!missingTotals.exec() || !missingTotals.next())
+            {
+                work.error = QStringLiteral("Read missing offline mailbox body totals: ") +
+                             missingTotals.lastError().text();
+                return work;
+            }
+            work.missingUnits = missingTotals.value(0).toULongLong();
+            work.missingBytes = missingTotals.value(1).toULongLong();
+            missingTotals.finish();
+            if (work.missingUnits == 0)
+                return work;
+
             QSqlQuery missing{connection.database()};
             missing.prepare(QStringLiteral(
                 "SELECT e.email_id,e.size FROM email_mailboxes m JOIN emails e ON "
                 "e.account_id=m.account_id AND e.email_id=m.email_id LEFT JOIN "
                 "mail_vault_email_refs r ON r.account_id=e.account_id AND r.email_id=e.email_id "
                 "AND r.blob_id=e.blob_id WHERE m.account_id=:account AND m.mailbox_id=:mailbox AND "
-                "r.email_id IS NULL ORDER BY e.received_at DESC,e.email_id"));
+                "r.email_id IS NULL ORDER BY e.received_at DESC,e.email_id LIMIT :limit"));
             missing.bindValue(QStringLiteral(":account"),
                               QString::fromStdString(std::string{accountId}));
             missing.bindValue(QStringLiteral(":mailbox"),
                               QString::fromStdString(std::string{mailboxId}));
+            missing.bindValue(QStringLiteral(":limit"),
+                              static_cast<qulonglong>(offlineBodyBatchSize));
             if (!missing.exec())
             {
-                work.error = QStringLiteral("Read missing offline mailbox bodies: ") +
+                work.error = QStringLiteral("Read missing offline mailbox body batch: ") +
                              missing.lastError().text();
                 return work;
             }
+            work.downloads.reserve(static_cast<std::size_t>(
+                std::min<std::uint64_t>(work.missingUnits, offlineBodyBatchSize)));
             while (missing.next())
-            {
-                const auto size = missing.value(1).toULongLong();
-                work.missingBytes += size;
-                work.downloads.emplace_back(missing.value(0).toString().toStdString(), size);
-            }
+                work.downloads.emplace_back(missing.value(0).toString().toStdString(),
+                                            missing.value(1).toULongLong());
             return work;
         }
 
@@ -1349,7 +1380,7 @@ namespace javelin::app
                 co_return;
             }
 
-            const auto missingUnits = static_cast<std::uint64_t>(work.downloads.size());
+            const auto missingUnits = work.missingUnits;
             progress = {
                 .completedUnits =
                     work.totalUnits >= missingUnits ? work.totalUnits - missingUnits : 0,

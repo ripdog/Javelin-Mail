@@ -12,6 +12,8 @@
 namespace javelin::jmap::cache
 {
 
+    struct MailVaultObject;
+
     struct RawMessageSource
     {
         std::string emailId;
@@ -26,10 +28,16 @@ namespace javelin::jmap::cache
 
         [[nodiscard]] std::optional<DatabaseError> upsert(std::string_view accountId,
                                                           const RawMessageSource& source);
+        [[nodiscard]] std::optional<DatabaseError> upsertInstalled(std::string_view accountId,
+                                                                   std::string_view emailId,
+                                                                   std::string_view blobId,
+                                                                   const MailVaultObject& object);
         [[nodiscard]] std::optional<DatabaseError> remove(std::string_view accountId,
                                                           std::string_view emailId);
         [[nodiscard]] std::variant<std::optional<RawMessageSource>, DatabaseError>
         find(std::string_view accountId, std::string_view emailId) const;
+        [[nodiscard]] std::variant<std::optional<std::string>, DatabaseError>
+        findBlobId(std::string_view accountId, std::string_view emailId) const;
         [[nodiscard]] std::variant<std::size_t, DatabaseError>
         migrateLegacySources(std::size_t limit = 25);
         [[nodiscard]] std::optional<DatabaseError> replayProjectionJobs(std::size_t limit = 100);

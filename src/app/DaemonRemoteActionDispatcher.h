@@ -101,5 +101,6 @@ namespace javelin::app
         std::deque<QString> m_replayOrder;
         std::size_t m_replayResultBytes = 0;
         std::unordered_map<QString, std::unique_ptr<MailboxObservation>> m_mailboxObservations;
+        bool m_daemonLogSubscribed = false;
     };
 } // namespace javelin::app

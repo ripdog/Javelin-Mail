@@ -560,6 +560,19 @@ namespace javelin::app
                     if (!refreshSettings().has_value())
                         Q_EMIT settingsChanged();
                 }
+                else if constexpr (std::is_same_v<Event, protocol::DaemonLogEntries>)
+                {
+                    for (const auto& entry : value.entries)
+                    {
+                        Q_EMIT daemonLogEntryAdded({
+                            .timestamp = QDateTime::fromMSecsSinceEpoch(
+                                static_cast<qint64>(entry.timestampMilliseconds)),
+                            .level = static_cast<QtMsgType>(entry.level),
+                            .subsystem = entry.subsystem,
+                            .message = entry.message,
+                        });
+                    }
+                }
                 else if constexpr (std::is_same_v<Event, protocol::DaemonShutdownRequested>)
                 {
                     Q_EMIT daemonShutdownRequested();

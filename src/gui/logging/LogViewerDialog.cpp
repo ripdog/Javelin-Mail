@@ -12,6 +12,10 @@
 #include <QTextCursor>
 #include <QVBoxLayout>
 
+#include <algorithm>
+#include <utility>
+#include <vector>
+
 namespace javelin::gui::logging
 {
     namespace
@@ -35,7 +39,8 @@ namespace javelin::gui::logging
         }
     } // namespace
 
-    LogViewerDialog::LogViewerDialog(QWidget* parent) : QDialog(parent)
+    LogViewerDialog::LogViewerDialog(javelin::app::DaemonLogPort& daemonLog, QWidget* parent)
+        : QDialog(parent), m_daemonLog(daemonLog)
     {
         setWindowTitle(i18n("Application Log"));
         resize(1000, 650);
@@ -60,18 +65,34 @@ namespace javelin::gui::logging
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
         auto* clear =
             buttons->addButton(i18nc("@action:button", "Clear"), QDialogButtonBox::ResetRole);
-        connect(clear, &QPushButton::clicked, &javelin::app::LogStore::instance(),
-                &javelin::app::LogStore::clear);
+        connect(clear, &QPushButton::clicked, this,
+                [this]
+                {
+                    javelin::app::LogStore::instance().clear();
+                    m_daemonLog.clear();
+                });
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         layout->addWidget(buttons);
         connect(m_level, &QComboBox::currentIndexChanged, this, &LogViewerDialog::rebuild);
         connect(m_subsystem, &QComboBox::currentIndexChanged, this, &LogViewerDialog::rebuild);
         connect(m_search, &QLineEdit::textChanged, this, &LogViewerDialog::rebuild);
-        connect(&javelin::app::LogStore::instance(), &javelin::app::LogStore::entryAdded, this,
-                &LogViewerDialog::append, Qt::QueuedConnection);
-        connect(&javelin::app::LogStore::instance(), &javelin::app::LogStore::cleared, m_output,
-                &QPlainTextEdit::clear);
+        connect(
+            &javelin::app::LogStore::instance(), &javelin::app::LogStore::entryAdded, this,
+            [this](const javelin::app::LogEntry& entry) { append(entry, Process::Gui); },
+            Qt::QueuedConnection);
+        connect(&javelin::app::LogStore::instance(), &javelin::app::LogStore::cleared, this,
+                &LogViewerDialog::rebuild);
+        connect(&m_daemonLog, &javelin::app::DaemonLogPort::entryAdded, this,
+                [this](const javelin::app::LogEntry& entry) { append(entry, Process::Daemon); });
+        connect(&m_daemonLog, &javelin::app::DaemonLogPort::cleared, this,
+                &LogViewerDialog::rebuild);
+        m_daemonLog.acquire();
         rebuild();
+    }
+
+    LogViewerDialog::~LogViewerDialog()
+    {
+        m_daemonLog.release();
     }
 
     bool LogViewerDialog::accepts(const javelin::app::LogEntry& entry) const
@@ -83,7 +104,7 @@ namespace javelin::gui::logging
                 entry.message.contains(m_search->text(), Qt::CaseInsensitive));
     }
 
-    void LogViewerDialog::append(const javelin::app::LogEntry& entry)
+    void LogViewerDialog::append(const javelin::app::LogEntry& entry, const Process process)
     {
         if (m_subsystem->findText(entry.subsystem) < 0)
         {
@@ -100,15 +121,16 @@ namespace javelin::gui::logging
             format.setFontWeight(QFont::Bold);
         QTextCursor cursor = m_output->textCursor();
         cursor.movePosition(QTextCursor::End);
+        const QString level = entry.level == QtDebugMsg     ? QStringLiteral("DEBUG")
+                              : entry.level == QtInfoMsg    ? QStringLiteral("INFO ")
+                              : entry.level == QtWarningMsg ? QStringLiteral("WARN ")
+                                                            : QStringLiteral("ERROR");
+        const QString processLabel =
+            process == Process::Gui ? QStringLiteral("GUI   ") : QStringLiteral("DAEMON");
         cursor.insertText(
-            QStringLiteral("%1  %-5s  [%2]  %3\n")
+            QStringLiteral("%1  %2  %3  [%4]  %5\n")
                 .arg(entry.timestamp.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")),
-                     entry.subsystem, entry.message)
-                .replace(QStringLiteral("%-5s"),
-                         entry.level == QtDebugMsg     ? QStringLiteral("DEBUG")
-                         : entry.level == QtInfoMsg    ? QStringLiteral("INFO ")
-                         : entry.level == QtWarningMsg ? QStringLiteral("WARN ")
-                                                       : QStringLiteral("ERROR")),
+                     processLabel, level, entry.subsystem, entry.message),
             format);
         m_output->setTextCursor(cursor);
     }
@@ -116,12 +138,21 @@ namespace javelin::gui::logging
     void LogViewerDialog::rebuild()
     {
         m_output->clear();
-        const auto entries = javelin::app::LogStore::instance().entries();
-        for (const auto& entry : entries)
+        std::vector<std::pair<javelin::app::LogEntry, Process>> entries;
+        const auto guiEntries = javelin::app::LogStore::instance().entries();
+        const auto daemonEntries = m_daemonLog.entries();
+        entries.reserve(static_cast<std::size_t>(guiEntries.size() + daemonEntries.size()));
+        for (const auto& entry : guiEntries)
+            entries.emplace_back(entry, Process::Gui);
+        for (const auto& entry : daemonEntries)
+            entries.emplace_back(entry, Process::Daemon);
+        std::stable_sort(entries.begin(), entries.end(), [](const auto& left, const auto& right)
+                         { return left.first.timestamp < right.first.timestamp; });
+        for (const auto& [entry, process] : entries)
         {
             if (m_subsystem->findText(entry.subsystem) < 0)
                 m_subsystem->addItem(entry.subsystem);
-            append(entry);
+            append(entry, process);
         }
     }
 } // namespace javelin::gui::logging

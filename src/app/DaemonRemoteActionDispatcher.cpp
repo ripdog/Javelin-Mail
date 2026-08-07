@@ -9,6 +9,7 @@
 #include "app/DeveloperDiagnostics.h"
 #include "app/DeveloperMaintenance.h"
 #include "app/IdentityApplicationPorts.h"
+#include "app/LogStore.h"
 #include "app/MailApplicationPorts.h"
 #include "app/MailApplicationService.h"
 #include "app/MessageContentApplicationPorts.h"
@@ -70,6 +71,27 @@ namespace javelin::app
         }
 
         constexpr std::size_t maximumReplayEntries = 4096;
+        constexpr qsizetype daemonLogBatchSize = 50;
+
+        [[nodiscard]] QString boundedLogText(const QString& value, const qsizetype maximumBytes)
+        {
+            const QByteArray utf8 = value.toUtf8();
+            if (utf8.size() <= maximumBytes)
+                return value;
+            return QString::fromUtf8(utf8.first(maximumBytes - 8)) + QStringLiteral("…");
+        }
+
+        [[nodiscard]] javelin::protocol::DiagnosticLogEntry
+        diagnosticLogEntry(const LogEntry& entry)
+        {
+            return {
+                .timestampMilliseconds =
+                    static_cast<std::uint64_t>(entry.timestamp.toMSecsSinceEpoch()),
+                .level = static_cast<std::uint8_t>(entry.level),
+                .subsystem = boundedLogText(entry.subsystem, 256),
+                .message = boundedLogText(entry.message, 4000),
+            };
+        }
         constexpr std::size_t maximumReplayResultBytes = 32 * 1024 * 1024;
         constexpr auto replayResultLifetime = std::chrono::minutes{10};
         constexpr auto repeatableReplayLifetime = std::chrono::hours{1};
@@ -235,6 +257,8 @@ namespace javelin::app
             case Kind::OnboardingCancelOAuth:
             case Kind::DeveloperDiagnosticsSnapshot:
             case Kind::AcknowledgeRemoteActionResult:
+            case Kind::DeveloperLogSetSubscribed:
+            case Kind::DeveloperLogClear:
                 return {};
             }
             return {};
@@ -254,6 +278,15 @@ namespace javelin::app
           m_connectionSettingsHydrator(std::move(connectionSettingsHydrator)),
           m_revocationRequestHydrator(std::move(revocationRequestHydrator))
     {
+        connect(&LogStore::instance(), &LogStore::entryAdded, this,
+                [this](const LogEntry& entry)
+                {
+                    if (!m_daemonLogSubscribed)
+                        return;
+                    m_eventSink.onBoundaryEvent(javelin::protocol::DaemonLogEntries{
+                        .entries = {diagnosticLogEntry(entry)},
+                    });
+                });
     }
 
     DaemonRemoteActionDispatcher::~DaemonRemoteActionDispatcher() = default;
@@ -261,6 +294,7 @@ namespace javelin::app
     void DaemonRemoteActionDispatcher::releaseGuiResources()
     {
         m_mailboxObservations.clear();
+        m_daemonLogSubscribed = false;
     }
 
     javelin::protocol::CommandReply
@@ -1022,6 +1056,33 @@ namespace javelin::app
                     return launch(m_services.developerMaintenancePort().clearMailboxCache(
                         std::move(clearCommand)));
                 });
+        case Kind::DeveloperLogSetSubscribed:
+            return decodeAndApply<bool>(
+                command.payload, invalidPayload,
+                [&](const bool subscribed)
+                {
+                    m_daemonLogSubscribed = subscribed;
+                    if (subscribed)
+                    {
+                        const auto entries = LogStore::instance().entries();
+                        for (qsizetype offset = 0; offset < entries.size();
+                             offset += daemonLogBatchSize)
+                        {
+                            javelin::protocol::DaemonLogEntries event;
+                            const qsizetype count =
+                                std::min(daemonLogBatchSize, entries.size() - offset);
+                            event.entries.reserve(static_cast<std::size_t>(count));
+                            for (qsizetype index = 0; index < count; ++index)
+                                event.entries.push_back(
+                                    diagnosticLogEntry(entries.at(offset + index)));
+                            m_eventSink.onBoundaryEvent(event);
+                        }
+                    }
+                    return empty();
+                });
+        case Kind::DeveloperLogClear:
+            LogStore::instance().clear();
+            return empty();
         case Kind::AcknowledgeRemoteActionResult:
             return reject(id,
                           QStringLiteral("Remote action acknowledgements are handled directly."),

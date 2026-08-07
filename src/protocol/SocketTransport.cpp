@@ -1569,6 +1569,19 @@ namespace javelin::protocol
                             }
                             else if constexpr (std::is_same_v<Event, DaemonShutdownRequested>)
                                 return true;
+                            else if constexpr (std::is_same_v<Event, DaemonLogEntries>)
+                            {
+                                return writeVector(
+                                    writer, value.entries, limits.maximumCollectionItems,
+                                    QStringLiteral("daemon_log.entries"),
+                                    [&writer](const DiagnosticLogEntry& entry)
+                                    {
+                                        return writer.qword(entry.timestampMilliseconds) &&
+                                               writer.byte(entry.level) &&
+                                               writer.string(entry.subsystem) &&
+                                               writer.string(entry.message);
+                                    });
+                            }
                             else
                                 return writeCacheIdentity(writer, value.cache) &&
                                        writer.string(value.cacheDatabasePath) &&
@@ -1664,6 +1677,25 @@ namespace javelin::protocol
             }
             if (kind == 8)
                 return finishReply(reader, BoundaryEvent{DaemonShutdownRequested{}});
+            if (kind == 9)
+            {
+                DaemonLogEntries event;
+                if (!readVector(reader, event.entries, limits.maximumCollectionItems,
+                                QStringLiteral("daemon_log.entries"),
+                                [&reader](DiagnosticLogEntry& entry)
+                                {
+                                    quint8 level = 0;
+                                    if (!reader.qword(entry.timestampMilliseconds) ||
+                                        !reader.byte(level) || level > 4 ||
+                                        !reader.string(entry.subsystem) ||
+                                        !reader.string(entry.message))
+                                        return false;
+                                    entry.level = level;
+                                    return true;
+                                }))
+                    return malformed(QStringLiteral("invalid daemon log event"));
+                return finishReply(reader, BoundaryEvent{std::move(event)});
+            }
             return malformed(QStringLiteral("unknown boundary event variant"));
         }
 
@@ -2661,15 +2693,14 @@ namespace javelin::protocol
                            .correlation = 0,
                            .coalescible = coalescible,
                            .event = event};
-        if (coalescible && (m_pendingWrites.size() + (m_currentWrite != nullptr ? 1U : 0U) >=
-                                m_options.maximumQueuedFrames ||
-                            m_queuedBytes + static_cast<std::size_t>(frame.data.size()) >
-                                m_options.maximumQueuedBytes))
-        {
-            if (std::holds_alternative<DaemonStatusChanged>(event) ||
-                std::holds_alternative<SettingsUpdated>(event))
-                return true;
-        }
+        const bool queueFull = m_pendingWrites.size() + (m_currentWrite != nullptr ? 1U : 0U) >=
+                                   m_options.maximumQueuedFrames ||
+                               m_queuedBytes + static_cast<std::size_t>(frame.data.size()) >
+                                   m_options.maximumQueuedBytes;
+        if (queueFull && (std::holds_alternative<DaemonStatusChanged>(event) ||
+                          std::holds_alternative<SettingsUpdated>(event) ||
+                          std::holds_alternative<DaemonLogEntries>(event)))
+            return true;
         return enqueue(std::move(frame));
     }
 

@@ -449,6 +449,58 @@ namespace javelin::jmap::cache
         return std::optional<std::string>{query.value(0).toString().toStdString()};
     }
 
+    std::variant<std::vector<std::string>, DatabaseError>
+    QueryService::listOfflineMailboxRepresentativeIds(
+        const std::string_view accountId, const std::string_view mailboxId,
+        const std::uint64_t generation, const std::size_t limit, const std::size_t offset,
+        javelin::jmap::query::EmailListSort sort) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        const auto orderDirection = javelin::jmap::query::isAscending(sort)
+                                        ? QStringLiteral("ASC")
+                                        : QStringLiteral("DESC");
+        const auto sortKey = sortKeyExpression(sort.property);
+        QSqlQuery query{m_connection.database()};
+        query.prepare(
+            QStringLiteral("WITH candidates AS ("
+                           "  SELECT m.email_id FROM offline_mailbox_membership m "
+                           "  INNER JOIN email_mailboxes em ON em.account_id=m.account_id "
+                           "    AND em.email_id=m.email_id AND em.mailbox_id=m.mailbox_id "
+                           "  WHERE m.account_id=:account_id AND m.mailbox_id=:mailbox_id "
+                           "    AND m.generation=:generation "
+                           "  UNION SELECT DISTINCT j.object_id FROM mutation_journal j "
+                           "  INNER JOIN email_mailboxes em ON em.account_id=j.account_id "
+                           "    AND em.email_id=j.object_id AND em.mailbox_id=:mailbox_id "
+                           "  WHERE j.account_id=:account_id AND j.data_type='Email' "
+                           "    AND j.status IN ('pending','in_flight','unknown')"
+                           "), ranked_threads AS ("
+                           "  SELECT e.email_id,e.thread_id,%2 AS sort_key,"
+                           "         ROW_NUMBER() OVER (PARTITION BY e.thread_id "
+                           "           ORDER BY %2 %1,e.email_id %1) AS thread_rank "
+                           "  FROM candidates c INNER JOIN emails e ON e.account_id=:account_id "
+                           "    AND e.email_id=c.email_id"
+                           ") SELECT email_id FROM ranked_threads WHERE thread_rank=1 "
+                           "ORDER BY sort_key %1,email_id %1 LIMIT :limit OFFSET :offset")
+                .arg(orderDirection, sortKey));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":mailbox_id"),
+                        QString::fromStdString(std::string{mailboxId}));
+        query.bindValue(QStringLiteral(":generation"), static_cast<qulonglong>(generation));
+        query.bindValue(QStringLiteral(":limit"), static_cast<qulonglong>(limit));
+        query.bindValue(QStringLiteral(":offset"), static_cast<qulonglong>(offset));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Read offline mailbox representatives"), query);
+
+        std::vector<std::string> ids;
+        ids.reserve(limit);
+        while (query.next())
+            ids.push_back(query.value(0).toString().toStdString());
+        return ids;
+    }
+
     std::variant<std::vector<MessageListItem>, DatabaseError>
     QueryService::listOfflineMailboxMessages(const std::string_view accountId,
                                              const std::string_view mailboxId,

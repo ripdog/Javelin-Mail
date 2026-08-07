@@ -22,8 +22,11 @@
 
 Raw messages are SHA-256-addressed under `objects/sha256`. Per-account, per-mailbox `messages`
 directories contain hard links named by Email id, making the mirror directly usable without an
-export operation. Installation uses a same-directory atomic commit. SQLite then records the object
-and Email reference and appends filesystem projection jobs in the same cache transaction.
+export operation. Network downloads stream into a bounded-memory incoming file inside the vault,
+are hashed incrementally, and are promoted to their content-addressed path with an atomic
+same-filesystem rename. Stale partial incoming downloads are discarded during daemon startup before
+network work begins. SQLite then records the object and Email reference and appends filesystem
+projection jobs in the same cache transaction.
 
 Projection jobs are replayable. A crash may leave an unprojected immutable object or a queued link,
 but cannot make SQLite claim a completed full mirror. Objects with no retained Email reference and
@@ -49,7 +52,8 @@ failures preserve that cursor; only an explicit JMAP `anchorNotFound` starts a n
 `Email/queryChanges` is bounded by the cached prefix tail, rebases every contiguous retained window,
 fetches additions plus updates to objects already known locally, and ignores changes wholly beyond
 the cached prefix. Later state-change refreshes update the same Email rows and effective membership.
-Raw message bodies are downloaded only after metadata enumeration completes.
+Raw message bodies are downloaded only after metadata enumeration completes. Hydration derives
+aggregate progress from SQLite but retains at most 256 pending Email ids in memory at a time.
 
 The `fetching` phase is itself durable. Restarting the daemon during body hydration does not repeat
 the full `Email/query`/`Email/get` crawl: after the normal foreground reconnect catch-up, the offline

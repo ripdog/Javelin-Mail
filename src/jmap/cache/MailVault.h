@@ -63,6 +63,10 @@ namespace javelin::jmap::cache
         install(const QByteArray& payload) const;
         [[nodiscard]] std::variant<MailVaultObject, MailVaultError>
         stage(const QByteArray& payload) const;
+        [[nodiscard]] std::optional<MailVaultError> cleanupIncoming() const;
+        [[nodiscard]] std::variant<QString, MailVaultError> prepareIncoming() const;
+        [[nodiscard]] std::variant<MailVaultObject, MailVaultError>
+        installIncoming(QString incomingPath) const;
         [[nodiscard]] std::variant<MailVaultLease, MailVaultError>
         acquireLease(const MailVaultObject& object) const;
         [[nodiscard]] bool isLeased(const MailVaultObject& object) const;

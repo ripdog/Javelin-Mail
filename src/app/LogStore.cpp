@@ -4,13 +4,14 @@
 #include <QDebug>
 #include <QMutexLocker>
 #include <QRegularExpression>
+
+#include <algorithm>
 #include <cstdio>
 
 namespace javelin::app
 {
     namespace
     {
-        constexpr qsizetype maximumEntries = 10000;
         QtMessageHandler previousHandler = nullptr;
 
         QString inferredSubsystem(const QMessageLogContext& context, const QString& message)
@@ -77,9 +78,10 @@ namespace javelin::app
         return store;
     }
 
-    void LogStore::install()
+    void LogStore::install(const qsizetype maximumEntries)
     {
         qRegisterMetaType<LogEntry>();
+        instance().setMaximumEntries(maximumEntries);
         previousHandler = qInstallMessageHandler(messageHandler);
         Q_UNUSED(previousHandler)
     }
@@ -90,14 +92,23 @@ namespace javelin::app
         return m_entries;
     }
 
+    void LogStore::setMaximumEntries(const qsizetype maximumEntries)
+    {
+        const QMutexLocker lock{&m_mutex};
+        m_maximumEntries = std::max<qsizetype>(0, maximumEntries);
+        if (m_entries.size() > m_maximumEntries)
+            m_entries.remove(0, m_entries.size() - m_maximumEntries);
+    }
+
     void LogStore::append(LogEntry entry)
     {
         {
             const QMutexLocker lock{&m_mutex};
-            m_entries.push_back(entry);
-            if (m_entries.size() > maximumEntries)
+            if (m_maximumEntries > 0)
             {
-                m_entries.remove(0, m_entries.size() - maximumEntries);
+                m_entries.push_back(entry);
+                if (m_entries.size() > m_maximumEntries)
+                    m_entries.remove(0, m_entries.size() - m_maximumEntries);
             }
         }
         Q_EMIT entryAdded(entry);

@@ -8,6 +8,7 @@
 #include "app/DeveloperDiagnostics.h"
 #include "app/DeveloperMaintenance.h"
 #include "app/IdentityApplicationPorts.h"
+#include "app/LogStore.h"
 #include "app/MailApplicationPorts.h"
 #include "app/MessageContentApplicationPorts.h"
 #include "app/MessageListMaterializationPort.h"
@@ -315,6 +316,25 @@ namespace javelin::app
 
       private:
         RemoteActionClient& m_client;
+    };
+
+    class RemoteDaemonLogPort final : public DaemonLogPort
+    {
+      public:
+        RemoteDaemonLogPort(GuiDaemonSession& session, RemoteActionClient& client,
+                            QObject* parent = nullptr);
+        [[nodiscard]] QVector<LogEntry> entries() const override;
+        void acquire() override;
+        void release() override;
+        void clear() override;
+
+      private:
+        void setRemoteSubscribed(bool subscribed);
+
+        GuiDaemonSession& m_session;
+        RemoteActionClient& m_client;
+        QVector<LogEntry> m_entries;
+        std::size_t m_subscribers = 0;
     };
 
     class RemoteWorkTaskPort final : public WorkTaskPort

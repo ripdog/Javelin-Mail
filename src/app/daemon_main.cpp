@@ -45,7 +45,7 @@ int main(int argc, char* argv[])
 {
     QCoreApplication application{argc, argv};
     KLocalizedString::setApplicationDomain(QByteArrayLiteral("javelinmail"));
-    javelin::app::LogStore::install();
+    javelin::app::LogStore::install(1000);
     QCoreApplication::setOrganizationName(QStringLiteral("Javelin Mail"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("javelin.app"));
     QCoreApplication::setApplicationName(QStringLiteral("Javelin Mail"));
@@ -83,13 +83,13 @@ int main(int argc, char* argv[])
                               .maximumAffectedKeys = 64,
                               .maximumMaterializationItems = 500,
                               .maximumFrameBytes = 64 * 1024 * 1024},
-                   .protocol = {.major = 5, .minor = 4},
+                   .protocol = {.major = 5, .minor = 5},
                    .expectedBuild = std::nullopt,
                    .maximumQueuedFrames = 128,
                    .maximumQueuedBytes = 128 * 1024 * 1024,
                    .responseTimeoutMilliseconds = 5000,
                    .enforcePeerCredentials = true},
-        .protocol = {.major = 5, .minor = 4},
+        .protocol = {.major = 5, .minor = 5},
         .build = {.application = QStringLiteral("Javelin-Mail"),
                   .revision = QStringLiteral(JAVELIN_APP_VERSION)},
         .guiExecutable =

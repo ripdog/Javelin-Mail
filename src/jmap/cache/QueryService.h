@@ -31,6 +31,11 @@ namespace javelin::jmap::cache
                                    std::uint64_t generation, std::size_t limit,
                                    std::size_t offset = 0,
                                    javelin::jmap::query::EmailListSort sort = {}) const override;
+        [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
+        listOfflineMailboxRepresentativeIds(std::string_view accountId, std::string_view mailboxId,
+                                            std::uint64_t generation, std::size_t limit,
+                                            std::size_t offset = 0,
+                                            javelin::jmap::query::EmailListSort sort = {}) const;
         [[nodiscard]] std::variant<std::size_t, DatabaseError>
         countMailboxMessages(std::string_view accountId, std::string_view mailboxId) const override;
         [[nodiscard]] std::variant<std::size_t, DatabaseError>

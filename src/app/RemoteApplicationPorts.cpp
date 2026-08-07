@@ -6,6 +6,9 @@
 #include "jmap/OperationError.h"
 #include "jmap/cache/Database.h"
 
+#include <QDebug>
+#include <QTimer>
+
 #include <algorithm>
 #include <ranges>
 #include <type_traits>
@@ -748,6 +751,80 @@ namespace javelin::app
         co_return co_await call<DeveloperMailboxClearResult>(
             m_client, javelin::protocol::RemoteActionKind::DeveloperMailboxClear,
             std::move(command));
+    }
+
+    RemoteDaemonLogPort::RemoteDaemonLogPort(GuiDaemonSession& session, RemoteActionClient& client,
+                                             QObject* parent)
+        : DaemonLogPort(parent), m_session(session), m_client(client)
+    {
+        connect(&m_session, &GuiDaemonSession::daemonLogEntryAdded, this,
+                [this](const LogEntry& entry)
+                {
+                    if (m_subscribers == 0)
+                        return;
+                    m_entries.push_back(entry);
+                    if (m_entries.size() > 1000)
+                        m_entries.remove(0, m_entries.size() - 1000);
+                    Q_EMIT entryAdded(entry);
+                });
+        connect(&m_session, &GuiDaemonSession::ready, this,
+                [this]
+                {
+                    if (m_subscribers == 0)
+                        return;
+                    QTimer::singleShot(0, this,
+                                       [this]
+                                       {
+                                           if (m_subscribers == 0)
+                                               return;
+                                           m_entries.clear();
+                                           Q_EMIT cleared();
+                                           setRemoteSubscribed(true);
+                                       });
+                });
+    }
+
+    QVector<LogEntry> RemoteDaemonLogPort::entries() const
+    {
+        return m_entries;
+    }
+
+    void RemoteDaemonLogPort::acquire()
+    {
+        ++m_subscribers;
+        if (m_subscribers != 1)
+            return;
+        m_entries.clear();
+        setRemoteSubscribed(true);
+    }
+
+    void RemoteDaemonLogPort::release()
+    {
+        if (m_subscribers == 0)
+            return;
+        --m_subscribers;
+        if (m_subscribers != 0)
+            return;
+        setRemoteSubscribed(false);
+        m_entries.clear();
+    }
+
+    void RemoteDaemonLogPort::clear()
+    {
+        const auto result = m_client.callImmediate<std::monostate>(
+            javelin::protocol::RemoteActionKind::DeveloperLogClear);
+        if (const auto* error = std::get_if<RemoteCallError>(&result))
+            qWarning().noquote() << "Clear daemon log failed" << error->detail;
+        m_entries.clear();
+        Q_EMIT cleared();
+    }
+
+    void RemoteDaemonLogPort::setRemoteSubscribed(const bool subscribed)
+    {
+        const auto result = m_client.callImmediate<std::monostate>(
+            javelin::protocol::RemoteActionKind::DeveloperLogSetSubscribed, subscribed);
+        if (const auto* error = std::get_if<RemoteCallError>(&result))
+            qWarning().noquote() << "Daemon log subscription failed" << error->detail;
     }
 
     RemoteWorkTaskPort::RemoteWorkTaskPort(GuiDaemonSession& session, RemoteActionClient& client)

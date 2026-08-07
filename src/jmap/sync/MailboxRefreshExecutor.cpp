@@ -20,6 +20,7 @@
 #include <QStringList>
 #include <algorithm>
 #include <array>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace javelin::jmap::sync
@@ -219,22 +220,6 @@ namespace javelin::jmap::sync
             return std::nullopt;
         }
 
-        [[nodiscard]] std::vector<javelin::jmap::sync::EmailMutationRecord>
-        activeEmailMutations(const std::vector<javelin::jmap::sync::EmailMutationRecord>& actions)
-        {
-            std::vector<javelin::jmap::sync::EmailMutationRecord> filtered;
-            filtered.reserve(actions.size());
-            for (const auto& action : actions)
-            {
-                if (javelin::jmap::sync::projectsOptimistically(action.status))
-                {
-                    filtered.push_back(action);
-                }
-            }
-
-            return filtered;
-        }
-
         [[nodiscard]] std::optional<OperationError>
         reapplyPendingEmailPatches(javelin::jmap::sync::MutationProjectionTransaction& transaction,
                                    javelin::jmap::cache::DatabaseConnection& databaseConnection,
@@ -250,8 +235,26 @@ namespace javelin::jmap::sync
 
             javelin::jmap::cache::EmailRepository emailRepository{databaseConnection};
             javelin::jmap::sync::EmailMutationJournal emailMutationJournal{databaseConnection};
+            const auto activeResult = emailMutationJournal.listActive(accountId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&activeResult))
+                return javelin::jmap::operationError(*error);
+
+            const std::unordered_set<std::string> refreshedIds{ids.begin(), ids.end()};
+            std::unordered_map<std::string, std::vector<javelin::jmap::sync::EmailMutationRecord>>
+                activeByEmail;
+            for (auto action :
+                 std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(activeResult))
+            {
+                if (!refreshedIds.contains(action.patch.emailId) ||
+                    !javelin::jmap::sync::projectsOptimistically(action.status))
+                    continue;
+                activeByEmail[action.patch.emailId].push_back(std::move(action));
+            }
+            if (activeByEmail.empty())
+                return std::nullopt;
+
             std::vector<javelin::jmap::domain::Email> reconciledEmails;
-            reconciledEmails.reserve(ids.size());
+            reconciledEmails.reserve(activeByEmail.size());
             std::vector<std::string> acceptedMutationIds;
 
             const auto patchSatisfied = [](const javelin::jmap::domain::Email& email,
@@ -275,6 +278,10 @@ namespace javelin::jmap::sync
 
             for (const auto& emailId : ids)
             {
+                const auto pending = activeByEmail.find(emailId);
+                if (pending == activeByEmail.end())
+                    continue;
+
                 const auto emailResult = emailRepository.find(accountId, emailId);
                 if (const auto* error =
                         std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
@@ -289,19 +296,7 @@ namespace javelin::jmap::sync
                     continue;
                 }
 
-                const auto pendingResult = emailMutationJournal.listForEmail(accountId, emailId);
-                if (const auto* error =
-                        std::get_if<javelin::jmap::cache::DatabaseError>(&pendingResult))
-                {
-                    return javelin::jmap::operationError(*error);
-                }
-
-                auto pendingActions = activeEmailMutations(
-                    std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(pendingResult));
-                if (pendingActions.empty())
-                {
-                    continue;
-                }
+                auto pendingActions = std::move(pending->second);
                 std::erase_if(pendingActions,
                               [&email, &acceptedMutationIds, &patchSatisfied](const auto& action)
                               {

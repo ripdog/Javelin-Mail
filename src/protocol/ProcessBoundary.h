@@ -44,7 +44,7 @@ namespace javelin::protocol
     struct ProtocolVersion
     {
         std::uint16_t major = 5;
-        std::uint16_t minor = 4;
+        std::uint16_t minor = 5;
 
         friend bool operator==(const ProtocolVersion&, const ProtocolVersion&) = default;
     };
@@ -202,7 +202,9 @@ namespace javelin::protocol
         DeveloperDiagnosticsSnapshot,
         DeveloperMailboxClear,
         AcknowledgeRemoteActionResult,
-        Last = AcknowledgeRemoteActionResult,
+        DeveloperLogSetSubscribed,
+        DeveloperLogClear,
+        Last = DeveloperLogClear,
     };
 
     struct RemoteActionCommand
@@ -634,10 +636,23 @@ namespace javelin::protocol
         DaemonStatus status;
     };
 
+    struct DiagnosticLogEntry
+    {
+        std::uint64_t timestampMilliseconds = 0;
+        std::uint8_t level = 0;
+        QString subsystem;
+        QString message;
+    };
+
+    struct DaemonLogEntries
+    {
+        std::vector<DiagnosticLogEntry> entries;
+    };
+
     using BoundaryEvent =
         std::variant<CacheInvalidation, OperationFailed, OperationCompleted, SettingsUpdated,
                      ActivationRequested, DaemonStatusChanged, CacheAccessSuspendRequested,
-                     CacheAccessResumed, DaemonShutdownRequested>;
+                     CacheAccessResumed, DaemonShutdownRequested, DaemonLogEntries>;
 
     struct BoundaryLimits
     {

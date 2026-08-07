@@ -581,6 +581,13 @@ namespace javelin::protocol
                 }
                 else if constexpr (std::is_same_v<Event, CacheAccessSuspendRequested>)
                     return 32;
+                else if constexpr (std::is_same_v<Event, DaemonLogEntries>)
+                {
+                    std::size_t size = 16;
+                    for (const auto& entry : value.entries)
+                        size += 16 + stringSize(entry.subsystem) + stringSize(entry.message);
+                    return size;
+                }
                 else
                     return 48;
             },

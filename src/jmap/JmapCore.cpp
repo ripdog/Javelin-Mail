@@ -13,6 +13,7 @@
 #include "jmap/auth/AccessTokenResolver.h"
 #include "jmap/auth/Auth.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailVault.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/MessageContentTypes.h"
@@ -31,6 +32,9 @@
 #include <QCoroFuture>
 
 #include <QDebug>
+#include <QFile>
+#include <QLoggingCategory>
+#include <QScopeGuard>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QUrl>
@@ -45,6 +49,8 @@
 
 namespace javelin::jmap
 {
+    Q_LOGGING_CATEGORY(logMessageContent, "jmap.messagecontent", QtInfoMsg)
+
     struct JmapCore::Impl
     {
         javelin::jmap::cache::DatabaseConnection* databaseConnection = nullptr;
@@ -68,10 +74,11 @@ namespace javelin::jmap
             std::optional<int> httpStatus;
         };
 
-        [[nodiscard]] QString storeRawMessageSource(const QString& databasePath,
-                                                    const std::string& accountId,
-                                                    const std::string& emailId,
-                                                    const std::string& blobId, QByteArray payload)
+        [[nodiscard]] QString storeDownloadedMessageSource(const QString& databasePath,
+                                                           const std::string& accountId,
+                                                           const std::string& emailId,
+                                                           const std::string& blobId,
+                                                           QString incomingPath)
         {
             javelin::jmap::cache::ThreadConnectionFactory factory({
                 .connectionNamePrefix = QStringLiteral("message-source-store"),
@@ -79,14 +86,22 @@ namespace javelin::jmap
             });
             auto opened = factory.openForCurrentThread(accountId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&opened))
+            {
+                QFile::remove(incomingPath);
                 return error->message;
+            }
             auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+            const auto installed = javelin::jmap::cache::MailVault::forDatabase(connection)
+                                       .installIncoming(incomingPath);
+            if (const auto* error = std::get_if<javelin::jmap::cache::MailVaultError>(&installed))
+            {
+                QFile::remove(incomingPath);
+                return error->message;
+            }
             javelin::jmap::cache::RawMessageSourceRepository sources{connection};
-            if (const auto error = sources.upsert(accountId, {
-                                                                 .emailId = emailId,
-                                                                 .blobId = blobId,
-                                                                 .payload = std::move(payload),
-                                                             }))
+            if (const auto error = sources.upsertInstalled(
+                    accountId, emailId, blobId,
+                    std::get<javelin::jmap::cache::MailVaultObject>(installed)))
                 return error->message;
             return {};
         }
@@ -240,14 +255,16 @@ namespace javelin::jmap
             };
         }
 
-        [[nodiscard]] QCoro::Task<std::variant<QByteArray, BlobDownloadError>>
-        downloadBlob(javelin::jmap::api::AbstractTransport& transport,
-                     std::string downloadUrlTemplate, std::string accountId,
-                     javelin::jmap::cache::EmailPart part, std::string accessToken,
-                     QString failurePrefix)
+        [[nodiscard]] QCoro::Task<std::variant<std::uint64_t, BlobDownloadError>>
+        downloadBlobToFile(javelin::jmap::api::AbstractTransport& transport,
+                           std::string downloadUrlTemplate, std::string accountId,
+                           javelin::jmap::cache::EmailPart part, std::string accessToken,
+                           QString filePath, QString failurePrefix)
         {
-            const auto transportResult = co_await transport.send(buildDownloadRequest(
-                buildDownloadUrl(downloadUrlTemplate, accountId, part), accountId, accessToken));
+            const auto transportResult = co_await transport.sendToFile(
+                buildDownloadRequest(buildDownloadUrl(downloadUrlTemplate, accountId, part),
+                                     accountId, accessToken),
+                std::move(filePath));
             if (const auto* error =
                     std::get_if<javelin::jmap::api::TransportError>(&transportResult))
             {
@@ -257,7 +274,7 @@ namespace javelin::jmap
                 };
             }
 
-            const auto& response = std::get<javelin::jmap::api::HttpResponse>(transportResult);
+            const auto& response = std::get<javelin::jmap::api::HttpFileResponse>(transportResult);
             if (response.statusCode < 200 || response.statusCode >= 300)
             {
                 co_return BlobDownloadError{
@@ -271,7 +288,7 @@ namespace javelin::jmap
                 };
             }
 
-            co_return response.body;
+            co_return response.size;
         }
 
         [[nodiscard]] std::variant<javelin::jmap::domain::Email, OperationError>
@@ -927,8 +944,9 @@ namespace javelin::jmap
             }
         };
 
-        qInfo().noquote() << "JMAP core message content refresh start"
-                          << QString::fromStdString(accountId) << QString::fromStdString(emailId);
+        qCDebug(logMessageContent).noquote()
+            << "JMAP core message content refresh start" << QString::fromStdString(accountId)
+            << QString::fromStdString(emailId);
         reportProgress(QStringLiteral("Checking for saved message content..."));
         if (m_impl->databaseConnection == nullptr || m_impl->resourceTransport == nullptr)
         {
@@ -959,17 +977,16 @@ namespace javelin::jmap
         }
         const auto& email = std::get<javelin::jmap::domain::Email>(emailResult);
 
-        const auto cachedSource = sourceRepository.find(accountId, emailId);
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedSource))
+        const auto cachedBlobId = sourceRepository.findBlobId(accountId, emailId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedBlobId))
         {
             co_return operationError(*error);
         }
-        const auto& source =
-            std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(cachedSource);
-        if (source.has_value() && source->blobId == email.blobId)
+        const auto& sourceBlobId = std::get<std::optional<std::string>>(cachedBlobId);
+        if (sourceBlobId.has_value() && *sourceBlobId == email.blobId)
         {
-            qInfo().noquote() << "JMAP core message source using cached data"
-                              << QString::fromStdString(emailId);
+            qCDebug(logMessageContent).noquote()
+                << "JMAP core message source using cached data" << QString::fromStdString(emailId);
             reportProgress(QStringLiteral("Opened message from saved content."));
             co_return MessageContentRefreshSummary{
                 .accountId = std::move(accountId),
@@ -1004,9 +1021,18 @@ namespace javelin::jmap
             .isInlineRenderable = false,
             .isBodySection = false,
         };
-        const auto downloadResult = co_await downloadBlob(
+        const auto incomingResult =
+            javelin::jmap::cache::MailVault::forDatabase(*m_impl->databaseConnection)
+                .prepareIncoming();
+        if (const auto* error = std::get_if<javelin::jmap::cache::MailVaultError>(&incomingResult))
+            co_return OperationError{.message = error->message};
+        const QString incomingPath = std::get<QString>(incomingResult);
+        const auto removeIncoming = qScopeGuard([&incomingPath] { QFile::remove(incomingPath); });
+        static_cast<void>(removeIncoming);
+
+        const auto downloadResult = co_await downloadBlobToFile(
             *m_impl->resourceTransport, context.session.downloadUrl, accountId, sourcePart,
-            context.accessToken, QStringLiteral("Message source download"));
+            context.accessToken, incomingPath, QStringLiteral("Message source download"));
         if (const auto* error = std::get_if<BlobDownloadError>(&downloadResult))
         {
             if (error->httpStatus == std::optional<int>{404})
@@ -1033,18 +1059,17 @@ namespace javelin::jmap
             };
         }
 
-        auto payload = std::get<QByteArray>(std::move(downloadResult));
-        const auto payloadSize = payload.size();
-        auto storeFuture = QtConcurrent::run(storeRawMessageSource,
+        const auto payloadSize = std::get<std::uint64_t>(downloadResult);
+        auto storeFuture = QtConcurrent::run(storeDownloadedMessageSource,
                                              m_impl->databaseConnection->database().databaseName(),
-                                             accountId, email.id, email.blobId, std::move(payload));
+                                             accountId, email.id, email.blobId, incomingPath);
         const QString storeError = co_await qCoro(storeFuture).takeResult();
         if (!storeError.isEmpty())
             co_return OperationError{.message = storeError};
 
-        qInfo().noquote() << "JMAP core message source refresh success"
-                          << QString::fromStdString(emailId)
-                          << static_cast<qulonglong>(payloadSize);
+        qCDebug(logMessageContent).noquote()
+            << "JMAP core message source refresh success" << QString::fromStdString(emailId)
+            << static_cast<qulonglong>(payloadSize);
         reportProgress(QStringLiteral("Message ready."));
 
         co_return MessageContentRefreshSummary{

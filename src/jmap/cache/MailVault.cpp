@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
+#include <QTemporaryFile>
 #include <QUrl>
 
 #include <atomic>
@@ -255,6 +256,90 @@ namespace javelin::jmap::cache
     std::variant<MailVaultObject, MailVaultError> MailVault::stage(const QByteArray& payload) const
     {
         return installAt(payload, QStringLiteral("staging/sha256"));
+    }
+
+    std::optional<MailVaultError> MailVault::cleanupIncoming() const
+    {
+        QDir directory{QDir(m_rootPath).filePath(QStringLiteral("incoming"))};
+        if (!directory.exists())
+            return std::nullopt;
+        const auto entries = directory.entryInfoList({QStringLiteral("download-*.eml")},
+                                                     QDir::Files | QDir::NoSymLinks);
+        for (const auto& entry : entries)
+        {
+            if (!QFile::remove(entry.absoluteFilePath()))
+                return error(QStringLiteral("Remove stale incoming mail vault object"),
+                             entry.absoluteFilePath());
+        }
+        return std::nullopt;
+    }
+
+    std::variant<QString, MailVaultError> MailVault::prepareIncoming() const
+    {
+        const QString directory = QDir(m_rootPath).filePath(QStringLiteral("incoming"));
+        if (const auto directoryError = ensureDirectory(directory))
+            return *directoryError;
+
+        QTemporaryFile file{QDir(directory).filePath(QStringLiteral("download-XXXXXX.eml"))};
+        file.setAutoRemove(false);
+        if (!file.open())
+            return error(QStringLiteral("Create incoming mail vault object"), file.errorString());
+        file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+        const QString path = file.fileName();
+        file.close();
+        return path;
+    }
+
+    std::variant<MailVaultObject, MailVaultError>
+    MailVault::installIncoming(QString incomingPath) const
+    {
+        QFile incoming{incomingPath};
+        if (!incoming.open(QIODevice::ReadOnly))
+            return error(QStringLiteral("Open incoming mail vault object"), incoming.errorString());
+
+        QCryptographicHash hasher{QCryptographicHash::Sha256};
+        QByteArray buffer(64 * 1024, Qt::Uninitialized);
+        while (true)
+        {
+            const qint64 count = incoming.read(buffer.data(), buffer.size());
+            if (count < 0)
+                return error(QStringLiteral("Read incoming mail vault object"),
+                             incoming.errorString());
+            if (count == 0)
+                break;
+            hasher.addData(QByteArrayView{buffer.constData(), count});
+        }
+        const auto size = static_cast<std::uint64_t>(incoming.size());
+        const QString hash = QString::fromLatin1(hasher.result().toHex());
+        const QString relativePath = QStringLiteral("objects/sha256/%1/%2/%3.eml")
+                                         .arg(hash.first(2), hash.sliced(2, 2), hash);
+        const QString absolutePath = QDir(m_rootPath).filePath(relativePath);
+        incoming.close();
+
+        const QFileInfo existing{absolutePath};
+        if (existing.exists())
+        {
+            if (static_cast<std::uint64_t>(existing.size()) != size)
+                return error(QStringLiteral("Verify existing mail vault object"), absolutePath);
+            if (!QFile::remove(incomingPath))
+                return error(QStringLiteral("Remove duplicate incoming mail vault object"),
+                             incomingPath);
+            return MailVaultObject{
+                .contentHash = hash.toStdString(), .relativePath = relativePath, .size = size};
+        }
+
+        if (const auto directoryError = ensureDirectory(existing.absolutePath()))
+            return *directoryError;
+        if (!QFile::rename(incomingPath, absolutePath))
+        {
+            const QFileInfo raced{absolutePath};
+            if (!raced.exists() || static_cast<std::uint64_t>(raced.size()) != size ||
+                !QFile::remove(incomingPath))
+                return error(QStringLiteral("Commit incoming mail vault object"), absolutePath);
+        }
+        QFile::setPermissions(absolutePath, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+        return MailVaultObject{
+            .contentHash = hash.toStdString(), .relativePath = relativePath, .size = size};
     }
 
     MailVaultLease::MailVaultLease(std::shared_ptr<State> state) : m_state(std::move(state))

@@ -11,8 +11,10 @@
 #include <QNetworkAccessManager>
 #include <QPair>
 #include <QPointer>
+#include <QString>
 #include <QUrl>
 
+#include <cstdint>
 #include <functional>
 #include <variant>
 #include <vector>
@@ -55,7 +57,14 @@ namespace javelin::jmap::api
         QByteArray body;
     };
 
+    struct HttpFileResponse
+    {
+        int statusCode = 0;
+        std::uint64_t size = 0;
+    };
+
     using TransportResult = std::variant<HttpResponse, TransportError>;
+    using FileTransportResult = std::variant<HttpFileResponse, TransportError>;
 
     class AbstractTransport
     {
@@ -67,6 +76,8 @@ namespace javelin::jmap::api
         }
 
         [[nodiscard]] virtual QCoro::Task<TransportResult> send(HttpRequest request) = 0;
+        [[nodiscard]] virtual QCoro::Task<FileTransportResult> sendToFile(HttpRequest request,
+                                                                          QString filePath);
     };
 
     class RefreshingTransport final : public AbstractTransport
@@ -79,6 +90,8 @@ namespace javelin::jmap::api
         void invalidateConnections() override;
 
         [[nodiscard]] QCoro::Task<TransportResult> send(HttpRequest request) override;
+        [[nodiscard]] QCoro::Task<FileTransportResult> sendToFile(HttpRequest request,
+                                                                  QString filePath) override;
 
       private:
         AbstractTransport& m_transport;
@@ -95,6 +108,8 @@ namespace javelin::jmap::api
         void invalidateConnections() override;
 
         [[nodiscard]] QCoro::Task<TransportResult> send(HttpRequest request) override;
+        [[nodiscard]] QCoro::Task<FileTransportResult> sendToFile(HttpRequest request,
+                                                                  QString filePath) override;
 
       private:
         QNetworkAccessManager& m_networkAccessManager;

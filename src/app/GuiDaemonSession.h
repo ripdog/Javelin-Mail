@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/CacheAccessBarrier.h"
+#include "app/LogStore.h"
 #include "app/SettingsApplicationPorts.h"
 #include "jmap/cache/Database.h"
 #include "protocol/SocketTransport.h"
@@ -112,6 +113,7 @@ namespace javelin::app
         void daemonStatusChanged(const javelin::protocol::DaemonStatus& status);
         void settingsChanged();
         void activationRequested(const javelin::protocol::ActivationRoute& route);
+        void daemonLogEntryAdded(const javelin::app::LogEntry& entry);
         void daemonShutdownRequested();
 
       private:

@@ -8,6 +8,8 @@
 #include <QCoroTask>
 
 #include <QCoreApplication>
+#include <QFile>
+#include <QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -350,6 +352,59 @@ TEST_CASE("refreshing HTTP transport retries one definite unauthorized response"
     REQUIRE(rawTransport.requests[1].authentication.has_value());
     CHECK(rawTransport.requests[1].authentication->accessToken == "refreshed-token");
     CHECK(rawTransport.requests[1].headers.front().value == "Bearer refreshed-token");
+}
+
+TEST_CASE("refreshing HTTP file transport retries unauthorized downloads",
+          "[jmap][transport][auth][file]")
+{
+    ensureApplication();
+
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("download.eml"));
+    FakeTransport rawTransport;
+    rawTransport.queuedResults.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::HttpFailure,
+        .message = "Unauthorized",
+        .httpStatus = 401,
+    });
+    rawTransport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = "streamed body",
+    });
+    javelin::jmap::api::RefreshingTransport transport{rawTransport};
+    int refreshCalls = 0;
+    transport.setRefreshHandler(
+        [&](std::string, std::string) -> QCoro::Task<std::optional<std::string>>
+        {
+            ++refreshCalls;
+            co_return std::string{"refreshed-token"};
+        });
+
+    const auto result = QCoro::waitFor(transport.sendToFile(
+        {
+            .method = javelin::jmap::api::HttpMethod::Get,
+            .url = QUrl{QStringLiteral("https://mail.example.com/resource")},
+            .headers = {{.name = "Authorization", .value = "Bearer access-token"}},
+            .body = {},
+            .authentication =
+                javelin::jmap::api::BearerAuthentication{
+                    .accountId = "u1",
+                    .accessToken = "access-token",
+                },
+            .cancellation = {},
+            .dispatched = {},
+        },
+        path));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::HttpFileResponse>(result));
+    CHECK(std::get<javelin::jmap::api::HttpFileResponse>(result).size == 13);
+    CHECK(refreshCalls == 1);
+    REQUIRE(rawTransport.requests.size() == 2);
+    CHECK(rawTransport.requests.back().authentication->accessToken == "refreshed-token");
+    QFile file{path};
+    REQUIRE(file.open(QIODevice::ReadOnly));
+    CHECK(file.readAll() == QByteArrayLiteral("streamed body"));
 }
 
 TEST_CASE("refreshing HTTP transport resolves current tokens for stale request scopes",
