@@ -13,12 +13,18 @@
 #include <KLocalizedString>
 
 #include <QCryptographicHash>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QPointer>
+#include <QSqlError>
 #include <QSqlQuery>
 #include <QTimer>
 #include <QtConcurrentRun>
+
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
 
 #include <optional>
 
@@ -26,10 +32,28 @@ namespace javelin::app
 {
     namespace
     {
+        constexpr std::size_t indexBatchSize = 128;
+
         struct ParsedIndexDocument
         {
             std::optional<javelin::jmap::cache::SearchIndexDocument> document;
             QString preview;
+            QString error;
+        };
+
+        struct IndexCandidate
+        {
+            std::string emailId;
+            std::string contentHash;
+            QString path;
+            QString subject;
+            std::uint64_t size = 0;
+        };
+
+        struct IndexBatchResult
+        {
+            std::uint64_t completedUnits = 0;
+            std::uint64_t completedBytes = 0;
             QString error;
         };
 
@@ -48,16 +72,14 @@ namespace javelin::app
             QFile file{path};
             if (!file.open(QIODevice::ReadOnly))
                 return {.document = std::nullopt, .preview = {}, .error = file.errorString()};
-            const QByteArray payload = file.readAll();
+            QByteArray payload = file.readAll();
             if (file.error() != QFileDevice::NoError)
                 return {.document = std::nullopt, .preview = {}, .error = file.errorString()};
-            const auto parsed = javelin::jmap::cache::parseMessageSource(emailId, payload);
+            auto parsed = javelin::jmap::cache::parseSearchableMessageBody(std::move(payload));
             QString body;
-            if (parsed.plainTextBody)
-                body += QString::fromStdString(parsed.plainTextBody->value);
-            else if (parsed.htmlBody)
-                body += javelin::jmap::render::plainTextFromHtml(
-                    QString::fromStdString(parsed.htmlBody->value));
+            if (parsed.has_value())
+                body = parsed->isHtml ? javelin::jmap::render::plainTextFromHtml(parsed->text)
+                                      : std::move(parsed->text);
             const QString preview = body.simplified().left(256);
             return {.document =
                         javelin::jmap::cache::SearchIndexDocument{
@@ -70,28 +92,61 @@ namespace javelin::app
                     .error = {}};
         }
 
-        [[nodiscard]] QString
-        commitIndexDocument(const QString& databasePath, const std::string& accountId,
-                            javelin::jmap::cache::SearchIndexDocument document, QString preview)
+        [[nodiscard]] IndexBatchResult indexBatch(const QString& databasePath,
+                                                  const std::string& accountId,
+                                                  std::vector<IndexCandidate> candidates)
         {
-            const std::string emailId = document.emailId;
-            const std::string contentHash = document.sourceHash;
             javelin::jmap::cache::ThreadConnectionFactory factory({
                 .connectionNamePrefix = QStringLiteral("mail-index-cache"),
                 .databasePath = databasePath,
             });
             auto opened = factory.openForCurrentThread(accountId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&opened))
-                return error->message;
+                return {.error = error->message};
             auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
-            javelin::jmap::cache::MailSearchIndex index{connection};
-            if (const auto error = index.upsert(accountId, document))
-                return error->message;
+            auto writerResult =
+                javelin::jmap::cache::MailSearchIndexWriter::open(connection, accountId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&writerResult))
+                return {.error = error->message};
+            auto writer =
+                std::get<javelin::jmap::cache::MailSearchIndexWriter>(std::move(writerResult));
             javelin::jmap::cache::EmailRepository emails{connection};
-            if (const auto error = emails.markSearchIndexed(accountId, emailId, contentHash,
-                                                            preview.toStdString()))
-                return error->message;
-            return {};
+            std::vector<javelin::jmap::cache::SearchIndexUpdate> updates;
+            updates.reserve(candidates.size());
+            std::uint64_t completedBytes = 0;
+            for (auto& candidate : candidates)
+            {
+                auto parsed = parseDocument(candidate.path, candidate.emailId,
+                                            candidate.contentHash, candidate.subject);
+                if (!parsed.document)
+                    return {.error = std::move(parsed.error)};
+                if (const auto error = writer.upsert(*parsed.document))
+                    return {.error = error->message};
+                updates.push_back({
+                    .emailId = candidate.emailId,
+                    .contentHash = candidate.contentHash,
+                    .preview = parsed.preview.toStdString(),
+                });
+                completedBytes += candidate.size;
+            }
+            if (const auto error = writer.commit())
+                return {.error = error->message};
+            if (const auto error = emails.markSearchIndexedMany(accountId, updates))
+                return {.error = error->message};
+            return {.completedUnits = static_cast<std::uint64_t>(updates.size()),
+                    .completedBytes = completedBytes,
+                    .error = {}};
+        }
+
+        void releaseIndexingMemory(javelin::jmap::cache::DatabaseConnection& connection)
+        {
+            QSqlQuery shrink{connection.database()};
+            if (!shrink.exec(QStringLiteral("PRAGMA shrink_memory")))
+                qWarning().noquote()
+                    << "Search indexing SQLite memory release failed" << shrink.lastError().text();
+#if defined(__GLIBC__)
+            static_cast<void>(malloc_trim(0));
+#endif
         }
     } // namespace
 
@@ -99,6 +154,7 @@ namespace javelin::app
                                        WorkScheduler& scheduler, QObject* parent)
         : QObject(parent), m_connection(connection), m_scheduler(scheduler)
     {
+        m_workerPool.setMaxThreadCount(1);
         connect(&m_scheduler, &WorkScheduler::jobsChanged, this, [this]() { schedulePump(); });
         connect(&m_scheduler, &WorkScheduler::foregroundAvailabilityChanged, this,
                 [this]() { schedulePump(); });
@@ -200,6 +256,15 @@ namespace javelin::app
                            {
                                m_scheduler.release(jobId);
                                m_runningAccounts.erase(accountId);
+                               if (m_runningAccounts.empty())
+                               {
+                                   QTimer::singleShot(0, this,
+                                                      [this]
+                                                      {
+                                                          if (m_runningAccounts.empty())
+                                                              releaseIndexingMemory(m_connection);
+                                                      });
+                               }
                                schedulePump();
                            });
         }
@@ -224,6 +289,7 @@ namespace javelin::app
                               .detail = i18n("Preparing local search")};
         static_cast<void>(m_scheduler.update(jobId, WorkStatus::Running, progress));
         const auto vault = javelin::jmap::cache::MailVault::forDatabase(m_connection);
+        const QString databasePath = m_connection.database().databaseName();
         while (true)
         {
             const auto control = m_scheduler.find(jobId);
@@ -246,43 +312,46 @@ namespace javelin::app
                 "o.content_hash=r.content_hash "
                 "JOIN emails e ON e.account_id=r.account_id AND e.email_id=r.email_id WHERE "
                 "r.account_id=:account AND (r.indexed_hash IS NULL OR "
-                "r.indexed_hash<>r.content_hash) ORDER BY r.updated_at LIMIT 1"));
+                "r.indexed_hash<>r.content_hash) ORDER BY r.updated_at LIMIT :limit"));
             next.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
-            if (!next.exec() || !next.next())
-                break;
-            const auto emailId = next.value(0).toString().toStdString();
-            const auto contentHash = next.value(1).toString().toStdString();
-            const QString path = QDir(vault.rootPath()).filePath(next.value(2).toString());
-            const QString subject = next.value(3).toString();
-            const std::uint64_t size = next.value(4).toULongLong();
+            next.bindValue(QStringLiteral(":limit"), static_cast<qulonglong>(indexBatchSize));
+            if (!next.exec())
+            {
+                static_cast<void>(m_scheduler.update(jobId, WorkStatus::Failed, progress,
+                                                     QStringLiteral("{}"),
+                                                     next.lastError().text()));
+                co_return;
+            }
+            std::vector<IndexCandidate> candidates;
+            candidates.reserve(indexBatchSize);
+            while (next.next())
+            {
+                candidates.push_back({
+                    .emailId = next.value(0).toString().toStdString(),
+                    .contentHash = next.value(1).toString().toStdString(),
+                    .path = QDir(vault.rootPath()).filePath(next.value(2).toString()),
+                    .subject = next.value(3).toString(),
+                    .size = next.value(4).toULongLong(),
+                });
+            }
             next.finish();
+            if (candidates.empty())
+                break;
 
-            auto future = QtConcurrent::run(&m_workerPool, parseDocument, path, emailId,
-                                            contentHash, subject);
-            auto parsed = co_await qCoro(future).takeResult();
+            auto future = QtConcurrent::run(&m_workerPool, indexBatch, databasePath, accountId,
+                                            std::move(candidates));
+            auto batch = co_await qCoro(future).takeResult();
             if (!self)
                 co_return;
-            if (!parsed.document)
-            {
-                static_cast<void>(m_scheduler.update(jobId, WorkStatus::Failed, progress,
-                                                     QStringLiteral("{}"), parsed.error));
-                co_return;
-            }
-            auto commitFuture = QtConcurrent::run(
-                &m_workerPool, commitIndexDocument, m_connection.database().databaseName(),
-                accountId, std::move(*parsed.document), std::move(parsed.preview));
-            const QString commitError = co_await qCoro(commitFuture).takeResult();
-            if (!self)
-                co_return;
-            if (!commitError.isEmpty())
-            {
-                static_cast<void>(m_scheduler.update(jobId, WorkStatus::Failed, progress,
-                                                     QStringLiteral("{}"), commitError));
-                co_return;
-            }
-            ++progress.completedUnits;
-            progress.completedBytes += size;
+            progress.completedUnits += batch.completedUnits;
+            progress.completedBytes += batch.completedBytes;
             progress.detail = i18n("Indexing downloaded mail");
+            if (!batch.error.isEmpty())
+            {
+                static_cast<void>(m_scheduler.update(jobId, WorkStatus::Failed, progress,
+                                                     QStringLiteral("{}"), batch.error));
+                co_return;
+            }
             static_cast<void>(m_scheduler.update(jobId, WorkStatus::Running, progress));
         }
         progress.detail = i18n("Search index is current");

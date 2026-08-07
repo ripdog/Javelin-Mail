@@ -81,6 +81,9 @@ the modeless Task Center renders the committed job model and provides pause/resu
 
 Each account has a disposable `indexes/<account>/search.sqlite3` FTS5 index. It contains normalized
 subject/body text and a source hash, not MIME or attachment bytes. MIME parsing runs away from the
-GUI thread. Search results are joined back to the main cache for current effective objects and are
+GUI thread. Bulk indexing reads pending refs in bounded batches, uses one indexing worker, and parses
+only the primary text body so attachment payloads are never decoded for search. Each batch keeps one
+raw MIME source in memory at a time and commits the FTS/indexed-hash bookkeeping in batch
+transactions. Search results are joined back to the main cache for current effective objects and are
 merged with JMAP search by the existing search session. Deleting the index is always safe; indexing
 rebuilds it from the vault.

@@ -7,6 +7,7 @@
 #include "jmap/api/Transport.h"
 #include "jmap/cache/Database.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailSearchIndex.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/domain/MailEntities.h"
@@ -223,6 +224,14 @@ namespace
         const QByteArray key = QByteArrayLiteral("account-1") + '\0' + QByteArrayLiteral("archive");
         return "full-mailbox-" +
                QCryptographicHash::hash(key, QCryptographicHash::Sha256).toHex().toStdString();
+    }
+
+    [[nodiscard]] std::string mailIndexJobId()
+    {
+        return "mail-index-" +
+               QCryptographicHash::hash(QByteArrayLiteral("account-1"), QCryptographicHash::Sha256)
+                   .toHex()
+                   .toStdString();
     }
 
     void seedFetchingScope(javelin::jmap::cache::DatabaseConnection& connection,
@@ -471,4 +480,52 @@ TEST_CASE("offline hydration absorbs mail added while body downloads are running
     CHECK(scalar(database.connection,
                  QStringLiteral("SELECT completed_bytes FROM offline_mailbox_scopes WHERE "
                                 "account_id='account-1' AND mailbox_id='archive'")) == 450);
+}
+
+TEST_CASE("mail indexing crosses a worker batch without retaining pending rows",
+          "[app][indexing][batch]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabase();
+    seedAccount(database.connection);
+
+    constexpr int messageCount = 130;
+    for (int index = 0; index < messageCount; ++index)
+    {
+        const auto emailId = "indexed-" + std::to_string(index);
+        const auto blobId = "blob-indexed-" + std::to_string(index);
+        upsertEmail(database.connection, email(emailId, blobId, "2026-08-07T10:00:00Z", 100));
+        cacheBody(database.connection, emailId, blobId);
+    }
+
+    javelin::app::WorkScheduler scheduler{database.connection, nullptr,
+                                          std::chrono::milliseconds{0}};
+    javelin::app::MailIndexService indexer{database.connection, scheduler};
+    indexer.applyAccounts({"account-1"});
+
+    REQUIRE(waitUntil(
+        [&]()
+        {
+            const auto job = scheduler.find(mailIndexJobId());
+            const auto* record = std::get_if<std::optional<javelin::app::WorkRecord>>(&job);
+            return record != nullptr && record->has_value() &&
+                   (*record)->status == javelin::app::WorkStatus::Complete;
+        },
+        10000));
+
+    CHECK(scalar(database.connection,
+                 QStringLiteral("SELECT COUNT(*) FROM mail_vault_email_refs WHERE "
+                                "account_id='account-1' AND indexed_hash=content_hash")) ==
+          messageCount);
+    const auto job = scheduler.find(mailIndexJobId());
+    const auto* record = std::get_if<std::optional<javelin::app::WorkRecord>>(&job);
+    REQUIRE(record != nullptr);
+    REQUIRE(record->has_value());
+    CHECK((*record)->progress.completedUnits == messageCount);
+
+    javelin::jmap::cache::MailSearchIndex searchIndex{database.connection};
+    const auto matches = searchIndex.search("account-1", "body", messageCount + 1);
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(matches));
+    CHECK(std::get<std::vector<std::string>>(matches).size() == messageCount);
 }

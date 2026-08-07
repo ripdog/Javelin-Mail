@@ -4,6 +4,7 @@
 #include "jmap/cache/MessageViewService.h"
 
 #include <QByteArray>
+#include <QString>
 
 #include <optional>
 #include <string_view>
@@ -26,8 +27,16 @@ namespace javelin::jmap::cache
         QByteArray payload;
     };
 
+    struct SearchableMessageBody
+    {
+        QString text;
+        bool isHtml = false;
+    };
+
     [[nodiscard]] ParsedMessageSource parseMessageSource(std::string_view emailId,
                                                          const QByteArray& payload);
+    [[nodiscard]] std::optional<SearchableMessageBody>
+    parseSearchableMessageBody(QByteArray payload);
     [[nodiscard]] std::optional<ParsedMessagePart> findMessageSourcePart(std::string_view emailId,
                                                                          const QByteArray& payload,
                                                                          std::string_view partId);

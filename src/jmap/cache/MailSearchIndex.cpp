@@ -105,6 +105,111 @@ namespace javelin::jmap::cache
         }
     } // namespace
 
+    struct MailSearchIndexWriter::State
+    {
+        explicit State(QString path) : writeScope(path), connection(path, false)
+        {
+        }
+
+        ~State()
+        {
+            if (transactionActive)
+                connection.database().rollback();
+        }
+
+        DatabaseWriteScope writeScope;
+        IndexConnection connection;
+        bool transactionActive = false;
+    };
+
+    MailSearchIndexWriter::MailSearchIndexWriter(std::unique_ptr<State> state)
+        : m_state(std::move(state))
+    {
+    }
+
+    MailSearchIndexWriter::MailSearchIndexWriter(MailSearchIndexWriter&&) noexcept = default;
+    MailSearchIndexWriter&
+    MailSearchIndexWriter::operator=(MailSearchIndexWriter&&) noexcept = default;
+    MailSearchIndexWriter::~MailSearchIndexWriter() = default;
+
+    std::variant<MailSearchIndexWriter, DatabaseError>
+    MailSearchIndexWriter::open(const DatabaseConnection& cacheConnection,
+                                const std::string_view accountId)
+    {
+        const DatabaseReadView readView{cacheConnection};
+        auto state = std::make_unique<State>(indexPath(readView, accountId));
+        if (state->connection.failure())
+            return *state->connection.failure();
+        if (!state->connection.database().transaction())
+            return error(QStringLiteral("Begin mail search update"),
+                         state->connection.database().lastError().text());
+        state->transactionActive = true;
+        return MailSearchIndexWriter{std::move(state)};
+    }
+
+    std::optional<DatabaseError> MailSearchIndexWriter::upsert(const SearchIndexDocument& document)
+    {
+        auto& database = m_state->connection.database();
+        if (!m_state->transactionActive)
+            return error(QStringLiteral("Update mail search index"),
+                         QStringLiteral("writer transaction is not active"));
+
+        QSqlQuery documentQuery{database};
+        documentQuery.prepare(QStringLiteral(
+            "INSERT INTO search_documents(email_id,source_hash,index_version) VALUES(:email,"
+            ":hash,1) ON CONFLICT(email_id) DO UPDATE SET source_hash=excluded.source_hash,"
+            "index_version=excluded.index_version RETURNING rowid"));
+        documentQuery.bindValue(QStringLiteral(":email"), QString::fromStdString(document.emailId));
+        documentQuery.bindValue(QStringLiteral(":hash"),
+                                QString::fromStdString(document.sourceHash));
+        if (!documentQuery.exec() || !documentQuery.next())
+        {
+            database.rollback();
+            m_state->transactionActive = false;
+            return error(QStringLiteral("Record indexed mail document"),
+                         documentQuery.lastError().text());
+        }
+        const qlonglong rowId = documentQuery.value(0).toLongLong();
+        documentQuery.finish();
+
+        QSqlQuery deleteIndexQuery{database};
+        deleteIndexQuery.prepare(QStringLiteral("DELETE FROM email_search_fts WHERE rowid=:rowid"));
+        deleteIndexQuery.bindValue(QStringLiteral(":rowid"), rowId);
+        if (!deleteIndexQuery.exec())
+        {
+            database.rollback();
+            m_state->transactionActive = false;
+            return error(QStringLiteral("Replace indexed mail document"),
+                         deleteIndexQuery.lastError().text());
+        }
+
+        QSqlQuery indexQuery{database};
+        indexQuery.prepare(QStringLiteral(
+            "INSERT INTO email_search_fts(rowid,subject,body) VALUES(:rowid,:subject,:body)"));
+        indexQuery.bindValue(QStringLiteral(":rowid"), rowId);
+        indexQuery.bindValue(QStringLiteral(":subject"), document.subject);
+        indexQuery.bindValue(QStringLiteral(":body"), document.body);
+        if (!indexQuery.exec())
+        {
+            database.rollback();
+            m_state->transactionActive = false;
+            return error(QStringLiteral("Index mail document"), indexQuery.lastError().text());
+        }
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError> MailSearchIndexWriter::commit()
+    {
+        if (!m_state->transactionActive)
+            return error(QStringLiteral("Commit mail search update"),
+                         QStringLiteral("writer transaction is not active"));
+        auto& database = m_state->connection.database();
+        if (!database.commit())
+            return error(QStringLiteral("Commit mail search update"), database.lastError().text());
+        m_state->transactionActive = false;
+        return std::nullopt;
+    }
+
     MailSearchIndex::MailSearchIndex(const DatabaseConnection& cacheConnection)
         : m_cacheConnection(cacheConnection),
           m_writerConnection(const_cast<DatabaseConnection*>(&cacheConnection))
@@ -127,56 +232,13 @@ namespace javelin::jmap::cache
         if (m_writerConnection == nullptr)
             return error(QStringLiteral("Update mail search index"),
                          QStringLiteral("read-only cache access"));
-        const QString path = indexPath(m_cacheConnection, accountId);
-        const DatabaseWriteScope writeScope{path};
-        IndexConnection connection{path, false};
-        if (connection.failure())
-            return connection.failure();
-        auto& database = connection.database();
-        if (!database.transaction())
-            return error(QStringLiteral("Begin mail search update"), database.lastError().text());
-
-        QSqlQuery documentQuery{database};
-        documentQuery.prepare(QStringLiteral(
-            "INSERT INTO search_documents(email_id,source_hash,index_version) VALUES(:email,"
-            ":hash,1) ON CONFLICT(email_id) DO UPDATE SET source_hash=excluded.source_hash,"
-            "index_version=excluded.index_version RETURNING rowid"));
-        documentQuery.bindValue(QStringLiteral(":email"), QString::fromStdString(document.emailId));
-        documentQuery.bindValue(QStringLiteral(":hash"),
-                                QString::fromStdString(document.sourceHash));
-        if (!documentQuery.exec() || !documentQuery.next())
-        {
-            database.rollback();
-            return error(QStringLiteral("Record indexed mail document"),
-                         documentQuery.lastError().text());
-        }
-        const qlonglong rowId = documentQuery.value(0).toLongLong();
-        documentQuery.finish();
-
-        QSqlQuery deleteIndexQuery{database};
-        deleteIndexQuery.prepare(QStringLiteral("DELETE FROM email_search_fts WHERE rowid=:rowid"));
-        deleteIndexQuery.bindValue(QStringLiteral(":rowid"), rowId);
-        if (!deleteIndexQuery.exec())
-        {
-            database.rollback();
-            return error(QStringLiteral("Replace indexed mail document"),
-                         deleteIndexQuery.lastError().text());
-        }
-
-        QSqlQuery indexQuery{database};
-        indexQuery.prepare(QStringLiteral(
-            "INSERT INTO email_search_fts(rowid,subject,body) VALUES(:rowid,:subject,:body)"));
-        indexQuery.bindValue(QStringLiteral(":rowid"), rowId);
-        indexQuery.bindValue(QStringLiteral(":subject"), document.subject);
-        indexQuery.bindValue(QStringLiteral(":body"), document.body);
-        if (!indexQuery.exec())
-        {
-            database.rollback();
-            return error(QStringLiteral("Index mail document"), indexQuery.lastError().text());
-        }
-        if (!database.commit())
-            return error(QStringLiteral("Commit mail search update"), database.lastError().text());
-        return std::nullopt;
+        auto opened = MailSearchIndexWriter::open(*m_writerConnection, accountId);
+        if (const auto* failure = std::get_if<DatabaseError>(&opened))
+            return *failure;
+        auto writer = std::get<MailSearchIndexWriter>(std::move(opened));
+        if (const auto failure = writer.upsert(document))
+            return failure;
+        return writer.commit();
     }
 
     std::optional<DatabaseError> MailSearchIndex::remove(const std::string_view accountId,

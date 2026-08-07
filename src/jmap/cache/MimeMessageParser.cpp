@@ -181,6 +181,21 @@ namespace javelin::jmap::cache
             message.parse();
         }
 
+        void normalizeCrlfInPlace(QByteArray& payload)
+        {
+            char* data = payload.data();
+            const qsizetype size = payload.size();
+            qsizetype writeOffset = 0;
+            for (qsizetype readOffset = 0; readOffset < size; ++readOffset)
+            {
+                if (data[readOffset] == '\r' && readOffset + 1 < size &&
+                    data[readOffset + 1] == '\n')
+                    continue;
+                data[writeOffset++] = data[readOffset];
+            }
+            payload.truncate(writeOffset);
+        }
+
         [[nodiscard]] const KMime::Content* findPart(const KMime::Content& content,
                                                      const std::string_view partId)
         {
@@ -221,6 +236,24 @@ namespace javelin::jmap::cache
         };
         collectParts(message, emailId, parsed);
         return parsed;
+    }
+
+    std::optional<SearchableMessageBody> parseSearchableMessageBody(QByteArray payload)
+    {
+        normalizeCrlfInPlace(payload);
+        KMime::Message message;
+        message.setContent(payload);
+        message.parse();
+
+        if (const auto* plain = message.mainBodyPart(QByteArrayLiteral("text/plain"));
+            plain != nullptr)
+        {
+            return SearchableMessageBody{.text = plain->decodedText(), .isHtml = false};
+        }
+        if (const auto* html = message.mainBodyPart(QByteArrayLiteral("text/html"));
+            html != nullptr)
+            return SearchableMessageBody{.text = html->decodedText(), .isHtml = true};
+        return std::nullopt;
     }
 
     std::optional<ParsedMessagePart> findMessageSourcePart(const std::string_view emailId,

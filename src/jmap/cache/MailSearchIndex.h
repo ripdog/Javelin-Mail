@@ -4,6 +4,7 @@
 
 #include <QString>
 
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -18,6 +19,26 @@ namespace javelin::jmap::cache
         std::string sourceHash;
         QString subject;
         QString body;
+    };
+
+    class MailSearchIndexWriter final
+    {
+      public:
+        MailSearchIndexWriter(const MailSearchIndexWriter&) = delete;
+        MailSearchIndexWriter& operator=(const MailSearchIndexWriter&) = delete;
+        MailSearchIndexWriter(MailSearchIndexWriter&&) noexcept;
+        MailSearchIndexWriter& operator=(MailSearchIndexWriter&&) noexcept;
+        ~MailSearchIndexWriter();
+
+        [[nodiscard]] static std::variant<MailSearchIndexWriter, DatabaseError>
+        open(const DatabaseConnection& cacheConnection, std::string_view accountId);
+        [[nodiscard]] std::optional<DatabaseError> upsert(const SearchIndexDocument& document);
+        [[nodiscard]] std::optional<DatabaseError> commit();
+
+      private:
+        struct State;
+        explicit MailSearchIndexWriter(std::unique_ptr<State> state);
+        std::unique_ptr<State> m_state;
     };
 
     class MailSearchIndex

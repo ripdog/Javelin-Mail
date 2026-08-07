@@ -1,4 +1,5 @@
 #include "jmap/cache/MessageViewService.h"
+#include "jmap/cache/MimeMessageParser.h"
 
 #include <QCoreApplication>
 #include <QSqlQuery>
@@ -284,4 +285,28 @@ TEST_CASE("message view service loads snapshots on a worker connection",
     REQUIRE(snapshot.has_value());
     CHECK(snapshot->email.subject == std::optional<std::string>{"Quarterly update"});
     REQUIRE(snapshot->htmlRenderDocument.has_value());
+}
+
+TEST_CASE("searchable MIME parsing ignores attachment payloads", "[jmap][cache][mime][search]")
+{
+    QByteArray payload =
+        QByteArrayLiteral("Subject: Indexed\r\n"
+                          "Content-Type: multipart/mixed; boundary=\"search-boundary\"\r\n"
+                          "\r\n"
+                          "--search-boundary\r\n"
+                          "Content-Type: text/plain; charset=utf-8\r\n"
+                          "\r\n"
+                          "Index this body only.\r\n"
+                          "--search-boundary\r\n"
+                          "Content-Type: application/octet-stream\r\n"
+                          "Content-Disposition: attachment; filename=\"large.bin\"\r\n"
+                          "Content-Transfer-Encoding: base64\r\n"
+                          "\r\n"
+                          "not-valid-base64-and-not-search-text%%%%\r\n"
+                          "--search-boundary--\r\n");
+
+    const auto body = javelin::jmap::cache::parseSearchableMessageBody(std::move(payload));
+    REQUIRE(body.has_value());
+    CHECK_FALSE(body->isHtml);
+    CHECK(body->text == QStringLiteral("Index this body only."));
 }

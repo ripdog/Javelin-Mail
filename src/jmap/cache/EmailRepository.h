@@ -11,6 +11,12 @@
 
 namespace javelin::jmap::cache
 {
+    struct SearchIndexUpdate
+    {
+        std::string emailId;
+        std::string contentHash;
+        std::string preview;
+    };
 
     class EmailRepository
     {
@@ -41,6 +47,9 @@ namespace javelin::jmap::cache
                                                                      std::string_view emailId,
                                                                      std::string_view contentHash,
                                                                      std::string_view preview);
+        [[nodiscard]] std::optional<DatabaseError>
+        markSearchIndexedMany(std::string_view accountId,
+                              std::span<const SearchIndexUpdate> updates);
         [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
         existingIds(std::string_view accountId, std::span<const std::string> emailIds) const;
         [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>

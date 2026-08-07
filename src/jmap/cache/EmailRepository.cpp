@@ -818,8 +818,22 @@ namespace javelin::jmap::cache
         const std::string_view accountId, const std::string_view emailId,
         const std::string_view contentHash, const std::string_view preview)
     {
+        const SearchIndexUpdate update{
+            .emailId = std::string{emailId},
+            .contentHash = std::string{contentHash},
+            .preview = std::string{preview},
+        };
+        return markSearchIndexedMany(accountId, std::span<const SearchIndexUpdate>{&update, 1});
+    }
+
+    std::optional<DatabaseError>
+    EmailRepository::markSearchIndexedMany(const std::string_view accountId,
+                                           const std::span<const SearchIndexUpdate> updates)
+    {
+        if (updates.empty())
+            return std::nullopt;
         auto transactionResult =
-            DatabaseTransaction::begin(m_connection, QStringLiteral("Record indexed email"));
+            DatabaseTransaction::begin(m_connection, QStringLiteral("Record indexed email batch"));
         if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
             return *error;
         auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
@@ -829,27 +843,30 @@ namespace javelin::jmap::cache
         updatePreview.prepare(QStringLiteral(
             "UPDATE emails SET preview=:preview WHERE account_id=:account AND email_id=:email "
             "AND preview=''"));
-        updatePreview.bindValue(QStringLiteral(":preview"),
-                                QString::fromStdString(std::string{preview}));
-        updatePreview.bindValue(QStringLiteral(":account"),
-                                QString::fromStdString(std::string{accountId}));
-        updatePreview.bindValue(QStringLiteral(":email"),
-                                QString::fromStdString(std::string{emailId}));
-        if (!updatePreview.exec())
-            return makeQueryError(QStringLiteral("Update indexed email preview"), updatePreview);
-
         QSqlQuery indexed{database};
         indexed.prepare(QStringLiteral(
             "UPDATE mail_vault_email_refs SET indexed_hash=:hash WHERE account_id=:account "
             "AND email_id=:email AND content_hash=:hash"));
-        indexed.bindValue(QStringLiteral(":hash"),
-                          QString::fromStdString(std::string{contentHash}));
-        indexed.bindValue(QStringLiteral(":account"),
-                          QString::fromStdString(std::string{accountId}));
-        indexed.bindValue(QStringLiteral(":email"), QString::fromStdString(std::string{emailId}));
-        if (!indexed.exec())
-            return makeQueryError(QStringLiteral("Mark email search source indexed"), indexed);
+        const QString account = QString::fromStdString(std::string{accountId});
+        for (const auto& update : updates)
+        {
+            const QString email = QString::fromStdString(update.emailId);
+            updatePreview.bindValue(QStringLiteral(":preview"),
+                                    QString::fromStdString(update.preview));
+            updatePreview.bindValue(QStringLiteral(":account"), account);
+            updatePreview.bindValue(QStringLiteral(":email"), email);
+            if (!updatePreview.exec())
+                return makeQueryError(QStringLiteral("Update indexed email preview"),
+                                      updatePreview);
+            updatePreview.finish();
 
+            indexed.bindValue(QStringLiteral(":hash"), QString::fromStdString(update.contentHash));
+            indexed.bindValue(QStringLiteral(":account"), account);
+            indexed.bindValue(QStringLiteral(":email"), email);
+            if (!indexed.exec())
+                return makeQueryError(QStringLiteral("Mark email search source indexed"), indexed);
+            indexed.finish();
+        }
         return transaction.commit();
     }
 
