@@ -2006,6 +2006,18 @@ namespace javelin::jmap::cache
                                            "identity_create_projections(account_id,creation_id)"),
                         },
                 },
+                MigrationStep{
+                    .version = 42,
+                    .name = QStringLiteral("mail_vault_projection_content_hash_index"),
+                    .statements =
+                        {
+                            QStringLiteral("CREATE INDEX idx_mail_vault_projection_content_hash ON "
+                                           "mail_vault_projection_jobs(content_hash,status)"),
+                            QStringLiteral(
+                                "CREATE INDEX idx_mail_vault_projection_target_pending ON "
+                                "mail_vault_projection_jobs(status,account_id,mailbox_id,job_id)"),
+                        },
+                },
             },
         };
     }

@@ -145,6 +145,13 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
               .compare(QStringLiteral("wal"), Qt::CaseInsensitive) == 0);
     CHECK(pragmaValue(connection.database(), QStringLiteral("busy_timeout")) ==
           QStringLiteral("5000"));
+
+    QSqlQuery projectionCleanupPlan{connection.database()};
+    REQUIRE(projectionCleanupPlan.exec(QStringLiteral(
+        "EXPLAIN QUERY PLAN DELETE FROM mail_vault_projection_jobs WHERE content_hash='probe'")));
+    REQUIRE(projectionCleanupPlan.next());
+    CHECK(projectionCleanupPlan.value(3).toString().contains(
+        QStringLiteral("idx_mail_vault_projection_content_hash")));
 }
 
 TEST_CASE("database migrations are repeatable when reopening an existing cache",

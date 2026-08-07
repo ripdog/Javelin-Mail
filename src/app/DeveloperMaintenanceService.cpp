@@ -295,7 +295,8 @@ namespace javelin::app
                     return queryError(QStringLiteral("Count mailbox projection jobs"), pending);
                 if (pending.value(0).toULongLong() == 0)
                     return std::nullopt;
-                if (const auto error = sources.replayProjectionJobs(250))
+                if (const auto error = sources.replayProjectionJobsForMailbox(
+                        command.accountId.toStdString(), command.mailboxId.toStdString(), 250))
                     return error;
             }
         }
@@ -393,19 +394,63 @@ namespace javelin::app
                 return *error;
 
             const MailVault vault{vaultPath};
+            constexpr std::size_t cleanupBatchSize = 128;
             std::uint64_t logicalBytes = 0;
             std::uint64_t reclaimedBytes = 0;
             std::uint64_t deferredBytes = 0;
+            std::vector<BodyObject> evictedObjects;
+            evictedObjects.reserve(cleanupBatchSize);
+            const auto commitEvictedObjects = [&]() -> std::optional<DatabaseError>
+            {
+                if (evictedObjects.empty())
+                    return std::nullopt;
+                const DatabaseWriteScope cleanupWriteScope{connection};
+                auto cleanupResult = DatabaseTransaction::begin(
+                    connection, QStringLiteral("Remove cleared mail vault objects"));
+                if (const auto* error = std::get_if<DatabaseError>(&cleanupResult))
+                    return *error;
+                auto cleanup = std::get<DatabaseTransaction>(std::move(cleanupResult));
+                QSqlQuery jobs{database};
+                jobs.prepare(QStringLiteral(
+                    "DELETE FROM mail_vault_projection_jobs WHERE content_hash=:hash"));
+                QSqlQuery objectRow{database};
+                objectRow.prepare(
+                    QStringLiteral("DELETE FROM mail_vault_objects WHERE content_hash=:hash"));
+                for (const auto& object : evictedObjects)
+                {
+                    jobs.bindValue(QStringLiteral(":hash"), object.contentHash);
+                    if (!jobs.exec())
+                    {
+                        return queryError(QStringLiteral("Delete cleared body projection history"),
+                                          jobs);
+                    }
+                    jobs.finish();
+                    objectRow.bindValue(QStringLiteral(":hash"), object.contentHash);
+                    if (!objectRow.exec())
+                    {
+                        return queryError(QStringLiteral("Delete cleared mail vault object"),
+                                          objectRow);
+                    }
+                    objectRow.finish();
+                }
+                if (const auto error = cleanup.commit())
+                    return error;
+                evictedObjects.clear();
+                return std::nullopt;
+            };
+
+            QSqlQuery refs{database};
+            refs.prepare(QStringLiteral(
+                "SELECT COUNT(*) FROM mail_vault_email_refs WHERE content_hash=:hash"));
             for (const auto& object : objects)
             {
                 logicalBytes += object.size;
-                QSqlQuery refs{database};
-                refs.prepare(QStringLiteral(
-                    "SELECT COUNT(*) FROM mail_vault_email_refs WHERE content_hash=:hash"));
                 refs.bindValue(QStringLiteral(":hash"), object.contentHash);
                 if (!refs.exec() || !refs.next())
                     return queryError(QStringLiteral("Inspect cleared body references"), refs);
-                if (refs.value(0).toULongLong() != 0)
+                const bool isUnreferenced = refs.value(0).toULongLong() == 0;
+                refs.finish();
+                if (!isUnreferenced)
                     continue;
 
                 const MailVaultObject vaultObject{.contentHash = object.contentHash.toStdString(),
@@ -419,34 +464,18 @@ namespace javelin::app
                 const bool existed =
                     QFileInfo::exists(QDir{vaultPath}.filePath(object.relativePath));
                 if (const auto error = vault.evict(vaultObject))
-                {
                     return maintenanceError(error->message);
-                }
-                const DatabaseWriteScope cleanupWriteScope{connection};
-                auto cleanupResult = DatabaseTransaction::begin(
-                    connection, QStringLiteral("Remove cleared mail vault object"));
-                if (const auto* error = std::get_if<DatabaseError>(&cleanupResult))
-                    return *error;
-                auto cleanup = std::get<DatabaseTransaction>(std::move(cleanupResult));
-                QSqlQuery jobs{database};
-                jobs.prepare(QStringLiteral(
-                    "DELETE FROM mail_vault_projection_jobs WHERE content_hash=:hash"));
-                jobs.bindValue(QStringLiteral(":hash"), object.contentHash);
-                if (!jobs.exec())
-                    return queryError(QStringLiteral("Delete cleared body projection history"),
-                                      jobs);
-                QSqlQuery objectRow{database};
-                objectRow.prepare(
-                    QStringLiteral("DELETE FROM mail_vault_objects WHERE content_hash=:hash"));
-                objectRow.bindValue(QStringLiteral(":hash"), object.contentHash);
-                if (!objectRow.exec())
-                    return queryError(QStringLiteral("Delete cleared mail vault object"),
-                                      objectRow);
-                if (const auto error = cleanup.commit())
-                    return *error;
+                evictedObjects.push_back(object);
                 if (existed)
                     reclaimedBytes += object.size;
+                if (evictedObjects.size() >= cleanupBatchSize)
+                {
+                    if (const auto error = commitEvictedObjects())
+                        return *error;
+                }
             }
+            if (const auto error = commitEvictedObjects())
+                return *error;
 
             return DeveloperMailboxClearSummary{
                 .accountId = command.accountId,

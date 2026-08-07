@@ -505,117 +505,146 @@ namespace javelin::jmap::cache
         return sources.size();
     }
 
-    std::optional<DatabaseError>
-    RawMessageSourceRepository::replayProjectionJobs(const std::size_t limit)
+    namespace
     {
-        QSqlQuery select{m_connection.database()};
-        select.prepare(
-            QStringLiteral("SELECT j.job_id,j.account_id,j.email_id,COALESCE(j.mailbox_id,''),"
-                           "COALESCE(j.content_hash,''),COALESCE(o.relative_path,''),COALESCE(o."
-                           "size,0),j.operation "
-                           "FROM mail_vault_projection_jobs j LEFT JOIN mail_vault_objects o ON "
-                           "o.content_hash=j.content_hash WHERE j.status='pending' ORDER BY "
-                           "j.job_id LIMIT :limit"));
-        select.bindValue(QStringLiteral(":limit"), static_cast<qulonglong>(limit));
-        if (!select.exec())
-            return makeQueryError(QStringLiteral("Read mail vault projection jobs"), select);
-        std::vector<ProjectionJob> jobs;
-        while (select.next())
+        [[nodiscard]] std::optional<DatabaseError>
+        replayProjectionJobs(DatabaseConnection& connection, const std::size_t limit,
+                             const std::optional<std::pair<std::string, std::string>>& mailbox)
         {
-            jobs.push_back({.id = select.value(0).toLongLong(),
-                            .accountId = select.value(1).toString().toStdString(),
-                            .emailId = select.value(2).toString().toStdString(),
-                            .mailboxId = select.value(3).toString().toStdString(),
-                            .contentHash = select.value(4).toString().toStdString(),
-                            .relativePath = select.value(5).toString(),
-                            .size = select.value(6).toULongLong(),
-                            .operation = select.value(7).toString().toStdString()});
-        }
-        select.finish();
+            QSqlQuery select{connection.database()};
+            QString statement = QStringLiteral(
+                "SELECT j.job_id,j.account_id,j.email_id,COALESCE(j.mailbox_id,''),"
+                "COALESCE(j.content_hash,''),COALESCE(o.relative_path,''),COALESCE(o.size,0),"
+                "j.operation FROM mail_vault_projection_jobs j LEFT JOIN mail_vault_objects o ON "
+                "o.content_hash=j.content_hash WHERE j.status='pending'");
+            if (mailbox.has_value())
+                statement += QStringLiteral(" AND j.account_id=:account AND j.mailbox_id=:mailbox");
+            statement += QStringLiteral(" ORDER BY j.job_id LIMIT :limit");
+            select.prepare(statement);
+            if (mailbox.has_value())
+            {
+                select.bindValue(QStringLiteral(":account"),
+                                 QString::fromStdString(mailbox->first));
+                select.bindValue(QStringLiteral(":mailbox"),
+                                 QString::fromStdString(mailbox->second));
+            }
+            select.bindValue(QStringLiteral(":limit"), static_cast<qulonglong>(limit));
+            if (!select.exec())
+                return makeQueryError(QStringLiteral("Read mail vault projection jobs"), select);
+            std::vector<ProjectionJob> jobs;
+            while (select.next())
+            {
+                jobs.push_back({.id = select.value(0).toLongLong(),
+                                .accountId = select.value(1).toString().toStdString(),
+                                .emailId = select.value(2).toString().toStdString(),
+                                .mailboxId = select.value(3).toString().toStdString(),
+                                .contentHash = select.value(4).toString().toStdString(),
+                                .relativePath = select.value(5).toString(),
+                                .size = select.value(6).toULongLong(),
+                                .operation = select.value(7).toString().toStdString()});
+            }
+            select.finish();
 
-        const MailVault vault = MailVault::forDatabase(m_connection);
-        std::optional<DatabaseError> firstFailure;
-        for (const auto& job : jobs)
-        {
-            std::optional<MailVaultError> failure;
-            if (job.operation == "link")
+            const MailVault vault = MailVault::forDatabase(connection);
+            std::optional<DatabaseError> firstFailure;
+            for (const auto& job : jobs)
             {
-                failure = vault.project(job.accountId, job.mailboxId, job.emailId,
-                                        {.contentHash = job.contentHash,
-                                         .relativePath = job.relativePath,
-                                         .size = job.size});
-            }
-            else if (job.operation == "unlink")
-            {
-                failure = vault.removeProjection(job.accountId, job.mailboxId, job.emailId);
-            }
-            else if (job.operation == "metadata")
-            {
-                QSqlQuery metadata{m_connection.database()};
-                if (job.mailboxId.empty())
+                std::optional<MailVaultError> failure;
+                if (job.operation == "link")
                 {
-                    metadata.prepare(QStringLiteral(
-                        "SELECT email_address FROM accounts WHERE account_id=:account"));
-                    metadata.bindValue(QStringLiteral(":account"),
-                                       QString::fromStdString(job.accountId));
-                    if (!metadata.exec())
+                    failure = vault.project(job.accountId, job.mailboxId, job.emailId,
+                                            {.contentHash = job.contentHash,
+                                             .relativePath = job.relativePath,
+                                             .size = job.size});
+                }
+                else if (job.operation == "unlink")
+                {
+                    failure = vault.removeProjection(job.accountId, job.mailboxId, job.emailId);
+                }
+                else if (job.operation == "metadata")
+                {
+                    QSqlQuery metadata{connection.database()};
+                    if (job.mailboxId.empty())
                     {
-                        failure = MailVaultError{
-                            .message = QStringLiteral("Read mail account metadata: ") +
-                                       metadata.lastError().text()};
+                        metadata.prepare(QStringLiteral(
+                            "SELECT email_address FROM accounts WHERE account_id=:account"));
+                        metadata.bindValue(QStringLiteral(":account"),
+                                           QString::fromStdString(job.accountId));
+                        if (!metadata.exec())
+                        {
+                            failure = MailVaultError{
+                                .message = QStringLiteral("Read mail account metadata: ") +
+                                           metadata.lastError().text()};
+                        }
+                        else if (metadata.next())
+                        {
+                            failure = vault.writeAccountMetadata(
+                                job.accountId, metadata.value(0).toString().toStdString());
+                        }
                     }
-                    else if (metadata.next())
+                    else
                     {
-                        failure = vault.writeAccountMetadata(
-                            job.accountId, metadata.value(0).toString().toStdString());
+                        metadata.prepare(QStringLiteral(
+                            "SELECT name FROM mailboxes WHERE account_id=:account AND "
+                            "mailbox_id=:mailbox"));
+                        metadata.bindValue(QStringLiteral(":account"),
+                                           QString::fromStdString(job.accountId));
+                        metadata.bindValue(QStringLiteral(":mailbox"),
+                                           QString::fromStdString(job.mailboxId));
+                        if (!metadata.exec())
+                        {
+                            failure = MailVaultError{
+                                .message = QStringLiteral("Read mail mailbox metadata: ") +
+                                           metadata.lastError().text()};
+                        }
+                        else if (metadata.next())
+                        {
+                            failure = vault.writeMailboxMetadata(
+                                job.accountId, job.mailboxId,
+                                metadata.value(0).toString().toStdString());
+                        }
                     }
                 }
                 else
                 {
-                    metadata.prepare(
-                        QStringLiteral("SELECT name FROM mailboxes WHERE account_id=:account AND "
-                                       "mailbox_id=:mailbox"));
-                    metadata.bindValue(QStringLiteral(":account"),
-                                       QString::fromStdString(job.accountId));
-                    metadata.bindValue(QStringLiteral(":mailbox"),
-                                       QString::fromStdString(job.mailboxId));
-                    if (!metadata.exec())
-                    {
-                        failure = MailVaultError{
-                            .message = QStringLiteral("Read mail mailbox metadata: ") +
-                                       metadata.lastError().text()};
-                    }
-                    else if (metadata.next())
-                    {
-                        failure =
-                            vault.writeMailboxMetadata(job.accountId, job.mailboxId,
-                                                       metadata.value(0).toString().toStdString());
-                    }
+                    failure = MailVaultError{
+                        .message =
+                            QStringLiteral("Replay mail vault projection: unsupported operation %1")
+                                .arg(QString::fromStdString(job.operation))};
                 }
+                const DatabaseWriteScope writeScope{connection};
+                QSqlQuery update{connection.database()};
+                update.prepare(QStringLiteral(
+                    "UPDATE mail_vault_projection_jobs SET status=:status,last_error=:error,"
+                    "updated_at=CURRENT_TIMESTAMP WHERE job_id=:job_id"));
+                update.bindValue(QStringLiteral(":status"),
+                                 failure ? QStringLiteral("pending") : QStringLiteral("complete"));
+                update.bindValue(QStringLiteral(":error"),
+                                 failure ? QVariant{failure->message} : QVariant{});
+                update.bindValue(QStringLiteral(":job_id"), job.id);
+                if (!update.exec())
+                {
+                    return makeQueryError(QStringLiteral("Complete mail vault projection job"),
+                                          update);
+                }
+                if (failure && !firstFailure.has_value())
+                    firstFailure = vaultError(*failure);
             }
-            else
-            {
-                failure = MailVaultError{
-                    .message = QStringLiteral("Replay mail vault projection: unsupported operation "
-                                              "%1")
-                                   .arg(QString::fromStdString(job.operation))};
-            }
-            const DatabaseWriteScope writeScope{m_connection};
-            QSqlQuery update{m_connection.database()};
-            update.prepare(QStringLiteral(
-                "UPDATE mail_vault_projection_jobs SET status=:status,last_error=:error,"
-                "updated_at=CURRENT_TIMESTAMP WHERE job_id=:job_id"));
-            update.bindValue(QStringLiteral(":status"),
-                             failure ? QStringLiteral("pending") : QStringLiteral("complete"));
-            update.bindValue(QStringLiteral(":error"),
-                             failure ? QVariant{failure->message} : QVariant{});
-            update.bindValue(QStringLiteral(":job_id"), job.id);
-            if (!update.exec())
-                return makeQueryError(QStringLiteral("Complete mail vault projection job"), update);
-            if (failure && !firstFailure.has_value())
-                firstFailure = vaultError(*failure);
+            return firstFailure;
         }
-        return firstFailure;
+    } // namespace
+
+    std::optional<DatabaseError>
+    RawMessageSourceRepository::replayProjectionJobs(const std::size_t limit)
+    {
+        return javelin::jmap::cache::replayProjectionJobs(m_connection, limit, std::nullopt);
+    }
+
+    std::optional<DatabaseError> RawMessageSourceRepository::replayProjectionJobsForMailbox(
+        const std::string_view accountId, const std::string_view mailboxId, const std::size_t limit)
+    {
+        return javelin::jmap::cache::replayProjectionJobs(
+            m_connection, limit, std::pair{std::string{accountId}, std::string{mailboxId}});
     }
 
 } // namespace javelin::jmap::cache

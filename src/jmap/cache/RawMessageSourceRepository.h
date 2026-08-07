@@ -41,6 +41,9 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::variant<std::size_t, DatabaseError>
         migrateLegacySources(std::size_t limit = 25);
         [[nodiscard]] std::optional<DatabaseError> replayProjectionJobs(std::size_t limit = 100);
+        [[nodiscard]] std::optional<DatabaseError>
+        replayProjectionJobsForMailbox(std::string_view accountId, std::string_view mailboxId,
+                                       std::size_t limit = 100);
         [[nodiscard]] std::variant<std::size_t, DatabaseError>
         evictUnretained(std::size_t limit = 25);
 

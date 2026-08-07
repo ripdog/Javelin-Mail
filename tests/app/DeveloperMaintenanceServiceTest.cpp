@@ -301,6 +301,9 @@ TEST_CASE("developer body clear reclaims unique objects and preserves shared bod
             .upsert("account-1",
                     {.emailId = "unique-inbox", .blobId = "blob-unique", .payload = uniquePayload})
             .has_value());
+    execute(database,
+            QStringLiteral("INSERT INTO mail_vault_projection_jobs(account_id,email_id,mailbox_id,"
+                           "operation) VALUES('account-1','shared-archive','archive','metadata')"));
 
     const QString uniquePath = textScalar(
         database, QStringLiteral("SELECT relative_path FROM mail_vault_objects o JOIN "
@@ -354,7 +357,58 @@ TEST_CASE("developer body clear reclaims unique objects and preserves shared bod
                                               "account_id='account-1' AND mailbox_id='inbox'")) ==
           QStringLiteral("paused"));
     CHECK_FALSE(resyncRequested);
+    CHECK(textScalar(database,
+                     QStringLiteral("SELECT status FROM mail_vault_projection_jobs WHERE "
+                                    "account_id='account-1' AND email_id='shared-archive' AND "
+                                    "mailbox_id='archive' AND operation='metadata' ORDER BY job_id "
+                                    "DESC LIMIT 1")) == QStringLiteral("pending"));
     REQUIRE(publisher.changes.size() == 1);
+}
+
+TEST_CASE("developer body clear batches large reclaimable object cleanup",
+          "[app][developer-maintenance][bodies][batch]")
+{
+    ensureApplication();
+    auto context = database();
+    seedBase(context.connection);
+    auto& database = context.connection.database();
+    javelin::jmap::cache::RawMessageSourceRepository sources{context.connection};
+    std::uint64_t expectedBytes = 0;
+    for (int index = 0; index < 130; ++index)
+    {
+        const QString emailId = QStringLiteral("batch-%1").arg(index);
+        const QString blobId = QStringLiteral("blob-%1").arg(index);
+        seedEmail(database, emailId, blobId, QStringLiteral("inbox"));
+        const QByteArray payload = QStringLiteral("body-%1").arg(index).toUtf8();
+        expectedBytes += static_cast<std::uint64_t>(payload.size());
+        REQUIRE_FALSE(sources
+                          .upsert("account-1", {.emailId = emailId.toStdString(),
+                                                .blobId = blobId.toStdString(),
+                                                .payload = payload})
+                          .has_value());
+    }
+
+    RecordingPublisher publisher;
+    javelin::app::MailboxMaintenanceRegistry registry;
+    const auto vault = javelin::jmap::cache::MailVault::forDatabase(context.connection);
+    DeveloperMaintenanceService maintenance{
+        context.directory.filePath(QStringLiteral("cache.sqlite3")), vault.rootPath(), registry,
+        publisher};
+    const auto result = QCoro::waitFor(maintenance.clearMailboxCache({
+        .accountId = QStringLiteral("account-1"),
+        .mailboxId = QStringLiteral("inbox"),
+        .kind = DeveloperMailboxCacheKind::Bodies,
+        .offlinePolicy = DeveloperOfflineClearPolicy::Disable,
+    }));
+    const auto& cleared = summary(result);
+    CHECK(cleared.projectionsRemoved == 130);
+    CHECK(cleared.reclaimedBytes == expectedBytes);
+    CHECK(cleared.deferredBytes == 0);
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_email_refs WHERE "
+                                          "account_id='account-1'")) == 0);
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_objects")) == 0);
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_projection_jobs WHERE "
+                                          "account_id='account-1' AND mailbox_id='inbox'")) == 0);
 }
 
 TEST_CASE("developer body clear defers leased objects for later vault collection",
