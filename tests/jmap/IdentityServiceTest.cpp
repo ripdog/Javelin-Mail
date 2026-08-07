@@ -459,6 +459,195 @@ TEST_CASE("identity creates remain pending without a fake server id until accept
     CHECK(std::get<std::vector<javelin::jmap::cache::PendingIdentityCreate>>(pending).empty());
 }
 
+TEST_CASE("Fastmail identity creates accept null set states when the batched get confirms state",
+          "[jmap][identity][service][fastmail]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    auto connection = database(directory, QStringLiteral("identity-fastmail-create-service"));
+    javelin::jmap::cache::IdentityRepository repository{connection};
+    REQUIRE_FALSE(repository.replaceAll("mail-account", {existingIdentity()}, "").has_value());
+    FakeMethodTransport transport;
+    transport.responder = [](const javelin::jmap::api::JmapMethodRequest& request)
+    {
+        const auto setArguments = request.envelope.methodCalls.front().arguments;
+        const auto document = QJsonDocument::fromJson(QByteArray::fromStdString(setArguments));
+        REQUIRE(document.isObject());
+        const auto create = document.object().value(QStringLiteral("create")).toObject();
+        REQUIRE(create.size() == 1);
+        const auto creationId = create.begin().key();
+        return javelin::jmap::api::JmapMethodTransportResult{javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {
+                    {.name = "Identity/set",
+                     .arguments =
+                         QStringLiteral(
+                             R"({"created":{"%1":{"displayName":"","enableExternalSMTP":false,"externalCredentialId":null,"server":"","isAutoConfigured":false,"bcc":null,"showInCompose":true,"warnings":[],"port":587,"verificationState":"autoverified","mayDelete":true,"ssl":"starttls","id":"identity-2","saveOnSMTP":false,"replyTo":null,"addBccOnSMTP":false,"useForAutoReply":true}},"updated":{},"newState":null,"oldState":null,"destroyed":[],"accountId":"mail-account"})")
+                             .arg(creationId)
+                             .toStdString(),
+                     .callId = "identity-set"},
+                    {.name = "Identity/get",
+                     .arguments =
+                         R"({"accountId":"mail-account","state":"","list":[{"id":"identity-1","name":"Alice","email":"alice@example.test","replyTo":null,"bcc":null,"textSignature":"Old","htmlSignature":"<p>Old</p>","mayDelete":true},{"id":"identity-2","name":"Alice Work","email":"alice@example.test","replyTo":null,"bcc":null,"textSignature":"Work","htmlSignature":"<p>Work</p>","mayDelete":true}],"notFound":[]})",
+                     .callId = "identity-after-set"},
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "s2",
+        }};
+    };
+
+    auto created = existingIdentity("Work");
+    created.id.clear();
+    created.name = "Alice Work";
+    javelin::jmap::identity::IdentityService service{connection, transport};
+    const auto result = QCoro::waitFor(service.save(settings(), "mail-account", created));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::domain::Identity>(result));
+    CHECK(std::get<javelin::jmap::domain::Identity>(result).id == "identity-2");
+    const auto pending = repository.listPendingCreates("mail-account");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::PendingIdentityCreate>>(pending));
+    CHECK(std::get<std::vector<javelin::jmap::cache::PendingIdentityCreate>>(pending).empty());
+}
+
+TEST_CASE("Fastmail null set state stays unknown without a confirming Identity get",
+          "[jmap][identity][service][fastmail]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    auto connection = database(directory, QStringLiteral("identity-fastmail-unconfirmed-service"));
+    javelin::jmap::cache::IdentityRepository repository{connection};
+    REQUIRE_FALSE(repository.replaceAll("mail-account", {existingIdentity()}, "").has_value());
+    FakeMethodTransport transport;
+    transport.responder = [](const javelin::jmap::api::JmapMethodRequest& request)
+    {
+        const auto setArguments = request.envelope.methodCalls.front().arguments;
+        const auto document = QJsonDocument::fromJson(QByteArray::fromStdString(setArguments));
+        REQUIRE(document.isObject());
+        const auto create = document.object().value(QStringLiteral("create")).toObject();
+        REQUIRE(create.size() == 1);
+        const auto creationId = create.begin().key();
+        return javelin::jmap::api::JmapMethodTransportResult{javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "Identity/set",
+                  .arguments =
+                      QStringLiteral(
+                          R"({"created":{"%1":{"id":"identity-2"}},"updated":{},"newState":null,"oldState":null,"destroyed":[],"accountId":"mail-account"})")
+                          .arg(creationId)
+                          .toStdString(),
+                  .callId = "identity-set"}},
+            .createdIds = std::nullopt,
+            .sessionState = "s2",
+        }};
+    };
+
+    auto created = existingIdentity("Work");
+    created.id.clear();
+    created.name = "Alice Work";
+    javelin::jmap::identity::IdentityService service{connection, transport};
+    const auto result = QCoro::waitFor(service.save(settings(), "mail-account", created));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+    CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+          javelin::jmap::OperationErrorCode::ProtocolViolation);
+    javelin::jmap::identity::IdentityMutationJournal journal{connection, repository};
+    const auto active = journal.listActive("mail-account");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::identity::IdentityMutationRecord>>(
+        active));
+    REQUIRE(std::get<std::vector<javelin::jmap::identity::IdentityMutationRecord>>(active).size() ==
+            1);
+    CHECK(std::get<std::vector<javelin::jmap::identity::IdentityMutationRecord>>(active)
+              .front()
+              .status == javelin::jmap::sync::MutationStatus::Unknown);
+}
+
+TEST_CASE("ambiguous identity creates recover when refresh finds one exact new server identity",
+          "[jmap][identity][service][recovery]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    auto connection = database(directory, QStringLiteral("identity-unknown-create-service"));
+    javelin::jmap::cache::IdentityRepository repository{connection};
+    REQUIRE_FALSE(repository.replaceAll("mail-account", {existingIdentity()}, "i1").has_value());
+    FakeMethodTransport transport;
+    transport.results.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "connection reset after dispatch",
+    });
+
+    auto created = existingIdentity("Recovered Create");
+    created.id.clear();
+    created.name = "Alice Work";
+    javelin::jmap::identity::IdentityService service{connection, transport};
+    const auto failed = QCoro::waitFor(service.save(settings(), "mail-account", created));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(failed));
+
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Identity/get",
+              .arguments =
+                  R"({"accountId":"mail-account","state":"i2","list":[{"id":"identity-1","name":"Alice","email":"alice@example.test","replyTo":null,"bcc":null,"textSignature":"Old","htmlSignature":"<p>Old</p>","mayDelete":true},{"id":"identity-2","name":"Alice Work","email":"alice@example.test","replyTo":null,"bcc":null,"textSignature":"Recovered Create","htmlSignature":"<p>Recovered Create</p>","mayDelete":true}],"notFound":[]})",
+              .callId = "identity-refresh"}},
+        .createdIds = std::nullopt,
+        .sessionState = "s3"});
+    const auto refreshed = QCoro::waitFor(service.refresh(settings(), "mail-account"));
+    REQUIRE(std::holds_alternative<javelin::jmap::identity::IdentitySnapshot>(refreshed));
+
+    javelin::jmap::identity::IdentityMutationJournal journal{connection, repository};
+    const auto active = journal.listActive("mail-account");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::identity::IdentityMutationRecord>>(
+        active));
+    CHECK(std::get<std::vector<javelin::jmap::identity::IdentityMutationRecord>>(active).empty());
+    const auto pending = repository.listPendingCreates("mail-account");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::PendingIdentityCreate>>(pending));
+    CHECK(std::get<std::vector<javelin::jmap::cache::PendingIdentityCreate>>(pending).empty());
+}
+
+TEST_CASE("ambiguous identity create recovery stays unresolved with multiple exact new matches",
+          "[jmap][identity][service][recovery]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    auto connection = database(directory, QStringLiteral("identity-ambiguous-create-service"));
+    javelin::jmap::cache::IdentityRepository repository{connection};
+    REQUIRE_FALSE(repository.replaceAll("mail-account", {existingIdentity()}, "i1").has_value());
+    FakeMethodTransport transport;
+    transport.results.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "connection reset after dispatch",
+    });
+
+    auto created = existingIdentity("Ambiguous Create");
+    created.id.clear();
+    created.name = "Alice Work";
+    javelin::jmap::identity::IdentityService service{connection, transport};
+    const auto failed = QCoro::waitFor(service.save(settings(), "mail-account", created));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(failed));
+
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Identity/get",
+              .arguments =
+                  R"({"accountId":"mail-account","state":"i2","list":[{"id":"identity-1","name":"Alice","email":"alice@example.test","replyTo":null,"bcc":null,"textSignature":"Old","htmlSignature":"<p>Old</p>","mayDelete":true},{"id":"identity-2","name":"Alice Work","email":"alice@example.test","replyTo":null,"bcc":null,"textSignature":"Ambiguous Create","htmlSignature":"<p>Ambiguous Create</p>","mayDelete":true},{"id":"identity-3","name":"Alice Work","email":"alice@example.test","replyTo":null,"bcc":null,"textSignature":"Ambiguous Create","htmlSignature":"<p>Ambiguous Create</p>","mayDelete":true}],"notFound":[]})",
+              .callId = "identity-refresh"}},
+        .createdIds = std::nullopt,
+        .sessionState = "s3"});
+    const auto refreshed = QCoro::waitFor(service.refresh(settings(), "mail-account"));
+    REQUIRE(std::holds_alternative<javelin::jmap::identity::IdentitySnapshot>(refreshed));
+
+    javelin::jmap::identity::IdentityMutationJournal journal{connection, repository};
+    const auto active = journal.listActive("mail-account");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::identity::IdentityMutationRecord>>(
+        active));
+    CHECK(std::get<std::vector<javelin::jmap::identity::IdentityMutationRecord>>(active).size() ==
+          1);
+    const auto pending = repository.listPendingCreates("mail-account");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::PendingIdentityCreate>>(pending));
+    CHECK(std::get<std::vector<javelin::jmap::cache::PendingIdentityCreate>>(pending).size() == 1);
+}
+
 TEST_CASE("identity deletes project before dispatch completion and accept server state",
           "[jmap][identity][service]")
 {

@@ -137,16 +137,22 @@ namespace javelin::jmap::identity
             return left.size() == right.size() && std::ranges::equal(left, right, sameAddress);
         }
 
-        [[nodiscard]] bool sameWritableIdentity(const javelin::jmap::domain::Identity& left,
-                                                const javelin::jmap::domain::Identity& right)
+        [[nodiscard]] bool sameWritableIdentityFields(const javelin::jmap::domain::Identity& left,
+                                                      const javelin::jmap::domain::Identity& right)
         {
-            return left.id == right.id && left.name == right.name && left.email == right.email &&
+            return left.name == right.name && left.email == right.email &&
                    sameAddresses(left.replyTo, right.replyTo) &&
                    sameAddresses(left.bcc, right.bcc) &&
                    left.textSignature.value_or(std::string{}) ==
                        right.textSignature.value_or(std::string{}) &&
                    left.htmlSignature.value_or(std::string{}) ==
                        right.htmlSignature.value_or(std::string{});
+        }
+
+        [[nodiscard]] bool sameWritableIdentity(const javelin::jmap::domain::Identity& left,
+                                                const javelin::jmap::domain::Identity& right)
+        {
+            return left.id == right.id && sameWritableIdentityFields(left, right);
         }
 
         [[nodiscard]] std::optional<OperationError>
@@ -548,8 +554,25 @@ namespace javelin::jmap::identity
             if (mutation.kind == IdentityMutationKind::Update)
             {
                 const auto serverIdentity = findIdentity(server.list, mutation.objectId);
-                accepted = serverIdentity.has_value() &&
+                accepted = serverIdentity.has_value() && mutation.after.has_value() &&
                            sameWritableIdentity(*serverIdentity, *mutation.after);
+            }
+            else if (mutation.kind == IdentityMutationKind::Create && mutation.after.has_value())
+            {
+                const auto cachedResult = repository.listByAccount(context.accountId);
+                if (const auto* cacheError = std::get_if<cache::DatabaseError>(&cachedResult))
+                    co_return operationError(*cacheError);
+                const auto& cached =
+                    std::get<std::vector<javelin::jmap::domain::Identity>>(cachedResult);
+                std::size_t matchingNewIdentities = 0;
+                for (const auto& serverIdentity : server.list)
+                {
+                    if (findIdentity(cached, serverIdentity.id).has_value())
+                        continue;
+                    if (sameWritableIdentityFields(serverIdentity, *mutation.after))
+                        ++matchingNewIdentities;
+                }
+                accepted = matchingNewIdentities == 1;
             }
             else if (mutation.kind == IdentityMutationKind::Destroy)
                 accepted = !findIdentity(server.list, mutation.objectId).has_value();
@@ -752,8 +775,16 @@ namespace javelin::jmap::identity
         auto confirmed = response.get.has_value()
                              ? response.get->list
                              : fallbackAcceptedIdentities(repository, mutation, response.set);
-        const auto acceptedState =
-            response.get.has_value() ? response.get->state : response.set.newState;
+        const auto acceptedState = response.get.has_value()
+                                       ? std::optional<std::string>{response.get->state}
+                                       : response.set.newState;
+        if (!acceptedState.has_value())
+        {
+            if (const auto cacheError = journal.transition(mutation, sync::MutationStatus::Unknown))
+                co_return operationError(*cacheError);
+            co_return error(OperationErrorCode::ProtocolViolation,
+                            QStringLiteral("The Identity/set response omitted its new state."));
+        }
         if (confirmed.empty())
         {
             if (const auto cacheError = journal.transition(mutation, sync::MutationStatus::Unknown))
@@ -761,7 +792,7 @@ namespace javelin::jmap::identity
             co_return error(OperationErrorCode::LocalStorageFailure,
                             QStringLiteral("The accepted Identity could not be materialized."));
         }
-        if (const auto cacheError = journal.accept(mutation, confirmed, acceptedState))
+        if (const auto cacheError = journal.accept(mutation, confirmed, *acceptedState))
             co_return operationError(*cacheError);
 
         const auto savedId = creating ? response.set.created.at(*creationId) : identity.id;
@@ -882,9 +913,17 @@ namespace javelin::jmap::identity
         auto confirmed = response.get.has_value()
                              ? response.get->list
                              : fallbackAcceptedIdentities(repository, mutation, response.set);
-        const auto acceptedState =
-            response.get.has_value() ? response.get->state : response.set.newState;
-        if (const auto cacheError = journal.accept(mutation, confirmed, acceptedState))
+        const auto acceptedState = response.get.has_value()
+                                       ? std::optional<std::string>{response.get->state}
+                                       : response.set.newState;
+        if (!acceptedState.has_value())
+        {
+            if (const auto cacheError = journal.transition(mutation, sync::MutationStatus::Unknown))
+                co_return operationError(*cacheError);
+            co_return error(OperationErrorCode::ProtocolViolation,
+                            QStringLiteral("The Identity/set response omitted its new state."));
+        }
+        if (const auto cacheError = journal.accept(mutation, confirmed, *acceptedState))
             co_return operationError(*cacheError);
         co_return std::monostate{};
     }

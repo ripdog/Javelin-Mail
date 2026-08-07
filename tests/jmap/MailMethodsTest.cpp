@@ -137,6 +137,22 @@ TEST_CASE("identity set responses retain structured per-object errors",
     CHECK(result.value->notUpdated.at("missing").type == "notFound");
 }
 
+TEST_CASE("identity set responses accept Fastmail null states with server-created properties",
+          "[jmap][method][mail][identity][fastmail]")
+{
+    const auto result = javelin::jmap::api::parseIdentitySetResponse(
+        R"({"created":{"85ff3150-9095-4095-8f2b-cfb367d435d1":{"displayName":"","enableExternalSMTP":false,"externalCredentialId":null,"server":"","isAutoConfigured":false,"bcc":null,"showInCompose":true,"warnings":[],"port":587,"verificationState":"autoverified","mayDelete":true,"verificationCheckTime":"2026-08-07T19:14:20Z","ssl":"starttls","id":"184241207","saveOnSMTP":false,"saveSentToMailboxId":"P2F","replyTo":null,"addBccOnSMTP":false,"useForAutoReply":true}},"updated":{},"newState":null,"oldState":null,"destroyed":[],"accountId":"u74ee43a3"})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->accountId == "u74ee43a3");
+    CHECK(result.value->oldState.empty());
+    CHECK_FALSE(result.value->newState.has_value());
+    CHECK(result.value->created.at("85ff3150-9095-4095-8f2b-cfb367d435d1") == "184241207");
+    CHECK(result.value->updated.empty());
+    CHECK(result.value->destroyed.empty());
+}
+
 TEST_CASE("email query requests serialize mailbox-scoped sort windows", "[jmap][method][mail]")
 {
     const auto json = javelin::jmap::api::serializeEmailQueryRequest({

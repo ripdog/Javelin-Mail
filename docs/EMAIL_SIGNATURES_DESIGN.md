@@ -236,7 +236,11 @@ On acceptance, atomically:
 
 On rejection, remove the projection and expose the failure. On an unknown outcome, keep the projection
 visibly uncertain until a refresh can match the created Identity or the user resolves the ambiguity.
-Matching must use the mutation's creation identity and SetResponse semantics, not fuzzy signature text.
+When the SetResponse supplied a created server ID, that ID is authoritative. If the response itself was
+lost or could not be decoded after dispatch, refresh may reconcile the create only when exactly one
+server Identity has newly appeared relative to the confirmed cache and all writable Identity fields
+exactly match the projected create. Existing or multiple exact matches remain ambiguous. Never match on
+a signature preview or other fuzzy presentation text.
 
 ### Destroys
 

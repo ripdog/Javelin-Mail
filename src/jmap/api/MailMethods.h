@@ -96,7 +96,7 @@ namespace javelin::jmap::api
     {
         std::string accountId;
         std::string oldState;
-        std::string newState;
+        std::optional<std::string> newState;
         std::unordered_map<std::string, std::string> created;
         std::vector<std::string> updated;
         std::vector<std::string> destroyed;

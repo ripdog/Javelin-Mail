@@ -75,7 +75,7 @@ namespace
     {
         std::string accountId;
         std::optional<std::string> oldState;
-        std::string newState;
+        std::optional<std::string> newState;
         std::optional<std::unordered_map<std::string, RawIdentitySetCreated>> created;
         std::optional<std::unordered_map<std::string, glz::generic>> updated;
         std::optional<std::vector<std::string>> destroyed;
