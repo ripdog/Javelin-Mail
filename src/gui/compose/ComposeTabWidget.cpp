@@ -2257,6 +2257,22 @@ namespace javelin::gui::compose
             return;
         }
 
+        if (!m_snapshot.subject.has_value())
+        {
+            QMessageBox messageBox{this};
+            messageBox.setWindowTitle(i18n("Send Without Subject?"));
+            messageBox.setText(i18n("This message has no subject. Send it anyway?"));
+            QAbstractButton* sendAnywayButton =
+                messageBox.addButton(i18n("Send Anyway"), QMessageBox::AcceptRole);
+            messageBox.addButton(QMessageBox::Cancel);
+            messageBox.exec();
+            if (messageBox.clickedButton() != sendAnywayButton)
+            {
+                m_subjectEdit->setFocus();
+                return;
+            }
+        }
+
         setBusy(true);
         Q_EMIT statusMessageRequested(i18n("Sending message..."), 5000);
         auto task = m_composeCommandPort.send(*settings, m_snapshot);
