@@ -271,6 +271,7 @@ namespace javelin::gui::developer
 
         auto* statusLayout = new QHBoxLayout;
         m_progress = new QProgressBar(page);
+        m_progress->setProperty("_kde_no_animations", true);
         m_progress->setRange(0, 0);
         m_progress->setVisible(false);
         m_status = new QLabel(page);

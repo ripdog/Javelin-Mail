@@ -1324,6 +1324,10 @@ namespace javelin::gui::shell
         messageHeaderRowLayout->addWidget(m_messageSortButton);
         messageHeaderLayout->addWidget(messageHeaderRow);
         m_messageLoadingIndicator = new QProgressBar(messageHeader);
+        // Breeze's indeterminate progress animation can repaint the entire top-level QWidget
+        // backing store at animation cadence on Wayland. KDE styles honor this property by
+        // retaining the busy progress appearance without starting their style animation engine.
+        m_messageLoadingIndicator->setProperty("_kde_no_animations", true);
         m_messageLoadingIndicator->setAccessibleName(i18n("Loading messages"));
         m_messageLoadingIndicator->setFixedHeight(2);
         m_messageLoadingIndicator->setTextVisible(false);

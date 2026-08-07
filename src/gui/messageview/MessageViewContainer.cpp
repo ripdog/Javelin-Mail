@@ -562,6 +562,7 @@ namespace javelin::gui::messageview
         makeLabelSelectable(m_placeholderDetailLabel);
 
         m_loadingIndicator = new QProgressBar(placeholderCard);
+        m_loadingIndicator->setProperty("_kde_no_animations", true);
         m_loadingIndicator->setRange(0, 0);
         m_loadingIndicator->setTextVisible(false);
         m_loadingIndicator->setFixedHeight(8);
