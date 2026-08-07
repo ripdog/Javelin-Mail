@@ -264,6 +264,59 @@ TEST_CASE("daemon process migrates settings before exposing readiness", "[app][d
     CHECK_FALSE(process.isReady());
 }
 
+TEST_CASE("daemon does not relaunch an auto-started GUI after bootstrap rejection",
+          "[app][daemon][activation][startup]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+
+    const auto runtimeDirectory = temporaryDirectory.filePath(QStringLiteral("runtime"));
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    const auto settingsPath = temporaryDirectory.filePath(QStringLiteral("settings.ini"));
+    REQUIRE(QDir{}.mkpath(runtimeDirectory));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+    REQUIRE(QFile::setPermissions(runtimeDirectory, QFileDevice::ReadOwner |
+                                                        QFileDevice::WriteOwner |
+                                                        QFileDevice::ExeOwner));
+
+    auto options = optionsFor(runtimeDirectory, cacheRoot, settingsPath);
+    options.guiExecutable = QString::fromUtf8(JAVELIN_INCOMPATIBLE_GUI_HELPER_PATH);
+    javelin::app::DaemonProcess process{std::move(options)};
+    REQUIRE_FALSE(process.start().has_value());
+
+    process.enqueueActivation(
+        javelin::protocol::RaiseGuiRoute{.activationToken = QStringLiteral("test-token")});
+    const auto launchesPath =
+        QDir{runtimeDirectory}.filePath(QStringLiteral("incompatible-gui-launches"));
+
+    QByteArray launches;
+    for (int attempt = 0; attempt < 200; ++attempt)
+    {
+        QCoreApplication::processEvents();
+        QFile file{launchesPath};
+        if (file.open(QIODevice::ReadOnly))
+            launches = file.readAll();
+        if (launches.count('\n') >= 1 && !process.hasGuiConnection())
+            break;
+        QThread::msleep(5);
+    }
+    REQUIRE(launches.count('\n') == 1);
+    REQUIRE(process.pendingActivationCount() == 1);
+
+    for (int attempt = 0; attempt < 100; ++attempt)
+    {
+        QCoreApplication::processEvents();
+        QThread::msleep(5);
+    }
+    QFile file{launchesPath};
+    REQUIRE(file.open(QIODevice::ReadOnly));
+    launches = file.readAll();
+    CHECK(launches.count('\n') == 1);
+    CHECK(process.pendingActivationCount() == 1);
+}
+
 TEST_CASE("daemon does not queue vault metadata for undiscovered connection ids",
           "[app][daemon][settings][offline][vault]")
 {

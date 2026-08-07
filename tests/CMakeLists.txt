@@ -295,6 +295,18 @@ target_compile_options(javelin_jmap_tests PRIVATE -fexceptions)
 
 catch_discover_tests(javelin_jmap_tests)
 
+add_executable(javelin_incompatible_gui_helper
+    app/IncompatibleGuiHelper.cpp
+)
+target_link_libraries(javelin_incompatible_gui_helper
+    PRIVATE
+        Qt::Core
+        javelin_protocol
+)
+javelin_set_project_warnings(javelin_incompatible_gui_helper)
+javelin_enable_static_analysis(javelin_incompatible_gui_helper)
+javelin_enable_sanitizers(javelin_incompatible_gui_helper)
+
 add_executable(javelin_daemon_tests
     ${PROJECT_SOURCE_DIR}/src/app/GuiDaemonSession.cpp
     ${PROJECT_SOURCE_DIR}/src/app/GuiMailApplicationEvents.cpp
@@ -327,6 +339,11 @@ javelin_set_project_warnings(javelin_daemon_tests)
 javelin_enable_static_analysis(javelin_daemon_tests)
 javelin_enable_sanitizers(javelin_daemon_tests)
 target_compile_options(javelin_daemon_tests PRIVATE -fexceptions)
+target_compile_definitions(javelin_daemon_tests
+    PRIVATE
+        JAVELIN_INCOMPATIBLE_GUI_HELPER_PATH="$<TARGET_FILE:javelin_incompatible_gui_helper>"
+)
+add_dependencies(javelin_daemon_tests javelin_incompatible_gui_helper)
 catch_discover_tests(javelin_daemon_tests)
 
 add_executable(javelin_contacts_gui_tests

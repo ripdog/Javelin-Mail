@@ -108,9 +108,15 @@ namespace
         handleGuiActivation(const javelin::protocol::ActivationRoute& route) override
         {
             if (m_handler)
+            {
                 m_handler(route);
-            else
-                m_pending.push_back(route);
+                return std::nullopt;
+            }
+
+            constexpr std::size_t maximumPendingActivations = 64;
+            if (m_pending.size() >= maximumPendingActivations)
+                m_pending.erase(m_pending.begin());
+            m_pending.push_back(route);
             return std::nullopt;
         }
 
@@ -119,6 +125,11 @@ namespace
             m_handler = std::move(handler);
             for (const auto& route : std::exchange(m_pending, {}))
                 m_handler(route);
+        }
+
+        void clearHandler()
+        {
+            m_handler = {};
         }
 
       private:
@@ -476,6 +487,8 @@ int main(int argc, char* argv[])
 
     restoreMainWindow = [&](const QString& activationToken)
     {
+        if (!session.isReady())
+            return;
         if (!services)
             services = std::make_unique<javelin::app::GuiServices>(session);
         if (services->settings().accounts().empty())
@@ -605,15 +618,30 @@ int main(int argc, char* argv[])
             route);
     };
 
+    bool guiActivationHandlingEnabled = false;
+    const auto enableGuiActivationHandling = [&]
+    {
+        if (guiActivationHandlingEnabled || !session.isReady())
+            return;
+        guiActivationHandlingEnabled = true;
+        guiActivationHandler.setHandler(handleActivation);
+    };
+
     QObject::connect(&session, &javelin::app::GuiDaemonSession::recoveryStarted, &recoveryWindow,
                      [&](const QString& detail)
                      {
+                         guiActivationHandlingEnabled = false;
+                         guiActivationHandler.clearHandler();
                          if (mainWindow != nullptr)
                              mainWindow->setEnabled(false);
                          showRecovery(detail, true);
                      });
     QObject::connect(&session, &javelin::app::GuiDaemonSession::recoveryFinished, &recoveryWindow,
-                     [&] { restoreMainWindow({}); });
+                     [&]
+                     {
+                         enableGuiActivationHandling();
+                         restoreMainWindow({});
+                     });
     QObject::connect(&session, &javelin::app::GuiDaemonSession::daemonShutdownRequested,
                      &application, &QCoreApplication::quit);
     QObject::connect(&session, &javelin::app::GuiDaemonSession::activationRequested,
@@ -636,7 +664,10 @@ int main(int argc, char* argv[])
         if (const auto error = session.startDaemon(mode))
             showRecovery(error->detail, canOfferDaemonStart(*error));
         else
+        {
+            enableGuiActivationHandling();
             restoreMainWindow({});
+        }
     };
 
     startDaemonForPendingMailto = [&]
@@ -648,7 +679,6 @@ int main(int argc, char* argv[])
         }
         attemptDaemonStart(javelin::app::GuiDaemonStartMode::Once);
     };
-    guiActivationHandler.setHandler(handleActivation);
 
     QObject::connect(enableAndStartDaemon, &QPushButton::clicked, &recoveryWindow,
                      [&attemptDaemonStart]
@@ -663,7 +693,10 @@ int main(int argc, char* argv[])
                          if (const auto error = session.reconnect())
                              showRecovery(error->detail, canOfferDaemonStart(*error));
                          else
+                         {
+                             enableGuiActivationHandling();
                              restoreMainWindow({});
+                         }
                      });
 
     if (const auto error = session.start())
@@ -681,10 +714,12 @@ int main(int argc, char* argv[])
     }
     else if (!mailtoUri.isEmpty())
     {
+        enableGuiActivationHandling();
         handleActivation(requestedActivation);
     }
     else
     {
+        enableGuiActivationHandling();
         restoreMainWindow({});
     }
 

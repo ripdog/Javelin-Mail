@@ -1400,10 +1400,11 @@ namespace javelin::app
                 &DaemonProcess::requestShutdown);
     }
 
-    void DaemonProcess::onSocketConnectionClosed(const protocol::SocketDisconnectReason,
-                                                 const QString&)
+    void DaemonProcess::onSocketConnectionClosed(const protocol::SocketDisconnectReason reason,
+                                                 const QString& detail)
     {
         const bool wasConnected = m_guiConnected;
+        const bool suppressAutomaticRelaunch = m_guiLaunchRequested && !m_guiReady;
         if (m_cacheAccessAcknowledged && m_services != nullptr)
         {
             if (const auto error = m_services->cacheAccessBarrier().resume())
@@ -1414,11 +1415,21 @@ namespace javelin::app
             m_remoteActions->releaseGuiResources();
         m_guiConnected = false;
         m_guiReady = false;
-        m_guiLaunchRequested = false;
+        m_guiLaunchRequested = suppressAutomaticRelaunch;
         m_cacheSuspend.reset();
         m_cacheAccessAcknowledged = false;
-        if (!m_pendingActivations.empty())
+        if (suppressAutomaticRelaunch)
+        {
+            qWarning().noquote()
+                << QStringLiteral(
+                       "GUI disconnected before startup completed; suppressing automatic "
+                       "relaunch")
+                << static_cast<int>(reason) << detail;
+        }
+        else if (!m_pendingActivations.empty())
+        {
             QTimer::singleShot(0, this, &DaemonProcess::launchGuiIfNeeded);
+        }
         if (wasConnected)
         {
             Q_EMIT guiDisconnected();
