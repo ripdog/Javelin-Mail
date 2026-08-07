@@ -356,6 +356,7 @@ add_executable(javelin_composer_gui_tests
     gui/ContactsGuiTestMain.cpp
     gui/JavelinComposerEditTest.cpp
     gui/ComposerInlineImageCodecTest.cpp
+    gui/MailtoParserTest.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/compose/JavelinComposerEdit.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/compose/JavelinComposerEdit.h
     ${PROJECT_SOURCE_DIR}/src/gui/compose/ComposeBodyConverter.cpp

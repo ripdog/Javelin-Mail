@@ -73,6 +73,10 @@ namespace javelin::jmap::submission
         std::optional<std::string> referenceEmailId;
         std::optional<std::string> draftEmailId;
         std::vector<javelin::jmap::domain::EmailAddress> initialTo;
+        std::vector<javelin::jmap::domain::EmailAddress> initialCc = {};
+        std::vector<javelin::jmap::domain::EmailAddress> initialBcc = {};
+        std::optional<std::string> initialSubject = std::nullopt;
+        std::optional<std::string> initialBody = std::nullopt;
         bool useExistingWorkingCopy = true;
         std::optional<std::string> composeSessionId = std::nullopt;
     };

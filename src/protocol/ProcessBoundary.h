@@ -570,9 +570,15 @@ namespace javelin::protocol
         QString activationToken;
     };
 
+    struct OpenMailtoRoute
+    {
+        QString uri;
+        QString activationToken;
+    };
+
     using ActivationRoute =
         std::variant<OpenMailboxRoute, OpenMessageRoute, OpenComposeRoute, RaiseGuiRoute,
-                     OpenSettingsRoute, RestoreDraftRoute, OpenTaskCenterRoute>;
+                     OpenSettingsRoute, RestoreDraftRoute, OpenTaskCenterRoute, OpenMailtoRoute>;
 
     enum class CacheSuspendReason : std::uint8_t
     {
@@ -677,10 +683,18 @@ namespace javelin::protocol
         virtual void onBoundaryEvent(const BoundaryEvent& event) = 0;
     };
 
-    class DaemonRequestHandler
+    class ActivationRequestHandler
     {
       public:
-        virtual ~DaemonRequestHandler() = default;
+        virtual ~ActivationRequestHandler() = default;
+        [[nodiscard]] virtual std::optional<BoundaryError>
+        handleGuiActivation(const ActivationRoute& route) = 0;
+    };
+
+    class DaemonRequestHandler : public ActivationRequestHandler
+    {
+      public:
+        ~DaemonRequestHandler() override = default;
 
         [[nodiscard]] virtual HandshakeReply handleHello(const HelloRequest& request) = 0;
         [[nodiscard]] virtual CommandReply handleCommand(CommandRequest request) = 0;
@@ -697,8 +711,8 @@ namespace javelin::protocol
         [[nodiscard]] virtual std::optional<BoundaryError>
         handlePing(const PingRequest& request) = 0;
         [[nodiscard]] virtual std::optional<BoundaryError> handleGuiReadyForActivation() = 0;
-        [[nodiscard]] virtual std::optional<BoundaryError>
-        handleGuiActivation(const ActivationRoute&)
+        [[nodiscard]] std::optional<BoundaryError>
+        handleGuiActivation(const ActivationRoute&) override
         {
             return BoundaryError{.code = BoundaryErrorCode::UnsupportedOperation,
                                  .field = QStringLiteral("activation"),

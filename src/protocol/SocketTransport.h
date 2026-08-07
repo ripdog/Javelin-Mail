@@ -207,7 +207,7 @@ namespace javelin::protocol
         Q_OBJECT
 
       public:
-        explicit SocketActivationEndpoint(DaemonRequestHandler& handler,
+        explicit SocketActivationEndpoint(ActivationRequestHandler& handler,
                                           SocketEndpointOptions options = {},
                                           QObject* parent = nullptr);
         ~SocketActivationEndpoint() override;
@@ -228,7 +228,7 @@ namespace javelin::protocol
         void finishSocket();
         void clearSocket();
 
-        DaemonRequestHandler& m_handler;
+        ActivationRequestHandler& m_handler;
         SocketEndpointOptions m_options;
         std::unique_ptr<QLocalServer> m_server;
         std::unique_ptr<QLocalSocket> m_socket;

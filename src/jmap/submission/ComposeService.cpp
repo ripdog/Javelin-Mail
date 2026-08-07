@@ -975,6 +975,18 @@ namespace javelin::jmap::submission
             };
         }
 
+        auto initialBcc = availableSenderIdentities.front().bcc;
+        initialBcc.insert(initialBcc.end(), std::make_move_iterator(request.initialBcc.begin()),
+                          std::make_move_iterator(request.initialBcc.end()));
+        const auto initialPlainTextBody =
+            request.initialBody.has_value()
+                ? *request.initialBody + initialPlainBody(availableSenderIdentities.front())
+                : initialPlainBody(availableSenderIdentities.front());
+        const auto initialHtmlTextBody =
+            request.initialBody.has_value() ? htmlFromText(*request.initialBody) +
+                                                  initialHtmlBody(availableSenderIdentities.front())
+                                            : initialHtmlBody(availableSenderIdentities.front());
+
         DraftSnapshot snapshot{
             .composeSessionId = request.composeSessionId.value_or(
                 QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString()),
@@ -984,11 +996,11 @@ namespace javelin::jmap::submission
             .editorMode = request.initialEditorMode,
             .identityId = availableSenderIdentities.front().id,
             .to = std::move(request.initialTo),
-            .cc = {},
-            .bcc = availableSenderIdentities.front().bcc,
-            .subject = std::nullopt,
-            .plainTextBody = initialPlainBody(availableSenderIdentities.front()),
-            .htmlBody = initialHtmlBody(availableSenderIdentities.front()),
+            .cc = std::move(request.initialCc),
+            .bcc = std::move(initialBcc),
+            .subject = std::move(request.initialSubject),
+            .plainTextBody = initialPlainTextBody,
+            .htmlBody = initialHtmlTextBody,
             .threading = {},
             .attachments = {},
         };

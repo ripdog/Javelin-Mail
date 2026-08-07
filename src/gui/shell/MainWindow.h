@@ -177,6 +177,7 @@ namespace javelin::gui::shell
                             QWidget* parent = nullptr);
         ~MainWindow() override;
         void openPreferencesForConnection(const QString& connectionId);
+        void openMailtoUri(const QString& uri);
         void restoreDraft(const QString& accountId, const QString& draftEmailId,
                           const QString& composeSessionId);
 

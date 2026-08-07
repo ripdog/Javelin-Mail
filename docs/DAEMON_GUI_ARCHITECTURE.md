@@ -950,11 +950,16 @@ The GUI merely receives later status and cache invalidations.
 
 Only one GUI process is supported.
 
-When a second `javelin` invocation occurs, it connects to the daemon and requests activation of the
-existing GUI. If no GUI exists, the daemon starts one or authorizes the new process to become the GUI
-instance.
+When a second `javelin` invocation occurs, it normally connects to the daemon and requests activation
+of the existing GUI. The GUI also owns a minimal activation-only local socket as a fallback while the
+daemon is unavailable. That fallback carries presentation intents such as a desktop `mailto:` launch;
+it does not expose application commands or cache state. A `mailto:` intent received during daemon
+recovery remains queued in the GUI, the GUI starts the daemon when necessary, and a new compose tab is
+opened only after the daemon session is ready. If no GUI exists, the new process becomes the GUI
+instance and follows the same pending-intent startup path.
 
-The daemon tracks one active GUI connection and one activation route queue. This removes the need for:
+The daemon tracks one active GUI connection and one activation route queue during normal operation.
+This removes the need for:
 
 - per-GUI route claiming;
 - multi-editor ownership rules;

@@ -194,7 +194,7 @@ namespace javelin::app
     std::optional<GuiBootstrapError> GuiDaemonSession::startDaemon(const GuiDaemonStartMode mode)
     {
         PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("daemon_start")};
-        if (m_readyReply.has_value())
+        if (isReady())
         {
             metrics.finish(QStringLiteral("already_ready"));
             return std::nullopt;
@@ -207,9 +207,12 @@ namespace javelin::app
         }
 
         const bool wasRecovering = m_inRecovery;
-        const auto result = start();
-        if (!result.has_value() && wasRecovering)
+        const auto result = m_readyReply.has_value() ? reconnect() : start();
+        if (!result.has_value() && wasRecovering && m_inRecovery)
+        {
+            m_inRecovery = false;
             Q_EMIT recoveryFinished();
+        }
         metrics.finish(result.has_value() ? QStringLiteral("error") : QStringLiteral("ready"));
         return result;
     }

@@ -14,6 +14,7 @@
 #include "app/SearchSession.h"
 #include "app/UndoApplicationPorts.h"
 #include "gui/IconUtils.h"
+#include "gui/compose/MailtoParser.h"
 #include "gui/developer/DeveloperOptionsDialog.h"
 #include "gui/identity/IdentityManagerDialog.h"
 #include "gui/logging/LogViewerDialog.h"
@@ -1647,6 +1648,67 @@ namespace javelin::gui::shell
             .referenceEmailId = std::nullopt,
             .draftEmailId = std::nullopt,
             .initialTo = {},
+        });
+    }
+
+    void MainWindow::openMailtoUri(const QString& uri)
+    {
+        const auto parsed = javelin::gui::compose::parseMailtoUri(uri);
+        if (!parsed.has_value())
+        {
+            m_statusBar->showMessage(i18n("The mail link is invalid."), 7000);
+            return;
+        }
+
+        auto preferredAccountId = activeAccountId();
+        if (!preferredAccountId.has_value())
+            preferredAccountId = currentAccountId(*m_mailboxView);
+
+        std::optional<std::string> accountId;
+        const auto accountsResult = m_accountReader.listAll();
+        if (const auto* accounts =
+                std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult))
+        {
+            const auto usable = [](const auto& account)
+            {
+                return account.hasMailCapability && account.hasSubmissionCapability &&
+                       !account.isReadOnly;
+            };
+            auto selected = accounts->cend();
+            if (preferredAccountId.has_value())
+            {
+                selected = std::find_if(
+                    accounts->cbegin(), accounts->cend(), [&](const auto& account)
+                    { return account.accountId == *preferredAccountId && usable(account); });
+            }
+            if (selected == accounts->cend())
+            {
+                selected = std::find_if(accounts->cbegin(), accounts->cend(),
+                                        [&usable](const auto& account)
+                                        { return account.isPrimary && usable(account); });
+            }
+            if (selected == accounts->cend())
+                selected = std::find_if(accounts->cbegin(), accounts->cend(), usable);
+            if (selected != accounts->cend())
+                accountId = selected->accountId;
+        }
+        if (!accountId.has_value())
+        {
+            m_statusBar->showMessage(i18n("No account is available for sending mail."), 7000);
+            return;
+        }
+
+        openComposeForRequest({
+            .accountId = *accountId,
+            .mode = javelin::jmap::submission::ComposeMode::NewMessage,
+            .referenceEmailId = std::nullopt,
+            .draftEmailId = std::nullopt,
+            .initialTo = parsed->to,
+            .initialCc = parsed->cc,
+            .initialBcc = parsed->bcc,
+            .initialSubject = parsed->subject,
+            .initialBody = parsed->body,
+            .useExistingWorkingCopy = false,
         });
     }
 

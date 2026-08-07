@@ -1414,6 +1414,8 @@ namespace javelin::protocol
                                writer.string(value.activationToken);
                     else if constexpr (std::is_same_v<Route, OpenTaskCenterRoute>)
                         return writer.string(value.activationToken);
+                    else if constexpr (std::is_same_v<Route, OpenMailtoRoute>)
+                        return writer.string(value.uri) && writer.string(value.activationToken);
                     else
                         return false;
                 },
@@ -1481,6 +1483,14 @@ namespace javelin::protocol
             {
                 OpenTaskCenterRoute value;
                 if (!reader.string(value.activationToken))
+                    return false;
+                route = std::move(value);
+                return true;
+            }
+            if (kind == 7)
+            {
+                OpenMailtoRoute value;
+                if (!reader.string(value.uri) || !reader.string(value.activationToken))
                     return false;
                 route = std::move(value);
                 return true;
@@ -2099,6 +2109,9 @@ namespace javelin::protocol
                         }
                         else if constexpr (std::is_same_v<Route, OpenTaskCenterRoute>)
                             return writer.byte(6) && writer.string(value.activationToken);
+                        else if constexpr (std::is_same_v<Route, OpenMailtoRoute>)
+                            return writer.byte(7) && writer.string(value.uri) &&
+                                   writer.string(value.activationToken);
                         else
                         {
                             return false;
@@ -2181,6 +2194,15 @@ namespace javelin::protocol
             OpenTaskCenterRoute route;
             if (!reader.string(route.activationToken))
                 return malformed(QStringLiteral("invalid task center activation route"));
+            if (const auto error = reader.finish())
+                return *error;
+            return ActivationRoute{std::move(route)};
+        }
+        if (routeIndex == 7)
+        {
+            OpenMailtoRoute route;
+            if (!reader.string(route.uri) || !reader.string(route.activationToken))
+                return malformed(QStringLiteral("invalid mailto activation route"));
             if (const auto error = reader.finish())
                 return *error;
             return ActivationRoute{std::move(route)};
@@ -2793,7 +2815,7 @@ namespace javelin::protocol
         m_closeDetail.clear();
     }
 
-    SocketActivationEndpoint::SocketActivationEndpoint(DaemonRequestHandler& handler,
+    SocketActivationEndpoint::SocketActivationEndpoint(ActivationRequestHandler& handler,
                                                        SocketEndpointOptions options,
                                                        QObject* parent)
         : QObject(parent), m_handler(handler), m_options(std::move(options)),

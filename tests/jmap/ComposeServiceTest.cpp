@@ -292,14 +292,27 @@ TEST_CASE("new compose sessions use the requested editor mode", "[jmap][submissi
             .initialEditorMode = javelin::jmap::submission::BodyEditorMode::PlainText,
             .referenceEmailId = std::nullopt,
             .draftEmailId = std::nullopt,
-            .initialTo = {},
+            .initialTo = {{.name = std::nullopt, .email = "alice@example.test"}},
+            .initialCc = {{.name = std::nullopt, .email = "bob@example.test"}},
+            .initialBcc = {{.name = std::nullopt, .email = "carol@example.test"}},
+            .initialSubject = "Mail link subject",
+            .initialBody = "Mail link body",
             .useExistingWorkingCopy = true,
             .composeSessionId = std::nullopt,
         }));
 
     REQUIRE(std::holds_alternative<javelin::jmap::submission::DraftSnapshot>(result));
-    CHECK(std::get<javelin::jmap::submission::DraftSnapshot>(result).editorMode ==
-          javelin::jmap::submission::BodyEditorMode::PlainText);
+    const auto& snapshot = std::get<javelin::jmap::submission::DraftSnapshot>(result);
+    CHECK(snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::PlainText);
+    REQUIRE(snapshot.to.size() == 1);
+    CHECK(snapshot.to.front().email == "alice@example.test");
+    REQUIRE(snapshot.cc.size() == 1);
+    CHECK(snapshot.cc.front().email == "bob@example.test");
+    REQUIRE(snapshot.bcc.size() == 1);
+    CHECK(snapshot.bcc.front().email == "carol@example.test");
+    CHECK(snapshot.subject == std::optional<std::string>{"Mail link subject"});
+    CHECK(snapshot.plainTextBody == "Mail link body");
+    CHECK(snapshot.htmlBody == "<p>Mail link body</p>");
     CHECK(transport.requests.empty());
 }
 
