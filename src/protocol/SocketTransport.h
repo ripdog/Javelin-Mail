@@ -225,6 +225,7 @@ namespace javelin::protocol
         void readSocket();
         void socketDisconnected();
         void socketError();
+        void finishSocket();
         void clearSocket();
 
         DaemonRequestHandler& m_handler;

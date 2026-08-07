@@ -2910,6 +2910,7 @@ namespace javelin::protocol
         }
         m_socket->write(std::get<QByteArray>(encoded));
         m_socket->flush();
+        finishSocket();
     }
 
     void SocketActivationEndpoint::socketDisconnected()
@@ -2925,6 +2926,20 @@ namespace javelin::protocol
                                                .detail = m_socket->errorString()};
             clearSocket();
         }
+    }
+
+    void SocketActivationEndpoint::finishSocket()
+    {
+        auto* socket = m_socket.release();
+        m_decoder.clear();
+        if (socket == nullptr)
+            return;
+
+        QObject::disconnect(socket, nullptr, this, nullptr);
+        connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
+        socket->disconnectFromServer();
+        if (socket->state() == QLocalSocket::UnconnectedState)
+            socket->deleteLater();
     }
 
     void SocketActivationEndpoint::clearSocket()

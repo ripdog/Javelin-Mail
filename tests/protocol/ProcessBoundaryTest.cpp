@@ -933,6 +933,14 @@ TEST_CASE("activation socket carries typed routes to the daemon", "[protocol][so
     CHECK(received->emailId == QStringLiteral("email-1"));
     CHECK(received->activationToken == QStringLiteral("token-1"));
 
+    for (int attempt = 0; attempt < 16; ++attempt)
+    {
+        const auto repeated =
+            SocketActivationClient::request(options, ActivationRoute{RaiseGuiRoute{}});
+        REQUIRE(std::holds_alternative<std::optional<BoundaryError>>(repeated));
+        CHECK_FALSE(std::get<std::optional<BoundaryError>>(repeated).has_value());
+    }
+
     auto incompatibleOptions = options;
     incompatibleOptions.expectedBuild = BuildIdentity{.application = QStringLiteral("Javelin-Mail"),
                                                       .revision = QStringLiteral("other-build")};
