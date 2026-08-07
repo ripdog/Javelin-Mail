@@ -139,12 +139,13 @@ javelin_enable_static_analysis(javelin_cache_read)
 javelin_enable_sanitizers(javelin_cache_read)
 
 set(JAVELIN_FORMAT_FILES
-    src/gui/widgets/StaticIndeterminateProgressBar.h
+    src/gui/widgets/IndeterminateProgressBar.h
     src/gui/developer/DeveloperOptionsDialog.cpp
     src/gui/developer/DeveloperOptionsDialog.h
     tests/app/DeveloperDiagnosticsServiceTest.cpp
     tests/app/DeveloperMaintenanceServiceTest.cpp
     tests/gui/DeveloperOptionsDialogTest.cpp
+    tests/gui/IndeterminateProgressBarTest.cpp
     tests/app/RemoteCodecTest.cpp
     src/protocol/SocketTransport.cpp
     src/jmap/render/HtmlBodyEmbedding.cpp

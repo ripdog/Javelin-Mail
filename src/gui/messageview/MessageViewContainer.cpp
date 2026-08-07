@@ -6,7 +6,7 @@
 #include "gui/messageview/PlainTextLinkifier.h"
 #include "gui/settings/GuiSettings.h"
 #include "gui/translation/TranslationService.h"
-#include "gui/widgets/StaticIndeterminateProgressBar.h"
+#include "gui/widgets/IndeterminateProgressBar.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 
 #include <QCoroTask>
@@ -562,8 +562,7 @@ namespace javelin::gui::messageview
         m_placeholderDetailLabel->setStyleSheet(QStringLiteral("color: #c5cad3;"));
         makeLabelSelectable(m_placeholderDetailLabel);
 
-        m_loadingIndicator =
-            new javelin::gui::widgets::StaticIndeterminateProgressBar(placeholderCard);
+        m_loadingIndicator = new javelin::gui::widgets::IndeterminateProgressBar(placeholderCard);
         m_loadingIndicator->setRange(0, 0);
         m_loadingIndicator->setTextVisible(false);
         m_loadingIndicator->setFixedHeight(8);

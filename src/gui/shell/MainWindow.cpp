@@ -56,7 +56,7 @@
 #include "gui/shell/TabPersistence.h"
 #include "gui/sieve/SieveEditorDialog.h"
 #include "gui/translation/TranslationService.h"
-#include "gui/widgets/StaticIndeterminateProgressBar.h"
+#include "gui/widgets/IndeterminateProgressBar.h"
 #include "jmap/cache/AccountReadRepository.h"
 #include "jmap/cache/ContactReader.h"
 #include "jmap/cache/IdentityReader.h"
@@ -1325,7 +1325,7 @@ namespace javelin::gui::shell
         messageHeaderRowLayout->addWidget(m_messageSortButton);
         messageHeaderLayout->addWidget(messageHeaderRow);
         m_messageLoadingIndicator =
-            new javelin::gui::widgets::StaticIndeterminateProgressBar(messageHeader);
+            new javelin::gui::widgets::IndeterminateProgressBar(messageHeader);
         m_messageLoadingIndicator->setAccessibleName(i18n("Loading messages"));
         m_messageLoadingIndicator->setFixedHeight(2);
         m_messageLoadingIndicator->setTextVisible(false);
