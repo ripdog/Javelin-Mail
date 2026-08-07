@@ -286,6 +286,8 @@ namespace javelin::gui::shell
         void updateMessageListHeader();
         void updateMessageActions();
         void updateSortButton();
+        void setDarkModeEnabled(bool enabled);
+        void updateDarkModeAction();
         void scheduleApplicationPaletteRefresh();
         void applyApplicationPalette();
         void updatePaletteDependentIcons();
@@ -362,6 +364,7 @@ namespace javelin::gui::shell
         QAction* m_refreshAction = nullptr;
         QAction* m_quitAction = nullptr;
         QAction* m_preferencesAction = nullptr;
+        QAction* m_darkModeAction = nullptr;
         QAction* m_developerOptionsAction = nullptr;
         QAction* m_newMessageAction = nullptr;
         QAction* m_contactsAction = nullptr;

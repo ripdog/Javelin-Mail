@@ -1,5 +1,5 @@
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
-<gui name="javelinmail" version="13">
+<gui name="javelinmail" version="14">
   <MenuBar>
     <Menu name="file"><text>&amp;File</text>
       <Action name="compose_new_message"/>
@@ -56,6 +56,7 @@
     <Action name="open_contacts"/>
     <Action name="open_calendar"/>
     <Separator/>
+    <Action name="toggle_dark_mode"/>
     <Action name="options_configure"/>
   </ToolBar>
   <ToolBar name="composeToolBar"><text>Compose Toolbar</text>

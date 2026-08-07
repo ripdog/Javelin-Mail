@@ -73,6 +73,11 @@
 #include <KLocalizedString>
 #include <KStandardAction>
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 8, 0)
+#include <KColorSchemeManager>
+#include <kconfigwidgets_version.h>
+#endif
+
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
@@ -120,6 +125,7 @@
 namespace javelin::gui::shell
 {
     Q_LOGGING_CATEGORY(logGuiMailbox, "gui.mailbox")
+    Q_LOGGING_CATEGORY(logGuiTheme, "gui.theme")
     Q_LOGGING_CATEGORY(logUserOperations, "user.operations")
     void MainWindow::presentError(const javelin::jmap::OperationError& error)
     {
@@ -305,7 +311,11 @@ namespace javelin::gui::shell
                 &MainWindow::presentUserInterventionError);
         setupUi();
         connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this,
-                [this] { scheduleApplicationPaletteRefresh(); });
+                [this]
+                {
+                    updateDarkModeAction();
+                    scheduleApplicationPaletteRefresh();
+                });
         connect(&m_undoCommandPort, &javelin::app::UndoCommandPort::historyStateChanged, this,
                 [this](const javelin::app::undo::HistoryState&) { updateUndoRedoActions(); });
         connect(
@@ -727,6 +737,15 @@ namespace javelin::gui::shell
             KStandardAction::preferences(this, &MainWindow::openPreferences, actionCollection());
         m_preferencesAction->setIcon(
             thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/settings.svg")));
+
+        m_darkModeAction = new QAction(QIcon::fromTheme(QStringLiteral("contrast")),
+                                       i18nc("@action:button", "Dark Mode"), this);
+        m_darkModeAction->setCheckable(true);
+        m_darkModeAction->setToolTip(i18nc("@info:tooltip", "Toggle dark mode"));
+        connect(m_darkModeAction, &QAction::toggled, this,
+                [this](const bool enabled) { setDarkModeEnabled(enabled); });
+        actionCollection()->addAction(QStringLiteral("toggle_dark_mode"), m_darkModeAction);
+        updateDarkModeAction();
 
         m_developerOptionsAction =
             new QAction(QIcon::fromTheme(QStringLiteral("applications-development")),
@@ -2660,6 +2679,53 @@ namespace javelin::gui::shell
                                              sortDirectionLabel(m_emailListSort.direction)));
     }
 
+    void MainWindow::setDarkModeEnabled(const bool enabled)
+    {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+        QGuiApplication::styleHints()->setColorScheme(enabled ? Qt::ColorScheme::Dark
+                                                              : Qt::ColorScheme::Light);
+#else
+#if KCONFIGWIDGETS_VERSION >= QT_VERSION_CHECK(6, 6, 0)
+        auto* colorSchemeManager = KColorSchemeManager::instance();
+#else
+        KColorSchemeManager localColorSchemeManager;
+        auto* colorSchemeManager = &localColorSchemeManager;
+#endif
+        colorSchemeManager->setAutosaveChanges(false);
+        const auto scheme = colorSchemeManager->indexForScheme(
+            enabled ? QStringLiteral("Breeze Dark") : QStringLiteral("Breeze Light"));
+        if (scheme.isValid())
+        {
+            colorSchemeManager->activateScheme(scheme);
+        }
+        else
+        {
+            qCWarning(logGuiTheme) << "Unable to locate Breeze color scheme for dark mode toggle";
+        }
+#endif
+    }
+
+    void MainWindow::updateDarkModeAction()
+    {
+        if (m_darkModeAction == nullptr)
+        {
+            return;
+        }
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+        const auto colorScheme = QGuiApplication::styleHints()->colorScheme();
+        const bool enabled =
+            colorScheme == Qt::ColorScheme::Dark ||
+            (colorScheme == Qt::ColorScheme::Unknown &&
+             palette().color(QPalette::Active, QPalette::Window).lightness() < 128);
+#else
+        const bool enabled = palette().color(QPalette::Active, QPalette::Window).lightness() < 128;
+#endif
+
+        const QSignalBlocker blocker{m_darkModeAction};
+        m_darkModeAction->setChecked(enabled);
+    }
+
     void MainWindow::scheduleApplicationPaletteRefresh()
     {
         if (m_paletteRefreshPending)
@@ -2688,6 +2754,7 @@ namespace javelin::gui::shell
         }
         setPalette(QPalette{});
 
+        updateDarkModeAction();
         updatePaletteDependentIcons();
         updateTabBar();
         m_calendarTabController->applicationPaletteChanged();
