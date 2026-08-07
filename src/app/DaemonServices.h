@@ -240,8 +240,8 @@ namespace javelin::app
         std::unique_ptr<MessageNavigationCoordinator> m_messageNavigationCoordinator;
         std::unique_ptr<CalendarNotificationService> m_calendarNotificationService;
         std::unique_ptr<WorkScheduler> m_workScheduler;
-        std::unique_ptr<FullMailSyncService> m_fullMailSyncService;
         std::unique_ptr<MailIndexService> m_mailIndexService;
+        std::unique_ptr<FullMailSyncService> m_fullMailSyncService;
         std::unique_ptr<LocalMaintenanceService> m_localMaintenanceService;
         std::unique_ptr<DeveloperDiagnosticsService> m_developerDiagnosticsService;
         std::unique_ptr<DeveloperMaintenanceService> m_developerMaintenanceService;

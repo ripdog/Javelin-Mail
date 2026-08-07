@@ -15,6 +15,7 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
+#include <QPointer>
 #include <QSqlQuery>
 #include <QTimer>
 #include <QtConcurrentRun>
@@ -101,6 +102,11 @@ namespace javelin::app
         connect(&m_scheduler, &WorkScheduler::jobsChanged, this, [this]() { schedulePump(); });
         connect(&m_scheduler, &WorkScheduler::foregroundAvailabilityChanged, this,
                 [this]() { schedulePump(); });
+    }
+
+    MailIndexService::~MailIndexService()
+    {
+        m_workerPool.waitForDone();
     }
 
     void MailIndexService::applyAccounts(std::vector<std::string> accountIds)
@@ -201,6 +207,7 @@ namespace javelin::app
 
     QCoro::Task<void> MailIndexService::runAccount(std::string accountId, std::string jobId)
     {
+        const QPointer<MailIndexService> self{this};
         QSqlQuery totalQuery{m_connection.database()};
         totalQuery.prepare(QStringLiteral(
             "SELECT COUNT(*) FROM mail_vault_email_refs WHERE account_id=:account AND "
@@ -250,8 +257,11 @@ namespace javelin::app
             const std::uint64_t size = next.value(4).toULongLong();
             next.finish();
 
-            auto future = QtConcurrent::run(parseDocument, path, emailId, contentHash, subject);
+            auto future = QtConcurrent::run(&m_workerPool, parseDocument, path, emailId,
+                                            contentHash, subject);
             auto parsed = co_await qCoro(future).takeResult();
+            if (!self)
+                co_return;
             if (!parsed.document)
             {
                 static_cast<void>(m_scheduler.update(jobId, WorkStatus::Failed, progress,
@@ -259,9 +269,11 @@ namespace javelin::app
                 co_return;
             }
             auto commitFuture = QtConcurrent::run(
-                commitIndexDocument, m_connection.database().databaseName(), accountId,
-                std::move(*parsed.document), std::move(parsed.preview));
+                &m_workerPool, commitIndexDocument, m_connection.database().databaseName(),
+                accountId, std::move(*parsed.document), std::move(parsed.preview));
             const QString commitError = co_await qCoro(commitFuture).takeResult();
+            if (!self)
+                co_return;
             if (!commitError.isEmpty())
             {
                 static_cast<void>(m_scheduler.update(jobId, WorkStatus::Failed, progress,

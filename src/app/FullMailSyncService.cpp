@@ -24,6 +24,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLoggingCategory>
+#include <QPointer>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStorageInfo>
@@ -935,6 +936,7 @@ namespace javelin::app
 
     QCoro::Task<bool> FullMailSyncService::waitForBackgroundNetwork(std::string id)
     {
+        const QPointer<FullMailSyncService> self{this};
         while (!m_scheduler.mayStartBackgroundNetwork())
         {
             const auto job = m_scheduler.find(id);
@@ -945,6 +947,8 @@ namespace javelin::app
             timer.setSingleShot(true);
             timer.start(std::chrono::milliseconds{100});
             co_await qCoro(timer).waitForTimeout();
+            if (!self)
+                co_return false;
         }
         const auto job = m_scheduler.find(id);
         const auto* value = std::get_if<std::optional<WorkRecord>>(&job);
@@ -953,6 +957,7 @@ namespace javelin::app
 
     QCoro::Task<void> FullMailSyncService::run(Scope scope)
     {
+        const QPointer<FullMailSyncService> self{this};
         const auto accountSettings = settingsFor(scope.accountId);
         if (!accountSettings)
             co_return;
@@ -1077,7 +1082,10 @@ namespace javelin::app
             }
             while (true)
             {
-                if (!co_await waitForBackgroundNetwork(scope.jobId))
+                const bool mayContinue = co_await waitForBackgroundNetwork(scope.jobId);
+                if (!self)
+                    co_return;
+                if (!mayContinue)
                 {
                     static_cast<void>(m_scheduler.pause(scope.jobId));
                     co_return;
@@ -1091,6 +1099,8 @@ namespace javelin::app
                 auto pageResult = co_await m_core.materializeFullMailboxPage(
                     liveSettings(*accountSettings), scope.accountId, scope.mailboxId, position,
                     pageSize, anchor);
+                if (!self)
+                    co_return;
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&pageResult))
                 {
                     if (anchor.has_value() &&
@@ -1122,6 +1132,8 @@ namespace javelin::app
                                       pagePosition, page.emailIds, std::move(page.emails),
                                       page.queryState, std::move(page.emailState), page.total);
                 const auto commit = co_await qCoro(commitFuture).takeResult();
+                if (!self)
+                    co_return;
                 if (commit.restartRequired)
                 {
                     const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
@@ -1397,13 +1409,18 @@ namespace javelin::app
 
             for (const auto& [emailId, size] : work.downloads)
             {
-                if (!co_await waitForBackgroundNetwork(scope.jobId))
+                const bool mayContinue = co_await waitForBackgroundNetwork(scope.jobId);
+                if (!self)
+                    co_return;
+                if (!mayContinue)
                 {
                     static_cast<void>(m_scheduler.pause(scope.jobId));
                     co_return;
                 }
                 const auto result = co_await m_core.refreshMessageContent(
                     liveSettings(*accountSettings), scope.accountId, emailId);
+                if (!self)
+                    co_return;
                 if (const auto* unavailable =
                         std::get_if<javelin::jmap::MessageContentUnavailable>(&result))
                 {
