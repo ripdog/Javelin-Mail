@@ -80,5 +80,10 @@ TEST_CASE("compose close planning handles immediate and empty draft closure")
 TEST_CASE("compose close planning distinguishes saved and unsaved drafts")
 {
     CHECK(planComposeTabClose({.savedDraft = true}) == ComposeTabClosePlan::ConfirmKeepSavedDraft);
+    CHECK(planComposeTabClose({.savedDraft = true, .hasUnsavedChanges = true}) ==
+          ComposeTabClosePlan::ConfirmSaveOrDiscard);
+    CHECK(
+        planComposeTabClose({.emptyDraft = true, .savedDraft = true, .hasUnsavedChanges = true}) ==
+        ComposeTabClosePlan::ConfirmSaveOrDiscard);
     CHECK(planComposeTabClose({}) == ComposeTabClosePlan::ConfirmSaveOrDiscard);
 }

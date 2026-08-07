@@ -1,6 +1,7 @@
 #include "gui/shell/TabPersistence.h"
 
 #include "gui/calendar/MonthCalendarWidget.h"
+#include "gui/compose/ComposeTabWidget.h"
 #include "gui/contacts/ContactsManagerWidget.h"
 
 #include <type_traits>
@@ -57,6 +58,8 @@ namespace javelin::gui::shell
                             },
                         .accountId = content.accountId,
                         .composeSessionId = content.composeSessionId,
+                        .hasUnsavedChanges =
+                            content.widget != nullptr && content.widget->hasUnsavedChanges(),
                     };
                 }
                 else if constexpr (std::is_same_v<Content, ContactsTabState>)

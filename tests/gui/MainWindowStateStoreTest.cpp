@@ -82,6 +82,7 @@ TEST_CASE("main window state round-trips every tab type")
         .common = {.title = QStringLiteral("Compose"), .selection = {}},
         .accountId = "account",
         .composeSessionId = "compose-session",
+        .hasUnsavedChanges = true,
     });
     expected.tabs.emplace_back(PersistedContactsTab{
         .common = {.title = QStringLiteral("Contacts"), .selection = {}},
@@ -131,11 +132,29 @@ TEST_CASE("main window state round-trips every tab type")
     const auto& compose = std::get<PersistedComposeTab>(actual.tabs[2]);
     CHECK(compose.accountId == "account");
     CHECK(compose.composeSessionId == "compose-session");
+    CHECK(compose.hasUnsavedChanges);
     const auto& contacts = std::get<PersistedContactsTab>(actual.tabs[3]);
     CHECK(contacts.view.filter == QStringLiteral("Ada"));
     CHECK((contacts.view.selectedContactKeys == std::vector<std::string>{"one", "two"}));
     const auto& calendar = std::get<PersistedCalendarTab>(actual.tabs[4]);
     CHECK((calendar.displayedMonth == QDate{2026, 7, 1}));
+}
+
+TEST_CASE("legacy compose workspace state defaults to no unsaved changes")
+{
+    const QVariantMap settings{
+        {QStringLiteral("tabs/size"), 1},
+        {QStringLiteral("tabs/1/type"), QStringLiteral("compose")},
+        {QStringLiteral("tabs/1/accountId"), QStringLiteral("account")},
+        {QStringLiteral("tabs/1/title"), QStringLiteral("Draft")},
+        {QStringLiteral("tabs/1/composeSessionId"), QStringLiteral("compose-session")},
+    };
+
+    const auto state = deserializeMainWindowState(encodeSettings(settings), {});
+
+    REQUIRE(state.tabs.size() == 1);
+    const auto& compose = std::get<PersistedComposeTab>(state.tabs.front());
+    CHECK_FALSE(compose.hasUnsavedChanges);
 }
 
 TEST_CASE("main window state accepts legacy account keys on workspace tabs")

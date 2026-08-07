@@ -49,6 +49,7 @@ namespace javelin::gui::shell
         PersistedTabCommon common;
         std::string accountId;
         std::string composeSessionId;
+        bool hasUnsavedChanges = false;
     };
 
     struct PersistedContactsTab

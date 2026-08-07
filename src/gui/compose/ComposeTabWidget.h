@@ -64,8 +64,8 @@ namespace javelin::gui::compose
                          javelin::jmap::cache::AccountReader& accountReader,
                          javelin::jmap::cache::IdentityReader& identityRepository,
                          javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
-                         javelin::jmap::submission::DraftSnapshot snapshot,
-                         QWidget* parent = nullptr);
+                         javelin::jmap::submission::DraftSnapshot snapshot, QWidget* parent,
+                         bool hasUnsavedChanges);
         ~ComposeTabWidget() override = default;
 
         [[nodiscard]] QString tabTitle() const;
@@ -73,6 +73,7 @@ namespace javelin::gui::compose
         [[nodiscard]] std::optional<std::string> draftEmailId() const;
         [[nodiscard]] bool isEmptyDraft() const;
         [[nodiscard]] bool closeWithoutPrompt() const;
+        [[nodiscard]] bool hasUnsavedChanges() const;
         [[nodiscard]] bool operationInFlight() const;
         [[nodiscard]] bool canSend() const;
         [[nodiscard]] bool richTextEnabled() const;
@@ -182,6 +183,7 @@ namespace javelin::gui::compose
         bool m_syncingUi = false;
         bool m_operationInFlight = false;
         bool m_closeWithoutPrompt = false;
+        bool m_hasUnsavedChanges = false;
         bool m_closeAfterSave = false;
         bool m_signatureProgrammaticEdit = false;
         bool m_signatureTracked = false;

@@ -102,7 +102,7 @@ namespace javelin::gui::shell
         if (!snapshot.has_value())
             return false;
 
-        static_cast<void>(materialize(*snapshot));
+        static_cast<void>(materialize(*snapshot, persisted.hasUnsavedChanges));
         return true;
     }
 
@@ -117,6 +117,7 @@ namespace javelin::gui::shell
             .closeWithoutPrompt = composeTab->widget->closeWithoutPrompt(),
             .emptyDraft = composeTab->widget->isEmptyDraft(),
             .savedDraft = composeTab->widget->draftEmailId().has_value(),
+            .hasUnsavedChanges = composeTab->widget->hasUnsavedChanges(),
         };
     }
 
@@ -201,7 +202,8 @@ namespace javelin::gui::shell
         return composeWidgetForTab(tab);
     }
 
-    std::size_t ComposeTabController::materialize(javelin::jmap::submission::DraftSnapshot snapshot)
+    std::size_t ComposeTabController::materialize(javelin::jmap::submission::DraftSnapshot snapshot,
+                                                  const bool hasUnsavedChanges)
     {
         std::vector<ComposeTabDescriptor> descriptors;
         descriptors.reserve(m_tabs.size());
@@ -249,7 +251,7 @@ namespace javelin::gui::shell
         const auto index = m_tabs.size() - 1;
         auto* widget = new javelin::gui::compose::ComposeTabWidget(
             m_settings, m_composeCommandPort, m_accountReader, m_identityRepository,
-            m_contactIdentityLookup, std::move(snapshot), &m_contentStack);
+            m_contactIdentityLookup, std::move(snapshot), &m_contentStack, hasUnsavedChanges);
         attachWidget(widget, index);
         return index;
     }

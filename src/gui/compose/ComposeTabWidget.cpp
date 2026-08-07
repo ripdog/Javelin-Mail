@@ -593,10 +593,12 @@ namespace javelin::gui::compose
         javelin::jmap::cache::AccountReader& accountReader,
         javelin::jmap::cache::IdentityReader& identityRepository,
         javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
-        javelin::jmap::submission::DraftSnapshot snapshot, QWidget* parent)
+        javelin::jmap::submission::DraftSnapshot snapshot, QWidget* parent,
+        const bool hasUnsavedChanges)
         : QWidget(parent), m_settings(settings), m_composeCommandPort(composeCommandPort),
           m_accountReader(accountReader), m_identityRepository(identityRepository),
-          m_contactIdentityLookup(contactIdentityLookup), m_snapshot(std::move(snapshot))
+          m_contactIdentityLookup(contactIdentityLookup), m_snapshot(std::move(snapshot)),
+          m_hasUnsavedChanges(hasUnsavedChanges)
     {
         setAcceptDrops(true);
         setupUi();
@@ -729,6 +731,11 @@ namespace javelin::gui::compose
     bool ComposeTabWidget::closeWithoutPrompt() const
     {
         return m_closeWithoutPrompt;
+    }
+
+    bool ComposeTabWidget::hasUnsavedChanges() const
+    {
+        return m_hasUnsavedChanges;
     }
 
     bool ComposeTabWidget::operationInFlight() const
@@ -1698,6 +1705,7 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::scheduleWorkingCopySave()
     {
+        m_hasUnsavedChanges = true;
         if (m_operationInFlight)
         {
             return;
@@ -2279,6 +2287,7 @@ namespace javelin::gui::compose
                     return;
                 }
 
+                m_hasUnsavedChanges = false;
                 Q_EMIT statusMessageRequested(i18n("Draft saved."), 5000);
                 if (m_closeAfterSave)
                 {

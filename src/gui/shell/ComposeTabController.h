@@ -96,7 +96,8 @@ namespace javelin::gui::shell
         void manageIdentitiesRequested(QString accountId, QString identityId);
 
       private:
-        [[nodiscard]] std::size_t materialize(javelin::jmap::submission::DraftSnapshot snapshot);
+        [[nodiscard]] std::size_t materialize(javelin::jmap::submission::DraftSnapshot snapshot,
+                                              bool hasUnsavedChanges = false);
         void attachWidget(javelin::gui::compose::ComposeTabWidget* widget, std::size_t index);
         [[nodiscard]] ComposeTabState* composeTabAt(int index);
         [[nodiscard]] const ComposeTabState* composeTabAt(int index) const;

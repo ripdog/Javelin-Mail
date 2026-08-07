@@ -171,6 +171,10 @@ namespace javelin::gui::shell
                     .common = std::move(common),
                     .accountId = accountId,
                     .composeSessionId = composeSessionId,
+                    .hasUnsavedChanges =
+                        settings
+                            .value(settingKey(prefix, QStringLiteral("hasUnsavedChanges")), false)
+                            .toBool(),
                 };
             }
             if (type == QStringLiteral("contacts"))
@@ -266,6 +270,8 @@ namespace javelin::gui::shell
                                         QString::fromStdString(value.accountId));
                         settings.insert(settingKey(prefix, QStringLiteral("composeSessionId")),
                                         QString::fromStdString(value.composeSessionId));
+                        settings.insert(settingKey(prefix, QStringLiteral("hasUnsavedChanges")),
+                                        value.hasUnsavedChanges);
                     }
                     else if constexpr (std::is_same_v<Tab, PersistedContactsTab>)
                     {

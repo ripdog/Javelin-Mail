@@ -2406,12 +2406,12 @@ namespace javelin::gui::shell
         case ComposeTabClosePlan::ConfirmSaveOrDiscard:
         {
             QMessageBox messageBox{this};
-            messageBox.setWindowTitle(i18n("Close Compose Tab"));
-            messageBox.setText(i18n("Save this message as a draft before closing?"));
+            messageBox.setWindowTitle(i18n("Save Changes?"));
+            messageBox.setText(i18n("Save changes to this draft before closing?"));
             QAbstractButton* saveButton =
-                messageBox.addButton(i18n("Save Draft"), QMessageBox::AcceptRole);
+                messageBox.addButton(i18nc("@action:button", "Save"), QMessageBox::AcceptRole);
             QAbstractButton* discardButton = messageBox.addButton(
-                i18nc("@action:button", "Discard"), QMessageBox::DestructiveRole);
+                i18nc("@action:button", "Don't Save"), QMessageBox::DestructiveRole);
             messageBox.addButton(QMessageBox::Cancel);
             messageBox.exec();
             if (messageBox.clickedButton() == saveButton)

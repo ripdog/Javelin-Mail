@@ -32,6 +32,8 @@ namespace javelin::gui::shell
             return ComposeTabClosePlan::BlockWhileBusy;
         if (input.closeWithoutPrompt)
             return ComposeTabClosePlan::CloseImmediately;
+        if (input.savedDraft && input.hasUnsavedChanges)
+            return ComposeTabClosePlan::ConfirmSaveOrDiscard;
         if (input.emptyDraft)
             return ComposeTabClosePlan::DiscardWorkingCopyAndClose;
         if (input.savedDraft)

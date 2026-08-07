@@ -36,6 +36,7 @@ namespace javelin::gui::shell
         bool closeWithoutPrompt = false;
         bool emptyDraft = false;
         bool savedDraft = false;
+        bool hasUnsavedChanges = false;
     };
 
     enum class ComposeTabClosePlan
