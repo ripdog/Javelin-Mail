@@ -3180,8 +3180,17 @@ namespace javelin::gui::shell
             m_messageView->setCurrentIndex(index);
         }
         const auto selection = m_messageCommandController->selectedActionItems();
+        const auto draftsMailbox = findMailboxByRole(m_mailboxReader, *accountId, "drafts");
+        const bool activeMailboxIsDrafts = sourceMailboxId.has_value() &&
+                                           draftsMailbox.has_value() &&
+                                           *sourceMailboxId == draftsMailbox->id;
 
         QMenu menu{this};
+        if (activeMailboxIsDrafts)
+        {
+            menu.addAction(m_editDraftAction);
+            menu.addSeparator();
+        }
         menu.addAction(m_viewSourceAction);
         menu.addAction(m_markUnreadAction);
         const auto senderEmail =
