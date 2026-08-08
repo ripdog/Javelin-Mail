@@ -148,6 +148,52 @@ TEST_CASE("preferred JMAP transport falls back to HTTP before websocket dispatch
     CHECK(cooldowns.retryDelay(session.capabilities.websocket->url).has_value());
 }
 
+TEST_CASE("HTTP JMAP transport rejects malformed method arguments before dispatch",
+          "[jmap][method][transport][http]")
+{
+    ensureApplication();
+    FakeHttpTransport resourceTransport;
+    javelin::jmap::api::HttpJmapMethodTransport httpTransport{resourceTransport};
+    auto request = methodRequest();
+    REQUIRE_FALSE(request.envelope.methodCalls.empty());
+    request.envelope.methodCalls.front().arguments = "{not json}";
+
+    const auto result = QCoro::waitFor(httpTransport.call(std::move(request)));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::ProtocolError>(result));
+    CHECK(std::get<javelin::jmap::api::ProtocolError>(result).code ==
+          javelin::jmap::api::ProtocolErrorCode::InvalidRequest);
+    CHECK(resourceTransport.calls == 0);
+}
+
+TEST_CASE("WebSocket JMAP transport rejects malformed method arguments before dispatch",
+          "[jmap][method][transport][websocket]")
+{
+    ensureApplication();
+    auto database = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{database.connection};
+    const auto session = sessionWithWebSocket("wss://127.0.0.1:1/jmap");
+    REQUIRE_FALSE(sessions.replace("u1", session).has_value());
+
+    FakeHttpTransport resourceTransport;
+    javelin::jmap::api::HttpJmapMethodTransport httpTransport{resourceTransport};
+    javelin::jmap::api::WebSocketFailureCooldowns cooldowns;
+    javelin::jmap::api::PreferredJmapMethodTransport preferred{database.connection, httpTransport,
+                                                               cooldowns};
+    auto request = methodRequest();
+    request.transportPolicy = javelin::jmap::api::JmapTransportPolicy::ForceWebSocket;
+    REQUIRE_FALSE(request.envelope.methodCalls.empty());
+    request.envelope.methodCalls.front().arguments = "{not json}";
+
+    const auto result = QCoro::waitFor(preferred.call(std::move(request)));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::ProtocolError>(result));
+    CHECK(std::get<javelin::jmap::api::ProtocolError>(result).code ==
+          javelin::jmap::api::ProtocolErrorCode::InvalidRequest);
+    CHECK(resourceTransport.calls == 0);
+    CHECK_FALSE(cooldowns.retryDelay(session.capabilities.websocket->url).has_value());
+}
+
 TEST_CASE("preferred JMAP transport invalidates HTTP connections when reachability returns",
           "[jmap][method][transport]")
 {

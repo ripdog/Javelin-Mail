@@ -103,13 +103,40 @@ namespace javelin::jmap::api
             return value;
         }
 
-        [[nodiscard]] MethodInvocation convertInvocation(RawMethodInvocation rawInvocation)
+        [[nodiscard]] std::vector<MethodInvocation>
+        convertInvocations(std::vector<RawMethodInvocation> rawInvocations)
         {
-            return MethodInvocation{
-                .name = std::move(rawInvocation.name),
-                .arguments = encodeJson(rawInvocation.arguments),
-                .callId = std::move(rawInvocation.callId),
-            };
+            std::vector<MethodInvocation> invocations;
+            invocations.reserve(rawInvocations.size());
+            for (auto& rawInvocation : rawInvocations)
+            {
+                invocations.push_back(MethodInvocation{
+                    .name = std::move(rawInvocation.name),
+                    .arguments = encodeJson(rawInvocation.arguments),
+                    .callId = std::move(rawInvocation.callId),
+                });
+            }
+            return invocations;
+        }
+
+        [[nodiscard]] std::optional<std::vector<RawMethodInvocation>>
+        convertInvocations(const std::vector<MethodInvocation>& invocations)
+        {
+            std::vector<RawMethodInvocation> rawInvocations;
+            rawInvocations.reserve(invocations.size());
+            for (const auto& invocation : invocations)
+            {
+                const auto decodedArguments = decodeJson(invocation.arguments);
+                if (!decodedArguments.has_value())
+                    return std::nullopt;
+
+                rawInvocations.push_back(RawMethodInvocation{
+                    .name = invocation.name,
+                    .arguments = std::move(*decodedArguments),
+                    .callId = invocation.callId,
+                });
+            }
+            return rawInvocations;
         }
 
         template <typename T> [[nodiscard]] ParsedEnvelope<T> parseEnvelope(std::string_view json)
@@ -145,6 +172,20 @@ namespace javelin::jmap::api
             return buffer;
         }
 
+        template <typename RawEnvelope>
+        [[nodiscard]] std::optional<std::string> serializeRequest(const RequestEnvelope& request,
+                                                                  RawEnvelope envelope)
+        {
+            auto methodCalls = convertInvocations(request.methodCalls);
+            if (!methodCalls.has_value())
+                return std::nullopt;
+
+            envelope.usingCapabilities = request.usingCapabilities;
+            envelope.methodCalls = std::move(*methodCalls);
+            envelope.createdIds = request.createdIds;
+            return serializeEnvelope(envelope);
+        }
+
     } // namespace
 
     ParsedEnvelope<RequestEnvelope> parseRequestEnvelope(std::string_view json)
@@ -160,14 +201,9 @@ namespace javelin::jmap::api
 
         RequestEnvelope envelope{
             .usingCapabilities = std::move(parsed.value->usingCapabilities),
-            .methodCalls = {},
+            .methodCalls = convertInvocations(std::move(parsed.value->methodCalls)),
             .createdIds = std::move(parsed.value->createdIds),
         };
-        envelope.methodCalls.reserve(parsed.value->methodCalls.size());
-        for (auto& methodCall : parsed.value->methodCalls)
-        {
-            envelope.methodCalls.push_back(convertInvocation(methodCall));
-        }
 
         return {
             .value = std::move(envelope),
@@ -187,15 +223,10 @@ namespace javelin::jmap::api
         }
 
         ResponseEnvelope envelope{
-            .methodResponses = {},
+            .methodResponses = convertInvocations(std::move(parsed.value->methodResponses)),
             .createdIds = std::move(parsed.value->createdIds),
             .sessionState = std::move(parsed.value->sessionState),
         };
-        envelope.methodResponses.reserve(parsed.value->methodResponses.size());
-        for (auto& methodResponse : parsed.value->methodResponses)
-        {
-            envelope.methodResponses.push_back(convertInvocation(methodResponse));
-        }
 
         return {
             .value = std::move(envelope),
@@ -205,83 +236,32 @@ namespace javelin::jmap::api
 
     std::optional<std::string> serializeRequestEnvelope(const RequestEnvelope& request)
     {
-        RawRequestEnvelope envelope{
-            .usingCapabilities = request.usingCapabilities,
-            .methodCalls = {},
-            .createdIds = request.createdIds,
-        };
-        envelope.methodCalls.reserve(request.methodCalls.size());
-        for (const auto& methodCall : request.methodCalls)
-        {
-            const auto decodedArguments = decodeJson(methodCall.arguments);
-            if (!decodedArguments.has_value())
-            {
-                return std::nullopt;
-            }
-
-            envelope.methodCalls.push_back(RawMethodInvocation{
-                .name = methodCall.name,
-                .arguments = std::move(*decodedArguments),
-                .callId = methodCall.callId,
-            });
-        }
-
-        return serializeEnvelope(envelope);
+        return serializeRequest(request, RawRequestEnvelope{});
     }
 
     std::optional<std::string> serializeWebSocketRequestEnvelope(const RequestEnvelope& request,
                                                                  const std::string_view requestId)
     {
-        RawWebSocketRequestEnvelope envelope{
-            .type = "Request",
-            .id = std::string{requestId},
-            .usingCapabilities = request.usingCapabilities,
-            .methodCalls = {},
-            .createdIds = request.createdIds,
-        };
-        envelope.methodCalls.reserve(request.methodCalls.size());
-        for (const auto& methodCall : request.methodCalls)
-        {
-            const auto decodedArguments = decodeJson(methodCall.arguments);
-            if (!decodedArguments.has_value())
-            {
-                return std::nullopt;
-            }
-
-            envelope.methodCalls.push_back(RawMethodInvocation{
-                .name = methodCall.name,
-                .arguments = std::move(*decodedArguments),
-                .callId = methodCall.callId,
-            });
-        }
-
-        return serializeEnvelope(envelope);
+        return serializeRequest(request, RawWebSocketRequestEnvelope{
+                                             .type = "Request",
+                                             .id = std::string{requestId},
+                                             .usingCapabilities = {},
+                                             .methodCalls = {},
+                                             .createdIds = std::nullopt,
+                                         });
     }
 
     std::optional<std::string> serializeResponseEnvelope(const ResponseEnvelope& response)
     {
-        RawResponseEnvelope envelope{
-            .methodResponses = {},
+        auto methodResponses = convertInvocations(response.methodResponses);
+        if (!methodResponses.has_value())
+            return std::nullopt;
+
+        return serializeEnvelope(RawResponseEnvelope{
+            .methodResponses = std::move(*methodResponses),
             .createdIds = response.createdIds,
             .sessionState = response.sessionState,
-        };
-        envelope.methodResponses.reserve(response.methodResponses.size());
-        for (const auto& methodResponse : response.methodResponses)
-        {
-            const auto decodedArguments = decodeJson(methodResponse.arguments);
-            if (!decodedArguments.has_value())
-            {
-                return std::nullopt;
-            }
-
-            envelope.methodResponses.push_back(RawMethodInvocation{
-                .name = methodResponse.name,
-                .arguments = std::move(*decodedArguments),
-                .callId = methodResponse.callId,
-            });
-        }
-
-        return serializeEnvelope(envelope);
+        });
     }
 
 } // namespace javelin::jmap::api

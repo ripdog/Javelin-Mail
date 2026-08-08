@@ -21,6 +21,7 @@
 #include <glaze/glaze.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -184,40 +185,71 @@ namespace javelin::jmap::api::detail
                 }
             }
         }
+
+        struct RequestDescription
+        {
+            QStringList methodCalls;
+            std::vector<MailboxReference> mailboxReferences;
+        };
+
+        [[nodiscard]] RequestDescription collectRequestDescription(const JmapMethodRequest& request)
+        {
+            RequestDescription description;
+            for (const auto& invocation : request.envelope.methodCalls)
+            {
+                QString method = QString::fromStdString(invocation.name);
+                if (!invocation.callId.empty())
+                {
+                    method += QStringLiteral("(") + QString::fromStdString(invocation.callId) +
+                              QStringLiteral(")");
+                }
+                description.methodCalls.push_back(std::move(method));
+
+                glz::generic arguments;
+                auto json = invocation.arguments;
+                if (glz::read_json(arguments, json) || !arguments.is_object())
+                    continue;
+                std::string accountId = request.accountId;
+                if (arguments.contains("accountId") && arguments.at("accountId").is_string())
+                    accountId = arguments.at("accountId").get_string();
+                collectMailboxReferences(arguments, accountId, description.mailboxReferences);
+                collectMailboxMethodReferences(invocation, arguments, accountId,
+                                               description.mailboxReferences);
+            }
+            return description;
+        }
+
+        [[nodiscard]] QStringList mailboxIdLabels(const std::vector<MailboxReference>& references)
+        {
+            QStringList labels;
+            labels.reserve(static_cast<qsizetype>(references.size()));
+            for (const auto& reference : references)
+                labels.push_back(
+                    QStringLiteral("[%1]").arg(QString::fromStdString(reference.mailboxId)));
+            return labels;
+        }
     } // namespace
+
+    JmapRequestLogContext describeJmapRequest(const JmapMethodRequest& request)
+    {
+        const auto description = collectRequestDescription(request);
+        return JmapRequestLogContext{
+            .methodCalls = description.methodCalls.join(QStringLiteral(", ")),
+            .mailboxes = mailboxIdLabels(description.mailboxReferences).join(QStringLiteral(", ")),
+        };
+    }
 
     JmapRequestLogContext
     describeJmapRequest(javelin::jmap::cache::DatabaseConnection& databaseConnection,
                         const JmapMethodRequest& request)
     {
-        QStringList methodCalls;
-        std::vector<MailboxReference> references;
-        for (const auto& invocation : request.envelope.methodCalls)
-        {
-            QString method = QString::fromStdString(invocation.name);
-            if (!invocation.callId.empty())
-            {
-                method += QStringLiteral("(") + QString::fromStdString(invocation.callId) +
-                          QStringLiteral(")");
-            }
-            methodCalls.push_back(std::move(method));
-
-            glz::generic arguments;
-            auto json = invocation.arguments;
-            if (glz::read_json(arguments, json) || !arguments.is_object())
-                continue;
-            std::string accountId = request.accountId;
-            if (arguments.contains("accountId") && arguments.at("accountId").is_string())
-                accountId = arguments.at("accountId").get_string();
-            collectMailboxReferences(arguments, accountId, references);
-            collectMailboxMethodReferences(invocation, arguments, accountId, references);
-        }
-
+        const auto description = collectRequestDescription(request);
         QStringList mailboxLabels;
+        mailboxLabels.reserve(static_cast<qsizetype>(description.mailboxReferences.size()));
         QSqlQuery mailboxQuery{databaseConnection.database()};
         mailboxQuery.prepare(QStringLiteral(
             "SELECT name FROM mailboxes WHERE account_id=:account AND mailbox_id=:mailbox"));
-        for (const auto& reference : references)
+        for (const auto& reference : description.mailboxReferences)
         {
             const QString mailboxId = QString::fromStdString(reference.mailboxId);
             mailboxQuery.bindValue(QStringLiteral(":account"),
@@ -233,7 +265,7 @@ namespace javelin::jmap::api::detail
         }
 
         return JmapRequestLogContext{
-            .methodCalls = methodCalls.join(QStringLiteral(", ")),
+            .methodCalls = description.methodCalls.join(QStringLiteral(", ")),
             .mailboxes = mailboxLabels.join(QStringLiteral(", ")),
         };
     }
@@ -241,6 +273,7 @@ namespace javelin::jmap::api::detail
 
 namespace javelin::jmap::api
 {
+    Q_LOGGING_CATEGORY(logJmapMethodTransport, "jmap.transport.method")
     Q_LOGGING_CATEGORY(logJmapWebSocketTransport, "jmap.transport.websocket")
 
     namespace
@@ -304,6 +337,50 @@ namespace javelin::jmap::api
             return error != nullptr && error->code == TransportErrorCode::Cancelled;
         }
 
+        [[nodiscard]] std::string nextMethodRequestId()
+        {
+            static std::atomic_uint64_t nextRequestId = 0;
+            return "javelin-" + std::to_string(++nextRequestId);
+        }
+
+        class MethodRequestTrace final
+        {
+          public:
+            MethodRequestTrace(QString requestId, QString transport,
+                               const detail::JmapRequestLogContext& context)
+                : m_requestId(std::move(requestId)), m_transport(std::move(transport)),
+                  m_contextText(requestContextText(context))
+            {
+                m_elapsed.start();
+                qCDebug(logJmapMethodTransport).noquote()
+                    << "request started" << m_requestId << m_transport << m_contextText;
+            }
+
+            [[nodiscard]] JmapMethodTransportResult finish(JmapMethodTransportResult result) const
+            {
+                const QString outcome = resultText(result);
+                if (isSuccessfulResult(result) || isCancelledResult(result))
+                {
+                    qCDebug(logJmapMethodTransport).noquote()
+                        << "request finished" << m_requestId << m_transport << outcome
+                        << m_elapsed.elapsed() << "ms" << m_contextText;
+                }
+                else
+                {
+                    qCWarning(logJmapMethodTransport).noquote()
+                        << "request finished" << m_requestId << m_transport << outcome
+                        << m_elapsed.elapsed() << "ms" << m_contextText;
+                }
+                return result;
+            }
+
+          private:
+            QString m_requestId;
+            QString m_transport;
+            QString m_contextText;
+            QElapsedTimer m_elapsed;
+        };
+
         struct BufferedWebSocketMessage
         {
             std::string type;
@@ -342,6 +419,28 @@ namespace javelin::jmap::api
                 .message = std::string{message},
                 .httpStatus = std::nullopt,
             };
+        }
+
+        [[nodiscard]] ProtocolError invalidRequestError(const std::string_view message)
+        {
+            return ProtocolError{
+                .code = ProtocolErrorCode::InvalidRequest,
+                .message = std::string{message},
+            };
+        }
+
+        [[nodiscard]] ProtocolError invalidResponseError(const std::string_view message)
+        {
+            return ProtocolError{
+                .code = ProtocolErrorCode::InvalidResponse,
+                .message = std::string{message},
+            };
+        }
+
+        [[nodiscard]] QByteArray bearerAuthorizationValue(const std::string_view accessToken)
+        {
+            return QByteArrayLiteral("Bearer ") +
+                   QByteArray::fromStdString(std::string{accessToken});
         }
 
         [[nodiscard]] QString requestErrorMessage(const WebSocketMessageHeader& header)
@@ -430,56 +529,37 @@ namespace javelin::jmap::api
                     };
                 }
 
-                const auto connected = co_await ensureConnected(webSocketUrl, request.accessToken,
-                                                                request.cancellation);
-                if (const auto* error = std::get_if<TransportError>(&connected))
-                {
-                    co_return WebSocketAttemptResult{.result = *error};
-                }
-
-                const std::string requestId = nextRequestId();
+                const std::string requestId = nextMethodRequestId();
                 const auto payload = serializeWebSocketRequestEnvelope(request.envelope, requestId);
                 if (!payload.has_value())
                 {
                     co_return WebSocketAttemptResult{
-                        .result =
-                            ProtocolError{
-                                .code = ProtocolErrorCode::InvalidResponse,
-                                .message = "Failed to serialize RFC 8887 JMAP request envelope",
-                            },
+                        .result = invalidRequestError("Failed to serialize JMAP request envelope"),
                     };
                 }
 
-                const QString requestIdText = QString::fromStdString(requestId);
-                const QString contextText = requestContextText(logContext);
-                QElapsedTimer elapsed;
-                elapsed.start();
-                qCDebug(logJmapWebSocketTransport).noquote()
-                    << "request started" << requestIdText << contextText;
+                MethodRequestTrace trace{QString::fromStdString(requestId),
+                                         QStringLiteral("websocket"), logContext};
                 const auto finish = [&](JmapMethodTransportResult result,
                                         const bool requestDispatched,
                                         const bool validWebSocketResponse)
                 {
-                    const QString outcome = resultText(result);
-                    if (isSuccessfulResult(result) || isCancelledResult(result))
-                    {
-                        qCDebug(logJmapWebSocketTransport).noquote()
-                            << "request finished" << requestIdText << outcome << elapsed.elapsed()
-                            << "ms" << contextText;
-                    }
-                    else
-                    {
-                        qCWarning(logJmapWebSocketTransport).noquote()
-                            << "request finished" << requestIdText << outcome << elapsed.elapsed()
-                            << "ms" << contextText;
-                    }
                     return WebSocketAttemptResult{
-                        .result = std::move(result),
+                        .result = trace.finish(std::move(result)),
                         .requestDispatched = requestDispatched,
                         .validWebSocketResponse = validWebSocketResponse,
                     };
                 };
 
+                const auto connected = co_await ensureConnected(webSocketUrl, request.accessToken,
+                                                                request.cancellation);
+                if (const auto* error = std::get_if<TransportError>(&connected))
+                {
+                    co_return finish(*error, false, false);
+                }
+
+                QElapsedTimer responseElapsed;
+                responseElapsed.start();
                 const auto disconnectGeneration = m_disconnectGeneration;
                 const auto invalidMessageGeneration = m_invalidMessageGeneration;
                 const qint64 bytesQueued =
@@ -493,7 +573,7 @@ namespace javelin::jmap::api
                     request.dispatched();
 
                 while (
-                    elapsed.elapsed() <
+                    responseElapsed.elapsed() <
                     std::chrono::duration_cast<std::chrono::milliseconds>(responseTimeout).count())
                 {
                     const auto response = m_responses.find(requestId);
@@ -514,10 +594,7 @@ namespace javelin::jmap::api
                                     true, false);
                             }
                             co_return finish(
-                                ProtocolError{
-                                    .code = ProtocolErrorCode::InvalidResponse,
-                                    .message = requestErrorMessage(header).toStdString(),
-                                },
+                                invalidResponseError(requestErrorMessage(header).toStdString()),
                                 true, true);
                         }
 
@@ -600,8 +677,7 @@ namespace javelin::jmap::api
                 {
                     QNetworkRequest handshake{url};
                     handshake.setRawHeader("Authorization",
-                                           QByteArray{"Bearer "} +
-                                               QByteArray::fromStdString(m_accessToken));
+                                           bearerAuthorizationValue(m_accessToken));
                     QWebSocketHandshakeOptions options;
                     options.setSubprotocols({QStringLiteral("jmap")});
                     m_opening = true;
@@ -687,19 +763,12 @@ namespace javelin::jmap::api
                                                                 });
             }
 
-            [[nodiscard]] std::string nextRequestId()
-            {
-                ++m_nextRequestId;
-                return "javelin-" + std::to_string(m_nextRequestId);
-            }
-
             QWebSocket m_socket;
             QTimer m_pingTimer;
             std::string m_url;
             std::string m_accessToken;
             std::unordered_map<std::string, BufferedWebSocketMessage> m_responses;
             std::unordered_set<std::string> m_ignoredRequestIds;
-            std::uint64_t m_nextRequestId = 0;
             std::uint64_t m_disconnectGeneration = 0;
             std::uint64_t m_invalidMessageGeneration = 0;
             bool m_opening = false;
@@ -790,11 +859,7 @@ namespace javelin::jmap::api
         }
         if (retryRequest.cancellation.isCancellationRequested())
         {
-            co_return TransportError{
-                .code = TransportErrorCode::Cancelled,
-                .message = "JMAP method call cancelled while refreshing authentication",
-                .httpStatus = std::nullopt,
-            };
+            co_return cancelledError("JMAP method call cancelled while refreshing authentication");
         }
 
         retryRequest.accessToken = std::move(*refreshedAccessToken);
@@ -817,30 +882,24 @@ namespace javelin::jmap::api
     {
         if (request.cancellation.isCancellationRequested())
         {
-            co_return TransportError{
-                .code = TransportErrorCode::Cancelled,
-                .message = "JMAP method call cancelled before HTTP dispatch",
-                .httpStatus = std::nullopt,
-            };
+            co_return cancelledError("JMAP method call cancelled before HTTP dispatch");
         }
 
         const auto body = serializeRequestEnvelope(request.envelope);
         if (!body.has_value())
         {
-            co_return ProtocolError{
-                .code = ProtocolErrorCode::InvalidResponse,
-                .message = "Failed to serialize JMAP request envelope",
-            };
+            co_return invalidRequestError("Failed to serialize JMAP request envelope");
         }
 
+        MethodRequestTrace trace{QString::fromStdString(nextMethodRequestId()),
+                                 QStringLiteral("http"), detail::describeJmapRequest(request)};
         const auto result = co_await m_transport.send(HttpRequest{
             .method = HttpMethod::Post,
             .url = QUrl{QString::fromStdString(request.apiUrl)},
             .headers =
                 {
                     HttpHeader{.name = "Authorization",
-                               .value = QByteArray{"Bearer "} +
-                                        QByteArray::fromStdString(request.accessToken)},
+                               .value = bearerAuthorizationValue(request.accessToken)},
                     HttpHeader{.name = "Accept", .value = "application/json"},
                     HttpHeader{.name = "Content-Type", .value = "application/json"},
                 },
@@ -851,19 +910,16 @@ namespace javelin::jmap::api
         });
         if (const auto* error = std::get_if<TransportError>(&result))
         {
-            co_return *error;
+            co_return trace.finish(*error);
         }
 
         const auto parsed =
             parseResponseEnvelope(std::get<HttpResponse>(result).body.toStdString());
         if (!parsed.ok())
         {
-            co_return ProtocolError{
-                .code = ProtocolErrorCode::InvalidResponse,
-                .message = *parsed.error,
-            };
+            co_return trace.finish(invalidResponseError(*parsed.error));
         }
-        co_return *parsed.value;
+        co_return trace.finish(std::move(*parsed.value));
     }
 
     struct PreferredJmapMethodTransport::Impl

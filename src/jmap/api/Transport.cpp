@@ -1,7 +1,5 @@
 #include "jmap/api/Transport.h"
 
-#include "jmap/api/MethodEnvelope.h"
-
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
@@ -19,7 +17,6 @@
 #include <QNetworkRequest>
 #include <QPointer>
 #include <QScopeGuard>
-#include <QStringList>
 
 #include <chrono>
 
@@ -41,58 +38,6 @@ namespace javelin::jmap::api
             }
 
             return body.first(maxBytes) + "...";
-        }
-
-        [[nodiscard]] QString
-        summarizeInvocations(const std::vector<javelin::jmap::api::MethodInvocation>& invocations)
-        {
-            QStringList methods;
-            methods.reserve(static_cast<qsizetype>(invocations.size()));
-            for (const auto& invocation : invocations)
-            {
-                methods.push_back(
-                    QStringLiteral("%1#%2").arg(QString::fromStdString(invocation.name),
-                                                QString::fromStdString(invocation.callId)));
-            }
-            return methods.join(QStringLiteral(","));
-        }
-
-        [[nodiscard]] QString summarizeJmapRequest(const QByteArray& body)
-        {
-            const auto parsed = javelin::jmap::api::parseRequestEnvelope(body.toStdString());
-            if (!parsed.value.has_value())
-            {
-                return {};
-            }
-
-            return QStringLiteral("methods %1")
-                .arg(summarizeInvocations(parsed.value->methodCalls));
-        }
-
-        [[nodiscard]] QString summarizeJmapResponse(const QByteArray& body)
-        {
-            const auto parsed = javelin::jmap::api::parseResponseEnvelope(body.toStdString());
-            if (!parsed.value.has_value())
-            {
-                return {};
-            }
-
-            return QStringLiteral("methods %1")
-                .arg(summarizeInvocations(parsed.value->methodResponses));
-        }
-
-        [[nodiscard]] QStringList failedJmapCalls(const QByteArray& body)
-        {
-            const auto parsed = javelin::jmap::api::parseResponseEnvelope(body.toStdString());
-            QStringList failures;
-            if (!parsed.value.has_value())
-                return failures;
-            for (const auto& response : parsed.value->methodResponses)
-            {
-                if (response.name == "error")
-                    failures.push_back(QString::fromStdString(response.callId));
-            }
-            return failures;
         }
 
         [[nodiscard]] std::optional<std::chrono::seconds> retryAfter(QNetworkReply& reply)
@@ -344,11 +289,8 @@ namespace javelin::jmap::api
             networkRequest.setRawHeader(header.name, header.value);
         }
 
-        const auto requestSummary =
-            request.method == HttpMethod::Post ? summarizeJmapRequest(request.body) : QString{};
-        qCInfo(logTransport).noquote()
-            << "request" << request.url.toString()
-            << (request.method == HttpMethod::Get ? "GET" : "POST") << requestSummary;
+        qCInfo(logTransport).noquote() << "request" << request.url.toString()
+                                       << (request.method == HttpMethod::Get ? "GET" : "POST");
 
         QNetworkReply* reply = nullptr;
         switch (request.method)
@@ -420,15 +362,7 @@ namespace javelin::jmap::api
         const auto statusCodeAttribute = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
         const int statusCode = statusCodeAttribute.isValid() ? statusCodeAttribute.toInt() : 0;
         const QByteArray responseBody = reply->readAll();
-        const auto responseSummary =
-            request.method == HttpMethod::Post ? summarizeJmapResponse(responseBody) : QString{};
-        const auto failedCalls =
-            request.method == HttpMethod::Post ? failedJmapCalls(responseBody) : QStringList{};
-        if (failedCalls.isEmpty())
-            qCInfo(logTransport).noquote() << "success" << statusCode << responseSummary;
-        else
-            qCWarning(logTransport).noquote() << "JMAP method failure" << statusCode << "calls"
-                                              << failedCalls.join(QLatin1Char(','));
+        qCInfo(logTransport).noquote() << "success" << statusCode;
         if (statusCode >= 400)
         {
             qCWarning(logTransport).noquote() << "HTTP failure" << request.url.toString()

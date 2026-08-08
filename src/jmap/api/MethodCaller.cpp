@@ -86,7 +86,7 @@ namespace javelin::jmap::api
 
         if (const auto* error = std::get_if<ProtocolError>(&transportResult))
         {
-            qWarning().noquote() << "JMAP method call response parse failure"
+            qWarning().noquote() << "JMAP method call protocol failure"
                                  << QString::fromStdString(error->message);
             co_return *error;
         }
