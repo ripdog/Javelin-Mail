@@ -2079,7 +2079,8 @@ namespace javelin::jmap
         co_return co_await searchMessages(
             std::move(settings), std::move(accountId),
             javelin::jmap::search::EmailSearchCriteria{.text = std::move(query)}, offset, limit,
-            std::move(sort), std::move(anchor), std::move(windowKey), std::move(progressCallback));
+            std::move(sort), std::move(anchor), std::move(windowKey), std::move(progressCallback),
+            {});
     }
 
     QCoro::Task<MessageSearchResult> JmapCore::searchMessages(
@@ -2087,7 +2088,8 @@ namespace javelin::jmap
         javelin::jmap::search::EmailSearchCriteria criteria, const std::size_t offset,
         const std::size_t limit, javelin::jmap::query::EmailListSort sort,
         std::optional<std::string> anchor, std::optional<std::string> windowKey,
-        std::function<void(const QString&)> progressCallback)
+        std::function<void(const QString&)> progressCallback,
+        javelin::jmap::search::EmailSearchResolution resolution)
     {
         const auto reportProgress = [&progressCallback](const QString& message)
         {
@@ -2118,8 +2120,8 @@ namespace javelin::jmap
 
         const auto pageResult = co_await performCollapsedQueryPage(
             *m_impl->databaseConnection, *m_impl->methodTransport, settings, accountId,
-            javelin::jmap::search::toEmailQueryFilter(criteria), offset, limit, std::move(sort),
-            std::move(anchor), 1, reportProgress);
+            javelin::jmap::search::toEmailQueryFilter(criteria, resolution), offset, limit,
+            std::move(sort), std::move(anchor), 1, reportProgress);
         if (const auto* error = std::get_if<OperationError>(&pageResult))
         {
             co_return *error;

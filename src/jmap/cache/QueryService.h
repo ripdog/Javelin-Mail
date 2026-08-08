@@ -2,6 +2,7 @@
 
 #include "jmap/cache/Database.h"
 #include "jmap/cache/QueryReader.h"
+#include "jmap/search/EmailSearch.h"
 
 #include <optional>
 
@@ -41,6 +42,19 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::variant<std::size_t, DatabaseError>
         countUnreadMailboxEmails(std::string_view accountId,
                                  std::string_view mailboxId) const override;
+        [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
+        listUserKeywords(std::string_view accountId,
+                         std::string_view mailboxId = {}) const override;
+        [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
+        listContactEmailAddresses() const;
+        [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
+        listFilteredMailboxMessages(std::string_view accountId, std::string_view mailboxId,
+                                    const javelin::jmap::search::EmailSearchCriteria& criteria,
+                                    std::size_t limit, std::size_t offset = 0,
+                                    javelin::jmap::query::EmailListSort sort = {}) const;
+        [[nodiscard]] std::variant<std::size_t, DatabaseError> countFilteredMailboxMessages(
+            std::string_view accountId, std::string_view mailboxId,
+            const javelin::jmap::search::EmailSearchCriteria& criteria) const;
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         listMessagesByEmailIds(std::string_view accountId,
                                const std::vector<std::string>& emailIds) const override;

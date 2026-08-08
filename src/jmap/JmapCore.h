@@ -228,7 +228,8 @@ namespace javelin::jmap
                        std::size_t limit = 100, javelin::jmap::query::EmailListSort sort = {},
                        std::optional<std::string> anchor = std::nullopt,
                        std::optional<std::string> windowKey = std::nullopt,
-                       std::function<void(const QString&)> progressCallback = {});
+                       std::function<void(const QString&)> progressCallback = {},
+                       javelin::jmap::search::EmailSearchResolution resolution = {});
         [[nodiscard]] QCoro::Task<AttachmentDownloadResult>
         downloadAttachment(LiveConnectionSettings settings, std::string accountId,
                            std::string emailId, std::string partId);

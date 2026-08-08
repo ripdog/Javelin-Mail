@@ -119,6 +119,9 @@ namespace
         std::optional<std::string> bcc = std::nullopt;
         std::optional<std::string> subject = std::nullopt;
         std::optional<std::string> body = std::nullopt;
+        std::optional<std::string> hasKeyword = std::nullopt;
+        std::optional<std::string> notKeyword = std::nullopt;
+        std::optional<bool> hasAttachment = std::nullopt;
     };
 
     struct RawEmailQuerySort
@@ -463,10 +466,11 @@ template <> struct glz::meta<RawEmailQueryFilter>
 {
     using T = RawEmailQueryFilter;
 
-    static constexpr auto value =
-        glz::object("operator", &T::operatorName, "conditions", &T::conditions, "inMailbox",
-                    &T::inMailbox, "text", &T::text, "from", &T::from, "to", &T::to, "cc", &T::cc,
-                    "bcc", &T::bcc, "subject", &T::subject, "body", &T::body);
+    static constexpr auto value = glz::object(
+        "operator", &T::operatorName, "conditions", &T::conditions, "inMailbox", &T::inMailbox,
+        "text", &T::text, "from", &T::from, "to", &T::to, "cc", &T::cc, "bcc", &T::bcc, "subject",
+        &T::subject, "body", &T::body, "hasKeyword", &T::hasKeyword, "notKeyword", &T::notKeyword,
+        "hasAttachment", &T::hasAttachment);
 };
 
 template <> struct glz::meta<RawEmailQuerySort>
@@ -927,6 +931,9 @@ namespace javelin::jmap::api
             .bcc = filter.bcc,
             .subject = filter.subject,
             .body = filter.body,
+            .hasKeyword = filter.hasKeyword,
+            .notKeyword = filter.notKeyword,
+            .hasAttachment = filter.hasAttachment,
         };
     }
 

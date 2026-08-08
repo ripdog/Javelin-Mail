@@ -213,6 +213,35 @@ TEST_CASE("email query requests serialize text search filters", "[jmap][method][
         R"({"accountId":"u1","filter":{"text":"quarterly report"},"sort":[{"property":"receivedAt","isAscending":false}],"position":0,"limit":25,"collapseThreads":true,"calculateTotal":true})");
 }
 
+TEST_CASE("email query requests serialize keyword and attachment filters", "[jmap][method][mail]")
+{
+    const auto json = javelin::jmap::api::serializeEmailQueryRequest({
+        .accountId = "u1",
+        .filter =
+            javelin::jmap::api::EmailQueryFilter{
+                .operatorName = "AND",
+                .conditions =
+                    {
+                        javelin::jmap::api::EmailQueryFilter{.hasKeyword = "$flagged"},
+                        javelin::jmap::api::EmailQueryFilter{.notKeyword = "$seen"},
+                        javelin::jmap::api::EmailQueryFilter{.hasAttachment = true},
+                    },
+            },
+        .sort = {javelin::jmap::api::EmailQuerySort{.property = "receivedAt"}},
+        .position = 0,
+        .anchor = std::nullopt,
+        .anchorOffset = 0,
+        .limit = 25,
+        .collapseThreads = true,
+        .calculateTotal = true,
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(
+        *json ==
+        R"({"accountId":"u1","filter":{"operator":"AND","conditions":[{"hasKeyword":"$flagged"},{"notKeyword":"$seen"},{"hasAttachment":true}]},"sort":[{"property":"receivedAt","isAscending":false}],"position":0,"limit":25,"collapseThreads":true,"calculateTotal":true})");
+}
+
 TEST_CASE("email query requests serialize anchored windows", "[jmap][method][mail]")
 {
     const auto json = javelin::jmap::api::serializeEmailQueryRequest({

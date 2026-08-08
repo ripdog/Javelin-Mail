@@ -92,6 +92,13 @@ namespace javelin::jmap::cache
         countMailboxMessages(std::string_view accountId, std::string_view mailboxId) const = 0;
         [[nodiscard]] virtual std::variant<std::size_t, DatabaseError>
         countUnreadMailboxEmails(std::string_view accountId, std::string_view mailboxId) const = 0;
+        [[nodiscard]] virtual std::variant<std::vector<std::string>, DatabaseError>
+        listUserKeywords(std::string_view accountId, std::string_view mailboxId = {}) const
+        {
+            static_cast<void>(accountId);
+            static_cast<void>(mailboxId);
+            return std::vector<std::string>{};
+        }
         [[nodiscard]] virtual std::variant<std::vector<MessageListItem>, DatabaseError>
         listMessagesByEmailIds(std::string_view accountId,
                                const std::vector<std::string>& emailIds) const = 0;

@@ -140,6 +140,9 @@ namespace javelin::jmap::api
         std::optional<std::string> bcc = std::nullopt;
         std::optional<std::string> subject = std::nullopt;
         std::optional<std::string> body = std::nullopt;
+        std::optional<std::string> hasKeyword = std::nullopt;
+        std::optional<std::string> notKeyword = std::nullopt;
+        std::optional<bool> hasAttachment = std::nullopt;
     };
 
     struct EmailQuerySort

@@ -326,6 +326,31 @@ namespace javelin::jmap::cache
         return ids;
     }
 
+    std::variant<std::vector<std::string>, DatabaseError>
+    MailSearchIndex::searchAllBody(const std::string_view accountId,
+                                   const std::string_view text) const
+    {
+        IndexConnection connection{indexPath(m_cacheConnection, accountId), true};
+        if (connection.failure())
+            return *connection.failure();
+        QString match = QStringLiteral("body : \"");
+        match += QString::fromStdString(std::string{text})
+                     .replace(QLatin1String("\""), QStringLiteral("\"\""));
+        match += QLatin1Char('"');
+        QSqlQuery query{connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT d.email_id FROM email_search_fts f JOIN search_documents d ON d.rowid=f.rowid "
+            "WHERE email_search_fts MATCH :match ORDER BY bm25(email_search_fts)"));
+        query.bindValue(QStringLiteral(":match"), match);
+        if (!query.exec())
+            return error(QStringLiteral("Search complete local mail body index"),
+                         query.lastError().text());
+        std::vector<std::string> ids;
+        while (query.next())
+            ids.push_back(query.value(0).toString().toStdString());
+        return ids;
+    }
+
     std::optional<DatabaseError> MailSearchIndex::rebuild(const std::string_view accountId) const
     {
         if (m_writerConnection == nullptr)

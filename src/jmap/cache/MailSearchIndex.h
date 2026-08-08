@@ -56,6 +56,8 @@ namespace javelin::jmap::cache
         search(std::string_view accountId, std::string_view text, std::size_t limit) const;
         [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
         searchAll(std::string_view accountId, std::string_view text) const;
+        [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
+        searchAllBody(std::string_view accountId, std::string_view text) const;
         [[nodiscard]] std::optional<DatabaseError> rebuild(std::string_view accountId) const;
 
       private:

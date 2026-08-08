@@ -6,6 +6,7 @@
 #include "app/RefreshGeneration.h"
 #include "jmap/cache/QueryReader.h"
 #include "jmap/query/EmailListSort.h"
+#include "jmap/search/EmailSearch.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -27,6 +28,7 @@ namespace javelin::app
                        MailApplicationEventsPort& events,
                        std::optional<RestoredMailboxState> restored = std::nullopt,
                        QObject* parent = nullptr);
+        ~MailboxSession() override;
 
         [[nodiscard]] const std::string& accountId() const override;
         [[nodiscard]] const std::string& mailboxId() const;
@@ -39,6 +41,9 @@ namespace javelin::app
         void refresh(MessageListRefreshMode mode = MessageListRefreshMode::Materialize) override;
         void markStale() override;
         void setSort(javelin::jmap::query::EmailListSort sort) override;
+        void setQuickFilter(javelin::jmap::search::EmailSearchCriteria criteria);
+        [[nodiscard]] const javelin::jmap::search::EmailSearchCriteria& quickFilter() const;
+        [[nodiscard]] bool quickFilterActive() const;
         void reveal(std::string emailId);
         [[nodiscard]] bool canLoadMore() const override;
         [[nodiscard]] bool loadMore() override;
@@ -52,6 +57,8 @@ namespace javelin::app
         rebuildFromProjectedWindows(std::vector<javelin::jmap::cache::MailboxWindowPage> windows);
         void resetToInitialWindow();
         [[nodiscard]] std::string queryKey() const;
+        [[nodiscard]] std::string quickFilterWindowKey() const;
+        [[nodiscard]] javelin::jmap::search::EmailSearchCriteria filteredCriteria() const;
         [[nodiscard]] std::size_t nextOffset() const;
 
         std::string m_accountId;
@@ -59,6 +66,8 @@ namespace javelin::app
         QString m_title;
         std::optional<std::string> m_role;
         javelin::jmap::query::EmailListSort m_sort;
+        javelin::jmap::search::EmailSearchCriteria m_quickFilter;
+        std::string m_quickFilterSessionId;
         javelin::jmap::cache::QueryReader& m_queryReader;
         MessageListMaterializationPort& m_materializationPort;
         MailApplicationEventsPort& m_events;

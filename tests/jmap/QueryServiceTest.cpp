@@ -237,6 +237,105 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     CHECK(subjectItems[1].emailId == "eml-2");
 }
 
+TEST_CASE("query service applies quick filters before thread collapsing",
+          "[jmap][cache][query][quick-filter]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    auto inbox = loadMailboxFixture();
+    javelin::jmap::cache::MailboxRepository mailboxRepository{databaseContext.connection};
+    REQUIRE_FALSE(mailboxRepository.replaceAll("account-1", {inbox}).has_value());
+
+    auto unreadMatch = loadEmailFixture();
+    unreadMatch.id = "quick-unread";
+    unreadMatch.threadId = "quick-thread";
+    unreadMatch.subject = "Alpha work item";
+    unreadMatch.receivedAt = "2026-08-08T10:00:00Z";
+    unreadMatch.hasAttachment = true;
+    unreadMatch.keywords = {"$flagged", "work"};
+
+    auto newerReadSibling = unreadMatch;
+    newerReadSibling.id = "quick-read-sibling";
+    newerReadSibling.receivedAt = "2026-08-08T11:00:00Z";
+    newerReadSibling.subject = "Different subject";
+    newerReadSibling.keywords = {"$seen", "$flagged", "work"};
+
+    auto otherThread = unreadMatch;
+    otherThread.id = "quick-other";
+    otherThread.threadId = "quick-other-thread";
+    otherThread.receivedAt = "2026-08-08T09:00:00Z";
+    otherThread.subject = "Alpha personal item";
+    otherThread.keywords = {"$flagged", "personal"};
+    auto bodyOnly = unreadMatch;
+    bodyOnly.id = "quick-body";
+    bodyOnly.threadId = "quick-body-thread";
+    bodyOnly.receivedAt = "2026-08-08T08:00:00Z";
+    bodyOnly.subject = "No subject match";
+    bodyOnly.keywords = {};
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(
+        emails.replaceAll("account-1", {unreadMatch, newerReadSibling, otherThread, bodyOnly})
+            .has_value());
+    javelin::jmap::cache::MailSearchIndex searchIndex{databaseContext.connection};
+    REQUIRE_FALSE(
+        searchIndex
+            .upsert("account-1", {.emailId = bodyOnly.id,
+                                  .sourceHash = "quick-body-v1",
+                                  .subject = QStringLiteral("No subject match"),
+                                  .body = QStringLiteral("A hidden narwhal appears here.")})
+            .has_value());
+
+    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
+    const javelin::jmap::search::EmailSearchCriteria criteria{
+        .unreadOnly = true,
+        .starredOnly = true,
+        .hasAttachmentOnly = true,
+        .tags = {"work"},
+        .quickText = "Alpha",
+        .quickTextSender = false,
+        .quickTextRecipients = false,
+        .quickTextSubject = true,
+        .quickTextBody = false,
+    };
+
+    const auto result =
+        queryService.listFilteredMailboxMessages("account-1", "mbx-inbox", criteria, 100, 0);
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(result));
+    const auto& items = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(result);
+    REQUIRE(items.size() == 1);
+    CHECK(items.front().emailId == "quick-unread");
+
+    const auto count =
+        queryService.countFilteredMailboxMessages("account-1", "mbx-inbox", criteria);
+    REQUIRE(std::holds_alternative<std::size_t>(count));
+    CHECK(std::get<std::size_t>(count) == 1);
+
+    const auto keywords = queryService.listUserKeywords("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(keywords));
+    CHECK(std::get<std::vector<std::string>>(keywords) ==
+          std::vector<std::string>{"personal", "work"});
+
+    const javelin::jmap::search::EmailSearchCriteria bodyCriteria{
+        .quickText = "hidden narwhal",
+        .quickTextSender = false,
+        .quickTextRecipients = false,
+        .quickTextSubject = false,
+        .quickTextBody = true,
+    };
+    const auto bodyResult =
+        queryService.listFilteredMailboxMessages("account-1", "mbx-inbox", bodyCriteria, 100, 0);
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(bodyResult));
+    const auto& bodyItems =
+        std::get<std::vector<javelin::jmap::cache::MessageListItem>>(bodyResult);
+    REQUIRE(bodyItems.size() == 1);
+    CHECK(bodyItems.front().emailId == "quick-body");
+}
+
 TEST_CASE("offline mailbox coverage exposes only the published crawl generation and projections",
           "[jmap][cache][query][offline]")
 {

@@ -110,6 +110,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QShortcut>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
@@ -548,6 +549,7 @@ namespace javelin::gui::shell
                         m_messageSelectionController->currentRow());
                     updateEmptyStates();
                     updateMessageListHeader();
+                    updateQuickFilterUi();
                     resolveOpenEmailRoute();
                     QTimer::singleShot(0, this, &MainWindow::maybeLoadMoreMessages);
                 });
@@ -1317,6 +1319,18 @@ namespace javelin::gui::shell
         m_searchServerButton->setToolTip(
             i18n("Replace results indexed on this device with authoritative server results"));
         m_searchServerButton->setVisible(false);
+        const auto quickFilterIcon = [this](const QString& resourcePath)
+        {
+            return javelin::gui::themedSvgIcon(resourcePath,
+                                               palette().color(QPalette::Active, QPalette::Text));
+        };
+        m_quickFilterButton = new QToolButton(messageHeaderRow);
+        m_quickFilterButton->setText(i18n("Quick Filter"));
+        m_quickFilterButton->setIcon(
+            quickFilterIcon(QStringLiteral(":/icons/thunderbird-icons/filter.svg")));
+        m_quickFilterButton->setCheckable(true);
+        m_quickFilterButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        m_quickFilterButton->setToolTip(i18n("Show quick filter controls"));
         m_messageSortButton = new QToolButton(messageHeaderRow);
         m_messageSortButton->setIcon(javelin::gui::themedSvgIcon(
             QStringLiteral(":/icons/thunderbird-icons/display-options.svg"),
@@ -1328,8 +1342,83 @@ namespace javelin::gui::shell
         messageHeaderRowLayout->addWidget(m_messageListTitleLabel, 1);
         messageHeaderRowLayout->addWidget(m_messageListMetaLabel);
         messageHeaderRowLayout->addWidget(m_searchServerButton);
+        messageHeaderRowLayout->addWidget(m_quickFilterButton);
         messageHeaderRowLayout->addWidget(m_messageSortButton);
         messageHeaderLayout->addWidget(messageHeaderRow);
+
+        m_quickFilterPanel = new QWidget(messageHeader);
+        auto* quickFilterLayout = new QVBoxLayout(m_quickFilterPanel);
+        quickFilterLayout->setContentsMargins(8, 3, 8, 3);
+        quickFilterLayout->setSpacing(3);
+        auto* quickFilterButtonsRow = new QWidget(m_quickFilterPanel);
+        auto* quickFilterButtonsLayout = new QHBoxLayout(quickFilterButtonsRow);
+        quickFilterButtonsLayout->setContentsMargins(0, 0, 0, 0);
+        quickFilterButtonsLayout->setSpacing(4);
+
+        const auto makeFilterButton =
+            [quickFilterButtonsRow, &quickFilterIcon](const QString& text, const QString& iconPath)
+        {
+            auto* button = new QToolButton(quickFilterButtonsRow);
+            button->setText(text);
+            button->setIcon(quickFilterIcon(iconPath));
+            button->setCheckable(true);
+            button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+            return button;
+        };
+        m_quickFilterPinButton =
+            makeFilterButton(i18n("Pin"), QStringLiteral(":/icons/thunderbird-icons/pin.svg"));
+        m_quickFilterPinButton->setToolTip(i18n("Keep these filters when switching folders"));
+        m_quickFilterUnreadButton = makeFilterButton(
+            i18n("Unread"), QStringLiteral(":/icons/thunderbird-icons/unread.svg"));
+        m_quickFilterStarredButton =
+            makeFilterButton(i18n("Starred"), QStringLiteral(":/icons/thunderbird-icons/star.svg"));
+        m_quickFilterContactButton = makeFilterButton(
+            i18n("Contact"), QStringLiteral(":/icons/thunderbird-icons/address-book.svg"));
+        m_quickFilterTagsButton =
+            makeFilterButton(i18n("Tags"), QStringLiteral(":/icons/thunderbird-icons/tag.svg"));
+        m_quickFilterAttachmentButton = makeFilterButton(
+            i18n("Attachment"), QStringLiteral(":/icons/thunderbird-icons/attachment.svg"));
+        m_quickFilterTagsMenu = new QMenu(m_quickFilterTagsButton);
+        m_quickFilterTagsButton->setMenu(m_quickFilterTagsMenu);
+        m_quickFilterTagsButton->setPopupMode(QToolButton::MenuButtonPopup);
+
+        quickFilterButtonsLayout->addWidget(m_quickFilterPinButton);
+        quickFilterButtonsLayout->addWidget(m_quickFilterUnreadButton);
+        quickFilterButtonsLayout->addWidget(m_quickFilterStarredButton);
+        quickFilterButtonsLayout->addWidget(m_quickFilterContactButton);
+        quickFilterButtonsLayout->addWidget(m_quickFilterTagsButton);
+        quickFilterButtonsLayout->addWidget(m_quickFilterAttachmentButton);
+        quickFilterButtonsLayout->addStretch(1);
+        quickFilterLayout->addWidget(quickFilterButtonsRow);
+
+        auto* quickFilterTextRow = new QWidget(m_quickFilterPanel);
+        auto* quickFilterTextLayout = new QHBoxLayout(quickFilterTextRow);
+        quickFilterTextLayout->setContentsMargins(0, 0, 0, 0);
+        quickFilterTextLayout->setSpacing(4);
+        m_quickFilterTextEdit = new QLineEdit(quickFilterTextRow);
+        m_quickFilterTextEdit->setPlaceholderText(i18n("Filter messages"));
+        m_quickFilterTextEdit->setClearButtonEnabled(true);
+        const auto makeScopeButton = [quickFilterTextRow](const QString& text, const bool checked)
+        {
+            auto* button = new QToolButton(quickFilterTextRow);
+            button->setText(text);
+            button->setCheckable(true);
+            button->setChecked(checked);
+            button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+            return button;
+        };
+        m_quickFilterSenderButton = makeScopeButton(i18n("Sender"), true);
+        m_quickFilterRecipientsButton = makeScopeButton(i18n("Recipients"), true);
+        m_quickFilterSubjectButton = makeScopeButton(i18n("Subject"), true);
+        m_quickFilterBodyButton = makeScopeButton(i18n("Body"), false);
+        quickFilterTextLayout->addWidget(m_quickFilterTextEdit, 1);
+        quickFilterTextLayout->addWidget(m_quickFilterSenderButton);
+        quickFilterTextLayout->addWidget(m_quickFilterRecipientsButton);
+        quickFilterTextLayout->addWidget(m_quickFilterSubjectButton);
+        quickFilterTextLayout->addWidget(m_quickFilterBodyButton);
+        quickFilterLayout->addWidget(quickFilterTextRow);
+        m_quickFilterPanel->setVisible(false);
+        messageHeaderLayout->addWidget(m_quickFilterPanel);
         m_messageLoadingIndicator =
             new javelin::gui::widgets::IndeterminateProgressBar(messageHeader);
         m_messageLoadingIndicator->setAccessibleName(i18n("Loading messages"));
@@ -1491,6 +1580,7 @@ namespace javelin::gui::shell
             *m_messageListPanePresenter, *m_tabBarPresenter);
         updateEmptyStates();
         updateMessageListHeader();
+        updateQuickFilterUi();
     }
 
     void MainWindow::connectSelection()
@@ -1510,6 +1600,53 @@ namespace javelin::gui::shell
         connect(m_messageView->verticalScrollBar(), &QScrollBar::rangeChanged, this,
                 [this] { QTimer::singleShot(0, this, &MainWindow::maybeLoadMoreMessages); });
         connect(m_messageSortButton, &QToolButton::clicked, this, &MainWindow::showSortMenu);
+        connect(m_quickFilterButton, &QToolButton::toggled, this,
+                [this](const bool visible)
+                {
+                    m_quickFilterPanel->setVisible(visible && activeTabIsMailbox());
+                    if (visible)
+                        rebuildQuickFilterTagsMenu();
+                });
+        auto* quickFilterShortcut =
+            new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K), this);
+        connect(quickFilterShortcut, &QShortcut::activated, this,
+                [this]
+                {
+                    if (!activeTabIsMailbox())
+                        return;
+                    m_quickFilterButton->setChecked(true);
+                    m_quickFilterTextEdit->setFocus(Qt::ShortcutFocusReason);
+                    m_quickFilterTextEdit->selectAll();
+                });
+        auto* hideQuickFilterShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+        connect(hideQuickFilterShortcut, &QShortcut::activated, this,
+                [this]
+                {
+                    if (m_quickFilterPanel->isVisible())
+                        m_quickFilterButton->setChecked(false);
+                });
+        m_quickFilterTextTimer = new QTimer(this);
+        m_quickFilterTextTimer->setSingleShot(true);
+        m_quickFilterTextTimer->setInterval(250);
+        connect(m_quickFilterTextTimer, &QTimer::timeout, this, &MainWindow::applyQuickFilter);
+        connect(m_quickFilterTextEdit, &QLineEdit::textChanged, this,
+                [this] { m_quickFilterTextTimer->start(); });
+        for (auto* button :
+             {m_quickFilterUnreadButton, m_quickFilterStarredButton, m_quickFilterContactButton,
+              m_quickFilterTagsButton, m_quickFilterAttachmentButton, m_quickFilterSenderButton,
+              m_quickFilterRecipientsButton, m_quickFilterSubjectButton, m_quickFilterBodyButton})
+        {
+            connect(button, &QToolButton::toggled, this, [this] { applyQuickFilter(); });
+        }
+        connect(m_quickFilterPinButton, &QToolButton::toggled, this,
+                [this](const bool pinned)
+                {
+                    m_quickFilterPinned = pinned;
+                    if (pinned)
+                        m_pinnedQuickFilter = quickFilterCriteriaFromUi();
+                });
+        connect(m_quickFilterTagsMenu, &QMenu::aboutToShow, this,
+                &MainWindow::rebuildQuickFilterTagsMenu);
         connect(m_searchServerButton, &QToolButton::clicked, this,
                 [this]
                 {
@@ -2043,6 +2180,7 @@ namespace javelin::gui::shell
             updateTabBar();
             updateEmptyStates();
             updateMessageListHeader();
+            updateQuickFilterUi();
             updateMessageActions();
             updateToolbarForActiveTab();
             metrics.finish(QStringLiteral("empty"));
@@ -2051,6 +2189,24 @@ namespace javelin::gui::shell
 
         m_activeTabIndex = index;
         auto& tab = m_tabs[static_cast<std::size_t>(index)];
+        if (auto* mailbox = std::get_if<MailboxTabState>(&tab.content);
+            mailbox != nullptr && mailbox->session != nullptr)
+        {
+            const auto identity =
+                std::pair{mailbox->session->accountId(), mailbox->session->mailboxId()};
+            if (m_lastQuickFilterMailbox.has_value() && *m_lastQuickFilterMailbox != identity)
+            {
+                mailbox->session->setQuickFilter(
+                    m_quickFilterPinned ? m_pinnedQuickFilter
+                                        : javelin::jmap::search::EmailSearchCriteria{});
+            }
+            else if (m_quickFilterPinned)
+            {
+                mailbox->session->setQuickFilter(m_pinnedQuickFilter);
+            }
+            m_lastQuickFilterMailbox = identity;
+        }
+        updateQuickFilterUi();
         const auto initialPlan = planTabActivation({
             .kind = tabKind(tab),
             .homeTab = index == 0,
@@ -2693,6 +2849,151 @@ namespace javelin::gui::shell
         m_messageListTabPresenter->showHeader(activeTab());
     }
 
+    javelin::jmap::search::EmailSearchCriteria MainWindow::quickFilterCriteriaFromUi() const
+    {
+        javelin::jmap::search::EmailSearchCriteria criteria;
+        criteria.unreadOnly = m_quickFilterUnreadButton->isChecked();
+        criteria.starredOnly = m_quickFilterStarredButton->isChecked();
+        criteria.fromContactsOnly = m_quickFilterContactButton->isChecked();
+        criteria.taggedOnly = m_quickFilterTagsButton->isChecked();
+        criteria.hasAttachmentOnly = m_quickFilterAttachmentButton->isChecked();
+        if (criteria.taggedOnly)
+            criteria.tags = m_quickFilterTags;
+        criteria.matchAllTags = m_quickFilterMatchAllTags;
+        const auto text = m_quickFilterTextEdit->text().trimmed();
+        if (!text.isEmpty())
+            criteria.quickText = text.toStdString();
+        criteria.quickTextSender = m_quickFilterSenderButton->isChecked();
+        criteria.quickTextRecipients = m_quickFilterRecipientsButton->isChecked();
+        criteria.quickTextSubject = m_quickFilterSubjectButton->isChecked();
+        criteria.quickTextBody = m_quickFilterBodyButton->isChecked();
+        return criteria;
+    }
+
+    void MainWindow::applyQuickFilter()
+    {
+        auto* tab = activeTab();
+        if (tab == nullptr)
+            return;
+        auto* mailbox = std::get_if<MailboxTabState>(&tab->content);
+        if (mailbox == nullptr || mailbox->session == nullptr)
+            return;
+
+        auto criteria = quickFilterCriteriaFromUi();
+        if (m_quickFilterPinned)
+            m_pinnedQuickFilter = criteria;
+        mailbox->session->setQuickFilter(std::move(criteria));
+    }
+
+    void MainWindow::updateQuickFilterUi()
+    {
+        auto* tab = activeTab();
+        auto* mailbox = tab == nullptr ? nullptr : std::get_if<MailboxTabState>(&tab->content);
+        const bool available = mailbox != nullptr && mailbox->session != nullptr;
+        m_quickFilterButton->setVisible(available);
+        m_quickFilterPanel->setVisible(available && m_quickFilterButton->isChecked());
+        if (!available)
+            return;
+
+        const auto& criteria = mailbox->session->quickFilter();
+        QSignalBlocker unreadBlocker{m_quickFilterUnreadButton};
+        QSignalBlocker starredBlocker{m_quickFilterStarredButton};
+        QSignalBlocker contactBlocker{m_quickFilterContactButton};
+        QSignalBlocker tagsBlocker{m_quickFilterTagsButton};
+        QSignalBlocker attachmentBlocker{m_quickFilterAttachmentButton};
+        QSignalBlocker textBlocker{m_quickFilterTextEdit};
+        QSignalBlocker senderBlocker{m_quickFilterSenderButton};
+        QSignalBlocker recipientsBlocker{m_quickFilterRecipientsButton};
+        QSignalBlocker subjectBlocker{m_quickFilterSubjectButton};
+        QSignalBlocker bodyBlocker{m_quickFilterBodyButton};
+        QSignalBlocker pinBlocker{m_quickFilterPinButton};
+
+        m_quickFilterUnreadButton->setChecked(criteria.unreadOnly);
+        m_quickFilterStarredButton->setChecked(criteria.starredOnly);
+        m_quickFilterContactButton->setChecked(criteria.fromContactsOnly);
+        m_quickFilterTagsButton->setChecked(criteria.taggedOnly || !criteria.tags.empty());
+        m_quickFilterAttachmentButton->setChecked(criteria.hasAttachmentOnly);
+        m_quickFilterTextEdit->setText(criteria.quickText.has_value()
+                                           ? QString::fromStdString(*criteria.quickText)
+                                           : QString{});
+        m_quickFilterSenderButton->setChecked(criteria.quickTextSender);
+        m_quickFilterRecipientsButton->setChecked(criteria.quickTextRecipients);
+        m_quickFilterSubjectButton->setChecked(criteria.quickTextSubject);
+        m_quickFilterBodyButton->setChecked(criteria.quickTextBody);
+        m_quickFilterPinButton->setChecked(m_quickFilterPinned);
+        m_quickFilterTags = criteria.tags;
+        m_quickFilterMatchAllTags = criteria.matchAllTags;
+    }
+
+    void MainWindow::rebuildQuickFilterTagsMenu()
+    {
+        if (m_quickFilterTagsMenu == nullptr)
+            return;
+        m_quickFilterTagsMenu->clear();
+
+        auto* anyAction = m_quickFilterTagsMenu->addAction(i18n("Any selected tag"));
+        anyAction->setCheckable(true);
+        anyAction->setChecked(!m_quickFilterMatchAllTags);
+        connect(anyAction, &QAction::triggered, this,
+                [this]
+                {
+                    m_quickFilterMatchAllTags = false;
+                    applyQuickFilter();
+                    rebuildQuickFilterTagsMenu();
+                });
+        auto* allAction = m_quickFilterTagsMenu->addAction(i18n("All selected tags"));
+        allAction->setCheckable(true);
+        allAction->setChecked(m_quickFilterMatchAllTags);
+        connect(allAction, &QAction::triggered, this,
+                [this]
+                {
+                    m_quickFilterMatchAllTags = true;
+                    applyQuickFilter();
+                    rebuildQuickFilterTagsMenu();
+                });
+        m_quickFilterTagsMenu->addSeparator();
+
+        const auto accountId = activeAccountId();
+        const auto mailboxId = activeMailboxId();
+        if (!accountId.has_value() || !mailboxId.has_value())
+            return;
+        const auto result = m_queryReader.listUserKeywords(*accountId, *mailboxId);
+        const auto* keywords = std::get_if<std::vector<std::string>>(&result);
+        if (keywords == nullptr)
+        {
+            auto* errorAction = m_quickFilterTagsMenu->addAction(i18n("Unable to load tags"));
+            errorAction->setEnabled(false);
+            return;
+        }
+        if (keywords->empty())
+        {
+            auto* emptyAction = m_quickFilterTagsMenu->addAction(i18n("No tags in this folder"));
+            emptyAction->setEnabled(false);
+            return;
+        }
+
+        for (const auto& keyword : *keywords)
+        {
+            auto* action = m_quickFilterTagsMenu->addAction(QString::fromStdString(keyword));
+            action->setCheckable(true);
+            action->setChecked(std::ranges::find(m_quickFilterTags, keyword) !=
+                               m_quickFilterTags.end());
+            connect(action, &QAction::toggled, this,
+                    [this, keyword](const bool checked)
+                    {
+                        const auto found = std::ranges::find(m_quickFilterTags, keyword);
+                        if (checked && found == m_quickFilterTags.end())
+                            m_quickFilterTags.push_back(keyword);
+                        else if (!checked && found != m_quickFilterTags.end())
+                            m_quickFilterTags.erase(found);
+
+                        QSignalBlocker blocker{m_quickFilterTagsButton};
+                        m_quickFilterTagsButton->setChecked(true);
+                        applyQuickFilter();
+                    });
+        }
+    }
+
     void MainWindow::updateMessageActions()
     {
         const auto selectedIds = m_messageSelectionController->selectedEmailIds();
@@ -2878,6 +3179,17 @@ namespace javelin::gui::shell
         m_advancedSearchAction->setIcon(
             icon(QStringLiteral(":/icons/thunderbird-icons/search.svg")));
 
+        m_quickFilterButton->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/filter.svg")));
+        m_quickFilterPinButton->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/pin.svg")));
+        m_quickFilterUnreadButton->setIcon(
+            icon(QStringLiteral(":/icons/thunderbird-icons/unread.svg")));
+        m_quickFilterStarredButton->setIcon(
+            icon(QStringLiteral(":/icons/thunderbird-icons/star.svg")));
+        m_quickFilterContactButton->setIcon(
+            icon(QStringLiteral(":/icons/thunderbird-icons/address-book.svg")));
+        m_quickFilterTagsButton->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/tag.svg")));
+        m_quickFilterAttachmentButton->setIcon(
+            icon(QStringLiteral(":/icons/thunderbird-icons/attachment.svg")));
         m_messageSortButton->setIcon(
             icon(QStringLiteral(":/icons/thunderbird-icons/display-options.svg")));
     }

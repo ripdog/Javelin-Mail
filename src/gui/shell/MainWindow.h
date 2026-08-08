@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 class QCloseEvent;
@@ -23,9 +24,11 @@ class QLineEdit;
 class QListView;
 class QPoint;
 class QProgressBar;
+class QMenu;
 class QSplitter;
 class QStackedWidget;
 class QTabBar;
+class QTimer;
 class QToolButton;
 class QTreeView;
 class QAction;
@@ -285,6 +288,10 @@ namespace javelin::gui::shell
         void savePersistentState() const;
         void updateEmptyStates();
         void updateMessageListHeader();
+        void updateQuickFilterUi();
+        void applyQuickFilter();
+        void rebuildQuickFilterTagsMenu();
+        [[nodiscard]] javelin::jmap::search::EmailSearchCriteria quickFilterCriteriaFromUi() const;
         void updateMessageActions();
         [[nodiscard]] bool selectedMessagesAreJunk() const;
         void updateSortButton();
@@ -353,6 +360,26 @@ namespace javelin::gui::shell
         QLabel* m_messageListMetaLabel = nullptr;
         QProgressBar* m_messageLoadingIndicator = nullptr;
         QToolButton* m_searchServerButton = nullptr;
+        QToolButton* m_quickFilterButton = nullptr;
+        QWidget* m_quickFilterPanel = nullptr;
+        QToolButton* m_quickFilterPinButton = nullptr;
+        QToolButton* m_quickFilterUnreadButton = nullptr;
+        QToolButton* m_quickFilterStarredButton = nullptr;
+        QToolButton* m_quickFilterContactButton = nullptr;
+        QToolButton* m_quickFilterTagsButton = nullptr;
+        QToolButton* m_quickFilterAttachmentButton = nullptr;
+        QLineEdit* m_quickFilterTextEdit = nullptr;
+        QToolButton* m_quickFilterSenderButton = nullptr;
+        QToolButton* m_quickFilterRecipientsButton = nullptr;
+        QToolButton* m_quickFilterSubjectButton = nullptr;
+        QToolButton* m_quickFilterBodyButton = nullptr;
+        QMenu* m_quickFilterTagsMenu = nullptr;
+        QTimer* m_quickFilterTextTimer = nullptr;
+        std::vector<std::string> m_quickFilterTags;
+        bool m_quickFilterMatchAllTags = false;
+        bool m_quickFilterPinned = false;
+        javelin::jmap::search::EmailSearchCriteria m_pinnedQuickFilter;
+        std::optional<std::pair<std::string, std::string>> m_lastQuickFilterMailbox;
         QToolButton* m_messageSortButton = nullptr;
         QWidget* m_messageListFooter = nullptr;
         QLabel* m_messageListFooterLabel = nullptr;

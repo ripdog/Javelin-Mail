@@ -9,6 +9,7 @@
 #include <KLocalizedString>
 
 #include <QFutureWatcher>
+#include <QUuid>
 #include <QtConcurrentRun>
 
 #include <algorithm>
@@ -31,11 +32,10 @@ namespace javelin::app
         using ProjectedMailboxWindowsResult =
             std::variant<ProjectedMailboxWindows, javelin::jmap::cache::DatabaseError>;
 
-        [[nodiscard]] ProjectedMailboxWindowsResult
-        loadProjectedMailboxWindows(const QString& databasePath, const std::string& accountId,
-                                    const std::string& queryKey,
-                                    const std::vector<WindowRequest>& requests,
-                                    const javelin::jmap::query::EmailListSort sort)
+        [[nodiscard]] ProjectedMailboxWindowsResult loadProjectedMailboxWindows(
+            const QString& databasePath, const std::string& accountId, const std::string& queryKey,
+            const std::vector<WindowRequest>& requests,
+            const javelin::jmap::query::EmailListSort sort, const bool searchWindows)
         {
             javelin::jmap::cache::ReadOnlyThreadConnectionFactory factory{
                 {.connectionNamePrefix = QStringLiteral("javelin-projected-mailbox"),
@@ -54,6 +54,36 @@ namespace javelin::app
             windows.reserve(requests.size());
             for (const auto& request : requests)
             {
+                if (searchWindows)
+                {
+                    auto result = queryService.loadSearchWindow(accountId, queryKey, request.offset,
+                                                                request.limit);
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                    {
+                        return *error;
+                    }
+                    auto page = std::get<std::optional<javelin::jmap::cache::SearchWindowPage>>(
+                        std::move(result));
+                    if (!page.has_value())
+                    {
+                        windows.push_back(std::nullopt);
+                        continue;
+                    }
+                    windows.push_back(javelin::jmap::cache::MailboxWindowPage{
+                        .requestedOffset = page->offset,
+                        .requestedLimit = page->limit,
+                        .position = page->position,
+                        .returnedLimit = page->returnedLimit,
+                        .total = page->total,
+                        .queryState = std::move(page->queryState),
+                        .coverage = page->coverage,
+                        .materialization = page->materialization,
+                        .items = std::move(page->items),
+                    });
+                    continue;
+                }
+
                 auto result = queryService.loadMailboxWindow(accountId, queryKey, request.offset,
                                                              request.limit, sort);
                 if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
@@ -81,8 +111,10 @@ namespace javelin::app
                                    std::optional<RestoredMailboxState> restored, QObject* parent)
         : MessageListSession(parent), m_accountId(std::move(accountId)),
           m_mailboxId(std::move(mailboxId)), m_title(std::move(title)), m_role(std::move(role)),
-          m_sort(sort), m_queryReader(queryReader), m_materializationPort(materializationPort),
-          m_events(events), m_windowSize(windowSize),
+          m_sort(sort),
+          m_quickFilterSessionId(QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString()),
+          m_queryReader(queryReader), m_materializationPort(materializationPort), m_events(events),
+          m_windowSize(windowSize),
           m_observation(m_materializationPort.beginMailboxObservation(m_accountId, m_mailboxId))
     {
         if (restored.has_value() && !restored->windows.empty())
@@ -120,6 +152,45 @@ namespace javelin::app
                     m_cacheEpoch = std::max(m_cacheEpoch, invalidation.epoch);
                     static_cast<void>(m_refreshGeneration.begin(m_cacheEpoch));
 
+                    if (quickFilterActive())
+                    {
+                        const auto key = quickFilterWindowKey();
+                        const bool retainedFilteredWindowChanged = std::ranges::any_of(
+                            change.searchWindows,
+                            [this, &key](const SearchQueryWindowChange& changed)
+                            {
+                                return changed.queryKey.toStdString() == key &&
+                                       std::ranges::any_of(
+                                           m_windows,
+                                           [&changed](const MessageListWindow& window)
+                                           {
+                                               return window.requestedOffset == changed.offset &&
+                                                      window.requestedLimit == changed.limit;
+                                           });
+                            });
+                        if (retainedFilteredWindowChanged)
+                        {
+                            if (m_state.refreshInFlight)
+                            {
+                                ++m_refreshRequestId;
+                                m_state.refreshInFlight = false;
+                                m_refreshAwaitingCache = false;
+                                Q_EMIT stateChanged();
+                            }
+                            reloadProjectedWindows();
+                            return;
+                        }
+
+                        if (change.mailboxIds.contains(QString::fromStdString(m_mailboxId)))
+                        {
+                            m_state.stale = true;
+                            if (!m_state.refreshInFlight && !m_state.loadMoreInFlight)
+                                requestInitialWindow(MessageListRefreshMode::Materialize,
+                                                     std::nullopt, 1);
+                        }
+                        return;
+                    }
+
                     bool retainedWindowChanged = false;
                     for (const auto& changed : change.queryWindows)
                     {
@@ -154,6 +225,12 @@ namespace javelin::app
                         reloadProjectedWindows();
                     }
                 });
+    }
+
+    MailboxSession::~MailboxSession()
+    {
+        if (quickFilterActive())
+            m_materializationPort.retireSearchWindow(m_accountId, quickFilterWindowKey());
     }
 
     const std::string& MailboxSession::accountId() const
@@ -407,7 +484,7 @@ namespace javelin::app
             });
         watcher->setFuture(QtConcurrent::run(loadProjectedMailboxWindows,
                                              m_queryReader.databasePath(), m_accountId, queryKey(),
-                                             std::move(requests), m_sort));
+                                             std::move(requests), m_sort, quickFilterActive()));
     }
 
     void MailboxSession::rebuildFromProjectedWindows(
@@ -497,6 +574,66 @@ namespace javelin::app
 
         const auto generation = m_generation;
         const auto requestId = ++m_refreshRequestId;
+        const auto handleError =
+            [this, generation, requestId](const javelin::jmap::OperationError& error)
+        {
+            if (generation != m_generation || requestId != m_refreshRequestId)
+                return;
+            m_state.refreshInFlight = false;
+            m_state.refreshError = error.message;
+            Q_EMIT stateChanged();
+            Q_EMIT refreshFailed(error);
+        };
+        const auto handleSummary = [this, generation, requestId](const auto& summary)
+        {
+            if (generation != m_generation || requestId != m_refreshRequestId)
+                return;
+            m_windows.clear();
+            m_windows.push_back({
+                .requestedOffset = summary.offset,
+                .requestedLimit = summary.limit,
+                .position = summary.position,
+                .returnedLimit = summary.returnedLimit,
+                .total = summary.total,
+                .queryState = summary.queryState,
+                .itemCount = summary.representativeCount,
+                .displayCurrent = false,
+            });
+            m_pendingLoadMoreOffset.reset();
+            m_state.loadMoreInFlight = false;
+            m_pendingLoadMoreRequestCompleted = false;
+            m_endReached = summary.representativeCount == 0 ||
+                           (summary.total.has_value() &&
+                            summary.position + summary.representativeCount >= *summary.total) ||
+                           (!summary.total.has_value() && summary.returnedLimit > 0 &&
+                            summary.representativeCount < summary.returnedLimit);
+            m_refreshAwaitingCache = true;
+            reloadProjectedWindows();
+        };
+
+        if (quickFilterActive())
+        {
+            auto task = m_materializationPort.requestSearchWindow(SearchWindowIntent{
+                .accountId = m_accountId,
+                .criteria = filteredCriteria(),
+                .offset = 0,
+                .limit = m_windowSize,
+                .sort = m_sort,
+                .anchor = std::move(anchor),
+                .windowKey = quickFilterWindowKey(),
+            });
+            QCoro::connect(std::move(task), this,
+                           [handleError, handleSummary](SearchWindowResult result)
+                           {
+                               if (const auto* error =
+                                       std::get_if<javelin::jmap::OperationError>(&result))
+                                   handleError(*error);
+                               else
+                                   handleSummary(std::get<SearchWindowSummary>(result));
+                           });
+            return;
+        }
+
         auto task = m_materializationPort.requestMailboxWindow(MailboxWindowIntent{
             .accountId = m_accountId,
             .mailboxId = m_mailboxId,
@@ -507,45 +644,15 @@ namespace javelin::app
             .anchor = std::move(anchor),
             .anchorOffset = anchorOffset,
         });
-        QCoro::connect(
-            std::move(task), this,
-            [this, generation, requestId](MailboxWindowResult result)
-            {
-                if (generation != m_generation || requestId != m_refreshRequestId)
-                    return;
-
-                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                {
-                    m_state.refreshInFlight = false;
-                    m_state.refreshError = error->message;
-                    Q_EMIT stateChanged();
-                    Q_EMIT refreshFailed(*error);
-                    return;
-                }
-
-                const auto& summary = std::get<MailboxWindowSummary>(result);
-                m_windows.clear();
-                m_windows.push_back({
-                    .requestedOffset = summary.offset,
-                    .requestedLimit = summary.limit,
-                    .position = summary.position,
-                    .returnedLimit = summary.returnedLimit,
-                    .total = summary.total,
-                    .queryState = summary.queryState,
-                    .itemCount = summary.representativeCount,
-                    .displayCurrent = false,
-                });
-                m_pendingLoadMoreOffset.reset();
-                m_state.loadMoreInFlight = false;
-                m_pendingLoadMoreRequestCompleted = false;
-                m_endReached = summary.representativeCount == 0 ||
-                               (summary.total.has_value() &&
-                                summary.position + summary.representativeCount >= *summary.total) ||
-                               (!summary.total.has_value() && summary.returnedLimit > 0 &&
-                                summary.representativeCount < summary.returnedLimit);
-                m_refreshAwaitingCache = true;
-                reloadProjectedWindows();
-            });
+        QCoro::connect(std::move(task), this,
+                       [handleError, handleSummary](MailboxWindowResult result)
+                       {
+                           if (const auto* error =
+                                   std::get_if<javelin::jmap::OperationError>(&result))
+                               handleError(*error);
+                           else
+                               handleSummary(std::get<MailboxWindowSummary>(result));
+                       });
     }
 
     void MailboxSession::markStale()
@@ -557,6 +664,8 @@ namespace javelin::app
     {
         if (m_sort.property == sort.property && m_sort.direction == sort.direction)
             return;
+        if (quickFilterActive())
+            m_materializationPort.retireSearchWindow(m_accountId, quickFilterWindowKey());
         m_sort = sort;
         ++m_generation;
         ++m_refreshRequestId;
@@ -564,6 +673,38 @@ namespace javelin::app
         m_refreshAwaitingCache = false;
         resetToInitialWindow();
         m_state.stale = true;
+    }
+
+    void MailboxSession::setQuickFilter(javelin::jmap::search::EmailSearchCriteria criteria)
+    {
+        criteria.inMailbox.reset();
+        const auto oldActive = quickFilterActive();
+        const auto oldKey = javelin::jmap::search::cacheKey(m_quickFilter, m_sort);
+        const auto newKey = javelin::jmap::search::cacheKey(criteria, m_sort);
+        if (oldKey == newKey)
+            return;
+
+        if (oldActive)
+            m_materializationPort.retireSearchWindow(m_accountId, quickFilterWindowKey());
+        m_quickFilter = std::move(criteria);
+        ++m_generation;
+        ++m_refreshRequestId;
+        m_refreshGeneration.replaceScope();
+        m_refreshAwaitingCache = false;
+        resetToInitialWindow();
+        m_state.stale = true;
+        Q_EMIT stateChanged();
+        refresh(MessageListRefreshMode::Materialize);
+    }
+
+    const javelin::jmap::search::EmailSearchCriteria& MailboxSession::quickFilter() const
+    {
+        return m_quickFilter;
+    }
+
+    bool MailboxSession::quickFilterActive() const
+    {
+        return !javelin::jmap::search::isEmpty(m_quickFilter);
     }
 
     void MailboxSession::reveal(std::string emailId)
@@ -609,6 +750,77 @@ namespace javelin::app
         });
         Q_EMIT stateChanged();
 
+        const auto handleError =
+            [this, generation, requestId, offset](const javelin::jmap::OperationError& error)
+        {
+            if (generation != m_generation || requestId != m_refreshRequestId ||
+                !m_pendingLoadMoreOffset.has_value() || *m_pendingLoadMoreOffset != offset)
+            {
+                return;
+            }
+            const auto pending =
+                std::ranges::find_if(m_windows, [offset](const MessageListWindow& window)
+                                     { return window.requestedOffset == offset; });
+            if (pending != m_windows.end())
+                m_windows.erase(pending);
+            m_pendingLoadMoreOffset.reset();
+            m_pendingLoadMoreRequestCompleted = false;
+            m_state.loadMoreInFlight = false;
+            m_state.loadMoreError = error.message;
+            Q_EMIT stateChanged();
+        };
+        const auto handleSummary = [this, generation, requestId, offset](const auto& summary)
+        {
+            if (generation != m_generation || requestId != m_refreshRequestId ||
+                !m_pendingLoadMoreOffset.has_value() || *m_pendingLoadMoreOffset != offset)
+            {
+                return;
+            }
+            const auto pending =
+                std::ranges::find_if(m_windows, [offset](const MessageListWindow& window)
+                                     { return window.requestedOffset == offset; });
+            if (pending == m_windows.end())
+                return;
+            pending->requestedOffset = summary.offset;
+            pending->requestedLimit = summary.limit;
+            pending->position = summary.position;
+            pending->returnedLimit = summary.returnedLimit;
+            pending->total = summary.total;
+            pending->queryState = summary.queryState;
+            pending->itemCount = summary.representativeCount;
+            pending->displayCurrent = false;
+            m_pendingLoadMoreRequestCompleted = true;
+            m_endReached = summary.representativeCount == 0 ||
+                           (summary.total.has_value() &&
+                            summary.position + summary.representativeCount >= *summary.total) ||
+                           (!summary.total.has_value() && summary.returnedLimit > 0 &&
+                            summary.representativeCount < summary.returnedLimit);
+            reloadProjectedWindows();
+        };
+
+        if (quickFilterActive())
+        {
+            auto task = m_materializationPort.requestSearchWindow(SearchWindowIntent{
+                .accountId = m_accountId,
+                .criteria = filteredCriteria(),
+                .offset = offset,
+                .limit = m_windowSize,
+                .sort = m_sort,
+                .anchor = anchor,
+                .windowKey = quickFilterWindowKey(),
+            });
+            QCoro::connect(std::move(task), this,
+                           [handleError, handleSummary](SearchWindowResult result)
+                           {
+                               if (const auto* error =
+                                       std::get_if<javelin::jmap::OperationError>(&result))
+                                   handleError(*error);
+                               else
+                                   handleSummary(std::get<SearchWindowSummary>(result));
+                           });
+            return true;
+        }
+
         auto task = m_materializationPort.requestMailboxWindow(MailboxWindowIntent{
             .accountId = m_accountId,
             .mailboxId = m_mailboxId,
@@ -619,58 +831,22 @@ namespace javelin::app
             .anchor = anchor,
             .anchorOffset = 1,
         });
-        QCoro::connect(
-            std::move(task), this,
-            [this, generation, requestId, offset](MailboxWindowResult result)
-            {
-                if (generation != m_generation || requestId != m_refreshRequestId ||
-                    !m_pendingLoadMoreOffset.has_value() || *m_pendingLoadMoreOffset != offset)
-                {
-                    return;
-                }
-
-                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                {
-                    const auto pending =
-                        std::ranges::find_if(m_windows, [offset](const MessageListWindow& window)
-                                             { return window.requestedOffset == offset; });
-                    if (pending != m_windows.end())
-                        m_windows.erase(pending);
-                    m_pendingLoadMoreOffset.reset();
-                    m_pendingLoadMoreRequestCompleted = false;
-                    m_state.loadMoreInFlight = false;
-                    m_state.loadMoreError = error->message;
-                    Q_EMIT stateChanged();
-                    return;
-                }
-
-                const auto& summary = std::get<MailboxWindowSummary>(result);
-                const auto pending =
-                    std::ranges::find_if(m_windows, [offset](const MessageListWindow& window)
-                                         { return window.requestedOffset == offset; });
-                if (pending == m_windows.end())
-                    return;
-                pending->requestedOffset = summary.offset;
-                pending->requestedLimit = summary.limit;
-                pending->position = summary.position;
-                pending->returnedLimit = summary.returnedLimit;
-                pending->total = summary.total;
-                pending->queryState = summary.queryState;
-                pending->itemCount = summary.representativeCount;
-                pending->displayCurrent = false;
-                m_pendingLoadMoreRequestCompleted = true;
-                m_endReached = summary.representativeCount == 0 ||
-                               (summary.total.has_value() &&
-                                summary.position + summary.representativeCount >= *summary.total) ||
-                               (!summary.total.has_value() && summary.returnedLimit > 0 &&
-                                summary.representativeCount < summary.returnedLimit);
-                reloadProjectedWindows();
-            });
+        QCoro::connect(std::move(task), this,
+                       [handleError, handleSummary](MailboxWindowResult result)
+                       {
+                           if (const auto* error =
+                                   std::get_if<javelin::jmap::OperationError>(&result))
+                               handleError(*error);
+                           else
+                               handleSummary(std::get<MailboxWindowSummary>(result));
+                       });
         return true;
     }
 
     std::vector<MessageListWindowRequest> MailboxSession::windowRequests() const
     {
+        if (quickFilterActive())
+            return {};
         std::vector<MessageListWindowRequest> requests;
         requests.reserve(m_windows.size());
         for (const auto& window : m_windows)
@@ -715,11 +891,26 @@ namespace javelin::app
 
     std::string MailboxSession::queryKey() const
     {
+        if (quickFilterActive())
+            return quickFilterWindowKey();
         return javelin::jmap::sync::mailboxQueryKey({
             .mailboxId = m_mailboxId,
             .sortProperty = javelin::jmap::query::propertyName(m_sort.property),
             .isAscending = javelin::jmap::query::isAscending(m_sort),
             .collapseThreads = true,
         });
+    }
+
+    std::string MailboxSession::quickFilterWindowKey() const
+    {
+        return "quick-filter:" + javelin::jmap::search::cacheKey(filteredCriteria(), m_sort) +
+               "|session:" + m_quickFilterSessionId;
+    }
+
+    javelin::jmap::search::EmailSearchCriteria MailboxSession::filteredCriteria() const
+    {
+        auto criteria = m_quickFilter;
+        criteria.inMailbox = m_mailboxId;
+        return criteria;
     }
 } // namespace javelin::app

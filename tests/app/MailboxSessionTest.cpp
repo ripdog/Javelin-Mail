@@ -95,15 +95,17 @@ namespace
         }
 
         [[nodiscard]] QCoro::Task<javelin::app::SearchWindowResult>
-        requestSearchWindow(javelin::app::SearchWindowIntent) override
+        requestSearchWindow(javelin::app::SearchWindowIntent intent) override
         {
+            lastSearchIntent = std::move(intent);
             co_return javelin::jmap::OperationError{
-                .message = QStringLiteral("Search materialization is not used by this test."),
+                .message = QStringLiteral("Expected test search materialization completion."),
             };
         }
 
-        void retireSearchWindow(std::string, std::string) override
+        void retireSearchWindow(std::string accountId, std::string windowKey) override
         {
+            retiredSearchWindow = std::pair{std::move(accountId), std::move(windowKey)};
         }
 
         void complete(javelin::app::MailboxWindowResult result)
@@ -115,6 +117,8 @@ namespace
         }
 
         std::optional<javelin::app::MailboxWindowIntent> lastMailboxIntent;
+        std::optional<javelin::app::SearchWindowIntent> lastSearchIntent;
+        std::optional<std::pair<std::string, std::string>> retiredSearchWindow;
 
       private:
         QPromise<javelin::app::MailboxWindowResult> m_mailboxPromise;
@@ -379,6 +383,33 @@ TEST_CASE("explicit mailbox refresh requests server reconciliation", "[app][mail
         .message = QStringLiteral("Expected explicit refresh test completion."),
     });
     QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+}
+
+TEST_CASE("mailbox quick filter stays inline and requests a filtered mailbox window",
+          "[app][mailbox-session][quick-filter]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("mailbox-session-quick-filter-test"));
+    PendingMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::MailboxSession session{
+        "account-1", "mailbox-1",     QStringLiteral("Inbox"), std::optional<std::string>{"inbox"},
+        {},          context.queries, materialization,         100,
+        events};
+
+    session.setQuickFilter({.unreadOnly = true, .hasAttachmentOnly = true});
+    waitFor([&] { return materialization.lastSearchIntent.has_value(); });
+
+    REQUIRE(materialization.lastSearchIntent.has_value());
+    CHECK_FALSE(materialization.lastMailboxIntent.has_value());
+    CHECK(materialization.lastSearchIntent->accountId == "account-1");
+    CHECK(materialization.lastSearchIntent->criteria.inMailbox ==
+          std::optional<std::string>{"mailbox-1"});
+    CHECK(materialization.lastSearchIntent->criteria.unreadOnly);
+    CHECK(materialization.lastSearchIntent->criteria.hasAttachmentOnly);
+    CHECK(materialization.lastSearchIntent->windowKey.starts_with("quick-filter:"));
+    CHECK(session.quickFilterActive());
+    CHECK(session.windowRequests().empty());
 }
 
 TEST_CASE("changing mailbox sort invalidates an obsolete refresh completion",

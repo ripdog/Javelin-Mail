@@ -14,6 +14,7 @@
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/NotificationRepository.h"
+#include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/contacts/ContactService.h"
@@ -919,11 +920,109 @@ namespace javelin::app
         }
         const auto requestLease =
             qScopeGuard([this, leaseKey]() { finishSearchWindowRequest(leaseKey); });
+        if (intent.criteria.inMailbox.has_value())
+        {
+            const auto& mailboxId = *intent.criteria.inMailbox;
+            const auto canonicalQueryKey = javelin::jmap::sync::mailboxQueryKey({
+                .mailboxId = mailboxId,
+                .sortProperty = "receivedAt",
+                .isAscending = false,
+                .collapseThreads = true,
+            });
+            const auto offlineStateResult = m_queryService.completeOfflineMailboxQueryState(
+                intent.accountId, mailboxId, canonicalQueryKey);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&offlineStateResult))
+            {
+                co_return javelin::jmap::operationError(*error);
+            }
+            const auto& offlineState = std::get<std::optional<std::string>>(offlineStateResult);
+            if (offlineState.has_value())
+            {
+                const auto itemsResult = m_queryService.listFilteredMailboxMessages(
+                    intent.accountId, mailboxId, intent.criteria, intent.limit, intent.offset,
+                    intent.sort);
+                const auto totalResult = m_queryService.countFilteredMailboxMessages(
+                    intent.accountId, mailboxId, intent.criteria);
+                const auto* items =
+                    std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&itemsResult);
+                const auto* total = std::get_if<std::size_t>(&totalResult);
+                if (items == nullptr)
+                    co_return javelin::jmap::operationError(
+                        std::get<javelin::jmap::cache::DatabaseError>(itemsResult));
+                if (total == nullptr)
+                    co_return javelin::jmap::operationError(
+                        std::get<javelin::jmap::cache::DatabaseError>(totalResult));
+
+                std::vector<std::string> emailIds;
+                emailIds.reserve(items->size());
+                for (const auto& item : *items)
+                    emailIds.push_back(item.emailId);
+                javelin::jmap::cache::SearchWindowRepository searchWindows{m_databaseConnection};
+                if (const auto error = searchWindows.replace({
+                        .accountId = intent.accountId,
+                        .queryKey = queryKey,
+                        .offset = intent.offset,
+                        .limit = intent.limit,
+                        .position = intent.offset,
+                        .returnedLimit = intent.limit,
+                        .total = *total,
+                        .queryState = *offlineState,
+                        .emailIds = emailIds,
+                    }))
+                {
+                    co_return javelin::jmap::operationError(*error);
+                }
+
+                Q_EMIT cacheCommitted(MailCacheChange{
+                    .accountId = QString::fromStdString(intent.accountId),
+                    .mailboxIds = {},
+                    .queryWindows = {},
+                    .searchWindows = {SearchQueryWindowChange{
+                        .queryKey = QString::fromStdString(queryKey),
+                        .offset = intent.offset,
+                        .limit = intent.limit,
+                        .total = *total,
+                    }},
+                    .hasNewMail = false,
+                });
+                co_return SearchWindowSummary{
+                    .accountId = std::move(intent.accountId),
+                    .queryKey = queryKey,
+                    .offset = intent.offset,
+                    .limit = intent.limit,
+                    .position = intent.offset,
+                    .returnedLimit = intent.limit,
+                    .representativeCount = items->size(),
+                    .total = *total,
+                    .queryState = *offlineState,
+                };
+            }
+        }
+
+        javelin::jmap::search::EmailSearchResolution resolution;
+        if (intent.criteria.fromContactsOnly)
+        {
+            const auto contacts = m_queryService.listContactEmailAddresses();
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&contacts))
+                co_return javelin::jmap::operationError(*error);
+            resolution.contactAddresses = std::get<std::vector<std::string>>(contacts);
+        }
+        if (intent.criteria.taggedOnly && intent.criteria.tags.empty())
+        {
+            const auto keywords = m_queryService.listUserKeywords(
+                intent.accountId, intent.criteria.inMailbox.value_or(std::string{}));
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&keywords))
+                co_return javelin::jmap::operationError(*error);
+            resolution.userKeywords = std::get<std::vector<std::string>>(keywords);
+        }
+
         const auto settings = configuration->second.settings;
         const ForegroundWorkScope foreground{m_workScheduler};
         auto result = co_await m_jmapCore.searchMessages(
             toLiveConnectionSettings(settings), intent.accountId, intent.criteria, intent.offset,
-            intent.limit, intent.sort, std::move(intent.anchor), queryKey);
+            intent.limit, intent.sort, std::move(intent.anchor), queryKey, {},
+            std::move(resolution));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             m_errorCoordinator.reportFailure(settings, intent.accountId,
