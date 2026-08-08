@@ -351,6 +351,7 @@ add_executable(javelin_contacts_gui_tests
     gui/ContactsManagerWidgetTest.cpp
     gui/DeveloperOptionsDialogTest.cpp
     gui/IndeterminateProgressBarTest.cpp
+    gui/MessageBannerWidgetTest.cpp
     gui/SendingIdentitiesDialogTest.cpp
 )
 target_include_directories(javelin_contacts_gui_tests

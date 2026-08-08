@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 
 class QLabel;
@@ -42,6 +43,7 @@ namespace javelin::gui::settings
 namespace javelin::gui::messageview
 {
     class HtmlMessageView;
+    class MessageBannerWidget;
 
     class MessageViewContainer : public QWidget
     {
@@ -113,7 +115,9 @@ namespace javelin::gui::messageview
         [[nodiscard]] QString currentSenderAddress() const;
         [[nodiscard]] QString currentSenderDomain() const;
         [[nodiscard]] QString contactAwareSenderLabel() const;
-        [[nodiscard]] std::string junkBannerKey() const;
+        [[nodiscard]] std::string messageBannerKey(std::string_view bannerId) const;
+        [[nodiscard]] bool messageBannerDismissed(std::string_view bannerId) const;
+        void dismissMessageBanner(std::string_view bannerId);
         [[nodiscard]] QString serverDisplayName() const;
         void changeEvent(QEvent* event) override;
         void resizeEvent(QResizeEvent* event) override;
@@ -135,8 +139,6 @@ namespace javelin::gui::messageview
         QWidget* m_placeholderPanel = nullptr;
         QLabel* m_placeholderTitleLabel = nullptr;
         QLabel* m_placeholderDetailLabel = nullptr;
-        QLabel* m_remoteContentIconLabel = nullptr;
-        QLabel* m_remoteContentStatusLabel = nullptr;
         QLabel* m_attachmentStatusLabel = nullptr;
         QToolButton* m_attachmentExpanderButton = nullptr;
         QWidget* m_attachmentHeaderWidget = nullptr;
@@ -144,19 +146,15 @@ namespace javelin::gui::messageview
         QToolButton* m_permitSenderRemoteContentButton = nullptr;
         QToolButton* m_permitDomainRemoteContentButton = nullptr;
         QToolButton* m_remoteContentButton = nullptr;
-        QWidget* m_junkBannerWidget = nullptr;
-        QLabel* m_junkIconLabel = nullptr;
-        QLabel* m_junkStatusLabel = nullptr;
+        MessageBannerWidget* m_remoteContentBanner = nullptr;
+        MessageBannerWidget* m_junkBanner = nullptr;
+        MessageBannerWidget* m_translationBanner = nullptr;
         QToolButton* m_notJunkButton = nullptr;
-        QToolButton* m_closeJunkBannerButton = nullptr;
-        QWidget* m_languageBannerWidget = nullptr;
-        QLabel* m_languageStatusLabel = nullptr;
         QToolButton* m_translateButton = nullptr;
         QToolButton* m_translateOptionsButton = nullptr;
         javelin::gui::settings::GuiSettings& m_settings;
         javelin::gui::translation::TranslationService& m_translationService;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
-        QWidget* m_bodyControlsWidget = nullptr;
         QStackedWidget* m_bodyStack = nullptr;
         QProgressBar* m_loadingIndicator = nullptr;
         QScrollArea* m_multipleSelectionScrollArea = nullptr;
@@ -182,7 +180,7 @@ namespace javelin::gui::messageview
         std::optional<javelin::gui::translation::LanguageDetectionResult> m_languageDetection;
         bool m_shouldOfferTranslation = false;
         bool m_htmlDocumentLoaded = false;
-        std::unordered_set<std::string> m_dismissedJunkBanners;
+        std::unordered_set<std::string> m_dismissedMessageBanners;
     };
 
 } // namespace javelin::gui::messageview

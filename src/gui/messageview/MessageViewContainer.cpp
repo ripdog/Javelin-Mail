@@ -2,6 +2,7 @@
 #include "app/MessageSubject.h"
 #include "gui/IconUtils.h"
 #include "gui/messageview/HtmlMessageView.h"
+#include "gui/messageview/MessageBannerWidget.h"
 #include "gui/messageview/MessageViewPresentation.h"
 #include "gui/messageview/PlainTextLinkifier.h"
 #include "gui/settings/GuiSettings.h"
@@ -50,6 +51,10 @@ namespace javelin::gui::messageview
 {
     namespace
     {
+        constexpr std::string_view RemoteContentBannerId{"remote-content"};
+        constexpr std::string_view TranslationBannerId{"translation"};
+        constexpr std::string_view JunkBannerId{"junk"};
+
         [[nodiscard]] QString
         detectionText(const javelin::jmap::cache::MessageViewSnapshot& snapshot)
         {
@@ -442,34 +447,19 @@ namespace javelin::gui::messageview
         headerLayout->addWidget(m_detailLabel);
         headerLayout->addWidget(m_metadataWidget);
 
-        m_bodyControlsWidget = new QWidget(this);
-        auto* buttonLayout = new QHBoxLayout(m_bodyControlsWidget);
-        buttonLayout->setContentsMargins(0, 0, 0, 0);
-        buttonLayout->setSpacing(6);
-
-        m_remoteContentIconLabel = new QLabel(m_bodyControlsWidget);
-        m_remoteContentIconLabel->setPixmap(javelin::gui::themedSvgPixmap(
+        m_remoteContentBanner = new MessageBannerWidget(this);
+        m_remoteContentBanner->setIcon(javelin::gui::themedSvgIcon(
             QStringLiteral(":/icons/thunderbird-icons/remote-blocked.svg"),
-            palette().color(QPalette::Active, QPalette::HighlightedText), 18));
-        m_remoteContentIconLabel->setFixedSize(20, 20);
-        m_remoteContentIconLabel->setAlignment(Qt::AlignCenter);
-
-        m_remoteContentStatusLabel = new QLabel(m_bodyControlsWidget);
-        m_remoteContentStatusLabel->setWordWrap(true);
-        makeLabelSelectable(m_remoteContentStatusLabel);
-
-        m_permitSenderRemoteContentButton = new QToolButton(m_bodyControlsWidget);
-        m_permitSenderRemoteContentButton->setText(i18n("Always load sender"));
+            palette().color(QPalette::Active, QPalette::Text)));
+        m_permitSenderRemoteContentButton =
+            m_remoteContentBanner->addButton(i18n("Always load sender"));
         connect(m_permitSenderRemoteContentButton, &QToolButton::clicked, this,
                 &MessageViewContainer::permitRemoteContentForCurrentSender);
-
-        m_permitDomainRemoteContentButton = new QToolButton(m_bodyControlsWidget);
-        m_permitDomainRemoteContentButton->setText(i18n("Always load domain"));
+        m_permitDomainRemoteContentButton =
+            m_remoteContentBanner->addButton(i18n("Always load domain"));
         connect(m_permitDomainRemoteContentButton, &QToolButton::clicked, this,
                 &MessageViewContainer::permitRemoteContentForCurrentDomain);
-
-        m_remoteContentButton = new QToolButton(m_bodyControlsWidget);
-        m_remoteContentButton->setText(i18n("Load remote content"));
+        m_remoteContentButton = m_remoteContentBanner->addButton(i18n("Load remote content"));
         m_remoteContentButton->setCheckable(true);
         connect(m_remoteContentButton, &QToolButton::clicked, this,
                 [this](const bool checked)
@@ -477,40 +467,19 @@ namespace javelin::gui::messageview
                     m_htmlView->setRemoteContentEnabled(checked);
                     updateRemoteContentButton();
                 });
+        connect(m_remoteContentBanner, &MessageBannerWidget::dismissed, this,
+                [this]
+                {
+                    dismissMessageBanner(RemoteContentBannerId);
+                    updateRemoteContentButton();
+                });
+        m_remoteContentBanner->setVisible(false);
 
-        buttonLayout->addWidget(m_remoteContentIconLabel);
-        buttonLayout->addWidget(m_remoteContentStatusLabel, 1);
-        buttonLayout->addWidget(m_permitSenderRemoteContentButton);
-        buttonLayout->addWidget(m_permitDomainRemoteContentButton);
-        buttonLayout->addWidget(m_remoteContentButton);
-
-        m_junkBannerWidget = new QWidget(this);
-        m_junkBannerWidget->setObjectName(QStringLiteral("junkBanner"));
-        m_junkBannerWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
-        m_junkBannerWidget->setStyleSheet(QStringLiteral(
-            "QWidget#junkBanner { background: palette(alternate-base); border: 1px solid "
-            "palette(mid); border-radius: 6px; }"
-            "QWidget#junkBanner QLabel { border: 0; background: transparent; }"
-            "QWidget#junkBanner QToolButton { border: 1px solid palette(mid); border-radius: 4px; "
-            "padding: 4px 8px; }"));
-        auto* junkLayout = new QHBoxLayout(m_junkBannerWidget);
-        junkLayout->setContentsMargins(8, 6, 8, 6);
-        junkLayout->setSpacing(8);
-
-        m_junkIconLabel = new QLabel(m_junkBannerWidget);
-        m_junkIconLabel->setPixmap(
-            javelin::gui::themedSvgPixmap(QStringLiteral(":/icons/thunderbird-icons/spam.svg"),
-                                          palette().color(QPalette::Active, QPalette::Text), 18));
-        m_junkIconLabel->setFixedSize(20, 20);
-        m_junkIconLabel->setAlignment(Qt::AlignCenter);
-
-        m_junkStatusLabel = new QLabel(m_junkBannerWidget);
-        m_junkStatusLabel->setWordWrap(false);
-        m_junkStatusLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-        makeLabelSelectable(m_junkStatusLabel);
-
-        m_notJunkButton = new QToolButton(m_junkBannerWidget);
-        m_notJunkButton->setText(i18nc("@action:button", "Not Junk"));
+        m_junkBanner = new MessageBannerWidget(this);
+        m_junkBanner->setIcon(
+            javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/spam.svg"),
+                                        palette().color(QPalette::Active, QPalette::Text)));
+        m_notJunkButton = m_junkBanner->addButton(i18nc("@action:button", "Not Junk"));
         connect(m_notJunkButton, &QToolButton::clicked, this,
                 [this]
                 {
@@ -523,48 +492,22 @@ namespace javelin::gui::messageview
                         m_mailboxId.has_value() ? QString::fromStdString(*m_mailboxId) : QString{},
                         QString::fromStdString(*m_emailId));
                 });
-
-        m_closeJunkBannerButton = new QToolButton(m_junkBannerWidget);
-        m_closeJunkBannerButton->setAutoRaise(true);
-        m_closeJunkBannerButton->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
-        m_closeJunkBannerButton->setToolTip(i18nc("@info:tooltip", "Close"));
-        connect(m_closeJunkBannerButton, &QToolButton::clicked, this,
+        connect(m_junkBanner, &MessageBannerWidget::dismissed, this,
                 [this]
                 {
-                    const auto key = junkBannerKey();
-                    if (!key.empty())
-                    {
-                        m_dismissedJunkBanners.insert(key);
-                    }
+                    dismissMessageBanner(JunkBannerId);
                     updateJunkBanner();
                 });
+        m_junkBanner->setVisible(false);
 
-        junkLayout->addWidget(m_junkIconLabel);
-        junkLayout->addWidget(m_junkStatusLabel, 1);
-        junkLayout->addWidget(m_notJunkButton);
-        junkLayout->addWidget(m_closeJunkBannerButton);
-        m_junkBannerWidget->setVisible(false);
-
-        m_languageBannerWidget = new QWidget(this);
-        auto* languageLayout = new QHBoxLayout(m_languageBannerWidget);
-        languageLayout->setContentsMargins(8, 6, 8, 6);
-        languageLayout->setSpacing(8);
-        m_languageBannerWidget->setStyleSheet(QStringLiteral(
-            "QWidget { background: #243044; border: 1px solid #3f5373; border-radius: 6px; }"
-            "QLabel { border: 0; background: transparent; }"
-            "QToolButton { border: 1px solid #60789f; border-radius: 4px; padding: 4px 8px; }"));
-
-        m_languageStatusLabel = new QLabel(m_languageBannerWidget);
-        m_languageStatusLabel->setWordWrap(true);
-        makeLabelSelectable(m_languageStatusLabel);
-
-        m_translateButton = new QToolButton(m_languageBannerWidget);
-        m_translateButton->setText(i18nc("@action:button", "Translate"));
+        m_translationBanner = new MessageBannerWidget(this);
+        m_translationBanner->setIcon(
+            QIcon::fromTheme(QStringLiteral("preferences-desktop-locale")));
+        m_translateButton = m_translationBanner->addButton(i18nc("@action:button", "Translate"));
         connect(m_translateButton, &QToolButton::clicked, this,
                 [this]() { translateCurrentMessage(); });
-
-        m_translateOptionsButton = new QToolButton(m_languageBannerWidget);
-        m_translateOptionsButton->setText(i18nc("@action:button", "Options"));
+        m_translateOptionsButton =
+            m_translationBanner->addButton(i18nc("@action:button", "Options"));
         m_translateOptionsButton->setPopupMode(QToolButton::InstantPopup);
         m_translateOptionsButton->setToolTip(i18n("Translation options"));
         auto* translateMenu = new QMenu(m_translateOptionsButton);
@@ -579,11 +522,13 @@ namespace javelin::gui::messageview
         connect(autoDomainAction, &QAction::toggled, this,
                 &MessageViewContainer::setAutoTranslateDomain);
         m_translateOptionsButton->setMenu(translateMenu);
-
-        languageLayout->addWidget(m_languageStatusLabel, 1);
-        languageLayout->addWidget(m_translateButton);
-        languageLayout->addWidget(m_translateOptionsButton);
-        m_languageBannerWidget->setVisible(false);
+        connect(m_translationBanner, &MessageBannerWidget::dismissed, this,
+                [this]
+                {
+                    dismissMessageBanner(TranslationBannerId);
+                    updateLanguageBanner();
+                });
+        m_translationBanner->setVisible(false);
 
         m_bodyStack = new QStackedWidget(this);
         m_bodyStack->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -744,9 +689,9 @@ namespace javelin::gui::messageview
         m_attachmentHeaderWidget->setVisible(false);
 
         layout->addWidget(headerWidget);
-        layout->addWidget(m_bodyControlsWidget);
-        layout->addWidget(m_languageBannerWidget);
-        layout->addWidget(m_junkBannerWidget);
+        layout->addWidget(m_remoteContentBanner);
+        layout->addWidget(m_translationBanner);
+        layout->addWidget(m_junkBanner);
         layout->addWidget(m_bodyStack, 1);
         layout->addWidget(m_attachmentHeaderWidget);
 
@@ -799,12 +744,14 @@ namespace javelin::gui::messageview
             return;
         }
 
-        m_remoteContentIconLabel->setPixmap(javelin::gui::themedSvgPixmap(
+        m_remoteContentBanner->setIcon(javelin::gui::themedSvgIcon(
             QStringLiteral(":/icons/thunderbird-icons/remote-blocked.svg"),
-            palette().color(QPalette::Active, QPalette::HighlightedText), 18));
-        m_junkIconLabel->setPixmap(
-            javelin::gui::themedSvgPixmap(QStringLiteral(":/icons/thunderbird-icons/spam.svg"),
-                                          palette().color(QPalette::Active, QPalette::Text), 18));
+            palette().color(QPalette::Active, QPalette::Text)));
+        m_junkBanner->setIcon(
+            javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/spam.svg"),
+                                        palette().color(QPalette::Active, QPalette::Text)));
+        m_translationBanner->setIcon(
+            QIcon::fromTheme(QStringLiteral("preferences-desktop-locale")));
     }
 
     void MessageViewContainer::translationSettingsChanged()
@@ -1044,29 +991,25 @@ namespace javelin::gui::messageview
             m_snapshot->htmlRenderDocument->blockedRemoteResourceCount > 0;
         const bool remoteContentAllowed =
             hasBlockedRemoteContent && m_htmlView->remoteContentEnabled();
-        const bool showRemoteContentControls = hasBlockedRemoteContent && !remoteContentAllowed;
-        m_bodyControlsWidget->setVisible(showRemoteContentControls);
-        m_remoteContentIconLabel->setVisible(showRemoteContentControls);
-        m_remoteContentStatusLabel->setVisible(showRemoteContentControls);
-        m_permitSenderRemoteContentButton->setVisible(showRemoteContentControls);
-        m_permitDomainRemoteContentButton->setVisible(showRemoteContentControls);
+        const bool showRemoteContentControls = hasBlockedRemoteContent && !remoteContentAllowed &&
+                                               !messageBannerDismissed(RemoteContentBannerId);
+        m_remoteContentBanner->setVisible(showRemoteContentControls);
         m_permitSenderRemoteContentButton->setEnabled(hasBlockedRemoteContent &&
                                                       !currentSenderAddress().isEmpty());
         m_permitDomainRemoteContentButton->setEnabled(hasBlockedRemoteContent &&
                                                       !currentSenderDomain().isEmpty());
-        m_remoteContentButton->setVisible(showRemoteContentControls);
         m_remoteContentButton->setEnabled(hasBlockedRemoteContent);
         m_remoteContentButton->setChecked(hasBlockedRemoteContent &&
                                           m_htmlView->remoteContentEnabled());
         if (hasBlockedRemoteContent)
         {
-            m_remoteContentStatusLabel->setText(
+            m_remoteContentBanner->setText(
                 i18np("Blocked remote resource: %1", "Blocked remote resources: %1",
                       m_snapshot->htmlRenderDocument->blockedRemoteResourceCount));
         }
         else
         {
-            m_remoteContentStatusLabel->clear();
+            m_remoteContentBanner->setText({});
         }
         m_permitSenderRemoteContentButton->setToolTip(
             currentSenderAddress().isEmpty() ? i18n("No sender address is available")
@@ -1080,13 +1023,28 @@ namespace javelin::gui::messageview
                                            : i18n("Load remote content"));
     }
 
-    std::string MessageViewContainer::junkBannerKey() const
+    std::string MessageViewContainer::messageBannerKey(const std::string_view bannerId) const
     {
         if (!m_accountId.has_value() || !m_emailId.has_value())
         {
             return {};
         }
-        return *m_accountId + '\n' + *m_emailId;
+        return std::string{bannerId} + '\n' + *m_accountId + '\n' + *m_emailId;
+    }
+
+    bool MessageViewContainer::messageBannerDismissed(const std::string_view bannerId) const
+    {
+        const auto key = messageBannerKey(bannerId);
+        return !key.empty() && m_dismissedMessageBanners.contains(key);
+    }
+
+    void MessageViewContainer::dismissMessageBanner(const std::string_view bannerId)
+    {
+        const auto key = messageBannerKey(bannerId);
+        if (!key.empty())
+        {
+            m_dismissedMessageBanners.insert(key);
+        }
     }
 
     QString MessageViewContainer::serverDisplayName() const
@@ -1112,19 +1070,17 @@ namespace javelin::gui::messageview
 
     void MessageViewContainer::updateJunkBanner()
     {
-        const auto key = junkBannerKey();
         const bool isJunk = m_snapshot.has_value() && m_junkMailboxId.has_value() &&
                             std::ranges::contains(m_snapshot->email.mailboxIds, *m_junkMailboxId);
-        const bool dismissed = !key.empty() && m_dismissedJunkBanners.contains(key);
-        const bool shouldShow = isJunk && !dismissed;
-        m_junkBannerWidget->setVisible(shouldShow);
+        const bool shouldShow = isJunk && !messageBannerDismissed(JunkBannerId);
+        m_junkBanner->setVisible(shouldShow);
         if (!shouldShow)
         {
-            m_junkStatusLabel->clear();
+            m_junkBanner->setText({});
             return;
         }
 
-        m_junkStatusLabel->setText(i18n("%1 marked this email as Junk.", serverDisplayName()));
+        m_junkBanner->setText(i18n("%1 marked this email as Junk.", serverDisplayName()));
     }
 
     void MessageViewContainer::updateLanguageBanner()
@@ -1134,15 +1090,14 @@ namespace javelin::gui::messageview
             (m_activeView == ActiveView::PlainText || m_activeView == ActiveView::Html);
         const bool hasLanguageOffer =
             m_snapshot.has_value() && m_languageDetection.has_value() && m_shouldOfferTranslation;
-        const bool shouldShow =
-            canTranslateView && (hasLanguageOffer || m_translationInProgress ||
+        const bool shouldShow = canTranslateView && !messageBannerDismissed(TranslationBannerId) &&
+                                (hasLanguageOffer || m_translationInProgress ||
                                  m_messageTranslated || !m_translationError.isEmpty());
-        m_languageBannerWidget->setVisible(shouldShow);
-        m_translateOptionsButton->setVisible(shouldShow);
+        m_translationBanner->setVisible(shouldShow);
         updateTranslateOptionsMenu();
         if (!shouldShow)
         {
-            m_languageStatusLabel->clear();
+            m_translationBanner->setText({});
             return;
         }
 
@@ -1156,28 +1111,28 @@ namespace javelin::gui::messageview
 
         if (m_translationInProgress)
         {
-            m_languageStatusLabel->setText(m_translationProgressText.isEmpty()
-                                               ? i18n("Translating message…")
-                                               : m_translationProgressText);
+            m_translationBanner->setText(m_translationProgressText.isEmpty()
+                                             ? i18n("Translating message…")
+                                             : m_translationProgressText);
             return;
         }
 
         if (!m_translationError.isEmpty())
         {
-            m_languageStatusLabel->setText(m_translationError);
+            m_translationBanner->setText(m_translationError);
             return;
         }
 
         if (m_messageTranslated)
         {
-            m_languageStatusLabel->setText(m_translationWasAutomatic
-                                               ? i18n("Auto-translated to %1.", targetName)
-                                               : i18n("Message translated to %1.", targetName));
+            m_translationBanner->setText(m_translationWasAutomatic
+                                             ? i18n("Auto-translated to %1.", targetName)
+                                             : i18n("Message translated to %1.", targetName));
             return;
         }
 
         const auto& detection = *m_languageDetection;
-        m_languageStatusLabel->setText(
+        m_translationBanner->setText(
             i18n("This message appears to be in %1.", languageName(detection.languageCode)));
     }
 
@@ -1529,7 +1484,7 @@ namespace javelin::gui::messageview
             m_titleLabel->setText(
                 i18np("%1 message selected", "%1 messages selected", m_multipleMessages.size()));
             m_detailLabel->clear();
-            m_bodyControlsWidget->setVisible(false);
+            m_remoteContentBanner->setVisible(false);
             setActiveView(ActiveView::Multiple);
             return;
         }
