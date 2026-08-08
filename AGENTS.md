@@ -28,6 +28,7 @@
 
 - SQLite is the immediate local data plane. Do not create a second in-memory source of truth or optimistic object store in the GUI.
 - Keep long-lived models lightweight; retain IDs and summaries and load full objects only for active views.
+- Extend existing read models instead of asynchronously enriching already-loaded rows when the data shares the same lifetime.
 - Offline-selected mailboxes are complete mirrors. Raw MIME and attachments belong in the filesystem vault, not SQLite BLOBs; other mailboxes remain bounded online-first working sets.
 - Do not block the GUI thread for I/O, database work, HTML processing, translation, or networking.
 - Use Qt asynchronous transports with QCoro where appropriate. Do not use nested callback pyramids, local event loops, or ad hoc polling state machines.
