@@ -17,6 +17,15 @@
 namespace javelin::jmap::cache
 {
 
+    struct MessageListTag
+    {
+        std::string keyword;
+        QString displayName;
+        QString color;
+
+        friend bool operator==(const MessageListTag&, const MessageListTag&) = default;
+    };
+
     struct MessageListItem
     {
         std::string emailId;
@@ -32,6 +41,27 @@ namespace javelin::jmap::cache
         bool isJunk = false;
         std::optional<javelin::jmap::domain::EmailAddress> from;
         std::vector<std::string> mailboxNames;
+        std::vector<MessageListTag> tags{};
+    };
+
+    struct EmailKeywordMembership
+    {
+        std::string emailId;
+        std::vector<std::string> keywords;
+
+        friend bool operator==(const EmailKeywordMembership&,
+                               const EmailKeywordMembership&) = default;
+    };
+
+    struct TagDefinition
+    {
+        std::string accountId;
+        std::string keyword;
+        QString displayName;
+        QString color;
+        int sortOrder = 0;
+
+        friend bool operator==(const TagDefinition&, const TagDefinition&) = default;
     };
 
     struct SearchWindowPage
@@ -98,6 +128,26 @@ namespace javelin::jmap::cache
             static_cast<void>(accountId);
             static_cast<void>(mailboxId);
             return std::vector<std::string>{};
+        }
+        [[nodiscard]] virtual std::variant<std::vector<std::string>, DatabaseError>
+        listTagKeywords(std::string_view accountId) const
+        {
+            static_cast<void>(accountId);
+            return std::vector<std::string>{};
+        }
+        [[nodiscard]] virtual std::variant<std::vector<EmailKeywordMembership>, DatabaseError>
+        listEmailKeywordMemberships(std::string_view accountId,
+                                    const std::vector<std::string>& emailIds) const
+        {
+            static_cast<void>(accountId);
+            static_cast<void>(emailIds);
+            return std::vector<EmailKeywordMembership>{};
+        }
+        [[nodiscard]] virtual std::variant<std::vector<TagDefinition>, DatabaseError>
+        listTagDefinitions(std::string_view accountId) const
+        {
+            static_cast<void>(accountId);
+            return std::vector<TagDefinition>{};
         }
         [[nodiscard]] virtual std::variant<std::vector<MessageListItem>, DatabaseError>
         listMessagesByEmailIds(std::string_view accountId,

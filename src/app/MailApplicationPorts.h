@@ -48,6 +48,38 @@ namespace javelin::app
     using QueuedMessageSelectionMutationResult =
         std::variant<QueuedMessageSelectionMutation, javelin::jmap::OperationError>;
 
+    struct MailTagDefinition
+    {
+        std::string accountId;
+        std::string keyword;
+        std::string displayName;
+        std::string color;
+        int sortOrder = 0;
+
+        friend bool operator==(const MailTagDefinition&, const MailTagDefinition&) = default;
+    };
+
+    struct SaveMailTagDefinition
+    {
+        std::string accountId;
+        std::optional<std::string> keyword;
+        std::string displayName;
+        std::string color;
+    };
+
+    using SaveMailTagDefinitionResult =
+        std::variant<MailTagDefinition, javelin::jmap::OperationError>;
+
+    struct QueuedMailTagDeletion
+    {
+        std::string accountId;
+        std::string keyword;
+        std::string jobId;
+    };
+
+    using QueuedMailTagDeletionResult =
+        std::variant<QueuedMailTagDeletion, javelin::jmap::OperationError>;
+
     // The GUI raises mail intents through this port. The implementation owns optimistic
     // projection, mutation grouping, and remote submission; presentation code only renders the
     // typed result and never assembles a protocol mutation itself.
@@ -68,6 +100,13 @@ namespace javelin::app
         queueMarkEmailRead(std::string accountId, std::string emailId) = 0;
         [[nodiscard]] virtual QCoro::Task<QueuedMessageSelectionMutationResult>
         queueSetEmailFlagged(std::string accountId, std::string emailId, bool flagged) = 0;
+        [[nodiscard]] virtual QCoro::Task<QueuedMessageSelectionMutationResult>
+        queueSetMessagesTag(std::string accountId, std::optional<std::string> sourceMailboxId,
+                            MessageSelection selection, std::string keyword, bool enabled) = 0;
+        [[nodiscard]] virtual QCoro::Task<SaveMailTagDefinitionResult>
+        saveTagDefinition(SaveMailTagDefinition definition) = 0;
+        [[nodiscard]] virtual QCoro::Task<QueuedMailTagDeletionResult>
+        deleteTag(std::string accountId, std::string keyword) = 0;
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
         submitPendingEmailMutations(std::string accountId,
                                     std::optional<std::string> operationGroupId = std::nullopt) = 0;

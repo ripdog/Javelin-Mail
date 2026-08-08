@@ -9,6 +9,7 @@
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
+#include "jmap/domain/MailKeywords.h"
 
 #include <QCoreApplication>
 #include <QSqlQuery>
@@ -107,6 +108,25 @@ namespace
     }
 
 } // namespace
+
+TEST_CASE("mail keyword classification preserves arbitrary dollar-prefixed tags",
+          "[jmap][mail][keywords]")
+{
+    using javelin::jmap::domain::canonicalKeyword;
+    using javelin::jmap::domain::hasStandardKeywordSemantics;
+    using javelin::jmap::domain::isValidKeyword;
+
+    CHECK(canonicalKeyword("$Custom-Tag") == "$custom-tag");
+    CHECK(isValidKeyword("work"));
+    CHECK(isValidKeyword("$custom"));
+    CHECK_FALSE(isValidKeyword("two words"));
+    CHECK_FALSE(isValidKeyword("bad*tag"));
+    CHECK_FALSE(isValidKeyword("bad]tag"));
+    CHECK(hasStandardKeywordSemantics("$SEEN"));
+    CHECK(hasStandardKeywordSemantics("$junk"));
+    CHECK_FALSE(hasStandardKeywordSemantics("$custom"));
+    CHECK_FALSE(hasStandardKeywordSemantics("work"));
+}
 
 TEST_CASE("query service returns mailbox tree rows shaped for a tree model", "[jmap][cache][query]")
 {
@@ -275,7 +295,7 @@ TEST_CASE("query service applies quick filters before thread collapsing",
     bodyOnly.threadId = "quick-body-thread";
     bodyOnly.receivedAt = "2026-08-08T08:00:00Z";
     bodyOnly.subject = "No subject match";
-    bodyOnly.keywords = {};
+    bodyOnly.keywords = {"$custom"};
 
     javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
     REQUIRE_FALSE(
@@ -318,7 +338,74 @@ TEST_CASE("query service applies quick filters before thread collapsing",
     const auto keywords = queryService.listUserKeywords("account-1", "mbx-inbox");
     REQUIRE(std::holds_alternative<std::vector<std::string>>(keywords));
     CHECK(std::get<std::vector<std::string>>(keywords) ==
-          std::vector<std::string>{"personal", "work"});
+          std::vector<std::string>{"$custom", "personal", "work"});
+
+    const javelin::jmap::search::EmailSearchCriteria taggedCriteria{
+        .taggedOnly = true,
+    };
+    const auto unconfiguredTaggedResult =
+        queryService.listFilteredMailboxMessages("account-1", "mbx-inbox", taggedCriteria, 100, 0);
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(
+        unconfiguredTaggedResult));
+    CHECK(std::get<std::vector<javelin::jmap::cache::MessageListItem>>(unconfiguredTaggedResult)
+              .empty());
+
+    QSqlQuery tagDefinition{databaseContext.connection.database()};
+    tagDefinition.prepare(QStringLiteral(
+        "INSERT INTO mail_tag_definitions(account_id,keyword,display_name,color,sort_order) "
+        "VALUES('account-1','work','Work Items','#123456',10)"));
+    REQUIRE(tagDefinition.exec());
+    const auto tagKeywords = queryService.listTagKeywords("account-1");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(tagKeywords));
+    CHECK(std::get<std::vector<std::string>>(tagKeywords) == std::vector<std::string>{"work"});
+
+    const auto taggedResult =
+        queryService.listFilteredMailboxMessages("account-1", "mbx-inbox", taggedCriteria, 100, 0);
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(taggedResult));
+    const auto& taggedItems =
+        std::get<std::vector<javelin::jmap::cache::MessageListItem>>(taggedResult);
+    REQUIRE(taggedItems.size() == 1);
+
+    REQUIRE(taggedItems.front().tags.size() == 1);
+    CHECK(taggedItems.front().tags.front().keyword == "work");
+    CHECK(taggedItems.front().tags.front().displayName == QStringLiteral("Work Items"));
+    CHECK(taggedItems.front().tags.front().color == QStringLiteral("#123456"));
+
+    const auto definitions = queryService.listTagDefinitions("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::TagDefinition>>(definitions));
+    const auto& tags = std::get<std::vector<javelin::jmap::cache::TagDefinition>>(definitions);
+    REQUIRE(tags.size() == 1);
+    CHECK(tags.front().keyword == "work");
+    CHECK(tags.front().displayName == QStringLiteral("Work Items"));
+    CHECK(tags.front().color == QStringLiteral("#123456"));
+
+    const auto memberships =
+        queryService.listEmailKeywordMemberships("account-1", {"quick-body", "quick-unread"});
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::EmailKeywordMembership>>(
+        memberships));
+    const auto& membershipRows =
+        std::get<std::vector<javelin::jmap::cache::EmailKeywordMembership>>(memberships);
+    REQUIRE(membershipRows.size() == 2);
+    CHECK(membershipRows[0].keywords == std::vector<std::string>{"$custom"});
+    CHECK(std::ranges::contains(membershipRows[1].keywords, std::string{"work"}));
+
+    QSqlQuery deletingTag{databaseContext.connection.database()};
+    REQUIRE(deletingTag.exec(QStringLiteral(
+        "INSERT INTO background_jobs(job_id,account_id,kind,priority,status,title,checkpoint_json) "
+        "VALUES('tag-delete:test','account-1','tag_deletion',2,'waiting_for_network',"
+        "'Delete tag Work Items','{\"keyword\":\"work\"}')")));
+    const auto visibleKeywords = queryService.listUserKeywords("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(visibleKeywords));
+    CHECK(std::get<std::vector<std::string>>(visibleKeywords) ==
+          std::vector<std::string>{"$custom", "personal"});
+    const auto visibleTagKeywords = queryService.listTagKeywords("account-1");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(visibleTagKeywords));
+    CHECK(std::get<std::vector<std::string>>(visibleTagKeywords).empty());
+    const auto visibleDefinitions = queryService.listTagDefinitions("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::TagDefinition>>(
+        visibleDefinitions));
+    CHECK(std::get<std::vector<javelin::jmap::cache::TagDefinition>>(visibleDefinitions).empty());
 
     const javelin::jmap::search::EmailSearchCriteria bodyCriteria{
         .quickText = "hidden narwhal",

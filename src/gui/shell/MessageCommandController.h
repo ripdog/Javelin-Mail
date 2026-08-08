@@ -75,6 +75,9 @@ namespace javelin::gui::shell
                               std::optional<std::string> sourceMailboxId, bool junk);
         void setEmailJunk(std::string accountId, std::optional<std::string> sourceMailboxId,
                           std::string emailId, bool junk);
+        void setSelectionTag(std::optional<std::string> accountId,
+                             std::optional<std::string> sourceMailboxId, std::string keyword,
+                             bool enabled);
 
       Q_SIGNALS:
         void statusMessage(QString message, int durationMilliseconds);

@@ -88,6 +88,24 @@ TEST_CASE("message list diff falls back to the first visible item when selection
     CHECK_FALSE(refresh.changes.empty());
 }
 
+TEST_CASE("message list diff reports tag presentation changes", "[jmap][query][tags]")
+{
+    auto previousMessage = message("eml-1", "thread-1", "First", "2026-04-05T10:00:00Z");
+    auto currentMessage = previousMessage;
+    currentMessage.tags.push_back(javelin::jmap::cache::MessageListTag{
+        .keyword = "work",
+        .displayName = QStringLiteral("Work"),
+        .color = QStringLiteral("#123456"),
+    });
+
+    const auto refresh = javelin::jmap::query::diffMessageList(
+        {previousMessage}, {currentMessage},
+        javelin::jmap::query::MessageSelectionKey{.threadId = "thread-1"});
+
+    REQUIRE(refresh.changes.size() == 1);
+    CHECK(refresh.changes.front().kind == javelin::jmap::query::QueryRowChangeKind::Update);
+}
+
 TEST_CASE("selection fallback keeps the same row when a next item is available", "[jmap][query]")
 {
     const auto fallback = javelin::jmap::query::selectionFallbackIndexAfterRemoval(1, 3);

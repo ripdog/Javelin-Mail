@@ -434,6 +434,48 @@ namespace javelin::gui::shell
         queueJunk(std::move(accountId), std::move(sourceMailboxId), std::move(selection), junk);
     }
 
+    void MessageCommandController::setSelectionTag(std::optional<std::string> accountId,
+                                                   std::optional<std::string> sourceMailboxId,
+                                                   std::string keyword, const bool enabled)
+    {
+        if (!accountId.has_value())
+        {
+            Q_EMIT statusMessage(i18n("Select a message to change tags."), 3000);
+            return;
+        }
+        auto selection = selectedActionItems();
+        if (selection.empty())
+            return;
+
+        auto task = m_mailCommandPort.queueSetMessagesTag(*accountId, std::move(sourceMailboxId),
+                                                          std::move(selection), std::move(keyword),
+                                                          enabled);
+        QCoro::connect(
+            std::move(task), this,
+            [this, accountId = std::move(*accountId),
+             enabled](javelin::app::QueuedMessageSelectionMutationResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    Q_EMIT operationFailed(*error);
+                    return;
+                }
+                const auto& summary =
+                    std::get<javelin::app::QueuedMessageSelectionMutation>(result);
+                if (summary.queuedEmailCount == 0 || summary.queuedMutations.empty())
+                    return;
+                Q_EMIT messageMetadataChanged(QString::fromStdString(accountId));
+                Q_EMIT statusMessage(
+                    enabled ? i18np("Added tag to %1 message.", "Added tag to %1 messages.",
+                                    summary.queuedEmailCount)
+                            : i18np("Removed tag from %1 message.", "Removed tag from %1 messages.",
+                                    summary.queuedEmailCount),
+                    5000);
+                submitQueuedMutations(accountId,
+                                      summary.queuedMutations.front().patch.operationGroupId);
+            });
+    }
+
     void MessageCommandController::queueJunk(std::string accountId,
                                              std::optional<std::string> sourceMailboxId,
                                              javelin::app::MessageSelection selection,

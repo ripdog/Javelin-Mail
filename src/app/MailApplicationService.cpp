@@ -18,6 +18,7 @@
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/contacts/ContactService.h"
+#include "jmap/domain/MailKeywords.h"
 #include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
@@ -25,9 +26,14 @@
 
 #include <KLocalizedString>
 
+#include <QCryptographicHash>
 #include <QDebug>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QScopeGuard>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QTimer>
 #include <QUuid>
 #include <algorithm>
@@ -184,6 +190,80 @@ namespace javelin::app
             return "contact-refresh:" + std::string{ownerAccountId};
         }
 
+        [[nodiscard]] std::string tagDeletionJobId(const std::string_view accountId,
+                                                   const std::string_view keyword)
+        {
+            QByteArray identity{accountId.data(), static_cast<qsizetype>(accountId.size())};
+            identity.push_back('\0');
+            identity.append(keyword.data(), static_cast<qsizetype>(keyword.size()));
+            const auto digest =
+                QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex().left(20);
+            return "tag-delete:" + digest.toStdString();
+        }
+
+        [[nodiscard]] QString tagDeletionCheckpoint(const std::string_view keyword)
+        {
+            QJsonObject object;
+            object.insert(QStringLiteral("keyword"), QString::fromStdString(std::string{keyword}));
+            return QString::fromUtf8(QJsonDocument{object}.toJson(QJsonDocument::Compact));
+        }
+
+        [[nodiscard]] std::optional<std::string> tagDeletionKeyword(const QStringView checkpoint)
+        {
+            const auto document = QJsonDocument::fromJson(checkpoint.toUtf8());
+            if (!document.isObject())
+                return std::nullopt;
+            const auto value = document.object().value(QStringLiteral("keyword"));
+            if (!value.isString() || value.toString().isEmpty())
+                return std::nullopt;
+            return value.toString().toStdString();
+        }
+
+        [[nodiscard]] std::string generatedTagKeyword(const QStringView displayName)
+        {
+            QString result;
+            bool separatorPending = false;
+            for (const auto character : displayName.toString().toLower())
+            {
+                const auto value = character.unicode();
+                if ((value >= 'a' && value <= 'z') || (value >= '0' && value <= '9'))
+                {
+                    if (separatorPending && !result.isEmpty())
+                        result.push_back(QLatin1Char('-'));
+                    result.push_back(character);
+                    separatorPending = false;
+                }
+                else
+                {
+                    separatorPending = !result.isEmpty();
+                }
+            }
+            if (result.isEmpty())
+                result = QStringLiteral("tag");
+            return result.left(240).toStdString();
+        }
+
+        [[nodiscard]] std::optional<QString>
+        keywordRightsError(const javelin::jmap::domain::Email& email,
+                           const std::vector<javelin::jmap::cache::MailboxTreeItem>& mailboxes)
+        {
+            for (const auto& mailboxId : email.mailboxIds)
+            {
+                const auto mailbox = std::ranges::find(mailboxes, mailboxId,
+                                                       &javelin::jmap::cache::MailboxTreeItem::id);
+                if (mailbox == mailboxes.end())
+                {
+                    return i18n("A mailbox containing this message is not cached locally.");
+                }
+                if (!mailbox->myRights.maySetKeywords)
+                {
+                    return i18n("The server does not allow changing tags in %1.",
+                                QString::fromStdString(mailbox->name));
+                }
+            }
+            return std::nullopt;
+        }
+
         [[nodiscard]] std::string searchWindowLeaseKey(const std::string_view accountId,
                                                        const std::string_view queryKey)
         {
@@ -317,9 +397,17 @@ namespace javelin::app
                     });
                 });
         connect(&m_workScheduler, &WorkScheduler::jobsChanged, this,
-                [this]() { scheduleContactRefreshPump(); });
+                [this]()
+                {
+                    scheduleContactRefreshPump();
+                    scheduleTagDeletionPump();
+                });
         connect(&m_workScheduler, &WorkScheduler::foregroundAvailabilityChanged, this,
-                [this]() { scheduleContactRefreshPump(); });
+                [this]()
+                {
+                    scheduleContactRefreshPump();
+                    scheduleTagDeletionPump();
+                });
         connect(&m_errorCoordinator, &ApplicationErrorCoordinator::authenticationPauseChanged, this,
                 [this](const QString& connectionId, const bool paused)
                 {
@@ -336,6 +424,21 @@ namespace javelin::app
                         else
                         {
                             applyAccountConfiguration(accountId);
+                            const auto listed = m_workScheduler.list();
+                            if (const auto* jobs = std::get_if<std::vector<WorkRecord>>(&listed))
+                            {
+                                for (const auto& job : *jobs)
+                                {
+                                    if (job.kind == WorkKind::TagDeletion &&
+                                        job.accountId == std::optional<std::string>{accountId} &&
+                                        job.status == WorkStatus::WaitingForAuth)
+                                    {
+                                        static_cast<void>(m_workScheduler.update(
+                                            job.jobId, WorkStatus::Queued, job.progress,
+                                            job.checkpointJson));
+                                    }
+                                }
+                            }
                         }
                     }
                 });
@@ -402,6 +505,7 @@ namespace javelin::app
                 m_errorCoordinator.forgetConnection(connectionId);
         }
         restoreContactRefreshJobs();
+        scheduleTagDeletionPump();
         if (accountConfigurationsChanged)
             refreshConfiguredSessions();
     }
@@ -420,6 +524,21 @@ namespace javelin::app
             coordinator->networkBecameReachable();
             schedulePendingEmailMutationReplay(accountId);
         }
+        const auto listed = m_workScheduler.list();
+        if (const auto* jobs = std::get_if<std::vector<WorkRecord>>(&listed))
+        {
+            for (const auto& job : *jobs)
+            {
+                if (job.kind == WorkKind::TagDeletion &&
+                    job.status == WorkStatus::WaitingForNetwork && job.accountId.has_value() &&
+                    m_configurations.contains(*job.accountId))
+                {
+                    static_cast<void>(m_workScheduler.update(job.jobId, WorkStatus::Queued,
+                                                             job.progress, job.checkpointJson));
+                }
+            }
+        }
+        scheduleTagDeletionPump();
     }
 
     std::unordered_map<std::string, AccountSyncCoordinator::Status>
@@ -1010,8 +1129,7 @@ namespace javelin::app
         }
         if (intent.criteria.taggedOnly && intent.criteria.tags.empty())
         {
-            const auto keywords = m_queryService.listUserKeywords(
-                intent.accountId, intent.criteria.inMailbox.value_or(std::string{}));
+            const auto keywords = m_queryService.listTagKeywords(intent.accountId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&keywords))
                 co_return javelin::jmap::operationError(*error);
             resolution.userKeywords = std::get<std::vector<std::string>>(keywords);
@@ -1545,6 +1663,269 @@ namespace javelin::app
         };
     }
 
+    QueuedMessageSelectionMutationResult MailApplicationService::queueSetMessagesTag(
+        std::string accountId, std::optional<std::string> sourceMailboxId,
+        MessageSelection selection, std::string keyword, const bool enabled)
+    {
+        keyword = javelin::jmap::domain::canonicalKeyword(std::move(keyword));
+        if (!javelin::jmap::domain::isValidKeyword(keyword) ||
+            javelin::jmap::domain::hasStandardKeywordSemantics(keyword))
+        {
+            return javelin::jmap::OperationError{
+                .message = i18n("This is not a valid user tag keyword."),
+            };
+        }
+
+        auto emailIdsResult =
+            resolveMessageSelection(m_queryService, accountId, sourceMailboxId, selection);
+        if (const auto* error = std::get_if<QString>(&emailIdsResult))
+            return javelin::jmap::OperationError{.message = *error};
+        const auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
+
+        const auto mailboxesResult = m_queryService.listMailboxTree(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxesResult))
+            return javelin::jmap::operationError(*error);
+        const auto& mailboxes =
+            std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(mailboxesResult);
+
+        javelin::jmap::cache::EmailRepository repository{m_databaseConnection};
+        std::vector<javelin::jmap::domain::Email> emails;
+        emails.reserve(emailIds.size());
+        for (const auto& emailId : emailIds)
+        {
+            const auto result = repository.find(accountId, emailId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                return javelin::jmap::operationError(*error);
+            const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(result);
+            if (!email.has_value())
+            {
+                return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::NotFound,
+                    .message = i18n("A selected message is not cached locally."),
+                };
+            }
+            const bool alreadyEnabled = std::ranges::contains(email->keywords, keyword);
+            if (alreadyEnabled == enabled)
+                continue;
+            if (const auto rightsError = keywordRightsError(*email, mailboxes))
+                return javelin::jmap::OperationError{.message = *rightsError};
+            emails.push_back(*email);
+        }
+
+        if (emails.empty())
+        {
+            return QueuedMessageSelectionMutation{
+                .accountId = std::move(accountId),
+                .queuedEmailCount = 0,
+                .queuedMutations = {},
+                .historyEntryId = std::nullopt,
+            };
+        }
+
+        const auto operationGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        std::vector<javelin::jmap::EmailMailboxMutation> mutations;
+        javelin::app::undo::MailPatchHistory history;
+        mutations.reserve(emails.size());
+        history.items.reserve(emails.size());
+        for (const auto& email : emails)
+        {
+            javelin::jmap::EmailMailboxMutation mutation{
+                .emailId = email.id,
+                .addMailboxIds = {},
+                .removeMailboxIds = {},
+                .addKeywords =
+                    enabled ? std::vector<std::string>{keyword} : std::vector<std::string>{},
+                .removeKeywords =
+                    enabled ? std::vector<std::string>{} : std::vector<std::string>{keyword},
+                .operationGroupId = operationGroupId.toStdString(),
+                .ifInState = std::nullopt,
+            };
+            history.items.push_back(historyItem(accountId, email, mutation));
+            mutations.push_back(std::move(mutation));
+        }
+
+        const auto verb = enabled ? QStringLiteral("Add Tag") : QStringLiteral("Remove Tag");
+        auto preparedResult = m_undoManager.prepareNormal(
+            messageCountLabel(verb, emails.size()) + QStringLiteral(" ") +
+                QString::fromStdString(keyword),
+            javelin::app::undo::HistoryDomain::Mail, std::move(history), operationGroupId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
+            return javelin::jmap::operationError(*error);
+        auto prepared =
+            std::get<std::optional<javelin::app::undo::HistoryEntry>>(std::move(preparedResult));
+        if (!prepared.has_value())
+        {
+            return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
+                .message = i18n("Failed to reserve operation history."),
+            };
+        }
+
+        auto queuedResult = queueExactEmailMutations(accountId, std::move(mutations));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queuedResult))
+        {
+            if (const auto discardError = m_undoManager.discardNormal(prepared->entryId))
+                return javelin::jmap::operationError(*discardError);
+            return *error;
+        }
+        auto queuedMutations =
+            std::get<std::vector<javelin::jmap::QueuedEmailMutation>>(std::move(queuedResult));
+        for (std::size_t index = 0; index < queuedMutations.size(); ++index)
+        {
+            std::get<javelin::app::undo::MailPatchHistory>(prepared->payload)
+                .items[index]
+                .mutationId = queuedMutations[index].mutationId;
+        }
+        auto committed = m_undoManager.commitNormal(std::move(*prepared));
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+            return javelin::jmap::operationError(*error);
+
+        return QueuedMessageSelectionMutation{
+            .accountId = std::move(accountId),
+            .queuedEmailCount = emails.size(),
+            .queuedMutations = std::move(queuedMutations),
+            .historyEntryId = std::get<javelin::app::undo::HistoryEntry>(committed).entryId,
+        };
+    }
+
+    SaveMailTagDefinitionResult
+    MailApplicationService::saveTagDefinition(SaveMailTagDefinition definition)
+    {
+        const auto displayName = QString::fromStdString(definition.displayName).trimmed();
+        if (displayName.isEmpty())
+            return javelin::jmap::OperationError{.message = i18n("Tag names cannot be empty.")};
+
+        std::string keyword;
+        if (definition.keyword.has_value())
+        {
+            keyword = javelin::jmap::domain::canonicalKeyword(*definition.keyword);
+            if (!javelin::jmap::domain::isValidKeyword(keyword) ||
+                javelin::jmap::domain::hasStandardKeywordSemantics(keyword))
+            {
+                return javelin::jmap::OperationError{
+                    .message = i18n("This is not a valid user tag keyword."),
+                };
+            }
+        }
+        else
+        {
+            const auto base = generatedTagKeyword(displayName);
+            keyword = base;
+            int suffix = 2;
+            while (true)
+            {
+                QSqlQuery exists{m_databaseConnection.database()};
+                exists.prepare(QStringLiteral(
+                    "SELECT EXISTS(SELECT 1 FROM mail_tag_definitions WHERE account_id=:account "
+                    "AND keyword=:keyword COLLATE NOCASE) OR EXISTS(SELECT 1 FROM email_keywords "
+                    "WHERE account_id=:account AND keyword=:keyword COLLATE NOCASE)"));
+                exists.bindValue(QStringLiteral(":account"),
+                                 QString::fromStdString(definition.accountId));
+                exists.bindValue(QStringLiteral(":keyword"), QString::fromStdString(keyword));
+                if (!exists.exec() || !exists.next())
+                {
+                    return javelin::jmap::OperationError{
+                        .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
+                        .message = i18n("Could not check existing mail tags: %1",
+                                        exists.lastError().text()),
+                    };
+                }
+                if (!exists.value(0).toBool() &&
+                    !javelin::jmap::domain::hasStandardKeywordSemantics(keyword))
+                    break;
+                keyword = base + "-" + std::to_string(suffix++);
+            }
+        }
+
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_databaseConnection};
+        QSqlQuery order{m_databaseConnection.database()};
+        order.prepare(
+            QStringLiteral("SELECT COALESCE((SELECT sort_order FROM mail_tag_definitions "
+                           "WHERE account_id=:account AND keyword=:keyword COLLATE NOCASE),"
+                           "COALESCE(MAX(sort_order),-10)+10) FROM mail_tag_definitions "
+                           "WHERE account_id=:account"));
+        order.bindValue(QStringLiteral(":account"), QString::fromStdString(definition.accountId));
+        order.bindValue(QStringLiteral(":keyword"), QString::fromStdString(keyword));
+        if (!order.exec() || !order.next())
+        {
+            return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
+                .message = i18n("Could not determine tag order: %1", order.lastError().text()),
+            };
+        }
+        const auto sortOrder = order.value(0).toInt();
+
+        QSqlQuery save{m_databaseConnection.database()};
+        save.prepare(QStringLiteral(
+            "INSERT INTO mail_tag_definitions(account_id,keyword,display_name,color,sort_order) "
+            "VALUES(:account,:keyword,:name,:color,:sort_order) ON CONFLICT(account_id,keyword) "
+            "DO UPDATE SET display_name=excluded.display_name,color=excluded.color"));
+        save.bindValue(QStringLiteral(":account"), QString::fromStdString(definition.accountId));
+        save.bindValue(QStringLiteral(":keyword"), QString::fromStdString(keyword));
+        save.bindValue(QStringLiteral(":name"), displayName);
+        save.bindValue(QStringLiteral(":color"), QString::fromStdString(definition.color));
+        save.bindValue(QStringLiteral(":sort_order"), sortOrder);
+        if (!save.exec())
+        {
+            return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
+                .message = i18n("Could not save tag: %1", save.lastError().text()),
+            };
+        }
+
+        return MailTagDefinition{
+            .accountId = std::move(definition.accountId),
+            .keyword = std::move(keyword),
+            .displayName = displayName.toStdString(),
+            .color = std::move(definition.color),
+            .sortOrder = sortOrder,
+        };
+    }
+
+    QueuedMailTagDeletionResult MailApplicationService::deleteTag(std::string accountId,
+                                                                  std::string keyword)
+    {
+        keyword = javelin::jmap::domain::canonicalKeyword(std::move(keyword));
+        if (!javelin::jmap::domain::isValidKeyword(keyword) ||
+            javelin::jmap::domain::hasStandardKeywordSemantics(keyword))
+        {
+            return javelin::jmap::OperationError{
+                .message = i18n("This is not a valid user tag keyword."),
+            };
+        }
+
+        QString displayName = QString::fromStdString(keyword);
+        const auto definitions = m_queryService.listTagDefinitions(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&definitions))
+            return javelin::jmap::operationError(*error);
+        const auto& tags = std::get<std::vector<javelin::jmap::cache::TagDefinition>>(definitions);
+        const auto found =
+            std::ranges::find(tags, keyword, &javelin::jmap::cache::TagDefinition::keyword);
+        if (found != tags.end())
+            displayName = found->displayName;
+
+        const auto jobId = tagDeletionJobId(accountId, keyword);
+        if (const auto error = m_workScheduler.ensure(WorkSpec{
+                .jobId = jobId,
+                .parentJobId = std::nullopt,
+                .accountId = accountId,
+                .kind = WorkKind::TagDeletion,
+                .priority = WorkPriority::Bulk,
+                .title = i18n("Delete tag %1", displayName),
+                .checkpointJson = tagDeletionCheckpoint(keyword),
+                .restartCompleted = true,
+            }))
+        {
+            return javelin::jmap::operationError(*error);
+        }
+        scheduleTagDeletionPump();
+        return QueuedMailTagDeletion{
+            .accountId = std::move(accountId),
+            .keyword = std::move(keyword),
+            .jobId = jobId,
+        };
+    }
+
     javelin::jmap::QueuedEmailMutationResult
     MailApplicationService::queueExactEmailMutation(std::string accountId,
                                                     javelin::jmap::EmailMailboxMutation mutation)
@@ -2016,6 +2397,258 @@ namespace javelin::app
                                summary.addressBookCount);
         static_cast<void>(
             m_workScheduler.update(jobId, WorkStatus::Complete, progress, QStringLiteral("{}")));
+    }
+
+    void MailApplicationService::scheduleTagDeletionPump()
+    {
+        if (m_tagDeletionPumpScheduled)
+            return;
+        m_tagDeletionPumpScheduled = true;
+        QTimer::singleShot(0, this,
+                           [this]()
+                           {
+                               m_tagDeletionPumpScheduled = false;
+                               pumpTagDeletions();
+                           });
+    }
+
+    void MailApplicationService::pumpTagDeletions()
+    {
+        if (!m_workScheduler.mayStartBackgroundNetwork())
+            return;
+        const auto listed = m_workScheduler.list();
+        const auto* jobs = std::get_if<std::vector<WorkRecord>>(&listed);
+        if (jobs == nullptr)
+            return;
+
+        for (const auto& job : *jobs)
+        {
+            if (job.kind != WorkKind::TagDeletion || job.status != WorkStatus::Queued ||
+                !job.accountId.has_value() || m_runningTagDeletions.contains(*job.accountId) ||
+                !m_configurations.contains(*job.accountId))
+                continue;
+            const auto keyword = tagDeletionKeyword(job.checkpointJson);
+            if (!keyword.has_value())
+            {
+                static_cast<void>(
+                    m_workScheduler.update(job.jobId, WorkStatus::Failed, {}, job.checkpointJson,
+                                           i18n("The tag deletion checkpoint is invalid.")));
+                continue;
+            }
+            if (!m_workScheduler.admit(job.jobId).has_value())
+                continue;
+
+            m_runningTagDeletions.insert(*job.accountId);
+            auto task = runTagDeletion(job.jobId, *job.accountId, *keyword);
+            QCoro::connect(std::move(task), this,
+                           [this, jobId = job.jobId, accountId = *job.accountId]()
+                           {
+                               m_workScheduler.release(jobId);
+                               m_runningTagDeletions.erase(accountId);
+                               scheduleTagDeletionPump();
+                           });
+        }
+    }
+
+    QCoro::Task<void> MailApplicationService::runTagDeletion(std::string jobId,
+                                                             std::string accountId,
+                                                             std::string keyword)
+    {
+        constexpr std::size_t batchSize = 25;
+        const auto checkpoint = tagDeletionCheckpoint(keyword);
+        WorkProgress progress;
+        progress.detail = i18n("Finding messages with tag %1", QString::fromStdString(keyword));
+        static_cast<void>(m_workScheduler.update(jobId, WorkStatus::Running, progress, checkpoint));
+
+        const auto fail =
+            [this, &jobId, &checkpoint, &progress](const javelin::jmap::OperationError& error)
+        {
+            auto status = WorkStatus::Failed;
+            if (javelin::jmap::isAuthenticationError(error))
+                status = WorkStatus::WaitingForAuth;
+            else if (javelin::jmap::isTransientError(error))
+                status = WorkStatus::WaitingForNetwork;
+            progress.detail = error.message;
+            static_cast<void>(
+                m_workScheduler.update(jobId, status, progress, checkpoint, error.message));
+            return status;
+        };
+
+        const auto configuration = m_configurations.find(accountId);
+        if (configuration == m_configurations.end())
+        {
+            static_cast<void>(m_workScheduler.update(jobId, WorkStatus::Failed, progress,
+                                                     checkpoint,
+                                                     accountSynchronizationNotConfigured()));
+            co_return;
+        }
+        const auto settings = configuration->second.settings;
+
+        while (true)
+        {
+            auto pending = co_await submitPendingEmailMutations(accountId, jobId);
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&pending))
+            {
+                fail(*error);
+                co_return;
+            }
+            const auto& submitted = std::get<javelin::jmap::SubmittedEmailMutations>(pending);
+            if (submitted.failedEmailCount != 0)
+            {
+                static_cast<void>(m_workScheduler.update(
+                    jobId, WorkStatus::Failed, progress, checkpoint,
+                    i18n("The server rejected removing this tag from %1 message(s).",
+                         submitted.failedEmailCount)));
+                co_return;
+            }
+
+            progress.detail = i18n("Finding messages with tag %1", QString::fromStdString(keyword));
+            auto queryResult = co_await m_jmapCore.queryEmailIdsByKeyword(
+                toLiveConnectionSettings(settings), accountId, keyword, batchSize);
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queryResult))
+            {
+                fail(*error);
+                co_return;
+            }
+            const auto& page = std::get<javelin::jmap::EmailIdQueryPage>(queryResult);
+            if (!progress.totalUnits.has_value() && page.total.has_value())
+                progress.totalUnits = *page.total;
+
+            if (page.emailIds.empty())
+            {
+                javelin::jmap::sync::EmailMutationJournal journal{m_databaseConnection};
+                const auto group = journal.listForOperationGroup(accountId, jobId);
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&group))
+                {
+                    static_cast<void>(m_workScheduler.update(jobId, WorkStatus::Failed, progress,
+                                                             checkpoint, error->message));
+                    co_return;
+                }
+                const auto records =
+                    std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(group);
+                for (const auto& record : records)
+                {
+                    if (record.status == javelin::jmap::sync::MutationStatus::Unknown)
+                    {
+                        if (const auto error = journal.transition(
+                                record.mutationId, javelin::jmap::sync::MutationStatus::Accepted))
+                        {
+                            static_cast<void>(m_workScheduler.update(
+                                jobId, WorkStatus::Failed, progress, checkpoint, error->message));
+                            co_return;
+                        }
+                    }
+                }
+                const auto settled = journal.listForOperationGroup(accountId, jobId);
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&settled))
+                {
+                    static_cast<void>(m_workScheduler.update(jobId, WorkStatus::Failed, progress,
+                                                             checkpoint, error->message));
+                    co_return;
+                }
+                for (const auto& record :
+                     std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(settled))
+                {
+                    if (record.status == javelin::jmap::sync::MutationStatus::Accepted)
+                        static_cast<void>(journal.remove(record.mutationId));
+                }
+
+                {
+                    const javelin::jmap::cache::DatabaseWriteScope writeScope{m_databaseConnection};
+                    QSqlQuery remove{m_databaseConnection.database()};
+                    remove.prepare(
+                        QStringLiteral("DELETE FROM mail_tag_definitions WHERE account_id=:account "
+                                       "AND keyword=:keyword COLLATE NOCASE"));
+                    remove.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
+                    remove.bindValue(QStringLiteral(":keyword"), QString::fromStdString(keyword));
+                    if (!remove.exec())
+                    {
+                        static_cast<void>(
+                            m_workScheduler.update(jobId, WorkStatus::Failed, progress, checkpoint,
+                                                   i18n("Could not remove the tag definition: %1",
+                                                        remove.lastError().text())));
+                        co_return;
+                    }
+                }
+
+                if (progress.totalUnits.has_value())
+                    progress.completedUnits = *progress.totalUnits;
+                progress.detail = i18n("Tag deleted");
+                static_cast<void>(
+                    m_workScheduler.update(jobId, WorkStatus::Complete, progress, checkpoint));
+                Q_EMIT cacheCommitted(MailCacheChange{
+                    .accountId = QString::fromStdString(accountId),
+                    .mailboxIds = {},
+                    .queryWindows = {},
+                    .searchWindows = {},
+                    .mailboxTreeChanged = false,
+                    .hasNewMail = false,
+                    .optimisticProjection = false,
+                });
+                co_return;
+            }
+
+            auto authoritativeResult = co_await getAuthoritativeEmails(accountId, page.emailIds);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::OperationError>(&authoritativeResult))
+            {
+                fail(*error);
+                co_return;
+            }
+            const auto& authoritative =
+                std::get<javelin::jmap::AuthoritativeEmails>(authoritativeResult);
+            const auto mailboxesResult = m_queryService.listMailboxTree(accountId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxesResult))
+            {
+                static_cast<void>(m_workScheduler.update(jobId, WorkStatus::Failed, progress,
+                                                         checkpoint, error->message));
+                co_return;
+            }
+            const auto& mailboxes =
+                std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(mailboxesResult);
+
+            std::vector<javelin::jmap::EmailMailboxMutation> mutations;
+            mutations.reserve(authoritative.emails.size());
+            for (const auto& email : authoritative.emails)
+            {
+                if (!std::ranges::contains(email.keywords, keyword))
+                    continue;
+                if (const auto rightsError = keywordRightsError(email, mailboxes))
+                {
+                    static_cast<void>(m_workScheduler.update(jobId, WorkStatus::Failed, progress,
+                                                             checkpoint, *rightsError));
+                    co_return;
+                }
+                mutations.push_back(javelin::jmap::EmailMailboxMutation{
+                    .emailId = email.id,
+                    .addMailboxIds = {},
+                    .removeMailboxIds = {},
+                    .addKeywords = {},
+                    .removeKeywords = {keyword},
+                    .operationGroupId = jobId,
+                    .ifInState = std::nullopt,
+                    .authoritativeMailboxIds = email.mailboxIds,
+                    .authoritativeKeywords = email.keywords,
+                });
+            }
+            if (mutations.empty())
+                continue;
+
+            progress.detail = i18np("Removing tag from %1 message", "Removing tag from %1 messages",
+                                    mutations.size());
+            auto queued = queueExactEmailMutations(accountId, std::move(mutations));
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queued))
+            {
+                fail(*error);
+                co_return;
+            }
+            const auto batchCount =
+                std::get<std::vector<javelin::jmap::QueuedEmailMutation>>(queued).size();
+            progress.completedUnits += batchCount;
+            static_cast<void>(
+                m_workScheduler.update(jobId, WorkStatus::Running, progress, checkpoint));
+        }
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactRefreshResult>

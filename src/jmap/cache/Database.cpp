@@ -2018,6 +2018,24 @@ namespace javelin::jmap::cache
                                 "mail_vault_projection_jobs(status,account_id,mailbox_id,job_id)"),
                         },
                 },
+                MigrationStep{
+                    .version = 43,
+                    .name = QStringLiteral("mail_tag_definitions"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE mail_tag_definitions ("
+                                "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON "
+                                "DELETE "
+                                "CASCADE,keyword TEXT NOT NULL COLLATE NOCASE,display_name TEXT "
+                                "NOT "
+                                "NULL,color TEXT NOT NULL DEFAULT '',sort_order INTEGER NOT NULL "
+                                "DEFAULT 0,PRIMARY KEY(account_id,keyword)) STRICT"),
+                            QStringLiteral(
+                                "CREATE INDEX idx_mail_tag_definitions_order ON "
+                                "mail_tag_definitions(account_id,sort_order,display_name)"),
+                        },
+                },
             },
         };
     }

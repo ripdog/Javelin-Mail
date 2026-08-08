@@ -293,6 +293,10 @@ namespace javelin::gui::shell
         void syncQuickFilterContinuitySelection(std::optional<std::string> emailId,
                                                 std::optional<std::string> threadId);
         void rebuildQuickFilterTagsMenu();
+        void rebuildMessageTagsMenu();
+        void populateMessageTagsMenu(QMenu& menu);
+        void createTag(bool applyToSelection);
+        void showTagManager();
         [[nodiscard]] javelin::jmap::search::EmailSearchCriteria quickFilterCriteriaFromUi() const;
         void updateMessageActions();
         [[nodiscard]] bool selectedMessagesAreJunk() const;
@@ -407,6 +411,8 @@ namespace javelin::gui::shell
         QAction* m_archiveAction = nullptr;
         QAction* m_markUnreadAction = nullptr;
         QAction* m_junkAction = nullptr;
+        QAction* m_tagsAction = nullptr;
+        QMenu* m_tagsMenu = nullptr;
         QAction* m_deleteAction = nullptr;
         QAction* m_permanentDeleteAction = nullptr;
         QAction* m_moveAction = nullptr;

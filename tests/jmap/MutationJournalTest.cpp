@@ -1,5 +1,6 @@
 #include "jmap/sync/MutationJournal.h"
 #include "jmap/sync/EmailMutationJournal.h"
+#include "jmap/sync/EmailMutationQueue.h"
 
 #include "FixtureReader.h"
 #include "jmap/cache/EmailRepository.h"
@@ -136,6 +137,47 @@ TEST_CASE("mutation journal round-trips typed Email patch mutations", "[jmap][sy
     CHECK(records.front().patch.destroy);
     CHECK(records.front().baseMailboxIds == std::vector<std::string>{"mbx-inbox"});
     CHECK(records.front().baseKeywords == std::vector<std::string>{"$flagged"});
+}
+
+TEST_CASE("authoritative email mutation queues for an uncached server message without fabricating "
+          "cache data",
+          "[jmap][sync][consistency]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    const auto queued = javelin::jmap::sync::queueEmailMutation(
+        databaseContext.connection, "account-1",
+        javelin::jmap::EmailMailboxMutation{
+            .emailId = "server-only",
+            .addMailboxIds = {},
+            .removeMailboxIds = {},
+            .addKeywords = {},
+            .removeKeywords = {"project-x"},
+            .operationGroupId = "tag-delete:test",
+            .ifInState = std::nullopt,
+            .authoritativeMailboxIds = std::vector<std::string>{"mbx-inbox"},
+            .authoritativeKeywords = std::vector<std::string>{"$seen", "project-x"},
+        });
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queued));
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    const auto cached = emails.find("account-1", "server-only");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cached));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(cached).has_value());
+
+    javelin::jmap::sync::EmailMutationJournal journal{databaseContext.connection};
+    const auto records = journal.listForOperationGroup("account-1", "tag-delete:test");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records));
+    const auto& mutations =
+        std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records);
+    REQUIRE(mutations.size() == 1);
+    CHECK(mutations.front().patch.removeKeywords == std::vector<std::string>{"project-x"});
+    CHECK(mutations.front().baseMailboxIds == std::vector<std::string>{"mbx-inbox"});
+    CHECK(mutations.front().baseKeywords == std::vector<std::string>{"$seen", "project-x"});
 }
 
 TEST_CASE("pending email patch merge reapplies local mailbox and keyword deltas", "[jmap][sync]")

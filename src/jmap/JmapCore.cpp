@@ -1081,6 +1081,70 @@ namespace javelin::jmap
         };
     }
 
+    QCoro::Task<EmailIdQueryPageResult>
+    JmapCore::queryEmailIdsByKeyword(LiveConnectionSettings settings, std::string accountId,
+                                     std::string keyword, const std::size_t limit)
+    {
+        if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
+        {
+            co_return OperationError{
+                .message = QStringLiteral("Keyword queries are unavailable."),
+            };
+        }
+        if (const auto validationError = validateLoginSettings(settings, true))
+            co_return *validationError;
+        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<OperationError>(&sessionResult))
+            co_return *error;
+
+        javelin::jmap::api::MethodCaller caller{*m_impl->methodTransport};
+        javelin::jmap::api::RequestBuilder builder;
+        builder.useCore().useMail();
+        const auto queryRequest = javelin::jmap::api::emailQuery({
+            .accountId = accountId,
+            .filter = javelin::jmap::api::EmailQueryFilter{.hasKeyword = std::move(keyword)},
+            .sort = {},
+            .position = std::uint64_t{0},
+            .anchor = std::nullopt,
+            .anchorOffset = 0,
+            .limit = static_cast<std::uint64_t>(limit),
+            .collapseThreads = false,
+            .calculateTotal = true,
+        });
+        if (!queryRequest.has_value())
+        {
+            co_return OperationError{
+                .message = QStringLiteral("Failed to encode the keyword Email/query request."),
+            };
+        }
+        const auto queryHandle = builder.call(*queryRequest, "keyword-query");
+        const auto envelopeResult = co_await caller.call(
+            buildApiRequestContext(settings, accountId,
+                                   std::get<javelin::jmap::api::Session>(sessionResult)),
+            builder);
+        if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
+            co_return operationError(*error);
+        if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))
+            co_return operationError(*error);
+        if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&envelopeResult))
+            co_return operationError(*error);
+
+        const javelin::jmap::api::ResponseReader reader{
+            std::get<javelin::jmap::api::ResponseEnvelope>(envelopeResult)};
+        const auto queryResult = reader.require(queryHandle);
+        if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&queryResult))
+            co_return operationError(*error);
+        const auto& page = std::get<javelin::jmap::api::EmailQueryResponse>(queryResult);
+        co_return EmailIdQueryPage{
+            .accountId = std::move(accountId),
+            .queryState = page.queryState,
+            .total = page.total.has_value()
+                         ? std::optional<std::size_t>{static_cast<std::size_t>(*page.total)}
+                         : std::nullopt,
+            .emailIds = page.ids,
+        };
+    }
+
     QCoro::Task<FullMailboxPageResult>
     JmapCore::materializeFullMailboxPage(LiveConnectionSettings settings, std::string accountId,
                                          std::string mailboxId, const std::size_t position,
@@ -1494,20 +1558,44 @@ namespace javelin::jmap
         std::unordered_map<std::string, std::vector<std::string>> mutationIdsByEmailId;
         std::unordered_map<std::string, std::vector<javelin::jmap::sync::EmailMutationRecord>>
             mutationsByEmailId;
+        std::unordered_set<std::string> uncachedEmailIds;
         for (const auto& emailId : emailIds)
         {
+            std::vector<javelin::jmap::sync::EmailMutationRecord> selectedActions;
+            for (const auto& action : pendingActions)
+            {
+                if (action.patch.emailId == emailId)
+                    selectedActions.push_back(action);
+            }
+            if (selectedActions.empty())
+                continue;
+
             const auto emailResult = emailRepository.find(accountId, emailId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
             {
                 co_return javelin::jmap::operationError(*error);
             }
 
+            javelin::jmap::domain::Email baseEmail;
             const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
-            if (!email.has_value())
+            if (email.has_value())
             {
-                co_return OperationError{
-                    .message = QStringLiteral("A queued email mutation targets a missing email."),
-                };
+                baseEmail = *email;
+            }
+            else
+            {
+                const auto& first = selectedActions.front();
+                if (!first.baseMailboxIds.has_value() || !first.baseKeywords.has_value())
+                {
+                    co_return OperationError{
+                        .message = QStringLiteral(
+                            "An uncached queued email mutation has no authoritative base."),
+                    };
+                }
+                baseEmail.id = emailId;
+                baseEmail.mailboxIds = *first.baseMailboxIds;
+                baseEmail.keywords = *first.baseKeywords;
+                uncachedEmailIds.insert(emailId);
             }
 
             const auto allEmailActionsResult =
@@ -1522,19 +1610,10 @@ namespace javelin::jmap
                 std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
                     allEmailActionsResult));
             if (allEmailActions.empty())
-            {
                 continue;
-            }
-            std::vector<javelin::jmap::sync::EmailMutationRecord> selectedActions;
-            for (const auto& action : pendingActions)
-            {
-                if (action.patch.emailId == emailId)
-                    selectedActions.push_back(action);
-            }
             mutationsByEmailId.emplace(emailId, selectedActions);
-
-            mergedEmails.emplace(
-                emailId, javelin::jmap::sync::projectEmailMutations(*email, allEmailActions));
+            mergedEmails.emplace(emailId, javelin::jmap::sync::projectEmailMutations(
+                                              std::move(baseEmail), allEmailActions));
 
             auto& pendingIds = mutationIdsByEmailId[emailId];
             pendingIds.reserve(selectedActions.size());
@@ -1681,7 +1760,7 @@ namespace javelin::jmap
         };
         const auto rejectSubmittedMutations =
             [this, &accountId, &emailMutationJournal, &mergedEmails, &mutationsByEmailId,
-             &mutationIdsByEmailId]() -> std::optional<OperationError>
+             &mutationIdsByEmailId, &uncachedEmailIds]() -> std::optional<OperationError>
         {
             auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
                 *m_impl->databaseConnection,
@@ -1724,10 +1803,13 @@ namespace javelin::jmap
                     return *error;
                 const auto& records = std::get<EmailMutationRecords>(recordsResult);
                 auto reprojected = reprojectActiveEmailMutations(std::move(restored), records);
-                if (const auto error =
-                        emails.upsertMany(transaction.cacheTransaction(), accountId, {reprojected}))
+                if (!uncachedEmailIds.contains(emailId))
                 {
-                    return javelin::jmap::operationError(*error);
+                    if (const auto error = emails.upsertMany(transaction.cacheTransaction(),
+                                                             accountId, {reprojected}))
+                    {
+                        return javelin::jmap::operationError(*error);
+                    }
                 }
                 if (const auto error = compactSettledAcceptedEmailMutations(transaction, records))
                     return *error;
@@ -1938,10 +2020,13 @@ namespace javelin::jmap
                     co_return *error;
                 const auto& records = std::get<EmailMutationRecords>(recordsResult);
                 auto reprojected = reprojectActiveEmailMutations(std::move(restored), records);
-                if (const auto error = emailRepository.upsertMany(transaction.cacheTransaction(),
-                                                                  accountId, {reprojected}))
+                if (!uncachedEmailIds.contains(emailId))
                 {
-                    co_return javelin::jmap::operationError(*error);
+                    if (const auto error = emailRepository.upsertMany(
+                            transaction.cacheTransaction(), accountId, {reprojected}))
+                    {
+                        co_return javelin::jmap::operationError(*error);
+                    }
                 }
                 if (const auto error = compactSettledAcceptedEmailMutations(transaction, records))
                     co_return *error;

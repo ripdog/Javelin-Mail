@@ -94,6 +94,16 @@ namespace javelin::jmap
 
     using FullMailboxPageResult = std::variant<FullMailboxPage, OperationError>;
 
+    struct EmailIdQueryPage
+    {
+        std::string accountId;
+        std::string queryState;
+        std::optional<std::size_t> total;
+        std::vector<std::string> emailIds;
+    };
+
+    using EmailIdQueryPageResult = std::variant<EmailIdQueryPage, OperationError>;
+
     struct MessageSearchSummary
     {
         std::string accountId;
@@ -208,6 +218,9 @@ namespace javelin::jmap
                                    std::string mailboxId, std::size_t position,
                                    std::size_t limit = 250,
                                    std::optional<std::string> anchor = std::nullopt);
+        [[nodiscard]] QCoro::Task<EmailIdQueryPageResult>
+        queryEmailIdsByKeyword(LiveConnectionSettings settings, std::string accountId,
+                               std::string keyword, std::size_t limit = 50);
         [[nodiscard]] QCoro::Task<MailboxPageResult>
         queryMailboxPage(LiveConnectionSettings settings, std::string accountId,
                          std::string mailboxId, std::size_t offset = 0, std::size_t limit = 100,

@@ -43,6 +43,8 @@ namespace javelin::gui::messages
             IsExpandedRole,
             CanExpandRole,
             MailboxNamesRole,
+            TagNamesRole,
+            TagColorsRole,
             IsSearchResultRole,
         };
 

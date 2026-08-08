@@ -1345,6 +1345,166 @@ TEST_CASE("JmapCore submits queued mailbox mutations through Email/set",
     CHECK(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(pendingResult).empty());
 }
 
+TEST_CASE("JmapCore submits authoritative keyword mutations for uncached server messages",
+          "[jmap][core][mutation-journal][tags]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    REQUIRE_FALSE(sessionRepository.replace("u1", loadSessionFixture()).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"server-only":null},"notUpdated":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
+    });
+
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto queued = core.queueEmailMailboxMutation(
+        "u1", {
+                  .emailId = "server-only",
+                  .removeKeywords = {"project-x"},
+                  .operationGroupId = "tag-delete:test",
+                  .authoritativeMailboxIds = std::vector<std::string>{"mbx-inbox"},
+                  .authoritativeKeywords = std::vector<std::string>{"$seen", "project-x"},
+              });
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queued));
+
+    const auto submitted = QCoro::waitFor(core.submitPendingEmailMutations(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1", "tag-delete:test"));
+    REQUIRE(std::holds_alternative<javelin::jmap::SubmittedEmailMutations>(submitted));
+    const auto& summary = std::get<javelin::jmap::SubmittedEmailMutations>(submitted);
+    CHECK(summary.attemptedEmailCount == 1);
+    CHECK(summary.updatedEmailCount == 1);
+    CHECK(summary.failedEmailCount == 0);
+
+    REQUIRE(transport.requests.size() == 1);
+    CHECK(transport.requests.front().body.contains("\"keywords/project-x\":null"));
+    CHECK_FALSE(transport.requests.front().body.contains("\"keywords\":{"));
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    const auto cached = emails.find("u1", "server-only");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cached));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(cached).has_value());
+
+    javelin::jmap::sync::EmailMutationJournal journal{databaseContext.connection};
+    const auto records = journal.listForOperationGroup("u1", "tag-delete:test");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records));
+    CHECK(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records).empty());
+}
+
+TEST_CASE("JmapCore rejects authoritative keyword mutations without fabricating uncached messages",
+          "[jmap][core][mutation-journal][tags]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    REQUIRE_FALSE(sessionRepository.replace("u1", loadSessionFixture()).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-1","updated":{},"notUpdated":{"server-only":{"type":"forbidden"}}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
+    });
+
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto queued = core.queueEmailMailboxMutation(
+        "u1", {
+                  .emailId = "server-only",
+                  .removeKeywords = {"project-x"},
+                  .operationGroupId = "tag-delete:test",
+                  .authoritativeMailboxIds = std::vector<std::string>{"mbx-inbox"},
+                  .authoritativeKeywords = std::vector<std::string>{"$seen", "project-x"},
+              });
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queued));
+
+    const auto submitted = QCoro::waitFor(core.submitPendingEmailMutations(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1", "tag-delete:test"));
+    REQUIRE(std::holds_alternative<javelin::jmap::SubmittedEmailMutations>(submitted));
+    CHECK(std::get<javelin::jmap::SubmittedEmailMutations>(submitted).failedEmailCount == 1);
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    const auto cached = emails.find("u1", "server-only");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cached));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(cached).has_value());
+
+    javelin::jmap::sync::EmailMutationJournal journal{databaseContext.connection};
+    const auto records = journal.listForOperationGroup("u1", "tag-delete:test");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records));
+    const auto& mutations =
+        std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records);
+    REQUIRE(mutations.size() == 1);
+    CHECK(mutations.front().status == javelin::jmap::sync::MutationStatus::Rejected);
+}
+
+TEST_CASE("JmapCore preserves ambiguous authoritative keyword mutations without caching messages",
+          "[jmap][core][mutation-journal][tags]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    REQUIRE_FALSE(sessionRepository.replace("u1", loadSessionFixture()).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "Connection closed after request dispatch",
+    });
+
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto queued = core.queueEmailMailboxMutation(
+        "u1", {
+                  .emailId = "server-only",
+                  .removeKeywords = {"project-x"},
+                  .operationGroupId = "tag-delete:test",
+                  .authoritativeMailboxIds = std::vector<std::string>{"mbx-inbox"},
+                  .authoritativeKeywords = std::vector<std::string>{"$seen", "project-x"},
+              });
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queued));
+
+    const auto submitted = QCoro::waitFor(core.submitPendingEmailMutations(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1", "tag-delete:test"));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(submitted));
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    const auto cached = emails.find("u1", "server-only");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cached));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(cached).has_value());
+
+    javelin::jmap::sync::EmailMutationJournal journal{databaseContext.connection};
+    const auto records = journal.listForOperationGroup("u1", "tag-delete:test");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records));
+    const auto& mutations =
+        std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records);
+    REQUIRE(mutations.size() == 1);
+    CHECK(mutations.front().status == javelin::jmap::sync::MutationStatus::Unknown);
+    CHECK(mutations.front().baseMailboxIds == std::vector<std::string>{"mbx-inbox"});
+    CHECK(mutations.front().baseKeywords == std::vector<std::string>{"$seen", "project-x"});
+}
+
 TEST_CASE("JmapCore keeps newer optimistic mutations projected while an older submit completes",
           "[jmap][core][mutation-journal][consistency]")
 {

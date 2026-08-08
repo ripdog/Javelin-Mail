@@ -87,26 +87,33 @@
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QColorDialog>
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QElapsedTimer>
 #include <QEvent>
+#include <QFormLayout>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QItemSelection>
 #include <QItemSelectionModel>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
+#include <QListWidget>
 #include <QLoggingCategory>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QMouseEvent>
+#include <QPixmap>
+#include <QPointer>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScrollBar>
@@ -122,7 +129,10 @@
 #include <QToolButton>
 #include <QTreeView>
 #include <QVBoxLayout>
+
 #include <QWidget>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <algorithm>
 #include <chrono>
@@ -252,6 +262,56 @@ namespace javelin::gui::shell
             return direction == javelin::jmap::query::EmailListSortDirection::Ascending
                        ? i18nc("@item message sort direction", "ascending")
                        : i18nc("@item message sort direction", "descending");
+        }
+
+        [[nodiscard]] QIcon tagColorIcon(const QStringView colorName)
+        {
+            const QColor color{colorName.toString()};
+            if (!color.isValid())
+                return {};
+            QPixmap swatch{14, 14};
+            swatch.fill(color);
+            return QIcon{swatch};
+        }
+
+        [[nodiscard]] std::vector<std::string>
+        resolveSelectionEmailIds(const javelin::jmap::cache::QueryReader& queryReader,
+                                 const std::string_view accountId,
+                                 const std::optional<std::string>& mailboxId,
+                                 const javelin::app::MessageSelection& selection)
+        {
+            std::vector<std::string> emailIds;
+            std::unordered_set<std::string> seen;
+            const auto append = [&emailIds, &seen](const std::string_view emailId)
+            {
+                if (!emailId.empty() && seen.emplace(emailId).second)
+                    emailIds.emplace_back(emailId);
+            };
+            for (const auto& item : selection)
+            {
+                if (const auto* email = std::get_if<javelin::app::SelectedEmail>(&item))
+                {
+                    append(email->emailId);
+                    continue;
+                }
+                const auto& thread = std::get<javelin::app::SelectedCollapsedThread>(item);
+                const auto messagesResult =
+                    mailboxId.has_value()
+                        ? queryReader.listMailboxThreadMessages(accountId, *mailboxId,
+                                                                thread.threadId)
+                        : queryReader.listThreadMessages(accountId, thread.threadId);
+                const auto* messages =
+                    std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(
+                        &messagesResult);
+                if (messages == nullptr || messages->empty())
+                {
+                    append(thread.representativeEmailId);
+                    continue;
+                }
+                for (const auto& message : *messages)
+                    append(message.emailId);
+            }
+            return emailIds;
         }
 
     } // namespace
@@ -856,6 +916,14 @@ namespace javelin::gui::shell
                         activeAccountId(), activeMailboxId(), !selectedMessagesAreJunk());
                 });
         actionCollection()->addAction(QStringLiteral("toggle_email_junk"), m_junkAction);
+
+        m_tagsAction =
+            new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/tag.svg")),
+                        i18nc("@action", "&Tags"), this);
+        m_tagsMenu = new QMenu(this);
+        connect(m_tagsMenu, &QMenu::aboutToShow, this, &MainWindow::rebuildMessageTagsMenu);
+        m_tagsAction->setMenu(m_tagsMenu);
+        actionCollection()->addAction(QStringLiteral("tag_email"), m_tagsAction);
 
         m_deleteAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/delete.svg")),
@@ -2972,32 +3040,32 @@ namespace javelin::gui::shell
         m_quickFilterTagsMenu->addSeparator();
 
         const auto accountId = activeAccountId();
-        const auto mailboxId = activeMailboxId();
-        if (!accountId.has_value() || !mailboxId.has_value())
+        if (!accountId.has_value())
             return;
-        const auto result = m_queryReader.listUserKeywords(*accountId, *mailboxId);
-        const auto* keywords = std::get_if<std::vector<std::string>>(&result);
-        if (keywords == nullptr)
+        const auto result = m_queryReader.listTagDefinitions(*accountId);
+        const auto* tags = std::get_if<std::vector<javelin::jmap::cache::TagDefinition>>(&result);
+        if (tags == nullptr)
         {
             auto* errorAction = m_quickFilterTagsMenu->addAction(i18n("Unable to load tags"));
             errorAction->setEnabled(false);
             return;
         }
-        if (keywords->empty())
+        if (tags->empty())
         {
-            auto* emptyAction = m_quickFilterTagsMenu->addAction(i18n("No tags in this folder"));
+            auto* emptyAction = m_quickFilterTagsMenu->addAction(i18n("No tags for this account"));
             emptyAction->setEnabled(false);
             return;
         }
 
-        for (const auto& keyword : *keywords)
+        for (const auto& tag : *tags)
         {
-            auto* action = m_quickFilterTagsMenu->addAction(QString::fromStdString(keyword));
+            auto* action =
+                m_quickFilterTagsMenu->addAction(tagColorIcon(tag.color), tag.displayName);
             action->setCheckable(true);
-            action->setChecked(std::ranges::find(m_quickFilterTags, keyword) !=
+            action->setChecked(std::ranges::find(m_quickFilterTags, tag.keyword) !=
                                m_quickFilterTags.end());
             connect(action, &QAction::toggled, this,
-                    [this, keyword](const bool checked)
+                    [this, keyword = tag.keyword](const bool checked)
                     {
                         const auto found = std::ranges::find(m_quickFilterTags, keyword);
                         if (checked && found == m_quickFilterTags.end())
@@ -3010,6 +3078,365 @@ namespace javelin::gui::shell
                         applyQuickFilter();
                     });
         }
+    }
+
+    void MainWindow::rebuildMessageTagsMenu()
+    {
+        if (m_tagsMenu != nullptr)
+            populateMessageTagsMenu(*m_tagsMenu);
+    }
+
+    void MainWindow::populateMessageTagsMenu(QMenu& menu)
+    {
+        menu.clear();
+        const auto accountId = activeAccountId();
+        if (!accountId.has_value())
+        {
+            auto* unavailable = menu.addAction(i18n("No mail account selected"));
+            unavailable->setEnabled(false);
+            return;
+        }
+
+        std::vector<std::string> selectedEmailIds;
+        const auto selection = m_messageCommandController->selectedActionItems();
+        if (!selection.empty())
+        {
+            selectedEmailIds =
+                resolveSelectionEmailIds(m_queryReader, *accountId, activeMailboxId(), selection);
+        }
+
+        std::unordered_map<std::string, std::size_t> selectedKeywordCounts;
+        if (!selectedEmailIds.empty())
+        {
+            const auto memberships =
+                m_queryReader.listEmailKeywordMemberships(*accountId, selectedEmailIds);
+            if (const auto* values =
+                    std::get_if<std::vector<javelin::jmap::cache::EmailKeywordMembership>>(
+                        &memberships))
+            {
+                for (const auto& membership : *values)
+                {
+                    for (const auto& keyword : membership.keywords)
+                        ++selectedKeywordCounts[keyword];
+                }
+            }
+        }
+
+        const auto definitions = m_queryReader.listTagDefinitions(*accountId);
+        const auto* tags =
+            std::get_if<std::vector<javelin::jmap::cache::TagDefinition>>(&definitions);
+        if (tags == nullptr)
+        {
+            auto* errorAction = menu.addAction(i18n("Unable to load tags"));
+            errorAction->setEnabled(false);
+        }
+        else if (tags->empty())
+        {
+            auto* emptyAction = menu.addAction(i18n("No tags yet"));
+            emptyAction->setEnabled(false);
+        }
+        else
+        {
+            for (const auto& tag : *tags)
+            {
+                const auto count = selectedKeywordCounts[tag.keyword];
+                const bool allSelected =
+                    !selectedEmailIds.empty() && count == selectedEmailIds.size();
+                const bool someSelected = count > 0 && !allSelected;
+                auto label = tag.displayName;
+                if (someSelected)
+                    label += i18nc("tag is present on only part of a selection", " (some)");
+                auto* action = menu.addAction(tagColorIcon(tag.color), label);
+                action->setCheckable(true);
+                action->setChecked(allSelected);
+                action->setEnabled(!selectedEmailIds.empty());
+                connect(action, &QAction::triggered, this,
+                        [this, keyword = tag.keyword, allSelected]
+                        {
+                            m_messageCommandController->setSelectionTag(
+                                activeAccountId(), activeMailboxId(), keyword, !allSelected);
+                        });
+            }
+        }
+
+        menu.addSeparator();
+        auto* newTag =
+            menu.addAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("New Tag…"));
+        connect(newTag, &QAction::triggered, this, [this] { createTag(true); });
+        auto* manageTags =
+            menu.addAction(QIcon::fromTheme(QStringLiteral("configure")), i18n("Manage Tags…"));
+        connect(manageTags, &QAction::triggered, this, &MainWindow::showTagManager);
+    }
+
+    void MainWindow::createTag(const bool applyToSelection)
+    {
+        const auto accountId = activeAccountId();
+        if (!accountId.has_value())
+            return;
+        bool accepted = false;
+        const auto name = QInputDialog::getText(this, i18n("New Tag"), i18n("Tag name:"),
+                                                QLineEdit::Normal, {}, &accepted)
+                              .trimmed();
+        if (!accepted || name.isEmpty())
+            return;
+        const auto color = QColorDialog::getColor(
+            palette().color(QPalette::Active, QPalette::Highlight), this, i18n("Tag Colour"));
+        if (!color.isValid())
+            return;
+
+        auto task = m_mailCommandPort.saveTagDefinition(javelin::app::SaveMailTagDefinition{
+            .accountId = *accountId,
+            .keyword = std::nullopt,
+            .displayName = name.toStdString(),
+            .color = color.name(QColor::HexRgb).toStdString(),
+        });
+        QCoro::connect(
+            std::move(task), this,
+            [this, accountId = *accountId,
+             applyToSelection](javelin::app::SaveMailTagDefinitionResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    presentError(*error);
+                    return;
+                }
+                const auto& tag = std::get<javelin::app::MailTagDefinition>(result);
+                m_statusBar->showMessage(
+                    i18n("Created tag %1", QString::fromStdString(tag.displayName)), 5000);
+                rebuildQuickFilterTagsMenu();
+                refreshMessageListPreservingSelection();
+                if (applyToSelection && activeAccountId() == std::optional<std::string>{accountId})
+                {
+                    m_messageCommandController->setSelectionTag(accountId, activeMailboxId(),
+                                                                tag.keyword, true);
+                }
+            });
+    }
+
+    void MainWindow::showTagManager()
+    {
+        const auto accountId = activeAccountId();
+        if (!accountId.has_value())
+            return;
+
+        QDialog dialog{this};
+        dialog.setWindowTitle(i18n("Manage Tags"));
+        dialog.resize(480, 360);
+        auto* layout = new QVBoxLayout(&dialog);
+        auto* list = new QListWidget(&dialog);
+        list->setSelectionMode(QAbstractItemView::SingleSelection);
+        layout->addWidget(list, 1);
+
+        auto* controls = new QHBoxLayout;
+        auto* addButton =
+            new QPushButton(QIcon::fromTheme(QStringLiteral("list-add")), i18n("New…"), &dialog);
+        auto* importButton = new QPushButton(QIcon::fromTheme(QStringLiteral("document-import")),
+                                             i18n("Import Keyword…"), &dialog);
+        auto* renameButton = new QPushButton(i18n("Rename…"), &dialog);
+        auto* colorButton = new QPushButton(i18n("Colour…"), &dialog);
+        auto* deleteButton = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-delete")),
+                                             i18n("Delete"), &dialog);
+        controls->addWidget(addButton);
+        controls->addWidget(importButton);
+        controls->addWidget(renameButton);
+        controls->addWidget(colorButton);
+        controls->addWidget(deleteButton);
+        controls->addStretch(1);
+        layout->addLayout(controls);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        layout->addWidget(buttons);
+
+        const QPointer<QListWidget> guardedList{list};
+        const auto reload = [this, guardedList, accountId = *accountId]()
+        {
+            if (guardedList == nullptr)
+                return;
+            const auto previous = guardedList->currentItem() != nullptr
+                                      ? guardedList->currentItem()->data(Qt::UserRole).toString()
+                                      : QString{};
+            guardedList->clear();
+            const auto definitions = m_queryReader.listTagDefinitions(accountId);
+            const auto* tags =
+                std::get_if<std::vector<javelin::jmap::cache::TagDefinition>>(&definitions);
+            if (tags == nullptr)
+                return;
+            for (const auto& tag : *tags)
+            {
+                auto* item =
+                    new QListWidgetItem(tagColorIcon(tag.color), tag.displayName, guardedList);
+                item->setData(Qt::UserRole, QString::fromStdString(tag.keyword));
+                item->setData(Qt::UserRole + 1, tag.color);
+                if (!previous.isEmpty() && item->data(Qt::UserRole).toString() == previous)
+                    guardedList->setCurrentItem(item);
+            }
+            if (guardedList->currentItem() == nullptr && guardedList->count() > 0)
+                guardedList->setCurrentRow(0);
+        };
+        reload();
+
+        const auto save = [this, guardedList, reload, accountId = *accountId](
+                              std::optional<std::string> keyword, QString name, QString color)
+        {
+            auto task = m_mailCommandPort.saveTagDefinition(javelin::app::SaveMailTagDefinition{
+                .accountId = accountId,
+                .keyword = std::move(keyword),
+                .displayName = name.toStdString(),
+                .color = color.toStdString(),
+            });
+            QCoro::connect(
+                std::move(task), this,
+                [this, guardedList, reload](javelin::app::SaveMailTagDefinitionResult result)
+                {
+                    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                    {
+                        presentError(*error);
+                        return;
+                    }
+                    if (guardedList != nullptr)
+                        reload();
+                    rebuildQuickFilterTagsMenu();
+                    refreshMessageListPreservingSelection();
+                });
+        };
+
+        connect(addButton, &QPushButton::clicked, &dialog,
+                [this, save]
+                {
+                    bool accepted = false;
+                    const auto name =
+                        QInputDialog::getText(this, i18n("New Tag"), i18n("Tag name:"),
+                                              QLineEdit::Normal, {}, &accepted)
+                            .trimmed();
+                    if (!accepted || name.isEmpty())
+                        return;
+                    const auto color = QColorDialog::getColor(
+                        palette().color(QPalette::Active, QPalette::Highlight), this,
+                        i18n("Tag Colour"));
+                    if (!color.isValid())
+                        return;
+                    save(std::nullopt, name, color.name(QColor::HexRgb));
+                });
+        connect(importButton, &QPushButton::clicked, &dialog,
+                [this, save, accountId = *accountId]
+                {
+                    const auto rawKeywords = m_queryReader.listUserKeywords(accountId);
+                    const auto definedKeywords = m_queryReader.listTagKeywords(accountId);
+                    const auto* raw = std::get_if<std::vector<std::string>>(&rawKeywords);
+                    const auto* defined = std::get_if<std::vector<std::string>>(&definedKeywords);
+                    if (raw == nullptr || defined == nullptr)
+                    {
+                        m_statusBar->showMessage(i18n("Could not load existing message keywords."),
+                                                 5000);
+                        return;
+                    }
+
+                    QStringList candidates;
+                    for (const auto& keyword : *raw)
+                    {
+                        if (!std::ranges::contains(*defined, keyword))
+                            candidates.push_back(QString::fromStdString(keyword));
+                    }
+                    if (candidates.empty())
+                    {
+                        QMessageBox::information(this, i18n("Import Keyword"),
+                                                 i18n("No unclaimed message keywords were found."));
+                        return;
+                    }
+
+                    bool accepted = false;
+                    const auto keyword = QInputDialog::getItem(this, i18n("Import Keyword"),
+                                                               i18n("Existing keyword:"),
+                                                               candidates, 0, false, &accepted);
+                    if (!accepted || keyword.isEmpty())
+                        return;
+                    const auto name =
+                        QInputDialog::getText(this, i18n("Import Keyword"), i18n("Tag name:"),
+                                              QLineEdit::Normal, keyword, &accepted)
+                            .trimmed();
+                    if (!accepted || name.isEmpty())
+                        return;
+                    const auto color = QColorDialog::getColor(
+                        palette().color(QPalette::Active, QPalette::Highlight), this,
+                        i18n("Tag Colour"));
+                    if (!color.isValid())
+                        return;
+                    save(keyword.toStdString(), name, color.name(QColor::HexRgb));
+                });
+        connect(renameButton, &QPushButton::clicked, &dialog,
+                [this, list, save]
+                {
+                    auto* item = list->currentItem();
+                    if (item == nullptr)
+                        return;
+                    bool accepted = false;
+                    const auto name =
+                        QInputDialog::getText(this, i18n("Rename Tag"), i18n("Tag name:"),
+                                              QLineEdit::Normal, item->text(), &accepted)
+                            .trimmed();
+                    if (!accepted || name.isEmpty())
+                        return;
+                    save(item->data(Qt::UserRole).toString().toStdString(), name,
+                         item->data(Qt::UserRole + 1).toString());
+                });
+        connect(colorButton, &QPushButton::clicked, &dialog,
+                [this, list, save]
+                {
+                    auto* item = list->currentItem();
+                    if (item == nullptr)
+                        return;
+                    QColor current{item->data(Qt::UserRole + 1).toString()};
+                    if (!current.isValid())
+                        current = palette().color(QPalette::Active, QPalette::Highlight);
+                    const auto color = QColorDialog::getColor(current, this, i18n("Tag Colour"));
+                    if (!color.isValid())
+                        return;
+                    save(item->data(Qt::UserRole).toString().toStdString(), item->text(),
+                         color.name(QColor::HexRgb));
+                });
+        connect(deleteButton, &QPushButton::clicked, &dialog,
+                [this, list, accountId = *accountId]
+                {
+                    auto* item = list->currentItem();
+                    if (item == nullptr)
+                        return;
+                    QMessageBox confirmation{QMessageBox::Question, i18n("Delete Tag"),
+                                             i18n("Delete “%1”?\n\nThis will remove the tag from "
+                                                  "all messages and delete it from your tag list.",
+                                                  item->text()),
+                                             QMessageBox::NoButton, this};
+                    auto* deleteTagButton =
+                        confirmation.addButton(i18n("Delete"), QMessageBox::DestructiveRole);
+                    confirmation.addButton(QMessageBox::Cancel);
+                    confirmation.exec();
+                    if (confirmation.clickedButton() != deleteTagButton)
+                        return;
+                    const auto keyword = item->data(Qt::UserRole).toString().toStdString();
+                    auto task = m_mailCommandPort.deleteTag(accountId, keyword);
+                    QCoro::connect(std::move(task), this,
+                                   [this, keyword](javelin::app::QueuedMailTagDeletionResult result)
+                                   {
+                                       if (const auto* error =
+                                               std::get_if<javelin::jmap::OperationError>(&result))
+                                       {
+                                           presentError(*error);
+                                           return;
+                                       }
+                                       if (const auto found =
+                                               std::ranges::find(m_quickFilterTags, keyword);
+                                           found != m_quickFilterTags.end())
+                                       {
+                                           m_quickFilterTags.erase(found);
+                                           applyQuickFilter();
+                                       }
+                                       rebuildQuickFilterTagsMenu();
+                                       refreshMessageListPreservingSelection();
+                                       m_statusBar->showMessage(
+                                           i18n("Tag deletion queued in Background Tasks."), 5000);
+                                   });
+                    delete list->takeItem(list->row(item));
+                });
+        dialog.exec();
     }
 
     void MainWindow::updateMessageActions()
@@ -3048,6 +3475,8 @@ namespace javelin::gui::shell
         m_junkAction->setEnabled(actions.junk);
         m_junkAction->setText(selectedMessagesAreJunk() ? i18nc("@action", "Not &Junk")
                                                         : i18nc("@action", "&Junk"));
+        m_tagsAction->setEnabled(accountId.has_value() &&
+                                 (activeTabIsMailbox() || activeTabIsSearch()));
         m_deleteAction->setEnabled(actions.deleteFromMailbox);
         m_permanentDeleteAction->setEnabled(actions.permanentDelete);
         m_moveAction->setEnabled(actions.move);
@@ -3193,6 +3622,7 @@ namespace javelin::gui::shell
         m_archiveAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/archive.svg")));
         m_markUnreadAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/unread.svg")));
         m_junkAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/spam.svg")));
+        m_tagsAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/tag.svg")));
         m_deleteAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/delete.svg")));
         m_advancedSearchAction->setIcon(
             icon(QStringLiteral(":/icons/thunderbird-icons/search.svg")));
@@ -3553,6 +3983,7 @@ namespace javelin::gui::shell
                 menu.addAction(m_permanentDeleteAction);
             }
             menu.addAction(m_junkAction);
+            menu.addAction(m_tagsAction);
             menu.addSeparator();
             auto* moveMenu = menu.addMenu(i18n("Move to"));
             auto* copyMenu = menu.addMenu(i18n("Copy to"));

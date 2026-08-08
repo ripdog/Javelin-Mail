@@ -74,6 +74,60 @@ TEST_CASE("work scheduler recovers running work and preserves explicit pauses",
     CHECK(pausedRecovery.mayStartBackgroundNetwork());
 }
 
+TEST_CASE("work scheduler preserves tag deletion jobs across restart",
+          "[app][work-scheduler][tags]")
+{
+    if (QCoreApplication::instance() == nullptr)
+    {
+        static int argc = 1;
+        static char name[] = "work-scheduler-tag-deletion-test";
+        static char* argv[]{name, nullptr};
+        static const auto application = std::make_unique<QCoreApplication>(argc, argv);
+        Q_UNUSED(application);
+    }
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("work-scheduler-tag-deletion-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+
+    {
+        javelin::app::WorkScheduler scheduler{connection, nullptr, std::chrono::milliseconds{0}};
+        REQUIRE_FALSE(scheduler
+                          .ensure({.jobId = "tag-delete:abc",
+                                   .parentJobId = std::nullopt,
+                                   .accountId = "account-1",
+                                   .kind = javelin::app::WorkKind::TagDeletion,
+                                   .priority = javelin::app::WorkPriority::Bulk,
+                                   .title = QStringLiteral("Delete tag Project X"),
+                                   .checkpointJson = QStringLiteral("{\"keyword\":\"project-x\"}"),
+                                   .restartCompleted = true})
+                          .has_value());
+        REQUIRE_FALSE(scheduler
+                          .update("tag-delete:abc", javelin::app::WorkStatus::Running,
+                                  {.completedUnits = 25,
+                                   .totalUnits = 50,
+                                   .completedBytes = 0,
+                                   .totalBytes = std::nullopt,
+                                   .detail = QStringLiteral("Removing tag")},
+                                  QStringLiteral("{\"keyword\":\"project-x\"}"))
+                          .has_value());
+    }
+
+    javelin::app::WorkScheduler recovered{connection, nullptr, std::chrono::milliseconds{0}};
+    const auto result = recovered.find("tag-delete:abc");
+    REQUIRE(std::holds_alternative<std::optional<javelin::app::WorkRecord>>(result));
+    const auto& job = std::get<std::optional<javelin::app::WorkRecord>>(result);
+    REQUIRE(job.has_value());
+    CHECK(job->kind == javelin::app::WorkKind::TagDeletion);
+    CHECK(job->status == javelin::app::WorkStatus::Queued);
+    CHECK(job->checkpointJson == QStringLiteral("{\"keyword\":\"project-x\"}"));
+    CHECK(javelin::app::classify(job->kind) == javelin::app::WorkClass::Maintenance);
+}
+
 TEST_CASE("work scheduler requeues configured failed work and preserves checkpoints",
           "[app][work-scheduler]")
 {

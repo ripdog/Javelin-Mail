@@ -15,6 +15,9 @@
 #include <QStyle>
 #include <QToolTip>
 
+#include <algorithm>
+#include <cmath>
+
 namespace javelin::gui::messages
 {
     namespace
@@ -58,6 +61,11 @@ namespace javelin::gui::messages
         // an indicator rather than another action.
         constexpr int buttonChevronSize = 12;
         constexpr int buttonTextChevronGap = 6;
+        constexpr int tagPillHeight = 22;
+        constexpr int tagPillHorizontalPadding = 7;
+        constexpr int tagPillIconSize = 14;
+        constexpr int tagPillIconTextGap = 4;
+        constexpr int tagPillMaxWidth = 160;
         constexpr int memberRowHeight = 100;
         constexpr int parentRowHeight = 104;
 
@@ -167,6 +175,80 @@ namespace javelin::gui::messages
             }
             return QRect{starButtonRect(contentRect).left() - buttonSize - buttonGap,
                          contentRect.bottom() - buttonMargin, buttonSize, buttonSize};
+        }
+
+        [[nodiscard]] double linearSrgbChannel(const double channel)
+        {
+            return channel <= 0.04045 ? channel / 12.92 : std::pow((channel + 0.055) / 1.055, 2.4);
+        }
+
+        [[nodiscard]] QColor readablePillForeground(const QColor& background)
+        {
+            const double luminance = 0.2126 * linearSrgbChannel(background.redF()) +
+                                     0.7152 * linearSrgbChannel(background.greenF()) +
+                                     0.0722 * linearSrgbChannel(background.blueF());
+            const double blackContrast = (luminance + 0.05) / 0.05;
+            const double whiteContrast = 1.05 / (luminance + 0.05);
+            return blackContrast >= whiteContrast ? QColor{Qt::black} : QColor{Qt::white};
+        }
+
+        void drawTagPill(QPainter* painter, const QStyleOptionViewItem& option, const QRect& rect,
+                         const QString& name, QColor background)
+        {
+            if (!background.isValid())
+                background = option.palette.color(QPalette::Highlight);
+            const auto foreground = readablePillForeground(background);
+
+            painter->save();
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(background);
+            painter->drawRoundedRect(rect, rect.height() / 2.0, rect.height() / 2.0);
+
+            QColor outline = foreground;
+            outline.setAlpha(48);
+            painter->setPen(QPen{outline, 1});
+            painter->setBrush(Qt::NoBrush);
+            painter->drawRoundedRect(rect.adjusted(0, 0, -1, -1), rect.height() / 2.0,
+                                     rect.height() / 2.0);
+
+            const auto tagIcon = javelin::gui::themedSvgIcon(
+                QStringLiteral(":/icons/thunderbird-icons/tag.svg"), foreground);
+            const QRect iconRect{rect.left() + tagPillHorizontalPadding,
+                                 rect.center().y() - tagPillIconSize / 2, tagPillIconSize,
+                                 tagPillIconSize};
+            tagIcon.paint(painter, iconRect);
+
+            const int textLeft = iconRect.right() + 1 + tagPillIconTextGap;
+            const QRect textRect{
+                textLeft, rect.top(),
+                std::max(0, rect.right() - tagPillHorizontalPadding - textLeft + 1), rect.height()};
+            painter->setFont(option.font);
+            painter->setPen(foreground);
+            painter->drawText(
+                textRect, Qt::AlignLeft | Qt::AlignVCenter,
+                option.fontMetrics.elidedText(name, Qt::ElideRight, textRect.width()));
+            painter->restore();
+        }
+
+        [[nodiscard]] int drawTagPills(QPainter* painter, const QStyleOptionViewItem& option,
+                                       const QStringList& names, const QStringList& colors,
+                                       int left, const int right, const int centerY)
+        {
+            const auto count = std::min(names.size(), colors.size());
+            for (qsizetype index = 0; index < count; ++index)
+            {
+                const int naturalWidth = 2 * tagPillHorizontalPadding + tagPillIconSize +
+                                         tagPillIconTextGap +
+                                         option.fontMetrics.horizontalAdvance(names[index]);
+                const int width = std::min(tagPillMaxWidth, naturalWidth);
+                if (left + width - 1 > right)
+                    break;
+
+                const QRect pillRect{left, centerY - tagPillHeight / 2, width, tagPillHeight};
+                drawTagPill(painter, option, pillRect, names[index], QColor{colors[index]});
+                left = pillRect.right() + 1 + buttonGap;
+            }
+            return left;
         }
 
         void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRect& rect,
@@ -400,20 +482,28 @@ namespace javelin::gui::messages
         drawButton(painter, option, repliesRect, repliesIcon, repliesLabel, repliesHovered,
                    repliesPressed, chevronIcon);
 
+        const auto attachmentRect = attachmentButtonRect(contentRect, hasAttachment);
+        const auto starRect = starButtonRect(contentRect);
+        const int bottomContentRight =
+            (attachmentRect.isEmpty() ? starRect.left() : attachmentRect.left()) - buttonGap;
+        int bottomContentLeft =
+            repliesRect.isEmpty() ? contentRect.left() : repliesRect.right() + 1 + buttonGap;
+        const auto tagNames = index.data(MessageListModel::TagNamesRole).toStringList();
+        const auto tagColors = index.data(MessageListModel::TagColorsRole).toStringList();
+        bottomContentLeft =
+            drawTagPills(painter, option, tagNames, tagColors, bottomContentLeft,
+                         bottomContentRight, contentRect.bottom() - buttonMargin + buttonSize / 2);
+
         if (index.data(MessageListModel::IsSearchResultRole).toBool())
         {
             const auto mailboxNames = index.data(MessageListModel::MailboxNamesRole)
                                           .toStringList()
                                           .join(QStringLiteral(", "));
-            if (!mailboxNames.isEmpty())
+            if (!mailboxNames.isEmpty() && bottomContentLeft <= bottomContentRight)
             {
-                const int left =
-                    repliesRect.isEmpty() ? contentRect.left() : repliesRect.right() + buttonGap;
-                const auto attachmentRect = attachmentButtonRect(contentRect, hasAttachment);
-                const int right = attachmentRect.isEmpty() ? starButtonRect(contentRect).left()
-                                                           : attachmentRect.left();
-                const QRect mailboxRect{left, contentRect.bottom() - buttonMargin,
-                                        std::max(0, right - buttonGap - left), buttonSize};
+                const QRect mailboxRect{bottomContentLeft, contentRect.bottom() - buttonMargin,
+                                        std::max(0, bottomContentRight - bottomContentLeft + 1),
+                                        buttonSize};
                 const auto folderIcon = javelin::gui::themedSvgIcon(
                     QStringLiteral(":/icons/thunderbird-icons/folder.svg"), textColor);
                 const QRect folderIconRect{mailboxRect.left(),
@@ -429,10 +519,9 @@ namespace javelin::gui::messages
                                                                 mailboxTextRect.width()));
             }
         }
-        drawButton(painter, option, attachmentButtonRect(contentRect, hasAttachment),
-                   attachmentIcon, QString{}, attachmentHovered, attachmentPressed);
-        drawButton(painter, option, starButtonRect(contentRect), starIcon, QString{}, starHovered,
-                   starPressed);
+        drawButton(painter, option, attachmentRect, attachmentIcon, QString{}, attachmentHovered,
+                   attachmentPressed);
+        drawButton(painter, option, starRect, starIcon, QString{}, starHovered, starPressed);
 
         painter->restore();
     }

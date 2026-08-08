@@ -46,6 +46,13 @@ namespace javelin::jmap::cache
         listUserKeywords(std::string_view accountId,
                          std::string_view mailboxId = {}) const override;
         [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
+        listTagKeywords(std::string_view accountId) const override;
+        [[nodiscard]] std::variant<std::vector<EmailKeywordMembership>, DatabaseError>
+        listEmailKeywordMemberships(std::string_view accountId,
+                                    const std::vector<std::string>& emailIds) const override;
+        [[nodiscard]] std::variant<std::vector<TagDefinition>, DatabaseError>
+        listTagDefinitions(std::string_view accountId) const override;
+        [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
         listContactEmailAddresses() const;
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         listFilteredMailboxMessages(std::string_view accountId, std::string_view mailboxId,

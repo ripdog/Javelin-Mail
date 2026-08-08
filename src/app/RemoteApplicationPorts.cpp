@@ -454,6 +454,31 @@ namespace javelin::app
             std::move(accountId), std::move(emailId), flagged);
     }
 
+    QCoro::Task<QueuedMessageSelectionMutationResult> RemoteMailCommandPort::queueSetMessagesTag(
+        std::string accountId, std::optional<std::string> sourceMailboxId,
+        MessageSelection selection, std::string keyword, const bool enabled)
+    {
+        return call<QueuedMessageSelectionMutationResult>(
+            m_client, javelin::protocol::RemoteActionKind::MailQueueSetTag, std::move(accountId),
+            std::move(sourceMailboxId), std::move(selection), std::move(keyword), enabled);
+    }
+
+    QCoro::Task<SaveMailTagDefinitionResult>
+    RemoteMailCommandPort::saveTagDefinition(SaveMailTagDefinition definition)
+    {
+        return call<SaveMailTagDefinitionResult>(
+            m_client, javelin::protocol::RemoteActionKind::MailSaveTagDefinition,
+            std::move(definition));
+    }
+
+    QCoro::Task<QueuedMailTagDeletionResult> RemoteMailCommandPort::deleteTag(std::string accountId,
+                                                                              std::string keyword)
+    {
+        return call<QueuedMailTagDeletionResult>(m_client,
+                                                 javelin::protocol::RemoteActionKind::MailDeleteTag,
+                                                 std::move(accountId), std::move(keyword));
+    }
+
     QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
     RemoteMailCommandPort::submitPendingEmailMutations(std::string accountId,
                                                        std::optional<std::string> operationGroupId)

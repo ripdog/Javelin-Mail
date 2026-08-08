@@ -29,6 +29,7 @@ namespace
             .isJunk = false,
             .from = std::nullopt,
             .mailboxNames = {},
+            .tags = {},
         };
     }
 } // namespace
@@ -51,6 +52,29 @@ TEST_CASE("message list model displays a placeholder for missing subjects",
               .toString() == QStringLiteral("<No Subject>"));
     CHECK(model.data(model.index(1), javelin::gui::messages::MessageListModel::SubjectRole)
               .toString() == QStringLiteral("<No Subject>"));
+}
+
+TEST_CASE("message list model exposes tags already carried by message rows",
+          "[gui][messages][model][tags]")
+{
+    javelin::jmap::cache::DatabaseConnection connection;
+    javelin::jmap::cache::QueryService queryService{connection};
+    javelin::gui::messages::MessageListModel model{queryService};
+
+    auto tagged = item("email-1", "thread-1");
+    tagged.tags.push_back(javelin::jmap::cache::MessageListTag{
+        .keyword = "work",
+        .displayName = QStringLiteral("Work Items"),
+        .color = QStringLiteral("#123456"),
+    });
+    model.setItems(std::optional<std::string>{"account-1"}, std::optional<std::string>{"mailbox-1"},
+                   {std::move(tagged)});
+
+    REQUIRE(model.rowCount() == 1);
+    CHECK(model.data(model.index(0), javelin::gui::messages::MessageListModel::TagNamesRole)
+              .toStringList() == QStringList{QStringLiteral("Work Items")});
+    CHECK(model.data(model.index(0), javelin::gui::messages::MessageListModel::TagColorsRole)
+              .toStringList() == QStringList{QStringLiteral("#123456")});
 }
 
 TEST_CASE("message list model marks one cached row read without resetting its list",

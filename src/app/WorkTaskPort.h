@@ -25,6 +25,7 @@ namespace javelin::app
         VaultProjection,
         ContactRefresh,
         CalendarRefresh,
+        TagDeletion,
         Maintenance,
     };
 
@@ -93,6 +94,8 @@ namespace javelin::app
             return "contact_refresh";
         case WorkKind::CalendarRefresh:
             return "calendar_refresh";
+        case WorkKind::TagDeletion:
+            return "tag_deletion";
         case WorkKind::Maintenance:
             return "maintenance";
         }

@@ -198,8 +198,13 @@ namespace javelin::app
             case Kind::MailQueueMarkUnread:
             case Kind::MailQueueMarkRead:
             case Kind::MailQueueSetFlagged:
+            case Kind::MailQueueSetTag:
             case Kind::MailSubmitPending:
                 return {Domain::MailQueryWindows, Domain::MessageMetadata, Domain::History};
+            case Kind::MailSaveTagDefinition:
+                return {Domain::MessageMetadata};
+            case Kind::MailDeleteTag:
+                return {Domain::MailQueryWindows, Domain::MessageMetadata, Domain::BackgroundJobs};
             case Kind::SieveSave:
             case Kind::SieveDelete:
             case Kind::SieveActivate:
@@ -848,6 +853,33 @@ namespace javelin::app
                 {
                     return launch(m_services.mailCommandPort().queueSetEmailFlagged(
                         std::move(accountId), std::move(emailId), flagged));
+                });
+        case Kind::MailQueueSetTag:
+            return decodeAndApply<std::string, std::optional<std::string>, MessageSelection,
+                                  std::string, bool>(
+                command.payload, invalidPayload,
+                [&](std::string accountId, std::optional<std::string> mailboxId,
+                    MessageSelection selection, std::string keyword, const bool enabled)
+                {
+                    return launch(m_services.mailCommandPort().queueSetMessagesTag(
+                        std::move(accountId), std::move(mailboxId), std::move(selection),
+                        std::move(keyword), enabled));
+                });
+        case Kind::MailSaveTagDefinition:
+            return decodeAndApply<SaveMailTagDefinition>(
+                command.payload, invalidPayload,
+                [&](SaveMailTagDefinition definition)
+                {
+                    return launch(
+                        m_services.mailCommandPort().saveTagDefinition(std::move(definition)));
+                });
+        case Kind::MailDeleteTag:
+            return decodeAndApply<std::string, std::string>(
+                command.payload, invalidPayload,
+                [&](std::string accountId, std::string keyword)
+                {
+                    return launch(m_services.mailCommandPort().deleteTag(std::move(accountId),
+                                                                         std::move(keyword)));
                 });
         case Kind::MailSubmitPending:
             return decodeAndApply<std::string, std::optional<std::string>>(

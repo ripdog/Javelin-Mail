@@ -136,6 +136,13 @@ namespace javelin::app
                                                                               std::string emailId);
         [[nodiscard]] QueuedMessageSelectionMutationResult
         queueSetEmailFlagged(std::string accountId, std::string emailId, bool flagged);
+        [[nodiscard]] QueuedMessageSelectionMutationResult
+        queueSetMessagesTag(std::string accountId, std::optional<std::string> sourceMailboxId,
+                            MessageSelection selection, std::string keyword, bool enabled);
+        [[nodiscard]] SaveMailTagDefinitionResult
+        saveTagDefinition(SaveMailTagDefinition definition);
+        [[nodiscard]] QueuedMailTagDeletionResult deleteTag(std::string accountId,
+                                                            std::string keyword);
         [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
         queueExactEmailMutation(std::string accountId,
                                 javelin::jmap::EmailMailboxMutation mutation) override;
@@ -276,6 +283,10 @@ namespace javelin::app
         void startSessionRefresh(const std::string& ownerAccountId,
                                  const AccountConnectionSettings& settings);
         void schedulePendingEmailMutationReplay(std::string accountId);
+        void scheduleTagDeletionPump();
+        void pumpTagDeletions();
+        [[nodiscard]] QCoro::Task<void> runTagDeletion(std::string jobId, std::string accountId,
+                                                       std::string keyword);
         void releaseMailboxObservation(
             javelin::jmap::sync::MailboxInterestRegistry::ObservationId observationId);
         [[nodiscard]] bool beginSearchWindowRequest(const std::string& leaseKey);
@@ -309,6 +320,7 @@ namespace javelin::app
         std::unordered_set<std::string> m_pendingMutationReplaysInFlight;
         std::unordered_set<std::string> m_pendingContactRefreshes;
         std::unordered_set<std::string> m_runningContactRefreshes;
+        std::unordered_set<std::string> m_runningTagDeletions;
         struct SearchWindowRequestState
         {
             std::size_t activeRequests = 0;
@@ -316,6 +328,7 @@ namespace javelin::app
         };
         std::unordered_map<std::string, SearchWindowRequestState> m_searchWindowRequests;
         bool m_contactRefreshPumpScheduled = false;
+        bool m_tagDeletionPumpScheduled = false;
         javelin::jmap::sync::MailboxInterestRegistry m_mailboxInterests;
     };
 

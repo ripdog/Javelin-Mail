@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <ranges>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace javelin::jmap::sync
@@ -117,7 +118,8 @@ namespace javelin::jmap::sync
                         EmailMailboxMutation mutation,
                         std::unordered_map<std::string, domain::Email>& effectiveEmails,
                         std::unordered_map<std::string, EmailMutationBase>& mutationBases,
-                        std::vector<std::string>& emailOrder)
+                        std::vector<std::string>& emailOrder,
+                        std::unordered_set<std::string>& uncachedEmailIds)
         {
             if (const auto error = validateMutation(mutation))
                 return *error;
@@ -130,11 +132,24 @@ namespace javelin::jmap::sync
                 if (const auto* error = std::get_if<cache::DatabaseError>(&found))
                     return operationError(*error);
                 const auto& email = std::get<std::optional<domain::Email>>(found);
-                if (!email.has_value())
+                domain::Email initial;
+                if (email.has_value())
+                {
+                    initial = *email;
+                }
+                else if (mutation.authoritativeMailboxIds.has_value())
+                {
+                    initial.id = mutation.emailId;
+                    initial.mailboxIds = *mutation.authoritativeMailboxIds;
+                    initial.keywords = *mutation.authoritativeKeywords;
+                    uncachedEmailIds.insert(mutation.emailId);
+                }
+                else
+                {
                     return OperationError{
                         .message = QStringLiteral("The selected message is not cached locally."),
                     };
-                auto initial = *email;
+                }
                 if (mutation.authoritativeMailboxIds.has_value())
                 {
                     initial.mailboxIds = *mutation.authoritativeMailboxIds;
@@ -231,14 +246,16 @@ namespace javelin::jmap::sync
         std::unordered_map<std::string, domain::Email> effectiveEmails;
         std::unordered_map<std::string, EmailMutationBase> mutationBases;
         std::vector<std::string> emailOrder;
+        std::unordered_set<std::string> uncachedEmailIds;
         std::vector<EmailMutationRecord> records;
         std::vector<QueuedEmailMutation> queued;
         records.reserve(mutations.size());
         queued.reserve(mutations.size());
         for (auto& mutation : mutations)
         {
-            auto prepared = prepareMutation(connection, accountId, std::move(mutation),
-                                            effectiveEmails, mutationBases, emailOrder);
+            auto prepared =
+                prepareMutation(connection, accountId, std::move(mutation), effectiveEmails,
+                                mutationBases, emailOrder, uncachedEmailIds);
             if (const auto* error = std::get_if<OperationError>(&prepared))
                 return *error;
             auto value = std::get<PreparedEmailMutation>(std::move(prepared));
@@ -249,7 +266,10 @@ namespace javelin::jmap::sync
         std::vector<domain::Email> projections;
         projections.reserve(emailOrder.size());
         for (const auto& emailId : emailOrder)
-            projections.push_back(std::move(effectiveEmails.at(emailId)));
+        {
+            if (!uncachedEmailIds.contains(emailId))
+                projections.push_back(std::move(effectiveEmails.at(emailId)));
+        }
         EmailMutationJournal journal{connection};
         if (const auto error = journal.queueGroup(records, projections))
             return operationError(*error);

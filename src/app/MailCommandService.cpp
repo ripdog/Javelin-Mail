@@ -47,6 +47,26 @@ namespace javelin::app
         co_return m_service.queueSetEmailFlagged(std::move(accountId), std::move(emailId), flagged);
     }
 
+    QCoro::Task<QueuedMessageSelectionMutationResult> MailCommandService::queueSetMessagesTag(
+        std::string accountId, std::optional<std::string> sourceMailboxId,
+        MessageSelection selection, std::string keyword, const bool enabled)
+    {
+        co_return m_service.queueSetMessagesTag(std::move(accountId), std::move(sourceMailboxId),
+                                                std::move(selection), std::move(keyword), enabled);
+    }
+
+    QCoro::Task<SaveMailTagDefinitionResult>
+    MailCommandService::saveTagDefinition(SaveMailTagDefinition definition)
+    {
+        co_return m_service.saveTagDefinition(std::move(definition));
+    }
+
+    QCoro::Task<QueuedMailTagDeletionResult> MailCommandService::deleteTag(std::string accountId,
+                                                                           std::string keyword)
+    {
+        co_return m_service.deleteTag(std::move(accountId), std::move(keyword));
+    }
+
     QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
     MailCommandService::submitPendingEmailMutations(std::string accountId,
                                                     std::optional<std::string> operationGroupId)

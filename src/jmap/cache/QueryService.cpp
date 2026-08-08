@@ -5,6 +5,7 @@
 
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
+#include "jmap/domain/MailKeywords.h"
 
 #include <glaze/glaze.hpp>
 
@@ -13,6 +14,7 @@
 #include <QSqlError>
 #include <QSqlQuery>
 
+#include <unordered_map>
 #include <unordered_set>
 
 namespace javelin::jmap::cache
@@ -28,6 +30,135 @@ namespace javelin::jmap::cache
                 .code = DatabaseErrorCode::QueryFailed,
                 .message = operation + QStringLiteral(": ") + query.lastError().text(),
             };
+        }
+
+        [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
+        queryUserKeywords(const DatabaseReadView& connection, const std::string_view accountId,
+                          const std::string_view mailboxId = {})
+        {
+            QSqlQuery query{connection.database()};
+            if (mailboxId.empty())
+            {
+                query.prepare(QStringLiteral(
+                    "SELECT DISTINCT k.keyword FROM email_keywords k "
+                    "WHERE k.account_id=:account_id AND NOT EXISTS(SELECT 1 FROM background_jobs j "
+                    "WHERE j.account_id=k.account_id AND j.kind='tag_deletion' "
+                    "AND j.status NOT IN ('failed','complete') "
+                    "AND json_extract(j.checkpoint_json,'$.keyword')=k.keyword COLLATE NOCASE) "
+                    "ORDER BY k.keyword COLLATE NOCASE"));
+            }
+            else
+            {
+                query.prepare(QStringLiteral(
+                    "SELECT DISTINCT k.keyword FROM email_keywords k "
+                    "JOIN email_mailboxes em ON em.account_id=k.account_id AND "
+                    "em.email_id=k.email_id "
+                    "WHERE k.account_id=:account_id AND em.mailbox_id=:mailbox_id "
+                    "AND NOT EXISTS(SELECT 1 FROM background_jobs j "
+                    "WHERE j.account_id=k.account_id AND j.kind='tag_deletion' "
+                    "AND j.status NOT IN ('failed','complete') "
+                    "AND json_extract(j.checkpoint_json,'$.keyword')=k.keyword COLLATE NOCASE) "
+                    "ORDER BY k.keyword COLLATE NOCASE"));
+                query.bindValue(QStringLiteral(":mailbox_id"),
+                                QString::fromStdString(std::string{mailboxId}));
+            }
+            query.bindValue(QStringLiteral(":account_id"),
+                            QString::fromStdString(std::string{accountId}));
+            if (!query.exec())
+                return makeQueryError(QStringLiteral("List message user keywords"), query);
+
+            std::vector<std::string> keywords;
+            while (query.next())
+            {
+                auto keyword = query.value(0).toString().toStdString();
+                if (!javelin::jmap::domain::hasStandardKeywordSemantics(keyword))
+                    keywords.push_back(std::move(keyword));
+            }
+            return keywords;
+        }
+
+        [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
+        queryTagKeywords(const DatabaseReadView& connection, const std::string_view accountId)
+        {
+            QSqlQuery query{connection.database()};
+            query.prepare(QStringLiteral(
+                "SELECT d.keyword FROM mail_tag_definitions d "
+                "WHERE d.account_id=:account_id AND NOT EXISTS(SELECT 1 FROM background_jobs j "
+                "WHERE j.account_id=d.account_id AND j.kind='tag_deletion' "
+                "AND j.status NOT IN ('failed','complete') "
+                "AND json_extract(j.checkpoint_json,'$.keyword')=d.keyword COLLATE NOCASE) "
+                "ORDER BY d.sort_order,d.display_name COLLATE NOCASE,d.keyword"));
+            query.bindValue(QStringLiteral(":account_id"),
+                            QString::fromStdString(std::string{accountId}));
+            if (!query.exec())
+                return makeQueryError(QStringLiteral("List mail tag keywords"), query);
+
+            std::vector<std::string> keywords;
+            while (query.next())
+                keywords.push_back(query.value(0).toString().toStdString());
+            return keywords;
+        }
+
+        [[nodiscard]] std::optional<DatabaseError>
+        attachMessageTags(const DatabaseReadView& connection, const std::string_view accountId,
+                          std::vector<MessageListItem>& items)
+        {
+            if (items.empty())
+                return std::nullopt;
+
+            std::vector<std::string> emailIds;
+            emailIds.reserve(items.size());
+            std::unordered_map<std::string, MessageListItem*> itemsById;
+            itemsById.reserve(items.size());
+            for (auto& item : items)
+            {
+                item.tags.clear();
+                emailIds.push_back(item.emailId);
+                itemsById.emplace(item.emailId, &item);
+            }
+
+            std::string emailIdsJson;
+            if (const auto error = glz::write_json(emailIds, emailIdsJson))
+            {
+                Q_UNUSED(error);
+                return DatabaseError{
+                    .code = DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Serialize message ids for tag lookup failed."),
+                };
+            }
+
+            QSqlQuery query{connection.database()};
+            query.prepare(QStringLiteral(
+                "WITH requested AS MATERIALIZED ("
+                " SELECT value AS email_id,CAST(key AS INTEGER) AS sort_index "
+                " FROM json_each(:email_ids)) "
+                "SELECT r.email_id,d.keyword,d.display_name,d.color FROM requested r "
+                "JOIN email_keywords k ON k.account_id=:account_id AND k.email_id=r.email_id "
+                "JOIN mail_tag_definitions d ON d.account_id=k.account_id "
+                " AND d.keyword=k.keyword COLLATE NOCASE "
+                "WHERE NOT EXISTS(SELECT 1 FROM background_jobs j "
+                " WHERE j.account_id=d.account_id AND j.kind='tag_deletion' "
+                " AND j.status NOT IN ('failed','complete') "
+                " AND json_extract(j.checkpoint_json,'$.keyword')=d.keyword COLLATE NOCASE) "
+                "ORDER BY r.sort_index,d.sort_order,d.display_name COLLATE NOCASE,d.keyword"));
+            query.bindValue(QStringLiteral(":account_id"),
+                            QString::fromStdString(std::string{accountId}));
+            query.bindValue(QStringLiteral(":email_ids"), QString::fromStdString(emailIdsJson));
+            if (!query.exec())
+                return makeQueryError(QStringLiteral("Load message tags"), query);
+
+            while (query.next())
+            {
+                const auto found = itemsById.find(query.value(0).toString().toStdString());
+                if (found == itemsById.end())
+                    continue;
+                found->second->tags.push_back(MessageListTag{
+                    .keyword = query.value(1).toString().toStdString(),
+                    .displayName = query.value(2).toString(),
+                    .color = query.value(3).toString(),
+                });
+            }
+            return std::nullopt;
         }
 
         [[nodiscard]] QString
@@ -154,9 +285,31 @@ namespace javelin::jmap::cache
             }
             else if (criteria.taggedOnly)
             {
-                result.sql += QStringLiteral(
-                    " AND EXISTS(SELECT 1 FROM email_keywords k WHERE k.account_id=e.account_id "
-                    "AND k.email_id=e.email_id AND k.keyword NOT LIKE '$%')");
+                const auto keywordsResult = queryTagKeywords(connection, accountId);
+                if (const auto* error = std::get_if<DatabaseError>(&keywordsResult))
+                    return *error;
+                const auto& keywords = std::get<std::vector<std::string>>(keywordsResult);
+                if (keywords.empty())
+                {
+                    result.sql += QStringLiteral(" AND 0");
+                }
+                else
+                {
+                    std::string tagsJson;
+                    if (const auto error = glz::write_json(keywords, tagsJson))
+                    {
+                        Q_UNUSED(error);
+                        return DatabaseError{
+                            .code = DatabaseErrorCode::QueryFailed,
+                            .message = QStringLiteral("Serialize quick-filter tags failed."),
+                        };
+                    }
+                    result.tagsJson = QString::fromStdString(tagsJson);
+                    result.sql += QStringLiteral(
+                        " AND EXISTS(SELECT 1 FROM email_keywords k "
+                        "JOIN json_each(:filter_tags) t ON t.value=k.keyword "
+                        "WHERE k.account_id=e.account_id AND k.email_id=e.email_id)");
+                }
             }
 
             const auto quickText = criteria.quickText.has_value()
@@ -528,6 +681,8 @@ namespace javelin::jmap::cache
             items.push_back(std::move(item));
         }
 
+        if (const auto error = attachMessageTags(m_connection, accountId, items))
+            return *error;
         return items;
     }
 
@@ -759,6 +914,8 @@ namespace javelin::jmap::cache
             }
             items.push_back(std::move(item));
         }
+        if (const auto error = attachMessageTags(m_connection, accountId, items))
+            return *error;
         return items;
     }
 
@@ -915,6 +1072,8 @@ namespace javelin::jmap::cache
             items.push_back(std::move(item));
         }
 
+        if (const auto error = attachMessageTags(m_connection, accountId, items))
+            return *error;
         return items;
     }
 
@@ -1340,6 +1499,8 @@ namespace javelin::jmap::cache
             items.push_back(std::move(item));
         }
 
+        if (const auto error = attachMessageTags(m_connection, accountId, items))
+            return *error;
         return items;
     }
 
@@ -1439,6 +1600,8 @@ namespace javelin::jmap::cache
             items.push_back(std::move(item));
         }
 
+        if (const auto error = attachMessageTags(m_connection, accountId, items))
+            return *error;
         return items;
     }
 
@@ -1485,34 +1648,100 @@ namespace javelin::jmap::cache
     {
         if (const auto error = m_connection.validate())
             return *error;
+        return queryUserKeywords(m_connection, accountId, mailboxId);
+    }
 
+    std::variant<std::vector<std::string>, DatabaseError>
+    QueryService::listTagKeywords(const std::string_view accountId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        return queryTagKeywords(m_connection, accountId);
+    }
+
+    std::variant<std::vector<EmailKeywordMembership>, DatabaseError>
+    QueryService::listEmailKeywordMemberships(const std::string_view accountId,
+                                              const std::vector<std::string>& emailIds) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        if (emailIds.empty())
+            return std::vector<EmailKeywordMembership>{};
+
+        std::string idsJson;
+        if (const auto error = glz::write_json(emailIds, idsJson))
+        {
+            Q_UNUSED(error);
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Serialize email ids for keyword lookup failed."),
+            };
+        }
         QSqlQuery query{m_connection.database()};
-        if (mailboxId.empty())
-        {
-            query.prepare(
-                QStringLiteral("SELECT DISTINCT k.keyword FROM email_keywords k "
-                               "WHERE k.account_id=:account_id AND k.keyword NOT LIKE '$%' "
-                               "ORDER BY k.keyword COLLATE NOCASE"));
-        }
-        else
-        {
-            query.prepare(QStringLiteral(
-                "SELECT DISTINCT k.keyword FROM email_keywords k "
-                "JOIN email_mailboxes em ON em.account_id=k.account_id AND em.email_id=k.email_id "
-                "WHERE k.account_id=:account_id AND em.mailbox_id=:mailbox_id "
-                "AND k.keyword NOT LIKE '$%' ORDER BY k.keyword COLLATE NOCASE"));
-            query.bindValue(QStringLiteral(":mailbox_id"),
-                            QString::fromStdString(std::string{mailboxId}));
-        }
+        query.prepare(
+            QStringLiteral("WITH selected(email_id) AS (SELECT value FROM json_each(:ids)) "
+                           "SELECT s.email_id,k.keyword FROM selected s LEFT JOIN email_keywords k "
+                           "ON k.account_id=:account_id AND k.email_id=s.email_id "
+                           "ORDER BY s.email_id,k.keyword COLLATE NOCASE"));
+        query.bindValue(QStringLiteral(":ids"), QString::fromStdString(idsJson));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
         if (!query.exec())
-            return makeQueryError(QStringLiteral("List message user keywords"), query);
+            return makeQueryError(QStringLiteral("List email keyword memberships"), query);
 
-        std::vector<std::string> keywords;
+        std::unordered_map<std::string, std::vector<std::string>> byEmail;
+        byEmail.reserve(emailIds.size());
         while (query.next())
-            keywords.push_back(query.value(0).toString().toStdString());
-        return keywords;
+        {
+            auto& keywords = byEmail[query.value(0).toString().toStdString()];
+            if (!query.value(1).isNull())
+                keywords.push_back(query.value(1).toString().toStdString());
+        }
+        std::vector<EmailKeywordMembership> memberships;
+        memberships.reserve(emailIds.size());
+        for (const auto& emailId : emailIds)
+        {
+            auto found = byEmail.find(emailId);
+            memberships.push_back(EmailKeywordMembership{
+                .emailId = emailId,
+                .keywords =
+                    found == byEmail.end() ? std::vector<std::string>{} : std::move(found->second),
+            });
+        }
+        return memberships;
+    }
+
+    std::variant<std::vector<TagDefinition>, DatabaseError>
+    QueryService::listTagDefinitions(const std::string_view accountId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT d.keyword,d.display_name,d.color,d.sort_order FROM mail_tag_definitions d "
+            "WHERE d.account_id=:account_id AND NOT EXISTS(SELECT 1 FROM background_jobs j "
+            "WHERE j.account_id=d.account_id AND j.kind='tag_deletion' "
+            "AND j.status NOT IN ('failed','complete') "
+            "AND json_extract(j.checkpoint_json,'$.keyword')=d.keyword COLLATE NOCASE) "
+            "ORDER BY d.sort_order,d.display_name COLLATE NOCASE,d.keyword"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("List mail tag definitions"), query);
+
+        std::vector<TagDefinition> definitions;
+        while (query.next())
+        {
+            definitions.push_back(TagDefinition{
+                .accountId = std::string{accountId},
+                .keyword = query.value(0).toString().toStdString(),
+                .displayName = query.value(1).toString(),
+                .color = query.value(2).toString(),
+                .sortOrder = query.value(3).toInt(),
+            });
+        }
+        return definitions;
     }
 
     std::variant<std::vector<std::string>, DatabaseError>

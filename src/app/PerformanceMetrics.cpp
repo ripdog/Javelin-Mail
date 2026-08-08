@@ -253,6 +253,12 @@ namespace javelin::app
             return QStringLiteral("mail_queue_mark_read");
         case Kind::MailQueueSetFlagged:
             return QStringLiteral("mail_queue_set_flagged");
+        case Kind::MailQueueSetTag:
+            return QStringLiteral("mail_queue_set_tag");
+        case Kind::MailSaveTagDefinition:
+            return QStringLiteral("mail_save_tag_definition");
+        case Kind::MailDeleteTag:
+            return QStringLiteral("mail_delete_tag");
         case Kind::MailSubmitPending:
             return QStringLiteral("mail_submit_pending");
         case Kind::SieveList:
