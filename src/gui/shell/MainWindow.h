@@ -25,7 +25,6 @@ class QPoint;
 class QProgressBar;
 class QSplitter;
 class QStackedWidget;
-class QSpinBox;
 class QTabBar;
 class QToolButton;
 class QTreeView;
@@ -185,7 +184,7 @@ namespace javelin::gui::shell
         void saveNewToolbarConfig() override;
 
       private:
-        static constexpr std::size_t pageSize = 100;
+        static constexpr std::size_t messageWindowSize = 100;
 
         enum class ToolbarContext
         {
@@ -217,8 +216,7 @@ namespace javelin::gui::shell
         void editSelectedDraft();
         void activateMailboxSelection(bool refreshRemote);
         void activateMailboxInHomeTab(std::string accountId, std::string mailboxId, QString title,
-                                      std::optional<std::string> role,
-                                      std::optional<std::size_t> total, bool refreshRemote);
+                                      std::optional<std::string> role, bool refreshRemote);
         void openMailboxSelectionInTab(bool refreshRemote);
         void openComposeForRequest(javelin::jmap::submission::OpenComposeRequest request);
         [[nodiscard]] bool closeComposeTab(int index);
@@ -252,12 +250,9 @@ namespace javelin::gui::shell
         [[nodiscard]] std::optional<std::string> activeMailboxId() const;
         [[nodiscard]] const TabState* activeTab() const;
         [[nodiscard]] TabState* activeTab();
-        void applyActiveTabPagePreservingSelection(std::optional<int> previousMessageRow);
-        void goToFirstPage();
-        void goToLastPage();
-        void goToPage(std::size_t pageIndex);
-        void goToPreviousPage();
-        void goToNextPage();
+        void applyActiveTabItemsPreservingSelection(std::optional<int> previousMessageRow);
+        void maybeLoadMoreMessages();
+        void loadMoreMessages();
         void refreshViewsFromCache();
         void refreshFromServer();
         void refreshAccountFromServer(std::string accountId);
@@ -356,15 +351,12 @@ namespace javelin::gui::shell
         QListView* m_messageView = nullptr;
         ElidingLabel* m_messageListTitleLabel = nullptr;
         QLabel* m_messageListMetaLabel = nullptr;
-        QLabel* m_messagePageLabel = nullptr;
         QProgressBar* m_messageLoadingIndicator = nullptr;
         QToolButton* m_searchServerButton = nullptr;
         QToolButton* m_messageSortButton = nullptr;
-        QToolButton* m_firstPageButton = nullptr;
-        QToolButton* m_previousPageButton = nullptr;
-        QSpinBox* m_pageNumberSpinBox = nullptr;
-        QToolButton* m_nextPageButton = nullptr;
-        QToolButton* m_lastPageButton = nullptr;
+        QWidget* m_messageListFooter = nullptr;
+        QLabel* m_messageListFooterLabel = nullptr;
+        QToolButton* m_messageListFooterRetryButton = nullptr;
         QLabel* m_messageEmptyState = nullptr;
         LayeredStatusBar* m_statusBar = nullptr;
         QAction* m_undoAction = nullptr;

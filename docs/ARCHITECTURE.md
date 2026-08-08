@@ -240,8 +240,8 @@ navigation request containing stable account, mailbox, thread, and Email identit
 ## Presentation and application coordination
 
 The GUI renders cache-backed models and reports user intent through typed ports. Mailbox visibility
-is represented by an opaque observation registered with the daemon-side coordinator. Pagination,
-search, content retrieval, downloads, contacts, calendars, Sieve, translation, mutations, bootstrap,
+is represented by an opaque observation registered with the daemon-side coordinator. Query-window
+materialization, search, content retrieval, downloads, contacts, calendars, Sieve, translation, mutations, bootstrap,
 and explicit synchronization all use typed application requests.
 
 `MessageCommandController` converts Qt selections into stable `MessageSelection` values, presents
@@ -251,7 +251,9 @@ follow the same pattern: GUI controllers own interaction and presentation lifeti
 services own application policy and operational execution.
 
 Mailbox and search tabs use application-layer sessions that own query-window reads, request
-generations, observation lifetimes, pagination, stale recovery, and prefetch. `TabWorkspace` owns tab
+generations, observation lifetimes, incremental list loading, stale recovery, and prefetch. The GUI
+presents those bounded windows as one virtualized infinite-scrolling list; it does not expose page
+navigation or turn continuation into ever-growing JMAP query limits. `TabWorkspace` owns tab
 identity and shared selection state. Selection restoration, activation, navigation, content ownership,
 action availability, and list presentation are separated into deterministic policies plus narrow Qt
 adapters so cache changes cannot reinterpret row numbers as user intent.

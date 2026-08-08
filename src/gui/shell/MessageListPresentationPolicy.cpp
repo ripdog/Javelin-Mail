@@ -20,11 +20,11 @@ namespace javelin::gui::shell
         {
             header = std::monostate{};
         }
-        else if (input.page.has_value())
+        else if (input.list.has_value())
         {
-            auto page = *input.page;
-            page.refreshInFlight = input.refreshInFlight;
-            header = std::move(page);
+            auto list = *input.list;
+            list.refreshInFlight = input.refreshInFlight;
+            header = std::move(list);
         }
         else
         {

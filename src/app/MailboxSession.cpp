@@ -6,10 +6,13 @@
 
 #include <QCoroTask>
 
+#include <KLocalizedString>
+
 #include <QFutureWatcher>
 #include <QtConcurrentRun>
 
 #include <algorithm>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 
@@ -17,15 +20,22 @@ namespace javelin::app
 {
     namespace
     {
-        using ProjectedMailboxPageResult =
-            std::variant<std::optional<javelin::jmap::cache::MailboxWindowPage>,
-                         javelin::jmap::cache::DatabaseError>;
+        struct WindowRequest
+        {
+            std::size_t offset = 0;
+            std::size_t limit = 0;
+        };
 
-        [[nodiscard]] ProjectedMailboxPageResult
-        loadProjectedMailboxPage(const QString& databasePath, const std::string& accountId,
-                                 const std::string& queryKey, const std::size_t offset,
-                                 const std::size_t limit,
-                                 const javelin::jmap::query::EmailListSort sort)
+        using ProjectedMailboxWindows =
+            std::vector<std::optional<javelin::jmap::cache::MailboxWindowPage>>;
+        using ProjectedMailboxWindowsResult =
+            std::variant<ProjectedMailboxWindows, javelin::jmap::cache::DatabaseError>;
+
+        [[nodiscard]] ProjectedMailboxWindowsResult
+        loadProjectedMailboxWindows(const QString& databasePath, const std::string& accountId,
+                                    const std::string& queryKey,
+                                    const std::vector<WindowRequest>& requests,
+                                    const javelin::jmap::query::EmailListSort sort)
         {
             javelin::jmap::cache::ReadOnlyThreadConnectionFactory factory{
                 {.connectionNamePrefix = QStringLiteral("javelin-projected-mailbox"),
@@ -33,11 +43,32 @@ namespace javelin::app
             auto connectionResult = factory.openForCurrentThread("snapshot");
             if (const auto* error =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&connectionResult))
+            {
                 return *error;
+            }
+
             auto connection = std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(
                 std::move(connectionResult));
             javelin::jmap::cache::QueryService queryService{connection};
-            return queryService.loadMailboxWindow(accountId, queryKey, offset, limit, sort);
+            ProjectedMailboxWindows windows;
+            windows.reserve(requests.size());
+            for (const auto& request : requests)
+            {
+                auto result = queryService.loadMailboxWindow(accountId, queryKey, request.offset,
+                                                             request.limit, sort);
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                {
+                    return *error;
+                }
+                windows.push_back(std::get<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
+                    std::move(result)));
+            }
+            return windows;
+        }
+
+        [[nodiscard]] bool displayCurrent(const javelin::jmap::cache::MailboxWindowPage& page)
+        {
+            return javelin::jmap::cache::isDisplayCurrent(page.coverage, page.materialization);
         }
     } // namespace
 
@@ -46,18 +77,38 @@ namespace javelin::app
                                    javelin::jmap::query::EmailListSort sort,
                                    javelin::jmap::cache::QueryReader& queryReader,
                                    MessageListMaterializationPort& materializationPort,
-                                   const std::size_t pageSize, MailApplicationEventsPort& events,
+                                   const std::size_t windowSize, MailApplicationEventsPort& events,
                                    std::optional<RestoredMailboxState> restored, QObject* parent)
         : MessageListSession(parent), m_accountId(std::move(accountId)),
           m_mailboxId(std::move(mailboxId)), m_title(std::move(title)), m_role(std::move(role)),
           m_sort(sort), m_queryReader(queryReader), m_materializationPort(materializationPort),
-          m_events(events), m_pageSize(pageSize),
+          m_events(events), m_windowSize(windowSize),
           m_observation(m_materializationPort.beginMailboxObservation(m_accountId, m_mailboxId))
     {
-        if (restored.has_value())
-            m_page = std::move(restored->page);
-        else
-            m_page.returnedLimit = m_pageSize;
+        if (restored.has_value() && !restored->windows.empty())
+        {
+            const auto count =
+                std::min(restored->windows.size(), maximumRestoredMessageListWindows);
+            m_windows.reserve(count);
+            for (std::size_t index = 0; index < count; ++index)
+            {
+                const auto& request = restored->windows[index];
+                if (request.limit == 0)
+                    break;
+                m_windows.push_back({
+                    .requestedOffset = request.offset,
+                    .requestedLimit = request.limit,
+                    .position = 0,
+                    .returnedLimit = 0,
+                    .total = std::nullopt,
+                    .queryState = {},
+                    .itemCount = 0,
+                    .displayCurrent = false,
+                });
+            }
+        }
+        if (m_windows.empty())
+            resetToInitialWindow();
 
         connect(&m_events, &MailApplicationEventsPort::cacheInvalidated, this,
                 [this](const MailCacheInvalidation& invalidation)
@@ -65,31 +116,42 @@ namespace javelin::app
                     const auto& change = invalidation.change;
                     if (change.accountId.toStdString() != m_accountId)
                         return;
+
                     m_cacheEpoch = std::max(m_cacheEpoch, invalidation.epoch);
                     static_cast<void>(m_refreshGeneration.begin(m_cacheEpoch));
-                    for (const auto& window : change.queryWindows)
+
+                    bool retainedWindowChanged = false;
+                    for (const auto& changed : change.queryWindows)
                     {
-                        if (window.mailboxId.toStdString() == m_mailboxId &&
-                            window.offset == m_page.offset)
-                        {
-                            if (m_page.refreshInFlight)
-                            {
-                                ++m_refreshRequestId;
-                                m_page.refreshInFlight = false;
-                                Q_EMIT pageChanged();
-                            }
-                            reloadProjectedPage();
-                            return;
-                        }
+                        if (changed.mailboxId.toStdString() != m_mailboxId)
+                            continue;
+                        retainedWindowChanged =
+                            std::ranges::any_of(m_windows,
+                                                [&changed](const MessageListWindow& window)
+                                                {
+                                                    return window.requestedOffset ==
+                                                               changed.offset &&
+                                                           window.requestedLimit == changed.limit;
+                                                }) ||
+                            retainedWindowChanged;
                     }
-                    for (const auto& changedMailboxId : change.mailboxIds)
+                    if (retainedWindowChanged)
                     {
-                        if (changedMailboxId.toStdString() == m_mailboxId)
+                        if (m_state.refreshInFlight)
                         {
-                            markStale();
-                            reloadProjectedPage();
-                            return;
+                            ++m_refreshRequestId;
+                            m_state.refreshInFlight = false;
+                            m_refreshAwaitingCache = false;
+                            Q_EMIT stateChanged();
                         }
+                        reloadProjectedWindows();
+                        return;
+                    }
+
+                    if (change.mailboxIds.contains(QString::fromStdString(m_mailboxId)))
+                    {
+                        m_state.stale = true;
+                        reloadProjectedWindows();
                     }
                 });
     }
@@ -114,161 +176,381 @@ namespace javelin::app
         return m_role;
     }
 
-    const MessageListPage& MailboxSession::page() const
+    const MessageListState& MailboxSession::state() const
     {
-        return m_page;
+        return m_state;
     }
 
     void MailboxSession::updateMetadata(QString title, std::optional<std::string> role)
     {
         m_title = std::move(title);
         m_role = std::move(role);
-        Q_EMIT pageChanged();
+        Q_EMIT stateChanged();
     }
 
-    void MailboxSession::loadCachedPage(const bool forceReload)
+    void MailboxSession::loadCachedState(const bool forceReload)
     {
-        if (m_page.cacheLoaded && !forceReload)
+        if (m_state.cacheLoaded && !forceReload)
             return;
-        reloadProjectedPage();
+        reloadProjectedWindows();
     }
 
-    void MailboxSession::reloadProjectedPage()
+    void MailboxSession::reloadProjectedWindows()
     {
         if (m_projectedReloadInFlight)
         {
             m_projectedReloadPending = true;
             return;
         }
+        if (m_windows.empty())
+            resetToInitialWindow();
+
+        std::vector<WindowRequest> requests;
+        requests.reserve(m_windows.size());
+        for (const auto& window : m_windows)
+        {
+            requests.push_back({
+                .offset = window.requestedOffset,
+                .limit = window.requestedLimit,
+            });
+        }
+
         m_projectedReloadInFlight = true;
         const auto generation = m_generation;
-        const auto offset = m_page.offset;
         const auto ticket = m_refreshGeneration.begin(m_cacheEpoch);
-        auto* watcher = new QFutureWatcher<ProjectedMailboxPageResult>(this);
+        auto* watcher = new QFutureWatcher<ProjectedMailboxWindowsResult>(this);
         connect(
-            watcher, &QFutureWatcher<ProjectedMailboxPageResult>::finished, this,
-            [this, watcher, generation, offset, ticket]
+            watcher, &QFutureWatcher<ProjectedMailboxWindowsResult>::finished, this,
+            [this, watcher, generation, ticket]
             {
                 auto result = watcher->result();
                 watcher->deleteLater();
                 m_projectedReloadInFlight = false;
-                if (generation == m_generation && offset == m_page.offset &&
-                    m_refreshGeneration.install(ticket, m_cacheEpoch))
+
+                if (generation != m_generation ||
+                    !m_refreshGeneration.install(ticket, m_cacheEpoch))
                 {
-                    if (const auto* page =
-                            std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
-                                &result);
-                        page != nullptr && page->has_value())
+                    if (std::exchange(m_projectedReloadPending, false))
+                        reloadProjectedWindows();
+                    return;
+                }
+
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                {
+                    if (m_state.loadMoreInFlight)
                     {
-                        applyCachedPage(**page);
-                        Q_EMIT pageChanged();
+                        m_state.loadMoreInFlight = false;
+                        m_pendingLoadMoreOffset.reset();
+                        m_state.loadMoreError = error->message;
                     }
-                    else if (const auto* missing = std::get_if<
-                                 std::optional<javelin::jmap::cache::MailboxWindowPage>>(&result);
-                             missing != nullptr && !missing->has_value())
+                    else
                     {
-                        m_page.cacheLoaded = false;
-                        m_page.stale = true;
-                        Q_EMIT pageChanged();
+                        m_state.refreshError = error->message;
                     }
-                    else if (const auto* error =
-                                 std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                    if (m_refreshAwaitingCache)
                     {
-                        m_page.refreshError = error->message;
-                        Q_EMIT pageChanged();
+                        m_refreshAwaitingCache = false;
+                        m_state.refreshInFlight = false;
+                    }
+                    Q_EMIT stateChanged();
+                    if (std::exchange(m_projectedReloadPending, false))
+                        reloadProjectedWindows();
+                    return;
+                }
+
+                auto windows = std::get<ProjectedMailboxWindows>(std::move(result));
+                if (windows.size() != m_windows.size())
+                {
+                    m_state.stale = true;
+                    Q_EMIT stateChanged();
+                    return;
+                }
+
+                bool allCurrent = true;
+                for (std::size_t index = 0; index < windows.size(); ++index)
+                {
+                    if (!windows[index].has_value() || !displayCurrent(*windows[index]))
+                    {
+                        allCurrent = false;
+                        m_windows[index].displayCurrent = false;
                     }
                 }
+
+                bool materializeMissingInitial = false;
+                if (allCurrent)
+                {
+                    std::vector<javelin::jmap::cache::MailboxWindowPage> committed;
+                    committed.reserve(windows.size());
+                    for (auto& window : windows)
+                        committed.push_back(std::move(*window));
+                    rebuildFromProjectedWindows(std::move(committed));
+                    const bool queryStateConsistent =
+                        m_windows.empty() ||
+                        std::ranges::all_of(m_windows, [queryState = m_windows.front().queryState](
+                                                           const MessageListWindow& window)
+                                            { return window.queryState == queryState; });
+                    m_state.stale = !queryStateConsistent;
+                    m_state.refreshError.clear();
+                    m_state.loadMoreError.clear();
+                    if (m_state.loadMoreInFlight)
+                    {
+                        m_state.loadMoreInFlight = false;
+                        m_pendingLoadMoreOffset.reset();
+                        m_pendingLoadMoreRequestCompleted = false;
+                    }
+                }
+                else if (m_pendingLoadMoreOffset.has_value())
+                {
+                    const auto pending = std::ranges::find_if(
+                        m_windows, [this](const MessageListWindow& window)
+                        { return window.requestedOffset == *m_pendingLoadMoreOffset; });
+                    const auto pendingIndex =
+                        pending == m_windows.end()
+                            ? windows.size()
+                            : static_cast<std::size_t>(std::distance(m_windows.begin(), pending));
+                    if (pendingIndex < windows.size() && windows[pendingIndex].has_value() &&
+                        displayCurrent(*windows[pendingIndex]))
+                    {
+                        auto page = std::move(*windows[pendingIndex]);
+                        auto& metadata = m_windows[pendingIndex];
+                        metadata.position = page.position;
+                        metadata.returnedLimit = page.returnedLimit;
+                        metadata.total = page.total;
+                        metadata.queryState = page.queryState;
+                        metadata.itemCount = page.items.size();
+                        metadata.displayCurrent = true;
+
+                        std::unordered_set<std::string> threadIds;
+                        threadIds.reserve(m_state.items.size() + page.items.size());
+                        for (const auto& item : m_state.items)
+                            threadIds.insert(item.threadId);
+                        for (auto& item : page.items)
+                        {
+                            if (threadIds.insert(item.threadId).second)
+                                m_state.items.push_back(std::move(item));
+                        }
+                        m_state.itemsRevision = ++m_itemsRevision;
+                        m_state.total = page.total;
+                        m_endReached =
+                            metadata.itemCount == 0 ||
+                            (metadata.total.has_value() &&
+                             metadata.position + metadata.itemCount >= *metadata.total) ||
+                            (!metadata.total.has_value() && metadata.returnedLimit > 0 &&
+                             metadata.itemCount < metadata.returnedLimit);
+                        m_state.loadMoreError.clear();
+                        m_pendingLoadMoreOffset.reset();
+                        m_state.loadMoreInFlight = false;
+                        m_pendingLoadMoreRequestCompleted = false;
+                    }
+                    else if (m_pendingLoadMoreRequestCompleted)
+                    {
+                        if (pending != m_windows.end())
+                            m_windows.erase(pending);
+                        m_state.loadMoreError =
+                            i18n("Could not load more messages from the cache.");
+                        m_pendingLoadMoreOffset.reset();
+                        m_state.loadMoreInFlight = false;
+                        m_pendingLoadMoreRequestCompleted = false;
+                    }
+                    m_state.stale = true;
+                }
+                else
+                {
+                    std::size_t currentPrefixLength = 0;
+                    while (currentPrefixLength < windows.size() &&
+                           windows[currentPrefixLength].has_value() &&
+                           displayCurrent(*windows[currentPrefixLength]))
+                    {
+                        ++currentPrefixLength;
+                    }
+
+                    if (currentPrefixLength > 0)
+                    {
+                        std::vector<javelin::jmap::cache::MailboxWindowPage> committed;
+                        committed.reserve(currentPrefixLength);
+                        for (std::size_t index = 0; index < currentPrefixLength; ++index)
+                            committed.push_back(std::move(*windows[index]));
+                        m_windows.resize(currentPrefixLength);
+                        rebuildFromProjectedWindows(std::move(committed));
+                        const bool queryStateConsistent = std::ranges::all_of(
+                            m_windows, [queryState = m_windows.front().queryState](
+                                           const MessageListWindow& window)
+                            { return window.queryState == queryState; });
+                        m_state.stale = !queryStateConsistent;
+                        m_state.refreshError.clear();
+                    }
+                    else
+                    {
+                        m_state.stale = true;
+                        if (m_state.items.empty())
+                        {
+                            m_state.cacheLoaded = false;
+                            if (!m_refreshAwaitingCache && !m_state.refreshInFlight)
+                                materializeMissingInitial = true;
+                        }
+                    }
+                }
+
+                if (m_refreshAwaitingCache)
+                {
+                    m_refreshAwaitingCache = false;
+                    m_state.refreshInFlight = false;
+                    if (!m_state.cacheLoaded)
+                        m_state.refreshError = i18n("Could not load the refreshed message list.");
+                }
+
+                Q_EMIT stateChanged();
+                if (materializeMissingInitial)
+                    refresh(MessageListRefreshMode::Materialize);
                 if (std::exchange(m_projectedReloadPending, false))
-                    reloadProjectedPage();
+                    reloadProjectedWindows();
             });
-        watcher->setFuture(QtConcurrent::run(loadProjectedMailboxPage, m_queryReader.databasePath(),
-                                             m_accountId, queryKey(), m_page.offset, m_pageSize,
-                                             m_sort));
+        watcher->setFuture(QtConcurrent::run(loadProjectedMailboxWindows,
+                                             m_queryReader.databasePath(), m_accountId, queryKey(),
+                                             std::move(requests), m_sort));
     }
 
-    void MailboxSession::applyCachedPage(javelin::jmap::cache::MailboxWindowPage page)
+    void MailboxSession::rebuildFromProjectedWindows(
+        std::vector<javelin::jmap::cache::MailboxWindowPage> windows)
     {
-        m_page.items = std::move(page.items);
-        m_page.position = page.position;
-        m_page.returnedLimit = page.returnedLimit;
-        m_page.total = page.total;
-        m_page.queryState = std::move(page.queryState);
-        m_page.installedOffset = m_page.offset;
-        m_page.pendingOffset.reset();
-        m_page.cacheLoaded =
-            javelin::jmap::cache::isDisplayCurrent(page.coverage, page.materialization);
-        m_page.stale = !javelin::jmap::cache::isDisplayCurrent(page.coverage, page.materialization);
+        std::size_t itemCapacity = 0;
+        for (const auto& window : windows)
+            itemCapacity += window.items.size();
+
+        std::vector<javelin::jmap::cache::MessageListItem> items;
+        items.reserve(itemCapacity);
+        std::unordered_set<std::string> threadIds;
+        threadIds.reserve(itemCapacity);
+
+        for (std::size_t index = 0; index < windows.size(); ++index)
+        {
+            auto& page = windows[index];
+            auto& metadata = m_windows[index];
+            metadata.requestedOffset = page.requestedOffset;
+            metadata.requestedLimit = page.requestedLimit;
+            metadata.position = page.position;
+            metadata.returnedLimit = page.returnedLimit;
+            metadata.total = page.total;
+            metadata.queryState = page.queryState;
+            metadata.itemCount = page.items.size();
+            metadata.displayCurrent = true;
+
+            for (auto& item : page.items)
+            {
+                if (threadIds.insert(item.threadId).second)
+                    items.push_back(std::move(item));
+            }
+        }
+
+        m_state.items = std::move(items);
+        m_state.itemsRevision = ++m_itemsRevision;
+        m_state.cacheLoaded = !m_windows.empty() && m_windows.front().displayCurrent;
+        if (!m_windows.empty())
+        {
+            const auto& last = m_windows.back();
+            m_state.total = last.total;
+            m_endReached =
+                last.itemCount == 0 ||
+                (last.total.has_value() && last.position + last.itemCount >= *last.total) ||
+                (!last.total.has_value() && last.returnedLimit > 0 &&
+                 last.itemCount < last.returnedLimit);
+        }
+        else
+        {
+            m_state.total.reset();
+            m_endReached = true;
+        }
     }
 
     void MailboxSession::refresh(const MessageListRefreshMode mode)
     {
-        if (m_page.refreshInFlight)
+        requestInitialWindow(mode, std::nullopt, 1);
+    }
+
+    void MailboxSession::requestInitialWindow(const MessageListRefreshMode mode,
+                                              std::optional<std::string> anchor,
+                                              const std::int64_t anchorOffset)
+    {
+        if (m_state.refreshInFlight)
             return;
-        m_page.refreshInFlight = true;
-        m_page.refreshError.clear();
-        Q_EMIT pageChanged();
-        const auto offset = m_page.offset;
+        if (m_state.loadMoreInFlight)
+        {
+            ++m_refreshRequestId;
+            if (m_pendingLoadMoreOffset.has_value())
+            {
+                const auto pending = std::ranges::find_if(
+                    m_windows, [this](const MessageListWindow& window)
+                    { return window.requestedOffset == *m_pendingLoadMoreOffset; });
+                if (pending != m_windows.end())
+                    m_windows.erase(pending);
+            }
+            m_pendingLoadMoreOffset.reset();
+            m_state.loadMoreInFlight = false;
+            m_pendingLoadMoreRequestCompleted = false;
+        }
+
+        m_state.refreshInFlight = true;
+        m_state.refreshError.clear();
+        m_state.loadMoreError.clear();
+        m_state.stale = true;
+        Q_EMIT stateChanged();
+
         const auto generation = m_generation;
         const auto requestId = ++m_refreshRequestId;
         auto task = m_materializationPort.requestMailboxWindow(MailboxWindowIntent{
             .accountId = m_accountId,
             .mailboxId = m_mailboxId,
-            .offset = offset,
-            .limit = m_pageSize,
+            .offset = 0,
+            .limit = m_windowSize,
             .sort = m_sort,
             .forceRefresh = mode == MessageListRefreshMode::RefreshFromServer,
-            .anchor = m_page.anchor,
-            .anchorOffset = m_anchorOffset,
+            .anchor = std::move(anchor),
+            .anchorOffset = anchorOffset,
         });
         QCoro::connect(
             std::move(task), this,
-            [this, offset, generation, requestId](MailboxWindowResult result)
+            [this, generation, requestId](MailboxWindowResult result)
             {
-                if (requestId != m_refreshRequestId)
+                if (generation != m_generation || requestId != m_refreshRequestId)
                     return;
-                m_page.refreshInFlight = false;
-                if (offset != m_page.offset || generation != m_generation)
-                {
-                    Q_EMIT pageChanged();
-                    return;
-                }
+
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
-                    m_page.refreshError = error->message;
-                    Q_EMIT pageChanged();
+                    m_state.refreshInFlight = false;
+                    m_state.refreshError = error->message;
+                    Q_EMIT stateChanged();
                     Q_EMIT refreshFailed(*error);
                     return;
                 }
 
                 const auto& summary = std::get<MailboxWindowSummary>(result);
-                m_page.offset = summary.offset;
-                m_page.total = summary.total;
-                m_page.position = summary.position;
-                m_page.returnedLimit = summary.returnedLimit;
-                m_page.queryState = summary.queryState;
-                m_page.anchor.reset();
-                m_anchorOffset = 1;
-                if (m_page.total.has_value() && m_page.offset > 0 &&
-                    (*m_page.total == 0 || m_page.position >= *m_page.total))
-                {
-                    const auto step = m_page.returnedLimit == 0 ? m_pageSize : m_page.returnedLimit;
-                    m_page.offset =
-                        normalizedMessageListPageOffset(m_page.offset, *m_page.total, step);
-                    resetForPageChange();
-                    m_page.stale = true;
-                    refresh();
-                    return;
-                }
-                m_page.stale = false;
-                m_page.refreshError.clear();
-                reloadProjectedPage();
-                Q_EMIT pageChanged();
+                m_windows.clear();
+                m_windows.push_back({
+                    .requestedOffset = summary.offset,
+                    .requestedLimit = summary.limit,
+                    .position = summary.position,
+                    .returnedLimit = summary.returnedLimit,
+                    .total = summary.total,
+                    .queryState = summary.queryState,
+                    .itemCount = summary.representativeCount,
+                    .displayCurrent = false,
+                });
+                m_pendingLoadMoreOffset.reset();
+                m_state.loadMoreInFlight = false;
+                m_pendingLoadMoreRequestCompleted = false;
+                m_endReached = summary.representativeCount == 0 ||
+                               (summary.total.has_value() &&
+                                summary.position + summary.representativeCount >= *summary.total) ||
+                               (!summary.total.has_value() && summary.returnedLimit > 0 &&
+                                summary.representativeCount < summary.returnedLimit);
+                m_refreshAwaitingCache = true;
+                reloadProjectedWindows();
             });
     }
 
     void MailboxSession::markStale()
     {
-        m_page.stale = true;
+        m_state.stale = true;
     }
 
     void MailboxSession::setSort(javelin::jmap::query::EmailListSort sort)
@@ -276,74 +558,159 @@ namespace javelin::app
         if (m_sort.property == sort.property && m_sort.direction == sort.direction)
             return;
         m_sort = sort;
-        m_page.offset = 0;
-        m_page.total.reset();
-        m_page.queryState.clear();
-        m_page.stale = true;
-        resetForPageChange();
+        ++m_generation;
+        ++m_refreshRequestId;
+        m_refreshGeneration.replaceScope();
+        m_refreshAwaitingCache = false;
+        resetToInitialWindow();
+        m_state.stale = true;
     }
 
     void MailboxSession::reveal(std::string emailId)
     {
-        if (m_page.refreshInFlight)
-            return;
-        m_page.anchor = std::move(emailId);
-        m_anchorOffset = 0;
-        m_page.stale = true;
-        refresh();
+        requestInitialWindow(MessageListRefreshMode::Materialize, std::move(emailId), 0);
     }
 
-    bool MailboxSession::goToPage(const std::size_t pageIndex)
+    bool MailboxSession::canLoadMore() const
     {
-        const auto step = m_page.returnedLimit == 0 ? m_pageSize : m_page.returnedLimit;
-        if (m_page.total.has_value() && pageIndex >= messageListPageCount(*m_page.total, step))
+        if (m_state.refreshInFlight || m_state.loadMoreInFlight || m_windows.empty() ||
+            m_state.items.empty() || m_endReached)
         {
             return false;
         }
-        const auto offset = messageListPageOffset(pageIndex, step);
-        if (offset == m_page.offset)
+        const auto& last = m_windows.back();
+        if (last.itemCount == 0)
             return false;
-        m_page.offset = offset;
-        m_page.anchor.reset();
-        resetForPageChange();
+        return !last.total.has_value() || nextOffset() < *last.total;
+    }
+
+    bool MailboxSession::loadMore()
+    {
+        if (!canLoadMore())
+            return false;
+
+        const auto offset = nextOffset();
+        const auto anchor = m_state.items.back().emailId;
+        const auto generation = m_generation;
+        const auto requestId = ++m_refreshRequestId;
+        m_pendingLoadMoreOffset = offset;
+        m_pendingLoadMoreRequestCompleted = false;
+        m_state.loadMoreInFlight = true;
+        m_state.loadMoreError.clear();
+        m_windows.push_back({
+            .requestedOffset = offset,
+            .requestedLimit = m_windowSize,
+            .position = 0,
+            .returnedLimit = 0,
+            .total = std::nullopt,
+            .queryState = {},
+            .itemCount = 0,
+            .displayCurrent = false,
+        });
+        Q_EMIT stateChanged();
+
+        auto task = m_materializationPort.requestMailboxWindow(MailboxWindowIntent{
+            .accountId = m_accountId,
+            .mailboxId = m_mailboxId,
+            .offset = offset,
+            .limit = m_windowSize,
+            .sort = m_sort,
+            .forceRefresh = false,
+            .anchor = anchor,
+            .anchorOffset = 1,
+        });
+        QCoro::connect(
+            std::move(task), this,
+            [this, generation, requestId, offset](MailboxWindowResult result)
+            {
+                if (generation != m_generation || requestId != m_refreshRequestId ||
+                    !m_pendingLoadMoreOffset.has_value() || *m_pendingLoadMoreOffset != offset)
+                {
+                    return;
+                }
+
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    const auto pending =
+                        std::ranges::find_if(m_windows, [offset](const MessageListWindow& window)
+                                             { return window.requestedOffset == offset; });
+                    if (pending != m_windows.end())
+                        m_windows.erase(pending);
+                    m_pendingLoadMoreOffset.reset();
+                    m_pendingLoadMoreRequestCompleted = false;
+                    m_state.loadMoreInFlight = false;
+                    m_state.loadMoreError = error->message;
+                    Q_EMIT stateChanged();
+                    return;
+                }
+
+                const auto& summary = std::get<MailboxWindowSummary>(result);
+                const auto pending =
+                    std::ranges::find_if(m_windows, [offset](const MessageListWindow& window)
+                                         { return window.requestedOffset == offset; });
+                if (pending == m_windows.end())
+                    return;
+                pending->requestedOffset = summary.offset;
+                pending->requestedLimit = summary.limit;
+                pending->position = summary.position;
+                pending->returnedLimit = summary.returnedLimit;
+                pending->total = summary.total;
+                pending->queryState = summary.queryState;
+                pending->itemCount = summary.representativeCount;
+                pending->displayCurrent = false;
+                m_pendingLoadMoreRequestCompleted = true;
+                m_endReached = summary.representativeCount == 0 ||
+                               (summary.total.has_value() &&
+                                summary.position + summary.representativeCount >= *summary.total) ||
+                               (!summary.total.has_value() && summary.returnedLimit > 0 &&
+                                summary.representativeCount < summary.returnedLimit);
+                reloadProjectedWindows();
+            });
         return true;
     }
 
-    bool MailboxSession::goToPreviousPage()
+    std::vector<MessageListWindowRequest> MailboxSession::windowRequests() const
     {
-        if (m_page.offset == 0)
-            return false;
-        const auto step = m_page.returnedLimit == 0 ? m_pageSize : m_page.returnedLimit;
-        m_page.offset -= std::min(m_page.offset, step);
-        m_page.anchor.reset();
-        resetForPageChange();
-        return true;
+        std::vector<MessageListWindowRequest> requests;
+        requests.reserve(m_windows.size());
+        for (const auto& window : m_windows)
+        {
+            if (window.itemCount == 0)
+                continue;
+            requests.push_back({
+                .offset = window.requestedOffset,
+                .limit = window.requestedLimit,
+            });
+        }
+        return requests;
     }
 
-    bool MailboxSession::goToNextPage()
+    void MailboxSession::resetToInitialWindow()
     {
-        if (m_page.total.has_value() && m_page.position + m_page.items.size() >= *m_page.total)
-            return false;
-        if (m_page.items.empty())
-            return false;
-        m_page.anchor = m_page.items.back().emailId;
-        m_anchorOffset = 1;
-        m_page.offset = m_page.position + m_page.items.size();
-        resetForPageChange();
-        return true;
+        m_windows.clear();
+        m_windows.push_back({
+            .requestedOffset = 0,
+            .requestedLimit = m_windowSize,
+            .position = 0,
+            .returnedLimit = 0,
+            .total = std::nullopt,
+            .queryState = {},
+            .itemCount = 0,
+            .displayCurrent = false,
+        });
+        m_pendingLoadMoreOffset.reset();
+        m_pendingLoadMoreRequestCompleted = false;
+        m_state = MessageListState{};
+        m_state.itemsRevision = ++m_itemsRevision;
+        m_endReached = false;
     }
 
-    void MailboxSession::resetForPageChange()
+    std::size_t MailboxSession::nextOffset() const
     {
-        ++m_generation;
-        ++m_refreshRequestId;
-        static_cast<void>(m_refreshGeneration.begin(m_cacheEpoch));
-        m_page.pendingOffset = m_page.offset;
-        m_page.position = m_page.offset;
-        m_page.items.clear();
-        m_page.cacheLoaded = false;
-        m_page.refreshInFlight = false;
-        m_page.refreshError.clear();
+        if (m_windows.empty())
+            return 0;
+        const auto& last = m_windows.back();
+        return last.position + last.itemCount;
     }
 
     std::string MailboxSession::queryKey() const

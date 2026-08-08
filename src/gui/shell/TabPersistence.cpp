@@ -33,7 +33,7 @@ namespace javelin::gui::shell
                         .selection = content.selection,
                         .mailboxId = content.session->mailboxId(),
                         .mailboxRole = content.session->role(),
-                        .offset = content.session->page().offset,
+                        .windows = content.session->windowRequests(),
                     });
                 }
                 else if constexpr (std::is_same_v<Content, SearchTabState>)
@@ -43,9 +43,9 @@ namespace javelin::gui::shell
                         .title = content.session->title(),
                         .selection = content.selection,
                         .criteria = content.session->criteria(),
-                        .page = content.session->page(),
                         .mode = content.session->mode(),
                         .sessionId = content.session->sessionId(),
+                        .windows = content.session->windowRequests(),
                     });
                 }
                 else if constexpr (std::is_same_v<Content, ComposeTabState>)

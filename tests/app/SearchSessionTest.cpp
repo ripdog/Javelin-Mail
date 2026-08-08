@@ -2,14 +2,20 @@
 #include "app/MailApplicationEventsPorts.h"
 #include "app/MessageListMaterializationPort.h"
 #include "jmap/cache/Database.h"
+#include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/QueryService.h"
+#include "jmap/cache/SearchWindowRepository.h"
+#include "jmap/search/EmailSearch.h"
 
 #include <QCoroFuture>
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QEventLoop>
 #include <QPromise>
+#include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QThread>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -129,12 +135,12 @@ namespace
         }
     };
 
-    [[nodiscard]] SessionContext makeSessionContext()
+    [[nodiscard]] SessionContext makeSessionContext(const QString& connectionName)
     {
         QTemporaryDir directory;
         REQUIRE(directory.isValid());
         auto opened = javelin::jmap::cache::DatabaseConnection::open({
-            .connectionName = QStringLiteral("search-session-commit-test"),
+            .connectionName = connectionName,
             .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
         });
         REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
@@ -143,12 +149,138 @@ namespace
             std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened)),
         };
     }
+
+    template <typename Predicate> void waitFor(Predicate predicate)
+    {
+        QElapsedTimer timer;
+        timer.start();
+        while (!predicate() && timer.elapsed() < 2000)
+        {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            QThread::msleep(1);
+        }
+        REQUIRE(predicate());
+    }
+
+    void seedAccount(javelin::jmap::cache::DatabaseConnection& connection)
+    {
+        QSqlQuery account{connection.database()};
+        account.prepare(QStringLiteral(
+            "INSERT INTO accounts (account_id, email_address, session_url, is_primary) "
+            "VALUES (:account_id, :email_address, :session_url, :is_primary)"));
+        account.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
+        account.bindValue(QStringLiteral(":email_address"), QStringLiteral("alice@example.com"));
+        account.bindValue(QStringLiteral(":session_url"),
+                          QStringLiteral("https://example.test/jmap"));
+        account.bindValue(QStringLiteral(":is_primary"), 1);
+        REQUIRE(account.exec());
+    }
+
+    [[nodiscard]] javelin::jmap::domain::Email email(std::string id, std::string receivedAt)
+    {
+        const auto threadId = "thread-" + id;
+        return {
+            .id = std::move(id),
+            .blobId = {},
+            .threadId = threadId,
+            .mailboxIds = {},
+            .keywords = {},
+            .size = 0,
+            .receivedAt = std::move(receivedAt),
+            .sentAt = std::nullopt,
+            .messageId = {},
+            .inReplyTo = {},
+            .references = {},
+            .hasAttachment = false,
+            .subject = std::nullopt,
+            .from = {},
+            .to = {},
+            .cc = {},
+            .bcc = {},
+            .replyTo = {},
+            .preview = std::nullopt,
+        };
+    }
+
+    [[nodiscard]] std::string searchWindowKey()
+    {
+        const javelin::jmap::search::EmailSearchCriteria criteria{.from = "sender@example.test"};
+        return javelin::jmap::search::cacheKey(criteria, {}) + "|session:test-session";
+    }
+
+    void seedSearchData(javelin::jmap::cache::DatabaseConnection& connection,
+                        const bool includeSecondWindow)
+    {
+        seedAccount(connection);
+        javelin::jmap::cache::EmailRepository emails{connection};
+        REQUIRE_FALSE(emails
+                          .replaceAll("account-1", {email("email-1", "2026-08-08T12:00:00Z"),
+                                                    email("email-2", "2026-08-08T11:00:00Z"),
+                                                    email("email-3", "2026-08-08T10:00:00Z"),
+                                                    email("email-4", "2026-08-08T09:00:00Z")})
+                          .has_value());
+
+        javelin::jmap::cache::SearchWindowRepository windows{connection};
+        REQUIRE_FALSE(windows
+                          .replace({
+                              .accountId = "account-1",
+                              .queryKey = searchWindowKey(),
+                              .offset = 0,
+                              .limit = 2,
+                              .position = 0,
+                              .returnedLimit = 2,
+                              .total = 4,
+                              .queryState = "state-1",
+                              .emailIds = {"email-1", "email-2"},
+                          })
+                          .has_value());
+        if (includeSecondWindow)
+        {
+            REQUIRE_FALSE(windows
+                              .replace({
+                                  .accountId = "account-1",
+                                  .queryKey = searchWindowKey(),
+                                  .offset = 2,
+                                  .limit = 2,
+                                  .position = 2,
+                                  .returnedLimit = 2,
+                                  .total = 4,
+                                  .queryState = "state-1",
+                                  .emailIds = {"email-3", "email-4"},
+                              })
+                              .has_value());
+        }
+    }
+
+    [[nodiscard]] javelin::app::MailCacheInvalidation
+    searchWindowInvalidation(const std::size_t offset, const std::size_t limit)
+    {
+        return {
+            .epoch = 1,
+            .changedDomains = {javelin::protocol::ChangedDomain::MailQueryWindows},
+            .affectedKeys = {QString::fromStdString(searchWindowKey())},
+            .change =
+                {
+                    .accountId = QStringLiteral("account-1"),
+                    .mailboxIds = {},
+                    .queryWindows = {},
+                    .searchWindows = {{.queryKey = QString::fromStdString(searchWindowKey()),
+                                       .offset = offset,
+                                       .limit = limit,
+                                       .total = 4}},
+                    .mailboxTreeChanged = false,
+                    .hasNewMail = false,
+                    .optimisticProjection = false,
+                    .contactsChanged = false,
+                },
+        };
+    }
 } // namespace
 
 TEST_CASE("search cache commit terminates its visible refresh", "[app][search-session]")
 {
     ApplicationGuard application;
-    auto context = makeSessionContext();
+    auto context = makeSessionContext(QStringLiteral("search-session-commit-test"));
     PendingSearchMaterializationPort materialization;
     FakeMailEvents events;
     javelin::app::SearchSession session{
@@ -161,7 +293,7 @@ TEST_CASE("search cache commit terminates its visible refresh", "[app][search-se
                      [&failureCount](const javelin::jmap::OperationError&) { ++failureCount; });
 
     session.refresh();
-    REQUIRE(session.page().refreshInFlight);
+    REQUIRE(session.state().refreshInFlight);
     REQUIRE(materialization.lastSearchIntent.has_value());
     const auto windowKey = materialization.lastSearchIntent->windowKey;
 
@@ -185,13 +317,153 @@ TEST_CASE("search cache commit terminates its visible refresh", "[app][search-se
             },
     });
 
-    CHECK_FALSE(session.page().refreshInFlight);
+    CHECK_FALSE(session.state().refreshInFlight);
 
     materialization.complete(javelin::jmap::OperationError{
         .message = QStringLiteral("Late search terminal event must be ignored."),
     });
     QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
 
-    CHECK_FALSE(session.page().refreshInFlight);
+    CHECK_FALSE(session.state().refreshInFlight);
     CHECK(failureCount == 0);
+}
+
+TEST_CASE("missing initial online-search cache materializes itself after the cache read",
+          "[app][search-session][infinite-scroll]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("search-session-cache-miss-test"));
+    PendingSearchMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::SearchSession session{
+        "account-1", {.from = "sender@example.test"}, {}, context.queries, materialization, events,
+        100,
+    };
+
+    CHECK_FALSE(session.state().stale);
+    session.loadCachedState();
+    waitFor([&] { return materialization.lastSearchIntent.has_value(); });
+
+    REQUIRE(materialization.lastSearchIntent.has_value());
+    CHECK(materialization.lastSearchIntent->offset == 0);
+    CHECK(materialization.lastSearchIntent->limit == 100);
+    CHECK_FALSE(materialization.lastSearchIntent->anchor.has_value());
+    CHECK(session.state().refreshInFlight);
+
+    materialization.complete(javelin::jmap::OperationError{
+        .message = QStringLiteral("Expected search cache-miss test completion."),
+    });
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+}
+
+TEST_CASE("online search restores a loaded infinite-scroll prefix from SQLite windows",
+          "[app][search-session][infinite-scroll][persistence]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("search-session-restore-prefix-test"));
+    seedSearchData(context.connection, true);
+    PendingSearchMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::SearchSession session{
+        "account-1",
+        {.from = "sender@example.test"},
+        {},
+        context.queries,
+        materialization,
+        events,
+        2,
+        javelin::app::RestoredSearchState{
+            .mode = javelin::app::SearchMode::Online,
+            .sessionId = "test-session",
+            .windows = {{.offset = 0, .limit = 2}, {.offset = 2, .limit = 2}},
+        },
+    };
+
+    session.loadCachedState();
+    waitFor([&] { return session.state().items.size() == 4; });
+
+    CHECK(session.state().cacheLoaded);
+    CHECK_FALSE(session.state().stale);
+    CHECK(session.state().items[3].emailId == "email-4");
+    CHECK(session.windowRequests().size() == 2);
+    CHECK_FALSE(materialization.lastSearchIntent.has_value());
+}
+
+TEST_CASE("online search infinite scrolling consumes a compatible prefetched bounded window",
+          "[app][search-session][infinite-scroll]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("search-session-infinite-scroll-test"));
+    seedSearchData(context.connection, false);
+    PendingSearchMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::SearchSession session{
+        "account-1",
+        {.from = "sender@example.test"},
+        {},
+        context.queries,
+        materialization,
+        events,
+        2,
+        javelin::app::RestoredSearchState{
+            .mode = javelin::app::SearchMode::Online,
+            .sessionId = "test-session",
+            .windows = {{.offset = 0, .limit = 2}},
+        },
+    };
+
+    CHECK_FALSE(session.state().stale);
+    session.loadCachedState();
+    waitFor([&] { return session.state().cacheLoaded; });
+    REQUIRE(session.state().items.size() == 2);
+    waitFor([&] { return materialization.lastSearchIntent.has_value(); });
+    REQUIRE(materialization.lastSearchIntent.has_value());
+    CHECK(materialization.lastSearchIntent->offset == 2);
+    CHECK(materialization.lastSearchIntent->limit == 2);
+    CHECK_FALSE(materialization.lastSearchIntent->anchor.has_value());
+    CHECK(materialization.lastSearchIntent->windowKey == searchWindowKey());
+
+    std::size_t stateChangeCount = 0;
+    QObject::connect(&session, &javelin::app::MessageListSession::stateChanged, &session,
+                     [&stateChangeCount] { ++stateChangeCount; });
+    REQUIRE(session.loadMore());
+    CHECK(session.state().loadMoreInFlight);
+    const auto loadMoreStateChange = stateChangeCount;
+    events.publish(searchWindowInvalidation(0, 2));
+    waitFor([&] { return stateChangeCount > loadMoreStateChange; });
+    CHECK(session.state().loadMoreInFlight);
+    CHECK(session.state().loadMoreError.isEmpty());
+
+    javelin::jmap::cache::SearchWindowRepository windows{context.connection};
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .queryKey = searchWindowKey(),
+                          .offset = 2,
+                          .limit = 2,
+                          .position = 2,
+                          .returnedLimit = 2,
+                          .total = 4,
+                          .queryState = "state-1",
+                          .emailIds = {"email-3", "email-4"},
+                      })
+                      .has_value());
+
+    materialization.complete(javelin::app::SearchWindowSummary{
+        .accountId = "account-1",
+        .queryKey = searchWindowKey(),
+        .offset = 2,
+        .limit = 2,
+        .position = 2,
+        .returnedLimit = 2,
+        .representativeCount = 2,
+        .total = 4,
+        .queryState = "state-1",
+    });
+
+    waitFor([&] { return session.state().items.size() == 4; });
+    CHECK_FALSE(session.state().loadMoreInFlight);
+    CHECK(session.state().items[0].emailId == "email-1");
+    CHECK(session.state().items[3].emailId == "email-4");
+    CHECK_FALSE(session.canLoadMore());
 }

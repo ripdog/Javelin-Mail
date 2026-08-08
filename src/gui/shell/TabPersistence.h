@@ -7,7 +7,6 @@
 
 #include <QString>
 
-#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
@@ -21,7 +20,7 @@ namespace javelin::gui::shell
         TabSelectionState selection;
         std::string mailboxId;
         std::optional<std::string> mailboxRole;
-        std::size_t offset = 0;
+        std::vector<javelin::app::MessageListWindowRequest> windows;
     };
 
     struct SearchTabPersistenceSnapshot
@@ -30,9 +29,9 @@ namespace javelin::gui::shell
         QString title;
         TabSelectionState selection;
         javelin::jmap::search::EmailSearchCriteria criteria;
-        javelin::app::MessageListPage page;
         javelin::app::SearchMode mode = javelin::app::SearchMode::Local;
         std::string sessionId;
+        std::vector<javelin::app::MessageListWindowRequest> windows;
     };
 
     struct MailboxTabRestorePlan
@@ -62,8 +61,7 @@ namespace javelin::gui::shell
                                                           QDate displayedMonth);
     [[nodiscard]] PersistedTab persistTab(const TabState& tab);
 
-    [[nodiscard]] MailboxTabRestorePlan planMailboxTabRestore(const PersistedMailboxTab& tab,
-                                                              std::size_t pageSize);
+    [[nodiscard]] MailboxTabRestorePlan planMailboxTabRestore(const PersistedMailboxTab& tab);
     [[nodiscard]] SearchTabRestorePlan planSearchTabRestore(PersistedSearchTab tab);
     [[nodiscard]] std::optional<int>
     resolveRestoredActiveTabIndex(int persistedActiveTabIndex,

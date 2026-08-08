@@ -19,13 +19,13 @@ namespace javelin::gui::shell
             return {
                 .showMailboxPane = context.homeTab,
                 .clearMessagePresentation = false,
-                .refreshRemote = true,
+                .refreshRemote = context.remoteRefreshRequested || context.messageListStale,
             };
         case TabKind::Search:
             return {
                 .showMailboxPane = context.homeTab,
                 .clearMessagePresentation = false,
-                .refreshRemote = context.remoteRefreshRequested || context.messagePageStale,
+                .refreshRemote = context.remoteRefreshRequested || context.messageListStale,
             };
         case TabKind::Compose:
             return {

@@ -690,42 +690,45 @@ When no effective server, settings, timer, or job state changes, an idle daemon 
 SQLite writes, negligible CPU wake-ups, and bounded steady-state memory. These properties are measured
 with the GUI disconnected as part of implementation acceptance.
 
-## Pagination and sparse windows
+## Infinite scrolling and sparse windows
 
 [QUERY_WINDOWS.md](QUERY_WINDOWS.md) remains authoritative.
 
-An uncached online-first mailbox is represented by server query windows, not by applying SQL offsets
-to whatever Email rows happen to be cached.
+An uncached online-first mailbox is represented by bounded server query windows, not by applying SQL
+offsets to whatever Email rows happen to be cached. The GUI presents the committed windows as one
+virtualized list and has no page-number, previous-page, next-page, first-page, or last-page state.
 
-A direct jump to position 400 works as follows:
+Continuation works as follows:
 
 ```text
-user requests position 400
-    -> GUI records position 400 as its current desired view
-    -> GUI finds no matching complete server window in SQLite
-    -> GUI retains useful existing rows and shows foreground loading
-    -> GUI sends a transient EnsureMailboxWindow request
-    -> daemon performs positional Email/query and required Email/get materialization
+viewport approaches the end of the loaded prefix
+    -> GUI keeps the already-installed rows and marks continuation in flight
+    -> GUI requests one bounded next window, anchored after the final loaded Email
+    -> daemon performs Email/query and required Email/get materialization
     -> daemon commits the complete window
     -> daemon sends CACHE_CHANGED for that window
-    -> GUI installs it only if position 400 is still the desired view
+    -> GUI appends its rows if the same list session still wants that continuation
 ```
 
-A result arriving after the user navigated elsewhere becomes useful cached data but cannot activate
-itself.
+A result arriving after the user changed mailbox, search, or sort may remain useful cached data but
+cannot activate itself. Request generations and stable query identity prevent an obsolete completion
+from replacing or extending the new list.
 
-The GUI tracks the installed window separately from the pending destination. While position 400 is
-loading, retained rows continue to be labelled and paged as the installed window; the mailbox header,
-pager, and accessibility state must not claim that those old rows already represent position 400.
-Retaining rows from a different mailbox or search beneath a newly activated title is misleading and
-is not permitted.
+Initial refresh and continuation have separate presentation state. Refresh may retain useful existing
+rows while the first authoritative replacement window is pending. Continuation leaves the viewport
+unchanged and appends only after cache commit. A continuation error preserves all rows already loaded
+and exposes an explicit retry affordance at the end of the list.
 
-After stable Email IDs have been shown, later refreshes preserve those IDs and the viewport anchor.
-They do not blindly repeat the old numeric position when insertions above it have shifted the result.
+The GUI never implements infinite scrolling by repeatedly querying limits of 100, 200, 300, and so
+on. Each request remains bounded. For mailboxes the next request uses the final representative as a
+stable anchor; online search may consume one compatible prefetched window and otherwise falls back to
+an anchored bounded request. If an anchored response advances `queryState`, the already-visible
+prefix is retained only as a continuity snapshot and the combined presentation remains stale rather
+than claiming one authoritative query generation.
 
-During recovery from a daemon disconnect, an already-running GUI may keep an installed cached window
-visible but cannot fabricate an uncached positional page from partial object membership. It does not
-present that snapshot as a fully operational daemon-free mode.
+During recovery from a daemon disconnect, an already-running GUI may keep installed cached windows
+visible but cannot fabricate an uncached continuation range from partial object membership. It does
+not present that snapshot as a fully operational daemon-free mode.
 
 ## Compose behaviour
 

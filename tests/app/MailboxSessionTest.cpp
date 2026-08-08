@@ -2,14 +2,21 @@
 #include "app/MailApplicationEventsPorts.h"
 #include "app/MessageListMaterializationPort.h"
 #include "jmap/cache/Database.h"
+#include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxRepository.h"
+#include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/QueryService.h"
+#include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include <QCoroFuture>
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QEventLoop>
 #include <QPromise>
+#include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QThread>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -143,9 +150,151 @@ namespace
         };
     }
 
-    void drainEvents()
+    template <typename Predicate> void waitFor(Predicate predicate)
     {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+        QElapsedTimer timer;
+        timer.start();
+        while (!predicate() && timer.elapsed() < 2000)
+        {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            QThread::msleep(1);
+        }
+        REQUIRE(predicate());
+    }
+
+    void seedAccountAndMailbox(javelin::jmap::cache::DatabaseConnection& connection)
+    {
+        QSqlQuery account{connection.database()};
+        account.prepare(QStringLiteral(
+            "INSERT INTO accounts (account_id, email_address, session_url, is_primary) "
+            "VALUES (:account_id, :email_address, :session_url, :is_primary)"));
+        account.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
+        account.bindValue(QStringLiteral(":email_address"), QStringLiteral("alice@example.com"));
+        account.bindValue(QStringLiteral(":session_url"),
+                          QStringLiteral("https://example.test/jmap"));
+        account.bindValue(QStringLiteral(":is_primary"), 1);
+        REQUIRE(account.exec());
+
+        javelin::jmap::cache::MailboxRepository mailboxes{connection};
+        REQUIRE_FALSE(mailboxes
+                          .replaceAll("account-1", {{.id = "mailbox-1",
+                                                     .name = "Inbox",
+                                                     .parentId = std::nullopt,
+                                                     .role = "inbox",
+                                                     .sortOrder = 0,
+                                                     .totalEmails = 4,
+                                                     .unreadEmails = 0,
+                                                     .totalThreads = 4,
+                                                     .unreadThreads = 0,
+                                                     .isSubscribed = true,
+                                                     .myRights = {}}})
+                          .has_value());
+    }
+
+    [[nodiscard]] javelin::jmap::domain::Email email(std::string id, std::string receivedAt)
+    {
+        const auto threadId = "thread-" + id;
+        return {
+            .id = std::move(id),
+            .blobId = {},
+            .threadId = threadId,
+            .mailboxIds = {"mailbox-1"},
+            .keywords = {},
+            .size = 0,
+            .receivedAt = std::move(receivedAt),
+            .sentAt = std::nullopt,
+            .messageId = {},
+            .inReplyTo = {},
+            .references = {},
+            .hasAttachment = false,
+            .subject = std::nullopt,
+            .from = {},
+            .to = {},
+            .cc = {},
+            .bcc = {},
+            .replyTo = {},
+            .preview = std::nullopt,
+        };
+    }
+
+    [[nodiscard]] std::string mailboxQueryKey()
+    {
+        return javelin::jmap::sync::mailboxQueryKey({
+            .mailboxId = "mailbox-1",
+            .sortProperty = "receivedAt",
+            .isAscending = false,
+            .collapseThreads = true,
+        });
+    }
+
+    void seedInfiniteScrollData(javelin::jmap::cache::DatabaseConnection& connection,
+                                const bool includeSecondWindow)
+    {
+        seedAccountAndMailbox(connection);
+        javelin::jmap::cache::EmailRepository emails{connection};
+        REQUIRE_FALSE(emails
+                          .replaceAll("account-1", {email("email-1", "2026-08-08T12:00:00Z"),
+                                                    email("email-2", "2026-08-08T11:00:00Z"),
+                                                    email("email-3", "2026-08-08T10:00:00Z"),
+                                                    email("email-4", "2026-08-08T09:00:00Z")})
+                          .has_value());
+
+        javelin::jmap::cache::MailboxWindowRepository windows{connection};
+        REQUIRE_FALSE(windows
+                          .replace({
+                              .accountId = "account-1",
+                              .mailboxId = "mailbox-1",
+                              .queryKey = mailboxQueryKey(),
+                              .requestedOffset = 0,
+                              .requestedLimit = 2,
+                              .position = 0,
+                              .returnedLimit = 2,
+                              .total = 4,
+                              .queryState = "state-1",
+                              .emailIds = {"email-1", "email-2"},
+                          })
+                          .has_value());
+        if (includeSecondWindow)
+        {
+            REQUIRE_FALSE(windows
+                              .replace({
+                                  .accountId = "account-1",
+                                  .mailboxId = "mailbox-1",
+                                  .queryKey = mailboxQueryKey(),
+                                  .requestedOffset = 2,
+                                  .requestedLimit = 2,
+                                  .position = 2,
+                                  .returnedLimit = 2,
+                                  .total = 4,
+                                  .queryState = "state-1",
+                                  .emailIds = {"email-3", "email-4"},
+                              })
+                              .has_value());
+        }
+    }
+
+    [[nodiscard]] javelin::app::MailCacheInvalidation windowInvalidation(const std::size_t offset,
+                                                                         const std::size_t limit)
+    {
+        return {
+            .epoch = 1,
+            .changedDomains = {javelin::protocol::ChangedDomain::MailQueryWindows},
+            .affectedKeys = {QStringLiteral("mailbox-1")},
+            .change =
+                {
+                    .accountId = QStringLiteral("account-1"),
+                    .mailboxIds = {},
+                    .queryWindows = {{.mailboxId = QStringLiteral("mailbox-1"),
+                                      .offset = offset,
+                                      .limit = limit,
+                                      .total = 4}},
+                    .searchWindows = {},
+                    .mailboxTreeChanged = false,
+                    .hasNewMail = false,
+                    .optimisticProjection = false,
+                    .contactsChanged = false,
+                },
+        };
     }
 } // namespace
 
@@ -166,39 +315,49 @@ TEST_CASE("mailbox cache commit terminates its visible refresh", "[app][mailbox-
 
     session.markStale();
     session.refresh();
-    REQUIRE(session.page().refreshInFlight);
+    REQUIRE(session.state().refreshInFlight);
     REQUIRE(materialization.lastMailboxIntent.has_value());
     CHECK_FALSE(materialization.lastMailboxIntent->forceRefresh);
 
-    events.publish({
-        .epoch = 1,
-        .changedDomains = {javelin::protocol::ChangedDomain::MailQueryWindows},
-        .affectedKeys = {QStringLiteral("mailbox-1")},
-        .change =
-            {
-                .accountId = QStringLiteral("account-1"),
-                .mailboxIds = {},
-                .queryWindows = {{.mailboxId = QStringLiteral("mailbox-1"),
-                                  .offset = 0,
-                                  .limit = 100,
-                                  .total = 0}},
-                .searchWindows = {},
-                .mailboxTreeChanged = false,
-                .hasNewMail = false,
-                .optimisticProjection = false,
-                .contactsChanged = false,
-            },
-    });
-
-    CHECK_FALSE(session.page().refreshInFlight);
+    events.publish(windowInvalidation(0, 100));
+    CHECK_FALSE(session.state().refreshInFlight);
 
     materialization.complete(javelin::jmap::OperationError{
         .message = QStringLiteral("Late terminal event must be ignored."),
     });
-    drainEvents();
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
 
-    CHECK_FALSE(session.page().refreshInFlight);
+    CHECK_FALSE(session.state().refreshInFlight);
     CHECK(failureCount == 0);
+}
+
+TEST_CASE("missing initial mailbox cache materializes itself after the cache read",
+          "[app][mailbox-session][infinite-scroll]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("mailbox-session-cache-miss-test"));
+    PendingMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::MailboxSession session{
+        "account-1", "mailbox-1",     QStringLiteral("Inbox"), std::optional<std::string>{"inbox"},
+        {},          context.queries, materialization,         100,
+        events};
+
+    CHECK_FALSE(session.state().stale);
+    session.loadCachedState();
+    waitFor([&] { return materialization.lastMailboxIntent.has_value(); });
+
+    REQUIRE(materialization.lastMailboxIntent.has_value());
+    CHECK(materialization.lastMailboxIntent->offset == 0);
+    CHECK(materialization.lastMailboxIntent->limit == 100);
+    CHECK_FALSE(materialization.lastMailboxIntent->anchor.has_value());
+    CHECK_FALSE(materialization.lastMailboxIntent->forceRefresh);
+    CHECK(session.state().refreshInFlight);
+
+    materialization.complete(javelin::jmap::OperationError{
+        .message = QStringLiteral("Expected cache-miss test completion."),
+    });
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
 }
 
 TEST_CASE("explicit mailbox refresh requests server reconciliation", "[app][mailbox-session]")
@@ -219,10 +378,11 @@ TEST_CASE("explicit mailbox refresh requests server reconciliation", "[app][mail
     materialization.complete(javelin::jmap::OperationError{
         .message = QStringLiteral("Expected explicit refresh test completion."),
     });
-    drainEvents();
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
 }
 
-TEST_CASE("obsolete mailbox completion cannot alter a new page", "[app][mailbox-session]")
+TEST_CASE("changing mailbox sort invalidates an obsolete refresh completion",
+          "[app][mailbox-session]")
 {
     ApplicationGuard application;
     auto context = makeSessionContext(QStringLiteral("mailbox-session-generation-test"));
@@ -236,42 +396,124 @@ TEST_CASE("obsolete mailbox completion cannot alter a new page", "[app][mailbox-
                                          context.queries,
                                          materialization,
                                          100,
-                                         events,
-                                         javelin::app::RestoredMailboxState{
-                                             .page =
-                                                 {
-                                                     .offset = 0,
-                                                     .installedOffset = 0,
-                                                     .pendingOffset = std::nullopt,
-                                                     .position = 0,
-                                                     .returnedLimit = 100,
-                                                     .total = 300,
-                                                     .queryState = "query-state",
-                                                     .anchor = std::nullopt,
-                                                     .items = {},
-                                                     .cacheLoaded = true,
-                                                     .refreshInFlight = false,
-                                                     .stale = false,
-                                                     .refreshError = {},
-                                                 },
-                                         }};
+                                         events};
 
     std::size_t failureCount = 0;
     QObject::connect(&session, &javelin::app::MessageListSession::refreshFailed, &session,
                      [&failureCount](const javelin::jmap::OperationError&) { ++failureCount; });
 
     session.refresh();
-    REQUIRE(session.page().refreshInFlight);
-    REQUIRE(session.goToPage(1));
-    CHECK_FALSE(session.page().refreshInFlight);
-    CHECK(session.page().offset == 100);
+    REQUIRE(session.state().refreshInFlight);
+    session.setSort({.property = javelin::jmap::query::EmailListSortProperty::Subject,
+                     .direction = javelin::jmap::query::EmailListSortDirection::Ascending});
+    CHECK(session.state().stale);
 
     materialization.complete(javelin::jmap::OperationError{
-        .message = QStringLiteral("Obsolete page failed."),
+        .message = QStringLiteral("Obsolete refresh failed."),
     });
-    drainEvents();
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
 
-    CHECK_FALSE(session.page().refreshInFlight);
-    CHECK(session.page().offset == 100);
     CHECK(failureCount == 0);
+}
+
+TEST_CASE("mailbox session restores a loaded infinite-scroll prefix from SQLite windows",
+          "[app][mailbox-session][infinite-scroll][persistence]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("mailbox-session-restore-prefix-test"));
+    seedInfiniteScrollData(context.connection, true);
+    PendingMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::MailboxSession session{
+        "account-1",
+        "mailbox-1",
+        QStringLiteral("Inbox"),
+        std::optional<std::string>{"inbox"},
+        {},
+        context.queries,
+        materialization,
+        2,
+        events,
+        javelin::app::RestoredMailboxState{
+            .windows = {{.offset = 0, .limit = 2}, {.offset = 2, .limit = 2}},
+        }};
+
+    session.loadCachedState();
+    waitFor([&] { return session.state().items.size() == 4; });
+
+    CHECK(session.state().cacheLoaded);
+    CHECK_FALSE(session.state().stale);
+    CHECK(session.state().items[3].emailId == "email-4");
+    CHECK(session.windowRequests().size() == 2);
+    CHECK_FALSE(materialization.lastMailboxIntent.has_value());
+}
+
+TEST_CASE("mailbox infinite scrolling appends a bounded anchored window and ignores late IPC",
+          "[app][mailbox-session][infinite-scroll]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("mailbox-session-infinite-scroll-test"));
+    seedInfiniteScrollData(context.connection, false);
+    PendingMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::MailboxSession session{
+        "account-1", "mailbox-1",     QStringLiteral("Inbox"), std::optional<std::string>{"inbox"},
+        {},          context.queries, materialization,         2,
+        events};
+
+    CHECK_FALSE(session.state().stale);
+    session.loadCachedState();
+    waitFor([&] { return session.state().cacheLoaded; });
+    REQUIRE(session.state().items.size() == 2);
+    CHECK(session.state().items[0].emailId == "email-1");
+    CHECK(session.state().items[1].emailId == "email-2");
+    REQUIRE(session.canLoadMore());
+
+    std::size_t stateChangeCount = 0;
+    QObject::connect(&session, &javelin::app::MessageListSession::stateChanged, &session,
+                     [&stateChangeCount] { ++stateChangeCount; });
+    REQUIRE(session.loadMore());
+    REQUIRE(materialization.lastMailboxIntent.has_value());
+    CHECK(materialization.lastMailboxIntent->offset == 2);
+    CHECK(materialization.lastMailboxIntent->limit == 2);
+    CHECK(materialization.lastMailboxIntent->anchor == std::optional<std::string>{"email-2"});
+    CHECK(materialization.lastMailboxIntent->anchorOffset == 1);
+    CHECK(session.state().loadMoreInFlight);
+
+    const auto loadMoreStateChange = stateChangeCount;
+    events.publish(windowInvalidation(0, 2));
+    waitFor([&] { return stateChangeCount > loadMoreStateChange; });
+    CHECK(session.state().loadMoreInFlight);
+    CHECK(session.state().loadMoreError.isEmpty());
+
+    javelin::jmap::cache::MailboxWindowRepository windows{context.connection};
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mailbox-1",
+                          .queryKey = mailboxQueryKey(),
+                          .requestedOffset = 2,
+                          .requestedLimit = 2,
+                          .position = 2,
+                          .returnedLimit = 2,
+                          .total = 4,
+                          .queryState = "state-2",
+                          .emailIds = {"email-3", "email-4"},
+                      })
+                      .has_value());
+    events.publish(windowInvalidation(2, 2));
+
+    waitFor([&] { return session.state().items.size() == 4; });
+    CHECK_FALSE(session.state().loadMoreInFlight);
+    CHECK(session.state().stale);
+    CHECK(session.state().items[2].emailId == "email-3");
+    CHECK(session.state().items[3].emailId == "email-4");
+    CHECK_FALSE(session.canLoadMore());
+
+    materialization.complete(javelin::jmap::OperationError{
+        .message = QStringLiteral("Late continuation completion must be ignored."),
+    });
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    CHECK(session.state().loadMoreError.isEmpty());
+    CHECK(session.state().items.size() == 4);
 }

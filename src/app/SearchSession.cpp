@@ -1,8 +1,8 @@
 #include "app/SearchSession.h"
 
 #include "app/MailApplicationEventsPorts.h"
-#include "app/MailApplicationService.h"
 #include "jmap/cache/QueryService.h"
+
 #include <QCoroTask>
 
 #include <KLocalizedString>
@@ -12,6 +12,7 @@
 #include <QtConcurrentRun>
 
 #include <algorithm>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 
@@ -21,12 +22,17 @@ namespace javelin::app
     {
         using LocalSearchResult = std::variant<std::vector<javelin::jmap::cache::MessageListItem>,
                                                javelin::jmap::cache::DatabaseError>;
-        using ProjectedSearchPageResult =
-            std::variant<std::optional<javelin::jmap::cache::SearchWindowPage>,
-                         javelin::jmap::cache::DatabaseError>;
 
-        constexpr std::size_t completeManifestThreshold = 2000;
-        constexpr std::size_t readAheadPages = 2;
+        struct WindowRequest
+        {
+            std::size_t offset = 0;
+            std::size_t limit = 0;
+        };
+
+        using ProjectedSearchWindows =
+            std::vector<std::optional<javelin::jmap::cache::SearchWindowPage>>;
+        using ProjectedSearchWindowsResult =
+            std::variant<ProjectedSearchWindows, javelin::jmap::cache::DatabaseError>;
 
         [[nodiscard]] LocalSearchResult
         runLocalSearch(const QString& databasePath, const std::string& accountId,
@@ -48,10 +54,10 @@ namespace javelin::app
             return queryService.searchAllCachedMessageText(accountId, text, sort);
         }
 
-        [[nodiscard]] ProjectedSearchPageResult
-        loadProjectedSearchPage(const QString& databasePath, const std::string& accountId,
-                                const std::string& queryKey, const std::size_t offset,
-                                const std::size_t limit)
+        [[nodiscard]] ProjectedSearchWindowsResult
+        loadProjectedSearchWindows(const QString& databasePath, const std::string& accountId,
+                                   const std::string& queryKey,
+                                   const std::vector<WindowRequest>& requests)
         {
             javelin::jmap::cache::ReadOnlyThreadConnectionFactory factory{
                 {.connectionNamePrefix = QStringLiteral("javelin-projected-search"),
@@ -62,10 +68,29 @@ namespace javelin::app
             {
                 return *error;
             }
+
             auto connection = std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(
                 std::move(connectionResult));
             javelin::jmap::cache::QueryService queryService{connection};
-            return queryService.loadSearchWindow(accountId, queryKey, offset, limit);
+            ProjectedSearchWindows windows;
+            windows.reserve(requests.size());
+            for (const auto& request : requests)
+            {
+                auto result = queryService.loadSearchWindow(accountId, queryKey, request.offset,
+                                                            request.limit);
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                {
+                    return *error;
+                }
+                windows.push_back(std::get<std::optional<javelin::jmap::cache::SearchWindowPage>>(
+                    std::move(result)));
+            }
+            return windows;
+        }
+
+        [[nodiscard]] bool displayCurrent(const javelin::jmap::cache::SearchWindowPage& page)
+        {
+            return javelin::jmap::cache::isDisplayCurrent(page.coverage, page.materialization);
         }
     } // namespace
 
@@ -74,22 +99,48 @@ namespace javelin::app
                                  javelin::jmap::query::EmailListSort sort,
                                  javelin::jmap::cache::QueryReader& queryReader,
                                  MessageListMaterializationPort& materializationPort,
-                                 MailApplicationEventsPort& events, const std::size_t pageSize,
+                                 MailApplicationEventsPort& events, const std::size_t windowSize,
                                  std::optional<RestoredSearchState> restored, QObject* parent)
         : MessageListSession(parent), m_accountId(std::move(accountId)),
           m_query(javelin::jmap::search::displayString(criteria)), m_criteria(std::move(criteria)),
           m_sort(sort), m_queryReader(queryReader), m_materializationPort(materializationPort),
-          m_events(events), m_pageSize(pageSize),
+          m_events(events), m_windowSize(windowSize),
           m_mode(javelin::jmap::search::isBasicTextSearch(m_criteria) ? SearchMode::Local
                                                                       : SearchMode::Online),
           m_sessionId(QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString())
     {
         if (restored.has_value())
         {
-            m_page = std::move(restored->page);
             m_mode = restored->mode == SearchMode::Promoting ? SearchMode::Online : restored->mode;
             if (!restored->sessionId.empty())
                 m_sessionId = std::move(restored->sessionId);
+        }
+        if (m_mode == SearchMode::Online)
+        {
+            if (restored.has_value() && !restored->windows.empty())
+            {
+                const auto count =
+                    std::min(restored->windows.size(), maximumRestoredMessageListWindows);
+                m_windows.reserve(count);
+                for (std::size_t index = 0; index < count; ++index)
+                {
+                    const auto& request = restored->windows[index];
+                    if (request.limit == 0)
+                        break;
+                    m_windows.push_back({
+                        .requestedOffset = request.offset,
+                        .requestedLimit = request.limit,
+                        .position = 0,
+                        .returnedLimit = 0,
+                        .total = std::nullopt,
+                        .queryState = {},
+                        .itemCount = 0,
+                        .displayCurrent = false,
+                    });
+                }
+            }
+            if (m_windows.empty())
+                resetOnlineWindows();
         }
 
         connect(&m_events, &MailApplicationEventsPort::cacheInvalidated, this,
@@ -101,29 +152,43 @@ namespace javelin::app
                     {
                         return;
                     }
+
                     m_cacheEpoch = std::max(m_cacheEpoch, invalidation.epoch);
                     static_cast<void>(m_refreshGeneration.begin(m_cacheEpoch));
                     const auto key = onlineWindowKey();
-                    for (const auto& window : change.searchWindows)
+                    bool retainedWindowChanged = false;
+                    for (const auto& changed : change.searchWindows)
                     {
-                        if (window.offset == m_page.offset && window.queryKey.toStdString() == key)
-                        {
-                            if (m_page.refreshInFlight)
-                            {
-                                ++m_refreshRequestId;
-                                m_visiblePrefetchOffset.reset();
-                                m_page.refreshInFlight = false;
-                                Q_EMIT pageChanged();
-                            }
-                            applyCommittedServerPage();
-                            return;
-                        }
+                        if (changed.queryKey.toStdString() != key)
+                            continue;
+                        retainedWindowChanged =
+                            std::ranges::any_of(m_windows,
+                                                [&changed](const MessageListWindow& window)
+                                                {
+                                                    return window.requestedOffset ==
+                                                               changed.offset &&
+                                                           window.requestedLimit == changed.limit;
+                                                }) ||
+                            retainedWindowChanged;
                     }
+                    if (retainedWindowChanged)
+                    {
+                        if (m_state.refreshInFlight)
+                        {
+                            ++m_refreshRequestId;
+                            m_state.refreshInFlight = false;
+                            m_refreshAwaitingCache = false;
+                            Q_EMIT stateChanged();
+                        }
+                        reloadProjectedWindows();
+                        return;
+                    }
+
                     if (change.hasNewMail || change.optimisticProjection ||
                         !change.mailboxIds.isEmpty())
                     {
-                        m_page.stale = true;
-                        applyCommittedServerPage();
+                        m_state.stale = true;
+                        reloadProjectedWindows();
                     }
                 });
     }
@@ -148,9 +213,9 @@ namespace javelin::app
         return i18nc("@title search tab", "Search: %1", QString::fromStdString(m_query));
     }
 
-    const MessageListPage& SearchSession::page() const
+    const MessageListState& SearchSession::state() const
     {
-        return m_page;
+        return m_state;
     }
 
     SearchMode SearchSession::mode() const
@@ -168,7 +233,7 @@ namespace javelin::app
         return m_sessionId;
     }
 
-    void SearchSession::loadCachedPage(const bool forceReload)
+    void SearchSession::loadCachedState(const bool forceReload)
     {
         if (m_mode == SearchMode::Local)
         {
@@ -177,15 +242,14 @@ namespace javelin::app
             if (!m_localSnapshotLoaded)
                 startLocalSnapshot();
             else
-                applyLocalPage();
+                applyLocalVisibleRange();
             return;
         }
         if (m_mode == SearchMode::Promoting)
             return;
-        if (m_page.cacheLoaded && !m_page.stale && !forceReload)
+        if (m_state.cacheLoaded && !m_state.stale && !forceReload)
             return;
-
-        reloadProjectedPage();
+        reloadProjectedWindows();
     }
 
     void SearchSession::refresh(const MessageListRefreshMode)
@@ -196,9 +260,8 @@ namespace javelin::app
                 startLocalSnapshot();
             return;
         }
-        if (m_mode == SearchMode::Promoting)
-            return;
-        requestOnlinePage();
+        if (m_mode == SearchMode::Online)
+            requestOnlineInitial();
     }
 
     void SearchSession::promoteToOnline()
@@ -208,245 +271,620 @@ namespace javelin::app
 
         ++m_generation;
         ++m_refreshRequestId;
-        m_visiblePrefetchOffset.reset();
         m_refreshGeneration.replaceScope();
         m_mode = SearchMode::Promoting;
         m_localSearchInFlight = false;
-        m_page = MessageListPage{
-            .offset = 0,
-            .installedOffset = std::nullopt,
-            .pendingOffset = std::nullopt,
-            .position = 0,
-            .returnedLimit = m_pageSize,
-            .total = std::nullopt,
-            .queryState = {},
-            .anchor = std::nullopt,
-            .items = {},
-            .cacheLoaded = false,
-            .refreshInFlight = false,
-            .stale = true,
-            .refreshError = {},
-        };
-        Q_EMIT pageChanged();
+        m_localSnapshot.clear();
+        m_localSnapshotLoaded = false;
+        m_localVisibleCount = 0;
+        m_state = MessageListState{};
+        m_state.itemsRevision = ++m_itemsRevision;
+        m_prefetchOffsets.clear();
+        m_pendingLoadMoreOffset.reset();
+        m_pendingLoadMoreAnchor.reset();
+        m_pendingLoadMoreCommitted = false;
+        m_pendingLoadMoreRequestCompleted = false;
+        resetOnlineWindows();
+        Q_EMIT stateChanged();
+
         m_mode = SearchMode::Online;
-        requestOnlinePage();
+        requestOnlineInitial();
     }
 
-    void SearchSession::requestOnlinePage()
+    void SearchSession::requestOnlineInitial()
     {
-        if (m_page.refreshInFlight)
+        if (m_closed || m_mode != SearchMode::Online || m_state.refreshInFlight)
             return;
-        if (m_prefetchOffsets.contains(m_page.offset))
+
+        if (m_state.loadMoreInFlight)
         {
             ++m_refreshRequestId;
-            m_visiblePrefetchOffset = m_page.offset;
-            m_page.refreshInFlight = true;
-            Q_EMIT pageChanged();
-            return;
+            m_state.loadMoreInFlight = false;
+            m_pendingLoadMoreOffset.reset();
+            m_pendingLoadMoreAnchor.reset();
+            m_pendingLoadMoreCommitted = false;
+            m_pendingLoadMoreRequestCompleted = false;
         }
 
-        const auto requestId = ++m_refreshRequestId;
-        m_visiblePrefetchOffset.reset();
-        m_page.refreshInFlight = true;
-        m_page.refreshError.clear();
-        Q_EMIT pageChanged();
-        const auto requestedOffset = m_page.offset;
+        m_state.refreshInFlight = true;
+        m_state.refreshError.clear();
+        m_state.loadMoreError.clear();
+        m_state.stale = true;
+        Q_EMIT stateChanged();
+
         const auto generation = m_generation;
+        const auto requestId = ++m_refreshRequestId;
         auto task = m_materializationPort.requestSearchWindow(SearchWindowIntent{
             .accountId = m_accountId,
             .criteria = m_criteria,
-            .offset = requestedOffset,
-            .limit = m_pageSize,
+            .offset = 0,
+            .limit = m_windowSize,
             .sort = m_sort,
-            .anchor = m_page.anchor,
+            .anchor = std::nullopt,
             .windowKey = onlineWindowKey(),
         });
         QCoro::connect(
             std::move(task), this,
-            [this, requestedOffset, generation, requestId](SearchWindowResult result)
+            [this, generation, requestId](SearchWindowResult result)
             {
-                if (requestId != m_refreshRequestId || m_closed ||
-                    requestedOffset != m_page.offset || generation != m_generation ||
-                    m_mode != SearchMode::Online)
+                if (m_closed || m_mode != SearchMode::Online || generation != m_generation ||
+                    requestId != m_refreshRequestId)
                 {
                     return;
                 }
+
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
-                    m_page.refreshInFlight = false;
-                    m_page.refreshError = error->message;
-                    const bool wasInitialPromotion = m_page.queryState.empty();
+                    m_state.refreshInFlight = false;
+                    m_state.refreshError = error->message;
+                    const bool wasInitialPromotion = m_windows.size() == 1 &&
+                                                     m_windows.front().queryState.empty() &&
+                                                     m_state.items.empty();
                     if (wasInitialPromotion && javelin::jmap::search::isBasicTextSearch(m_criteria))
                     {
                         m_mode = SearchMode::Local;
-                        m_page.refreshError.clear();
+                        m_state.refreshError.clear();
+                        m_windows.clear();
                         if (m_localSnapshotLoaded)
-                            applyLocalPage();
+                            applyLocalVisibleRange();
                         else
                             startLocalSnapshot();
                     }
                     const bool refreshAgain = std::exchange(m_refreshAfterCurrent, false);
-                    Q_EMIT pageChanged();
+                    Q_EMIT stateChanged();
                     Q_EMIT refreshFailed(*error);
                     if (refreshAgain && m_mode == SearchMode::Online)
-                        requestOnlinePage();
+                        requestOnlineInitial();
                     return;
                 }
 
                 const auto& summary = std::get<SearchWindowSummary>(result);
-                m_localSnapshot.clear();
-                m_localSnapshotLoaded = false;
-                m_page.total = summary.total;
-                m_page.position = summary.position;
-                m_page.returnedLimit = summary.returnedLimit;
-                m_page.queryState = summary.queryState;
-                m_page.refreshInFlight = false;
-                m_page.anchor.reset();
-                if (m_page.total.has_value() && m_page.offset > 0 &&
-                    (*m_page.total == 0 || m_page.position >= *m_page.total))
-                {
-                    const auto step = m_page.returnedLimit == 0 ? m_pageSize : m_page.returnedLimit;
-                    m_page.offset =
-                        normalizedMessageListPageOffset(m_page.offset, *m_page.total, step);
-                    resetForPageChange();
-                    requestOnlinePage();
-                    return;
-                }
-                applyCommittedServerPage();
-                m_page.stale = false;
-                m_page.refreshError.clear();
-                const auto nextOffset = summary.position + summary.representativeCount;
-                const auto remainingRequests =
-                    summary.total.has_value() && *summary.total <= completeManifestThreshold
-                        ? (*summary.total > nextOffset ? *summary.total - nextOffset : 0)
-                        : readAheadPages;
-                if (summary.representativeCount != 0 && remainingRequests > 0)
-                {
-                    prefetchOnlinePages(nextOffset, remainingRequests, generation,
-                                        summary.queryState);
-                }
-                const bool refreshAgain = std::exchange(m_refreshAfterCurrent, false);
-                Q_EMIT pageChanged();
-                if (refreshAgain)
-                    requestOnlinePage();
+                m_windows.clear();
+                m_windows.push_back({
+                    .requestedOffset = summary.offset,
+                    .requestedLimit = summary.limit,
+                    .position = summary.position,
+                    .returnedLimit = summary.returnedLimit,
+                    .total = summary.total,
+                    .queryState = summary.queryState,
+                    .itemCount = summary.representativeCount,
+                    .displayCurrent = false,
+                });
+                m_pendingLoadMoreOffset.reset();
+                m_pendingLoadMoreAnchor.reset();
+                m_pendingLoadMoreCommitted = false;
+                m_pendingLoadMoreRequestCompleted = false;
+                m_state.loadMoreInFlight = false;
+                m_endReached = summary.representativeCount == 0 ||
+                               (summary.total.has_value() &&
+                                summary.position + summary.representativeCount >= *summary.total) ||
+                               (!summary.total.has_value() && summary.returnedLimit > 0 &&
+                                summary.representativeCount < summary.returnedLimit);
+                m_refreshAwaitingCache = true;
+                reloadProjectedWindows();
             });
     }
 
-    void SearchSession::prefetchOnlinePages(const std::size_t offset,
-                                            const std::size_t remainingRequests,
-                                            const std::uint64_t generation, std::string queryState)
+    void SearchSession::requestOnlineContinuation(const std::size_t offset, std::string anchor)
     {
-        if (remainingRequests == 0 || generation != m_generation || m_mode != SearchMode::Online ||
-            (m_page.total.has_value() && offset >= *m_page.total))
+        if (m_closed || m_mode != SearchMode::Online || !m_state.loadMoreInFlight ||
+            !m_pendingLoadMoreOffset.has_value() || *m_pendingLoadMoreOffset != offset)
+        {
+            return;
+        }
+
+        if (std::ranges::none_of(m_windows, [offset](const MessageListWindow& window)
+                                 { return window.requestedOffset == offset; }))
+        {
+            m_windows.push_back({
+                .requestedOffset = offset,
+                .requestedLimit = m_windowSize,
+                .position = 0,
+                .returnedLimit = 0,
+                .total = std::nullopt,
+                .queryState = {},
+                .itemCount = 0,
+                .displayCurrent = false,
+            });
+        }
+
+        const auto generation = m_generation;
+        const auto requestId = ++m_refreshRequestId;
+        m_pendingLoadMoreCommitted = true;
+        m_pendingLoadMoreRequestCompleted = false;
+        auto task = m_materializationPort.requestSearchWindow(SearchWindowIntent{
+            .accountId = m_accountId,
+            .criteria = m_criteria,
+            .offset = offset,
+            .limit = m_windowSize,
+            .sort = m_sort,
+            .anchor = std::move(anchor),
+            .windowKey = onlineWindowKey(),
+        });
+        QCoro::connect(
+            std::move(task), this,
+            [this, generation, requestId, offset](SearchWindowResult result)
+            {
+                if (m_closed || m_mode != SearchMode::Online || generation != m_generation ||
+                    requestId != m_refreshRequestId || !m_pendingLoadMoreOffset.has_value() ||
+                    *m_pendingLoadMoreOffset != offset)
+                {
+                    return;
+                }
+
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    const auto pending =
+                        std::ranges::find_if(m_windows, [offset](const MessageListWindow& window)
+                                             { return window.requestedOffset == offset; });
+                    if (pending != m_windows.end())
+                        m_windows.erase(pending);
+                    m_state.loadMoreInFlight = false;
+                    m_state.loadMoreError = error->message;
+                    m_pendingLoadMoreOffset.reset();
+                    m_pendingLoadMoreAnchor.reset();
+                    m_pendingLoadMoreCommitted = false;
+                    m_pendingLoadMoreRequestCompleted = false;
+                    Q_EMIT stateChanged();
+                    return;
+                }
+
+                const auto& summary = std::get<SearchWindowSummary>(result);
+                const auto existing =
+                    std::ranges::find_if(m_windows, [&summary](const MessageListWindow& window)
+                                         { return window.requestedOffset == summary.offset; });
+                if (existing == m_windows.end())
+                {
+                    m_windows.push_back({
+                        .requestedOffset = summary.offset,
+                        .requestedLimit = summary.limit,
+                        .position = summary.position,
+                        .returnedLimit = summary.returnedLimit,
+                        .total = summary.total,
+                        .queryState = summary.queryState,
+                        .itemCount = summary.representativeCount,
+                        .displayCurrent = false,
+                    });
+                }
+                else
+                {
+                    existing->requestedLimit = summary.limit;
+                    existing->position = summary.position;
+                    existing->returnedLimit = summary.returnedLimit;
+                    existing->total = summary.total;
+                    existing->queryState = summary.queryState;
+                    existing->itemCount = summary.representativeCount;
+                    existing->displayCurrent = false;
+                }
+                m_pendingLoadMoreRequestCompleted = true;
+                m_endReached = summary.representativeCount == 0 ||
+                               (summary.total.has_value() &&
+                                summary.position + summary.representativeCount >= *summary.total) ||
+                               (!summary.total.has_value() && summary.returnedLimit > 0 &&
+                                summary.representativeCount < summary.returnedLimit);
+                reloadProjectedWindows();
+            });
+    }
+
+    void SearchSession::reloadProjectedWindows()
+    {
+        if (m_closed || m_mode != SearchMode::Online)
+            return;
+        if (m_projectedReloadInFlight)
+        {
+            m_projectedReloadPending = true;
+            return;
+        }
+        if (m_windows.empty())
+            resetOnlineWindows();
+
+        std::vector<WindowRequest> requests;
+        requests.reserve(m_windows.size());
+        for (const auto& window : m_windows)
+        {
+            requests.push_back({
+                .offset = window.requestedOffset,
+                .limit = window.requestedLimit,
+            });
+        }
+
+        m_projectedReloadInFlight = true;
+        const auto generation = m_generation;
+        const auto ticket = m_refreshGeneration.begin(m_cacheEpoch);
+        auto* watcher = new QFutureWatcher<ProjectedSearchWindowsResult>(this);
+        connect(
+            watcher, &QFutureWatcher<ProjectedSearchWindowsResult>::finished, this,
+            [this, watcher, generation, ticket]
+            {
+                auto result = watcher->result();
+                watcher->deleteLater();
+                m_projectedReloadInFlight = false;
+
+                if (m_closed || m_mode != SearchMode::Online || generation != m_generation ||
+                    !m_refreshGeneration.install(ticket, m_cacheEpoch))
+                {
+                    if (std::exchange(m_projectedReloadPending, false))
+                        reloadProjectedWindows();
+                    return;
+                }
+
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                {
+                    if (m_state.loadMoreInFlight)
+                    {
+                        m_state.loadMoreInFlight = false;
+                        m_pendingLoadMoreOffset.reset();
+                        m_pendingLoadMoreAnchor.reset();
+                        m_pendingLoadMoreCommitted = false;
+                        m_pendingLoadMoreRequestCompleted = false;
+                        m_state.loadMoreError = error->message;
+                    }
+                    else
+                    {
+                        m_state.refreshError = error->message;
+                    }
+                    if (m_refreshAwaitingCache)
+                    {
+                        m_refreshAwaitingCache = false;
+                        m_state.refreshInFlight = false;
+                    }
+                    Q_EMIT stateChanged();
+                    if (std::exchange(m_projectedReloadPending, false))
+                        reloadProjectedWindows();
+                    return;
+                }
+
+                auto windows = std::get<ProjectedSearchWindows>(std::move(result));
+                if (windows.size() != m_windows.size())
+                {
+                    m_state.stale = true;
+                    Q_EMIT stateChanged();
+                    return;
+                }
+
+                const auto pendingIt =
+                    m_pendingLoadMoreOffset.has_value()
+                        ? std::ranges::find_if(
+                              m_windows, [this](const MessageListWindow& window)
+                              { return window.requestedOffset == *m_pendingLoadMoreOffset; })
+                        : m_windows.end();
+                const auto pendingIndex =
+                    pendingIt == m_windows.end()
+                        ? windows.size()
+                        : static_cast<std::size_t>(std::distance(m_windows.begin(), pendingIt));
+
+                bool pendingCompatible = true;
+                if (pendingIndex < windows.size() && !m_pendingLoadMoreCommitted &&
+                    windows[pendingIndex].has_value() && pendingIndex > 0)
+                {
+                    pendingCompatible =
+                        windows[pendingIndex]->queryState == m_windows[pendingIndex - 1].queryState;
+                }
+
+                bool allCurrent = pendingCompatible;
+                for (std::size_t index = 0; index < windows.size(); ++index)
+                {
+                    if (!windows[index].has_value() || !displayCurrent(*windows[index]))
+                    {
+                        allCurrent = false;
+                        m_windows[index].displayCurrent = false;
+                    }
+                }
+
+                bool requestContinuation = false;
+                bool materializeMissingInitial = false;
+                std::size_t continuationOffset = 0;
+                std::string continuationAnchor;
+                if (allCurrent)
+                {
+                    std::vector<javelin::jmap::cache::SearchWindowPage> committed;
+                    committed.reserve(windows.size());
+                    for (auto& window : windows)
+                        committed.push_back(std::move(*window));
+                    rebuildFromProjectedWindows(std::move(committed));
+                    const bool queryStateConsistent =
+                        m_windows.empty() ||
+                        std::ranges::all_of(m_windows, [queryState = m_windows.front().queryState](
+                                                           const MessageListWindow& window)
+                                            { return window.queryState == queryState; });
+                    m_state.stale = !queryStateConsistent;
+                    m_state.refreshError.clear();
+                    m_state.loadMoreError.clear();
+                    if (m_state.loadMoreInFlight && pendingIndex < windows.size())
+                    {
+                        m_state.loadMoreInFlight = false;
+                        m_pendingLoadMoreOffset.reset();
+                        m_pendingLoadMoreAnchor.reset();
+                        m_pendingLoadMoreCommitted = false;
+                        m_pendingLoadMoreRequestCompleted = false;
+                    }
+                }
+                else if (pendingIndex < windows.size())
+                {
+                    const bool pendingCurrent = windows[pendingIndex].has_value() &&
+                                                displayCurrent(*windows[pendingIndex]) &&
+                                                pendingCompatible;
+                    if (pendingCurrent)
+                    {
+                        auto page = std::move(*windows[pendingIndex]);
+                        auto& metadata = m_windows[pendingIndex];
+                        metadata.position = page.position;
+                        metadata.returnedLimit = page.returnedLimit;
+                        metadata.total = page.total;
+                        metadata.queryState = page.queryState;
+                        metadata.itemCount = page.items.size();
+                        metadata.displayCurrent = true;
+
+                        std::unordered_set<std::string> threadIds;
+                        threadIds.reserve(m_state.items.size() + page.items.size());
+                        for (const auto& item : m_state.items)
+                            threadIds.insert(item.threadId);
+                        for (auto& item : page.items)
+                        {
+                            if (threadIds.insert(item.threadId).second)
+                                m_state.items.push_back(std::move(item));
+                        }
+                        m_state.itemsRevision = ++m_itemsRevision;
+                        m_state.total = page.total;
+                        m_endReached =
+                            metadata.itemCount == 0 ||
+                            (metadata.total.has_value() &&
+                             metadata.position + metadata.itemCount >= *metadata.total) ||
+                            (!metadata.total.has_value() && metadata.returnedLimit > 0 &&
+                             metadata.itemCount < metadata.returnedLimit);
+                        m_state.loadMoreInFlight = false;
+                        m_state.loadMoreError.clear();
+                        m_pendingLoadMoreOffset.reset();
+                        m_pendingLoadMoreAnchor.reset();
+                        m_pendingLoadMoreCommitted = false;
+                        m_pendingLoadMoreRequestCompleted = false;
+                        m_state.stale = true;
+                    }
+                    else if (!m_pendingLoadMoreCommitted && m_pendingLoadMoreAnchor.has_value())
+                    {
+                        continuationOffset = *m_pendingLoadMoreOffset;
+                        continuationAnchor = *m_pendingLoadMoreAnchor;
+                        m_windows.erase(m_windows.begin() +
+                                        static_cast<std::ptrdiff_t>(pendingIndex));
+                        requestContinuation = true;
+                    }
+                    else if (m_pendingLoadMoreRequestCompleted)
+                    {
+                        if (pendingIt != m_windows.end())
+                            m_windows.erase(pendingIt);
+                        m_state.loadMoreInFlight = false;
+                        m_state.loadMoreError = i18n("Could not load more search results.");
+                        m_pendingLoadMoreOffset.reset();
+                        m_pendingLoadMoreAnchor.reset();
+                        m_pendingLoadMoreCommitted = false;
+                        m_pendingLoadMoreRequestCompleted = false;
+                        m_state.stale = true;
+                    }
+                    else
+                    {
+                        m_state.stale = true;
+                    }
+                }
+                else
+                {
+                    std::size_t currentPrefixLength = 0;
+                    while (currentPrefixLength < windows.size() &&
+                           windows[currentPrefixLength].has_value() &&
+                           displayCurrent(*windows[currentPrefixLength]))
+                    {
+                        ++currentPrefixLength;
+                    }
+
+                    if (currentPrefixLength > 0)
+                    {
+                        std::vector<javelin::jmap::cache::SearchWindowPage> committed;
+                        committed.reserve(currentPrefixLength);
+                        for (std::size_t index = 0; index < currentPrefixLength; ++index)
+                            committed.push_back(std::move(*windows[index]));
+                        m_windows.resize(currentPrefixLength);
+                        rebuildFromProjectedWindows(std::move(committed));
+                        const bool queryStateConsistent = std::ranges::all_of(
+                            m_windows, [queryState = m_windows.front().queryState](
+                                           const MessageListWindow& window)
+                            { return window.queryState == queryState; });
+                        m_state.stale = !queryStateConsistent;
+                        m_state.refreshError.clear();
+                    }
+                    else
+                    {
+                        m_state.stale = true;
+                        if (m_state.items.empty())
+                        {
+                            m_state.cacheLoaded = false;
+                            if (!m_refreshAwaitingCache && !m_state.refreshInFlight)
+                                materializeMissingInitial = true;
+                        }
+                    }
+                }
+
+                bool refreshAgain = false;
+                if (m_refreshAwaitingCache)
+                {
+                    m_refreshAwaitingCache = false;
+                    m_state.refreshInFlight = false;
+                    if (!m_state.cacheLoaded)
+                        m_state.refreshError = i18n("Could not load the refreshed search results.");
+                    refreshAgain = std::exchange(m_refreshAfterCurrent, false);
+                }
+
+                Q_EMIT stateChanged();
+                if (requestContinuation)
+                {
+                    requestOnlineContinuation(continuationOffset, std::move(continuationAnchor));
+                }
+                else
+                {
+                    if (materializeMissingInitial)
+                        requestOnlineInitial();
+                    else if (allCurrent && !m_state.stale)
+                        prefetchNextOnlineWindow();
+                    if (refreshAgain)
+                        requestOnlineInitial();
+                }
+                if (std::exchange(m_projectedReloadPending, false))
+                    reloadProjectedWindows();
+            });
+        watcher->setFuture(QtConcurrent::run(loadProjectedSearchWindows,
+                                             m_queryReader.databasePath(), m_accountId,
+                                             onlineWindowKey(), std::move(requests)));
+    }
+
+    void SearchSession::rebuildFromProjectedWindows(
+        std::vector<javelin::jmap::cache::SearchWindowPage> windows)
+    {
+        std::size_t itemCapacity = 0;
+        for (const auto& window : windows)
+            itemCapacity += window.items.size();
+
+        std::vector<javelin::jmap::cache::MessageListItem> items;
+        items.reserve(itemCapacity);
+        std::unordered_set<std::string> threadIds;
+        threadIds.reserve(itemCapacity);
+
+        for (std::size_t index = 0; index < windows.size(); ++index)
+        {
+            auto& page = windows[index];
+            auto& metadata = m_windows[index];
+            metadata.requestedOffset = page.offset;
+            metadata.requestedLimit = page.limit;
+            metadata.position = page.position;
+            metadata.returnedLimit = page.returnedLimit;
+            metadata.total = page.total;
+            metadata.queryState = page.queryState;
+            metadata.itemCount = page.items.size();
+            metadata.displayCurrent = true;
+            for (auto& item : page.items)
+            {
+                if (threadIds.insert(item.threadId).second)
+                    items.push_back(std::move(item));
+            }
+        }
+
+        m_state.items = std::move(items);
+        m_state.itemsRevision = ++m_itemsRevision;
+        m_state.cacheLoaded = !m_windows.empty() && m_windows.front().displayCurrent;
+        if (!m_windows.empty())
+        {
+            const auto& last = m_windows.back();
+            m_state.total = last.total;
+            m_endReached =
+                last.itemCount == 0 ||
+                (last.total.has_value() && last.position + last.itemCount >= *last.total) ||
+                (!last.total.has_value() && last.returnedLimit > 0 &&
+                 last.itemCount < last.returnedLimit);
+        }
+        else
+        {
+            m_state.total.reset();
+            m_endReached = true;
+        }
+    }
+
+    void SearchSession::prefetchNextOnlineWindow()
+    {
+        if (m_closed || m_mode != SearchMode::Online || m_windows.empty() || m_endReached ||
+            m_state.refreshInFlight)
+        {
+            return;
+        }
+
+        const auto& last = m_windows.back();
+        if (!last.displayCurrent || last.itemCount == 0)
+            return;
+        const auto offset = nextOnlineOffset();
+        if (last.total.has_value() && offset >= *last.total)
+            return;
+        if (m_prefetchOffsets.contains(offset) ||
+            std::ranges::any_of(m_windows, [offset](const MessageListWindow& window)
+                                { return window.requestedOffset == offset; }))
         {
             return;
         }
 
         m_prefetchOffsets.insert(offset);
-        auto* watcher = new QFutureWatcher<ProjectedSearchPageResult>(this);
-        connect(
-            watcher, &QFutureWatcher<ProjectedSearchPageResult>::finished, this,
-            [this, watcher, offset, remainingRequests, generation,
-             queryState = std::move(queryState)]
+        const auto generation = m_generation;
+        const auto expectedQueryState = last.queryState;
+        auto task = m_materializationPort.requestSearchWindow(SearchWindowIntent{
+            .accountId = m_accountId,
+            .criteria = m_criteria,
+            .offset = offset,
+            .limit = m_windowSize,
+            .sort = m_sort,
+            .anchor = std::nullopt,
+            .windowKey = onlineWindowKey(),
+        });
+        QCoro::connect(
+            std::move(task), this,
+            [this, generation, offset, expectedQueryState](SearchWindowResult result)
             {
-                auto cached = watcher->result();
-                watcher->deleteLater();
-                if (m_closed || generation != m_generation || m_mode != SearchMode::Online)
-                {
-                    m_prefetchOffsets.erase(offset);
+                m_prefetchOffsets.erase(offset);
+                if (m_closed || m_mode != SearchMode::Online || generation != m_generation)
                     return;
-                }
 
-                if (const auto* page =
-                        std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&cached);
-                    page != nullptr && page->has_value() &&
-                    javelin::jmap::cache::isPaginationAuthoritative((*page)->coverage,
-                                                                    (*page)->materialization) &&
-                    (*page)->queryState == queryState)
+                const auto* summary = std::get_if<SearchWindowSummary>(&result);
+                const bool usable = summary != nullptr && summary->queryState == expectedQueryState;
+                if (m_pendingLoadMoreOffset == std::optional<std::size_t>{offset})
                 {
-                    m_prefetchOffsets.erase(offset);
-                    if (m_page.offset == offset && m_visiblePrefetchOffset == offset)
+                    if (!usable)
                     {
-                        m_visiblePrefetchOffset.reset();
-                        m_page.refreshInFlight = false;
-                        applyCommittedServerPage();
-                        Q_EMIT pageChanged();
+                        if (m_pendingLoadMoreAnchor.has_value())
+                            requestOnlineContinuation(offset, *m_pendingLoadMoreAnchor);
+                        return;
                     }
-                    const auto next = (*page)->position + (*page)->items.size();
-                    if (next > offset)
-                        prefetchOnlinePages(next, remainingRequests - 1, generation,
-                                            std::move(queryState));
-                    return;
-                }
-
-                auto task = m_materializationPort.requestSearchWindow(SearchWindowIntent{
-                    .accountId = m_accountId,
-                    .criteria = m_criteria,
-                    .offset = offset,
-                    .limit = m_pageSize,
-                    .sort = m_sort,
-                    .anchor = std::nullopt,
-                    .windowKey = onlineWindowKey(),
-                });
-                QCoro::connect(
-                    std::move(task), this,
-                    [this, offset, remainingRequests, generation,
-                     queryState = std::move(queryState)](SearchWindowResult result)
+                    if (std::ranges::none_of(m_windows, [offset](const MessageListWindow& window)
+                                             { return window.requestedOffset == offset; }))
                     {
-                        m_prefetchOffsets.erase(offset);
-                        if (m_closed || generation != m_generation || m_mode != SearchMode::Online)
-                            return;
-                        const auto* summary = std::get_if<SearchWindowSummary>(&result);
-                        const bool visibleCurrentPage =
-                            m_page.offset == offset && m_visiblePrefetchOffset == offset;
-                        if (summary == nullptr || summary->queryState != queryState)
-                        {
-                            if (visibleCurrentPage)
-                            {
-                                m_visiblePrefetchOffset.reset();
-                                m_page.refreshInFlight = false;
-                                m_page.stale = true;
-                                Q_EMIT pageChanged();
-                                requestOnlinePage();
-                            }
-                            else if (summary != nullptr)
-                            {
-                                m_page.stale = true;
-                                Q_EMIT pageChanged();
-                            }
-                            return;
-                        }
-                        if (visibleCurrentPage)
-                        {
-                            m_visiblePrefetchOffset.reset();
-                            m_page.refreshInFlight = false;
-                            applyCommittedServerPage();
-                            Q_EMIT pageChanged();
-                        }
-                        if (summary->representativeCount == 0)
-                            return;
-                        const auto next = summary->position + summary->representativeCount;
-                        if (next > offset)
-                        {
-                            prefetchOnlinePages(next, remainingRequests - 1, generation,
-                                                std::move(queryState));
-                        }
-                    });
+                        m_windows.push_back({
+                            .requestedOffset = offset,
+                            .requestedLimit = m_windowSize,
+                            .position = 0,
+                            .returnedLimit = 0,
+                            .total = std::nullopt,
+                            .queryState = {},
+                            .itemCount = 0,
+                            .displayCurrent = false,
+                        });
+                    }
+                    reloadProjectedWindows();
+                }
             });
-        watcher->setFuture(QtConcurrent::run(loadProjectedSearchPage, m_queryReader.databasePath(),
-                                             m_accountId, onlineWindowKey(), offset, m_pageSize));
     }
 
     void SearchSession::refreshAfterMutation()
     {
         if (m_mode != SearchMode::Online)
             return;
-        if (m_page.refreshInFlight)
+        if (m_state.refreshInFlight)
         {
             m_refreshAfterCurrent = true;
             return;
         }
-        requestOnlinePage();
+        requestOnlineInitial();
     }
 
     void SearchSession::close()
@@ -454,7 +892,6 @@ namespace javelin::app
         m_closed = true;
         ++m_generation;
         ++m_refreshRequestId;
-        m_visiblePrefetchOffset.reset();
         m_refreshGeneration.close();
         if (m_mode == SearchMode::Online)
             m_materializationPort.retireSearchWindow(m_accountId, onlineWindowKey());
@@ -463,13 +900,14 @@ namespace javelin::app
     void SearchSession::markStale()
     {
         if (m_mode == SearchMode::Online)
-            m_page.stale = true;
+            m_state.stale = true;
     }
 
     void SearchSession::setSort(javelin::jmap::query::EmailListSort sort)
     {
         if (m_sort.property == sort.property && m_sort.direction == sort.direction)
             return;
+
         if (m_mode == SearchMode::Online)
         {
             m_materializationPort.retireSearchWindow(m_accountId, onlineWindowKey());
@@ -478,58 +916,74 @@ namespace javelin::app
         m_sort = sort;
         ++m_generation;
         ++m_refreshRequestId;
-        m_visiblePrefetchOffset.reset();
         m_refreshGeneration.replaceScope();
-        m_page.offset = 0;
-        m_page.position = 0;
-        m_page.anchor.reset();
-        m_page.total.reset();
-        m_page.items.clear();
-        m_page.cacheLoaded = false;
-        m_page.stale = true;
-        m_page.refreshInFlight = false;
+        m_state = MessageListState{};
+        m_state.itemsRevision = ++m_itemsRevision;
+        m_state.stale = true;
         m_localSnapshot.clear();
         m_localSnapshotLoaded = false;
+        m_localVisibleCount = 0;
         m_prefetchOffsets.clear();
+        m_pendingLoadMoreOffset.reset();
+        m_pendingLoadMoreAnchor.reset();
+        m_pendingLoadMoreCommitted = false;
+        m_pendingLoadMoreRequestCompleted = false;
+        m_refreshAwaitingCache = false;
+        m_endReached = false;
+        if (m_mode == SearchMode::Online)
+            resetOnlineWindows();
     }
 
-    bool SearchSession::goToPreviousPage()
+    bool SearchSession::canLoadMore() const
     {
-        if (m_page.offset == 0)
-            return false;
-        const auto step = m_page.returnedLimit == 0 ? m_pageSize : m_page.returnedLimit;
-        m_page.offset -= std::min(m_page.offset, step);
-        m_page.anchor.reset();
-        resetForPageChange();
-        return true;
-    }
-
-    bool SearchSession::goToPage(const std::size_t pageIndex)
-    {
-        const auto step = m_page.returnedLimit == 0 ? m_pageSize : m_page.returnedLimit;
-        if (m_page.total.has_value() && pageIndex >= messageListPageCount(*m_page.total, step))
+        if (m_mode == SearchMode::Local)
+            return m_localSnapshotLoaded && m_localVisibleCount < m_localSnapshot.size();
+        if (m_mode != SearchMode::Online || m_state.refreshInFlight || m_state.loadMoreInFlight ||
+            m_windows.empty() || m_state.items.empty() || m_endReached)
         {
             return false;
         }
-        const auto offset = messageListPageOffset(pageIndex, step);
-        if (offset == m_page.offset)
-            return false;
-        m_page.offset = offset;
-        m_page.anchor.reset();
-        resetForPageChange();
-        return true;
+        const auto& last = m_windows.back();
+        return last.itemCount > 0 && (!last.total.has_value() || nextOnlineOffset() < *last.total);
     }
 
-    bool SearchSession::goToNextPage()
+    bool SearchSession::loadMore()
     {
-        if (m_page.total.has_value() && m_page.position + m_page.items.size() >= *m_page.total)
+        if (!canLoadMore())
             return false;
-        if (m_page.items.empty())
-            return false;
-        if (m_mode == SearchMode::Online)
-            m_page.anchor = m_page.items.back().emailId;
-        m_page.offset = m_page.position + m_page.items.size();
-        resetForPageChange();
+
+        if (m_mode == SearchMode::Local)
+        {
+            m_localVisibleCount =
+                std::min(m_localVisibleCount + m_windowSize, m_localSnapshot.size());
+            applyLocalVisibleRange();
+            Q_EMIT stateChanged();
+            return true;
+        }
+
+        const auto offset = nextOnlineOffset();
+        m_pendingLoadMoreOffset = offset;
+        m_pendingLoadMoreAnchor = m_state.items.back().emailId;
+        m_pendingLoadMoreCommitted = false;
+        m_pendingLoadMoreRequestCompleted = false;
+        m_state.loadMoreInFlight = true;
+        m_state.loadMoreError.clear();
+        Q_EMIT stateChanged();
+
+        if (m_prefetchOffsets.contains(offset))
+            return true;
+
+        m_windows.push_back({
+            .requestedOffset = offset,
+            .requestedLimit = m_windowSize,
+            .position = 0,
+            .returnedLimit = 0,
+            .total = std::nullopt,
+            .queryState = {},
+            .itemCount = 0,
+            .displayCurrent = false,
+        });
+        reloadProjectedWindows();
         return true;
     }
 
@@ -561,119 +1015,81 @@ namespace javelin::app
                 }
                 if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
                 {
-                    m_page.refreshError = error->message;
-                    Q_EMIT pageChanged();
+                    m_state.refreshError = error->message;
+                    Q_EMIT stateChanged();
                     return;
                 }
+
                 m_localSnapshot =
                     std::get<std::vector<javelin::jmap::cache::MessageListItem>>(std::move(result));
                 m_localSnapshotLoaded = true;
-                m_page.total = m_localSnapshot.size();
-                m_page.queryState.clear();
-                m_page.stale = false;
-                applyLocalPage();
-                Q_EMIT pageChanged();
+                m_localVisibleCount = std::min(m_windowSize, m_localSnapshot.size());
+                applyLocalVisibleRange();
+                Q_EMIT stateChanged();
             });
         watcher->setFuture(QtConcurrent::run(runLocalSearch, m_queryReader.databasePath(),
                                              m_accountId, *m_criteria.text, m_sort));
     }
 
-    void SearchSession::applyLocalPage()
+    void SearchSession::applyLocalVisibleRange()
     {
-        if (m_mode != SearchMode::Local)
+        if (m_mode != SearchMode::Local || !m_localSnapshotLoaded)
             return;
-        const auto begin = std::min(m_page.offset, m_localSnapshot.size());
-        const auto end = std::min(begin + m_pageSize, m_localSnapshot.size());
-        m_page.items.assign(m_localSnapshot.begin() + static_cast<std::ptrdiff_t>(begin),
-                            m_localSnapshot.begin() + static_cast<std::ptrdiff_t>(end));
-        m_page.position = begin;
-        m_page.returnedLimit = m_pageSize;
-        m_page.total = m_localSnapshot.size();
-        m_page.installedOffset = m_page.offset;
-        m_page.pendingOffset.reset();
-        m_page.cacheLoaded = true;
-        m_page.refreshInFlight = false;
-        m_page.stale = false;
+        const auto end = std::min(m_localVisibleCount, m_localSnapshot.size());
+        m_state.items.assign(m_localSnapshot.begin(),
+                             m_localSnapshot.begin() + static_cast<std::ptrdiff_t>(end));
+        m_state.itemsRevision = ++m_itemsRevision;
+        m_state.total = m_localSnapshot.size();
+        m_state.cacheLoaded = true;
+        m_state.refreshInFlight = false;
+        m_state.loadMoreInFlight = false;
+        m_state.stale = false;
+        m_state.refreshError.clear();
+        m_state.loadMoreError.clear();
+        m_endReached = end >= m_localSnapshot.size();
     }
 
-    void SearchSession::applyCommittedServerPage()
+    std::vector<MessageListWindowRequest> SearchSession::windowRequests() const
     {
-        loadCachedPage(true);
-    }
+        if (m_mode != SearchMode::Online)
+            return {};
 
-    void SearchSession::reloadProjectedPage()
-    {
-        if (m_projectedReloadInFlight)
+        std::vector<MessageListWindowRequest> requests;
+        requests.reserve(m_windows.size());
+        for (const auto& window : m_windows)
         {
-            m_projectedReloadPending = true;
-            return;
+            if (window.itemCount == 0)
+                continue;
+            requests.push_back({
+                .offset = window.requestedOffset,
+                .limit = window.requestedLimit,
+            });
         }
-        m_projectedReloadInFlight = true;
-        const auto generation = m_generation;
-        const auto offset = m_page.offset;
-        const auto queryKey = onlineWindowKey();
-        const auto ticket = m_refreshGeneration.begin(m_cacheEpoch);
-        auto* watcher = new QFutureWatcher<ProjectedSearchPageResult>(this);
-        connect(watcher, &QFutureWatcher<ProjectedSearchPageResult>::finished, this,
-                [this, watcher, generation, offset, ticket]
-                {
-                    auto result = watcher->result();
-                    watcher->deleteLater();
-                    m_projectedReloadInFlight = false;
-                    if (m_closed || m_mode != SearchMode::Online || generation != m_generation ||
-                        offset != m_page.offset ||
-                        !m_refreshGeneration.install(ticket, m_cacheEpoch))
-                    {
-                        if (std::exchange(m_projectedReloadPending, false))
-                            reloadProjectedPage();
-                        return;
-                    }
-
-                    const auto* page =
-                        std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&result);
-                    if (page == nullptr || !page->has_value() ||
-                        !javelin::jmap::cache::isDisplayCurrent((*page)->coverage,
-                                                                (*page)->materialization) ||
-                        (!m_page.queryState.empty() && (*page)->queryState != m_page.queryState))
-                    {
-                        m_page.cacheLoaded = false;
-                        m_page.stale = true;
-                    }
-                    else
-                    {
-                        m_page.items = (*page)->items;
-                        m_page.position = (*page)->position;
-                        m_page.returnedLimit = (*page)->returnedLimit;
-                        m_page.total = (*page)->total;
-                        m_page.queryState = (*page)->queryState;
-                        m_page.cacheLoaded = true;
-                        m_page.stale = false;
-                        m_page.installedOffset = m_page.offset;
-                        m_page.pendingOffset.reset();
-                    }
-                    Q_EMIT pageChanged();
-                    if (std::exchange(m_projectedReloadPending, false))
-                        reloadProjectedPage();
-                });
-        watcher->setFuture(QtConcurrent::run(loadProjectedSearchPage, m_queryReader.databasePath(),
-                                             m_accountId, queryKey, offset, m_pageSize));
+        return requests;
     }
 
-    void SearchSession::resetForPageChange()
+    void SearchSession::resetOnlineWindows()
     {
-        ++m_generation;
-        ++m_refreshRequestId;
-        m_visiblePrefetchOffset.reset();
-        static_cast<void>(m_refreshGeneration.begin(m_cacheEpoch));
-        m_page.pendingOffset = m_page.offset;
-        m_page.position = m_page.offset;
-        m_page.items.clear();
-        m_page.cacheLoaded = false;
-        m_page.refreshInFlight = false;
-        m_page.refreshError.clear();
-        m_refreshAfterCurrent = false;
-        if (m_mode == SearchMode::Local)
-            applyLocalPage();
+        m_windows.clear();
+        m_windows.push_back({
+            .requestedOffset = 0,
+            .requestedLimit = m_windowSize,
+            .position = 0,
+            .returnedLimit = 0,
+            .total = std::nullopt,
+            .queryState = {},
+            .itemCount = 0,
+            .displayCurrent = false,
+        });
+        m_endReached = false;
+    }
+
+    std::size_t SearchSession::nextOnlineOffset() const
+    {
+        if (m_windows.empty())
+            return 0;
+        const auto& last = m_windows.back();
+        return last.position + last.itemCount;
     }
 
     std::string SearchSession::onlineWindowKey() const

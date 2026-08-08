@@ -36,7 +36,7 @@ namespace javelin::gui::shell
                                                   javelin::gui::messages::MessageListContextHeader>)
                     m_panePresenter.showContext(header);
                 else
-                    m_panePresenter.showPage(header);
+                    m_panePresenter.showList(header);
             },
             plan.header);
     }
@@ -58,47 +58,44 @@ namespace javelin::gui::shell
                 {
                     if (content.session == nullptr)
                         return;
-                    const auto& page = content.session->page();
+                    const auto& state = content.session->state();
                     input.title = m_tabBarPresenter.mailboxTitle(content);
-                    input.refreshError = page.refreshError;
-                    input.refreshInFlight = page.refreshInFlight;
-                    javelin::gui::messages::MessageListPageHeader header{};
-                    const auto presentationPosition =
-                        page.pendingOffset.has_value() && page.installedOffset.has_value()
-                            ? *page.installedOffset
-                            : page.position;
-                    header.title = input.title;
-                    header.offset = presentationPosition;
-                    header.position = presentationPosition;
-                    header.itemCount = page.items.size();
-                    header.returnedLimit = page.returnedLimit;
-                    header.total = page.total;
-                    input.page = std::move(header);
+                    input.itemCount = state.items.size();
+                    input.refreshError = state.refreshError;
+                    input.refreshInFlight = state.refreshInFlight;
+                    input.list = javelin::gui::messages::MessageListHeader{
+                        .title = input.title,
+                        .itemCount = state.items.size(),
+                        .total = state.total,
+                        .search = false,
+                        .indexedSearch = false,
+                        .canSearchServer = false,
+                        .refreshInFlight = state.refreshInFlight,
+                        .loadMoreInFlight = state.loadMoreInFlight,
+                        .loadMoreError = state.loadMoreError,
+                    };
                 }
                 else if constexpr (std::is_same_v<Content, SearchTabState>)
                 {
                     if (content.session == nullptr)
                         return;
-                    const auto& page = content.session->page();
+                    const auto& state = content.session->state();
                     input.title = content.session->title();
-                    input.refreshError = page.refreshError;
-                    input.refreshInFlight = page.refreshInFlight;
+                    input.itemCount = state.items.size();
+                    input.refreshError = state.refreshError;
+                    input.refreshInFlight = state.refreshInFlight;
                     input.localSearch = content.session->mode() == javelin::app::SearchMode::Local;
-                    javelin::gui::messages::MessageListPageHeader header{};
-                    const auto presentationPosition =
-                        page.pendingOffset.has_value() && page.installedOffset.has_value()
-                            ? *page.installedOffset
-                            : page.position;
-                    header.title = input.title;
-                    header.offset = presentationPosition;
-                    header.position = presentationPosition;
-                    header.itemCount = page.items.size();
-                    header.returnedLimit = page.returnedLimit;
-                    header.total = page.total;
-                    header.search = true;
-                    header.indexedSearch = input.localSearch;
-                    header.canSearchServer = content.session->canPromoteToOnline();
-                    input.page = std::move(header);
+                    input.list = javelin::gui::messages::MessageListHeader{
+                        .title = input.title,
+                        .itemCount = state.items.size(),
+                        .total = state.total,
+                        .search = true,
+                        .indexedSearch = input.localSearch,
+                        .canSearchServer = content.session->canPromoteToOnline(),
+                        .refreshInFlight = state.refreshInFlight,
+                        .loadMoreInFlight = state.loadMoreInFlight,
+                        .loadMoreError = state.loadMoreError,
+                    };
                 }
                 else
                 {

@@ -7,40 +7,15 @@
 #include <QObject>
 #include <QString>
 
-#include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace javelin::app
 {
-    [[nodiscard]] inline std::size_t messageListPageCount(const std::size_t total,
-                                                          const std::size_t effectiveLimit)
-    {
-        if (total == 0)
-            return 0;
-        const auto step = std::max<std::size_t>(effectiveLimit, 1);
-        return 1 + ((total - 1) / step);
-    }
-
-    [[nodiscard]] inline std::size_t messageListPageOffset(const std::size_t pageIndex,
-                                                           const std::size_t effectiveLimit)
-    {
-        return pageIndex * std::max<std::size_t>(effectiveLimit, 1);
-    }
-
-    [[nodiscard]] inline std::size_t
-    normalizedMessageListPageOffset(const std::size_t currentOffset, const std::size_t total,
-                                    const std::size_t effectiveLimit)
-    {
-        if (total == 0)
-            return 0;
-        if (currentOffset < total)
-            return currentOffset;
-        const auto step = std::max<std::size_t>(effectiveLimit, 1);
-        return ((total - 1) / step) * step;
-    }
+    inline constexpr std::size_t maximumRestoredMessageListWindows = 256;
 
     enum class MessageListRefreshMode
     {
@@ -48,21 +23,37 @@ namespace javelin::app
         RefreshFromServer,
     };
 
-    struct MessageListPage
+    struct MessageListState
+    {
+        std::optional<std::size_t> total;
+        std::vector<javelin::jmap::cache::MessageListItem> items;
+        std::uint64_t itemsRevision = 0;
+        bool cacheLoaded = false;
+        bool refreshInFlight = false;
+        bool loadMoreInFlight = false;
+        bool stale = false;
+        QString refreshError;
+        QString loadMoreError;
+    };
+
+    struct MessageListWindowRequest
     {
         std::size_t offset = 0;
-        std::optional<std::size_t> installedOffset;
-        std::optional<std::size_t> pendingOffset;
+        std::size_t limit = 0;
+
+        [[nodiscard]] bool operator==(const MessageListWindowRequest&) const = default;
+    };
+
+    struct MessageListWindow
+    {
+        std::size_t requestedOffset = 0;
+        std::size_t requestedLimit = 0;
         std::size_t position = 0;
         std::size_t returnedLimit = 0;
         std::optional<std::size_t> total;
         std::string queryState;
-        std::optional<std::string> anchor;
-        std::vector<javelin::jmap::cache::MessageListItem> items;
-        bool cacheLoaded = false;
-        bool refreshInFlight = false;
-        bool stale = false;
-        QString refreshError;
+        std::size_t itemCount = 0;
+        bool displayCurrent = false;
     };
 
     class MessageListSession : public QObject
@@ -75,17 +66,16 @@ namespace javelin::app
 
         [[nodiscard]] virtual const std::string& accountId() const = 0;
         [[nodiscard]] virtual QString title() const = 0;
-        [[nodiscard]] virtual const MessageListPage& page() const = 0;
-        virtual void loadCachedPage(bool forceReload = false) = 0;
+        [[nodiscard]] virtual const MessageListState& state() const = 0;
+        virtual void loadCachedState(bool forceReload = false) = 0;
         virtual void refresh(MessageListRefreshMode mode = MessageListRefreshMode::Materialize) = 0;
         virtual void markStale() = 0;
         virtual void setSort(javelin::jmap::query::EmailListSort sort) = 0;
-        [[nodiscard]] virtual bool goToPage(std::size_t pageIndex) = 0;
-        [[nodiscard]] virtual bool goToPreviousPage() = 0;
-        [[nodiscard]] virtual bool goToNextPage() = 0;
+        [[nodiscard]] virtual bool canLoadMore() const = 0;
+        [[nodiscard]] virtual bool loadMore() = 0;
 
       Q_SIGNALS:
-        void pageChanged();
+        void stateChanged();
         void refreshFailed(javelin::jmap::OperationError error);
     };
 } // namespace javelin::app

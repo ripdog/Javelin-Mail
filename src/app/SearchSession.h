@@ -28,8 +28,8 @@ namespace javelin::app
         SearchSession(std::string accountId, javelin::jmap::search::EmailSearchCriteria criteria,
                       javelin::jmap::query::EmailListSort sort,
                       javelin::jmap::cache::QueryReader& queryReader,
-                      javelin::app::MessageListMaterializationPort& materializationPort,
-                      MailApplicationEventsPort& events, std::size_t pageSize,
+                      MessageListMaterializationPort& materializationPort,
+                      MailApplicationEventsPort& events, std::size_t windowSize,
                       std::optional<RestoredSearchState> restored = std::nullopt,
                       QObject* parent = nullptr);
 
@@ -37,31 +37,33 @@ namespace javelin::app
         [[nodiscard]] const std::string& query() const;
         [[nodiscard]] const javelin::jmap::search::EmailSearchCriteria& criteria() const;
         [[nodiscard]] QString title() const override;
-        [[nodiscard]] const MessageListPage& page() const override;
+        [[nodiscard]] const MessageListState& state() const override;
         [[nodiscard]] SearchMode mode() const;
         [[nodiscard]] bool canPromoteToOnline() const;
         [[nodiscard]] const std::string& sessionId() const;
 
-        void loadCachedPage(bool forceReload = false) override;
+        void loadCachedState(bool forceReload = false) override;
         void refresh(MessageListRefreshMode mode = MessageListRefreshMode::Materialize) override;
         void promoteToOnline();
         void close();
         void refreshAfterMutation();
         void markStale() override;
         void setSort(javelin::jmap::query::EmailListSort sort) override;
-        [[nodiscard]] bool goToPage(std::size_t pageIndex) override;
-        [[nodiscard]] bool goToPreviousPage() override;
-        [[nodiscard]] bool goToNextPage() override;
+        [[nodiscard]] bool canLoadMore() const override;
+        [[nodiscard]] bool loadMore() override;
+        [[nodiscard]] std::vector<MessageListWindowRequest> windowRequests() const;
 
       private:
         void startLocalSnapshot();
-        void applyLocalPage();
-        void requestOnlinePage();
-        void reloadProjectedPage();
-        void prefetchOnlinePages(std::size_t offset, std::size_t remainingRequests,
-                                 std::uint64_t generation, std::string queryState);
-        void applyCommittedServerPage();
-        void resetForPageChange();
+        void applyLocalVisibleRange();
+        void requestOnlineInitial();
+        void requestOnlineContinuation(std::size_t offset, std::string anchor);
+        void reloadProjectedWindows();
+        void
+        rebuildFromProjectedWindows(std::vector<javelin::jmap::cache::SearchWindowPage> windows);
+        void prefetchNextOnlineWindow();
+        void resetOnlineWindows();
+        [[nodiscard]] std::size_t nextOnlineOffset() const;
         [[nodiscard]] std::string onlineWindowKey() const;
 
         std::string m_accountId;
@@ -69,25 +71,33 @@ namespace javelin::app
         javelin::jmap::search::EmailSearchCriteria m_criteria;
         javelin::jmap::query::EmailListSort m_sort;
         javelin::jmap::cache::QueryReader& m_queryReader;
-        javelin::app::MessageListMaterializationPort& m_materializationPort;
+        MessageListMaterializationPort& m_materializationPort;
         MailApplicationEventsPort& m_events;
-        std::size_t m_pageSize;
-        MessageListPage m_page;
+        std::size_t m_windowSize;
+        MessageListState m_state;
         SearchMode m_mode = SearchMode::Local;
         std::string m_sessionId;
         std::vector<javelin::jmap::cache::MessageListItem> m_localSnapshot;
+        std::size_t m_localVisibleCount = 0;
+        std::vector<MessageListWindow> m_windows;
         std::unordered_set<std::size_t> m_prefetchOffsets;
-        std::optional<std::size_t> m_visiblePrefetchOffset;
+        std::optional<std::size_t> m_pendingLoadMoreOffset;
+        std::optional<std::string> m_pendingLoadMoreAnchor;
+        bool m_pendingLoadMoreCommitted = false;
+        bool m_pendingLoadMoreRequestCompleted = false;
         bool m_localSnapshotLoaded = false;
         bool m_localSearchInFlight = false;
         bool m_refreshAfterCurrent = false;
         bool m_closed = false;
-        std::uint64_t m_generation = 0;
-        std::uint64_t m_refreshRequestId = 0;
-        std::uint64_t m_cacheEpoch = 0;
-        RefreshGeneration m_refreshGeneration;
         bool m_projectedReloadInFlight = false;
         bool m_projectedReloadPending = false;
+        bool m_refreshAwaitingCache = false;
+        bool m_endReached = false;
+        std::uint64_t m_generation = 0;
+        std::uint64_t m_refreshRequestId = 0;
+        std::uint64_t m_itemsRevision = 0;
+        std::uint64_t m_cacheEpoch = 0;
+        RefreshGeneration m_refreshGeneration;
     };
 
 } // namespace javelin::app

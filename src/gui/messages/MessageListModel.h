@@ -57,8 +57,8 @@ namespace javelin::gui::messages
         [[nodiscard]] QMimeData* mimeData(const QModelIndexList& indexes) const override;
         [[nodiscard]] Qt::DropActions supportedDragActions() const override;
 
-        void setPage(std::optional<std::string> accountId, std::optional<std::string> mailboxId,
-                     std::vector<javelin::jmap::cache::MessageListItem> items);
+        void setItems(std::optional<std::string> accountId, std::optional<std::string> mailboxId,
+                      const std::vector<javelin::jmap::cache::MessageListItem>& items);
         void clear();
         [[nodiscard]] bool setThreadExpanded(std::string_view threadId, bool expanded);
         [[nodiscard]] bool toggleThreadExpanded(std::string_view threadId);

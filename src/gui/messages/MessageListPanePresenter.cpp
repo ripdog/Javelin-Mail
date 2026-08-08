@@ -1,6 +1,5 @@
 #include "gui/messages/MessageListPanePresenter.h"
 
-#include "gui/messages/Pagination.h"
 #include "gui/shell/ElidingLabel.h"
 
 #include <KLocalizedString>
@@ -8,27 +7,20 @@
 #include <QLabel>
 #include <QListView>
 #include <QProgressBar>
-#include <QSignalBlocker>
-#include <QSpinBox>
 #include <QToolButton>
-
-#include <algorithm>
-#include <limits>
+#include <QWidget>
 
 namespace javelin::gui::messages
 {
     MessageListPanePresenter::MessageListPanePresenter(
-        javelin::gui::shell::ElidingLabel& titleLabel, QLabel& metaLabel, QLabel& pageLabel,
-        QLabel& emptyState, QListView& messageView, QProgressBar& loadingIndicator,
-        QToolButton& searchServerButton, QToolButton& firstPageButton,
-        QToolButton& previousPageButton, QSpinBox& pageNumberSpinBox, QToolButton& nextPageButton,
-        QToolButton& lastPageButton, const std::size_t defaultPageSize)
-        : m_titleLabel(titleLabel), m_metaLabel(metaLabel), m_pageLabel(pageLabel),
-          m_emptyState(emptyState), m_messageView(messageView),
-          m_loadingIndicator(loadingIndicator), m_searchServerButton(searchServerButton),
-          m_firstPageButton(firstPageButton), m_previousPageButton(previousPageButton),
-          m_pageNumberSpinBox(pageNumberSpinBox), m_nextPageButton(nextPageButton),
-          m_lastPageButton(lastPageButton), m_defaultPageSize(defaultPageSize)
+        javelin::gui::shell::ElidingLabel& titleLabel, QLabel& metaLabel, QLabel& emptyState,
+        QListView& messageView, QProgressBar& loadingIndicator, QToolButton& searchServerButton,
+        QWidget& continuationFooter, QLabel& continuationLabel,
+        QToolButton& continuationRetryButton)
+        : m_titleLabel(titleLabel), m_metaLabel(metaLabel), m_emptyState(emptyState),
+          m_messageView(messageView), m_loadingIndicator(loadingIndicator),
+          m_searchServerButton(searchServerButton), m_continuationFooter(continuationFooter),
+          m_continuationLabel(continuationLabel), m_continuationRetryButton(continuationRetryButton)
     {
     }
 
@@ -70,7 +62,7 @@ namespace javelin::gui::messages
         m_metaLabel.clear();
         m_searchServerButton.setVisible(false);
         showLoadingIndicator(false);
-        disablePagination();
+        hideContinuation();
     }
 
     void MessageListPanePresenter::showContext(const MessageListContextHeader& header) const
@@ -79,57 +71,48 @@ namespace javelin::gui::messages
         m_metaLabel.setText(header.context);
         m_searchServerButton.setVisible(false);
         showLoadingIndicator(false);
-        disablePagination();
+        hideContinuation();
     }
 
-    void MessageListPanePresenter::showPage(const MessageListPageHeader& header) const
+    void MessageListPanePresenter::showList(const MessageListHeader& header) const
     {
         m_titleLabel.setText(header.title);
         m_searchServerButton.setVisible(header.canSearchServer);
         showLoadingIndicator(header.refreshInFlight);
-        const auto step = header.returnedLimit == 0 ? m_defaultPageSize : header.returnedLimit;
-        const QSignalBlocker pageNumberBlocker{&m_pageNumberSpinBox};
-        if (!header.total)
+
+        if (header.total.has_value())
+        {
+            m_metaLabel.setText(header.indexedSearch
+                                    ? i18np("%1 Indexed Match", "%1 Indexed Matches", *header.total)
+                                : header.search
+                                    ? i18np("%1 Match", "%1 Matches", *header.total)
+                                    : i18np("%1 Conversation", "%1 Conversations", *header.total));
+        }
+        else
         {
             m_metaLabel.setText(
                 header.search
                     ? i18np("%1 Loaded Match", "%1 Loaded Matches", header.itemCount)
                     : i18np("%1 Loaded Conversation", "%1 Loaded Conversations", header.itemCount));
-            m_pageLabel.clear();
-            m_firstPageButton.setEnabled(header.offset > 0);
-            m_previousPageButton.setEnabled(header.offset > 0);
-            m_pageNumberSpinBox.setRange(0, 0);
-            m_pageNumberSpinBox.setValue(0);
-            m_pageNumberSpinBox.setSuffix(QString{});
-            m_pageNumberSpinBox.setEnabled(false);
-            m_nextPageButton.setEnabled(false);
-            m_lastPageButton.setEnabled(false);
-            return;
         }
 
-        m_metaLabel.setText(
-            header.indexedSearch ? i18np("%1 Indexed Match", "%1 Indexed Matches", *header.total)
-            : header.search      ? i18np("%1 Match", "%1 Matches", *header.total)
-                                 : i18np("%1 Conversation", "%1 Conversations", *header.total));
-        const auto metrics = pageMetrics(header.position, header.itemCount, *header.total);
-        m_pageLabel.setText(*header.total == 0 ? QStringLiteral("0-0")
-                                               : QStringLiteral("%1-%2")
-                                                     .arg(static_cast<qulonglong>(metrics.start))
-                                                     .arg(static_cast<qulonglong>(metrics.end)));
-        const auto pages = pageCount(*header.total, step);
-        const auto currentPage =
-            pages == 0 ? std::size_t{0} : std::min(pageIndex(header.position, step) + 1, pages);
-        const auto intMaximum = static_cast<std::size_t>(std::numeric_limits<int>::max());
-        m_pageNumberSpinBox.setRange(pages == 0 ? 0 : 1,
-                                     static_cast<int>(std::min(pages, intMaximum)));
-        m_pageNumberSpinBox.setValue(static_cast<int>(std::min(currentPage, intMaximum)));
-        m_pageNumberSpinBox.setSuffix(
-            i18nc("@info page number suffix", " of %1", static_cast<qulonglong>(pages)));
-        m_pageNumberSpinBox.setEnabled(pages > 0);
-        m_firstPageButton.setEnabled(header.position > 0);
-        m_previousPageButton.setEnabled(header.position > 0);
-        m_nextPageButton.setEnabled(metrics.hasNext);
-        m_lastPageButton.setEnabled(metrics.hasNext);
+        if (!header.loadMoreError.isEmpty())
+        {
+            m_continuationLabel.setText(
+                i18n("Could not load more messages. %1", header.loadMoreError));
+            m_continuationRetryButton.setVisible(true);
+            m_continuationFooter.setVisible(true);
+        }
+        else if (header.loadMoreInFlight)
+        {
+            m_continuationLabel.setText(i18n("Loading more messages…"));
+            m_continuationRetryButton.setVisible(false);
+            m_continuationFooter.setVisible(true);
+        }
+        else
+        {
+            hideContinuation();
+        }
     }
 
     void MessageListPanePresenter::showLoadingIndicator(const bool inFlight) const
@@ -143,13 +126,10 @@ namespace javelin::gui::messages
         m_loadingIndicator.setValue(0);
     }
 
-    void MessageListPanePresenter::disablePagination() const
+    void MessageListPanePresenter::hideContinuation() const
     {
-        m_pageLabel.clear();
-        m_firstPageButton.setEnabled(false);
-        m_previousPageButton.setEnabled(false);
-        m_pageNumberSpinBox.setEnabled(false);
-        m_nextPageButton.setEnabled(false);
-        m_lastPageButton.setEnabled(false);
+        m_continuationFooter.setVisible(false);
+        m_continuationRetryButton.setVisible(false);
+        m_continuationLabel.clear();
     }
 } // namespace javelin::gui::messages

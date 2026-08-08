@@ -64,30 +64,49 @@ namespace javelin::gui::shell
         m_searchEdit.clear();
     }
 
-    void MessageListTabBindingPresenter::applyPage(const TabState* tab) const
+    void MessageListTabBindingPresenter::applyItems(const TabState* tab) const
     {
         if (tab == nullptr)
         {
             m_messageModel.clear();
+            m_appliedSession = nullptr;
+            m_appliedItemsRevision = 0;
             return;
         }
 
         if (const auto* mailbox = std::get_if<MailboxTabState>(&tab->content);
             mailbox != nullptr && mailbox->session != nullptr)
         {
-            m_messageModel.setPage(mailbox->session->accountId(), mailbox->session->mailboxId(),
-                                   mailbox->session->page().items);
+            const auto& state = mailbox->session->state();
+            if (m_appliedSession == mailbox->session &&
+                m_appliedItemsRevision == state.itemsRevision)
+            {
+                return;
+            }
+            m_messageModel.setItems(mailbox->session->accountId(), mailbox->session->mailboxId(),
+                                    state.items);
+            m_appliedSession = mailbox->session;
+            m_appliedItemsRevision = state.itemsRevision;
             return;
         }
 
         if (const auto* search = std::get_if<SearchTabState>(&tab->content);
             search != nullptr && search->session != nullptr)
         {
-            m_messageModel.setPage(search->session->accountId(), std::nullopt,
-                                   search->session->page().items);
+            const auto& state = search->session->state();
+            if (m_appliedSession == search->session &&
+                m_appliedItemsRevision == state.itemsRevision)
+            {
+                return;
+            }
+            m_messageModel.setItems(search->session->accountId(), std::nullopt, state.items);
+            m_appliedSession = search->session;
+            m_appliedItemsRevision = state.itemsRevision;
             return;
         }
 
         m_messageModel.clear();
+        m_appliedSession = nullptr;
+        m_appliedItemsRevision = 0;
     }
 } // namespace javelin::gui::shell

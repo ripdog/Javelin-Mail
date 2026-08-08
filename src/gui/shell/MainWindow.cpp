@@ -24,6 +24,7 @@
 #include "gui/mailboxes/MailboxSelection.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/mailboxes/MailboxTreeView.h"
+#include "gui/messages/InfiniteScroll.h"
 #include "gui/messages/MessageDragListView.h"
 #include "gui/messages/MessageListDelegate.h"
 #include "gui/messages/MessageListModel.h"
@@ -111,7 +112,6 @@
 #include <QScrollBar>
 #include <QSignalBlocker>
 #include <QSizePolicy>
-#include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStyle>
@@ -476,7 +476,7 @@ namespace javelin::gui::shell
         m_messageSelectionController = std::make_unique<MessageSelectionController>(
             *m_mailboxModel, *m_mailboxView, *m_messageModel, *m_messageView);
         m_messageListTabController = new MessageListTabController(
-            m_queryReader, m_messageListSessionFactory, pageSize, this, this);
+            m_queryReader, m_messageListSessionFactory, messageWindowSize, this, this);
         m_messageNavigationController = std::make_unique<MessageNavigationController>(
             m_messageNavigationPort, *m_messageListTabController);
         m_messageContentController = new MessageContentController(m_messageContentPort, this);
@@ -537,18 +537,19 @@ namespace javelin::gui::shell
                     if (!summary.usedCachedContent)
                         m_statusBar->showMessage(i18n("Message ready."), 5000);
                 });
-        connect(m_messageListTabController, &MessageListTabController::pageChanged, this,
+        connect(m_messageListTabController, &MessageListTabController::stateChanged, this,
                 [this](javelin::app::MessageListSession* session)
                 {
                     const auto* tab = activeTab();
                     if (tab == nullptr || !m_messageListTabController->ownsSession(*tab, session))
                         return;
 
-                    applyActiveTabPagePreservingSelection(
+                    applyActiveTabItemsPreservingSelection(
                         m_messageSelectionController->currentRow());
                     updateEmptyStates();
                     updateMessageListHeader();
                     resolveOpenEmailRoute();
+                    QTimer::singleShot(0, this, &MainWindow::maybeLoadMoreMessages);
                 });
         connect(m_messageListTabController, &MessageListTabController::operationFailed, this,
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
@@ -647,7 +648,6 @@ namespace javelin::gui::shell
         if (route.mailboxName.has_value() && !route.mailboxName->empty())
             mailboxTitle = QString::fromStdString(*route.mailboxName);
         std::optional<std::string> mailboxRole;
-        std::optional<std::size_t> totalThreads;
         const auto mailboxIndex = findMailboxIndexForSelection(*m_mailboxModel, accountId,
                                                                std::optional<QString>{mailboxId});
         if (mailboxIndex.isValid())
@@ -662,14 +662,10 @@ namespace javelin::gui::shell
                     .toString();
             if (!role.isEmpty())
                 mailboxRole = role.toStdString();
-            const auto totalThreadsValue =
-                mailboxIndex.data(javelin::gui::mailboxes::MailboxTreeModel::TotalThreadsRole);
-            if (totalThreadsValue.isValid())
-                totalThreads = static_cast<std::size_t>(totalThreadsValue.toULongLong());
         }
 
         activateMailboxInHomeTab(route.accountId, route.mailboxId, mailboxTitle, mailboxRole,
-                                 totalThreads, false);
+                                 false);
         if (auto* tab = activeTab())
             m_messageNavigationController->begin(*tab, route);
         loadActiveTabFromCache(true, false);
@@ -1326,39 +1322,12 @@ namespace javelin::gui::shell
             QStringLiteral(":/icons/thunderbird-icons/display-options.svg"),
             palette().color(QPalette::Text)));
         m_messageSortButton->setToolTip(i18n("Sort messages"));
-        m_firstPageButton = new QToolButton(messageHeaderRow);
-        m_firstPageButton->setIcon(style()->standardIcon(QStyle::SP_MediaSkipBackward));
-        m_firstPageButton->setToolTip(i18n("First page"));
-        m_previousPageButton = new QToolButton(messageHeaderRow);
-        m_previousPageButton->setIcon(
-            javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/nav-left.svg"),
-                                        palette().color(QPalette::Text)));
-        m_previousPageButton->setToolTip(i18n("Previous page"));
-        m_nextPageButton = new QToolButton(messageHeaderRow);
-        m_nextPageButton->setIcon(
-            javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/nav-right.svg"),
-                                        palette().color(QPalette::Text)));
-        m_nextPageButton->setToolTip(i18n("Next page"));
-        m_lastPageButton = new QToolButton(messageHeaderRow);
-        m_lastPageButton->setIcon(style()->standardIcon(QStyle::SP_MediaSkipForward));
-        m_lastPageButton->setToolTip(i18n("Last page"));
-        m_pageNumberSpinBox = new QSpinBox(messageHeaderRow);
-        m_pageNumberSpinBox->setPrefix(i18nc("@item page number prefix", "Page "));
-        m_pageNumberSpinBox->setAlignment(Qt::AlignCenter);
-        m_pageNumberSpinBox->setToolTip(i18n("Enter a page number"));
-        m_messagePageLabel = new QLabel(messageHeaderRow);
         auto titleFont = javelin::gui::fontWithSizeDelta(m_messageListTitleLabel->font(), 4);
         titleFont.setBold(true);
         m_messageListTitleLabel->setFont(titleFont);
         messageHeaderRowLayout->addWidget(m_messageListTitleLabel, 1);
         messageHeaderRowLayout->addWidget(m_messageListMetaLabel);
         messageHeaderRowLayout->addWidget(m_searchServerButton);
-        messageHeaderRowLayout->addWidget(m_firstPageButton);
-        messageHeaderRowLayout->addWidget(m_previousPageButton);
-        messageHeaderRowLayout->addWidget(m_pageNumberSpinBox);
-        messageHeaderRowLayout->addWidget(m_messagePageLabel);
-        messageHeaderRowLayout->addWidget(m_nextPageButton);
-        messageHeaderRowLayout->addWidget(m_lastPageButton);
         messageHeaderRowLayout->addWidget(m_messageSortButton);
         messageHeaderLayout->addWidget(messageHeaderRow);
         m_messageLoadingIndicator =
@@ -1384,8 +1353,20 @@ namespace javelin::gui::shell
         m_messageEmptyState->setAttribute(Qt::WA_TransparentForMouseEvents);
         messageListAreaLayout->addWidget(m_messageView, 0, 0);
         messageListAreaLayout->addWidget(m_messageEmptyState, 0, 0);
+        m_messageListFooter = new QWidget(messagePane);
+        auto* messageListFooterLayout = new QHBoxLayout(m_messageListFooter);
+        messageListFooterLayout->setContentsMargins(8, 3, 8, 3);
+        messageListFooterLayout->setSpacing(8);
+        m_messageListFooterLabel = new QLabel(m_messageListFooter);
+        m_messageListFooterRetryButton = new QToolButton(m_messageListFooter);
+        m_messageListFooterRetryButton->setText(i18n("Retry"));
+        m_messageListFooterRetryButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        messageListFooterLayout->addWidget(m_messageListFooterLabel, 1);
+        messageListFooterLayout->addWidget(m_messageListFooterRetryButton);
+        m_messageListFooter->setVisible(false);
         messageLayout->addWidget(messageHeader);
         messageLayout->addWidget(messageListArea, 1);
+        messageLayout->addWidget(m_messageListFooter);
 
         m_messageViewContainer = new javelin::gui::messageview::MessageViewContainer(
             m_settings, m_translationService, m_contactIdentityLookup, this);
@@ -1503,10 +1484,9 @@ namespace javelin::gui::shell
         setCentralWidget(centralContainer);
         m_messageListPanePresenter =
             std::make_unique<javelin::gui::messages::MessageListPanePresenter>(
-                *m_messageListTitleLabel, *m_messageListMetaLabel, *m_messagePageLabel,
-                *m_messageEmptyState, *m_messageView, *m_messageLoadingIndicator,
-                *m_searchServerButton, *m_firstPageButton, *m_previousPageButton,
-                *m_pageNumberSpinBox, *m_nextPageButton, *m_lastPageButton, pageSize);
+                *m_messageListTitleLabel, *m_messageListMetaLabel, *m_messageEmptyState,
+                *m_messageView, *m_messageLoadingIndicator, *m_searchServerButton,
+                *m_messageListFooter, *m_messageListFooterLabel, *m_messageListFooterRetryButton);
         m_messageListTabPresenter = std::make_unique<MessageListTabPresenter>(
             *m_messageListPanePresenter, *m_tabBarPresenter);
         updateEmptyStates();
@@ -1523,18 +1503,12 @@ namespace javelin::gui::shell
                 });
         connect(m_tabBar, &QTabBar::tabCloseRequested, this, &MainWindow::closeTab);
         connect(m_tabBarPresenter, &TabBarPresenter::closeRequested, this, &MainWindow::closeTab);
-        connect(m_firstPageButton, &QToolButton::clicked, this, &MainWindow::goToFirstPage);
-        connect(m_previousPageButton, &QToolButton::clicked, this, &MainWindow::goToPreviousPage);
-        connect(m_nextPageButton, &QToolButton::clicked, this, &MainWindow::goToNextPage);
-        connect(m_lastPageButton, &QToolButton::clicked, this, &MainWindow::goToLastPage);
-        connect(m_pageNumberSpinBox, &QSpinBox::editingFinished, this,
-                [this]
-                {
-                    if (m_pageNumberSpinBox->value() > 0)
-                    {
-                        goToPage(static_cast<std::size_t>(m_pageNumberSpinBox->value() - 1));
-                    }
-                });
+        connect(m_messageListFooterRetryButton, &QToolButton::clicked, this,
+                &MainWindow::loadMoreMessages);
+        connect(m_messageView->verticalScrollBar(), &QScrollBar::valueChanged, this,
+                [this] { maybeLoadMoreMessages(); });
+        connect(m_messageView->verticalScrollBar(), &QScrollBar::rangeChanged, this,
+                [this] { QTimer::singleShot(0, this, &MainWindow::maybeLoadMoreMessages); });
         connect(m_messageSortButton, &QToolButton::clicked, this, &MainWindow::showSortMenu);
         connect(m_searchServerButton, &QToolButton::clicked, this,
                 [this]
@@ -2000,7 +1974,6 @@ namespace javelin::gui::shell
 
     void MainWindow::activateMailboxInHomeTab(std::string accountId, std::string mailboxId,
                                               QString title, std::optional<std::string> role,
-                                              const std::optional<std::size_t> total,
                                               const bool refreshRemote)
     {
         auto tab = m_messageListTabController->createMailboxTab({
@@ -2009,25 +1982,7 @@ namespace javelin::gui::shell
             .title = std::move(title),
             .role = std::move(role),
             .sort = m_emailListSort,
-            .restored =
-                javelin::app::RestoredMailboxState{
-                    .page =
-                        javelin::app::MessageListPage{
-                            .offset = 0,
-                            .installedOffset = std::nullopt,
-                            .pendingOffset = std::nullopt,
-                            .position = 0,
-                            .returnedLimit = pageSize,
-                            .total = total,
-                            .queryState = {},
-                            .anchor = std::nullopt,
-                            .items = {},
-                            .cacheLoaded = false,
-                            .refreshInFlight = false,
-                            .stale = false,
-                            .refreshError = {},
-                        },
-                },
+            .restored = std::nullopt,
         });
         if (m_tabs.empty())
         {
@@ -2099,7 +2054,7 @@ namespace javelin::gui::shell
         const auto initialPlan = planTabActivation({
             .kind = tabKind(tab),
             .homeTab = index == 0,
-            .messagePageStale = m_messageListTabController->pageStale(tab),
+            .messageListStale = m_messageListTabController->stateStale(tab),
             .remoteRefreshRequested = refreshRemote,
         });
 
@@ -2134,7 +2089,7 @@ namespace javelin::gui::shell
         const auto loadedPlan = planTabActivation({
             .kind = tabKind(tab),
             .homeTab = index == 0,
-            .messagePageStale = m_messageListTabController->pageStale(tab),
+            .messageListStale = m_messageListTabController->stateStale(tab),
             .remoteRefreshRequested = refreshRemote,
         });
         if (loadedPlan.refreshRemote)
@@ -2150,7 +2105,7 @@ namespace javelin::gui::shell
                     const auto plan = planTabActivation({
                         .kind = tabKind(currentTab),
                         .homeTab = index == 0,
-                        .messagePageStale = m_messageListTabController->pageStale(currentTab),
+                        .messageListStale = m_messageListTabController->stateStale(currentTab),
                         .remoteRefreshRequested = refreshRemote,
                     });
                     if (plan.refreshRemote)
@@ -2204,14 +2159,14 @@ namespace javelin::gui::shell
     }
 
     void
-    MainWindow::applyActiveTabPagePreservingSelection(const std::optional<int> previousMessageRow)
+    MainWindow::applyActiveTabItemsPreservingSelection(const std::optional<int> previousMessageRow)
     {
         bool autoSelectedFallback = false;
         const bool wasUpdatingModel = m_modelUpdateInProgress;
         m_modelUpdateInProgress = true;
         {
             QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
-            m_messageListTabBindingPresenter->applyPage(activeTab());
+            m_messageListTabBindingPresenter->applyItems(activeTab());
             autoSelectedFallback =
                 m_messageSelectionController->restoreTabSelection(activeTab(), previousMessageRow);
         }
@@ -2234,13 +2189,13 @@ namespace javelin::gui::shell
         auto* tab = activeTab();
         if (tab == nullptr)
         {
-            m_messageListTabBindingPresenter->applyPage(nullptr);
+            m_messageListTabBindingPresenter->applyItems(nullptr);
             refreshSelectionFromModels();
             metrics.finish(QStringLiteral("empty"));
             return;
         }
 
-        if (!m_messageListTabController->loadCachedPage(*tab, forceReload))
+        if (!m_messageListTabController->loadCachedState(*tab, forceReload))
         {
             const auto plan = planTabActivation({
                 .kind = tabKind(*tab),
@@ -2257,7 +2212,7 @@ namespace javelin::gui::shell
         }
 
         const auto cacheMilliseconds = timer.restart();
-        applyActiveTabPagePreservingSelection(m_messageSelectionController->currentRow());
+        applyActiveTabItemsPreservingSelection(m_messageSelectionController->currentRow());
         const auto applyMilliseconds = timer.elapsed();
         if (cacheMilliseconds + applyMilliseconds >= 50)
         {
@@ -2268,7 +2223,7 @@ namespace javelin::gui::shell
         metrics.finish(QStringLiteral("loaded"), QStringLiteral("cache_ms=%1 apply_ms=%2")
                                                      .arg(cacheMilliseconds)
                                                      .arg(applyMilliseconds));
-        if (m_messageListTabController->pageStale(*tab) ||
+        if (m_messageListTabController->stateStale(*tab) ||
             (refreshRemote && tabKind(*tab) == TabKind::Mailbox))
         {
             const auto mode = refreshRemote && tabKind(*tab) == TabKind::Mailbox
@@ -2324,17 +2279,11 @@ namespace javelin::gui::shell
         m_messageNavigationPort.cancel();
 
         const auto currentIndex = m_mailboxView->currentIndex();
-        const auto totalThreadsValue =
-            currentIndex.data(javelin::gui::mailboxes::MailboxTreeModel::TotalThreadsRole);
-        const auto totalThreads = totalThreadsValue.isValid()
-                                      ? std::optional<std::size_t>{static_cast<std::size_t>(
-                                            totalThreadsValue.toULongLong())}
-                                      : std::nullopt;
         activateMailboxInHomeTab(
             *accountId, *mailboxId,
             currentIndex.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxNameRole)
                 .toString(),
-            currentMailboxRole(*m_mailboxView), totalThreads, refreshRemote);
+            currentMailboxRole(*m_mailboxView), refreshRemote);
         metrics.finish(QStringLiteral("completed"),
                        QStringLiteral("elapsed_ms=%1").arg(timer.elapsed()));
     }
@@ -2601,53 +2550,35 @@ namespace javelin::gui::shell
                                  5000);
     }
 
-    void MainWindow::goToPreviousPage()
+    void MainWindow::maybeLoadMoreMessages()
     {
         auto* tab = activeTab();
-        if (tab == nullptr || !m_messageListTabController->goToPreviousPage(*tab))
+        if (tab == nullptr || m_messageView == nullptr || m_messageModel == nullptr)
             return;
-
-        tabSelection(*tab) = {};
-        loadActiveTabFromCache();
-    }
-
-    void MainWindow::goToFirstPage()
-    {
-        goToPage(0);
-    }
-
-    void MainWindow::goToLastPage()
-    {
-        const auto* tab = activeTab();
-        if (tab == nullptr)
-            return;
-
-        const auto lastPage = m_messageListTabController->lastPageIndex(*tab);
-        if (lastPage.has_value())
-            goToPage(*lastPage);
-    }
-
-    void MainWindow::goToPage(const std::size_t pageIndex)
-    {
-        auto* tab = activeTab();
-        if (tab == nullptr || !m_messageListTabController->goToPage(*tab, pageIndex))
+        const auto* session = messageListSession(*tab);
+        if (session == nullptr || !session->state().loadMoreError.isEmpty() ||
+            !m_messageListTabController->canLoadMore(*tab))
         {
-            updateMessageListHeader();
             return;
         }
 
-        tabSelection(*tab) = {};
-        loadActiveTabFromCache();
+        const auto* scrollBar = m_messageView->verticalScrollBar();
+        if (scrollBar == nullptr || m_messageModel->rowCount() == 0)
+            return;
+        if (javelin::gui::messages::shouldLoadMoreMessages(scrollBar->value(), scrollBar->maximum(),
+                                                           scrollBar->pageStep(),
+                                                           m_messageModel->rowCount()))
+        {
+            static_cast<void>(m_messageListTabController->loadMore(*tab));
+        }
     }
 
-    void MainWindow::goToNextPage()
+    void MainWindow::loadMoreMessages()
     {
         auto* tab = activeTab();
-        if (tab == nullptr || !m_messageListTabController->goToNextPage(*tab))
+        if (tab == nullptr)
             return;
-
-        tabSelection(*tab) = {};
-        loadActiveTabFromCache();
+        static_cast<void>(m_messageListTabController->loadMore(*tab));
     }
 
     void MainWindow::reloadAccounts()
@@ -2949,9 +2880,6 @@ namespace javelin::gui::shell
 
         m_messageSortButton->setIcon(
             icon(QStringLiteral(":/icons/thunderbird-icons/display-options.svg")));
-        m_previousPageButton->setIcon(
-            icon(QStringLiteral(":/icons/thunderbird-icons/nav-left.svg")));
-        m_nextPageButton->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/nav-right.svg")));
     }
 
     void MainWindow::changeEvent(QEvent* event)
@@ -3485,12 +3413,11 @@ namespace javelin::gui::shell
             resolveRestoredActiveTabIndex(state.activeTabIndex, restoredTabIndices).value_or(0);
         updateTabBar();
         activateTab(*m_activeTabIndex, false);
-        refreshTabFromServer(static_cast<std::size_t>(*m_activeTabIndex));
     }
 
     void MainWindow::restoreMailboxTab(const PersistedMailboxTab& tab)
     {
-        auto plan = planMailboxTabRestore(tab, pageSize);
+        auto plan = planMailboxTabRestore(tab);
         auto restoredTab = m_messageListTabController->createMailboxTab({
             .accountId = std::move(plan.accountId),
             .mailboxId = std::move(plan.mailboxId),

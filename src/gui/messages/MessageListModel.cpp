@@ -252,19 +252,70 @@ namespace javelin::gui::messages
         return Qt::MoveAction;
     }
 
-    void MessageListModel::setPage(std::optional<std::string> accountId,
-                                   std::optional<std::string> mailboxId,
-                                   std::vector<javelin::jmap::cache::MessageListItem> items)
+    void MessageListModel::setItems(std::optional<std::string> accountId,
+                                    std::optional<std::string> mailboxId,
+                                    const std::vector<javelin::jmap::cache::MessageListItem>& items)
     {
+        const bool sameContext = m_accountId == accountId && m_mailboxId == mailboxId;
+        const bool extendsCurrentPrefix =
+            sameContext && items.size() >= m_threads.size() &&
+            std::equal(m_threads.begin(), m_threads.end(), items.begin(),
+                       [](const ThreadEntry& existing, const auto& replacement)
+                       { return existing.summary.threadId == replacement.threadId; });
+        if (extendsCurrentPrefix)
+        {
+            m_accountId = std::move(accountId);
+            m_mailboxId = std::move(mailboxId);
+            for (std::size_t threadIndex = 0; threadIndex < m_threads.size(); ++threadIndex)
+            {
+                if (!sameItem(m_threads[threadIndex].summary, items[threadIndex]))
+                {
+                    m_threads[threadIndex].summary = items[threadIndex];
+                    if (const auto row = visibleSummaryRowForThread(threadIndex); row.has_value())
+                    {
+                        const QModelIndex changed = index(*row, 0);
+                        Q_EMIT dataChanged(changed, changed);
+                    }
+                }
+            }
+
+            if (items.size() > m_threads.size())
+            {
+                const auto firstThread = m_threads.size();
+                const auto addedCount = items.size() - firstThread;
+                const int firstRow = static_cast<int>(m_rows.size());
+                const int lastRow = firstRow + static_cast<int>(addedCount) - 1;
+                beginInsertRows(QModelIndex{}, firstRow, lastRow);
+                m_threads.reserve(items.size());
+                m_rows.reserve(m_rows.size() + addedCount);
+                for (std::size_t threadIndex = firstThread; threadIndex < items.size();
+                     ++threadIndex)
+                {
+                    m_threads.push_back(ThreadEntry{
+                        .summary = items[threadIndex],
+                        .members = {},
+                        .membersLoaded = false,
+                        .membersLoading = false,
+                    });
+                    m_rows.push_back(VisibleRow{
+                        .kind = RowKind::ThreadSummary,
+                        .threadIndex = threadIndex,
+                        .memberIndex = std::nullopt,
+                    });
+                }
+                endInsertRows();
+            }
+            return;
+        }
+
         ++m_generation;
-        // A disjoint query page is one logical replacement. Publishing it as a long sequence of
+        // A disjoint query result is one logical replacement. Publishing it as a long sequence of
         // row removals and insertions makes QItemSelectionModel visit transient row identities.
-        const bool pagesAreDisjoint =
+        const bool listsAreDisjoint =
             (!m_threads.empty() || !items.empty()) &&
             std::ranges::none_of(items, [this](const auto& item)
                                  { return findThreadIndex(item.threadId).has_value(); });
-        if (m_accountId != accountId || m_mailboxId != mailboxId || !m_expandedThreadIds.empty() ||
-            pagesAreDisjoint)
+        if (!sameContext || !m_expandedThreadIds.empty() || listsAreDisjoint)
         {
             beginResetModel();
             m_accountId = std::move(accountId);
@@ -274,12 +325,10 @@ namespace javelin::gui::messages
 
             std::vector<std::string> survivingExpandedThreadIds;
             survivingExpandedThreadIds.reserve(m_expandedThreadIds.size());
-            for (auto& item : items)
+            for (const auto& item : items)
             {
                 if (containsThreadId(m_expandedThreadIds, item.threadId))
-                {
                     survivingExpandedThreadIds.push_back(item.threadId);
-                }
 
                 m_threads.push_back(ThreadEntry{
                     .summary = std::move(item),
@@ -301,17 +350,14 @@ namespace javelin::gui::messages
              --threadIndex)
         {
             const auto threadIndexValue = static_cast<std::size_t>(threadIndex);
-            const auto existsInNewPage = std::ranges::any_of(
+            const auto existsInNewList = std::ranges::any_of(
                 items, [threadId = m_threads[threadIndexValue].summary.threadId](const auto& item)
                 { return item.threadId == threadId; });
-            if (existsInNewPage)
-            {
+            if (existsInNewList)
                 continue;
-            }
 
-            const int blockStart =
-                visibleBlockStartForThread(static_cast<std::size_t>(threadIndex));
-            const int blockSize = visibleBlockSizeForThread(static_cast<std::size_t>(threadIndex));
+            const int blockStart = visibleBlockStartForThread(threadIndexValue);
+            const int blockSize = visibleBlockSizeForThread(threadIndexValue);
             beginRemoveRows(QModelIndex{}, blockStart, blockStart + blockSize - 1);
             m_rows.erase(m_rows.begin() + blockStart, m_rows.begin() + blockStart + blockSize);
             m_threads.erase(m_threads.begin() + threadIndex);
@@ -328,7 +374,7 @@ namespace javelin::gui::messages
                                 static_cast<int>(targetIndex));
                 m_threads.insert(m_threads.begin() + static_cast<std::ptrdiff_t>(targetIndex),
                                  ThreadEntry{
-                                     .summary = std::move(items[targetIndex]),
+                                     .summary = items[targetIndex],
                                      .members = {},
                                      .membersLoaded = false,
                                      .membersLoading = false,
@@ -365,7 +411,7 @@ namespace javelin::gui::messages
 
             if (!sameItem(m_threads[*existingIndex].summary, items[targetIndex]))
             {
-                m_threads[*existingIndex].summary = std::move(items[targetIndex]);
+                m_threads[*existingIndex].summary = items[targetIndex];
                 const QModelIndex changed = index(static_cast<int>(*existingIndex), 0);
                 Q_EMIT dataChanged(changed, changed);
             }
@@ -374,7 +420,7 @@ namespace javelin::gui::messages
 
     void MessageListModel::clear()
     {
-        setPage(std::nullopt, std::nullopt, {});
+        setItems(std::nullopt, std::nullopt, {});
     }
 
     bool MessageListModel::setThreadExpanded(const std::string_view threadId, const bool expanded)

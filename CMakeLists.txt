@@ -384,8 +384,9 @@ set(JAVELIN_FORMAT_FILES
     src/gui/calendar/RecurrenceDialog.h
     src/gui/calendar/RecurrencePattern.cpp
     src/gui/calendar/RecurrencePattern.h
+    src/gui/messages/InfiniteScroll.h
+    src/gui/messages/MessageListWindowPersistence.h
     src/gui/messages/MessageListModel.cpp
-    src/gui/messages/Pagination.h
     src/gui/messages/MessageListModel.h
     src/gui/messages/MessageListPanePresenter.cpp
     src/gui/messages/MessageListPanePresenter.h
@@ -1066,8 +1067,9 @@ add_library(javelin_gui STATIC
     src/gui/mailboxes/MailboxTreeModel.h
     src/gui/mailboxes/MailboxTreeView.cpp
     src/gui/mailboxes/MailboxTreeView.h
+    src/gui/messages/InfiniteScroll.h
+    src/gui/messages/MessageListWindowPersistence.h
     src/gui/messages/MessageListModel.cpp
-    src/gui/messages/Pagination.h
     src/gui/messages/MessageListModel.h
     src/gui/messages/MessageListPanePresenter.cpp
     src/gui/messages/MessageListPanePresenter.h

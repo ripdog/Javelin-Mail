@@ -10,7 +10,7 @@ namespace javelin::gui::shell
     {
         std::optional<TabKind> kind;
         bool homeTab = false;
-        bool messagePageStale = false;
+        bool messageListStale = false;
         bool remoteRefreshRequested = false;
     };
 

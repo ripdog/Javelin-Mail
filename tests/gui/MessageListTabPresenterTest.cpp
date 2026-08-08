@@ -27,51 +27,50 @@ TEST_CASE("message list presentation labels non-message tabs")
     CHECK(header.context == QStringLiteral("Compose"));
 }
 
-TEST_CASE("message list presentation preserves mailbox page metadata")
+TEST_CASE("message list presentation preserves aggregate mailbox metadata")
 {
-    javelin::gui::messages::MessageListPageHeader page{};
-    page.title = QStringLiteral("Inbox — Personal");
-    page.offset = 100;
-    page.position = 100;
-    page.itemCount = 18;
-    page.returnedLimit = 100;
-    page.total = 218;
+    javelin::gui::messages::MessageListHeader list{};
+    list.title = QStringLiteral("Inbox — Personal");
+    list.itemCount = 118;
+    list.total = 218;
+    list.loadMoreInFlight = true;
 
     MessageListPresentationInput input{};
     input.tabKind = TabKind::Mailbox;
-    input.title = page.title;
-    input.itemCount = 18;
+    input.title = list.title;
+    input.itemCount = 118;
     input.refreshError = QStringLiteral("offline");
     input.refreshInFlight = true;
-    input.page = page;
+    input.list = list;
     const auto plan = planMessageListPresentation(input);
 
     CHECK(plan.emptyState.refreshError == QStringLiteral("offline"));
     CHECK(plan.emptyState.refreshInFlight);
-    const auto& header = std::get<javelin::gui::messages::MessageListPageHeader>(plan.header);
-    CHECK(header.offset == 100);
+    const auto& header = std::get<javelin::gui::messages::MessageListHeader>(plan.header);
+    CHECK(header.itemCount == 118);
     CHECK(header.total == std::optional<std::size_t>{218});
     CHECK_FALSE(header.search);
     CHECK(header.refreshInFlight);
+    CHECK(header.loadMoreInFlight);
 }
 
 TEST_CASE("local search presentation selects the indexed empty state")
 {
-    javelin::gui::messages::MessageListPageHeader page{};
-    page.title = QStringLiteral("Search: needle");
-    page.search = true;
-    page.indexedSearch = true;
-    page.canSearchServer = true;
+    javelin::gui::messages::MessageListHeader list{};
+    list.title = QStringLiteral("Search: needle");
+    list.search = true;
+    list.indexedSearch = true;
+    list.canSearchServer = true;
 
     MessageListPresentationInput input{};
     input.tabKind = TabKind::Search;
-    input.title = page.title;
+    input.title = list.title;
     input.localSearch = true;
-    input.page = page;
+    input.list = list;
     const auto plan = planMessageListPresentation(input);
 
     CHECK(plan.emptyState.collection == javelin::gui::messages::MessageCollectionKind::LocalSearch);
-    const auto& header = std::get<javelin::gui::messages::MessageListPageHeader>(plan.header);
+    const auto& header = std::get<javelin::gui::messages::MessageListHeader>(plan.header);
     CHECK(header.indexedSearch);
     CHECK(header.canSearchServer);
 }

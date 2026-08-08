@@ -19,12 +19,12 @@ namespace javelin::gui::shell
         QString refreshError;
         bool refreshInFlight = false;
         bool localSearch = false;
-        std::optional<javelin::gui::messages::MessageListPageHeader> page;
+        std::optional<javelin::gui::messages::MessageListHeader> list;
     };
 
     using MessageListHeaderPresentation =
         std::variant<std::monostate, javelin::gui::messages::MessageListContextHeader,
-                     javelin::gui::messages::MessageListPageHeader>;
+                     javelin::gui::messages::MessageListHeader>;
 
     struct MessageListPresentationPlan
     {

@@ -2,6 +2,13 @@
 
 #include "gui/shell/TabWorkspace.h"
 
+#include <cstdint>
+
+namespace javelin::app
+{
+    class MessageListSession;
+}
+
 namespace javelin::gui::mailboxes
 {
     class MailboxTreeModel;
@@ -27,7 +34,7 @@ namespace javelin::gui::shell
                                        QWidget& mailboxPane);
 
         void syncNavigation(const TabState* tab, bool showMailboxPane) const;
-        void applyPage(const TabState* tab) const;
+        void applyItems(const TabState* tab) const;
 
       private:
         javelin::gui::mailboxes::MailboxTreeModel& m_mailboxModel;
@@ -35,5 +42,7 @@ namespace javelin::gui::shell
         QLineEdit& m_searchEdit;
         javelin::gui::messages::MessageListModel& m_messageModel;
         QWidget& m_mailboxPane;
+        mutable const javelin::app::MessageListSession* m_appliedSession = nullptr;
+        mutable std::uint64_t m_appliedItemsRevision = 0;
     };
 } // namespace javelin::gui::shell

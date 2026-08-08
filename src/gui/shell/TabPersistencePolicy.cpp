@@ -27,7 +27,7 @@ namespace javelin::gui::shell
             .accountId = snapshot.accountId,
             .mailboxId = snapshot.mailboxId,
             .mailboxRole = snapshot.mailboxRole,
-            .offset = snapshot.offset,
+            .windows = snapshot.windows,
         };
     }
 
@@ -45,9 +45,9 @@ namespace javelin::gui::shell
                     .criteria = snapshot.criteria,
                     .restored =
                         {
-                            .page = snapshot.page,
                             .mode = snapshot.mode,
                             .sessionId = snapshot.sessionId,
+                            .windows = snapshot.windows,
                         },
                 },
         };
@@ -78,8 +78,7 @@ namespace javelin::gui::shell
         };
     }
 
-    MailboxTabRestorePlan planMailboxTabRestore(const PersistedMailboxTab& tab,
-                                                const std::size_t pageSize)
+    MailboxTabRestorePlan planMailboxTabRestore(const PersistedMailboxTab& tab)
     {
         return {
             .accountId = tab.accountId,
@@ -87,25 +86,7 @@ namespace javelin::gui::shell
             .title = tab.common.title.isEmpty() ? QString::fromStdString(tab.mailboxId)
                                                 : tab.common.title,
             .mailboxRole = tab.mailboxRole,
-            .restored =
-                {
-                    .page =
-                        {
-                            .offset = tab.offset,
-                            .installedOffset = std::nullopt,
-                            .pendingOffset = std::nullopt,
-                            .position = tab.offset,
-                            .returnedLimit = pageSize,
-                            .total = std::nullopt,
-                            .queryState = {},
-                            .anchor = std::nullopt,
-                            .items = {},
-                            .cacheLoaded = false,
-                            .refreshInFlight = false,
-                            .stale = false,
-                            .refreshError = {},
-                        },
-                },
+            .restored = {.windows = tab.windows},
             .selection =
                 {
                     .threadId = tab.common.selection.threadId,
@@ -146,9 +127,7 @@ namespace javelin::gui::shell
         {
             const auto previous = persistedIndex - static_cast<int>(distance);
             if (previous >= 0 && restoredTabIndices[static_cast<std::size_t>(previous)].has_value())
-            {
                 return restoredTabIndices[static_cast<std::size_t>(previous)];
-            }
 
             const auto next = persistedIndex + static_cast<int>(distance);
             if (next < static_cast<int>(restoredTabIndices.size()) &&

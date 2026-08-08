@@ -8,8 +8,8 @@
 class QLabel;
 class QListView;
 class QProgressBar;
-class QSpinBox;
 class QToolButton;
+class QWidget;
 
 namespace javelin::gui::shell
 {
@@ -39,51 +39,45 @@ namespace javelin::gui::messages
         QString context;
     };
 
-    struct MessageListPageHeader
+    struct MessageListHeader
     {
         QString title;
-        std::size_t offset = 0;
-        std::size_t position = 0;
         std::size_t itemCount = 0;
-        std::size_t returnedLimit = 0;
         std::optional<std::size_t> total;
         bool search = false;
         bool indexedSearch = false;
         bool canSearchServer = false;
         bool refreshInFlight = false;
+        bool loadMoreInFlight = false;
+        QString loadMoreError;
     };
 
     class MessageListPanePresenter
     {
       public:
         MessageListPanePresenter(javelin::gui::shell::ElidingLabel& titleLabel, QLabel& metaLabel,
-                                 QLabel& pageLabel, QLabel& emptyState, QListView& messageView,
+                                 QLabel& emptyState, QListView& messageView,
                                  QProgressBar& loadingIndicator, QToolButton& searchServerButton,
-                                 QToolButton& firstPageButton, QToolButton& previousPageButton,
-                                 QSpinBox& pageNumberSpinBox, QToolButton& nextPageButton,
-                                 QToolButton& lastPageButton, std::size_t defaultPageSize);
+                                 QWidget& continuationFooter, QLabel& continuationLabel,
+                                 QToolButton& continuationRetryButton);
 
         void showEmptyState(const MessageListEmptyState& state) const;
         void showNoContext() const;
         void showContext(const MessageListContextHeader& header) const;
-        void showPage(const MessageListPageHeader& header) const;
+        void showList(const MessageListHeader& header) const;
 
       private:
-        void disablePagination() const;
         void showLoadingIndicator(bool inFlight) const;
+        void hideContinuation() const;
 
         javelin::gui::shell::ElidingLabel& m_titleLabel;
         QLabel& m_metaLabel;
-        QLabel& m_pageLabel;
         QLabel& m_emptyState;
         QListView& m_messageView;
         QProgressBar& m_loadingIndicator;
         QToolButton& m_searchServerButton;
-        QToolButton& m_firstPageButton;
-        QToolButton& m_previousPageButton;
-        QSpinBox& m_pageNumberSpinBox;
-        QToolButton& m_nextPageButton;
-        QToolButton& m_lastPageButton;
-        std::size_t m_defaultPageSize;
+        QWidget& m_continuationFooter;
+        QLabel& m_continuationLabel;
+        QToolButton& m_continuationRetryButton;
     };
 } // namespace javelin::gui::messages

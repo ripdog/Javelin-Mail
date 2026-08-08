@@ -52,7 +52,7 @@ namespace javelin::gui::shell
             .activeAccountId = tabAccountId(*activeTab),
             .activeMailboxId = tabMailboxId(*activeTab),
             .rows = rows,
-            .mailboxRefreshInFlight = m_messageListTabController.pageRefreshInFlight(*activeTab),
+            .mailboxRefreshInFlight = m_messageListTabController.stateRefreshInFlight(*activeTab),
             .revealAlreadyRequested =
                 m_revealRequestedForRoute == std::optional<std::uint64_t>{route->id},
         });

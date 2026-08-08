@@ -34,7 +34,7 @@ namespace javelin::gui::shell
         std::string accountId;
         std::string mailboxId;
         std::optional<std::string> mailboxRole;
-        std::size_t offset = 0;
+        std::vector<javelin::app::MessageListWindowRequest> windows;
     };
 
     struct PersistedSearchTab

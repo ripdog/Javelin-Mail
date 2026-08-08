@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace javelin::jmap::cache
 {
@@ -17,15 +18,8 @@ namespace javelin::jmap::cache
 
 namespace javelin::app
 {
-    class MailApplicationService;
-    class MailApplicationEventsPort;
     class MailboxSession;
     class SearchSession;
-
-    struct RestoredMailboxState
-    {
-        MessageListPage page;
-    };
 
     enum class SearchMode
     {
@@ -34,11 +28,16 @@ namespace javelin::app
         Online,
     };
 
+    struct RestoredMailboxState
+    {
+        std::vector<MessageListWindowRequest> windows;
+    };
+
     struct RestoredSearchState
     {
-        MessageListPage page;
         SearchMode mode = SearchMode::Local;
         std::string sessionId;
+        std::vector<MessageListWindowRequest> windows;
     };
 
     class MessageListSessionFactoryPort
@@ -50,13 +49,13 @@ namespace javelin::app
         createMailboxSession(std::string accountId, std::string mailboxId, QString title,
                              std::optional<std::string> role,
                              javelin::jmap::query::EmailListSort sort,
-                             javelin::jmap::cache::QueryReader& queryReader, std::size_t pageSize,
+                             javelin::jmap::cache::QueryReader& queryReader, std::size_t windowSize,
                              std::optional<RestoredMailboxState> restored, QObject* parent) = 0;
         [[nodiscard]] virtual SearchSession*
         createSearchSession(std::string accountId,
                             javelin::jmap::search::EmailSearchCriteria criteria,
                             javelin::jmap::query::EmailListSort sort,
-                            javelin::jmap::cache::QueryReader& queryReader, std::size_t pageSize,
+                            javelin::jmap::cache::QueryReader& queryReader, std::size_t windowSize,
                             std::optional<RestoredSearchState> restored, QObject* parent) = 0;
     };
 } // namespace javelin::app

@@ -1,5 +1,7 @@
 #include "gui/shell/MainWindowStateStore.h"
 
+#include "gui/messages/MessageListWindowPersistence.h"
+
 #include <QDataStream>
 #include <QIODevice>
 #include <QStringList>
@@ -140,9 +142,8 @@ namespace javelin::gui::shell
                     .accountId = accountId,
                     .mailboxId = mailboxId,
                     .mailboxRole = optionalString(settings, prefix, QStringLiteral("mailboxRole")),
-                    .offset = static_cast<std::size_t>(
-                        settings.value(settingKey(prefix, QStringLiteral("offset")), 0)
-                            .toULongLong()),
+                    .windows =
+                        javelin::gui::messages::readMessageListWindowManifest(settings, prefix),
                 };
             }
             if (type == QStringLiteral("search"))
@@ -252,8 +253,8 @@ namespace javelin::gui::shell
                                         QString::fromStdString(value.mailboxId));
                         writeOptionalString(settings, prefix, QStringLiteral("mailboxRole"),
                                             value.mailboxRole);
-                        settings.insert(settingKey(prefix, QStringLiteral("offset")),
-                                        static_cast<qulonglong>(value.offset));
+                        javelin::gui::messages::writeMessageListWindowManifest(settings, prefix,
+                                                                               value.windows);
                     }
                     else if constexpr (std::is_same_v<Tab, PersistedSearchTab>)
                     {

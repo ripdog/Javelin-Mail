@@ -12,10 +12,10 @@ namespace javelin::gui::shell
 {
     MessageListTabController::MessageListTabController(
         javelin::jmap::cache::QueryReader& queryReader,
-        javelin::app::MessageListSessionFactoryPort& sessionFactory, const std::size_t pageSize,
+        javelin::app::MessageListSessionFactoryPort& sessionFactory, const std::size_t windowSize,
         QObject* sessionParent, QObject* parent)
         : QObject(parent), m_queryReader(queryReader), m_sessionFactory(sessionFactory),
-          m_pageSize(pageSize), m_sessionParent(sessionParent)
+          m_windowSize(windowSize), m_sessionParent(sessionParent)
     {
     }
 
@@ -66,7 +66,7 @@ namespace javelin::gui::shell
     {
         auto* session = m_sessionFactory.createMailboxSession(
             std::move(spec.accountId), std::move(spec.mailboxId), std::move(spec.title),
-            std::move(spec.role), spec.sort, m_queryReader, m_pageSize, std::move(spec.restored),
+            std::move(spec.role), spec.sort, m_queryReader, m_windowSize, std::move(spec.restored),
             m_sessionParent);
         bind(*session);
         return {.content = MailboxTabState{.session = session, .selection = {}}};
@@ -76,7 +76,7 @@ namespace javelin::gui::shell
     {
         auto* session = m_sessionFactory.createSearchSession(
             std::move(spec.accountId), std::move(spec.criteria), spec.sort, m_queryReader,
-            m_pageSize, std::move(spec.restored), m_sessionParent);
+            m_windowSize, std::move(spec.restored), m_sessionParent);
         bind(*session);
         return {.content = SearchTabState{.session = session, .selection = {}}};
     }
@@ -104,13 +104,12 @@ namespace javelin::gui::shell
         }
     }
 
-    bool MessageListTabController::loadCachedPage(TabState& tab, const bool forceReload)
+    bool MessageListTabController::loadCachedState(TabState& tab, const bool forceReload)
     {
         auto* session = messageListSession(tab);
         if (session == nullptr)
             return false;
-
-        session->loadCachedPage(forceReload);
+        session->loadCachedState(forceReload);
         return true;
     }
 
@@ -120,40 +119,20 @@ namespace javelin::gui::shell
         auto* session = messageListSession(tab);
         if (session == nullptr)
             return false;
-
         session->refresh(mode);
         return true;
     }
 
-    bool MessageListTabController::goToPreviousPage(TabState& tab)
-    {
-        auto* session = messageListSession(tab);
-        return session != nullptr && session->goToPreviousPage();
-    }
-
-    bool MessageListTabController::goToNextPage(TabState& tab)
-    {
-        auto* session = messageListSession(tab);
-        return session != nullptr && session->goToNextPage();
-    }
-
-    bool MessageListTabController::goToPage(TabState& tab, const std::size_t pageIndex)
-    {
-        auto* session = messageListSession(tab);
-        return session != nullptr && session->goToPage(pageIndex);
-    }
-
-    std::optional<std::size_t> MessageListTabController::lastPageIndex(const TabState& tab) const
+    bool MessageListTabController::canLoadMore(const TabState& tab) const
     {
         const auto* session = messageListSession(tab);
-        if (session == nullptr || !session->page().total.has_value() || *session->page().total == 0)
-        {
-            return std::nullopt;
-        }
+        return session != nullptr && session->canLoadMore();
+    }
 
-        const auto effectiveLimit =
-            session->page().returnedLimit == 0 ? m_pageSize : session->page().returnedLimit;
-        return javelin::app::messageListPageCount(*session->page().total, effectiveLimit) - 1;
+    bool MessageListTabController::loadMore(TabState& tab)
+    {
+        auto* session = messageListSession(tab);
+        return session != nullptr && session->loadMore();
     }
 
     void MessageListTabController::setSort(std::vector<TabState>& tabs,
@@ -180,16 +159,16 @@ namespace javelin::gui::shell
         return true;
     }
 
-    bool MessageListTabController::pageStale(const TabState& tab) const
+    bool MessageListTabController::stateStale(const TabState& tab) const
     {
         const auto* session = messageListSession(tab);
-        return session != nullptr && session->page().stale;
+        return session != nullptr && session->state().stale;
     }
 
-    bool MessageListTabController::pageRefreshInFlight(const TabState& tab) const
+    bool MessageListTabController::stateRefreshInFlight(const TabState& tab) const
     {
         const auto* session = messageListSession(tab);
-        return session != nullptr && session->page().refreshInFlight;
+        return session != nullptr && session->state().refreshInFlight;
     }
 
     bool
@@ -204,7 +183,6 @@ namespace javelin::gui::shell
         auto* search = std::get_if<SearchTabState>(&tab.content);
         if (search == nullptr || search->session == nullptr)
             return false;
-
         search->session->promoteToOnline();
         return true;
     }
@@ -214,7 +192,6 @@ namespace javelin::gui::shell
         auto* mailbox = std::get_if<MailboxTabState>(&tab.content);
         if (mailbox == nullptr || mailbox->session == nullptr)
             return false;
-
         mailbox->session->reveal(std::move(emailId));
         return true;
     }
@@ -273,8 +250,8 @@ namespace javelin::gui::shell
 
     void MessageListTabController::bind(javelin::app::MessageListSession& session)
     {
-        connect(&session, &javelin::app::MessageListSession::pageChanged, this,
-                [this, session = &session] { Q_EMIT pageChanged(session); });
+        connect(&session, &javelin::app::MessageListSession::stateChanged, this,
+                [this, session = &session] { Q_EMIT stateChanged(session); });
         connect(&session, &javelin::app::MessageListSession::refreshFailed, this,
                 [this](const javelin::jmap::OperationError& error)
                 { Q_EMIT operationFailed(error); });

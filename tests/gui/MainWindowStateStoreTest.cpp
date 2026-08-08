@@ -1,4 +1,5 @@
 #include "gui/shell/MainWindowStateStore.h"
+#include "gui/search/SearchSessionPersistence.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -43,7 +44,7 @@ TEST_CASE("main window state round-trips every tab type")
         .accountId = "account",
         .mailboxId = "inbox",
         .mailboxRole = "inbox",
-        .offset = 200,
+        .windows = {{.offset = 0, .limit = 100}, {.offset = 100, .limit = 100}},
     });
     expected.tabs.emplace_back(PersistedSearchTab{
         .common =
@@ -57,24 +58,9 @@ TEST_CASE("main window state round-trips every tab type")
                 .criteria = {.text = "needle", .from = "sender@example.test"},
                 .restored =
                     {
-                        .page =
-                            {
-                                .offset = 20,
-                                .installedOffset = std::nullopt,
-                                .pendingOffset = std::nullopt,
-                                .position = 20,
-                                .returnedLimit = 10,
-                                .total = 25,
-                                .queryState = "query-state",
-                                .anchor = std::nullopt,
-                                .items = {},
-                                .cacheLoaded = true,
-                                .refreshInFlight = false,
-                                .stale = true,
-                                .refreshError = {},
-                            },
                         .mode = javelin::app::SearchMode::Online,
                         .sessionId = "search-session",
+                        .windows = {{.offset = 0, .limit = 100}},
                     },
             },
     });
@@ -117,17 +103,17 @@ TEST_CASE("main window state round-trips every tab type")
     CHECK(mailbox.common.selection.threadId == std::optional<std::string>{"thread"});
     CHECK(mailbox.mailboxId == "inbox");
     CHECK(mailbox.mailboxRole == std::optional<std::string>{"inbox"});
-    CHECK(mailbox.offset == 200);
+    CHECK((mailbox.windows == std::vector<javelin::app::MessageListWindowRequest>{
+                                  {.offset = 0, .limit = 100}, {.offset = 100, .limit = 100}}));
 
     const auto& search = std::get<PersistedSearchTab>(actual.tabs[1]);
     CHECK(search.accountId == "account");
     CHECK(search.search.criteria.text == std::optional<std::string>{"needle"});
     CHECK(search.search.criteria.from == std::optional<std::string>{"sender@example.test"});
-    CHECK(search.search.restored.page.offset == 20);
-    CHECK(search.search.restored.page.total == std::optional<std::size_t>{25});
-    CHECK(search.search.restored.page.queryState == "query-state");
     CHECK(search.search.restored.mode == javelin::app::SearchMode::Online);
     CHECK(search.search.restored.sessionId == "search-session");
+    CHECK((search.search.restored.windows ==
+           std::vector<javelin::app::MessageListWindowRequest>{{.offset = 0, .limit = 100}}));
 
     const auto& compose = std::get<PersistedComposeTab>(actual.tabs[2]);
     CHECK(compose.accountId == "account");
@@ -186,7 +172,7 @@ TEST_CASE("main window state rejects account-bound tabs without an account")
         .accountId = {},
         .mailboxId = "inbox",
         .mailboxRole = "inbox",
-        .offset = 0,
+        .windows = {},
     });
     state.tabs.emplace_back(PersistedSearchTab{
         .common = {.title = QStringLiteral("Search"), .selection = {}},
@@ -224,4 +210,33 @@ TEST_CASE("main window state falls back safely when the payload is corrupt")
     CHECK(state.tabs.empty());
     CHECK(state.emailListSort.property == fallback.property);
     CHECK(state.emailListSort.direction == fallback.direction);
+}
+
+TEST_CASE("search persistence stores a compact window manifest but no result payload")
+{
+    QVariantMap settings;
+    javelin::gui::search::writeSearchSessionSettings(
+        settings, QStringLiteral("search/"),
+        {
+            .criteria = {.from = "sender@example.test"},
+            .restored =
+                {
+                    .mode = javelin::app::SearchMode::Online,
+                    .sessionId = "session-a",
+                    .windows = {{.offset = 0, .limit = 100}, {.offset = 100, .limit = 100}},
+                },
+        });
+
+    CHECK(settings.value(QStringLiteral("search/searchFrom")).toString() ==
+          QStringLiteral("sender@example.test"));
+    CHECK(settings.value(QStringLiteral("search/onlineSearch")).toBool());
+    CHECK(settings.value(QStringLiteral("search/searchSessionId")).toString() ==
+          QStringLiteral("session-a"));
+    CHECK(settings.value(QStringLiteral("search/windowOffsets")).toList().size() == 2);
+    CHECK(settings.value(QStringLiteral("search/windowLimits")).toList().size() == 2);
+    CHECK_FALSE(settings.contains(QStringLiteral("search/offset")));
+    CHECK_FALSE(settings.contains(QStringLiteral("search/position")));
+    CHECK_FALSE(settings.contains(QStringLiteral("search/total")));
+    CHECK_FALSE(settings.contains(QStringLiteral("search/queryState")));
+    CHECK_FALSE(settings.contains(QStringLiteral("search/cachedItems")));
 }

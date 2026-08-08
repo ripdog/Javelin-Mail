@@ -11,21 +11,36 @@ TEST_CASE("empty tab activation clears message presentation", "[gui][tabs][activ
     CHECK_FALSE(plan.refreshRemote);
 }
 
-TEST_CASE("mailbox activation shows navigation only for the home tab", "[gui][tabs][activation]")
+TEST_CASE("mailbox activation preserves a current loaded prefix and refreshes only when needed",
+          "[gui][tabs][activation][infinite-scroll]")
 {
     const auto home = javelin::gui::shell::planTabActivation({
         .kind = javelin::gui::shell::TabKind::Mailbox,
         .homeTab = true,
+        .messageListStale = false,
+        .remoteRefreshRequested = false,
     });
     const auto secondary = javelin::gui::shell::planTabActivation({
         .kind = javelin::gui::shell::TabKind::Mailbox,
         .homeTab = false,
+        .messageListStale = false,
+        .remoteRefreshRequested = false,
+    });
+    const auto stale = javelin::gui::shell::planTabActivation({
+        .kind = javelin::gui::shell::TabKind::Mailbox,
+        .messageListStale = true,
+    });
+    const auto requested = javelin::gui::shell::planTabActivation({
+        .kind = javelin::gui::shell::TabKind::Mailbox,
+        .remoteRefreshRequested = true,
     });
 
     CHECK(home.showMailboxPane);
     CHECK_FALSE(secondary.showMailboxPane);
-    CHECK(home.refreshRemote);
-    CHECK(secondary.refreshRemote);
+    CHECK_FALSE(home.refreshRemote);
+    CHECK_FALSE(secondary.refreshRemote);
+    CHECK(stale.refreshRemote);
+    CHECK(requested.refreshRemote);
 }
 
 TEST_CASE("search activation refreshes only stale or explicitly requested results",
@@ -34,19 +49,19 @@ TEST_CASE("search activation refreshes only stale or explicitly requested result
     const auto cached = javelin::gui::shell::planTabActivation({
         .kind = javelin::gui::shell::TabKind::Search,
         .homeTab = false,
-        .messagePageStale = false,
+        .messageListStale = false,
         .remoteRefreshRequested = false,
     });
     const auto stale = javelin::gui::shell::planTabActivation({
         .kind = javelin::gui::shell::TabKind::Search,
         .homeTab = false,
-        .messagePageStale = true,
+        .messageListStale = true,
         .remoteRefreshRequested = false,
     });
     const auto requested = javelin::gui::shell::planTabActivation({
         .kind = javelin::gui::shell::TabKind::Search,
         .homeTab = false,
-        .messagePageStale = false,
+        .messageListStale = false,
         .remoteRefreshRequested = true,
     });
 
@@ -61,7 +76,7 @@ TEST_CASE("compose activation preserves the message presentation behind the edit
     const auto plan = javelin::gui::shell::planTabActivation({
         .kind = javelin::gui::shell::TabKind::Compose,
         .homeTab = true,
-        .messagePageStale = true,
+        .messageListStale = true,
         .remoteRefreshRequested = true,
     });
 
