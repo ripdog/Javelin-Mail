@@ -694,11 +694,16 @@ namespace javelin::jmap::api
             }
             for (const auto& attendee : value.attendees)
             {
-                std::unordered_map<std::string, bool> roles;
+                auto roles = attendee.roles;
+                std::erase_if(roles, [](const auto& role) { return !role.second; });
                 if (attendee.isOwner)
-                    roles.emplace("owner", true);
+                    roles.insert_or_assign("owner", true);
+                else
+                    roles.erase("owner");
                 if (attendee.isAttendee)
-                    roles.emplace("attendee", true);
+                    roles.insert_or_assign("attendee", true);
+                else
+                    roles.erase("attendee");
                 raw.participants.emplace(
                     attendee.id,
                     detail::RawParticipant{.type = "Participant",
@@ -876,6 +881,9 @@ namespace javelin::jmap::api
             }
             for (const auto& [id, participant] : raw.participants)
             {
+                auto additionalRoles = participant.roles;
+                additionalRoles.erase("owner");
+                additionalRoles.erase("attendee");
                 value.attendees.push_back(calendar::Attendee{
                     .id = id,
                     .name = participant.name,
@@ -885,6 +893,7 @@ namespace javelin::jmap::api
                     .isOwner = participant.roles.contains("owner") && participant.roles.at("owner"),
                     .isAttendee =
                         participant.roles.contains("attendee") && participant.roles.at("attendee"),
+                    .roles = std::move(additionalRoles),
                     .expectReply = participant.expectReply,
                     .scheduleSequence = participant.scheduleSequence,
                     .scheduleUpdated =

@@ -18,6 +18,7 @@ namespace
                 .participationStatus = owner ? "accepted" : "tentative",
                 .isOwner = owner,
                 .isAttendee = true,
+                .roles = {},
                 .expectReply = !owner,
                 .scheduleSequence = 7,
                 .scheduleUpdated = std::nullopt};

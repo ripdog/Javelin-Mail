@@ -141,6 +141,7 @@ namespace javelin::jmap::calendar
                               .participationStatus = "needs-action",
                               .isOwner = false,
                               .isAttendee = true,
+                              .roles = {},
                               .expectReply = true,
                               .scheduleSequence = 0,
                               .scheduleUpdated = std::nullopt});

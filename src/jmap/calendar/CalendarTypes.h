@@ -165,6 +165,7 @@ namespace javelin::jmap::calendar
         std::string participationStatus;
         bool isOwner = false;
         bool isAttendee = true;
+        std::unordered_map<std::string, bool> roles;
         bool expectReply = false;
         std::uint32_t scheduleSequence = 0;
         std::optional<UtcInstant> scheduleUpdated;

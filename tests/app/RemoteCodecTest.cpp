@@ -2,6 +2,7 @@
 #include "app/DeveloperDiagnostics.h"
 #include "app/DeveloperMaintenance.h"
 #include "app/RemoteActionTypes.h"
+#include "jmap/calendar/CalendarTypes.h"
 #include "jmap/identity/IdentityCommandTypes.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -51,6 +52,33 @@ TEST_CASE("remote codec round-trips nested typed values", "[app][remote-codec]")
     CHECK(value->totals == fixture.totals);
     CHECK(value->status == fixture.status);
     CHECK(value->delay == fixture.delay);
+}
+
+TEST_CASE("remote codec preserves calendar participant roles", "[app][remote-codec][calendar]")
+{
+    const javelin::jmap::calendar::Attendee attendee{
+        .id = "participant-1",
+        .name = "Alice",
+        .email = "alice@example.test",
+        .calendarAddress = "mailto:alice@example.test",
+        .participationStatus = "accepted",
+        .isOwner = false,
+        .isAttendee = true,
+        .roles = {{"chair", true}, {"x-example-role", true}},
+        .expectReply = false,
+        .scheduleSequence = 4,
+        .scheduleUpdated = std::nullopt,
+    };
+
+    const auto encoded = javelin::app::remote::encode(attendee);
+    const auto* payload = std::get_if<QByteArray>(&encoded);
+    REQUIRE(payload != nullptr);
+
+    const auto decoded =
+        javelin::app::remote::decodeValue<javelin::jmap::calendar::Attendee>(*payload);
+    const auto* value = std::get_if<javelin::jmap::calendar::Attendee>(&decoded);
+    REQUIRE(value != nullptr);
+    CHECK(*value == attendee);
 }
 
 TEST_CASE("remote codec preserves structured undo failures", "[app][remote-codec][undo]")

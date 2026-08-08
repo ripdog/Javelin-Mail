@@ -208,7 +208,7 @@ TEST_CASE("calendar set serializes creation and destructive deletion", "[jmap][c
 TEST_CASE("calendar event documents preserve recurrence and attendees", "[jmap][calendar]")
 {
     const auto parsed = javelin::jmap::api::parseCalendarEventGetResponse(
-        R"({"accountId":"a1","state":"e4","list":[{"@type":"Event","id":"e1","uid":"uid-1","calendarIds":{"work":true},"title":"Planning","start":"2026-03-03T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true,"organizerCalendarAddress":"mailto:alice@example.test","recurrenceRule":{"@type":"RecurrenceRule","frequency":"weekly","interval":1},"recurrenceOverrides":{"2026-03-10T09:00:00":{"excluded":true}},"participants":{"p1":{"@type":"Participant","name":"Alice","email":"alice@example.test","calendarAddress":"mailto:alice@example.test","participationStatus":"accepted","roles":{"owner":true,"attendee":true},"expectReply":true,"scheduleSequence":2}}}],"notFound":[]})");
+        R"({"accountId":"a1","state":"e4","list":[{"@type":"Event","id":"e1","uid":"uid-1","calendarIds":{"work":true},"title":"Planning","start":"2026-03-03T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true,"organizerCalendarAddress":"mailto:alice@example.test","recurrenceRule":{"@type":"RecurrenceRule","frequency":"weekly","interval":1},"recurrenceOverrides":{"2026-03-10T09:00:00":{"excluded":true}},"participants":{"p1":{"@type":"Participant","name":"Alice","email":"alice@example.test","calendarAddress":"mailto:alice@example.test","participationStatus":"accepted","roles":{"owner":true,"attendee":true,"chair":true},"expectReply":true,"scheduleSequence":2}}}],"notFound":[]})");
 
     REQUIRE(parsed.ok());
     REQUIRE(parsed.value->list.size() == 1);
@@ -219,9 +219,13 @@ TEST_CASE("calendar event documents preserve recurrence and attendees", "[jmap][
     CHECK(event.recurrenceOverrides.at("2026-03-10T09:00:00").excluded);
     REQUIRE(event.attendees.size() == 1);
     CHECK(event.attendees.front().isOwner);
+    CHECK(event.attendees.front().roles.at("chair"));
     CHECK(event.attendees.front().expectReply);
     CHECK(event.organizerCalendarAddress ==
           std::optional<std::string>{"mailto:alice@example.test"});
+    const auto serialized = javelin::jmap::api::serializeCalendarEventDocument(event);
+    REQUIRE(serialized.has_value());
+    CHECK(serialized->find(R"("chair":true)") != std::string::npos);
 }
 
 TEST_CASE("calendar scheduling serializes participant sets and RSVP patches",
@@ -244,6 +248,7 @@ TEST_CASE("calendar scheduling serializes participant sets and RSVP patches",
                                   .participationStatus = "needs-action",
                                   .isOwner = false,
                                   .isAttendee = true,
+                                  .roles = {},
                                   .expectReply = true,
                                   .scheduleSequence = 0,
                                   .scheduleUpdated = std::nullopt});
