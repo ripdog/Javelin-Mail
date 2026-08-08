@@ -352,6 +352,7 @@ add_executable(javelin_contacts_gui_tests
     gui/ContactsGuiTestMain.cpp
     gui/ContactsManagerWidgetTest.cpp
     gui/DeveloperOptionsDialogTest.cpp
+    gui/FontUtilsTest.cpp
     gui/IconUtilsTest.cpp
     gui/IndeterminateProgressBarTest.cpp
     gui/MessageBannerWidgetTest.cpp

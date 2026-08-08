@@ -1,5 +1,6 @@
 #include "gui/messageview/MessageViewContainer.h"
 #include "app/MessageSubject.h"
+#include "gui/FontUtils.h"
 #include "gui/IconUtils.h"
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/messageview/MessageBannerWidget.h"
@@ -9,6 +10,7 @@
 #include "gui/translation/TranslationService.h"
 #include "gui/widgets/IndeterminateProgressBar.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
+#include "jmap/render/HtmlTextExtractor.h"
 
 #include <QCoroTask>
 
@@ -37,7 +39,6 @@
 #include <QStringList>
 #include <QStyle>
 #include <QTextBrowser>
-#include <QTextDocument>
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -70,9 +71,8 @@ namespace javelin::gui::messageview
 
             if (hasCompleteHtml)
             {
-                QTextDocument document;
-                document.setHtml(QString::fromStdString(snapshot.htmlBody->value));
-                return document.toPlainText();
+                return javelin::jmap::render::plainTextFromHtml(
+                    QString::fromStdString(snapshot.htmlBody->value));
             }
 
             return {};
@@ -316,9 +316,8 @@ namespace javelin::gui::messageview
                 const auto subject = javelin::app::subjectForDisplay(message.subject);
                 auto* subjectLabel = new QLabel(subject, this);
                 subjectLabel->setWordWrap(true);
-                auto subjectFont = subjectLabel->font();
+                auto subjectFont = javelin::gui::fontWithSizeDelta(subjectLabel->font(), 1);
                 subjectFont.setBold(true);
-                subjectFont.setPointSize(subjectFont.pointSize() + 1);
                 subjectLabel->setFont(subjectFont);
 
                 const auto preview = message.preview.has_value()
@@ -406,8 +405,7 @@ namespace javelin::gui::messageview
         m_titleLabel->setWordWrap(true);
         makeLabelSelectable(m_titleLabel);
 
-        auto titleFont = m_titleLabel->font();
-        titleFont.setPointSize(titleFont.pointSize() + 4);
+        auto titleFont = javelin::gui::fontWithSizeDelta(m_titleLabel->font(), 4);
         titleFont.setBold(true);
         m_titleLabel->setFont(titleFont);
 
@@ -573,8 +571,8 @@ namespace javelin::gui::messageview
         placeholderCardLayout->setSpacing(10);
 
         m_placeholderTitleLabel = new QLabel(placeholderCard);
-        auto placeholderTitleFont = m_placeholderTitleLabel->font();
-        placeholderTitleFont.setPointSize(placeholderTitleFont.pointSize() + 2);
+        auto placeholderTitleFont =
+            javelin::gui::fontWithSizeDelta(m_placeholderTitleLabel->font(), 2);
         placeholderTitleFont.setBold(true);
         m_placeholderTitleLabel->setFont(placeholderTitleFont);
         m_placeholderTitleLabel->setWordWrap(true);

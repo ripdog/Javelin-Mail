@@ -121,6 +121,8 @@ add_library(javelin_cache_read STATIC
     src/jmap/cache/RawMessageSourceReadRepository.h
     src/jmap/render/HtmlMessageDocumentBuilder.cpp
     src/jmap/render/HtmlMessageDocumentBuilder.h
+    src/jmap/render/HtmlTextExtractor.cpp
+    src/jmap/render/HtmlTextExtractor.h
     src/jmap/render/InlineMessageUrl.cpp
     src/jmap/render/InlineMessageUrl.h
 )
@@ -133,6 +135,8 @@ target_link_libraries(javelin_cache_read
         Qt::Concurrent
         Qt::Core
         Qt::Sql
+    PRIVATE
+        KF6::Codecs
 )
 javelin_set_project_warnings(javelin_cache_read)
 javelin_enable_static_analysis(javelin_cache_read)
@@ -832,8 +836,6 @@ add_library(javelin_jmap STATIC
     src/jmap/query/QueryDiff.h
     src/jmap/render/HtmlMessageDocumentBuilder.cpp
     src/jmap/render/HtmlMessageDocumentBuilder.h
-    src/jmap/render/HtmlTextExtractor.cpp
-    src/jmap/render/HtmlTextExtractor.h
     src/jmap/render/InlineMessageUrl.cpp
     src/jmap/render/InlineMessageUrl.h
     src/jmap/search/EmailSearch.cpp

@@ -13,6 +13,7 @@
 #include "app/PerformanceMetrics.h"
 #include "app/SearchSession.h"
 #include "app/UndoApplicationPorts.h"
+#include "gui/FontUtils.h"
 #include "gui/IconUtils.h"
 #include "gui/compose/MailtoParser.h"
 #include "gui/developer/DeveloperOptionsDialog.h"
@@ -1346,8 +1347,7 @@ namespace javelin::gui::shell
         m_pageNumberSpinBox->setAlignment(Qt::AlignCenter);
         m_pageNumberSpinBox->setToolTip(i18n("Enter a page number"));
         m_messagePageLabel = new QLabel(messageHeaderRow);
-        auto titleFont = m_messageListTitleLabel->font();
-        titleFont.setPointSize(titleFont.pointSize() + 4);
+        auto titleFont = javelin::gui::fontWithSizeDelta(m_messageListTitleLabel->font(), 4);
         titleFont.setBold(true);
         m_messageListTitleLabel->setFont(titleFont);
         messageHeaderRowLayout->addWidget(m_messageListTitleLabel, 1);

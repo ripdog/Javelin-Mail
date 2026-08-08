@@ -1,6 +1,7 @@
 #include "gui/contacts/ContactsManagerWidget.h"
 #include "gui/widgets/EmailAddressLineEdit.h"
 
+#include "gui/FontUtils.h"
 #include "gui/IconUtils.h"
 #include "gui/settings/GuiSettings.h"
 #include "jmap/contacts/ContactInterchange.h"
@@ -1002,8 +1003,7 @@ namespace javelin::gui::contacts
         auto* view = new QWidget(m_detailStack);
         auto* viewLayout = new QVBoxLayout(view);
         m_viewTitle = new QLabel(view);
-        QFont titleFont = m_viewTitle->font();
-        titleFont.setPointSize(titleFont.pointSize() + 5);
+        QFont titleFont = javelin::gui::fontWithSizeDelta(m_viewTitle->font(), 5);
         titleFont.setBold(true);
         m_viewTitle->setFont(titleFont);
         m_photoLabel = new QLabel(view);
@@ -1057,8 +1057,8 @@ namespace javelin::gui::contacts
         auto* multiple = new QWidget(m_detailStack);
         auto* multipleLayout = new QVBoxLayout(multiple);
         m_multipleSelectionTitle = new QLabel(multiple);
-        QFont multipleTitleFont = m_multipleSelectionTitle->font();
-        multipleTitleFont.setPointSize(multipleTitleFont.pointSize() + 5);
+        QFont multipleTitleFont =
+            javelin::gui::fontWithSizeDelta(m_multipleSelectionTitle->font(), 5);
         multipleTitleFont.setBold(true);
         m_multipleSelectionTitle->setFont(multipleTitleFont);
         m_multipleStarButton = new QToolButton(multiple);
@@ -1088,8 +1088,7 @@ namespace javelin::gui::contacts
         auto* formLayout = new QVBoxLayout(formWidget);
         formLayout->setSpacing(14);
         auto* heading = new QLabel(i18n("Contact details"), formWidget);
-        QFont headingFont = heading->font();
-        headingFont.setPointSize(headingFont.pointSize() + 4);
+        QFont headingFont = javelin::gui::fontWithSizeDelta(heading->font(), 4);
         headingFont.setBold(true);
         heading->setFont(headingFont);
         formLayout->addWidget(heading);

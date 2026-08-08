@@ -1,5 +1,6 @@
 #include "gui/messages/MessageListDelegate.h"
 
+#include "gui/FontUtils.h"
 #include "gui/IconUtils.h"
 #include "gui/messages/MessageListModel.h"
 
@@ -312,9 +313,8 @@ namespace javelin::gui::messages
         const auto timestamp =
             formattedTimestamp(index.data(MessageListModel::ReceivedAtRole).toString());
 
-        auto senderFont = option.font;
-        senderFont.setPointSize(senderFont.pointSize() +
-                                (isMemberRow ? 0 : senderFontSizeIncreaseParent));
+        auto senderFont = javelin::gui::fontWithSizeDelta(
+            option.font, isMemberRow ? 0 : senderFontSizeIncreaseParent);
         senderFont.setBold(true);
         painter->setFont(senderFont);
         painter->setPen(senderColor);
@@ -354,10 +354,9 @@ namespace javelin::gui::messages
         painter->setPen(textColor);
         painter->drawText(rightHeaderRect, Qt::AlignRight | Qt::AlignVCenter, timestamp);
 
-        auto subjectFont = option.font;
-        subjectFont.setPointSize(subjectFont.pointSize() + (isMemberRow
-                                                                ? subjectFontSizeIncreaseMember
-                                                                : subjectFontSizeIncreaseParent));
+        auto subjectFont = javelin::gui::fontWithSizeDelta(
+            option.font,
+            isMemberRow ? subjectFontSizeIncreaseMember : subjectFontSizeIncreaseParent);
         painter->setFont(subjectFont);
         painter->setPen(textColor);
         const auto subjectMetrics = QFontMetrics{subjectFont};
