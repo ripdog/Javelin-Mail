@@ -97,6 +97,7 @@ namespace
         value.start = {.value = "2026-07-13T09:00:00"};
         value.duration = {.value = "PT1H"};
         value.timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Pacific/Auckland"};
+        value.isOrigin = true;
         return value;
     }
 } // namespace
@@ -1004,6 +1005,356 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     REQUIRE(std::holds_alternative<std::optional<std::string>>(resolvedState));
     CHECK(std::get<std::optional<std::string>>(resolvedState) ==
           std::optional<std::string>{"calendar-default-resolved"});
+}
+
+TEST_CASE("calendar invitation responses use participant identities and RSVP rights",
+          "[jmap][calendar][service][scheduling]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-service-rsvp"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    if (const auto error = sessions.replace("a1", session()))
+        FAIL(error->message.toStdString());
+
+    javelin::jmap::cache::CalendarRepository calendars{connection};
+    const javelin::jmap::calendar::Calendar work{
+        .accountId = "a1",
+        .id = "work",
+        .name = "Work",
+        .description = std::nullopt,
+        .color = std::nullopt,
+        .sortOrder = 0,
+        .isSubscribed = true,
+        .isVisible = true,
+        .isDefault = true,
+        .timeZone = std::nullopt,
+        .defaultAlertsWithTime = {},
+        .defaultAlertsWithoutTime = {},
+        .myRights = {.mayReadFreeBusy = true,
+                     .mayReadItems = true,
+                     .mayWriteAll = false,
+                     .mayWriteOwn = false,
+                     .mayUpdatePrivate = true,
+                     .mayRSVP = true,
+                     .mayShare = false,
+                     .mayDelete = false},
+    };
+    REQUIRE_FALSE(calendars.replaceCalendars("a1", "calendar-state-1", {work}).has_value());
+
+    auto invitation = event();
+    invitation.title = "Invitation";
+    invitation.isOrigin = false;
+    invitation.organizerCalendarAddress = "mailto:organizer@example.test";
+    invitation.attendees = {
+        {.id = "organizer",
+         .name = "Organizer",
+         .email = "organizer@example.test",
+         .calendarAddress = "mailto:organizer@example.test",
+         .participationStatus = "accepted",
+         .isOwner = true,
+         .isAttendee = true,
+         .expectReply = false,
+         .scheduleSequence = 0,
+         .scheduleUpdated = std::nullopt},
+        {.id = "me",
+         .name = "Alice",
+         .email = "alice@example.test",
+         .calendarAddress = "mailto:alice@example.test",
+         .participationStatus = "needs-action",
+         .isOwner = false,
+         .isAttendee = true,
+         .expectReply = true,
+         .scheduleSequence = 0,
+         .scheduleUpdated = std::nullopt},
+    };
+    REQUIRE_FALSE(
+        calendars
+            .reconcileWindow({.accountId = "a1",
+                              .start = {.value = "2026-06-29T00:00:00"},
+                              .end = {.value = "2026-08-10T00:00:00"},
+                              .displayTimeZone = {.value = "Pacific/Auckland"},
+                              .queryState = "query-rsvp",
+                              .eventState = "event-rsvp-1",
+                              .events = {invitation},
+                              .occurrences = {{.accountId = "a1",
+                                               .id = "event-1",
+                                               .eventId = "event-1",
+                                               .recurrenceId = std::nullopt,
+                                               .localStart = invitation.start,
+                                               .localEnd = {.value = "2026-07-13T10:00:00"},
+                                               .utcStart = std::nullopt,
+                                               .utcEnd = std::nullopt,
+                                               .allDay = false}}})
+            .has_value());
+
+    FakeMethodTransport transport;
+    javelin::jmap::calendar::CalendarService service{connection, transport};
+    const javelin::jmap::LiveConnectionSettings settings{
+        .sessionUrl = "https://example.test/.well-known/jmap",
+        .loginEmail = "alice@example.test",
+        .apiKey = "secret",
+    };
+    const auto identityResponse = [](const std::string& address)
+    {
+        return javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "ParticipantIdentity/get",
+                  .arguments =
+                      QStringLiteral(
+                          R"({"accountId":"a1","state":"participant-1","list":[{"id":"default","name":"Alice","calendarAddress":"%1","isDefault":true}],"notFound":[]})")
+                          .arg(QString::fromStdString(address))
+                          .toStdString(),
+                  .callId = "participant-identities"}},
+            .createdIds = std::nullopt,
+            .sessionState = "session-participants",
+        };
+    };
+
+    SECTION("accepted response projects and commits without ordinary write rights")
+    {
+        transport.results.push_back(identityResponse("mailto:alice@example.test"));
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "CalendarEvent/set",
+                  .arguments =
+                      R"({"accountId":"a1","oldState":"event-rsvp-1","newState":"event-rsvp-2","created":{},"updated":{"event-1":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+                  .callId = "calendar-event-set"}},
+            .createdIds = std::nullopt,
+            .sessionState = "session-rsvp-accepted",
+        });
+        std::size_t projectionNotifications = 0;
+
+        const auto result = QCoro::waitFor(service.respond(settings, "a1",
+                                                           {.accountId = "a1",
+                                                            .eventId = "event-1",
+                                                            .participationStatus = "accepted",
+                                                            .ifInState = std::nullopt,
+                                                            .materialization = std::nullopt},
+                                                           [&projectionNotifications]
+                                                           { ++projectionNotifications; }));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
+        CHECK(projectionNotifications == 2);
+        REQUIRE(transport.requests.size() == 2);
+        CHECK(transport.requests[0].envelope.methodCalls.front().name == "ParticipantIdentity/get");
+        CHECK(transport.requests[1].envelope.methodCalls.front().name == "CalendarEvent/set");
+        const auto& arguments = transport.requests[1].envelope.methodCalls.front().arguments;
+        CHECK(arguments.find(R"("participants/me/participationStatus":"accepted")") !=
+              std::string::npos);
+        CHECK(arguments.find(R"("sendSchedulingMessages":true)") != std::string::npos);
+        const auto cached = calendars.findEvent("a1", "event-1");
+        REQUIRE(
+            std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached));
+        const auto& accepted =
+            std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached);
+        REQUIRE(accepted.has_value());
+        CHECK(accepted->attendees[1].participationStatus == "accepted");
+    }
+
+    SECTION("definitive RSVP rejection restores the invitation")
+    {
+        transport.results.push_back(identityResponse("mailto:alice@example.test"));
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "CalendarEvent/set",
+                  .arguments =
+                      R"({"accountId":"a1","oldState":"event-rsvp-1","newState":"event-rsvp-1","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{"event-1":{"type":"forbidden","description":"RSVP disabled"}},"notDestroyed":{}})",
+                  .callId = "calendar-event-set"}},
+            .createdIds = std::nullopt,
+            .sessionState = "session-rsvp-rejected",
+        });
+
+        const auto result = QCoro::waitFor(service.respond(settings, "a1",
+                                                           {.accountId = "a1",
+                                                            .eventId = "event-1",
+                                                            .participationStatus = "declined",
+                                                            .ifInState = std::nullopt,
+                                                            .materialization = std::nullopt}));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+              javelin::jmap::OperationErrorCode::PermissionDenied);
+        const auto cached = calendars.findEvent("a1", "event-1");
+        REQUIRE(
+            std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached));
+        REQUIRE(
+            std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached).has_value());
+        CHECK(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached)
+                  ->attendees[1]
+                  .participationStatus == "needs-action");
+    }
+
+    SECTION("ambiguous RSVP keeps the optimistic response as unknown")
+    {
+        transport.results.push_back(identityResponse("mailto:alice@example.test"));
+        transport.results.push_back(javelin::jmap::api::TransportError{
+            .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+            .message = "Connection closed after dispatch",
+        });
+
+        const auto result = QCoro::waitFor(service.respond(settings, "a1",
+                                                           {.accountId = "a1",
+                                                            .eventId = "event-1",
+                                                            .participationStatus = "tentative",
+                                                            .ifInState = std::nullopt,
+                                                            .materialization = std::nullopt}));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        const auto cached = calendars.findEvent("a1", "event-1");
+        REQUIRE(
+            std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached));
+        REQUIRE(
+            std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached).has_value());
+        CHECK(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached)
+                  ->attendees[1]
+                  .participationStatus == "tentative");
+        const auto records =
+            javelin::jmap::calendar::CalendarMutationJournal{connection, calendars}.listForEvent(
+                "a1", "event-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(
+                records));
+        REQUIRE(std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(records)
+                    .size() == 1);
+        CHECK(std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(records)
+                  .front()
+                  .status == javelin::jmap::sync::MutationStatus::Unknown);
+    }
+
+    SECTION("an organizer update during identity lookup is preserved in the RSVP projection")
+    {
+        transport.results.push_back(identityResponse("mailto:alice@example.test"));
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "CalendarEvent/set",
+                  .arguments =
+                      R"({"accountId":"a1","oldState":"event-rsvp-remote","newState":"event-rsvp-2","created":{},"updated":{"event-1":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+                  .callId = "calendar-event-set"}},
+            .createdIds = std::nullopt,
+            .sessionState = "session-rsvp-after-remote-update",
+        });
+        transport.beforeReturn = [&calendars, invitation]
+        {
+            auto remotelyUpdated = invitation;
+            remotelyUpdated.title = "Organizer changed the title";
+            const auto cacheError =
+                calendars.applyEventDelta("a1", "calendar-state-1", "event-rsvp-remote",
+                                          {.value = "Pacific/Auckland"}, {remotelyUpdated},
+                                          {{.accountId = "a1",
+                                            .id = "event-1",
+                                            .eventId = "event-1",
+                                            .recurrenceId = std::nullopt,
+                                            .localStart = remotelyUpdated.start,
+                                            .localEnd = {.value = "2026-07-13T10:00:00"},
+                                            .utcStart = std::nullopt,
+                                            .utcEnd = std::nullopt,
+                                            .allDay = false}},
+                                          {});
+            REQUIRE_FALSE(cacheError.has_value());
+        };
+
+        const auto result = QCoro::waitFor(service.respond(settings, "a1",
+                                                           {.accountId = "a1",
+                                                            .eventId = "event-1",
+                                                            .participationStatus = "accepted",
+                                                            .ifInState = std::nullopt,
+                                                            .materialization = std::nullopt}));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
+        REQUIRE(transport.requests.size() == 2);
+        const auto& arguments = transport.requests[1].envelope.methodCalls.front().arguments;
+        CHECK(arguments.find(R"("ifInState":"event-rsvp-remote")") != std::string::npos);
+        CHECK(arguments.find(R"("participants/me/participationStatus":"accepted")") !=
+              std::string::npos);
+        CHECK(arguments.find("Organizer changed the title") == std::string::npos);
+        const auto cached = calendars.findEvent("a1", "event-1");
+        REQUIRE(
+            std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached));
+        REQUIRE(
+            std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached).has_value());
+        CHECK(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached)->title ==
+              "Organizer changed the title");
+    }
+
+    SECTION("a participant identity must match the invitation")
+    {
+        transport.results.push_back(identityResponse("mailto:other@example.test"));
+
+        const auto result = QCoro::waitFor(service.respond(settings, "a1",
+                                                           {.accountId = "a1",
+                                                            .eventId = "event-1",
+                                                            .participationStatus = "accepted",
+                                                            .ifInState = std::nullopt,
+                                                            .materialization = std::nullopt}));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+              javelin::jmap::OperationErrorCode::InvalidRequest);
+        REQUIRE(transport.requests.size() == 1);
+    }
+
+    SECTION("mayRSVP is required before querying participant identities")
+    {
+        auto noRsvp = work;
+        noRsvp.myRights.mayRSVP = false;
+        REQUIRE_FALSE(calendars.replaceCalendars("a1", "calendar-state-2", {noRsvp}).has_value());
+
+        const auto result = QCoro::waitFor(service.respond(settings, "a1",
+                                                           {.accountId = "a1",
+                                                            .eventId = "event-1",
+                                                            .participationStatus = "accepted",
+                                                            .ifInState = std::nullopt,
+                                                            .materialization = std::nullopt}));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+              javelin::jmap::OperationErrorCode::PermissionDenied);
+        CHECK(transport.requests.empty());
+    }
+
+    SECTION("non-origin fields cannot be edited but private settings use mayUpdatePrivate")
+    {
+        auto renamed = invitation;
+        renamed.title = "Not my meeting";
+        const auto forbidden = QCoro::waitFor(service.update(settings, "a1",
+                                                             {.accountId = "a1",
+                                                              .event = renamed,
+                                                              .operationGroupId = std::nullopt,
+                                                              .ifInState = std::nullopt,
+                                                              .materialization = std::nullopt}));
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(forbidden));
+        CHECK(std::get<javelin::jmap::OperationError>(forbidden).code ==
+              javelin::jmap::OperationErrorCode::PermissionDenied);
+        CHECK(transport.requests.empty());
+
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "CalendarEvent/set",
+                  .arguments =
+                      R"({"accountId":"a1","oldState":"event-rsvp-1","newState":"event-rsvp-2","created":{},"updated":{"event-1":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+                  .callId = "calendar-event-set"}},
+            .createdIds = std::nullopt,
+            .sessionState = "session-private-update",
+        });
+        auto privateUpdate = invitation;
+        privateUpdate.useDefaultAlerts = true;
+        const auto allowed = QCoro::waitFor(service.update(settings, "a1",
+                                                           {.accountId = "a1",
+                                                            .event = std::move(privateUpdate),
+                                                            .operationGroupId = std::nullopt,
+                                                            .ifInState = std::nullopt,
+                                                            .materialization = std::nullopt}));
+        REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(allowed));
+        REQUIRE(transport.requests.size() == 1);
+        CHECK(transport.requests.front().envelope.methodCalls.front().arguments.find(
+                  R"("useDefaultAlerts":true)") != std::string::npos);
+    }
 }
 
 TEST_CASE("calendar refresh recovers a recurring base omitted by the bounded base query",

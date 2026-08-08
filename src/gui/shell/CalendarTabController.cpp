@@ -14,6 +14,7 @@
 #include <QAbstractButton>
 #include <QDateTime>
 #include <QDebug>
+#include <QLocale>
 #include <QLoggingCategory>
 #include <QMenu>
 #include <QMessageBox>
@@ -46,6 +47,128 @@ namespace javelin::gui::shell
                 return configured.displayName;
             return account.name.empty() ? i18n("Unnamed account")
                                         : QString::fromStdString(account.name);
+        }
+
+        [[nodiscard]] QString displayCalendarAddress(const std::string_view address)
+        {
+            auto value = QString::fromUtf8(address.data(), static_cast<qsizetype>(address.size()));
+            if (value.startsWith(QStringLiteral("mailto:"), Qt::CaseInsensitive))
+                value.remove(0, 7);
+            return value;
+        }
+
+        [[nodiscard]] QString participantLabel(const javelin::jmap::calendar::Attendee& participant)
+        {
+            const auto address = displayCalendarAddress(participant.calendarAddress);
+            const auto name = QString::fromStdString(participant.name);
+            if (name.isEmpty())
+                return address;
+            if (address.isEmpty() || name.compare(address, Qt::CaseInsensitive) == 0)
+                return name;
+            return i18nc("calendar participant display", "%1 <%2>", name, address);
+        }
+
+        [[nodiscard]] QString
+        invitationOrganizer(const javelin::jmap::calendar::CalendarEvent& event)
+        {
+            const auto owner = std::ranges::find_if(event.attendees, [](const auto& participant)
+                                                    { return participant.isOwner; });
+            if (owner != event.attendees.end())
+                return participantLabel(*owner);
+            if (event.organizerCalendarAddress)
+                return displayCalendarAddress(*event.organizerCalendarAddress);
+            return i18n("Unknown organizer");
+        }
+
+        [[nodiscard]] QString invitationWhen(const javelin::jmap::calendar::CalendarEvent& event)
+        {
+            const auto start =
+                QDateTime::fromString(QString::fromStdString(event.start.value), Qt::ISODate);
+            if (!start.isValid())
+                return QString::fromStdString(event.start.value);
+            if (event.showWithoutTime)
+                return QLocale().toString(start.date(), QLocale::ShortFormat);
+            auto value = i18nc("calendar event date and time", "%1 at %2",
+                               QLocale().toString(start.date(), QLocale::ShortFormat),
+                               QLocale().toString(start.time(), QLocale::ShortFormat));
+            if (event.timeZone)
+                value += i18nc("calendar event time zone", " (%1)",
+                               QString::fromStdString(event.timeZone->value));
+            return value;
+        }
+
+        [[nodiscard]] bool canRsvp(const javelin::jmap::calendar::CalendarEvent& event,
+                                   const std::vector<javelin::jmap::calendar::Calendar>& calendars)
+        {
+            if (event.attendees.empty())
+                return false;
+            std::unordered_set<std::string> required;
+            for (const auto& [calendarId, present] : event.calendarIds)
+                if (present)
+                    required.emplace(calendarId);
+            for (const auto& calendar : calendars)
+            {
+                if (!required.erase(calendar.id))
+                    continue;
+                if (!calendar.myRights.mayRSVP)
+                    return false;
+            }
+            return required.empty();
+        }
+
+        [[nodiscard]] std::optional<std::string>
+        promptInvitationResponse(QWidget* parent,
+                                 const javelin::jmap::calendar::CalendarEvent& event,
+                                 const bool responseAllowed)
+        {
+            QStringList details{
+                i18n("Organizer: %1", invitationOrganizer(event)),
+                i18n("When: %1", invitationWhen(event)),
+            };
+            if (event.location && !event.location->empty())
+                details.push_back(i18n("Where: %1", QString::fromStdString(*event.location)));
+            QStringList attendees;
+            for (const auto& participant : event.attendees)
+                if (participant.isAttendee && !participant.isOwner)
+                    attendees.push_back(participantLabel(participant));
+            if (!attendees.isEmpty())
+                details.push_back(i18n("Attendees: %1", attendees.join(QStringLiteral(", "))));
+            if (event.description && !event.description->empty())
+                details.push_back(QStringLiteral("\n") +
+                                  QString::fromStdString(*event.description));
+            if (!responseAllowed)
+                details.push_back(
+                    QStringLiteral("\n") +
+                    i18n("This calendar does not allow you to respond to the invitation."));
+
+            QMessageBox prompt{QMessageBox::Information, i18n("Calendar invitation"),
+                               event.title.empty() ? i18n("Untitled event")
+                                                   : QString::fromStdString(event.title),
+                               QMessageBox::NoButton, parent};
+            prompt.setInformativeText(details.join(QLatin1Char('\n')));
+            QPushButton* accept = nullptr;
+            QPushButton* tentative = nullptr;
+            QPushButton* decline = nullptr;
+            if (responseAllowed)
+            {
+                accept = prompt.addButton(i18nc("@action:button calendar RSVP", "Accept"),
+                                          QMessageBox::AcceptRole);
+                tentative = prompt.addButton(i18nc("@action:button calendar RSVP", "Tentative"),
+                                             QMessageBox::ActionRole);
+                decline = prompt.addButton(i18nc("@action:button calendar RSVP", "Decline"),
+                                           QMessageBox::DestructiveRole);
+            }
+            auto* close = prompt.addButton(QMessageBox::Close);
+            prompt.setDefaultButton(close);
+            prompt.setEscapeButton(close);
+            prompt.exec();
+            if (prompt.clickedButton() == accept)
+                return std::string{"accepted"};
+            if (prompt.clickedButton() == tentative)
+                return std::string{"tentative"};
+            if (prompt.clickedButton() == decline)
+                return std::string{"declined"};
+            return std::nullopt;
         }
     } // namespace
 
@@ -448,6 +571,80 @@ namespace javelin::gui::shell
                 if (calendars == nullptr)
                     return;
 
+                auto occurrenceEvent = *event;
+                if (!recurrenceId.isEmpty())
+                {
+                    const auto occurrence = std::ranges::find_if(
+                        window->value().occurrences,
+                        [&eventId, &recurrenceId](const auto& candidate)
+                        {
+                            return candidate.eventId == eventId.toStdString() &&
+                                   candidate.recurrenceId &&
+                                   candidate.recurrenceId->value == recurrenceId.toStdString();
+                        });
+                    if (occurrence == window->value().occurrences.end())
+                    {
+                        qCWarning(logCalendarOperations).noquote()
+                            << "calendar occurrence is missing from the visible cache" << accountId
+                            << eventId << recurrenceId;
+                        Q_EMIT statusMessage(
+                            i18n("This occurrence is no longer available. Refresh and try again."),
+                            10000);
+                        return;
+                    }
+                    occurrenceEvent.start = occurrence->localStart;
+                    const auto occurrenceStart = QDateTime::fromString(
+                        QString::fromStdString(occurrence->localStart.value), Qt::ISODate);
+                    const auto occurrenceEnd = QDateTime::fromString(
+                        QString::fromStdString(occurrence->localEnd.value), Qt::ISODate);
+                    if (occurrence->allDay)
+                        occurrenceEvent.duration.value =
+                            QStringLiteral("P%1D")
+                                .arg(occurrenceStart.date().daysTo(occurrenceEnd.date()))
+                                .toStdString();
+                    else
+                        occurrenceEvent.duration.value =
+                            QStringLiteral("PT%1S")
+                                .arg(occurrenceStart.secsTo(occurrenceEnd))
+                                .toStdString();
+                    if (const auto existingOverride =
+                            event->recurrenceOverrides.find(recurrenceId.toStdString());
+                        existingOverride != event->recurrenceOverrides.end() &&
+                        existingOverride->second.title)
+                        occurrenceEvent.title = *existingOverride->second.title;
+                }
+
+                if (!event->isOrigin)
+                {
+                    const auto response = promptInvitationResponse(widget, occurrenceEvent,
+                                                                   canRsvp(*event, *calendars));
+                    if (!response)
+                        return;
+                    const bool requiresRecurrenceMaterialization =
+                        event->recurrenceRule.has_value() || !event->recurrenceOverrides.empty();
+                    auto task = m_calendarCommandPort.respondToCalendarEvent(
+                        account->ownerAccountId,
+                        {.accountId = account->accountId,
+                         .eventId = event->id,
+                         .participationStatus = *response,
+                         .ifInState = std::nullopt,
+                         .materialization = requiresRecurrenceMaterialization
+                                                ? std::optional{javelin::jmap::calendar::
+                                                                    CalendarRangeMaterialization{
+                                                                        .interval = interval,
+                                                                        .displayTimeZone = timeZone,
+                                                                    }}
+                                                : std::nullopt});
+                    QCoro::connect(std::move(task), widget,
+                                   [this](javelin::jmap::calendar::CalendarMutationResult result)
+                                   {
+                                       if (const auto* error =
+                                               std::get_if<javelin::jmap::OperationError>(&result))
+                                           Q_EMIT operationFailed(*error);
+                                   });
+                    return;
+                }
+
                 enum class EditScope
                 {
                     Occurrence,
@@ -472,48 +669,7 @@ namespace javelin::gui::shell
                         return;
                 }
 
-                auto editableEvent = *event;
-                if (editScope == EditScope::Occurrence)
-                {
-                    const auto occurrence = std::ranges::find_if(
-                        window->value().occurrences,
-                        [&eventId, &recurrenceId](const auto& candidate)
-                        {
-                            return candidate.eventId == eventId.toStdString() &&
-                                   candidate.recurrenceId &&
-                                   candidate.recurrenceId->value == recurrenceId.toStdString();
-                        });
-                    if (occurrence == window->value().occurrences.end())
-                    {
-                        qCWarning(logCalendarOperations).noquote()
-                            << "calendar occurrence is missing from the visible cache" << accountId
-                            << eventId << recurrenceId;
-                        Q_EMIT statusMessage(
-                            i18n("This occurrence is no longer available. Refresh and try again."),
-                            10000);
-                        return;
-                    }
-                    editableEvent.start = occurrence->localStart;
-                    const auto occurrenceStart = QDateTime::fromString(
-                        QString::fromStdString(occurrence->localStart.value), Qt::ISODate);
-                    const auto occurrenceEnd = QDateTime::fromString(
-                        QString::fromStdString(occurrence->localEnd.value), Qt::ISODate);
-                    if (occurrence->allDay)
-                        editableEvent.duration.value =
-                            QStringLiteral("P%1D")
-                                .arg(occurrenceStart.date().daysTo(occurrenceEnd.date()))
-                                .toStdString();
-                    else
-                        editableEvent.duration.value =
-                            QStringLiteral("PT%1S")
-                                .arg(occurrenceStart.secsTo(occurrenceEnd))
-                                .toStdString();
-                    if (const auto existingOverride =
-                            event->recurrenceOverrides.find(recurrenceId.toStdString());
-                        existingOverride != event->recurrenceOverrides.end() &&
-                        existingOverride->second.title)
-                        editableEvent.title = *existingOverride->second.title;
-                }
+                auto editableEvent = editScope == EditScope::Occurrence ? occurrenceEvent : *event;
 
                 std::vector<javelin::jmap::calendar::Calendar> subscribedCalendars;
                 std::ranges::copy_if(*calendars, std::back_inserter(subscribedCalendars),

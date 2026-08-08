@@ -180,6 +180,9 @@ namespace javelin::app
                             javelin::jmap::calendar::DeleteEventCommand command,
                             javelin::app::undo::CommandOrigin origin =
                                 javelin::app::undo::CommandOrigin::User) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        respondToCalendarEvent(std::string ownerAccountId,
+                               javelin::jmap::calendar::RespondToEventCommand command);
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::AuthoritativeCalendarEventResult>
         getAuthoritativeCalendarEvent(std::string ownerAccountId, std::string accountId,
                                       std::optional<std::string> eventId, std::string uid) override;

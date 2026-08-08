@@ -146,6 +146,16 @@ namespace javelin::jmap::calendar
         auto operator<=>(const RecurrenceRule&) const = default;
     };
 
+    struct ParticipantIdentity
+    {
+        std::string id;
+        std::string name;
+        std::string calendarAddress;
+        bool isDefault = false;
+
+        bool operator==(const ParticipantIdentity&) const = default;
+    };
+
     struct Attendee
     {
         std::string id;
@@ -155,6 +165,7 @@ namespace javelin::jmap::calendar
         std::string participationStatus;
         bool isOwner = false;
         bool isAttendee = true;
+        bool expectReply = false;
         std::uint32_t scheduleSequence = 0;
         std::optional<UtcInstant> scheduleUpdated;
 
@@ -188,6 +199,7 @@ namespace javelin::jmap::calendar
         bool showWithoutTime = false;
         bool isDraft = false;
         bool isOrigin = false;
+        std::optional<std::string> organizerCalendarAddress = std::nullopt;
         bool useDefaultAlerts = false;
         std::unordered_map<std::string, Alert> alerts;
         std::optional<UtcInstant> utcStart;

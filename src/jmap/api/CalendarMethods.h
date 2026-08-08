@@ -11,6 +11,14 @@
 
 namespace javelin::jmap::api
 {
+    struct ParticipantIdentityGetResponse
+    {
+        std::string accountId;
+        std::string state;
+        std::vector<calendar::ParticipantIdentity> list;
+        std::vector<std::string> notFound;
+    };
+
     struct CalendarGetResponse
     {
         std::string accountId;
@@ -165,6 +173,8 @@ namespace javelin::jmap::api
         std::unordered_map<std::string, CalendarSetError> notDestroyed;
     };
 
+    [[nodiscard]] std::optional<MethodRequest<ParticipantIdentityGetResponse>>
+    participantIdentityGet(const GetRequest& request);
     [[nodiscard]] std::optional<MethodRequest<CalendarGetResponse>>
     calendarGet(const GetRequest& request);
     [[nodiscard]] std::optional<MethodRequest<CalendarChangesResponse>>
@@ -180,6 +190,8 @@ namespace javelin::jmap::api
     [[nodiscard]] std::optional<MethodRequest<CalendarEventSetResponse>>
     calendarEventSet(const CalendarEventSetRequest& request);
 
+    [[nodiscard]] ParsedEnvelope<ParticipantIdentityGetResponse>
+    parseParticipantIdentityGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<CalendarGetResponse>
     parseCalendarGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<CalendarChangesResponse>
@@ -201,6 +213,14 @@ namespace javelin::jmap::api
     [[nodiscard]] ParsedEnvelope<calendar::CalendarEvent>
     parseCalendarEventDocument(std::string_view accountId, std::string_view json);
 
+    template <> struct MethodResponseTraits<ParticipantIdentityGetResponse>
+    {
+        static constexpr std::string_view methodName = "ParticipantIdentity/get";
+        static ParsedEnvelope<ParticipantIdentityGetResponse> parse(std::string_view json)
+        {
+            return parseParticipantIdentityGetResponse(json);
+        }
+    };
     template <> struct MethodResponseTraits<CalendarGetResponse>
     {
         static constexpr std::string_view methodName = "Calendar/get";

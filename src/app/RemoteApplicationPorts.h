@@ -75,6 +75,9 @@ namespace javelin::app
                             javelin::jmap::calendar::DeleteEventCommand command,
                             undo::CommandOrigin origin) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        respondToCalendarEvent(std::string ownerAccountId,
+                               javelin::jmap::calendar::RespondToEventCommand command) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         setCalendarSubscribed(std::string ownerAccountId, std::string accountId,
                               std::string calendarId, bool subscribed) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>

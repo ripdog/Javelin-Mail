@@ -191,6 +191,8 @@ namespace javelin::app
             return QStringLiteral("calendar_update_event");
         case Kind::CalendarDeleteEvent:
             return QStringLiteral("calendar_delete_event");
+        case Kind::CalendarRespondEvent:
+            return QStringLiteral("calendar_respond_event");
         case Kind::CalendarSetSubscribed:
             return QStringLiteral("calendar_set_subscribed");
         case Kind::CalendarSetDefault:

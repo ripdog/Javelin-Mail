@@ -47,6 +47,13 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+    CalendarCommandService::respondToCalendarEvent(
+        std::string ownerAccountId, javelin::jmap::calendar::RespondToEventCommand command)
+    {
+        return m_service.respondToCalendarEvent(std::move(ownerAccountId), std::move(command));
+    }
+
+    QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     CalendarCommandService::setCalendarSubscribed(std::string ownerAccountId, std::string accountId,
                                                   std::string calendarId, const bool subscribed)
     {

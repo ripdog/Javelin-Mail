@@ -70,8 +70,18 @@ namespace javelin::jmap::calendar
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
         remove(LiveConnectionSettings settings, std::string ownerAccountId,
                DeleteEventCommand command, std::function<void()> projectionCommitted = {});
+        [[nodiscard]] QCoro::Task<CalendarMutationResult>
+        respond(LiveConnectionSettings settings, std::string ownerAccountId,
+                RespondToEventCommand command, std::function<void()> projectionCommitted = {});
 
       private:
+        enum class MutationPermission
+        {
+            Write,
+            Private,
+            Rsvp,
+        };
+
         [[nodiscard]] std::uint64_t beginRefresh(std::string_view ownerAccountId);
         [[nodiscard]] bool isCurrentRefresh(std::string_view ownerAccountId,
                                             std::uint64_t generation) const;
@@ -80,7 +90,7 @@ namespace javelin::jmap::calendar
                api::CalendarEventSetRequest request, std::vector<std::string> calendarIds,
                std::optional<std::string> operationGroupId,
                std::optional<CalendarRangeMaterialization> materialization,
-               std::function<void()> projectionCommitted);
+               MutationPermission permission, std::function<void()> projectionCommitted);
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
         mutateCalendar(LiveConnectionSettings settings, api::Session session,
                        api::CalendarSetRequest request, std::optional<Calendar> projectedCalendar,

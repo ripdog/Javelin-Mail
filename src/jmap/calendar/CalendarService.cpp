@@ -14,6 +14,7 @@
 #include <QDateTime>
 #include <QLoggingCategory>
 #include <QRegularExpression>
+#include <QUrl>
 #include <QUuid>
 
 #include <algorithm>
@@ -131,11 +132,27 @@ namespace javelin::jmap::calendar
         const std::vector<std::string>& calendarEventReadProperties()
         {
             static const std::vector<std::string> properties{
-                "id",           "baseEventId", "recurrenceId",     "uid",
-                "calendarIds",  "title",       "description",      "locations",
-                "start",        "duration",    "timeZone",         "showWithoutTime",
-                "isDraft",      "isOrigin",    "useDefaultAlerts", "alerts",
-                "utcStart",     "utcEnd",      "recurrenceRule",   "recurrenceOverrides",
+                "id",
+                "baseEventId",
+                "recurrenceId",
+                "uid",
+                "calendarIds",
+                "title",
+                "description",
+                "locations",
+                "start",
+                "duration",
+                "timeZone",
+                "showWithoutTime",
+                "isDraft",
+                "isOrigin",
+                "organizerCalendarAddress",
+                "useDefaultAlerts",
+                "alerts",
+                "utcStart",
+                "utcEnd",
+                "recurrenceRule",
+                "recurrenceOverrides",
                 "participants",
             };
             return properties;
@@ -220,6 +237,91 @@ namespace javelin::jmap::calendar
                     return false;
             }
             return required.empty();
+        }
+
+        bool privateUpdatable(const std::vector<calendar::Calendar>& calendars,
+                              const std::vector<std::string>& calendarIds)
+        {
+            std::unordered_set<std::string> required{calendarIds.begin(), calendarIds.end()};
+            for (const auto& item : calendars)
+            {
+                if (!required.erase(item.id))
+                    continue;
+                if (!item.myRights.mayUpdatePrivate)
+                    return false;
+            }
+            return required.empty();
+        }
+
+        bool rsvpable(const std::vector<calendar::Calendar>& calendars,
+                      const std::vector<std::string>& calendarIds)
+        {
+            std::unordered_set<std::string> required{calendarIds.begin(), calendarIds.end()};
+            for (const auto& item : calendars)
+            {
+                if (!required.erase(item.id))
+                    continue;
+                if (!item.myRights.mayRSVP)
+                    return false;
+            }
+            return required.empty();
+        }
+
+        [[nodiscard]] std::string normalizedCalendarAddress(const std::string_view address)
+        {
+            auto text =
+                QString::fromUtf8(address.data(), static_cast<qsizetype>(address.size())).trimmed();
+            QUrl url{text, QUrl::StrictMode};
+            if (!url.isValid() || url.scheme().isEmpty())
+                return text.toStdString();
+            url.setScheme(url.scheme().toLower());
+            if (!url.host().isEmpty())
+                url.setHost(url.host().toLower());
+            if (url.scheme() == QStringLiteral("mailto"))
+            {
+                auto mailbox = url.path();
+                const auto at = mailbox.lastIndexOf(QLatin1Char('@'));
+                if (at >= 0)
+                    mailbox = mailbox.first(at + 1) + mailbox.sliced(at + 1).toLower();
+                url.setPath(mailbox);
+            }
+            return url.toString(QUrl::FullyEncoded).toStdString();
+        }
+
+        [[nodiscard]] std::optional<std::size_t>
+        matchingParticipantIndex(const CalendarEvent& event,
+                                 const std::vector<ParticipantIdentity>& identities)
+        {
+            const auto matchesIdentity =
+                [&event](const ParticipantIdentity& identity) -> std::optional<std::size_t>
+            {
+                const auto identityAddress = normalizedCalendarAddress(identity.calendarAddress);
+                for (std::size_t index = 0; index < event.attendees.size(); ++index)
+                {
+                    if (normalizedCalendarAddress(event.attendees[index].calendarAddress) ==
+                        identityAddress)
+                        return index;
+                }
+                return std::nullopt;
+            };
+            for (const auto& identity : identities)
+                if (identity.isDefault)
+                    if (const auto index = matchesIdentity(identity))
+                        return index;
+            for (const auto& identity : identities)
+                if (const auto index = matchesIdentity(identity))
+                    return index;
+            return std::nullopt;
+        }
+
+        [[nodiscard]] bool onlyPerUserPropertiesChanged(const CalendarEvent& before,
+                                                        const CalendarEvent& after)
+        {
+            auto comparableBefore = before;
+            auto comparableAfter = after;
+            comparableBefore.useDefaultAlerts = comparableAfter.useDefaultAlerts;
+            comparableBefore.alerts = comparableAfter.alerts;
+            return comparableBefore == comparableAfter;
         }
 
         std::variant<std::string, OperationError>
@@ -2343,10 +2445,11 @@ namespace javelin::jmap::calendar
                                              .update = {},
                                              .destroy = {},
                                              .sendSchedulingMessages = true};
-        co_return co_await mutate(
-            std::move(settings), std::move(ownerAccountId), std::move(request),
-            std::move(calendarIds), std::move(command.operationGroupId),
-            std::move(command.materialization), std::move(projectionCommitted));
+        co_return co_await mutate(std::move(settings), std::move(ownerAccountId),
+                                  std::move(request), std::move(calendarIds),
+                                  std::move(command.operationGroupId),
+                                  std::move(command.materialization), MutationPermission::Write,
+                                  std::move(projectionCommitted));
     }
 
     QCoro::Task<CalendarMutationResult>
@@ -2373,6 +2476,12 @@ namespace javelin::jmap::calendar
         if (!previous)
             co_return error(OperationErrorCode::InvalidRequest,
                             QStringLiteral("The calendar event is no longer in the cache."));
+        const bool privateOnly = onlyPerUserPropertiesChanged(*previous, command.event);
+        if (!previous->isOrigin && !privateOnly)
+            co_return error(
+                OperationErrorCode::PermissionDenied,
+                QStringLiteral(
+                    "Invited events may only change private reminder settings or RSVP status."));
         if (*previous == command.event)
             co_return CommittedMutation{.accountId = std::move(command.accountId),
                                         .newState = *command.ifInState,
@@ -2388,7 +2497,9 @@ namespace javelin::jmap::calendar
         co_return co_await mutate(
             std::move(settings), std::move(ownerAccountId), std::move(request),
             std::move(calendarIds), std::move(command.operationGroupId),
-            std::move(command.materialization), std::move(projectionCommitted));
+            std::move(command.materialization),
+            privateOnly ? MutationPermission::Private : MutationPermission::Write,
+            std::move(projectionCommitted));
     }
 
     QCoro::Task<CalendarMutationResult>
@@ -2411,16 +2522,136 @@ namespace javelin::jmap::calendar
         co_return co_await mutate(std::move(settings), std::move(ownerAccountId),
                                   std::move(request), std::move(command.calendarIds),
                                   std::move(command.operationGroupId), std::nullopt,
-                                  std::move(projectionCommitted));
+                                  MutationPermission::Write, std::move(projectionCommitted));
     }
 
     QCoro::Task<CalendarMutationResult>
-    CalendarService::mutate(LiveConnectionSettings settings, std::string ownerAccountId,
-                            api::CalendarEventSetRequest request,
-                            std::vector<std::string> calendarIds,
-                            std::optional<std::string> operationGroupId,
-                            std::optional<CalendarRangeMaterialization> materialization,
-                            std::function<void()> projectionCommitted)
+    CalendarService::respond(LiveConnectionSettings settings, std::string ownerAccountId,
+                             RespondToEventCommand command,
+                             std::function<void()> projectionCommitted)
+    {
+        if (command.participationStatus != "accepted" &&
+            command.participationStatus != "tentative" && command.participationStatus != "declined")
+            co_return error(OperationErrorCode::InvalidRequest,
+                            QStringLiteral("The requested RSVP status is invalid."));
+
+        cache::CalendarRepository repository{m_connection};
+        const auto cached = repository.findEvent(command.accountId, command.eventId);
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&cached))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        auto previous = std::get<std::optional<CalendarEvent>>(cached);
+        if (!previous)
+            co_return error(OperationErrorCode::NotFound,
+                            QStringLiteral("The calendar invitation is no longer in the cache."));
+        if (previous->isOrigin)
+            co_return error(
+                OperationErrorCode::InvalidRequest,
+                QStringLiteral(
+                    "This event is organized by this account and does not need an RSVP."));
+        if (previous->attendees.empty())
+            co_return error(OperationErrorCode::InvalidRequest,
+                            QStringLiteral("This invitation has no participants to RSVP as."));
+        std::vector<std::string> initialCalendarIds;
+        for (const auto& [calendarId, present] : previous->calendarIds)
+            if (present)
+                initialCalendarIds.push_back(calendarId);
+        const auto calendarsResult = repository.listCalendars(command.accountId);
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&calendarsResult))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        if (!rsvpable(std::get<std::vector<Calendar>>(calendarsResult), initialCalendarIds))
+            co_return error(OperationErrorCode::PermissionDenied,
+                            QStringLiteral("You do not have permission to RSVP to this event."));
+
+        const auto sessionResult = loadSession(m_connection, ownerAccountId);
+        if (const auto* serviceError = std::get_if<OperationError>(&sessionResult))
+            co_return *serviceError;
+        const auto& session = std::get<api::Session>(sessionResult);
+        const auto account = session.accounts.find(command.accountId);
+        if (account == session.accounts.end() || !account->second.accountCapabilities.calendars)
+            co_return error(
+                OperationErrorCode::UnsupportedCapability,
+                QStringLiteral("This account does not support JMAP Calendars draft-26."));
+
+        const auto identitiesMethod = api::participantIdentityGet({.accountId = command.accountId,
+                                                                   .ids = std::nullopt,
+                                                                   .idsReference = std::nullopt,
+                                                                   .properties = std::nullopt});
+        if (!identitiesMethod)
+            co_return error(
+                OperationErrorCode::InvalidRequest,
+                QStringLiteral("Unable to serialize the participant identity request."));
+        api::RequestBuilder identityBuilder;
+        identityBuilder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
+        const auto identityHandle =
+            identityBuilder.call(*identitiesMethod, "participant-identities");
+        api::MethodCaller caller{m_methodTransport};
+        const auto identityResult =
+            co_await caller.call(context(settings, session, command.accountId), identityBuilder);
+        const auto* identityEnvelope = std::get_if<api::ResponseEnvelope>(&identityResult);
+        if (!identityEnvelope)
+            co_return callError(identityResult);
+        const auto identityRead = api::ResponseReader{*identityEnvelope}.require(identityHandle);
+        if (const auto* readError = std::get_if<api::ResponseReaderError>(&identityRead))
+            co_return responseError(*readError);
+        const auto& identities = std::get<api::ParticipantIdentityGetResponse>(identityRead).list;
+
+        const auto refreshed = repository.findEvent(command.accountId, command.eventId);
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&refreshed))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        previous = std::get<std::optional<CalendarEvent>>(refreshed);
+        if (!previous)
+            co_return error(OperationErrorCode::NotFound,
+                            QStringLiteral("The calendar invitation is no longer in the cache."));
+        if (previous->isOrigin)
+            co_return error(
+                OperationErrorCode::InvalidRequest,
+                QStringLiteral(
+                    "This event is now organized by this account and does not need an RSVP."));
+        if (!command.ifInState)
+        {
+            const auto state = currentEventState(m_connection, command.accountId);
+            if (const auto* serviceError = std::get_if<OperationError>(&state))
+                co_return *serviceError;
+            command.ifInState = std::get<std::string>(state);
+        }
+        std::vector<std::string> calendarIds;
+        for (const auto& [calendarId, present] : previous->calendarIds)
+            if (present)
+                calendarIds.push_back(calendarId);
+        const auto participantIndex = matchingParticipantIndex(*previous, identities);
+        if (!participantIndex)
+            co_return error(
+                OperationErrorCode::InvalidRequest,
+                QStringLiteral(
+                    "This invitation does not contain one of your calendar identities."));
+
+        auto updated = *previous;
+        if (updated.attendees[*participantIndex].participationStatus == command.participationStatus)
+            co_return CommittedMutation{.accountId = std::move(command.accountId),
+                                        .newState = *command.ifInState,
+                                        .createdId = std::nullopt,
+                                        .receipt = {}};
+        updated.attendees[*participantIndex].participationStatus = command.participationStatus;
+        api::CalendarEventSetRequest request{
+            .accountId = command.accountId,
+            .ifInState = command.ifInState,
+            .create = {},
+            .update = {{command.eventId, {.previous = *previous, .event = std::move(updated)}}},
+            .destroy = {},
+            .sendSchedulingMessages = true,
+        };
+        co_return co_await mutate(std::move(settings), std::move(ownerAccountId),
+                                  std::move(request), std::move(calendarIds), std::nullopt,
+                                  std::move(command.materialization), MutationPermission::Rsvp,
+                                  std::move(projectionCommitted));
+    }
+
+    QCoro::Task<CalendarMutationResult> CalendarService::mutate(
+        LiveConnectionSettings settings, std::string ownerAccountId,
+        api::CalendarEventSetRequest request, std::vector<std::string> calendarIds,
+        std::optional<std::string> operationGroupId,
+        std::optional<CalendarRangeMaterialization> materialization,
+        const MutationPermission permission, std::function<void()> projectionCommitted)
     {
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
         if (const auto* serviceError = std::get_if<OperationError>(&sessionResult))
@@ -2435,9 +2666,21 @@ namespace javelin::jmap::calendar
         const auto calendarsResult = repository.listCalendars(request.accountId);
         if (const auto* cacheError = std::get_if<cache::DatabaseError>(&calendarsResult))
             co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
-        if (!writable(std::get<std::vector<Calendar>>(calendarsResult), calendarIds))
-            co_return error(OperationErrorCode::PermissionDenied,
-                            QStringLiteral("You do not have permission to modify this event."));
+        const auto& calendars = std::get<std::vector<Calendar>>(calendarsResult);
+        const bool permitted =
+            permission == MutationPermission::Rsvp      ? rsvpable(calendars, calendarIds)
+            : permission == MutationPermission::Private ? privateUpdatable(calendars, calendarIds)
+                                                        : writable(calendars, calendarIds);
+        if (!permitted)
+        {
+            const auto message =
+                permission == MutationPermission::Rsvp
+                    ? QStringLiteral("You do not have permission to RSVP to this event.")
+                : permission == MutationPermission::Private
+                    ? QStringLiteral("You do not have permission to change private event settings.")
+                    : QStringLiteral("You do not have permission to modify this event.");
+            co_return error(OperationErrorCode::PermissionDenied, message);
+        }
         const auto method = api::calendarEventSet(request);
         if (!method)
             co_return error(OperationErrorCode::InvalidRequest,

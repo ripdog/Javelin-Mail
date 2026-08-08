@@ -27,6 +27,11 @@ The first usable calendar slice is present:
   dialogs.
 - Single events can be created, updated, moved, and deleted. Mutation failures are
   logged, leave the dialog open, and do not update the cache before server success.
+- Scheduled event changes delegate iTIP/iMIP delivery to the JMAP server. New invitees
+  request replies, and server-materialized non-origin events open a temporary details
+  dialog with Accept/Tentative/Decline actions. RSVP resolves the matching
+  `ParticipantIdentity` on demand, honors `mayRSVP`, and uses the ordinary optimistic
+  CalendarEvent mutation path; private reminder changes use `mayUpdatePrivate`.
 - All-day/floating event parsing, base-event lookup for expanded occurrences, time
   editors, automatic end-time adjustment, account-labelled tabs, calendar
   visibility controls, equal columns, and today highlighting are implemented.

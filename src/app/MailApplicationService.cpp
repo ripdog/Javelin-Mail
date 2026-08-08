@@ -2558,6 +2558,35 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+    MailApplicationService::respondToCalendarEvent(
+        std::string ownerAccountId, javelin::jmap::calendar::RespondToEventCommand command)
+    {
+        const ForegroundWorkScope foreground{m_workScheduler};
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
+                .message = accountSynchronizationNotConfigured(),
+            };
+        const auto projectionCommitted = [this, ownerAccountId]
+        {
+            const auto range = m_visibleCalendarRanges.find(ownerAccountId);
+            if (range == m_visibleCalendarRanges.end())
+                return;
+            Q_EMIT calendarCacheCommitted({.ownerAccountId = QString::fromStdString(ownerAccountId),
+                                           .interval = range->second.interval,
+                                           .displayTimeZone = range->second.displayTimeZone,
+                                           .accountCount = 1,
+                                           .eventCount = 0});
+        };
+        auto result = co_await m_calendarService.respond(
+            toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
+            std::move(command), projectionCommitted);
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                i18n("Respond to calendar invitation"), std::move(result));
+    }
+
+    QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     MailApplicationService::deleteCalendarEvent(std::string ownerAccountId,
                                                 javelin::jmap::calendar::DeleteEventCommand command,
                                                 const javelin::app::undo::CommandOrigin origin)

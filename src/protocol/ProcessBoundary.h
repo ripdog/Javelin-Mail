@@ -44,7 +44,7 @@ namespace javelin::protocol
     struct ProtocolVersion
     {
         std::uint16_t major = 5;
-        std::uint16_t minor = 5;
+        std::uint16_t minor = 6;
 
         friend bool operator==(const ProtocolVersion&, const ProtocolVersion&) = default;
     };
@@ -204,7 +204,8 @@ namespace javelin::protocol
         AcknowledgeRemoteActionResult,
         DeveloperLogSetSubscribed,
         DeveloperLogClear,
-        Last = DeveloperLogClear,
+        CalendarRespondEvent,
+        Last = CalendarRespondEvent,
     };
 
     struct RemoteActionCommand

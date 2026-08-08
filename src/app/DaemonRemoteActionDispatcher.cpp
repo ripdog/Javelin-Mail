@@ -161,6 +161,7 @@ namespace javelin::app
                         Domain::MessageContent, Domain::Contacts,         Domain::Calendars,
                         Domain::History,        Domain::BackgroundJobs};
             case Kind::CalendarRequestRange:
+            case Kind::CalendarRespondEvent:
                 return {Domain::Calendars};
             case Kind::CalendarCreateEvent:
             case Kind::CalendarUpdateEvent:
@@ -579,6 +580,15 @@ namespace javelin::app
                 {
                     return launch(m_services.calendarCommandPort().deleteCalendarEvent(
                         std::move(ownerAccountId), std::move(eventCommand), origin));
+                });
+        case Kind::CalendarRespondEvent:
+            return decodeAndApply<std::string, javelin::jmap::calendar::RespondToEventCommand>(
+                command.payload, invalidPayload,
+                [&](std::string ownerAccountId,
+                    javelin::jmap::calendar::RespondToEventCommand eventCommand)
+                {
+                    return launch(m_services.calendarCommandPort().respondToCalendarEvent(
+                        std::move(ownerAccountId), std::move(eventCommand)));
                 });
         case Kind::CalendarSetSubscribed:
             return decodeAndApply<std::string, std::string, std::string, bool>(

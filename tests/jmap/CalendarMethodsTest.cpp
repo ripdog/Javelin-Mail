@@ -90,6 +90,26 @@ TEST_CASE("calendar event get serializes result-referenced query ids", "[jmap][c
     CHECK(request->arguments.find(R"("ids")") == std::string::npos);
 }
 
+TEST_CASE("participant identity get uses the calendars account", "[jmap][calendar][scheduling]")
+{
+    const auto method = javelin::jmap::api::participantIdentityGet({.accountId = "a1",
+                                                                    .ids = std::nullopt,
+                                                                    .idsReference = std::nullopt,
+                                                                    .properties = std::nullopt});
+
+    REQUIRE(method.has_value());
+    CHECK(method->name == "ParticipantIdentity/get");
+    CHECK(method->arguments.find(R"("accountId":"a1")") != std::string::npos);
+
+    const auto parsed = javelin::jmap::api::parseParticipantIdentityGetResponse(
+        R"({"accountId":"a1","state":"p2","list":[{"id":"work","name":"Alice","calendarAddress":"mailto:alice@example.test","isDefault":true},{"id":"alias","name":"Alice Alias","calendarAddress":"mailto:alias@example.test","isDefault":false}],"notFound":[]})");
+    REQUIRE(parsed.ok());
+    REQUIRE(parsed.value->list.size() == 2);
+    CHECK(parsed.value->list.front().calendarAddress == "mailto:alice@example.test");
+    CHECK(parsed.value->list.front().isDefault);
+    CHECK_FALSE(parsed.value->list.back().isDefault);
+}
+
 TEST_CASE("calendar get parses draft-26 rights", "[jmap][calendar]")
 {
     const auto parsed = javelin::jmap::api::parseCalendarGetResponse(
@@ -188,7 +208,7 @@ TEST_CASE("calendar set serializes creation and destructive deletion", "[jmap][c
 TEST_CASE("calendar event documents preserve recurrence and attendees", "[jmap][calendar]")
 {
     const auto parsed = javelin::jmap::api::parseCalendarEventGetResponse(
-        R"({"accountId":"a1","state":"e4","list":[{"@type":"Event","id":"e1","uid":"uid-1","calendarIds":{"work":true},"title":"Planning","start":"2026-03-03T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true,"recurrenceRule":{"@type":"RecurrenceRule","frequency":"weekly","interval":1},"recurrenceOverrides":{"2026-03-10T09:00:00":{"excluded":true}},"participants":{"p1":{"@type":"Participant","name":"Alice","email":"alice@example.test","calendarAddress":"mailto:alice@example.test","participationStatus":"accepted","roles":{"owner":true,"attendee":true},"scheduleSequence":2}}}],"notFound":[]})");
+        R"({"accountId":"a1","state":"e4","list":[{"@type":"Event","id":"e1","uid":"uid-1","calendarIds":{"work":true},"title":"Planning","start":"2026-03-03T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true,"organizerCalendarAddress":"mailto:alice@example.test","recurrenceRule":{"@type":"RecurrenceRule","frequency":"weekly","interval":1},"recurrenceOverrides":{"2026-03-10T09:00:00":{"excluded":true}},"participants":{"p1":{"@type":"Participant","name":"Alice","email":"alice@example.test","calendarAddress":"mailto:alice@example.test","participationStatus":"accepted","roles":{"owner":true,"attendee":true},"expectReply":true,"scheduleSequence":2}}}],"notFound":[]})");
 
     REQUIRE(parsed.ok());
     REQUIRE(parsed.value->list.size() == 1);
@@ -199,6 +219,61 @@ TEST_CASE("calendar event documents preserve recurrence and attendees", "[jmap][
     CHECK(event.recurrenceOverrides.at("2026-03-10T09:00:00").excluded);
     REQUIRE(event.attendees.size() == 1);
     CHECK(event.attendees.front().isOwner);
+    CHECK(event.attendees.front().expectReply);
+    CHECK(event.organizerCalendarAddress ==
+          std::optional<std::string>{"mailto:alice@example.test"});
+}
+
+TEST_CASE("calendar scheduling serializes participant sets and RSVP patches",
+          "[jmap][calendar][scheduling]")
+{
+    javelin::jmap::calendar::CalendarEvent previous;
+    previous.accountId = "a1";
+    previous.id = "event-1";
+    previous.uid = "uid-1";
+    previous.calendarIds = {{"work", true}};
+    previous.title = "Planning";
+    previous.start = {.value = "2026-03-03T09:00:00"};
+    previous.duration = {.value = "PT1H"};
+    previous.isOrigin = false;
+    previous.organizerCalendarAddress = "mailto:organizer@example.test";
+    previous.attendees.push_back({.id = "alice",
+                                  .name = "Alice",
+                                  .email = "alice@example.test",
+                                  .calendarAddress = "mailto:alice@example.test",
+                                  .participationStatus = "needs-action",
+                                  .isOwner = false,
+                                  .isAttendee = true,
+                                  .expectReply = true,
+                                  .scheduleSequence = 0,
+                                  .scheduleUpdated = std::nullopt});
+
+    const auto created = javelin::jmap::api::calendarEventSet({.accountId = "a1",
+                                                               .ifInState = "e1",
+                                                               .create = {{"new", previous}},
+                                                               .update = {},
+                                                               .destroy = {},
+                                                               .sendSchedulingMessages = true});
+    REQUIRE(created.has_value());
+    CHECK(created->arguments.find(R"("roles":{"attendee":true})") != std::string::npos);
+    CHECK(created->arguments.find(R"("expectReply":true)") != std::string::npos);
+    CHECK(created->arguments.find(R"("owner":false)") == std::string::npos);
+    CHECK(created->arguments.find(R"("organizerCalendarAddress")") == std::string::npos);
+
+    auto accepted = previous;
+    accepted.attendees.front().participationStatus = "accepted";
+    const auto response = javelin::jmap::api::calendarEventSet(
+        {.accountId = "a1",
+         .ifInState = "e1",
+         .create = {},
+         .update = {{"event-1", {.previous = previous, .event = accepted}}},
+         .destroy = {},
+         .sendSchedulingMessages = true});
+    REQUIRE(response.has_value());
+    CHECK(response->arguments.find(R"("participants/alice/participationStatus":"accepted")") !=
+          std::string::npos);
+    CHECK(response->arguments.find(R"("participants":{"alice")") == std::string::npos);
+    CHECK(response->arguments.find(R"("sendSchedulingMessages":true)") != std::string::npos);
 }
 
 TEST_CASE("calendar event documents round-trip complete custom recurrence rules",

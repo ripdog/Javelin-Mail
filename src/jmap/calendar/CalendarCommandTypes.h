@@ -67,6 +67,15 @@ namespace javelin::jmap::calendar
         std::optional<std::string> ifInState;
     };
 
+    struct RespondToEventCommand
+    {
+        std::string accountId;
+        std::string eventId;
+        std::string participationStatus;
+        std::optional<std::string> ifInState;
+        std::optional<CalendarRangeMaterialization> materialization;
+    };
+
     struct CreateCalendarCommand
     {
         std::string accountId;

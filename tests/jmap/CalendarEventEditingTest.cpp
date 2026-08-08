@@ -18,6 +18,7 @@ namespace
                 .participationStatus = owner ? "accepted" : "tentative",
                 .isOwner = owner,
                 .isAttendee = true,
+                .expectReply = !owner,
                 .scheduleSequence = 7,
                 .scheduleUpdated = std::nullopt};
     }
@@ -46,10 +47,12 @@ TEST_CASE("attendee edits preserve matching scheduling records and owners")
     CHECK(result[0].isOwner);
     CHECK(result[1].id == "guest-id");
     CHECK(result[1].participationStatus == "tentative");
+    CHECK(result[1].expectReply);
     CHECK(result[1].scheduleSequence == 7);
     CHECK(result[2].id == "attendee-1");
     CHECK(result[2].email == std::optional<std::string>{"new@example.test"});
     CHECK(result[2].participationStatus == "needs-action");
+    CHECK(result[2].expectReply);
 }
 
 TEST_CASE("attendee suggestions split display names from email addresses")

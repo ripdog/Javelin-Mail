@@ -8,6 +8,22 @@
 
 namespace javelin::jmap::api::detail
 {
+    struct RawParticipantIdentity
+    {
+        std::string id;
+        std::string name;
+        std::string calendarAddress;
+        bool isDefault = false;
+    };
+
+    struct RawParticipantIdentityGetResponse
+    {
+        std::string accountId;
+        std::string state;
+        std::vector<RawParticipantIdentity> list;
+        std::vector<std::string> notFound;
+    };
+
     struct RawCalendarRights
     {
         bool mayReadFreeBusy = false;
@@ -175,6 +191,7 @@ namespace javelin::jmap::api::detail
         std::string calendarAddress;
         std::string participationStatus;
         std::unordered_map<std::string, bool> roles;
+        bool expectReply = false;
         std::uint32_t scheduleSequence = 0;
         std::optional<std::string> scheduleUpdated;
 
@@ -206,6 +223,7 @@ namespace javelin::jmap::api::detail
         bool showWithoutTime = false;
         bool isDraft = false;
         bool isOrigin = false;
+        std::optional<std::string> organizerCalendarAddress;
         bool useDefaultAlerts = false;
         std::unordered_map<std::string, RawAlert> alerts;
         std::optional<std::string> utcStart;
@@ -323,6 +341,10 @@ namespace javelin::jmap::api::detail
         static constexpr auto value = glz::object(__VA_ARGS__);                                    \
     }
 
+JAVELIN_GLZ_META(RawParticipantIdentity, "id", &T::id, "name", &T::name, "calendarAddress",
+                 &T::calendarAddress, "isDefault", &T::isDefault);
+JAVELIN_GLZ_META(RawParticipantIdentityGetResponse, "accountId", &T::accountId, "state", &T::state,
+                 "list", &T::list, "notFound", &T::notFound);
 JAVELIN_GLZ_META(RawCalendarRights, "mayReadFreeBusy", &T::mayReadFreeBusy, "mayReadItems",
                  &T::mayReadItems, "mayWriteAll", &T::mayWriteAll, "mayWriteOwn", &T::mayWriteOwn,
                  "mayUpdatePrivate", &T::mayUpdatePrivate, "mayRSVP", &T::mayRSVP, "mayShare",
@@ -364,8 +386,8 @@ JAVELIN_GLZ_META(RawOverride, "excluded", &T::excluded, "start", &T::start, "dur
                  &T::duration, "title", &T::title);
 JAVELIN_GLZ_META(RawParticipant, "@type", &T::type, "name", &T::name, "email", &T::email,
                  "calendarAddress", &T::calendarAddress, "participationStatus",
-                 &T::participationStatus, "roles", &T::roles, "scheduleSequence",
-                 &T::scheduleSequence, "scheduleUpdated", &T::scheduleUpdated);
+                 &T::participationStatus, "roles", &T::roles, "expectReply", &T::expectReply,
+                 "scheduleSequence", &T::scheduleSequence, "scheduleUpdated", &T::scheduleUpdated);
 JAVELIN_GLZ_META(RawLocation, "@type", &T::type, "name", &T::name);
 JAVELIN_GLZ_META(RawTrigger, "@type", &T::type, "relativeTo", &T::relativeTo, "offset", &T::offset,
                  "when", &T::when);
@@ -376,9 +398,10 @@ JAVELIN_GLZ_META(RawEvent, "@type", &T::type, "id", &T::id, "baseEventId", &T::b
                  "title", &T::title, "description", &T::description, "locations", &T::locations,
                  "start", &T::start, "duration", &T::duration, "timeZone", &T::timeZone,
                  "showWithoutTime", &T::showWithoutTime, "isDraft", &T::isDraft, "isOrigin",
-                 &T::isOrigin, "utcStart", &T::utcStart, "utcEnd", &T::utcEnd, "recurrenceRule",
-                 &T::recurrenceRule, "recurrenceOverrides", &T::recurrenceOverrides, "participants",
-                 &T::participants, "useDefaultAlerts", &T::useDefaultAlerts, "alerts", &T::alerts);
+                 &T::isOrigin, "organizerCalendarAddress", &T::organizerCalendarAddress, "utcStart",
+                 &T::utcStart, "utcEnd", &T::utcEnd, "recurrenceRule", &T::recurrenceRule,
+                 "recurrenceOverrides", &T::recurrenceOverrides, "participants", &T::participants,
+                 "useDefaultAlerts", &T::useDefaultAlerts, "alerts", &T::alerts);
 JAVELIN_GLZ_META(RawEventWrite, "@type", &T::type, "uid", &T::uid, "calendarIds", &T::calendarIds,
                  "title", &T::title, "description", &T::description, "locations", &T::locations,
                  "start", &T::start, "duration", &T::duration, "timeZone", &T::timeZone,
@@ -592,6 +615,7 @@ namespace javelin::jmap::api
                 .showWithoutTime = value.showWithoutTime,
                 .isDraft = value.isDraft,
                 .isOrigin = value.isOrigin,
+                .organizerCalendarAddress = value.organizerCalendarAddress,
                 .useDefaultAlerts = value.useDefaultAlerts,
                 .alerts = {},
                 .utcStart = value.utcStart ? std::optional{value.utcStart->value} : std::nullopt,
@@ -670,19 +694,25 @@ namespace javelin::jmap::api
             }
             for (const auto& attendee : value.attendees)
             {
+                std::unordered_map<std::string, bool> roles;
+                if (attendee.isOwner)
+                    roles.emplace("owner", true);
+                if (attendee.isAttendee)
+                    roles.emplace("attendee", true);
                 raw.participants.emplace(
                     attendee.id,
-                    detail::RawParticipant{
-                        .type = "Participant",
-                        .name = attendee.name,
-                        .email = attendee.email,
-                        .calendarAddress = attendee.calendarAddress,
-                        .participationStatus = attendee.participationStatus,
-                        .roles = {{"owner", attendee.isOwner}, {"attendee", attendee.isAttendee}},
-                        .scheduleSequence = attendee.scheduleSequence,
-                        .scheduleUpdated = attendee.scheduleUpdated
-                                               ? std::optional{attendee.scheduleUpdated->value}
-                                               : std::nullopt});
+                    detail::RawParticipant{.type = "Participant",
+                                           .name = attendee.name,
+                                           .email = attendee.email,
+                                           .calendarAddress = attendee.calendarAddress,
+                                           .participationStatus = attendee.participationStatus,
+                                           .roles = std::move(roles),
+                                           .expectReply = attendee.expectReply,
+                                           .scheduleSequence = attendee.scheduleSequence,
+                                           .scheduleUpdated =
+                                               attendee.scheduleUpdated
+                                                   ? std::optional{attendee.scheduleUpdated->value}
+                                                   : std::nullopt});
             }
             return raw;
         }
@@ -750,6 +780,7 @@ namespace javelin::jmap::api
                 .showWithoutTime = isImportedAllDayEvent(raw),
                 .isDraft = raw.isDraft,
                 .isOrigin = raw.isOrigin,
+                .organizerCalendarAddress = raw.organizerCalendarAddress,
                 .useDefaultAlerts = raw.useDefaultAlerts,
                 .alerts = {},
                 .utcStart = raw.utcStart
@@ -854,6 +885,7 @@ namespace javelin::jmap::api
                     .isOwner = participant.roles.contains("owner") && participant.roles.at("owner"),
                     .isAttendee =
                         participant.roles.contains("attendee") && participant.roles.at("attendee"),
+                    .expectReply = participant.expectReply,
                     .scheduleSequence = participant.scheduleSequence,
                     .scheduleUpdated =
                         participant.scheduleUpdated
@@ -882,6 +914,15 @@ namespace javelin::jmap::api
             return {.type = type, .description = raw.description, .properties = raw.properties};
         }
     } // namespace
+
+    std::optional<MethodRequest<ParticipantIdentityGetResponse>>
+    participantIdentityGet(const GetRequest& request)
+    {
+        const auto arguments = serializeGetRequest(request);
+        return arguments ? std::optional{MethodRequest<ParticipantIdentityGetResponse>{
+                               .name = "ParticipantIdentity/get", .arguments = *arguments}}
+                         : std::nullopt;
+    }
 
     std::optional<MethodRequest<CalendarGetResponse>> calendarGet(const GetRequest& request)
     {
@@ -1014,6 +1055,25 @@ namespace javelin::jmap::api
         return arguments ? std::optional{MethodRequest<CalendarEventSetResponse>{
                                .name = "CalendarEvent/set", .arguments = *arguments}}
                          : std::nullopt;
+    }
+
+    ParsedEnvelope<ParticipantIdentityGetResponse>
+    parseParticipantIdentityGetResponse(std::string_view json)
+    {
+        auto raw = parseRaw<detail::RawParticipantIdentityGetResponse>(json);
+        if (!raw.ok())
+            return {.value = std::nullopt, .error = raw.error};
+        ParticipantIdentityGetResponse result{.accountId = raw.value->accountId,
+                                              .state = raw.value->state,
+                                              .list = {},
+                                              .notFound = raw.value->notFound};
+        result.list.reserve(raw.value->list.size());
+        for (const auto& identity : raw.value->list)
+            result.list.push_back({.id = identity.id,
+                                   .name = identity.name,
+                                   .calendarAddress = identity.calendarAddress,
+                                   .isDefault = identity.isDefault});
+        return {.value = std::move(result), .error = std::nullopt};
     }
 
     ParsedEnvelope<CalendarGetResponse> parseCalendarGetResponse(std::string_view json)
