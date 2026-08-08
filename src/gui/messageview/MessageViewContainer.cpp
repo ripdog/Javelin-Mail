@@ -503,18 +503,11 @@ namespace javelin::gui::messageview
 
         m_unsubscribeBanner = new MessageBannerWidget(this);
         m_unsubscribeBanner->setIcon(QIcon::fromTheme(QStringLiteral("news-unsubscribe")));
-        m_unsubscribeButton =
-            m_unsubscribeBanner->addButton(i18nc("@action:button", "Unsubscribe"));
-        connect(m_unsubscribeButton, &QToolButton::clicked, this,
-                [this]
-                {
-                    if (!m_snapshot.has_value() || !m_snapshot->unsubscribeUrl.has_value())
-                    {
-                        return;
-                    }
-                    QDesktopServices::openUrl(
-                        QUrl::fromEncoded(QByteArray::fromStdString(*m_snapshot->unsubscribeUrl)));
-                });
+        m_unsubscribeLink = m_unsubscribeBanner->addLink(i18nc("@action", "Unsubscribe"));
+        connect(m_unsubscribeLink, &QLabel::linkActivated, this, [](const QString& url)
+                { QDesktopServices::openUrl(QUrl::fromEncoded(url.toUtf8())); });
+        connect(m_unsubscribeLink, &QLabel::linkHovered, this,
+                [this](const QString& url) { Q_EMIT hoveredLinkChanged(url); });
         connect(m_unsubscribeBanner, &MessageBannerWidget::dismissed, this,
                 [this]
                 {
@@ -1119,13 +1112,13 @@ namespace javelin::gui::messageview
         if (!shouldShow)
         {
             m_unsubscribeBanner->setText({});
-            m_unsubscribeBanner->setButtonHoverText(m_unsubscribeButton, {});
+            m_unsubscribeBanner->setLinkTarget(m_unsubscribeLink, {});
             return;
         }
 
         const auto url = QString::fromStdString(*m_snapshot->unsubscribeUrl);
         m_unsubscribeBanner->setText(i18n("This message is from a mailing list."));
-        m_unsubscribeBanner->setButtonHoverText(m_unsubscribeButton, url);
+        m_unsubscribeBanner->setLinkTarget(m_unsubscribeLink, url);
     }
 
     void MessageViewContainer::updateLanguageBanner()

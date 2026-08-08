@@ -1,12 +1,9 @@
 #include "gui/messageview/MessageBannerWidget.h"
 
-#include <QCoreApplication>
-#include <QEvent>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QSizePolicy>
 #include <QToolButton>
-#include <QVBoxLayout>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -17,16 +14,15 @@ TEST_CASE("message banners keep one aligned row and close after their action but
     banner.setText(QStringLiteral("A message banner label"));
     auto* firstButton = banner.addButton(QStringLiteral("First"));
     auto* secondButton = banner.addButton(QStringLiteral("Second"));
+    auto* link = banner.addLink(QStringLiteral("Unsubscribe"));
+    banner.setLinkTarget(link, QStringLiteral("https://example.com/unsubscribe?token=a&b"));
 
-    auto* outerLayout = qobject_cast<QVBoxLayout*>(banner.layout());
-    REQUIRE(outerLayout != nullptr);
-    auto* primaryRow = banner.findChild<QWidget*>(QStringLiteral("messageBannerPrimaryRow"));
-    REQUIRE(primaryRow != nullptr);
-    auto* layout = qobject_cast<QHBoxLayout*>(primaryRow->layout());
+    auto* layout = qobject_cast<QHBoxLayout*>(banner.layout());
     REQUIRE(layout != nullptr);
-    REQUIRE(layout->count() == 5);
+    REQUIRE(layout->count() == 6);
     CHECK(layout->itemAt(2)->widget() == firstButton);
     CHECK(layout->itemAt(3)->widget() == secondButton);
+    CHECK(layout->itemAt(4)->widget() == link);
 
     auto* textLabel = banner.findChild<QLabel*>(QStringLiteral("messageBannerText"));
     REQUIRE(textLabel != nullptr);
@@ -37,19 +33,9 @@ TEST_CASE("message banners keep one aligned row and close after their action but
 
     auto* closeButton = banner.findChild<QToolButton*>(QStringLiteral("messageBannerClose"));
     REQUIRE(closeButton != nullptr);
-    CHECK(layout->itemAt(4)->widget() == closeButton);
-
-    auto* previewLabel = banner.findChild<QLabel*>(QStringLiteral("messageBannerPreview"));
-    REQUIRE(previewLabel != nullptr);
-    CHECK(previewLabel->isHidden());
-    banner.setButtonHoverText(firstButton, QStringLiteral("https://example.com/unsubscribe"));
-    QEvent enterEvent{QEvent::Enter};
-    QCoreApplication::sendEvent(firstButton, &enterEvent);
-    CHECK_FALSE(previewLabel->isHidden());
-    CHECK(previewLabel->text() == QStringLiteral("https://example.com/unsubscribe"));
-    QEvent leaveEvent{QEvent::Leave};
-    QCoreApplication::sendEvent(firstButton, &leaveEvent);
-    CHECK(previewLabel->isHidden());
+    CHECK(layout->itemAt(5)->widget() == closeButton);
+    CHECK(link->textInteractionFlags().testFlag(Qt::LinksAccessibleByMouse));
+    CHECK(link->text().contains(QStringLiteral("https://example.com/unsubscribe?token=a&amp;b")));
 
     bool dismissed = false;
     QObject::connect(&banner, &javelin::gui::messageview::MessageBannerWidget::dismissed,

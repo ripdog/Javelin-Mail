@@ -2,7 +2,6 @@
 
 #include <QWidget>
 
-class QEvent;
 class QHBoxLayout;
 class QIcon;
 class QLabel;
@@ -21,19 +20,16 @@ namespace javelin::gui::messageview
         void setIcon(const QIcon& icon);
         void setText(const QString& text);
         [[nodiscard]] QToolButton* addButton(const QString& text);
-        void setButtonHoverText(QToolButton* button, const QString& text);
+        [[nodiscard]] QLabel* addLink(const QString& text);
+        void setLinkTarget(QLabel* link, const QString& target);
 
       Q_SIGNALS:
         void dismissed();
 
       private:
-        bool eventFilter(QObject* watched, QEvent* event) override;
-
         QHBoxLayout* m_layout = nullptr;
         QLabel* m_iconLabel = nullptr;
         QLabel* m_textLabel = nullptr;
-        QLabel* m_previewLabel = nullptr;
         QToolButton* m_closeButton = nullptr;
-        QObject* m_previewSource = nullptr;
     };
 } // namespace javelin::gui::messageview

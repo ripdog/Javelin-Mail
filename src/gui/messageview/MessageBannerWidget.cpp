@@ -2,20 +2,14 @@
 
 #include <KLocalizedString>
 
-#include <QEvent>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
 #include <QSizePolicy>
 #include <QToolButton>
-#include <QVBoxLayout>
 
 namespace javelin::gui::messageview
 {
-    namespace
-    {
-        constexpr auto HoverTextProperty = "messageBannerHoverText";
-    }
 
     MessageBannerWidget::MessageBannerWidget(QWidget* parent) : QWidget(parent)
     {
@@ -28,28 +22,22 @@ namespace javelin::gui::messageview
             "QWidget#messageBanner QToolButton { border: 1px solid palette(mid); border-radius: "
             "4px; padding: 4px 8px; }"));
 
-        auto* outerLayout = new QVBoxLayout(this);
-        outerLayout->setContentsMargins(8, 6, 8, 6);
-        outerLayout->setSpacing(4);
-
-        auto* primaryRow = new QWidget(this);
-        primaryRow->setObjectName(QStringLiteral("messageBannerPrimaryRow"));
-        m_layout = new QHBoxLayout(primaryRow);
-        m_layout->setContentsMargins(0, 0, 0, 0);
+        m_layout = new QHBoxLayout(this);
+        m_layout->setContentsMargins(8, 6, 8, 6);
         m_layout->setSpacing(8);
 
-        m_iconLabel = new QLabel(primaryRow);
+        m_iconLabel = new QLabel(this);
         m_iconLabel->setObjectName(QStringLiteral("messageBannerIcon"));
         m_iconLabel->setFixedSize(20, 20);
         m_iconLabel->setAlignment(Qt::AlignCenter);
 
-        m_textLabel = new QLabel(primaryRow);
+        m_textLabel = new QLabel(this);
         m_textLabel->setObjectName(QStringLiteral("messageBannerText"));
         m_textLabel->setWordWrap(false);
         m_textLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         m_textLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
 
-        m_closeButton = new QToolButton(primaryRow);
+        m_closeButton = new QToolButton(this);
         m_closeButton->setObjectName(QStringLiteral("messageBannerClose"));
         m_closeButton->setAutoRaise(true);
         m_closeButton->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
@@ -59,17 +47,6 @@ namespace javelin::gui::messageview
         m_layout->addWidget(m_iconLabel, 0, Qt::AlignVCenter);
         m_layout->addWidget(m_textLabel, 1, Qt::AlignVCenter);
         m_layout->addWidget(m_closeButton, 0, Qt::AlignVCenter);
-
-        m_previewLabel = new QLabel(this);
-        m_previewLabel->setObjectName(QStringLiteral("messageBannerPreview"));
-        m_previewLabel->setContentsMargins(28, 0, 0, 0);
-        m_previewLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        m_previewLabel->setWordWrap(true);
-        m_previewLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-        m_previewLabel->hide();
-
-        outerLayout->addWidget(primaryRow);
-        outerLayout->addWidget(m_previewLabel);
     }
 
     void MessageBannerWidget::setIcon(const QIcon& icon)
@@ -90,47 +67,32 @@ namespace javelin::gui::messageview
         return button;
     }
 
-    void MessageBannerWidget::setButtonHoverText(QToolButton* button, const QString& text)
+    QLabel* MessageBannerWidget::addLink(const QString& text)
     {
-        if (button == nullptr)
-        {
-            return;
-        }
-
-        button->setProperty(HoverTextProperty, text);
-        button->installEventFilter(this);
-        if (m_previewSource != button)
-        {
-            return;
-        }
-
-        m_previewLabel->setText(text);
-        m_previewLabel->setVisible(!text.isEmpty());
-        if (text.isEmpty())
-        {
-            m_previewSource = nullptr;
-        }
+        auto* link = new QLabel(this);
+        link->setProperty("messageBannerLinkText", text);
+        link->setTextFormat(Qt::RichText);
+        link->setTextInteractionFlags(Qt::LinksAccessibleByMouse | Qt::LinksAccessibleByKeyboard);
+        link->setOpenExternalLinks(false);
+        link->setFocusPolicy(Qt::StrongFocus);
+        m_layout->insertWidget(m_layout->count() - 1, link, 0, Qt::AlignVCenter);
+        return link;
     }
 
-    bool MessageBannerWidget::eventFilter(QObject* watched, QEvent* event)
+    void MessageBannerWidget::setLinkTarget(QLabel* link, const QString& target)
     {
-        if (event->type() == QEvent::Enter)
+        if (link == nullptr)
         {
-            const auto text = watched->property(HoverTextProperty).toString();
-            if (!text.isEmpty())
-            {
-                m_previewSource = watched;
-                m_previewLabel->setText(text);
-                m_previewLabel->show();
-            }
-        }
-        else if (event->type() == QEvent::Leave && m_previewSource == watched)
-        {
-            m_previewSource = nullptr;
-            m_previewLabel->clear();
-            m_previewLabel->hide();
+            return;
         }
 
-        return QWidget::eventFilter(watched, event);
+        const auto text = link->property("messageBannerLinkText").toString().toHtmlEscaped();
+        if (target.isEmpty())
+        {
+            link->setText(text);
+            return;
+        }
+
+        link->setText(QStringLiteral("<a href=\"%1\">%2</a>").arg(target.toHtmlEscaped(), text));
     }
 } // namespace javelin::gui::messageview

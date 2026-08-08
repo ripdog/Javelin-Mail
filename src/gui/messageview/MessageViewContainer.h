@@ -152,7 +152,7 @@ namespace javelin::gui::messageview
         MessageBannerWidget* m_unsubscribeBanner = nullptr;
         MessageBannerWidget* m_translationBanner = nullptr;
         QToolButton* m_notJunkButton = nullptr;
-        QToolButton* m_unsubscribeButton = nullptr;
+        QLabel* m_unsubscribeLink = nullptr;
         QToolButton* m_translateButton = nullptr;
         QToolButton* m_translateOptionsButton = nullptr;
         javelin::gui::settings::GuiSettings& m_settings;
