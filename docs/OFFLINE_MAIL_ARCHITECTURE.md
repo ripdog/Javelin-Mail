@@ -10,7 +10,9 @@
 - Raw sources live in `mail-vault/v1`, beside the application cache database. SQLite records
   identity, retention, progress, and recovery work; it does not contain multi-gigabyte MIME BLOBs.
 - Confirmed server destruction removes the local reference and mailbox projection. Unchecking a
-  mailbox changes its downloaded sources to evictable cache; it does not immediately destroy them.
+  mailbox changes its downloaded sources to evictable cache; it does not destroy them unless the
+  user explicitly chooses cache cleanup. User-facing mailbox cleanup may remove bodies alone, but
+  clearing SQLite-backed mailbox state must also clear that mailbox's cached bodies.
 - Foreground work owns network priority. An in-flight background request may finish, but no further
   background request starts until every startup, freshness, and user-initiated request has ended,
   followed by a five-second quiet period. The quiet period also applies at process startup.

@@ -178,7 +178,7 @@ TEST_CASE("remote codec round-trips developer mailbox clear results",
         javelin::app::DeveloperMailboxClearSummary{
             .accountId = QStringLiteral("account-1"),
             .mailboxId = QStringLiteral("inbox"),
-            .kind = javelin::app::DeveloperMailboxCacheKind::Bodies,
+            .kind = javelin::app::DeveloperMailboxCacheKind::SqliteAndBodies,
             .maintenanceGeneration = 7,
             .rowsDiscarded = 8,
             .projectionsRemoved = 3,
@@ -199,7 +199,7 @@ TEST_CASE("remote codec round-trips developer mailbox clear results",
     const auto* summary = std::get_if<javelin::app::DeveloperMailboxClearSummary>(decodedResult);
     REQUIRE(summary != nullptr);
     CHECK(summary->accountId == QStringLiteral("account-1"));
-    CHECK(summary->kind == javelin::app::DeveloperMailboxCacheKind::Bodies);
+    CHECK(summary->kind == javelin::app::DeveloperMailboxCacheKind::SqliteAndBodies);
     CHECK(summary->maintenanceGeneration == 7);
     CHECK(summary->reclaimedBytes == 2048);
     CHECK(summary->offlineStorageDisabled);

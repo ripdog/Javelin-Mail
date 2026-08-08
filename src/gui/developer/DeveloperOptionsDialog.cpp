@@ -258,7 +258,7 @@ namespace javelin::gui::developer
         maintenanceLayout->addStretch(1);
         m_clearSqliteButton =
             new QPushButton(QIcon::fromTheme(QStringLiteral("edit-clear-history")),
-                            i18n("Clear SQLite Cache…"), page);
+                            i18n("Clear SQLite + Bodies…"), page);
         m_clearSqliteButton->setObjectName(QStringLiteral("developerClearSqliteButton"));
         m_clearBodiesButton = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-delete")),
                                               i18n("Clear Body Cache…"), page);
@@ -431,17 +431,20 @@ namespace javelin::gui::developer
         if (mailbox == nullptr)
             return;
 
-        QMessageBox confirmation{QMessageBox::Warning, i18n("Clear SQLite Cache"),
-                                 i18n("Clear cached mailbox data for %1?", mailbox->mailboxName),
-                                 QMessageBox::Cancel, this};
+        QMessageBox confirmation{
+            QMessageBox::Warning, i18n("Clear SQLite and Body Cache"),
+            i18n("Clear cached mailbox data and message bodies for %1?", mailbox->mailboxName),
+            QMessageBox::Cancel, this};
         confirmation.setInformativeText(i18n(
-            "This discards %1 of estimated SQLite-backed list and metadata state for %2 on %3. "
-            "The mailbox, account settings, message bodies, and active optimistic changes are "
-            "preserved. The mailbox will be loaded again when it is next viewed.",
-            bytes(mailbox->usage.sqliteEstimatedBytes), mailbox->mailboxName,
-            mailbox->accountName));
+            "This discards about %1 of SQLite-backed list and metadata state for %2 on %3 and "
+            "removes its cached message bodies. Up to %4 of body storage can be reclaimed; %5 is "
+            "shared with other mailboxes and remains available there. The mailbox, account "
+            "settings, and active optimistic changes are preserved. The mailbox will be loaded "
+            "again when it is next viewed.",
+            bytes(mailbox->usage.sqliteEstimatedBytes), mailbox->mailboxName, mailbox->accountName,
+            bytes(mailbox->usage.reclaimableBodyBytes), bytes(mailbox->usage.sharedBodyBytes)));
         auto* clearButton =
-            confirmation.addButton(i18n("Clear SQLite Cache"), QMessageBox::DestructiveRole);
+            confirmation.addButton(i18n("Clear SQLite and Bodies"), QMessageBox::DestructiveRole);
         confirmation.setDefaultButton(QMessageBox::Cancel);
         confirmation.exec();
         if (confirmation.clickedButton() != clearButton)
@@ -449,7 +452,7 @@ namespace javelin::gui::developer
 
         runClear({.accountId = mailbox->accountId,
                   .mailboxId = mailbox->mailboxId,
-                  .kind = javelin::app::DeveloperMailboxCacheKind::Sqlite,
+                  .kind = javelin::app::DeveloperMailboxCacheKind::SqliteAndBodies,
                   .offlinePolicy = javelin::app::DeveloperOfflineClearPolicy::Preserve});
     }
 
@@ -507,9 +510,18 @@ namespace javelin::gui::developer
         if (m_loading)
             return;
         setLoading(true);
-        m_status->setText(command.kind == javelin::app::DeveloperMailboxCacheKind::Sqlite
-                              ? i18n("Clearing mailbox SQLite cache…")
-                              : i18n("Clearing mailbox body cache…"));
+        switch (command.kind)
+        {
+        case javelin::app::DeveloperMailboxCacheKind::Sqlite:
+            m_status->setText(i18n("Clearing mailbox SQLite cache…"));
+            break;
+        case javelin::app::DeveloperMailboxCacheKind::Bodies:
+            m_status->setText(i18n("Clearing mailbox body cache…"));
+            break;
+        case javelin::app::DeveloperMailboxCacheKind::SqliteAndBodies:
+            m_status->setText(i18n("Clearing mailbox SQLite and body caches…"));
+            break;
+        }
         auto task = m_maintenance.clearMailboxCache(std::move(command));
         QCoro::connect(std::move(task), this,
                        [this](javelin::app::DeveloperMailboxClearResult result)
@@ -531,13 +543,20 @@ namespace javelin::gui::developer
             m_postRefreshStatus = i18np("Discarded %1 cached SQLite row.",
                                         "Discarded %1 cached SQLite rows.", summary.rowsDiscarded);
         }
-        else
+        else if (summary.kind == javelin::app::DeveloperMailboxCacheKind::Bodies)
         {
             m_postRefreshStatus = i18n(
                 "Removed %1 mailbox projections and reclaimed %2. %3 remains deferred while in "
                 "use.",
                 summary.projectionsRemoved, bytes(summary.reclaimedBytes),
                 bytes(summary.deferredBytes));
+        }
+        else
+        {
+            m_postRefreshStatus = i18n(
+                "Cleared cached mailbox state and bodies, discarding %1 cache rows and reclaiming "
+                "%2. %3 remains deferred while in use.",
+                summary.rowsDiscarded, bytes(summary.reclaimedBytes), bytes(summary.deferredBytes));
         }
         refresh();
     }

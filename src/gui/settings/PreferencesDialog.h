@@ -7,6 +7,8 @@
 
 #include <KConfigDialog>
 #include <QHash>
+#include <QList>
+#include <QModelIndex>
 
 #include <cstdint>
 #include <vector>
@@ -35,6 +37,8 @@ namespace javelin::jmap::cache
 namespace javelin::app
 {
     class AccountCommandPort;
+    class DeveloperDiagnosticsPort;
+    class DeveloperMaintenancePort;
     class OnboardingPort;
 } // namespace javelin::app
 
@@ -56,7 +60,10 @@ namespace javelin::gui::settings
             javelin::app::OnboardingPort& onboardingPort,
             javelin::gui::translation::TranslationService& translationService,
             javelin::jmap::cache::AccountReader& accountReader,
-            javelin::jmap::cache::MailboxReader& mailboxReader, QWidget* parent = nullptr);
+            javelin::jmap::cache::MailboxReader& mailboxReader,
+            javelin::app::DeveloperDiagnosticsPort& developerDiagnosticsPort,
+            javelin::app::DeveloperMaintenancePort& developerMaintenancePort,
+            QWidget* parent = nullptr);
         ~PreferencesDialog() override;
 
         void selectConfiguredAccount(const QString& connectionId);
@@ -93,6 +100,17 @@ namespace javelin::gui::settings
         void refreshMailboxSyncList();
         void storeMailboxSyncSelection();
         void storeMailboxNotificationSelection();
+        void mailboxSyncSelectionChanged(const QModelIndex& index, const QList<int>& roles);
+        void offerMailboxCacheCleanup(const QString& accountId, const QString& mailboxId,
+                                      const QString& mailboxName);
+
+        struct PendingMailboxCacheClear
+        {
+            QString accountId;
+            QString mailboxId;
+            bool clearSqlite = false;
+            bool clearBodies = false;
+        };
 
         GuiSettings& m_settings;
         javelin::protocol::SettingsRevision m_baseRevision;
@@ -101,6 +119,8 @@ namespace javelin::gui::settings
         javelin::gui::translation::TranslationService& m_translationService;
         javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::MailboxReader& m_mailboxReader;
+        javelin::app::DeveloperDiagnosticsPort& m_developerDiagnosticsPort;
+        javelin::app::DeveloperMaintenancePort& m_developerMaintenancePort;
         std::vector<ConnectionSettings> m_accounts;
         std::vector<ConnectionSettings> m_removedAccounts;
         QStringList m_loadedAccountIds;
@@ -150,6 +170,7 @@ namespace javelin::gui::settings
         QHash<QString, QStringList> m_syncedMailboxIds;
         QHash<QString, QStringList> m_notificationMailboxIds;
         QString m_mailboxSyncCurrentAccountId;
+        std::vector<PendingMailboxCacheClear> m_pendingMailboxCacheClears;
     };
 
 } // namespace javelin::gui::settings

@@ -3095,6 +3095,8 @@ namespace javelin::gui::shell
                                                          m_translationService,
                                                          m_accountReader,
                                                          m_mailboxReader,
+                                                         m_developerDiagnosticsPort,
+                                                         m_developerMaintenancePort,
                                                          this};
         connect(&dialog, &javelin::gui::settings::PreferencesDialog::accountAdded, this,
                 [this](const javelin::gui::settings::ConnectionSettings& settings)

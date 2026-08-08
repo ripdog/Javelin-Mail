@@ -265,6 +265,70 @@ TEST_CASE("developer SQLite clear preserves mailbox bodies and active optimistic
     CHECK(resync->second == "inbox");
 }
 
+TEST_CASE("combined mailbox clear removes bodies before cached mailbox state",
+          "[app][developer-maintenance][combined]")
+{
+    ensureApplication();
+    auto context = database();
+    seedBase(context.connection);
+    auto& database = context.connection.database();
+    seedEmail(database, QStringLiteral("message-1"), QStringLiteral("blob-1"),
+              QStringLiteral("inbox"));
+    execute(database,
+            QStringLiteral("INSERT INTO offline_mailbox_scopes(account_id,mailbox_id,desired,"
+                           "status,generation,completed_generation,completed_total) VALUES"
+                           "('account-1','inbox',1,'complete',2,2,1)"));
+    execute(database,
+            QStringLiteral("INSERT INTO offline_mailbox_membership(account_id,mailbox_id,email_id,"
+                           "generation,position) VALUES('account-1','inbox','message-1',2,0)"));
+
+    const QByteArray payload = QByteArrayLiteral("combined clear body");
+    javelin::jmap::cache::RawMessageSourceRepository sources{context.connection};
+    REQUIRE_FALSE(
+        sources
+            .upsert("account-1", {.emailId = "message-1", .blobId = "blob-1", .payload = payload})
+            .has_value());
+    const auto vault = javelin::jmap::cache::MailVault::forDatabase(context.connection);
+    const QString bodyPath = textScalar(
+        database, QStringLiteral("SELECT relative_path FROM mail_vault_objects o JOIN "
+                                 "mail_vault_email_refs r ON r.content_hash=o.content_hash WHERE "
+                                 "r.account_id='account-1' AND r.email_id='message-1'"));
+    REQUIRE(QFileInfo::exists(QDir{vault.rootPath()}.filePath(bodyPath)));
+
+    RecordingPublisher publisher;
+    javelin::app::MailboxMaintenanceRegistry registry;
+    bool resyncRequested = false;
+    DeveloperMaintenanceService maintenance{
+        context.directory.filePath(QStringLiteral("cache.sqlite3")), vault.rootPath(), registry,
+        publisher, [&resyncRequested](const std::string_view, const std::string_view)
+        { resyncRequested = true; }};
+
+    const auto result = QCoro::waitFor(maintenance.clearMailboxCache({
+        .accountId = QStringLiteral("account-1"),
+        .mailboxId = QStringLiteral("inbox"),
+        .kind = DeveloperMailboxCacheKind::SqliteAndBodies,
+        .offlinePolicy = DeveloperOfflineClearPolicy::Disable,
+    }));
+    const auto& cleared = summary(result);
+    CHECK(cleared.kind == DeveloperMailboxCacheKind::SqliteAndBodies);
+    CHECK(cleared.reclaimedBytes == static_cast<std::uint64_t>(payload.size()));
+    CHECK(cleared.offlineStorageDisabled);
+
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_mailbox_refs WHERE "
+                                          "account_id='account-1' AND mailbox_id='inbox'")) == 0);
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_email_refs WHERE "
+                                          "account_id='account-1' AND email_id='message-1'")) == 0);
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM email_mailboxes WHERE account_id="
+                                          "'account-1' AND mailbox_id='inbox'")) == 0);
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM offline_mailbox_membership WHERE "
+                                          "account_id='account-1' AND mailbox_id='inbox'")) == 0);
+    CHECK(scalar(database, QStringLiteral("SELECT desired FROM offline_mailbox_scopes WHERE "
+                                          "account_id='account-1' AND mailbox_id='inbox'")) == 0);
+    CHECK_FALSE(QFileInfo::exists(QDir{vault.rootPath()}.filePath(bodyPath)));
+    CHECK_FALSE(resyncRequested);
+    REQUIRE(publisher.changes.size() == 1);
+}
+
 TEST_CASE("developer body clear reclaims unique objects and preserves shared bodies",
           "[app][developer-maintenance][bodies]")
 {

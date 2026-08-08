@@ -1,6 +1,8 @@
 #include "gui/settings/PreferencesDialog.h"
 
 #include "app/AccountApplicationPorts.h"
+#include "app/DeveloperDiagnostics.h"
+#include "app/DeveloperMaintenance.h"
 #include "app/OnboardingApplicationPorts.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/mailboxes/MailboxTreeView.h"
@@ -15,6 +17,8 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCoreApplication>
+#include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
@@ -26,6 +30,8 @@
 #include <QListWidget>
 #include <QLocale>
 #include <QMessageBox>
+#include <QPointer>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QSet>
@@ -33,12 +39,14 @@
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QTimer>
 #include <QUuid>
 #include <QVBoxLayout>
 
 #include <algorithm>
 #include <optional>
 #include <utility>
+#include <variant>
 
 namespace javelin::gui::settings
 {
@@ -62,6 +70,49 @@ namespace javelin::gui::settings
             Sender,
             Domain,
         };
+
+        struct MailboxCacheClearRequest
+        {
+            QString accountId;
+            QString mailboxId;
+            bool clearSqlite = false;
+            bool clearBodies = false;
+        };
+
+        [[nodiscard]] QString formattedBytes(const std::uint64_t bytes)
+        {
+            return QLocale{}.formattedDataSize(static_cast<qint64>(bytes));
+        }
+
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        clearMailboxCaches(javelin::app::DeveloperMaintenancePort& maintenance,
+                           std::vector<MailboxCacheClearRequest> requests)
+        {
+            std::optional<javelin::jmap::cache::DatabaseError> firstError;
+            for (const auto& request : requests)
+            {
+                if (!request.clearBodies && !request.clearSqlite)
+                    continue;
+
+                const auto kind = request.clearSqlite
+                                      ? javelin::app::DeveloperMailboxCacheKind::SqliteAndBodies
+                                      : javelin::app::DeveloperMailboxCacheKind::Bodies;
+                auto result = co_await maintenance.clearMailboxCache(
+                    {.accountId = request.accountId,
+                     .mailboxId = request.mailboxId,
+                     .kind = kind,
+                     .offlinePolicy = javelin::app::DeveloperOfflineClearPolicy::Preserve});
+                if (!firstError.has_value())
+                {
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                    {
+                        firstError = *error;
+                    }
+                }
+            }
+            co_return firstError;
+        }
 
         [[nodiscard]] ConnectionSettings newAccount()
         {
@@ -134,12 +185,15 @@ namespace javelin::gui::settings
         javelin::app::OnboardingPort& onboardingPort,
         javelin::gui::translation::TranslationService& translationService,
         javelin::jmap::cache::AccountReader& accountReader,
-        javelin::jmap::cache::MailboxReader& mailboxReader, QWidget* parent)
+        javelin::jmap::cache::MailboxReader& mailboxReader,
+        javelin::app::DeveloperDiagnosticsPort& developerDiagnosticsPort,
+        javelin::app::DeveloperMaintenancePort& developerMaintenancePort, QWidget* parent)
         : KConfigDialog(parent, QStringLiteral("preferences"), nullptr), m_settings(settings),
           m_baseRevision(m_settings.snapshot().revision), m_accountCommandPort(accountCommandPort),
           m_onboardingPort(onboardingPort), m_translationService(translationService),
           m_accountReader(accountReader), m_mailboxReader(mailboxReader),
-          m_accounts(m_settings.accounts()),
+          m_developerDiagnosticsPort(developerDiagnosticsPort),
+          m_developerMaintenancePort(developerMaintenancePort), m_accounts(m_settings.accounts()),
           m_remoteContentSenders(m_settings.remoteContentSenders()),
           m_remoteContentDomains(m_settings.remoteContentDomains()),
           m_translationSettings(m_translationService.settings()),
@@ -202,7 +256,7 @@ namespace javelin::gui::settings
         auto* mailboxSyncDescription = new QLabel(
             i18n("Download every message and attachment in selected mailboxes for complete "
                  "offline access. Large mailboxes continue in the Task Center and can be paused. "
-                 "Unchecking keeps downloaded mail as removable cache."),
+                 "When you uncheck a mailbox, you can keep or clear its downloaded cache."),
             mailboxSyncPage);
         mailboxSyncDescription->setWordWrap(true);
         mailboxSyncDescription->setSizePolicy(
@@ -563,11 +617,8 @@ namespace javelin::gui::settings
                     refreshMailboxSyncList();
                 });
         connect(m_mailboxSyncModel, &QAbstractItemModel::dataChanged, this,
-                [this]
-                {
-                    storeMailboxSyncSelection();
-                    noteUnsavedChanges();
-                });
+                [this](const QModelIndex& topLeft, const QModelIndex&, const QList<int>& roles)
+                { mailboxSyncSelectionChanged(topLeft, roles); });
         connect(m_mailboxNotificationModel, &QAbstractItemModel::dataChanged, this,
                 [this]
                 {
@@ -810,6 +861,7 @@ namespace javelin::gui::settings
             return false;
         }
         m_baseRevision = m_settings.snapshot().revision;
+
         if (const auto error = m_translationService.saveSettings(m_translationSettings))
         {
             QMessageBox::critical(this, i18n("Could not save translation preferences"),
@@ -825,6 +877,37 @@ namespace javelin::gui::settings
                 QMessageBox::critical(this, i18n("Could not remove account cache"), error->message);
             }
         }
+
+        std::vector<MailboxCacheClearRequest> cacheClearRequests;
+        cacheClearRequests.reserve(m_pendingMailboxCacheClears.size());
+        for (const auto& pending : m_pendingMailboxCacheClears)
+        {
+            if (m_syncedMailboxIds.value(pending.accountId).contains(pending.mailboxId))
+                continue;
+            cacheClearRequests.push_back(
+                {.accountId = pending.accountId,
+                 .mailboxId = pending.mailboxId,
+                 .clearSqlite = pending.clearSqlite,
+                 .clearBodies = pending.clearBodies || pending.clearSqlite});
+        }
+        m_pendingMailboxCacheClears.clear();
+        if (!cacheClearRequests.empty())
+        {
+            QPointer<QWidget> cleanupParent{parentWidget()};
+            auto task =
+                clearMailboxCaches(m_developerMaintenancePort, std::move(cacheClearRequests));
+            QCoro::connect(std::move(task), QCoreApplication::instance(),
+                           [cleanupParent](std::optional<javelin::jmap::cache::DatabaseError> error)
+                           {
+                               if (error.has_value() && cleanupParent != nullptr)
+                               {
+                                   QMessageBox::warning(cleanupParent,
+                                                        i18n("Could not clear mailbox cache"),
+                                                        error->message);
+                               }
+                           });
+        }
+
         m_baseRevision = m_settings.snapshot().revision;
         m_removedAccounts.clear();
         m_loadedAccountIds.clear();
@@ -925,6 +1008,189 @@ namespace javelin::gui::settings
         }
         const auto selected = m_mailboxSyncModel->checkedMailboxIds();
         m_syncedMailboxIds.insert(accountId, selected);
+    }
+
+    void PreferencesDialog::mailboxSyncSelectionChanged(const QModelIndex& index,
+                                                        const QList<int>& roles)
+    {
+        if (!roles.isEmpty() && !roles.contains(Qt::CheckStateRole))
+            return;
+
+        const QString accountId =
+            index.data(javelin::gui::mailboxes::MailboxTreeModel::AccountIdRole).toString();
+        const QString mailboxId =
+            index.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxIdRole).toString();
+        const QString mailboxName =
+            index.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxNameRole).toString();
+        if (accountId.isEmpty() || mailboxId.isEmpty())
+            return;
+
+        storeMailboxSyncSelection();
+        noteUnsavedChanges();
+
+        const bool checked = index.data(Qt::CheckStateRole).toInt() == Qt::Checked;
+        if (checked)
+        {
+            std::erase_if(
+                m_pendingMailboxCacheClears, [&](const PendingMailboxCacheClear& pending)
+                { return pending.accountId == accountId && pending.mailboxId == mailboxId; });
+            return;
+        }
+
+        if (!m_settings.syncedMailboxIds(accountId).contains(mailboxId))
+            return;
+
+        QTimer::singleShot(0, this, [this, accountId, mailboxId, mailboxName]
+                           { offerMailboxCacheCleanup(accountId, mailboxId, mailboxName); });
+    }
+
+    void PreferencesDialog::offerMailboxCacheCleanup(const QString& accountId,
+                                                     const QString& mailboxId,
+                                                     const QString& mailboxName)
+    {
+        if (m_syncedMailboxIds.value(accountId).contains(mailboxId) ||
+            !m_settings.syncedMailboxIds(accountId).contains(mailboxId))
+        {
+            return;
+        }
+
+        std::erase_if(m_pendingMailboxCacheClears, [&](const PendingMailboxCacheClear& pending)
+                      { return pending.accountId == accountId && pending.mailboxId == mailboxId; });
+
+        QDialog dialog{this};
+        dialog.setWindowTitle(i18n("Clear Offline Mail Cache"));
+        dialog.setModal(true);
+        dialog.setMinimumWidth(520);
+
+        auto* layout = new QVBoxLayout(&dialog);
+        auto* description = new QLabel(
+            i18n("Offline sync has been disabled for %1. You can keep its downloaded cache or "
+                 "remove some of it now.",
+                 mailboxName),
+            &dialog);
+        description->setWordWrap(true);
+        layout->addWidget(description);
+
+        auto* calculationStatus = new QLabel(i18n("Calculating reclaimable space…"), &dialog);
+        calculationStatus->setWordWrap(true);
+        layout->addWidget(calculationStatus);
+        auto* progress = new QProgressBar(&dialog);
+        progress->setRange(0, 0);
+        progress->setTextVisible(false);
+        layout->addWidget(progress);
+
+        auto* clearSqlite =
+            new QCheckBox(i18n("Clear cached mail list and metadata (calculating…)"), &dialog);
+        auto* clearBodies = new QCheckBox(
+            i18n("Clear cached message bodies and attachments (calculating…)"), &dialog);
+        clearSqlite->setEnabled(false);
+        clearBodies->setEnabled(false);
+        layout->addWidget(clearSqlite);
+        layout->addWidget(clearBodies);
+
+        auto* dependency = new QLabel(
+            i18n("Cached mail database entries may only be cleared together with their message "
+                 "bodies."),
+            &dialog);
+        dependency->setWordWrap(true);
+        dependency->setForegroundRole(QPalette::PlaceholderText);
+        layout->addWidget(dependency);
+
+        auto* selectionSummary = new QLabel(&dialog);
+        selectionSummary->setWordWrap(true);
+        layout->addWidget(selectionSummary);
+
+        auto* buttons =
+            new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        auto* continueButton = buttons->button(QDialogButtonBox::Ok);
+        continueButton->setText(i18nc("@action:button", "Continue"));
+        continueButton->setEnabled(false);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        layout->addWidget(buttons);
+
+        std::uint64_t reclaimableBodyBytes = 0;
+        bool measurementReady = false;
+        const auto updateSelectionSummary = [&]
+        {
+            if (!measurementReady)
+                return;
+            if (clearBodies->isChecked())
+            {
+                selectionSummary->setText(
+                    i18n("Up to %1 of message-body disk space can be reclaimed.",
+                         formattedBytes(reclaimableBodyBytes)));
+            }
+            else
+            {
+                selectionSummary->setText(i18n("Downloaded message bodies will be kept."));
+            }
+        };
+        connect(clearSqlite, &QCheckBox::toggled, &dialog,
+                [&, clearBodies](const bool checked)
+                {
+                    if (checked)
+                        clearBodies->setChecked(true);
+                    clearBodies->setEnabled(measurementReady && !checked);
+                    updateSelectionSummary();
+                });
+        connect(clearBodies, &QCheckBox::toggled, &dialog,
+                [&updateSelectionSummary] { updateSelectionSummary(); });
+
+        auto task = m_developerDiagnosticsPort.snapshot();
+        QCoro::connect(
+            std::move(task), &dialog,
+            [&](javelin::app::DeveloperDiagnosticsResult result)
+            {
+                progress->hide();
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                {
+                    calculationStatus->setText(
+                        i18n("Could not calculate reclaimable space: %1", error->message));
+                    buttons->button(QDialogButtonBox::Cancel)
+                        ->setText(i18nc("@action:button", "Close"));
+                    return;
+                }
+
+                const auto& snapshot = std::get<javelin::app::DeveloperDiagnosticsSnapshot>(result);
+                const auto mailbox = std::ranges::find_if(
+                    snapshot.mailboxes, [&](const javelin::app::DeveloperMailboxRecord& record)
+                    { return record.accountId == accountId && record.mailboxId == mailboxId; });
+                if (mailbox == snapshot.mailboxes.end())
+                {
+                    calculationStatus->setText(
+                        i18n("The mailbox is no longer available in the local cache."));
+                    buttons->button(QDialogButtonBox::Cancel)
+                        ->setText(i18nc("@action:button", "Close"));
+                    return;
+                }
+
+                reclaimableBodyBytes = mailbox->usage.reclaimableBodyBytes;
+                clearSqlite->setText(i18n("Clear cached mail list and metadata (about %1)",
+                                          formattedBytes(mailbox->usage.sqliteEstimatedBytes)));
+                clearBodies->setText(
+                    i18n("Clear cached message bodies and attachments (up to %1 reclaimable)",
+                         formattedBytes(reclaimableBodyBytes)));
+                calculationStatus->setText(i18n("Reclaimable space calculated."));
+                measurementReady = true;
+                clearSqlite->setEnabled(true);
+                clearBodies->setEnabled(true);
+                continueButton->setEnabled(true);
+                updateSelectionSummary();
+            });
+
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+
+        const bool clearSqliteSelected = clearSqlite->isChecked();
+        const bool clearBodiesSelected = clearBodies->isChecked() || clearSqliteSelected;
+        if (!clearSqliteSelected && !clearBodiesSelected)
+            return;
+
+        m_pendingMailboxCacheClears.push_back({.accountId = accountId,
+                                               .mailboxId = mailboxId,
+                                               .clearSqlite = clearSqliteSelected,
+                                               .clearBodies = clearBodiesSelected});
     }
 
     void PreferencesDialog::refreshRemoteContentList()

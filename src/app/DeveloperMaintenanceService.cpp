@@ -143,7 +143,7 @@ namespace javelin::app
 
         [[nodiscard]] DeveloperMailboxClearResult
         clearSqlite(DatabaseConnection& connection, const DeveloperMailboxClearCommand& command,
-                    const std::uint64_t maintenanceGeneration)
+                    const std::uint64_t maintenanceGeneration, const bool resetOffline = true)
         {
             const DatabaseWriteScope writeScope{connection};
             auto transactionResult = DatabaseTransaction::begin(
@@ -212,8 +212,11 @@ namespace javelin::app
                         "('pending','in_flight','accepted','unknown'))"),
                     command.accountId, command.mailboxId))
                 return *error;
-            if (const auto error = resetOfflineScope(database, command))
-                return *error;
+            if (resetOffline)
+            {
+                if (const auto error = resetOfflineScope(database, command))
+                    return *error;
+            }
             const auto generation = advanceEmailGeneration(database, command.accountId);
             if (const auto* error = std::get_if<DatabaseError>(&generation))
                 return *error;
@@ -508,7 +511,30 @@ namespace javelin::app
             auto connection = std::get<DatabaseConnection>(std::move(opened));
             if (command.kind == DeveloperMailboxCacheKind::Sqlite)
                 return clearSqlite(connection, command, maintenanceGeneration);
-            return clearBodies(connection, vaultPath, command, maintenanceGeneration);
+            if (command.kind == DeveloperMailboxCacheKind::Bodies)
+                return clearBodies(connection, vaultPath, command, maintenanceGeneration);
+
+            auto bodies = clearBodies(connection, vaultPath, command, maintenanceGeneration);
+            if (const auto* error = std::get_if<DatabaseError>(&bodies))
+                return *error;
+            auto sqlite = clearSqlite(connection, command, maintenanceGeneration, false);
+            if (const auto* error = std::get_if<DatabaseError>(&sqlite))
+                return *error;
+
+            const auto& bodySummary = std::get<DeveloperMailboxClearSummary>(bodies);
+            const auto& sqliteSummary = std::get<DeveloperMailboxClearSummary>(sqlite);
+            return DeveloperMailboxClearSummary{
+                .accountId = command.accountId,
+                .mailboxId = command.mailboxId,
+                .kind = DeveloperMailboxCacheKind::SqliteAndBodies,
+                .maintenanceGeneration = maintenanceGeneration,
+                .rowsDiscarded = bodySummary.rowsDiscarded + sqliteSummary.rowsDiscarded,
+                .projectionsRemoved = bodySummary.projectionsRemoved,
+                .logicalBytesReleased = bodySummary.logicalBytesReleased,
+                .reclaimedBytes = bodySummary.reclaimedBytes,
+                .deferredBytes = bodySummary.deferredBytes,
+                .offlineStorageDisabled = bodySummary.offlineStorageDisabled,
+            };
         }
     } // namespace
 

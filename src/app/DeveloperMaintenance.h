@@ -15,6 +15,7 @@ namespace javelin::app
     {
         Sqlite,
         Bodies,
+        SqliteAndBodies,
     };
 
     enum class DeveloperOfflineClearPolicy
