@@ -5,7 +5,9 @@
 #include <QList>
 #include <QObject>
 #include <QString>
+#include <QTimer>
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 
@@ -56,6 +58,9 @@ namespace javelin::app
 
       public:
         explicit DaemonTrayController(WorkScheduler& workScheduler, QObject* parent = nullptr);
+        DaemonTrayController(WorkScheduler& workScheduler,
+                             std::chrono::milliseconds toolTipUpdateInterval,
+                             QObject* parent = nullptr);
         ~DaemonTrayController() override;
 
         DaemonTrayController(const DaemonTrayController&) = delete;
@@ -98,9 +103,12 @@ namespace javelin::app
       private:
         class Menu;
 
+        void requestToolTipUpdate();
         void updateToolTip();
 
         WorkScheduler& m_workScheduler;
+        QTimer m_toolTipUpdateTimer;
+        bool m_toolTipUpdatePending = false;
         std::unique_ptr<Menu> m_menu;
         QString m_activationToken;
         QString m_serviceName;

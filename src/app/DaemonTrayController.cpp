@@ -311,13 +311,32 @@ namespace javelin::app
     };
 
     DaemonTrayController::DaemonTrayController(WorkScheduler& workScheduler, QObject* parent)
+        : DaemonTrayController(workScheduler, std::chrono::seconds{1}, parent)
+    {
+    }
+
+    DaemonTrayController::DaemonTrayController(
+        WorkScheduler& workScheduler, const std::chrono::milliseconds toolTipUpdateInterval,
+        QObject* parent)
         : QObject(parent), m_workScheduler(workScheduler)
     {
         qDBusRegisterMetaType<TrayIconPixmap>();
         qDBusRegisterMetaType<QList<TrayIconPixmap>>();
         qDBusRegisterMetaType<TrayToolTip>();
+        m_toolTipUpdateTimer.setSingleShot(true);
+        m_toolTipUpdateTimer.setInterval(toolTipUpdateInterval);
+        connect(&m_toolTipUpdateTimer, &QTimer::timeout, this,
+                [this]
+                {
+                    if (!m_toolTipUpdatePending)
+                        return;
+                    m_toolTipUpdatePending = false;
+                    updateToolTip();
+                    if (m_toolTipUpdateTimer.interval() > 0)
+                        m_toolTipUpdateTimer.start();
+                });
         connect(&m_workScheduler, &WorkScheduler::jobsChanged, this,
-                &DaemonTrayController::updateToolTip);
+                &DaemonTrayController::requestToolTipUpdate);
     }
 
     DaemonTrayController::~DaemonTrayController()
@@ -369,8 +388,12 @@ namespace javelin::app
             return false;
         }
 
-        m_available = true;
+        m_toolTipUpdateTimer.stop();
+        m_toolTipUpdatePending = false;
         updateToolTip();
+        if (m_toolTipUpdateTimer.interval() > 0)
+            m_toolTipUpdateTimer.start();
+        m_available = true;
 
         QDBusInterface watcher{QString::fromLatin1(watcherService),
                                QString::fromLatin1(watcherPath),
@@ -468,7 +491,7 @@ namespace javelin::app
         if (m_inboxUnreadCount == unreadCount)
             return;
         m_inboxUnreadCount = unreadCount;
-        updateToolTip();
+        requestToolTipUpdate();
     }
 
     void DaemonTrayController::Activate(const int, const int)
@@ -492,6 +515,22 @@ namespace javelin::app
 
     void DaemonTrayController::SecondaryActivate(const int, const int)
     {
+    }
+
+    void DaemonTrayController::requestToolTipUpdate()
+    {
+        if (m_toolTipUpdateTimer.interval() <= 0)
+        {
+            updateToolTip();
+            return;
+        }
+        if (m_toolTipUpdateTimer.isActive())
+        {
+            m_toolTipUpdatePending = true;
+            return;
+        }
+        updateToolTip();
+        m_toolTipUpdateTimer.start();
     }
 
     void DaemonTrayController::updateToolTip()
