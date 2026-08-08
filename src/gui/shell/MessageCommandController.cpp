@@ -402,6 +402,90 @@ namespace javelin::gui::shell
             });
     }
 
+    void MessageCommandController::setSelectionJunk(std::optional<std::string> accountId,
+                                                    std::optional<std::string> sourceMailboxId,
+                                                    const bool junk)
+    {
+        if (!accountId.has_value())
+        {
+            Q_EMIT statusMessage(i18n("Select a message to classify."), 3000);
+            return;
+        }
+
+        auto selection = selectedActionItems();
+        if (selection.empty())
+        {
+            Q_EMIT statusMessage(i18n("Select a message to classify."), 3000);
+            return;
+        }
+        queueJunk(std::move(*accountId), std::move(sourceMailboxId), std::move(selection), junk);
+    }
+
+    void MessageCommandController::setEmailJunk(std::string accountId,
+                                                std::optional<std::string> sourceMailboxId,
+                                                std::string emailId, const bool junk)
+    {
+        if (accountId.empty() || emailId.empty())
+        {
+            return;
+        }
+        javelin::app::MessageSelection selection;
+        selection.emplace_back(javelin::app::SelectedEmail{.emailId = std::move(emailId)});
+        queueJunk(std::move(accountId), std::move(sourceMailboxId), std::move(selection), junk);
+    }
+
+    void MessageCommandController::queueJunk(std::string accountId,
+                                             std::optional<std::string> sourceMailboxId,
+                                             javelin::app::MessageSelection selection,
+                                             const bool junk)
+    {
+        qCInfo(logMessageCommands) << (junk ? "junk requested" : "not junk requested")
+                                   << selection.size() << "selection item(s)";
+        auto task = m_mailCommandPort.queueMailboxSelectionMutation(
+            javelin::app::MailboxSelectionMutationIntent{
+                .accountId = accountId,
+                .selection = std::move(selection),
+                .operation = junk ? javelin::app::MailboxSelectionOperation::Junk
+                                  : javelin::app::MailboxSelectionOperation::NotJunk,
+                .sourceMailboxId = std::move(sourceMailboxId),
+                .destinationMailboxId = std::nullopt,
+            });
+        QCoro::connect(
+            std::move(task), this,
+            [this, accountId = std::move(accountId),
+             junk](javelin::app::QueuedMailboxSelectionMutationResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    Q_EMIT operationFailed(*error);
+                    return;
+                }
+
+                const auto& summary =
+                    std::get<javelin::app::QueuedMailboxSelectionMutation>(result);
+                if (summary.queuedEmailCount == 0 || summary.queuedMutations.empty())
+                {
+                    Q_EMIT statusMessage(junk ? i18n("Already marked as junk.")
+                                              : i18n("Already marked as not junk."),
+                                         5000);
+                    return;
+                }
+
+                Q_EMIT junkStateChanged(QString::fromStdString(accountId));
+                Q_EMIT statusMessage(
+                    summary.queuedEmailCount == 1
+                        ? (junk ? i18n("Marked as junk.") : i18n("Marked as not junk."))
+                        : (junk ? i18np("Marked %1 message as junk.", "Marked %1 messages as junk.",
+                                        summary.queuedEmailCount)
+                                : i18np("Marked %1 message as not junk.",
+                                        "Marked %1 messages as not junk.",
+                                        summary.queuedEmailCount)),
+                    5000);
+                submitQueuedMutations(accountId,
+                                      summary.queuedMutations.front().patch.operationGroupId);
+            });
+    }
+
     void MessageCommandController::queueArchive(std::string accountId,
                                                 std::optional<std::string> sourceMailboxId,
                                                 javelin::app::MessageSelection selection)

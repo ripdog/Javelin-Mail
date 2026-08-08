@@ -310,6 +310,13 @@ namespace javelin::jmap::cache
                 "rt.sent_at, "
                 "rt.thread_message_count, rt.thread_has_attachment, rt.thread_has_unread, "
                 "rt.thread_has_flagged, "
+                "EXISTS(SELECT 1 FROM email_mailboxes junk_membership "
+                "INNER JOIN mailboxes junk_mailbox "
+                "ON junk_mailbox.account_id=junk_membership.account_id "
+                "AND junk_mailbox.mailbox_id=junk_membership.mailbox_id "
+                "WHERE junk_membership.account_id=:account_id "
+                "AND junk_membership.email_id=rt.email_id AND junk_mailbox.role='junk') "
+                "AS is_junk, "
                 "("
                 "  SELECT a.display_name FROM email_addresses a "
                 "  WHERE a.account_id = :account_id AND a.email_id = rt.email_id AND a.field_name "
@@ -364,13 +371,14 @@ namespace javelin::jmap::cache
                 .mailboxNames = {},
             };
 
-            if (!query.value(11).isNull())
+            item.isJunk = query.value(10).toInt() != 0;
+            if (!query.value(12).isNull())
             {
                 item.from = javelin::jmap::domain::EmailAddress{
-                    .name = query.value(10).isNull()
+                    .name = query.value(11).isNull()
                                 ? std::nullopt
-                                : std::optional{query.value(10).toString().toStdString()},
-                    .email = query.value(11).toString().toStdString(),
+                                : std::optional{query.value(11).toString().toStdString()},
+                    .email = query.value(12).toString().toStdString(),
                 };
             }
 
@@ -550,6 +558,12 @@ namespace javelin::jmap::cache
                 ") SELECT rt.email_id,rt.thread_id,rt.subject,rt.preview,rt.received_at,"
                 "rt.sent_at,rt.thread_message_count,rt.thread_has_attachment,"
                 "rt.thread_has_unread,rt.thread_has_flagged,"
+                "EXISTS(SELECT 1 FROM email_mailboxes junk_membership "
+                "INNER JOIN mailboxes junk_mailbox "
+                "ON junk_mailbox.account_id=junk_membership.account_id "
+                "AND junk_mailbox.mailbox_id=junk_membership.mailbox_id "
+                "WHERE junk_membership.account_id=:account_id "
+                "AND junk_membership.email_id=rt.email_id AND junk_mailbox.role='junk'),"
                 "(SELECT a.display_name FROM email_addresses a WHERE a.account_id=:account_id "
                 " AND a.email_id=rt.email_id AND a.field_name='from' ORDER BY a.position LIMIT 1),"
                 "(SELECT a.address FROM email_addresses a WHERE a.account_id=:account_id "
@@ -590,13 +604,14 @@ namespace javelin::jmap::cache
                 .from = std::nullopt,
                 .mailboxNames = {},
             };
-            if (!query.value(11).isNull())
+            item.isJunk = query.value(10).toInt() != 0;
+            if (!query.value(12).isNull())
             {
                 item.from = javelin::jmap::domain::EmailAddress{
-                    .name = query.value(10).isNull()
+                    .name = query.value(11).isNull()
                                 ? std::nullopt
-                                : std::optional{query.value(10).toString().toStdString()},
-                    .email = query.value(11).toString().toStdString(),
+                                : std::optional{query.value(11).toString().toStdString()},
+                    .email = query.value(12).toString().toStdString(),
                 };
             }
             items.push_back(std::move(item));
@@ -646,6 +661,13 @@ namespace javelin::jmap::cache
             "ELSE 0 END) AS thread_has_unread, "
             "       COALESCE(thread_flags.thread_has_flagged, CASE WHEN flagged.email_id IS NULL "
             "THEN 0 ELSE 1 END) AS thread_has_flagged, "
+            "       EXISTS(SELECT 1 FROM email_mailboxes junk_membership "
+            "         INNER JOIN mailboxes junk_mailbox "
+            "           ON junk_mailbox.account_id=junk_membership.account_id "
+            "          AND junk_mailbox.mailbox_id=junk_membership.mailbox_id "
+            "         WHERE junk_membership.account_id=:account_id "
+            "           AND junk_membership.email_id=e.email_id "
+            "           AND junk_mailbox.role='junk') AS is_junk, "
             "       ("
             "         SELECT a.display_name FROM email_addresses a "
             "         WHERE a.account_id = :account_id AND a.email_id = e.email_id "
@@ -730,17 +752,18 @@ namespace javelin::jmap::cache
                 .mailboxNames = {},
             };
 
-            if (!query.value(11).isNull())
+            item.isJunk = query.value(10).toInt() != 0;
+            if (!query.value(12).isNull())
             {
                 item.from = javelin::jmap::domain::EmailAddress{
-                    .name = query.value(10).isNull()
+                    .name = query.value(11).isNull()
                                 ? std::nullopt
-                                : std::optional{query.value(10).toString().toStdString()},
-                    .email = query.value(11).toString().toStdString(),
+                                : std::optional{query.value(11).toString().toStdString()},
+                    .email = query.value(12).toString().toStdString(),
                 };
             }
 
-            if (const auto mailboxNamesJson = query.value(12).toString().toStdString();
+            if (const auto mailboxNamesJson = query.value(13).toString().toStdString();
                 !mailboxNamesJson.empty())
             {
                 static_cast<void>(glz::read_json(item.mailboxNames, mailboxNamesJson));
@@ -1098,6 +1121,13 @@ namespace javelin::jmap::cache
             "       1 AS thread_message_count, e.has_attachment, "
             "       CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END AS is_unread, "
             "       CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END AS is_flagged, "
+            "       EXISTS(SELECT 1 FROM email_mailboxes junk_membership "
+            "         INNER JOIN mailboxes junk_mailbox "
+            "           ON junk_mailbox.account_id=junk_membership.account_id "
+            "          AND junk_mailbox.mailbox_id=junk_membership.mailbox_id "
+            "         WHERE junk_membership.account_id=:account_id "
+            "           AND junk_membership.email_id=e.email_id "
+            "           AND junk_mailbox.role='junk') AS is_junk, "
             "       ("
             "         SELECT a.display_name FROM email_addresses a "
             "         WHERE a.account_id = :account_id AND a.email_id = e.email_id "
@@ -1153,13 +1183,14 @@ namespace javelin::jmap::cache
                 .mailboxNames = {},
             };
 
-            if (!query.value(11).isNull())
+            item.isJunk = query.value(10).toInt() != 0;
+            if (!query.value(12).isNull())
             {
                 item.from = javelin::jmap::domain::EmailAddress{
-                    .name = query.value(10).isNull()
+                    .name = query.value(11).isNull()
                                 ? std::nullopt
-                                : std::optional{query.value(10).toString().toStdString()},
-                    .email = query.value(11).toString().toStdString(),
+                                : std::optional{query.value(11).toString().toStdString()},
+                    .email = query.value(12).toString().toStdString(),
                 };
             }
 
@@ -1185,6 +1216,13 @@ namespace javelin::jmap::cache
             "       1 AS thread_message_count, e.has_attachment, "
             "       CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END AS is_unread, "
             "       CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END AS is_flagged, "
+            "       EXISTS(SELECT 1 FROM email_mailboxes junk_membership "
+            "         INNER JOIN mailboxes junk_mailbox "
+            "           ON junk_mailbox.account_id=junk_membership.account_id "
+            "          AND junk_mailbox.mailbox_id=junk_membership.mailbox_id "
+            "         WHERE junk_membership.account_id=:account_id "
+            "           AND junk_membership.email_id=e.email_id "
+            "           AND junk_mailbox.role='junk') AS is_junk, "
             "       ("
             "         SELECT a.display_name FROM email_addresses a "
             "         WHERE a.account_id = :account_id AND a.email_id = e.email_id "
@@ -1244,13 +1282,14 @@ namespace javelin::jmap::cache
                 .mailboxNames = {},
             };
 
-            if (!query.value(11).isNull())
+            item.isJunk = query.value(10).toInt() != 0;
+            if (!query.value(12).isNull())
             {
                 item.from = javelin::jmap::domain::EmailAddress{
-                    .name = query.value(10).isNull()
+                    .name = query.value(11).isNull()
                                 ? std::nullopt
-                                : std::optional{query.value(10).toString().toStdString()},
-                    .email = query.value(11).toString().toStdString(),
+                                : std::optional{query.value(11).toString().toStdString()},
+                    .email = query.value(12).toString().toStdString(),
                 };
             }
 

@@ -26,6 +26,7 @@ namespace javelin::gui::shell
         bool editDraft = false;
         bool archive = false;
         bool markUnread = false;
+        bool junk = false;
         bool deleteFromMailbox = false;
         bool permanentDelete = false;
         bool move = false;

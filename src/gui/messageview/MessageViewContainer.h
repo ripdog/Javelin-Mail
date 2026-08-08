@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_set>
 
 class QLabel;
 class QEvent;
@@ -56,7 +57,8 @@ namespace javelin::gui::messageview
 
         void setSelection(javelin::jmap::cache::MessageViewReader& messageViewReader,
                           std::optional<std::string> accountId,
-                          std::optional<std::string> mailboxId, std::optional<std::string> emailId);
+                          std::optional<std::string> mailboxId, std::optional<std::string> emailId,
+                          std::optional<std::string> junkMailboxId);
         void setMultipleSelection(std::optional<std::string> accountId,
                                   std::optional<std::string> mailboxId,
                                   std::vector<javelin::jmap::cache::MessageListItem> messages);
@@ -73,6 +75,7 @@ namespace javelin::gui::messageview
         void messageActivated(QString emailId);
         void hoveredLinkChanged(QString url);
         void contentRequired(QString accountId, QString emailId);
+        void notJunkRequested(QString accountId, QString mailboxId, QString emailId);
 
       private:
         enum class ActiveView
@@ -89,6 +92,7 @@ namespace javelin::gui::messageview
         void updatePresentation(bool reloadBody = true);
         void updateSenderRemoteContentPermit();
         void updateRemoteContentButton();
+        void updateJunkBanner();
         void updateLanguageBanner();
         void startLanguageDetection();
         void translateCurrentMessage();
@@ -109,12 +113,15 @@ namespace javelin::gui::messageview
         [[nodiscard]] QString currentSenderAddress() const;
         [[nodiscard]] QString currentSenderDomain() const;
         [[nodiscard]] QString contactAwareSenderLabel() const;
+        [[nodiscard]] std::string junkBannerKey() const;
+        [[nodiscard]] QString serverDisplayName() const;
         void changeEvent(QEvent* event) override;
         void resizeEvent(QResizeEvent* event) override;
 
         std::optional<std::string> m_accountId;
         std::optional<std::string> m_mailboxId;
         std::optional<std::string> m_emailId;
+        std::optional<std::string> m_junkMailboxId;
         std::vector<javelin::jmap::cache::MessageListItem> m_multipleMessages;
         std::optional<javelin::jmap::cache::MessageViewSnapshot> m_snapshot;
         bool m_loading = false;
@@ -137,6 +144,11 @@ namespace javelin::gui::messageview
         QToolButton* m_permitSenderRemoteContentButton = nullptr;
         QToolButton* m_permitDomainRemoteContentButton = nullptr;
         QToolButton* m_remoteContentButton = nullptr;
+        QWidget* m_junkBannerWidget = nullptr;
+        QLabel* m_junkIconLabel = nullptr;
+        QLabel* m_junkStatusLabel = nullptr;
+        QToolButton* m_notJunkButton = nullptr;
+        QToolButton* m_closeJunkBannerButton = nullptr;
         QWidget* m_languageBannerWidget = nullptr;
         QLabel* m_languageStatusLabel = nullptr;
         QToolButton* m_translateButton = nullptr;
@@ -170,6 +182,7 @@ namespace javelin::gui::messageview
         std::optional<javelin::gui::translation::LanguageDetectionResult> m_languageDetection;
         bool m_shouldOfferTranslation = false;
         bool m_htmlDocumentLoaded = false;
+        std::unordered_set<std::string> m_dismissedJunkBanners;
     };
 
 } // namespace javelin::gui::messageview

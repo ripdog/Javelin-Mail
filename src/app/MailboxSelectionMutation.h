@@ -20,6 +20,8 @@ namespace javelin::app
         Move,
         Copy,
         Archive,
+        Junk,
+        NotJunk,
     };
 
     struct MailboxSelectionMutationIntent

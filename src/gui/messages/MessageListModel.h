@@ -37,6 +37,7 @@ namespace javelin::gui::messages
             HasAttachmentRole,
             IsUnreadRole,
             IsFlaggedRole,
+            IsJunkRole,
             ThreadMessageCountRole,
             RowKindRole,
             IsExpandedRole,

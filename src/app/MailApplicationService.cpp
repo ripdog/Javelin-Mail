@@ -1037,16 +1037,34 @@ namespace javelin::app
 
         const auto& mailboxes =
             std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(mailboxesResult);
-        const auto destination =
-            intent.destinationMailboxId.has_value()
-                ? std::ranges::find(mailboxes, *intent.destinationMailboxId,
-                                    &javelin::jmap::cache::MailboxTreeItem::id)
-                : std::ranges::find(mailboxes, std::optional<std::string>{"archive"},
-                                    &javelin::jmap::cache::MailboxTreeItem::role);
+        const auto destination = [&mailboxes, &intent]
+        {
+            if (intent.destinationMailboxId.has_value())
+            {
+                return std::ranges::find(mailboxes, *intent.destinationMailboxId,
+                                         &javelin::jmap::cache::MailboxTreeItem::id);
+            }
+            const auto role = intent.operation == MailboxSelectionOperation::Archive
+                                  ? std::optional<std::string>{"archive"}
+                              : intent.operation == MailboxSelectionOperation::Junk
+                                  ? std::optional<std::string>{"junk"}
+                              : intent.operation == MailboxSelectionOperation::NotJunk
+                                  ? std::optional<std::string>{"inbox"}
+                                  : std::optional<std::string>{std::nullopt};
+            return std::ranges::find(mailboxes, role, &javelin::jmap::cache::MailboxTreeItem::role);
+        }();
         QString label;
         if (intent.operation == MailboxSelectionOperation::Archive)
         {
             label = messageCountLabel(QStringLiteral("Archive"), queuedEmailCount);
+        }
+        else if (intent.operation == MailboxSelectionOperation::Junk)
+        {
+            label = messageCountLabel(QStringLiteral("Mark Junk"), queuedEmailCount);
+        }
+        else if (intent.operation == MailboxSelectionOperation::NotJunk)
+        {
+            label = messageCountLabel(QStringLiteral("Mark Not Junk"), queuedEmailCount);
         }
         else
         {

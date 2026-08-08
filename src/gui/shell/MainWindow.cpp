@@ -703,8 +703,7 @@ namespace javelin::gui::shell
             }
         }
 
-        m_messageViewContainer->setSelection(m_messageViewReader, route.accountId, route.mailboxId,
-                                             route.emailId);
+        setMessageViewSelection(route.accountId, route.mailboxId, route.emailId);
     }
 
     void MainWindow::createActions()
@@ -847,6 +846,17 @@ namespace javelin::gui::shell
                                                                     activeMailboxId());
                 });
         actionCollection()->addAction(QStringLiteral("mark_email_unread"), m_markUnreadAction);
+
+        m_junkAction =
+            new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/spam.svg")),
+                        i18nc("@action", "&Junk"), this);
+        connect(m_junkAction, &QAction::triggered, this,
+                [this]
+                {
+                    m_messageCommandController->setSelectionJunk(
+                        activeAccountId(), activeMailboxId(), !selectedMessagesAreJunk());
+                });
+        actionCollection()->addAction(QStringLiteral("toggle_email_junk"), m_junkAction);
 
         m_deleteAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/delete.svg")),
@@ -1234,6 +1244,17 @@ namespace javelin::gui::shell
                     refreshMessageListPreservingSelection();
                     refreshSelectionFromModels();
                 });
+        connect(m_messageCommandController, &MessageCommandController::junkStateChanged, this,
+                [this](const QString& accountId)
+                {
+                    markSearchTabsStaleForAccount(accountId.toStdString());
+                    refreshMessageListPreservingSelection();
+                    refreshSelectionFromModels();
+                    m_messageViewContainer->refresh(m_messageViewReader);
+                    updateEmptyStates();
+                    updateMessageListHeader();
+                    updateMessageActions();
+                });
         connect(m_messageCommandController, &MessageCommandController::emailMarkedRead, this,
                 [this](const QString& accountId, const QString& emailId)
                 {
@@ -1392,6 +1413,16 @@ namespace javelin::gui::shell
         connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::viewSourceRequested, this,
                 &MainWindow::viewSelectedMessageSource);
+        connect(m_messageViewContainer,
+                &javelin::gui::messageview::MessageViewContainer::notJunkRequested, this,
+                [this](const QString& accountId, const QString& mailboxId, const QString& emailId)
+                {
+                    m_messageCommandController->setEmailJunk(
+                        accountId.toStdString(),
+                        mailboxId.isEmpty() ? std::optional<std::string>{std::nullopt}
+                                            : std::optional<std::string>{mailboxId.toStdString()},
+                        emailId.toStdString(), false);
+                });
         connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::messageActivated, this,
                 [this](const QString& emailId)
@@ -1556,16 +1587,14 @@ namespace javelin::gui::shell
         const bool allowSearchSelection = activeTabIsSearch() && accountId.has_value();
         if (!accountId.has_value() || (!mailboxId.has_value() && !allowSearchSelection))
         {
-            m_messageViewContainer->setSelection(m_messageViewReader, accountId, mailboxId,
-                                                 std::nullopt);
+            setMessageViewSelection(accountId, mailboxId, std::nullopt);
             updateMessageActions();
             return;
         }
 
         if (!current.isValid())
         {
-            m_messageViewContainer->setSelection(m_messageViewReader, accountId, mailboxId,
-                                                 std::nullopt);
+            setMessageViewSelection(accountId, mailboxId, std::nullopt);
             updateMessageActions();
             return;
         }
@@ -1592,10 +1621,10 @@ namespace javelin::gui::shell
                                    }
                                });
         }
-        m_messageViewContainer->setSelection(
-            m_messageViewReader, accountId, mailboxId,
-            emailId.isEmpty() ? std::optional<std::string>{std::nullopt}
-                              : std::optional<std::string>{emailId.toStdString()});
+        setMessageViewSelection(accountId, mailboxId,
+                                emailId.isEmpty()
+                                    ? std::optional<std::string>{std::nullopt}
+                                    : std::optional<std::string>{emailId.toStdString()});
         updateEmptyStates();
         updateMessageListHeader();
         updateMessageActions();
@@ -2051,8 +2080,7 @@ namespace javelin::gui::shell
             const auto plan = planTabActivation({});
             m_activeTabIndex.reset();
             m_messageModel->clear();
-            m_messageViewContainer->setSelection(m_messageViewReader, std::nullopt, std::nullopt,
-                                                 std::nullopt);
+            setMessageViewSelection(std::nullopt, std::nullopt, std::nullopt);
             if (m_contentStack != nullptr)
                 m_contentStack->setCurrentIndex(0);
             if (m_mailboxPane != nullptr)
@@ -2221,8 +2249,7 @@ namespace javelin::gui::shell
             if (plan.clearMessagePresentation)
             {
                 m_messageModel->clear();
-                m_messageViewContainer->setSelection(m_messageViewReader, std::nullopt,
-                                                     std::nullopt, std::nullopt);
+                setMessageViewSelection(std::nullopt, std::nullopt, std::nullopt);
             }
             updateMessageActions();
             metrics.finish(QStringLiteral("cache_miss"));
@@ -2636,6 +2663,31 @@ namespace javelin::gui::shell
         loadActiveTabFromCache(true);
     }
 
+    void MainWindow::setMessageViewSelection(std::optional<std::string> accountId,
+                                             std::optional<std::string> mailboxId,
+                                             std::optional<std::string> emailId)
+    {
+        std::optional<std::string> junkMailboxId;
+        if (accountId.has_value() && m_mailboxModel != nullptr)
+        {
+            const auto junkIndex = javelin::gui::mailboxes::findMailboxIndexForRole(
+                *m_mailboxModel, QString::fromStdString(*accountId), QStringLiteral("junk"));
+            if (junkIndex.isValid())
+            {
+                const auto id =
+                    junkIndex.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxIdRole)
+                        .toString();
+                if (!id.isEmpty())
+                {
+                    junkMailboxId = id.toStdString();
+                }
+            }
+        }
+        m_messageViewContainer->setSelection(m_messageViewReader, std::move(accountId),
+                                             std::move(mailboxId), std::move(emailId),
+                                             std::move(junkMailboxId));
+    }
+
     void MainWindow::refreshSelectionFromModels()
     {
         if (activeTabIsCompose())
@@ -2663,15 +2715,14 @@ namespace javelin::gui::shell
         {
             if (const auto* route = m_messageNavigationController->activeRoute(activeTab()))
             {
-                m_messageViewContainer->setSelection(m_messageViewReader, route->accountId,
-                                                     route->mailboxId, route->emailId);
+                setMessageViewSelection(route->accountId, route->mailboxId, route->emailId);
                 updateEmptyStates();
                 updateMessageListHeader();
                 updateMessageActions();
                 return;
             }
         }
-        m_messageViewContainer->setSelection(m_messageViewReader, accountId, mailboxId, emailId);
+        setMessageViewSelection(accountId, mailboxId, emailId);
         m_messageSelectionController->syncTabSelection(activeTab());
         updateEmptyStates();
         updateMessageListHeader();
@@ -2744,11 +2795,37 @@ namespace javelin::gui::shell
         m_editDraftAction->setEnabled(actions.editDraft);
         m_archiveAction->setEnabled(actions.archive);
         m_markUnreadAction->setEnabled(actions.markUnread);
+        m_junkAction->setEnabled(actions.junk);
+        m_junkAction->setText(selectedMessagesAreJunk() ? i18nc("@action", "Not &Junk")
+                                                        : i18nc("@action", "&Junk"));
         m_deleteAction->setEnabled(actions.deleteFromMailbox);
         m_permanentDeleteAction->setEnabled(actions.permanentDelete);
         m_moveAction->setEnabled(actions.move);
         m_copyAction->setEnabled(actions.copy);
         m_viewSourceAction->setEnabled(actions.viewSource);
+    }
+
+    bool MainWindow::selectedMessagesAreJunk() const
+    {
+        const auto* selectionModel = m_messageView->selectionModel();
+        if (selectionModel == nullptr)
+        {
+            return false;
+        }
+
+        auto rows = selectionModel->selectedRows();
+        if (rows.empty() && m_messageView->currentIndex().isValid())
+        {
+            rows.push_back(m_messageView->currentIndex());
+        }
+        return !rows.empty() &&
+               std::ranges::all_of(
+                   rows,
+                   [](const QModelIndex& index)
+                   {
+                       return index.data(javelin::gui::messages::MessageListModel::IsJunkRole)
+                           .toBool();
+                   });
     }
 
     void MainWindow::updateSortButton()
@@ -2865,6 +2942,7 @@ namespace javelin::gui::shell
         m_editDraftAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/draft.svg")));
         m_archiveAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/archive.svg")));
         m_markUnreadAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/unread.svg")));
+        m_junkAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/spam.svg")));
         m_deleteAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/delete.svg")));
         m_advancedSearchAction->setIcon(
             icon(QStringLiteral(":/icons/thunderbird-icons/search.svg")));
@@ -3179,6 +3257,7 @@ namespace javelin::gui::shell
                                                                QItemSelectionModel::Rows);
             m_messageView->setCurrentIndex(index);
         }
+        updateMessageActions();
         const auto selection = m_messageCommandController->selectedActionItems();
         const auto draftsMailbox = findMailboxByRole(m_mailboxReader, *accountId, "drafts");
         const bool activeMailboxIsDrafts = sourceMailboxId.has_value() &&
@@ -3213,6 +3292,7 @@ namespace javelin::gui::shell
                 menu.addAction(m_deleteAction);
                 menu.addAction(m_permanentDeleteAction);
             }
+            menu.addAction(m_junkAction);
             menu.addSeparator();
             auto* moveMenu = menu.addMenu(i18n("Move to"));
             auto* copyMenu = menu.addMenu(i18n("Copy to"));

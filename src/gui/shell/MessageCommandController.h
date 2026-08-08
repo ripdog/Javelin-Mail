@@ -71,12 +71,17 @@ namespace javelin::gui::shell
         void toggleFlagged(std::optional<std::string> accountId, const QModelIndex& index);
         void markSelectionUnread(std::optional<std::string> accountId,
                                  std::optional<std::string> sourceMailboxId);
+        void setSelectionJunk(std::optional<std::string> accountId,
+                              std::optional<std::string> sourceMailboxId, bool junk);
+        void setEmailJunk(std::string accountId, std::optional<std::string> sourceMailboxId,
+                          std::string emailId, bool junk);
 
       Q_SIGNALS:
         void statusMessage(QString message, int durationMilliseconds);
         void operationFailed(javelin::jmap::OperationError error);
         void mailboxMembershipChanged(QString accountId);
         void messageMetadataChanged(QString accountId);
+        void junkStateChanged(QString accountId);
         void emailMarkedRead(QString accountId, QString emailId);
         void emailMutationsSubmitted(const EmailMutationSubmissionSummary& summary);
 
@@ -87,6 +92,8 @@ namespace javelin::gui::shell
                          javelin::app::MessageSelection selection);
         void queueDestroy(std::string accountId, std::optional<std::string> sourceMailboxId,
                           javelin::app::MessageSelection selection);
+        void queueJunk(std::string accountId, std::optional<std::string> sourceMailboxId,
+                       javelin::app::MessageSelection selection, bool junk);
         void submitQueuedMutations(std::string accountId,
                                    std::optional<std::string> operationGroupId);
         [[nodiscard]] bool confirmPermanentDelete(std::size_t selectionItemCount) const;

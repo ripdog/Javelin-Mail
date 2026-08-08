@@ -38,6 +38,7 @@
 #include <QTextBrowser>
 #include <QTextDocument>
 #include <QToolButton>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -483,6 +484,66 @@ namespace javelin::gui::messageview
         buttonLayout->addWidget(m_permitDomainRemoteContentButton);
         buttonLayout->addWidget(m_remoteContentButton);
 
+        m_junkBannerWidget = new QWidget(this);
+        m_junkBannerWidget->setObjectName(QStringLiteral("junkBanner"));
+        m_junkBannerWidget->setStyleSheet(QStringLiteral(
+            "QWidget#junkBanner { background: palette(alternate-base); border: 1px solid "
+            "palette(mid); border-radius: 6px; }"
+            "QWidget#junkBanner QLabel { border: 0; background: transparent; }"
+            "QWidget#junkBanner QToolButton { border: 1px solid palette(mid); border-radius: 4px; "
+            "padding: 4px 8px; }"));
+        auto* junkLayout = new QHBoxLayout(m_junkBannerWidget);
+        junkLayout->setContentsMargins(8, 6, 8, 6);
+        junkLayout->setSpacing(8);
+
+        m_junkIconLabel = new QLabel(m_junkBannerWidget);
+        m_junkIconLabel->setPixmap(
+            javelin::gui::themedSvgPixmap(QStringLiteral(":/icons/thunderbird-icons/spam.svg"),
+                                          palette().color(QPalette::Active, QPalette::Text), 18));
+        m_junkIconLabel->setFixedSize(20, 20);
+        m_junkIconLabel->setAlignment(Qt::AlignCenter);
+
+        m_junkStatusLabel = new QLabel(m_junkBannerWidget);
+        m_junkStatusLabel->setWordWrap(true);
+        makeLabelSelectable(m_junkStatusLabel);
+
+        m_notJunkButton = new QToolButton(m_junkBannerWidget);
+        m_notJunkButton->setText(i18nc("@action:button", "Not Junk"));
+        connect(m_notJunkButton, &QToolButton::clicked, this,
+                [this]
+                {
+                    if (!m_accountId.has_value() || !m_emailId.has_value())
+                    {
+                        return;
+                    }
+                    Q_EMIT notJunkRequested(
+                        QString::fromStdString(*m_accountId),
+                        m_mailboxId.has_value() ? QString::fromStdString(*m_mailboxId) : QString{},
+                        QString::fromStdString(*m_emailId));
+                });
+
+        m_closeJunkBannerButton = new QToolButton(m_junkBannerWidget);
+        m_closeJunkBannerButton->setAutoRaise(true);
+        m_closeJunkBannerButton->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
+        m_closeJunkBannerButton->setToolTip(i18nc("@info:tooltip", "Close"));
+        connect(m_closeJunkBannerButton, &QToolButton::clicked, this,
+                [this]
+                {
+                    const auto key = junkBannerKey();
+                    if (!key.empty())
+                    {
+                        m_dismissedJunkBanners.insert(key);
+                    }
+                    updateJunkBanner();
+                });
+
+        junkLayout->addWidget(m_junkIconLabel);
+        junkLayout->addWidget(m_junkStatusLabel);
+        junkLayout->addStretch(1);
+        junkLayout->addWidget(m_notJunkButton);
+        junkLayout->addWidget(m_closeJunkBannerButton);
+        m_junkBannerWidget->setVisible(false);
+
         m_languageBannerWidget = new QWidget(this);
         auto* languageLayout = new QHBoxLayout(m_languageBannerWidget);
         languageLayout->setContentsMargins(8, 6, 8, 6);
@@ -684,6 +745,7 @@ namespace javelin::gui::messageview
         layout->addWidget(headerWidget);
         layout->addWidget(m_bodyControlsWidget);
         layout->addWidget(m_languageBannerWidget);
+        layout->addWidget(m_junkBannerWidget);
         layout->addWidget(m_bodyStack, 1);
         layout->addWidget(m_attachmentHeaderWidget);
 
@@ -739,6 +801,9 @@ namespace javelin::gui::messageview
         m_remoteContentIconLabel->setPixmap(javelin::gui::themedSvgPixmap(
             QStringLiteral(":/icons/thunderbird-icons/remote-blocked.svg"),
             palette().color(QPalette::Active, QPalette::HighlightedText), 18));
+        m_junkIconLabel->setPixmap(
+            javelin::gui::themedSvgPixmap(QStringLiteral(":/icons/thunderbird-icons/spam.svg"),
+                                          palette().color(QPalette::Active, QPalette::Text), 18));
     }
 
     void MessageViewContainer::translationSettingsChanged()
@@ -777,13 +842,13 @@ namespace javelin::gui::messageview
         startLanguageDetection();
     }
 
-    void
-    MessageViewContainer::setSelection(javelin::jmap::cache::MessageViewReader& messageViewReader,
-                                       std::optional<std::string> accountId,
-                                       std::optional<std::string> mailboxId,
-                                       std::optional<std::string> emailId)
+    void MessageViewContainer::setSelection(
+        javelin::jmap::cache::MessageViewReader& messageViewReader,
+        std::optional<std::string> accountId, std::optional<std::string> mailboxId,
+        std::optional<std::string> emailId, std::optional<std::string> junkMailboxId)
     {
-        if (m_accountId == accountId && m_mailboxId == mailboxId && m_emailId == emailId)
+        if (m_accountId == accountId && m_mailboxId == mailboxId && m_emailId == emailId &&
+            m_junkMailboxId == junkMailboxId)
         {
             return;
         }
@@ -792,6 +857,7 @@ namespace javelin::gui::messageview
         m_accountId = std::move(accountId);
         m_mailboxId = std::move(mailboxId);
         m_emailId = std::move(emailId);
+        m_junkMailboxId = std::move(junkMailboxId);
         m_multipleMessages.clear();
         m_attachmentsExpanded = false;
         ++m_translationRequestToken;
@@ -821,6 +887,7 @@ namespace javelin::gui::messageview
         m_accountId = std::move(accountId);
         m_mailboxId = std::move(mailboxId);
         m_emailId = std::nullopt;
+        m_junkMailboxId = std::nullopt;
         m_multipleMessages = std::move(messages);
         m_attachmentsExpanded = false;
         ++m_translationRequestToken;
@@ -920,6 +987,7 @@ namespace javelin::gui::messageview
         m_activeView = view;
         updateSenderRemoteContentPermit();
         updateRemoteContentButton();
+        updateJunkBanner();
         updateLanguageBanner();
 
         switch (m_activeView)
@@ -1009,6 +1077,53 @@ namespace javelin::gui::messageview
         m_remoteContentButton->setText(m_htmlView->remoteContentEnabled()
                                            ? i18n("Hide remote content")
                                            : i18n("Load remote content"));
+    }
+
+    std::string MessageViewContainer::junkBannerKey() const
+    {
+        if (!m_accountId.has_value() || !m_emailId.has_value())
+        {
+            return {};
+        }
+        return *m_accountId + '\n' + *m_emailId;
+    }
+
+    QString MessageViewContainer::serverDisplayName() const
+    {
+        if (!m_accountId.has_value())
+        {
+            return i18n("Server");
+        }
+
+        const auto accountId = QString::fromStdString(*m_accountId);
+        const auto account = m_settings.accountForCachedId(accountId);
+        auto name = QUrl{account.sessionUrl}.host();
+        if (name.isEmpty())
+        {
+            name = account.displayName.trimmed();
+        }
+        if (name.isEmpty())
+        {
+            name = account.loginEmail.trimmed();
+        }
+        return name.isEmpty() ? i18n("Server") : name;
+    }
+
+    void MessageViewContainer::updateJunkBanner()
+    {
+        const auto key = junkBannerKey();
+        const bool isJunk = m_snapshot.has_value() && m_junkMailboxId.has_value() &&
+                            std::ranges::contains(m_snapshot->email.mailboxIds, *m_junkMailboxId);
+        const bool dismissed = !key.empty() && m_dismissedJunkBanners.contains(key);
+        const bool shouldShow = isJunk && !dismissed;
+        m_junkBannerWidget->setVisible(shouldShow);
+        if (!shouldShow)
+        {
+            m_junkStatusLabel->clear();
+            return;
+        }
+
+        m_junkStatusLabel->setText(i18n("%1 marked this email as Junk.", serverDisplayName()));
     }
 
     void MessageViewContainer::updateLanguageBanner()
@@ -1383,6 +1498,7 @@ namespace javelin::gui::messageview
         rebuildMultipleSelectionRows();
         updateAttachmentSection();
         updateRemoteContentButton();
+        updateJunkBanner();
         updateLanguageBanner();
         m_loadingIndicator->setVisible(false);
         m_placeholderDetailLabel->setVisible(true);

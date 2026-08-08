@@ -78,6 +78,7 @@ namespace javelin::gui::search
             object.insert(QStringLiteral("hasAttachment"), item.hasAttachment);
             object.insert(QStringLiteral("isUnread"), item.isUnread);
             object.insert(QStringLiteral("isFlagged"), item.isFlagged);
+            object.insert(QStringLiteral("isJunk"), item.isJunk);
             if (item.from.has_value())
             {
                 object.insert(QStringLiteral("from"), serializeEmailAddress(*item.from));
@@ -135,6 +136,7 @@ namespace javelin::gui::search
                 .hasAttachment = object.value(QStringLiteral("hasAttachment")).toBool(false),
                 .isUnread = object.value(QStringLiteral("isUnread")).toBool(false),
                 .isFlagged = object.value(QStringLiteral("isFlagged")).toBool(false),
+                .isJunk = object.value(QStringLiteral("isJunk")).toBool(false),
                 .from = deserializeEmailAddress(object.value(QStringLiteral("from"))),
                 .mailboxNames = std::move(mailboxNames),
             };

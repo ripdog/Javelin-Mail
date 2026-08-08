@@ -29,6 +29,7 @@ namespace javelin::jmap::cache
         bool hasAttachment = false;
         bool isUnread = false;
         bool isFlagged = false;
+        bool isJunk = false;
         std::optional<javelin::jmap::domain::EmailAddress> from;
         std::vector<std::string> mailboxNames;
     };

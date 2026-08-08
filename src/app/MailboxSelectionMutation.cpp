@@ -48,6 +48,12 @@ namespace javelin::app
             return i18n("You do not have permission to remove messages from %1.",
                         QString::fromStdString(mailbox.name));
         }
+
+        [[nodiscard]] QString cannotSetKeywordsIn(const Mailbox& mailbox)
+        {
+            return i18n("You do not have permission to change message keywords in %1.",
+                        QString::fromStdString(mailbox.name));
+        }
     } // namespace
 
     MailboxSelectionMutationPlanResult planMailboxSelectionMutation(
@@ -64,8 +70,10 @@ namespace javelin::app
 
         const Mailbox* destination = nullptr;
         const Mailbox* searchArchiveSource = nullptr;
-        if (intent.operation == MailboxSelectionOperation::Archive)
+        const Mailbox* junkMailbox = findMailboxByRole(mailboxes, "junk");
+        switch (intent.operation)
         {
+        case MailboxSelectionOperation::Archive:
             destination = findMailboxByRole(mailboxes, "archive");
             if (destination == nullptr)
             {
@@ -79,9 +87,23 @@ namespace javelin::app
                     return i18n("No Inbox mailbox is available.");
                 }
             }
-        }
-        else
-        {
+            break;
+        case MailboxSelectionOperation::Junk:
+            destination = junkMailbox;
+            if (destination == nullptr)
+            {
+                return i18n("No Junk mailbox is available.");
+            }
+            break;
+        case MailboxSelectionOperation::NotJunk:
+            destination = findMailboxByRole(mailboxes, "inbox");
+            if (destination == nullptr)
+            {
+                return i18n("No Inbox mailbox is available.");
+            }
+            break;
+        case MailboxSelectionOperation::Move:
+        case MailboxSelectionOperation::Copy:
             if (!intent.destinationMailboxId.has_value())
             {
                 return i18n("A destination mailbox is required.");
@@ -91,6 +113,9 @@ namespace javelin::app
             {
                 return mailboxUnavailable(*intent.destinationMailboxId);
             }
+            break;
+        default:
+            return i18n("The requested mailbox operation is not supported.");
         }
 
         std::unordered_map<std::string_view, const javelin::jmap::domain::Email*> emailsById;
@@ -121,7 +146,8 @@ namespace javelin::app
                 std::ranges::find(email.mailboxIds, destination->id) != email.mailboxIds.end();
 
             std::vector<std::string> removeMailboxIds;
-            if (intent.operation == MailboxSelectionOperation::Move)
+            if (intent.operation == MailboxSelectionOperation::Move ||
+                intent.operation == MailboxSelectionOperation::Junk)
             {
                 if (intent.sourceMailboxId.has_value())
                 {
@@ -131,7 +157,10 @@ namespace javelin::app
                         return i18n("Message %1 is no longer in the source mailbox.",
                                     QString::fromStdString(emailId));
                     }
-                    removeMailboxIds.push_back(*intent.sourceMailboxId);
+                    if (*intent.sourceMailboxId != destination->id)
+                    {
+                        removeMailboxIds.push_back(*intent.sourceMailboxId);
+                    }
                 }
                 else
                 {
@@ -161,6 +190,54 @@ namespace javelin::app
                 }
                 removeMailboxIds.push_back(sourceMailboxId);
             }
+            else if (intent.operation == MailboxSelectionOperation::NotJunk &&
+                     junkMailbox != nullptr && junkMailbox->id != destination->id &&
+                     std::ranges::contains(email.mailboxIds, junkMailbox->id))
+            {
+                removeMailboxIds.push_back(junkMailbox->id);
+            }
+
+            std::vector<std::string> addKeywords;
+            std::vector<std::string> removeKeywords;
+            if (intent.operation == MailboxSelectionOperation::Junk)
+            {
+                if (!std::ranges::contains(email.keywords, std::string{"$junk"}))
+                {
+                    addKeywords.push_back("$junk");
+                }
+                if (std::ranges::contains(email.keywords, std::string{"$notjunk"}))
+                {
+                    removeKeywords.push_back("$notjunk");
+                }
+            }
+            else if (intent.operation == MailboxSelectionOperation::NotJunk)
+            {
+                if (!std::ranges::contains(email.keywords, std::string{"$notjunk"}))
+                {
+                    addKeywords.push_back("$notjunk");
+                }
+                if (std::ranges::contains(email.keywords, std::string{"$junk"}))
+                {
+                    removeKeywords.push_back("$junk");
+                }
+            }
+
+            const bool changesKeywords = !addKeywords.empty() || !removeKeywords.empty();
+            if (changesKeywords)
+            {
+                for (const auto& mailboxId : email.mailboxIds)
+                {
+                    const auto* mailbox = findMailboxById(mailboxesById, mailboxId);
+                    if (mailbox == nullptr)
+                    {
+                        return mailboxUnavailable(mailboxId);
+                    }
+                    if (!mailbox->myRights.maySetKeywords)
+                    {
+                        return cannotSetKeywordsIn(*mailbox);
+                    }
+                }
+            }
 
             const bool needsDestination = !alreadyInDestination;
             if (needsDestination && !destination->myRights.mayAddItems)
@@ -180,10 +257,15 @@ namespace javelin::app
                 }
             }
 
-            if (!needsDestination && removeMailboxIds.empty())
+            if (!needsDestination && removeMailboxIds.empty() && !changesKeywords)
             {
                 ++plan.skippedEmailCount;
                 continue;
+            }
+
+            if (changesKeywords && needsDestination && !destination->myRights.maySetKeywords)
+            {
+                return cannotSetKeywordsIn(*destination);
             }
 
             plan.mutations.push_back(javelin::jmap::EmailMailboxMutation{
@@ -191,8 +273,8 @@ namespace javelin::app
                 .addMailboxIds = needsDestination ? std::vector<std::string>{destination->id}
                                                   : std::vector<std::string>{},
                 .removeMailboxIds = std::move(removeMailboxIds),
-                .addKeywords = {},
-                .removeKeywords = {},
+                .addKeywords = std::move(addKeywords),
+                .removeKeywords = std::move(removeKeywords),
                 .operationGroupId = std::nullopt,
                 .ifInState = std::nullopt,
                 .authoritativeMailboxIds = std::nullopt,

@@ -152,6 +152,15 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     auto databaseContext = makeDatabaseContext();
     seedAccount(databaseContext.connection);
 
+    auto inbox = loadMailboxFixture();
+    auto junk = inbox;
+    junk.id = "mbx-junk";
+    junk.name = "Junk";
+    junk.role = "junk";
+    junk.sortOrder = 20;
+    javelin::jmap::cache::MailboxRepository mailboxRepository{databaseContext.connection};
+    REQUIRE_FALSE(mailboxRepository.replaceAll("account-1", {inbox, junk}).has_value());
+
     auto first = loadEmailFixture();
     first.threadId = "thr-1";
     first.subject = "Alpha thread";
@@ -162,6 +171,7 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     second.receivedAt = "2026-04-06T11:22:33Z";
     second.subject = "Beta thread";
     second.keywords = {"$seen"};
+    second.mailboxIds = {"mbx-inbox", "mbx-junk"};
     auto third = first;
     third.id = "eml-3";
     third.threadId = "thr-2";
@@ -183,6 +193,7 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     CHECK(firstItems.front().threadMessageCount == 2);
     CHECK(firstItems.front().isUnread);
     CHECK(firstItems.front().isFlagged);
+    CHECK(firstItems.front().isJunk);
 
     const auto secondPage = queryService.listMailboxMessages("account-1", "mbx-inbox", 1, 1);
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(secondPage));
@@ -194,6 +205,7 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     CHECK(secondItems.front().threadMessageCount == 1);
     CHECK_FALSE(secondItems.front().isUnread);
     CHECK_FALSE(secondItems.front().isFlagged);
+    CHECK_FALSE(secondItems.front().isJunk);
     REQUIRE(secondItems.front().from.has_value());
     CHECK(secondItems.front().from->email == "alice@example.com");
 
@@ -540,8 +552,13 @@ TEST_CASE("query service rehydrates cached representative rows by email id order
     archive.name = "Archive";
     archive.role = "archive";
     archive.sortOrder = 20;
+    auto junk = inbox;
+    junk.id = "mbx-junk";
+    junk.name = "Junk";
+    junk.role = "junk";
+    junk.sortOrder = 30;
     javelin::jmap::cache::MailboxRepository mailboxRepository{databaseContext.connection};
-    REQUIRE_FALSE(mailboxRepository.replaceAll("account-1", {inbox, archive}).has_value());
+    REQUIRE_FALSE(mailboxRepository.replaceAll("account-1", {inbox, archive, junk}).has_value());
 
     auto first = loadEmailFixture();
     first.id = "eml-1";
@@ -555,13 +572,14 @@ TEST_CASE("query service rehydrates cached representative rows by email id order
     second.receivedAt = "2026-04-06T11:22:33Z";
     second.subject = "Later message";
     second.keywords = {"$flagged"};
+    second.mailboxIds = {"mbx-inbox", "mbx-junk"};
 
     auto third = first;
     third.id = "eml-3";
     third.threadId = "thr-2";
     third.receivedAt = "2026-04-04T11:22:33Z";
     third.subject = "Other thread";
-    third.keywords.clear();
+    third.keywords = {"$junk"};
     third.mailboxIds = {"mbx-inbox", "mbx-archive"};
 
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
@@ -578,12 +596,14 @@ TEST_CASE("query service rehydrates cached representative rows by email id order
     CHECK(items[0].threadMessageCount == 1);
     CHECK(items[0].isUnread);
     CHECK_FALSE(items[0].isFlagged);
+    CHECK_FALSE(items[0].isJunk);
     CHECK(items[0].mailboxNames == std::vector<std::string>{"Inbox", "Archive"});
     CHECK(items[1].emailId == "eml-2");
     CHECK(items[1].threadId == "thr-1");
     CHECK(items[1].threadMessageCount == 2);
     CHECK(items[1].isUnread);
     CHECK(items[1].isFlagged);
+    CHECK(items[1].isJunk);
 
     const auto inboxUnread = queryService.countUnreadMailboxEmails("account-1", "mbx-inbox");
     REQUIRE(std::holds_alternative<std::size_t>(inboxUnread));

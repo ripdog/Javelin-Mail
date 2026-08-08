@@ -51,8 +51,8 @@ namespace javelin::gui::messages
                    left.receivedAt == right.receivedAt && left.sentAt == right.sentAt &&
                    left.threadMessageCount == right.threadMessageCount &&
                    left.hasAttachment == right.hasAttachment && left.isUnread == right.isUnread &&
-                   left.isFlagged == right.isFlagged && sameAddress(left.from, right.from) &&
-                   left.mailboxNames == right.mailboxNames;
+                   left.isFlagged == right.isFlagged && left.isJunk == right.isJunk &&
+                   sameAddress(left.from, right.from) && left.mailboxNames == right.mailboxNames;
         }
 
     } // namespace
@@ -157,6 +157,11 @@ namespace javelin::gui::messages
         if (role == IsFlaggedRole)
         {
             return item.isFlagged;
+        }
+
+        if (role == IsJunkRole)
+        {
+            return item.isJunk;
         }
 
         if (role == ThreadMessageCountRole)

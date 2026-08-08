@@ -20,6 +20,7 @@ namespace javelin::gui::shell
                          context.selectedCount == 1,
             .archive = movable,
             .markUnread = hasSelection && context.hasReadSelection,
+            .junk = hasSelection && !compose,
             .deleteFromMailbox =
                 mailbox && context.hasAccount && context.hasMailbox && context.selectedCount > 0,
             .permanentDelete = hasSelection,

@@ -278,6 +278,9 @@ namespace javelin::gui::shell
         void reloadAccounts();
         void refreshMessageListPreservingSelection();
         void refreshSelectionFromModels();
+        void setMessageViewSelection(std::optional<std::string> accountId,
+                                     std::optional<std::string> mailboxId,
+                                     std::optional<std::string> emailId);
         void selectPendingInitialMailbox();
         void restorePersistentState();
         void restoreMailboxTab(const PersistedMailboxTab& tab);
@@ -288,6 +291,7 @@ namespace javelin::gui::shell
         void updateEmptyStates();
         void updateMessageListHeader();
         void updateMessageActions();
+        [[nodiscard]] bool selectedMessagesAreJunk() const;
         void updateSortButton();
         void setDarkModeEnabled(bool enabled);
         void updateDarkModeAction();
@@ -381,6 +385,7 @@ namespace javelin::gui::shell
         QAction* m_editDraftAction = nullptr;
         QAction* m_archiveAction = nullptr;
         QAction* m_markUnreadAction = nullptr;
+        QAction* m_junkAction = nullptr;
         QAction* m_deleteAction = nullptr;
         QAction* m_permanentDeleteAction = nullptr;
         QAction* m_moveAction = nullptr;
