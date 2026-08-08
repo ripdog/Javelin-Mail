@@ -54,6 +54,7 @@ namespace javelin::gui::messageview
         constexpr std::string_view RemoteContentBannerId{"remote-content"};
         constexpr std::string_view TranslationBannerId{"translation"};
         constexpr std::string_view JunkBannerId{"junk"};
+        constexpr std::string_view UnsubscribeBannerId{"unsubscribe"};
 
         [[nodiscard]] QString
         detectionText(const javelin::jmap::cache::MessageViewSnapshot& snapshot)
@@ -500,6 +501,28 @@ namespace javelin::gui::messageview
                 });
         m_junkBanner->setVisible(false);
 
+        m_unsubscribeBanner = new MessageBannerWidget(this);
+        m_unsubscribeBanner->setIcon(QIcon::fromTheme(QStringLiteral("news-unsubscribe")));
+        m_unsubscribeButton =
+            m_unsubscribeBanner->addButton(i18nc("@action:button", "Unsubscribe"));
+        connect(m_unsubscribeButton, &QToolButton::clicked, this,
+                [this]
+                {
+                    if (!m_snapshot.has_value() || !m_snapshot->unsubscribeUrl.has_value())
+                    {
+                        return;
+                    }
+                    QDesktopServices::openUrl(
+                        QUrl::fromEncoded(QByteArray::fromStdString(*m_snapshot->unsubscribeUrl)));
+                });
+        connect(m_unsubscribeBanner, &MessageBannerWidget::dismissed, this,
+                [this]
+                {
+                    dismissMessageBanner(UnsubscribeBannerId);
+                    updateUnsubscribeBanner();
+                });
+        m_unsubscribeBanner->setVisible(false);
+
         m_translationBanner = new MessageBannerWidget(this);
         m_translationBanner->setIcon(
             QIcon::fromTheme(QStringLiteral("preferences-desktop-locale")));
@@ -692,6 +715,7 @@ namespace javelin::gui::messageview
         layout->addWidget(m_remoteContentBanner);
         layout->addWidget(m_translationBanner);
         layout->addWidget(m_junkBanner);
+        layout->addWidget(m_unsubscribeBanner);
         layout->addWidget(m_bodyStack, 1);
         layout->addWidget(m_attachmentHeaderWidget);
 
@@ -750,6 +774,7 @@ namespace javelin::gui::messageview
         m_junkBanner->setIcon(
             javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/spam.svg"),
                                         palette().color(QPalette::Active, QPalette::Text)));
+        m_unsubscribeBanner->setIcon(QIcon::fromTheme(QStringLiteral("news-unsubscribe")));
         m_translationBanner->setIcon(
             QIcon::fromTheme(QStringLiteral("preferences-desktop-locale")));
     }
@@ -936,6 +961,7 @@ namespace javelin::gui::messageview
         updateSenderRemoteContentPermit();
         updateRemoteContentButton();
         updateJunkBanner();
+        updateUnsubscribeBanner();
         updateLanguageBanner();
 
         switch (m_activeView)
@@ -1081,6 +1107,25 @@ namespace javelin::gui::messageview
         }
 
         m_junkBanner->setText(i18n("%1 marked this email as Junk.", serverDisplayName()));
+    }
+
+    void MessageViewContainer::updateUnsubscribeBanner()
+    {
+        const bool hasUnsubscribeUrl = m_snapshot.has_value() &&
+                                       m_snapshot->unsubscribeUrl.has_value() &&
+                                       !m_snapshot->unsubscribeUrl->empty();
+        const bool shouldShow = hasUnsubscribeUrl && !messageBannerDismissed(UnsubscribeBannerId);
+        m_unsubscribeBanner->setVisible(shouldShow);
+        if (!shouldShow)
+        {
+            m_unsubscribeBanner->setText({});
+            m_unsubscribeBanner->setButtonHoverText(m_unsubscribeButton, {});
+            return;
+        }
+
+        const auto url = QString::fromStdString(*m_snapshot->unsubscribeUrl);
+        m_unsubscribeBanner->setText(i18n("This message is from a mailing list."));
+        m_unsubscribeBanner->setButtonHoverText(m_unsubscribeButton, url);
     }
 
     void MessageViewContainer::updateLanguageBanner()
@@ -1455,6 +1500,7 @@ namespace javelin::gui::messageview
         updateAttachmentSection();
         updateRemoteContentButton();
         updateJunkBanner();
+        updateUnsubscribeBanner();
         updateLanguageBanner();
         m_loadingIndicator->setVisible(false);
         m_placeholderDetailLabel->setVisible(true);

@@ -3,6 +3,8 @@
 #include <KMime/Message>
 #include <KMime/Util>
 
+#include <QUrl>
+
 namespace javelin::jmap::cache
 {
     namespace
@@ -181,6 +183,52 @@ namespace javelin::jmap::cache
             message.parse();
         }
 
+        [[nodiscard]] std::optional<std::string>
+        mailingListUnsubscribeUrl(const KMime::Message& message)
+        {
+            const auto* header = message.headerByType(QByteArrayLiteral("List-Unsubscribe"));
+            if (header == nullptr)
+            {
+                return std::nullopt;
+            }
+
+            const auto value = header->asUnicodeString();
+            std::optional<std::string> mailtoUrl;
+            qsizetype offset = 0;
+            while (offset < value.size())
+            {
+                const auto opening = value.indexOf(QLatin1Char('<'), offset);
+                if (opening < 0)
+                {
+                    break;
+                }
+                const auto closing = value.indexOf(QLatin1Char('>'), opening + 1);
+                if (closing < 0)
+                {
+                    break;
+                }
+
+                const auto candidate = value.mid(opening + 1, closing - opening - 1).trimmed();
+                const QUrl url{candidate};
+                if (url.isValid() && !url.scheme().isEmpty())
+                {
+                    const auto scheme = url.scheme().toLower();
+                    const auto encoded = url.toString(QUrl::FullyEncoded).toStdString();
+                    if (scheme == QStringLiteral("https") || scheme == QStringLiteral("http"))
+                    {
+                        return encoded;
+                    }
+                    if (scheme == QStringLiteral("mailto") && !mailtoUrl.has_value())
+                    {
+                        mailtoUrl = encoded;
+                    }
+                }
+
+                offset = closing + 1;
+            }
+            return mailtoUrl;
+        }
+
         void normalizeCrlfInPlace(QByteArray& payload)
         {
             char* data = payload.data();
@@ -231,6 +279,7 @@ namespace javelin::jmap::cache
                 bodyFromPart(message, QByteArrayLiteral("text/plain"), MessageBodyKind::PlainText),
             .htmlBody =
                 bodyFromPart(message, QByteArrayLiteral("text/html"), MessageBodyKind::Html),
+            .unsubscribeUrl = mailingListUnsubscribeUrl(message),
             .renderParts = {},
             .attachments = {},
         };

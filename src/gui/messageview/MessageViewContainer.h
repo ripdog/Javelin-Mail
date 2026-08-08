@@ -95,6 +95,7 @@ namespace javelin::gui::messageview
         void updateSenderRemoteContentPermit();
         void updateRemoteContentButton();
         void updateJunkBanner();
+        void updateUnsubscribeBanner();
         void updateLanguageBanner();
         void startLanguageDetection();
         void translateCurrentMessage();
@@ -148,8 +149,10 @@ namespace javelin::gui::messageview
         QToolButton* m_remoteContentButton = nullptr;
         MessageBannerWidget* m_remoteContentBanner = nullptr;
         MessageBannerWidget* m_junkBanner = nullptr;
+        MessageBannerWidget* m_unsubscribeBanner = nullptr;
         MessageBannerWidget* m_translationBanner = nullptr;
         QToolButton* m_notJunkButton = nullptr;
+        QToolButton* m_unsubscribeButton = nullptr;
         QToolButton* m_translateButton = nullptr;
         QToolButton* m_translateOptionsButton = nullptr;
         javelin::gui::settings::GuiSettings& m_settings;

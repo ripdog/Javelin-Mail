@@ -17,6 +17,7 @@ namespace javelin::jmap::cache
     {
         std::optional<MessageBody> plainTextBody;
         std::optional<MessageBody> htmlBody;
+        std::optional<std::string> unsubscribeUrl;
         std::vector<EmailPart> renderParts;
         std::vector<MessageAttachment> attachments;
     };

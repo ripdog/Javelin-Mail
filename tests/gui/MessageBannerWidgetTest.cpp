@@ -1,9 +1,12 @@
 #include "gui/messageview/MessageBannerWidget.h"
 
+#include <QCoreApplication>
+#include <QEvent>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QSizePolicy>
 #include <QToolButton>
+#include <QVBoxLayout>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,7 +18,11 @@ TEST_CASE("message banners keep one aligned row and close after their action but
     auto* firstButton = banner.addButton(QStringLiteral("First"));
     auto* secondButton = banner.addButton(QStringLiteral("Second"));
 
-    auto* layout = qobject_cast<QHBoxLayout*>(banner.layout());
+    auto* outerLayout = qobject_cast<QVBoxLayout*>(banner.layout());
+    REQUIRE(outerLayout != nullptr);
+    auto* primaryRow = banner.findChild<QWidget*>(QStringLiteral("messageBannerPrimaryRow"));
+    REQUIRE(primaryRow != nullptr);
+    auto* layout = qobject_cast<QHBoxLayout*>(primaryRow->layout());
     REQUIRE(layout != nullptr);
     REQUIRE(layout->count() == 5);
     CHECK(layout->itemAt(2)->widget() == firstButton);
@@ -31,6 +38,18 @@ TEST_CASE("message banners keep one aligned row and close after their action but
     auto* closeButton = banner.findChild<QToolButton*>(QStringLiteral("messageBannerClose"));
     REQUIRE(closeButton != nullptr);
     CHECK(layout->itemAt(4)->widget() == closeButton);
+
+    auto* previewLabel = banner.findChild<QLabel*>(QStringLiteral("messageBannerPreview"));
+    REQUIRE(previewLabel != nullptr);
+    CHECK(previewLabel->isHidden());
+    banner.setButtonHoverText(firstButton, QStringLiteral("https://example.com/unsubscribe"));
+    QEvent enterEvent{QEvent::Enter};
+    QCoreApplication::sendEvent(firstButton, &enterEvent);
+    CHECK_FALSE(previewLabel->isHidden());
+    CHECK(previewLabel->text() == QStringLiteral("https://example.com/unsubscribe"));
+    QEvent leaveEvent{QEvent::Leave};
+    QCoreApplication::sendEvent(firstButton, &leaveEvent);
+    CHECK(previewLabel->isHidden());
 
     bool dismissed = false;
     QObject::connect(&banner, &javelin::gui::messageview::MessageBannerWidget::dismissed,

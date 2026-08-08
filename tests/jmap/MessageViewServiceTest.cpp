@@ -142,6 +142,8 @@ namespace
     void seedMessageContent(javelin::jmap::cache::DatabaseConnection& connection,
                             const QByteArray& payload = QByteArrayLiteral(
                                 "Subject: Quarterly update\r\n"
+                                "List-Unsubscribe: <mailto:leave@example.com>,\r\n"
+                                " <https://example.com/unsubscribe?token=abc>\r\n"
                                 "Content-Type: multipart/related; boundary=\"b\"\r\n"
                                 "\r\n"
                                 "--b\r\n"
@@ -194,6 +196,8 @@ TEST_CASE("message view service loads cached raw email bodies and attachments",
         std::get<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(result);
     REQUIRE(snapshot.has_value());
     CHECK(snapshot->email.subject == std::optional<std::string>{"Quarterly update"});
+    CHECK(snapshot->unsubscribeUrl ==
+          std::optional<std::string>{"https://example.com/unsubscribe?token=abc"});
     REQUIRE(snapshot->plainTextBody.has_value());
     CHECK(snapshot->plainTextBody->kind == javelin::jmap::cache::MessageBodyKind::PlainText);
     CHECK(snapshot->plainTextBody->value == "Plain body");
