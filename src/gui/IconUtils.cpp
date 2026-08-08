@@ -26,6 +26,22 @@ namespace javelin::gui
 
             auto svg = QString::fromUtf8(file.readAll());
             const auto themeColor = color.name(QColor::HexRgb);
+
+            const auto rootStart = svg.indexOf(QStringLiteral("<svg"));
+            if (rootStart >= 0)
+            {
+                const auto rootEnd = svg.indexOf(QLatin1Char('>'), rootStart);
+                if (rootEnd > rootStart)
+                {
+                    auto rootTag = svg.mid(rootStart, rootEnd - rootStart + 1);
+                    rootTag.replace(QStringLiteral("fill=\"context-fill\""),
+                                    QStringLiteral("fill=\"%1\"").arg(themeColor));
+                    rootTag.replace(QStringLiteral("fill-opacity=\"context-fill-opacity\""),
+                                    QStringLiteral("fill-opacity=\"1\""));
+                    svg.replace(rootStart, rootEnd - rootStart + 1, rootTag);
+                }
+            }
+
             svg.replace(
                 QStringLiteral("fill=\"context-fill\" fill-opacity=\"context-fill-opacity\""),
                 QStringLiteral("fill=\"%1\" fill-opacity=\"1\"").arg(themeColor));

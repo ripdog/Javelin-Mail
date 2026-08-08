@@ -350,6 +350,7 @@ add_executable(javelin_contacts_gui_tests
     gui/ContactsGuiTestMain.cpp
     gui/ContactsManagerWidgetTest.cpp
     gui/DeveloperOptionsDialogTest.cpp
+    gui/IconUtilsTest.cpp
     gui/IndeterminateProgressBarTest.cpp
     gui/MessageBannerWidgetTest.cpp
     gui/SendingIdentitiesDialogTest.cpp
@@ -369,6 +370,10 @@ javelin_set_project_warnings(javelin_contacts_gui_tests)
 javelin_enable_static_analysis(javelin_contacts_gui_tests)
 javelin_enable_sanitizers(javelin_contacts_gui_tests)
 target_compile_options(javelin_contacts_gui_tests PRIVATE -fexceptions)
+target_compile_definitions(javelin_contacts_gui_tests
+    PRIVATE
+        JAVELIN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+)
 catch_discover_tests(javelin_contacts_gui_tests DISCOVERY_MODE PRE_TEST)
 
 add_executable(javelin_composer_gui_tests
