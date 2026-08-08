@@ -1693,6 +1693,7 @@ namespace javelin::gui::shell
     {
         if (m_modelUpdateInProgress)
             return;
+        auto* tab = activeTab();
         const auto accountId = activeAccountId();
         const auto mailboxId = activeMailboxId();
         const bool allowSearchSelection = activeTabIsSearch() && accountId.has_value();
@@ -1705,6 +1706,7 @@ namespace javelin::gui::shell
 
         if (!current.isValid())
         {
+            syncQuickFilterContinuitySelection(std::nullopt, std::nullopt);
             setMessageViewSelection(accountId, mailboxId, std::nullopt);
             updateMessageActions();
             return;
@@ -1716,8 +1718,11 @@ namespace javelin::gui::shell
             current.data(javelin::gui::messages::MessageListModel::ThreadIdRole).toString();
         const auto selectedEmailId = emailId.toStdString();
         const auto selectedThreadId = threadId.toStdString();
+        syncQuickFilterContinuitySelection(
+            emailId.isEmpty() ? std::nullopt : std::optional<std::string>{selectedEmailId},
+            threadId.isEmpty() ? std::nullopt : std::optional<std::string>{selectedThreadId});
         m_messageNavigationController->cancelIfSelectionChanged(
-            activeTab(), selectedEmailId, std::optional<std::string_view>{selectedThreadId});
+            tab, selectedEmailId, std::optional<std::string_view>{selectedThreadId});
         const bool isUnread = indexIsUnread(current);
         if (!threadId.isEmpty() && !activeTabIsSearch())
         {
@@ -2785,6 +2790,8 @@ namespace javelin::gui::shell
 
         const auto accountId = activeAccountId();
         const auto mailboxId = activeMailboxId();
+        syncQuickFilterContinuitySelection(m_messageSelectionController->currentEmailId(),
+                                           m_messageSelectionController->currentThreadId());
         auto selectedSummaries = m_messageSelectionController->selectedMessageSummaries();
         if (selectedSummaries.size() > 1)
         {
@@ -2883,6 +2890,17 @@ namespace javelin::gui::shell
         if (m_quickFilterPinned)
             m_pinnedQuickFilter = criteria;
         mailbox->session->setQuickFilter(std::move(criteria));
+    }
+
+    void MainWindow::syncQuickFilterContinuitySelection(std::optional<std::string> emailId,
+                                                        std::optional<std::string> threadId)
+    {
+        auto* tab = activeTab();
+        auto* mailbox = tab == nullptr ? nullptr : std::get_if<MailboxTabState>(&tab->content);
+        if (mailbox == nullptr || mailbox->session == nullptr)
+            return;
+        mailbox->session->setQuickFilterContinuitySelection(std::move(emailId),
+                                                            std::move(threadId));
     }
 
     void MainWindow::updateQuickFilterUi()

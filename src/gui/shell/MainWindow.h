@@ -290,6 +290,8 @@ namespace javelin::gui::shell
         void updateMessageListHeader();
         void updateQuickFilterUi();
         void applyQuickFilter();
+        void syncQuickFilterContinuitySelection(std::optional<std::string> emailId,
+                                                std::optional<std::string> threadId);
         void rebuildQuickFilterTagsMenu();
         [[nodiscard]] javelin::jmap::search::EmailSearchCriteria quickFilterCriteriaFromUi() const;
         void updateMessageActions();

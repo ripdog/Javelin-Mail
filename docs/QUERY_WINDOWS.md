@@ -49,6 +49,13 @@ current position, total, or ordered membership and cannot by itself prove the ne
 exists only to preserve stable selection, detail content, and viewport rather than blanking or
 replacing the user's view. Reconciliation installs the replacement by stable object identity.
 
+Quick-filter presentation applies the same principle more narrowly after reconciliation. If the
+currently selected message stops matching the live filter, the session may retain that one thread as
+a continuity row while it remains selected. The row is re-read from current effective SQLite mailbox
+state before presentation, so a moved or deleted message cannot survive as continuity. It is not
+counted in the filtered total or window membership, never supplies a continuation anchor, and is
+removed when selection or filter criteria change. All other filter membership remains live.
+
 An Email or EmailQuery state token is not evidence that this ordered coverage exists. Push-state
 deduplication may skip a background refresh when the state tokens are current and every configured
 canonical mailbox window is display-current. Only `server` coverage proves authoritative remote

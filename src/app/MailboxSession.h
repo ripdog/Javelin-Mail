@@ -42,6 +42,8 @@ namespace javelin::app
         void markStale() override;
         void setSort(javelin::jmap::query::EmailListSort sort) override;
         void setQuickFilter(javelin::jmap::search::EmailSearchCriteria criteria);
+        void setQuickFilterContinuitySelection(std::optional<std::string> emailId,
+                                               std::optional<std::string> threadId);
         [[nodiscard]] const javelin::jmap::search::EmailSearchCriteria& quickFilter() const;
         [[nodiscard]] bool quickFilterActive() const;
         void reveal(std::string emailId);
@@ -53,8 +55,9 @@ namespace javelin::app
         void reloadProjectedWindows();
         void requestInitialWindow(MessageListRefreshMode mode, std::optional<std::string> anchor,
                                   std::int64_t anchorOffset);
-        void
-        rebuildFromProjectedWindows(std::vector<javelin::jmap::cache::MailboxWindowPage> windows);
+        void rebuildFromProjectedWindows(
+            std::vector<javelin::jmap::cache::MailboxWindowPage> windows,
+            std::optional<javelin::jmap::cache::MessageListItem> continuityItem = std::nullopt);
         void resetToInitialWindow();
         [[nodiscard]] std::string queryKey() const;
         [[nodiscard]] std::string quickFilterWindowKey() const;
@@ -68,6 +71,10 @@ namespace javelin::app
         javelin::jmap::query::EmailListSort m_sort;
         javelin::jmap::search::EmailSearchCriteria m_quickFilter;
         std::string m_quickFilterSessionId;
+        std::optional<std::string> m_quickFilterContinuityEmailId;
+        std::optional<std::string> m_quickFilterContinuityThreadId;
+        std::optional<std::size_t> m_quickFilterContinuityPreferredIndex;
+        bool m_quickFilterContinuityInjected = false;
         javelin::jmap::cache::QueryReader& m_queryReader;
         MessageListMaterializationPort& m_materializationPort;
         MailApplicationEventsPort& m_events;
