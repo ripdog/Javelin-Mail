@@ -37,10 +37,9 @@ namespace
         [[nodiscard]] QCoro::Task<javelin::app::DeveloperMailboxClearResult>
         clearMailboxCache(javelin::app::DeveloperMailboxClearCommand command) override
         {
-            co_return javelin::app::DeveloperMailboxClearSummary{
-                .accountId = std::move(command.accountId),
-                .mailboxId = std::move(command.mailboxId),
-                .kind = command.kind,
+            Q_UNUSED(command)
+            co_return javelin::app::DeveloperMailboxClearQueued{
+                .jobId = QStringLiteral("mailbox-cache-cleanup:test"),
             };
         }
     };

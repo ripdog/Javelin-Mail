@@ -1,17 +1,26 @@
 #include "app/DeveloperMaintenanceService.h"
 
 #include "app/MailboxMaintenanceRegistry.h"
+#include "app/WorkScheduler.h"
 #include "jmap/cache/MailVault.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 
 #include <QCoroFuture>
+#include <QCoroTask>
+
+#include <KLocalizedString>
 
 #include <QDir>
 #include <QFileInfo>
 #include <QHash>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QLocale>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QThread>
+#include <QTimer>
+#include <QUuid>
 #include <QtConcurrentRun>
 
 #include <algorithm>
@@ -50,6 +59,116 @@ namespace javelin::app
                          const DatabaseErrorCode code = DatabaseErrorCode::QueryFailed)
         {
             return {.code = code, .message = message};
+        }
+
+        constexpr std::string_view mailboxCleanupJobPrefix = "mailbox-cache-cleanup:";
+
+        [[nodiscard]] QString cacheKindName(const DeveloperMailboxCacheKind kind)
+        {
+            switch (kind)
+            {
+            case DeveloperMailboxCacheKind::Sqlite:
+                return QStringLiteral("sqlite");
+            case DeveloperMailboxCacheKind::Bodies:
+                return QStringLiteral("bodies");
+            case DeveloperMailboxCacheKind::SqliteAndBodies:
+                return QStringLiteral("sqlite_and_bodies");
+            }
+            return QStringLiteral("sqlite");
+        }
+
+        [[nodiscard]] std::optional<DeveloperMailboxCacheKind> cacheKind(const QString& name)
+        {
+            if (name == QStringLiteral("sqlite"))
+                return DeveloperMailboxCacheKind::Sqlite;
+            if (name == QStringLiteral("bodies"))
+                return DeveloperMailboxCacheKind::Bodies;
+            if (name == QStringLiteral("sqlite_and_bodies"))
+                return DeveloperMailboxCacheKind::SqliteAndBodies;
+            return std::nullopt;
+        }
+
+        [[nodiscard]] QString offlinePolicyName(const DeveloperOfflineClearPolicy policy)
+        {
+            return policy == DeveloperOfflineClearPolicy::Disable ? QStringLiteral("disable")
+                                                                  : QStringLiteral("preserve");
+        }
+
+        [[nodiscard]] std::optional<DeveloperOfflineClearPolicy> offlinePolicy(const QString& name)
+        {
+            if (name == QStringLiteral("preserve"))
+                return DeveloperOfflineClearPolicy::Preserve;
+            if (name == QStringLiteral("disable"))
+                return DeveloperOfflineClearPolicy::Disable;
+            return std::nullopt;
+        }
+
+        [[nodiscard]] QString cleanupCheckpoint(const DeveloperMailboxClearCommand& command)
+        {
+            const QJsonObject object{
+                {QStringLiteral("type"), QStringLiteral("mailbox_cache_cleanup")},
+                {QStringLiteral("version"), 1},
+                {QStringLiteral("accountId"), command.accountId},
+                {QStringLiteral("mailboxId"), command.mailboxId},
+                {QStringLiteral("kind"), cacheKindName(command.kind)},
+                {QStringLiteral("offlinePolicy"), offlinePolicyName(command.offlinePolicy)},
+            };
+            return QString::fromUtf8(QJsonDocument{object}.toJson(QJsonDocument::Compact));
+        }
+
+        [[nodiscard]] std::variant<DeveloperMailboxClearCommand, DatabaseError>
+        cleanupCommand(const QString& checkpoint)
+        {
+            QJsonParseError parseError;
+            const auto document = QJsonDocument::fromJson(checkpoint.toUtf8(), &parseError);
+            if (parseError.error != QJsonParseError::NoError || !document.isObject())
+                return maintenanceError(i18n("The mailbox cache cleanup checkpoint is invalid."));
+            const auto object = document.object();
+            if (object.value(QStringLiteral("type")).toString() !=
+                    QStringLiteral("mailbox_cache_cleanup") ||
+                object.value(QStringLiteral("version")).toInt() != 1)
+                return maintenanceError(
+                    i18n("The mailbox cache cleanup checkpoint is unsupported."));
+
+            const QString accountId = object.value(QStringLiteral("accountId")).toString();
+            const QString mailboxId = object.value(QStringLiteral("mailboxId")).toString();
+            const auto kind = cacheKind(object.value(QStringLiteral("kind")).toString());
+            const auto policy =
+                offlinePolicy(object.value(QStringLiteral("offlinePolicy")).toString());
+            if (accountId.isEmpty() || mailboxId.isEmpty() || !kind.has_value() ||
+                !policy.has_value())
+                return maintenanceError(
+                    i18n("The mailbox cache cleanup checkpoint is incomplete."));
+
+            return DeveloperMailboxClearCommand{
+                .accountId = accountId,
+                .mailboxId = mailboxId,
+                .kind = *kind,
+                .offlinePolicy = *policy,
+            };
+        }
+
+        [[nodiscard]] bool isMailboxCleanupJob(const WorkRecord& job)
+        {
+            return job.kind == WorkKind::Maintenance &&
+                   job.jobId.starts_with(mailboxCleanupJobPrefix);
+        }
+
+        [[nodiscard]] QString cleanupTitle(const DeveloperMailboxClearCommand& command)
+        {
+            if (command.kind == DeveloperMailboxCacheKind::Bodies)
+                return i18n("Clear cached message bodies for %1", command.mailboxId);
+            return i18n("Clear cached mailbox data for %1", command.mailboxId);
+        }
+
+        [[nodiscard]] QString cleanupRunningDetail(const DeveloperMailboxClearCommand& command)
+        {
+            if (command.kind == DeveloperMailboxCacheKind::Bodies)
+                return i18n("Removing cached message bodies from %1", command.mailboxId);
+            if (command.kind == DeveloperMailboxCacheKind::SqliteAndBodies)
+                return i18n("Removing cached message bodies and mailbox data from %1",
+                            command.mailboxId);
+            return i18n("Removing cached mailbox data from %1", command.mailboxId);
         }
 
         [[nodiscard]] std::variant<std::uint64_t, DatabaseError> count(QSqlDatabase& database,
@@ -141,7 +260,7 @@ namespace javelin::app
             return std::nullopt;
         }
 
-        [[nodiscard]] DeveloperMailboxClearResult
+        [[nodiscard]] DeveloperMailboxClearExecutionResult
         clearSqlite(DatabaseConnection& connection, const DeveloperMailboxClearCommand& command,
                     const std::uint64_t maintenanceGeneration, const bool resetOffline = true)
         {
@@ -245,11 +364,15 @@ namespace javelin::app
         {
             QSqlQuery query{database};
             query.prepare(QStringLiteral(
-                "SELECT DISTINCT o.content_hash,o.relative_path,o.size FROM "
-                "mail_vault_mailbox_refs mr JOIN mail_vault_email_refs r ON "
-                "r.account_id=mr.account_id AND r.email_id=mr.email_id JOIN mail_vault_objects o "
-                "ON o.content_hash=r.content_hash WHERE mr.account_id=:account AND "
-                "mr.mailbox_id=:mailbox ORDER BY o.content_hash"));
+                "SELECT DISTINCT o.content_hash,o.relative_path,o.size FROM mail_vault_objects o "
+                "WHERE EXISTS(SELECT 1 FROM mail_vault_mailbox_refs mr JOIN "
+                "mail_vault_email_refs r ON r.account_id=mr.account_id AND "
+                "r.email_id=mr.email_id WHERE r.content_hash=o.content_hash AND "
+                "mr.account_id=:account AND mr.mailbox_id=:mailbox) OR EXISTS(SELECT 1 FROM "
+                "mail_vault_projection_jobs j WHERE j.content_hash=o.content_hash AND "
+                "j.account_id=:account AND j.mailbox_id=:mailbox AND j.operation='unlink') ORDER "
+                "BY "
+                "o.content_hash"));
             query.bindValue(QStringLiteral(":account"), command.accountId);
             query.bindValue(QStringLiteral(":mailbox"), command.mailboxId);
             if (!query.exec())
@@ -304,7 +427,7 @@ namespace javelin::app
             }
         }
 
-        [[nodiscard]] DeveloperMailboxClearResult
+        [[nodiscard]] DeveloperMailboxClearExecutionResult
         clearBodies(DatabaseConnection& connection, const QString& vaultPath,
                     const DeveloperMailboxClearCommand& command,
                     const std::uint64_t maintenanceGeneration)
@@ -495,7 +618,7 @@ namespace javelin::app
             };
         }
 
-        [[nodiscard]] DeveloperMailboxClearResult
+        [[nodiscard]] DeveloperMailboxClearExecutionResult
         clearMailbox(QString databasePath, QString vaultPath, DeveloperMailboxClearCommand command,
                      const std::uint64_t maintenanceGeneration)
         {
@@ -540,15 +663,21 @@ namespace javelin::app
 
     DeveloperMaintenanceService::DeveloperMaintenanceService(
         QString databasePath, QString vaultPath, MailboxMaintenanceRegistry& registry,
-        MailCacheChangePublisher& cacheChangePublisher,
-        std::function<void(std::string_view, std::string_view)> requestOfflineResync)
-        : m_databasePath(std::move(databasePath)), m_vaultPath(std::move(vaultPath)),
-          m_registry(registry), m_cacheChangePublisher(cacheChangePublisher),
+        MailCacheChangePublisher& cacheChangePublisher, WorkScheduler& workScheduler,
+        std::function<void(std::string_view, std::string_view)> requestOfflineResync,
+        QObject* parent)
+        : QObject(parent), m_databasePath(std::move(databasePath)),
+          m_vaultPath(std::move(vaultPath)), m_registry(registry),
+          m_cacheChangePublisher(cacheChangePublisher), m_workScheduler(workScheduler),
           m_requestOfflineResync(std::move(requestOfflineResync))
     {
         m_workerPool.setMaxThreadCount(1);
         m_workerPool.setExpiryTimeout(-1);
         m_workerPool.setThreadPriority(QThread::LowPriority);
+        connect(&m_workScheduler, &WorkScheduler::jobsChanged, this, [this]() { schedulePump(); });
+        connect(&m_workScheduler, &WorkScheduler::foregroundAvailabilityChanged, this,
+                [this]() { schedulePump(); });
+        schedulePump();
     }
 
     DeveloperMaintenanceService::~DeveloperMaintenanceService()
@@ -559,36 +688,163 @@ namespace javelin::app
     QCoro::Task<DeveloperMailboxClearResult>
     DeveloperMaintenanceService::clearMailboxCache(DeveloperMailboxClearCommand command)
     {
+        if (command.accountId.isEmpty() || command.mailboxId.isEmpty())
+            co_return maintenanceError(i18n("The mailbox cache cleanup target is incomplete."));
+
+        const std::string jobId = QStringLiteral("mailbox-cache-cleanup:%1")
+                                      .arg(QUuid::createUuid().toString(QUuid::WithoutBraces))
+                                      .toStdString();
+        if (const auto error = m_workScheduler.ensure({
+                .jobId = jobId,
+                .parentJobId = std::nullopt,
+                .accountId = command.accountId.toStdString(),
+                .kind = WorkKind::Maintenance,
+                .priority = WorkPriority::Bulk,
+                .title = cleanupTitle(command),
+                .checkpointJson = cleanupCheckpoint(command),
+            }))
+            co_return *error;
+
+        schedulePump();
+        co_return DeveloperMailboxClearQueued{.jobId = QString::fromStdString(jobId)};
+    }
+
+    void DeveloperMaintenanceService::schedulePump()
+    {
+        if (m_pumpScheduled)
+            return;
+        m_pumpScheduled = true;
+        QTimer::singleShot(0, this,
+                           [this]
+                           {
+                               m_pumpScheduled = false;
+                               pump();
+                           });
+    }
+
+    void DeveloperMaintenanceService::pump()
+    {
+        if (m_running || !m_workScheduler.mayStartBackgroundNetwork())
+            return;
+
+        const auto listed = m_workScheduler.list();
+        const auto* jobs = std::get_if<std::vector<WorkRecord>>(&listed);
+        if (jobs == nullptr)
+            return;
+
+        for (const auto& job : *jobs)
+        {
+            if (!isMailboxCleanupJob(job) || job.status != WorkStatus::Queued)
+                continue;
+
+            const auto decoded = cleanupCommand(job.checkpointJson);
+            const auto* command = std::get_if<DeveloperMailboxClearCommand>(&decoded);
+            if (command == nullptr)
+            {
+                const auto& error = std::get<DatabaseError>(decoded);
+                static_cast<void>(m_workScheduler.update(
+                    job.jobId, WorkStatus::Failed,
+                    WorkProgress{.completedUnits = 0,
+                                 .totalUnits = std::nullopt,
+                                 .completedBytes = 0,
+                                 .totalBytes = std::nullopt,
+                                 .detail = i18n("Could not resume mailbox cache cleanup")},
+                    job.checkpointJson, error.message));
+                continue;
+            }
+
+            if (!m_workScheduler.admit(job.jobId).has_value())
+                continue;
+
+            m_running = true;
+            auto task = runJob(job.jobId, *command);
+            QCoro::connect(std::move(task), this,
+                           [this, jobId = job.jobId]
+                           {
+                               m_workScheduler.release(jobId);
+                               m_running = false;
+                               schedulePump();
+                           });
+            return;
+        }
+    }
+
+    QCoro::Task<void> DeveloperMaintenanceService::runJob(std::string jobId,
+                                                          DeveloperMailboxClearCommand command)
+    {
+        const QString checkpoint = cleanupCheckpoint(command);
+        WorkProgress progress{
+            .completedUnits = 0,
+            .totalUnits = 1,
+            .completedBytes = 0,
+            .totalBytes = std::nullopt,
+            .detail = cleanupRunningDetail(command),
+        };
+
         auto lease = m_registry.tryBegin(command.accountId, command.mailboxId);
         if (!lease.has_value())
         {
-            co_return maintenanceError(
-                QStringLiteral("Mailbox cache maintenance is already active."),
-                DatabaseErrorCode::TransientContention);
+            const auto error =
+                maintenanceError(i18n("Mailbox cache maintenance is already active."),
+                                 DatabaseErrorCode::TransientContention);
+            static_cast<void>(m_workScheduler.update(jobId, WorkStatus::Failed, progress,
+                                                     checkpoint, error.message));
+            co_return;
         }
+
+        if (const auto error =
+                m_workScheduler.update(jobId, WorkStatus::Running, progress, checkpoint))
+            co_return;
+
         const std::uint64_t generation = lease->generation();
         auto future = QtConcurrent::run(&m_workerPool, clearMailbox, m_databasePath, m_vaultPath,
                                         command, generation);
         auto result = co_await qCoro(future).takeResult();
-        if (const auto* summary = std::get_if<DeveloperMailboxClearSummary>(&result))
+        if (const auto* error = std::get_if<DatabaseError>(&result))
         {
-            m_cacheChangePublisher.publishCacheChange(MailCacheChange{
-                .accountId = summary->accountId,
-                .mailboxIds = {summary->mailboxId},
-                .queryWindows = {},
-                .searchWindows = {},
-                .mailboxTreeChanged = false,
-                .hasNewMail = false,
-                .optimisticProjection = false,
-                .contactsChanged = false,
-            });
-            if (command.offlinePolicy == DeveloperOfflineClearPolicy::Preserve &&
-                m_requestOfflineResync)
-            {
-                m_requestOfflineResync(command.accountId.toStdString(),
-                                       command.mailboxId.toStdString());
-            }
+            static_cast<void>(m_workScheduler.update(jobId, WorkStatus::Failed, progress,
+                                                     checkpoint, error->message));
+            co_return;
         }
-        co_return result;
+
+        const auto& summary = std::get<DeveloperMailboxClearSummary>(result);
+        m_cacheChangePublisher.publishCacheChange(MailCacheChange{
+            .accountId = summary.accountId,
+            .mailboxIds = {summary.mailboxId},
+            .queryWindows = {},
+            .searchWindows = {},
+            .mailboxTreeChanged = false,
+            .hasNewMail = false,
+            .optimisticProjection = false,
+            .contactsChanged = false,
+        });
+        if (command.offlinePolicy == DeveloperOfflineClearPolicy::Preserve &&
+            m_requestOfflineResync)
+        {
+            m_requestOfflineResync(command.accountId.toStdString(),
+                                   command.mailboxId.toStdString());
+        }
+
+        progress.completedUnits = 1;
+        progress.completedBytes = summary.reclaimedBytes;
+        if (summary.deferredBytes > 0)
+        {
+            progress.detail =
+                i18n("Reclaimed %1; %2 remains in use",
+                     QLocale{}.formattedDataSize(static_cast<qint64>(summary.reclaimedBytes)),
+                     QLocale{}.formattedDataSize(static_cast<qint64>(summary.deferredBytes)));
+        }
+        else if (summary.reclaimedBytes > 0)
+        {
+            progress.detail =
+                i18n("Reclaimed %1",
+                     QLocale{}.formattedDataSize(static_cast<qint64>(summary.reclaimedBytes)));
+        }
+        else
+        {
+            progress.detail = i18n("Cache cleanup complete");
+        }
+        static_cast<void>(
+            m_workScheduler.update(jobId, WorkStatus::Complete, progress, checkpoint));
     }
 } // namespace javelin::app

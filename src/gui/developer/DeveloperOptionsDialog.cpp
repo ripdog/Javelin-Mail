@@ -537,28 +537,9 @@ namespace javelin::gui::developer
             return;
         }
 
-        const auto& summary = std::get<javelin::app::DeveloperMailboxClearSummary>(result);
-        if (summary.kind == javelin::app::DeveloperMailboxCacheKind::Sqlite)
-        {
-            m_postRefreshStatus = i18np("Discarded %1 cached SQLite row.",
-                                        "Discarded %1 cached SQLite rows.", summary.rowsDiscarded);
-        }
-        else if (summary.kind == javelin::app::DeveloperMailboxCacheKind::Bodies)
-        {
-            m_postRefreshStatus = i18n(
-                "Removed %1 mailbox projections and reclaimed %2. %3 remains deferred while in "
-                "use.",
-                summary.projectionsRemoved, bytes(summary.reclaimedBytes),
-                bytes(summary.deferredBytes));
-        }
-        else
-        {
-            m_postRefreshStatus = i18n(
-                "Cleared cached mailbox state and bodies, discarding %1 cache rows and reclaiming "
-                "%2. %3 remains deferred while in use.",
-                summary.rowsDiscarded, bytes(summary.reclaimedBytes), bytes(summary.deferredBytes));
-        }
-        refresh();
+        const auto& queued = std::get<javelin::app::DeveloperMailboxClearQueued>(result);
+        Q_UNUSED(queued)
+        m_status->setText(i18n("Mailbox cache cleanup queued in Task Center."));
     }
 
     void DeveloperOptionsDialog::setLoading(const bool loading)

@@ -12,7 +12,10 @@
 - Confirmed server destruction removes the local reference and mailbox projection. Unchecking a
   mailbox changes its downloaded sources to evictable cache; it does not destroy them unless the
   user explicitly chooses cache cleanup. User-facing mailbox cleanup may remove bodies alone, but
-  clearing SQLite-backed mailbox state must also clear that mailbox's cached bodies.
+  clearing SQLite-backed mailbox state must also clear that mailbox's cached bodies. Explicit
+  cleanup is a daemon-owned durable background job: it is committed before the GUI reports that it
+  was queued, appears in Task Center, and is reconstructed from its persisted checkpoint after a
+  daemon restart.
 - Foreground work owns network priority. An in-flight background request may finish, but no further
   background request starts until every startup, freshness, and user-initiated request has ended,
   followed by a five-second quiet period. The quiet period also applies at process startup.
@@ -31,8 +34,11 @@ network work begins. SQLite then records the object and Email reference and appe
 projection jobs in the same cache transaction.
 
 Projection jobs are replayable. A crash may leave an unprojected immutable object or a queued link,
-but cannot make SQLite claim a completed full mirror. Objects with no retained Email reference and
-no pending projection are garbage-collection candidates.
+but cannot make SQLite claim a completed full mirror. Mailbox cache cleanup also treats persisted
+unlink projection jobs as eviction candidates, so a crash after references are removed but before
+physical vault eviction can resume without losing track of the object. Combined body/SQLite cleanup
+always removes body ownership first; replay is therefore safe at every committed boundary. Objects
+with no retained Email reference and no pending projection are garbage-collection candidates.
 
 Existing `raw_message_sources` rows are an explicit migration source only while
 `raw_message_sources_to_vault` is incomplete. Each source is installed and verified before its

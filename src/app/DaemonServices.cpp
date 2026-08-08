@@ -182,7 +182,7 @@ namespace javelin::app
             *m_undoManager);
         m_developerMaintenanceService = std::make_unique<DeveloperMaintenanceService>(
             location.databasePath, location.vaultRootPath, *m_mailboxMaintenanceRegistry,
-            *m_mailService,
+            *m_mailService, *m_workScheduler,
             [this](const std::string_view accountId, const std::string_view mailboxId)
             { m_fullMailSyncService->requestMailboxResync(accountId, mailboxId); });
         m_mailCommandService = std::make_unique<MailCommandService>(*m_mailService);

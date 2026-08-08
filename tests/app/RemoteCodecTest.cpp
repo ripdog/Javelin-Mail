@@ -175,17 +175,8 @@ TEST_CASE("remote codec round-trips developer mailbox clear results",
           "[app][remote-codec][developer-maintenance]")
 {
     const javelin::app::DeveloperMailboxClearResult result{
-        javelin::app::DeveloperMailboxClearSummary{
-            .accountId = QStringLiteral("account-1"),
-            .mailboxId = QStringLiteral("inbox"),
-            .kind = javelin::app::DeveloperMailboxCacheKind::SqliteAndBodies,
-            .maintenanceGeneration = 7,
-            .rowsDiscarded = 8,
-            .projectionsRemoved = 3,
-            .logicalBytesReleased = 4096,
-            .reclaimedBytes = 2048,
-            .deferredBytes = 1024,
-            .offlineStorageDisabled = true,
+        javelin::app::DeveloperMailboxClearQueued{
+            .jobId = QStringLiteral("mailbox-cache-cleanup:job-1"),
         }};
 
     const auto encoded = javelin::app::remote::encode(result);
@@ -196,13 +187,9 @@ TEST_CASE("remote codec round-trips developer mailbox clear results",
         javelin::app::remote::decodeValue<javelin::app::DeveloperMailboxClearResult>(*payload);
     const auto* decodedResult = std::get_if<javelin::app::DeveloperMailboxClearResult>(&decoded);
     REQUIRE(decodedResult != nullptr);
-    const auto* summary = std::get_if<javelin::app::DeveloperMailboxClearSummary>(decodedResult);
-    REQUIRE(summary != nullptr);
-    CHECK(summary->accountId == QStringLiteral("account-1"));
-    CHECK(summary->kind == javelin::app::DeveloperMailboxCacheKind::SqliteAndBodies);
-    CHECK(summary->maintenanceGeneration == 7);
-    CHECK(summary->reclaimedBytes == 2048);
-    CHECK(summary->offlineStorageDisabled);
+    const auto* queued = std::get_if<javelin::app::DeveloperMailboxClearQueued>(decodedResult);
+    REQUIRE(queued != nullptr);
+    CHECK(queued->jobId == QStringLiteral("mailbox-cache-cleanup:job-1"));
 }
 
 TEST_CASE("remote codec round-trips sender Identity signatures and pending creates",

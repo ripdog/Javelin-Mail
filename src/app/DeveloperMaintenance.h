@@ -46,8 +46,16 @@ namespace javelin::app
         bool offlineStorageDisabled = false;
     };
 
-    using DeveloperMailboxClearResult =
+    using DeveloperMailboxClearExecutionResult =
         std::variant<DeveloperMailboxClearSummary, javelin::jmap::cache::DatabaseError>;
+
+    struct DeveloperMailboxClearQueued
+    {
+        QString jobId;
+    };
+
+    using DeveloperMailboxClearResult =
+        std::variant<DeveloperMailboxClearQueued, javelin::jmap::cache::DatabaseError>;
 
     class DeveloperMaintenancePort
     {

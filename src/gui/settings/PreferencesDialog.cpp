@@ -85,8 +85,8 @@ namespace javelin::gui::settings
         }
 
         [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
-        clearMailboxCaches(javelin::app::DeveloperMaintenancePort& maintenance,
-                           std::vector<MailboxCacheClearRequest> requests)
+        enqueueMailboxCacheClears(javelin::app::DeveloperMaintenancePort& maintenance,
+                                  std::vector<MailboxCacheClearRequest> requests)
         {
             std::optional<javelin::jmap::cache::DatabaseError> firstError;
             for (const auto& request : requests)
@@ -894,16 +894,16 @@ namespace javelin::gui::settings
         if (!cacheClearRequests.empty())
         {
             QPointer<QWidget> cleanupParent{parentWidget()};
-            auto task =
-                clearMailboxCaches(m_developerMaintenancePort, std::move(cacheClearRequests));
+            auto task = enqueueMailboxCacheClears(m_developerMaintenancePort,
+                                                  std::move(cacheClearRequests));
             QCoro::connect(std::move(task), QCoreApplication::instance(),
                            [cleanupParent](std::optional<javelin::jmap::cache::DatabaseError> error)
                            {
                                if (error.has_value() && cleanupParent != nullptr)
                                {
-                                   QMessageBox::warning(cleanupParent,
-                                                        i18n("Could not clear mailbox cache"),
-                                                        error->message);
+                                   QMessageBox::warning(
+                                       cleanupParent, i18n("Could not queue mailbox cache cleanup"),
+                                       error->message);
                                }
                            });
         }

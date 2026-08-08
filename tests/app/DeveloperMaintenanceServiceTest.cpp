@@ -1,6 +1,7 @@
 #include "app/DeveloperMaintenanceService.h"
 
 #include "app/MailboxMaintenanceRegistry.h"
+#include "app/WorkScheduler.h"
 #include "jmap/cache/Database.h"
 #include "jmap/cache/MailVault.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
@@ -8,12 +9,17 @@
 #include <QCoroTask>
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QThread>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -26,9 +32,11 @@ namespace
     using javelin::app::DeveloperMailboxCacheKind;
     using javelin::app::DeveloperMailboxClearCommand;
     using javelin::app::DeveloperMailboxClearResult;
-    using javelin::app::DeveloperMailboxClearSummary;
     using javelin::app::DeveloperMaintenanceService;
     using javelin::app::DeveloperOfflineClearPolicy;
+    using javelin::app::WorkRecord;
+    using javelin::app::WorkScheduler;
+    using javelin::app::WorkStatus;
     using javelin::jmap::cache::DatabaseConnection;
 
     struct DatabaseContext
@@ -126,12 +134,31 @@ namespace
                     .arg(emailId, mailboxId));
     }
 
-    [[nodiscard]] const DeveloperMailboxClearSummary&
-    summary(const DeveloperMailboxClearResult& result)
+    [[nodiscard]] QString queuedJobId(const DeveloperMailboxClearResult& result)
     {
-        const auto* value = std::get_if<DeveloperMailboxClearSummary>(&result);
+        const auto* value = std::get_if<javelin::app::DeveloperMailboxClearQueued>(&result);
         REQUIRE(value != nullptr);
-        return *value;
+        REQUIRE_FALSE(value->jobId.isEmpty());
+        return value->jobId;
+    }
+
+    [[nodiscard]] WorkRecord waitForTerminalJob(WorkScheduler& scheduler, const QString& jobId)
+    {
+        QElapsedTimer timeout;
+        timeout.start();
+        while (timeout.elapsed() < 5000)
+        {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            const auto found = scheduler.find(jobId.toStdString());
+            const auto* record = std::get_if<std::optional<WorkRecord>>(&found);
+            if (record != nullptr && record->has_value() &&
+                ((*record)->status == WorkStatus::Complete ||
+                 (*record)->status == WorkStatus::Failed))
+                return **record;
+            QThread::msleep(1);
+        }
+        FAIL("background mailbox cache cleanup did not finish");
+        return {};
     }
 } // namespace
 
@@ -211,11 +238,15 @@ TEST_CASE("developer SQLite clear preserves mailbox bodies and active optimistic
 
     RecordingPublisher publisher;
     javelin::app::MailboxMaintenanceRegistry registry;
+    WorkScheduler scheduler{context.connection, nullptr, std::chrono::milliseconds{0}};
     std::optional<std::pair<std::string, std::string>> resync;
     DeveloperMaintenanceService maintenance{
         context.directory.filePath(QStringLiteral("cache.sqlite3")),
-        javelin::jmap::cache::MailVault::forDatabase(context.connection).rootPath(), registry,
-        publisher, [&resync](const std::string_view accountId, const std::string_view mailboxId)
+        javelin::jmap::cache::MailVault::forDatabase(context.connection).rootPath(),
+        registry,
+        publisher,
+        scheduler,
+        [&resync](const std::string_view accountId, const std::string_view mailboxId)
         { resync = std::pair{std::string{accountId}, std::string{mailboxId}}; }};
 
     const auto result = QCoro::waitFor(maintenance.clearMailboxCache({
@@ -224,9 +255,8 @@ TEST_CASE("developer SQLite clear preserves mailbox bodies and active optimistic
         .kind = DeveloperMailboxCacheKind::Sqlite,
         .offlinePolicy = DeveloperOfflineClearPolicy::Preserve,
     }));
-    const auto& cleared = summary(result);
-    CHECK(cleared.kind == DeveloperMailboxCacheKind::Sqlite);
-    CHECK(cleared.rowsDiscarded == 6);
+    const auto completed = waitForTerminalJob(scheduler, queuedJobId(result));
+    REQUIRE(completed.status == WorkStatus::Complete);
 
     CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mailboxes WHERE account_id="
                                           "'account-1' AND mailbox_id='inbox'")) == 1);
@@ -297,10 +327,15 @@ TEST_CASE("combined mailbox clear removes bodies before cached mailbox state",
 
     RecordingPublisher publisher;
     javelin::app::MailboxMaintenanceRegistry registry;
+    WorkScheduler scheduler{context.connection, nullptr, std::chrono::milliseconds{0}};
     bool resyncRequested = false;
     DeveloperMaintenanceService maintenance{
-        context.directory.filePath(QStringLiteral("cache.sqlite3")), vault.rootPath(), registry,
-        publisher, [&resyncRequested](const std::string_view, const std::string_view)
+        context.directory.filePath(QStringLiteral("cache.sqlite3")),
+        vault.rootPath(),
+        registry,
+        publisher,
+        scheduler,
+        [&resyncRequested](const std::string_view, const std::string_view)
         { resyncRequested = true; }};
 
     const auto result = QCoro::waitFor(maintenance.clearMailboxCache({
@@ -309,10 +344,9 @@ TEST_CASE("combined mailbox clear removes bodies before cached mailbox state",
         .kind = DeveloperMailboxCacheKind::SqliteAndBodies,
         .offlinePolicy = DeveloperOfflineClearPolicy::Disable,
     }));
-    const auto& cleared = summary(result);
-    CHECK(cleared.kind == DeveloperMailboxCacheKind::SqliteAndBodies);
-    CHECK(cleared.reclaimedBytes == static_cast<std::uint64_t>(payload.size()));
-    CHECK(cleared.offlineStorageDisabled);
+    const auto completed = waitForTerminalJob(scheduler, queuedJobId(result));
+    REQUIRE(completed.status == WorkStatus::Complete);
+    CHECK(completed.progress.completedBytes == static_cast<std::uint64_t>(payload.size()));
 
     CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_mailbox_refs WHERE "
                                           "account_id='account-1' AND mailbox_id='inbox'")) == 0);
@@ -378,10 +412,15 @@ TEST_CASE("developer body clear reclaims unique objects and preserves shared bod
 
     RecordingPublisher publisher;
     javelin::app::MailboxMaintenanceRegistry registry;
+    WorkScheduler scheduler{context.connection, nullptr, std::chrono::milliseconds{0}};
     bool resyncRequested = false;
     DeveloperMaintenanceService maintenance{
-        context.directory.filePath(QStringLiteral("cache.sqlite3")), vault.rootPath(), registry,
-        publisher, [&resyncRequested](const std::string_view, const std::string_view)
+        context.directory.filePath(QStringLiteral("cache.sqlite3")),
+        vault.rootPath(),
+        registry,
+        publisher,
+        scheduler,
+        [&resyncRequested](const std::string_view, const std::string_view)
         { resyncRequested = true; }};
 
     const auto result = QCoro::waitFor(maintenance.clearMailboxCache({
@@ -390,14 +429,9 @@ TEST_CASE("developer body clear reclaims unique objects and preserves shared bod
         .kind = DeveloperMailboxCacheKind::Bodies,
         .offlinePolicy = DeveloperOfflineClearPolicy::Disable,
     }));
-    const auto& cleared = summary(result);
-    CHECK(cleared.kind == DeveloperMailboxCacheKind::Bodies);
-    CHECK(cleared.projectionsRemoved == 2);
-    CHECK(cleared.logicalBytesReleased ==
-          static_cast<std::uint64_t>(sharedPayload.size() + uniquePayload.size()));
-    CHECK(cleared.reclaimedBytes == static_cast<std::uint64_t>(uniquePayload.size()));
-    CHECK(cleared.deferredBytes == 0);
-    CHECK(cleared.offlineStorageDisabled);
+    const auto completed = waitForTerminalJob(scheduler, queuedJobId(result));
+    REQUIRE(completed.status == WorkStatus::Complete);
+    CHECK(completed.progress.completedBytes == static_cast<std::uint64_t>(uniquePayload.size()));
 
     CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM email_mailboxes WHERE account_id="
                                           "'account-1' AND mailbox_id='inbox'")) == 2);
@@ -454,20 +488,20 @@ TEST_CASE("developer body clear batches large reclaimable object cleanup",
 
     RecordingPublisher publisher;
     javelin::app::MailboxMaintenanceRegistry registry;
+    WorkScheduler scheduler{context.connection, nullptr, std::chrono::milliseconds{0}};
     const auto vault = javelin::jmap::cache::MailVault::forDatabase(context.connection);
     DeveloperMaintenanceService maintenance{
         context.directory.filePath(QStringLiteral("cache.sqlite3")), vault.rootPath(), registry,
-        publisher};
+        publisher, scheduler};
     const auto result = QCoro::waitFor(maintenance.clearMailboxCache({
         .accountId = QStringLiteral("account-1"),
         .mailboxId = QStringLiteral("inbox"),
         .kind = DeveloperMailboxCacheKind::Bodies,
         .offlinePolicy = DeveloperOfflineClearPolicy::Disable,
     }));
-    const auto& cleared = summary(result);
-    CHECK(cleared.projectionsRemoved == 130);
-    CHECK(cleared.reclaimedBytes == expectedBytes);
-    CHECK(cleared.deferredBytes == 0);
+    const auto completed = waitForTerminalJob(scheduler, queuedJobId(result));
+    REQUIRE(completed.status == WorkStatus::Complete);
+    CHECK(completed.progress.completedBytes == expectedBytes);
     CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_email_refs WHERE "
                                           "account_id='account-1'")) == 0);
     CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_objects")) == 0);
@@ -513,18 +547,20 @@ TEST_CASE("developer body clear defers leased objects for later vault collection
 
     RecordingPublisher publisher;
     javelin::app::MailboxMaintenanceRegistry registry;
+    WorkScheduler scheduler{context.connection, nullptr, std::chrono::milliseconds{0}};
     DeveloperMaintenanceService maintenance{
         context.directory.filePath(QStringLiteral("cache.sqlite3")), vault.rootPath(), registry,
-        publisher};
+        publisher, scheduler};
     const auto result = QCoro::waitFor(maintenance.clearMailboxCache({
         .accountId = QStringLiteral("account-1"),
         .mailboxId = QStringLiteral("inbox"),
         .kind = DeveloperMailboxCacheKind::Bodies,
         .offlinePolicy = DeveloperOfflineClearPolicy::Disable,
     }));
-    const auto& cleared = summary(result);
-    CHECK(cleared.reclaimedBytes == 0);
-    CHECK(cleared.deferredBytes == static_cast<std::uint64_t>(payload.size()));
+    const auto completed = waitForTerminalJob(scheduler, queuedJobId(result));
+    REQUIRE(completed.status == WorkStatus::Complete);
+    CHECK(completed.progress.completedBytes == 0);
+    CHECK(completed.progress.detail.contains(QStringLiteral("remains in use")));
     CHECK(QFileInfo::exists(QDir{vault.rootPath()}.filePath(object.relativePath)));
     CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_email_refs WHERE "
                                           "account_id='account-1' AND email_id='leased-inbox'")) ==
@@ -539,4 +575,113 @@ TEST_CASE("developer body clear defers leased objects for later vault collection
     REQUIRE(evictedCount != nullptr);
     CHECK(*evictedCount == 1);
     CHECK_FALSE(QFileInfo::exists(QDir{vault.rootPath()}.filePath(object.relativePath)));
+}
+
+TEST_CASE("mailbox cache cleanup is visible and resumes after daemon restart",
+          "[app][developer-maintenance][background][recovery]")
+{
+    ensureApplication();
+    auto context = database();
+    seedBase(context.connection);
+    auto& database = context.connection.database();
+    seedEmail(database, QStringLiteral("restart-message"), QStringLiteral("restart-blob"),
+              QStringLiteral("inbox"));
+
+    const QByteArray payload = QByteArrayLiteral("restart-safe body");
+    javelin::jmap::cache::RawMessageSourceRepository sources{context.connection};
+    REQUIRE_FALSE(
+        sources
+            .upsert("account-1",
+                    {.emailId = "restart-message", .blobId = "restart-blob", .payload = payload})
+            .has_value());
+    const auto vault = javelin::jmap::cache::MailVault::forDatabase(context.connection);
+    const QString bodyPath = textScalar(
+        database, QStringLiteral("SELECT relative_path FROM mail_vault_objects o JOIN "
+                                 "mail_vault_email_refs r ON r.content_hash=o.content_hash WHERE "
+                                 "r.account_id='account-1' AND r.email_id='restart-message'"));
+    const QString contentHash = textScalar(
+        database, QStringLiteral("SELECT content_hash FROM mail_vault_email_refs WHERE "
+                                 "account_id='account-1' AND email_id='restart-message'"));
+    REQUIRE(QFileInfo::exists(QDir{vault.rootPath()}.filePath(bodyPath)));
+
+    RecordingPublisher publisher;
+    javelin::app::MailboxMaintenanceRegistry registry;
+    QString jobId;
+    {
+        WorkScheduler scheduler{context.connection, nullptr, std::chrono::hours{1}};
+        DeveloperMaintenanceService maintenance{
+            context.directory.filePath(QStringLiteral("cache.sqlite3")), vault.rootPath(), registry,
+            publisher, scheduler};
+        const auto result = QCoro::waitFor(maintenance.clearMailboxCache({
+            .accountId = QStringLiteral("account-1"),
+            .mailboxId = QStringLiteral("inbox"),
+            .kind = DeveloperMailboxCacheKind::Bodies,
+            .offlinePolicy = DeveloperOfflineClearPolicy::Disable,
+        }));
+        jobId = queuedJobId(result);
+
+        const auto listed = scheduler.list();
+        const auto* jobs = std::get_if<std::vector<WorkRecord>>(&listed);
+        REQUIRE(jobs != nullptr);
+        const auto queued = std::ranges::find(*jobs, jobId.toStdString(), &WorkRecord::jobId);
+        REQUIRE(queued != jobs->end());
+        CHECK(queued->status == WorkStatus::Queued);
+        CHECK(queued->checkpointJson.contains(QStringLiteral("mailbox_cache_cleanup")));
+        CHECK(queued->checkpointJson.contains(QStringLiteral("inbox")));
+
+        execute(database,
+                QStringLiteral("INSERT INTO mail_vault_projection_jobs(account_id,email_id,"
+                               "mailbox_id,content_hash,operation) VALUES('account-1',"
+                               "'restart-message','inbox','%1','unlink')")
+                    .arg(contentHash));
+        execute(database,
+                QStringLiteral("DELETE FROM mail_vault_mailbox_refs WHERE account_id='account-1' "
+                               "AND mailbox_id='inbox'"));
+        execute(database,
+                QStringLiteral("DELETE FROM mail_vault_email_refs WHERE account_id='account-1' "
+                               "AND email_id='restart-message'"));
+        execute(database,
+                QStringLiteral("UPDATE background_jobs SET status='running' WHERE job_id='%1'")
+                    .arg(jobId));
+
+        CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_mailbox_refs WHERE "
+                                              "account_id='account-1' AND mailbox_id='inbox'")) ==
+              0);
+        CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_email_refs WHERE "
+                                              "account_id='account-1' AND "
+                                              "email_id='restart-message'")) == 0);
+        CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_objects WHERE "
+                                              "content_hash='%1'")
+                                   .arg(contentHash)) == 1);
+        CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_projection_jobs "
+                                              "WHERE content_hash='%1' AND operation='unlink'")
+                                   .arg(contentHash)) == 1);
+    }
+
+    CHECK(QFileInfo::exists(QDir{vault.rootPath()}.filePath(bodyPath)));
+    {
+        WorkScheduler scheduler{context.connection, nullptr, std::chrono::milliseconds{0}};
+        const auto recovered = scheduler.find(jobId.toStdString());
+        const auto* record = std::get_if<std::optional<WorkRecord>>(&recovered);
+        REQUIRE(record != nullptr);
+        REQUIRE(record->has_value());
+        CHECK((*record)->status == WorkStatus::Queued);
+
+        DeveloperMaintenanceService maintenance{
+            context.directory.filePath(QStringLiteral("cache.sqlite3")), vault.rootPath(), registry,
+            publisher, scheduler};
+        const auto completed = waitForTerminalJob(scheduler, jobId);
+        REQUIRE(completed.status == WorkStatus::Complete);
+        CHECK(completed.progress.completedBytes == static_cast<std::uint64_t>(payload.size()));
+    }
+
+    CHECK_FALSE(QFileInfo::exists(QDir{vault.rootPath()}.filePath(bodyPath)));
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_objects WHERE "
+                                          "content_hash='%1'")
+                               .arg(contentHash)) == 0);
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_projection_jobs WHERE "
+                                          "content_hash='%1'")
+                               .arg(contentHash)) == 0);
+    REQUIRE(publisher.changes.size() == 1);
+    CHECK(publisher.changes.front().mailboxIds == QStringList{QStringLiteral("inbox")});
 }
