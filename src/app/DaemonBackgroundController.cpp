@@ -108,6 +108,8 @@ namespace javelin::app
                     m_services.fullMailSyncService().requestCatchUp(change.accountId.toStdString());
                 if (change.hasNewMail)
                     m_services.mailIndexService().requestIndex(change.accountId.toStdString());
+                if (mailCacheChanged)
+                    refreshTrayUnreadCount();
             });
         connect(&m_services.errorCoordinator(), &ApplicationErrorCoordinator::incidentRaised, this,
                 [this](const QString& connectionId, const QString&, const QString& title,
@@ -197,15 +199,6 @@ namespace javelin::app
                     Q_EMIT activationRequested(
                         protocol::RaiseGuiRoute{.activationToken = activationToken});
                 });
-        connect(m_tray.get(), &DaemonTrayController::taskCenterRequested, this,
-                [this](const QString& activationToken)
-                {
-                    Q_EMIT activationRequested(protocol::OpenTaskCenterRoute{
-                        .activationToken = activationToken,
-                    });
-                });
-        connect(m_tray.get(), &DaemonTrayController::refreshRequested, this,
-                &DaemonBackgroundController::requestAccountRefresh);
         connect(m_tray.get(), &DaemonTrayController::quitRequested, this,
                 &DaemonBackgroundController::shutdownRequested);
 
@@ -215,6 +208,7 @@ namespace javelin::app
         m_services.deferredSendService().start();
         m_services.calendarNotificationService().start();
         setupNetworkReachability();
+        refreshTrayUnreadCount();
         if (!m_tray->start())
             qInfo() << QStringLiteral("Tray integration is unavailable; daemon services continue");
     }
@@ -266,16 +260,25 @@ namespace javelin::app
         }
     }
 
-    void DaemonBackgroundController::requestAccountRefresh()
+    void DaemonBackgroundController::refreshTrayUnreadCount()
     {
+        std::uint64_t unreadCount = 0;
         for (const auto& [accountId, status] : m_services.mailService().accountStatuses())
         {
             static_cast<void>(status);
-            if (!m_services.mailService().requestAccountSynchronization(accountId))
-                qWarning().noquote()
-                    << QStringLiteral("Tray refresh could not start synchronization for")
-                    << QString::fromStdString(accountId);
+            const auto mailboxes = m_services.queryService().listMailboxTree(accountId);
+            const auto* items =
+                std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxes);
+            if (items == nullptr)
+                continue;
+
+            for (const auto& mailbox : *items)
+            {
+                if (mailbox.role.has_value() && *mailbox.role == "inbox")
+                    unreadCount += mailbox.unreadEmails;
+            }
         }
+        m_tray->setInboxUnreadCount(unreadCount);
     }
 
     void DaemonBackgroundController::queueNotificationRetry(const QString& accountId)

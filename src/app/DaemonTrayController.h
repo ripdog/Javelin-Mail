@@ -1,13 +1,43 @@
 #pragma once
 
+#include <QByteArray>
 #include <QDBusObjectPath>
+#include <QList>
 #include <QObject>
+#include <QString>
 
+#include <cstdint>
 #include <memory>
+
+class QDBusArgument;
 
 namespace javelin::app
 {
     class WorkScheduler;
+
+    struct TrayIconPixmap
+    {
+        int width = 0;
+        int height = 0;
+        QByteArray data;
+
+        friend bool operator==(const TrayIconPixmap&, const TrayIconPixmap&) = default;
+    };
+
+    struct TrayToolTip
+    {
+        QString iconName;
+        QList<TrayIconPixmap> iconPixmaps;
+        QString title;
+        QString description;
+
+        friend bool operator==(const TrayToolTip&, const TrayToolTip&) = default;
+    };
+
+    QDBusArgument& operator<<(QDBusArgument& argument, const TrayIconPixmap& pixmap);
+    const QDBusArgument& operator>>(const QDBusArgument& argument, TrayIconPixmap& pixmap);
+    QDBusArgument& operator<<(QDBusArgument& argument, const TrayToolTip& tooltip);
+    const QDBusArgument& operator>>(const QDBusArgument& argument, TrayToolTip& tooltip);
 
     class DaemonTrayController final : public QObject
     {
@@ -22,6 +52,7 @@ namespace javelin::app
         Q_PROPERTY(QDBusObjectPath Menu READ menu CONSTANT)
         Q_PROPERTY(bool ItemIsMenu READ itemIsMenu CONSTANT)
         Q_PROPERTY(QString IconName READ iconName CONSTANT)
+        Q_PROPERTY(javelin::app::TrayToolTip ToolTip READ toolTip)
 
       public:
         explicit DaemonTrayController(WorkScheduler& workScheduler, QObject* parent = nullptr);
@@ -45,6 +76,8 @@ namespace javelin::app
         [[nodiscard]] QDBusObjectPath menu() const;
         [[nodiscard]] bool itemIsMenu() const;
         [[nodiscard]] QString iconName() const;
+        [[nodiscard]] TrayToolTip toolTip() const;
+        void setInboxUnreadCount(std::uint64_t unreadCount);
 
       public Q_SLOTS:
         void Activate(int x, int y);
@@ -55,18 +88,17 @@ namespace javelin::app
 
       Q_SIGNALS:
         void raiseGuiRequested(const QString& activationToken);
-        void taskCenterRequested(const QString& activationToken);
-        void refreshRequested();
         void quitRequested();
         void NewTitle();
         void NewIcon();
         void NewMenu();
+        void NewToolTip();
         void NewStatus(const QString& status);
 
       private:
         class Menu;
 
-        void updateSummary();
+        void updateToolTip();
 
         WorkScheduler& m_workScheduler;
         std::unique_ptr<Menu> m_menu;
@@ -74,6 +106,11 @@ namespace javelin::app
         QString m_serviceName;
         QString m_title = QStringLiteral("Javelin Mail");
         QString m_status = QStringLiteral("Passive");
+        TrayToolTip m_toolTip;
+        std::uint64_t m_inboxUnreadCount = 0;
         bool m_available = false;
     };
 } // namespace javelin::app
+
+Q_DECLARE_METATYPE(javelin::app::TrayIconPixmap)
+Q_DECLARE_METATYPE(javelin::app::TrayToolTip)

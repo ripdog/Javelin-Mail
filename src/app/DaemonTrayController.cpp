@@ -9,6 +9,7 @@
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusMessage>
+#include <QDBusMetaType>
 #include <QDBusVariant>
 #include <QDBusVirtualObject>
 #include <QDebug>
@@ -17,9 +18,42 @@
 #include <QVariantMap>
 
 #include <tuple>
+#include <vector>
 
 namespace javelin::app
 {
+    QDBusArgument& operator<<(QDBusArgument& argument, const TrayIconPixmap& pixmap)
+    {
+        argument.beginStructure();
+        argument << pixmap.width << pixmap.height << pixmap.data;
+        argument.endStructure();
+        return argument;
+    }
+
+    const QDBusArgument& operator>>(const QDBusArgument& argument, TrayIconPixmap& pixmap)
+    {
+        argument.beginStructure();
+        argument >> pixmap.width >> pixmap.height >> pixmap.data;
+        argument.endStructure();
+        return argument;
+    }
+
+    QDBusArgument& operator<<(QDBusArgument& argument, const TrayToolTip& tooltip)
+    {
+        argument.beginStructure();
+        argument << tooltip.iconName << tooltip.iconPixmaps << tooltip.title << tooltip.description;
+        argument.endStructure();
+        return argument;
+    }
+
+    const QDBusArgument& operator>>(const QDBusArgument& argument, TrayToolTip& tooltip)
+    {
+        argument.beginStructure();
+        argument >> tooltip.iconName >> tooltip.iconPixmaps >> tooltip.title >> tooltip.description;
+        argument.endStructure();
+        return argument;
+    }
+
     namespace
     {
         constexpr auto trayPath = "/StatusNotifierItem";
@@ -66,6 +100,40 @@ namespace javelin::app
             if (name == QStringLiteral("visible"))
                 return true;
             return {};
+        }
+
+        [[nodiscard]] QString runningWorkSummary(const WorkScheduler& workScheduler)
+        {
+            const auto listed = workScheduler.list();
+            const auto* jobs = std::get_if<std::vector<WorkRecord>>(&listed);
+            if (jobs == nullptr)
+                return {};
+
+            std::vector<const WorkRecord*> running;
+            for (const auto& job : *jobs)
+            {
+                if (job.status == WorkStatus::Running)
+                    running.push_back(&job);
+            }
+
+            if (running.empty())
+                return {};
+            if (running.size() > 1)
+                return i18np("%1 background task running", "%1 background tasks running",
+                             running.size());
+
+            const auto& current = *running.front();
+            QString detail = current.progress.detail;
+            if (current.progress.totalUnits.has_value() && *current.progress.totalUnits > 0)
+            {
+                const auto progress = QStringLiteral("%1 / %2")
+                                          .arg(current.progress.completedUnits)
+                                          .arg(*current.progress.totalUnits);
+                detail =
+                    detail.isEmpty() ? progress : QStringLiteral("%1 — %2").arg(detail, progress);
+            }
+            return detail.isEmpty() ? current.title
+                                    : QStringLiteral("%1 — %2").arg(current.title, detail);
         }
     } // namespace
 
@@ -124,12 +192,8 @@ namespace javelin::app
                     {
                         children.push_back(QVariant::fromValue(
                             menuLayoutItem(1, actionProperties(i18n("Open Javelin"), true))));
-                        children.push_back(QVariant::fromValue(
-                            menuLayoutItem(2, actionProperties(i18n("Task Center…"), true))));
-                        children.push_back(QVariant::fromValue(
-                            menuLayoutItem(3, actionProperties(i18n("Refresh accounts"), true))));
                         children.push_back(QVariant::fromValue(menuLayoutItem(
-                            4, actionProperties(i18nc("@action:inmenu", "Quit"), true))));
+                            2, actionProperties(i18nc("@action:inmenu", "Quit"), true))));
                     }
                     const auto layout = menuLayoutItem(0, {}, children);
                     QList<QVariant> replyArguments;
@@ -216,10 +280,6 @@ namespace javelin::app
             case 1:
                 return actionProperties(i18n("Open Javelin"), true);
             case 2:
-                return actionProperties(i18n("Task Center…"), true);
-            case 3:
-                return actionProperties(i18n("Refresh accounts"), true);
-            case 4:
                 return actionProperties(i18nc("@action:inmenu", "Quit"), true);
             default:
                 return {};
@@ -239,13 +299,7 @@ namespace javelin::app
             case 1:
                 Q_EMIT m_controller.raiseGuiRequested({});
                 break;
-            case 3:
-                Q_EMIT m_controller.refreshRequested();
-                break;
             case 2:
-                Q_EMIT m_controller.taskCenterRequested({});
-                break;
-            case 4:
                 Q_EMIT m_controller.quitRequested();
                 break;
             default:
@@ -259,8 +313,11 @@ namespace javelin::app
     DaemonTrayController::DaemonTrayController(WorkScheduler& workScheduler, QObject* parent)
         : QObject(parent), m_workScheduler(workScheduler)
     {
+        qDBusRegisterMetaType<TrayIconPixmap>();
+        qDBusRegisterMetaType<QList<TrayIconPixmap>>();
+        qDBusRegisterMetaType<TrayToolTip>();
         connect(&m_workScheduler, &WorkScheduler::jobsChanged, this,
-                &DaemonTrayController::updateSummary);
+                &DaemonTrayController::updateToolTip);
     }
 
     DaemonTrayController::~DaemonTrayController()
@@ -313,7 +370,7 @@ namespace javelin::app
         }
 
         m_available = true;
-        updateSummary();
+        updateToolTip();
 
         QDBusInterface watcher{QString::fromLatin1(watcherService),
                                QString::fromLatin1(watcherPath),
@@ -401,6 +458,19 @@ namespace javelin::app
         return QStringLiteral("javelinmail");
     }
 
+    TrayToolTip DaemonTrayController::toolTip() const
+    {
+        return m_toolTip;
+    }
+
+    void DaemonTrayController::setInboxUnreadCount(const std::uint64_t unreadCount)
+    {
+        if (m_inboxUnreadCount == unreadCount)
+            return;
+        m_inboxUnreadCount = unreadCount;
+        updateToolTip();
+    }
+
     void DaemonTrayController::Activate(const int, const int)
     {
         const auto token = std::exchange(m_activationToken, {});
@@ -422,26 +492,30 @@ namespace javelin::app
 
     void DaemonTrayController::SecondaryActivate(const int, const int)
     {
-        Q_EMIT refreshRequested();
     }
 
-    void DaemonTrayController::updateSummary()
+    void DaemonTrayController::updateToolTip()
     {
-        const auto summary = m_workScheduler.summary();
-        const auto title =
-            summary.isEmpty() ? i18n("Javelin Mail") : i18n("Javelin Mail — %1", summary);
-        const auto status = QStringLiteral("Active");
-        if (m_title != title)
+        const auto tooltip = TrayToolTip{
+            .iconName = QStringLiteral("javelinmail"),
+            .iconPixmaps = {},
+            .title =
+                i18np("%1 unread email in Inbox", "%1 unread emails in Inbox", m_inboxUnreadCount),
+            .description = runningWorkSummary(m_workScheduler),
+        };
+        if (m_toolTip != tooltip)
         {
-            m_title = title;
+            m_toolTip = tooltip;
             if (m_available)
-                Q_EMIT NewTitle();
+                Q_EMIT NewToolTip();
         }
+
+        const auto status = QStringLiteral("Active");
         if (m_status != status)
         {
             m_status = status;
             if (m_available)
-                Q_EMIT NewStatus(QStringLiteral("%1").arg(m_status));
+                Q_EMIT NewStatus(m_status);
         }
     }
 } // namespace javelin::app

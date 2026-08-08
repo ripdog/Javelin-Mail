@@ -311,6 +311,7 @@ add_executable(javelin_daemon_tests
     ${PROJECT_SOURCE_DIR}/src/app/GuiDaemonSession.cpp
     ${PROJECT_SOURCE_DIR}/src/app/GuiMailApplicationEvents.cpp
     app/DaemonProcessTest.cpp
+    app/DaemonTrayControllerTest.cpp
     app/DesktopNotificationControllerTest.cpp
     app/DeferredSendServiceTest.cpp
     app/DeveloperMaintenanceServiceTest.cpp
@@ -331,6 +332,7 @@ target_link_libraries(javelin_daemon_tests
     PRIVATE
         Catch2::Catch2WithMain
         Qt::Core
+        Qt::DBus
         Qt::Network
         Qt::Sql
         javelin_daemon_core

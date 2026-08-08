@@ -42,7 +42,7 @@ namespace javelin::app
       private:
         void setupNetworkReachability();
         void retryMailNotifications();
-        void requestAccountRefresh();
+        void refreshTrayUnreadCount();
         void queueNotificationRetry(const QString& accountId);
 
         DaemonServices& m_services;
