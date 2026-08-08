@@ -486,6 +486,7 @@ namespace javelin::gui::messageview
 
         m_junkBannerWidget = new QWidget(this);
         m_junkBannerWidget->setObjectName(QStringLiteral("junkBanner"));
+        m_junkBannerWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
         m_junkBannerWidget->setStyleSheet(QStringLiteral(
             "QWidget#junkBanner { background: palette(alternate-base); border: 1px solid "
             "palette(mid); border-radius: 6px; }"
@@ -504,7 +505,8 @@ namespace javelin::gui::messageview
         m_junkIconLabel->setAlignment(Qt::AlignCenter);
 
         m_junkStatusLabel = new QLabel(m_junkBannerWidget);
-        m_junkStatusLabel->setWordWrap(true);
+        m_junkStatusLabel->setWordWrap(false);
+        m_junkStatusLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         makeLabelSelectable(m_junkStatusLabel);
 
         m_notJunkButton = new QToolButton(m_junkBannerWidget);
@@ -538,8 +540,7 @@ namespace javelin::gui::messageview
                 });
 
         junkLayout->addWidget(m_junkIconLabel);
-        junkLayout->addWidget(m_junkStatusLabel);
-        junkLayout->addStretch(1);
+        junkLayout->addWidget(m_junkStatusLabel, 1);
         junkLayout->addWidget(m_notJunkButton);
         junkLayout->addWidget(m_closeJunkBannerButton);
         m_junkBannerWidget->setVisible(false);
