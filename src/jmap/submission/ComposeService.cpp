@@ -35,7 +35,6 @@
 #include <QMimeDatabase>
 #include <QRegularExpression>
 #include <QString>
-#include <QTimeZone>
 #include <QUrl>
 #include <QUuid>
 
@@ -1764,7 +1763,7 @@ namespace javelin::jmap::submission
                 .message = QStringLiteral("The scheduled send time must be in the future."),
             };
         }
-        const auto delay = std::chrono::duration_cast<std::chrono::seconds>(sendAt - currentTime);
+        const auto delay = std::chrono::ceil<std::chrono::seconds>(sendAt - currentTime);
         if (static_cast<std::uint64_t>(delay.count()) > maxDelayedSend)
         {
             return javelin::jmap::OperationError{
@@ -1992,17 +1991,21 @@ namespace javelin::jmap::submission
                 };
             }
 
-            const auto epochSeconds =
-                std::chrono::duration_cast<std::chrono::seconds>(sendAt->time_since_epoch())
+            const auto holdFor =
+                std::chrono::ceil<std::chrono::seconds>(*sendAt - std::chrono::system_clock::now())
                     .count();
-            const auto holdUntil = QDateTime::fromSecsSinceEpoch(epochSeconds, QTimeZone::UTC)
-                                       .toString(Qt::ISODate)
-                                       .toStdString();
+            if (holdFor <= 0)
+            {
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                    .message = QStringLiteral("The scheduled send time must be in the future."),
+                };
+            }
             javelin::jmap::api::EmailSubmissionEnvelope envelope{
                 .mailFrom =
                     javelin::jmap::api::EnvelopeAddress{
                         .email = identity->email,
-                        .parameters = {{"HOLDUNTIL", holdUntil}},
+                        .parameters = {{"HOLDFOR", std::to_string(holdFor)}},
                     },
                 .rcptTo = {},
             };
@@ -2112,15 +2115,31 @@ namespace javelin::jmap::submission
             std::get<javelin::jmap::api::EmailSubmissionSetResponse>(submissionResult);
         if (!submissionResponse.notCreated.empty() || submissionResponse.created.empty())
         {
-            const auto errorJson =
-                submissionResponse.notCreated.empty()
-                    ? std::optional<std::string_view>{}
-                    : std::optional<std::string_view>{submissionResponse.notCreated.front()};
-            if (const auto rejectionError = rejectGroup(errorJson))
+            const javelin::jmap::api::SetError* setError = nullptr;
+            if (const auto error = submissionResponse.notCreated.find("send");
+                error != submissionResponse.notCreated.end())
+                setError = &error->second;
+            else if (!submissionResponse.notCreated.empty())
+                setError = &submissionResponse.notCreated.begin()->second;
+
+            const auto errorType = setError != nullptr && !setError->type.empty()
+                                       ? std::optional<std::string_view>{setError->type}
+                                       : std::nullopt;
+            if (const auto rejectionError = rejectGroup(errorType))
                 co_return *rejectionError;
+
+            QString message = QStringLiteral("The server rejected the send request.");
+            if (setError != nullptr && setError->description.has_value() &&
+                !setError->description->empty())
+                message = QStringLiteral("The server rejected the send request: %1")
+                              .arg(QString::fromStdString(*setError->description));
+            else if (setError != nullptr && !setError->type.empty())
+                message = QStringLiteral("The server rejected the send request (%1).")
+                              .arg(QString::fromStdString(setError->type));
+
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::Conflict,
-                .message = QStringLiteral("The server rejected the send request."),
+                .message = std::move(message),
             };
         }
 

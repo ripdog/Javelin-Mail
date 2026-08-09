@@ -119,7 +119,7 @@ TEST_CASE("email submission envelopes serialize delayed send parameters",
                          javelin::jmap::api::EmailSubmissionEnvelope{
                              .mailFrom = javelin::jmap::api::EnvelopeAddress{
                                  .email = "sender@example.com",
-                                 .parameters = {{"HOLDUNTIL", "2026-08-10T09:30:00Z"}},
+                                 .parameters = {{"HOLDFOR", "3600"}},
                              },
                              .rcptTo =
                                  {javelin::jmap::api::EnvelopeAddress{
@@ -133,8 +133,24 @@ TEST_CASE("email submission envelopes serialize delayed send parameters",
     });
 
     REQUIRE(json.has_value());
-    CHECK(json->find(R"("HOLDUNTIL":"2026-08-10T09:30:00Z")") != std::string::npos);
+    CHECK(json->find(R"("HOLDFOR":"3600")") != std::string::npos);
     CHECK(json->find(R"("email":"recipient@example.com","parameters":{})") != std::string::npos);
+}
+
+TEST_CASE("email submission set responses preserve per-object errors", "[jmap][method][submission]")
+{
+    const auto result = javelin::jmap::api::parseEmailSubmissionSetResponse(
+        R"({"accountId":"u1","oldState":"s1","newState":"s1","created":{},"notCreated":{"send":{"type":"invalidProperties","description":"Failed to parse mailFrom parameters: Invalid parameter HOLDUNTIL.","properties":["envelope"]}}})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    REQUIRE(result.value->notCreated.contains("send"));
+    const auto& error = result.value->notCreated.at("send");
+    CHECK(error.type == "invalidProperties");
+    CHECK(error.description ==
+          std::optional<std::string>{
+              "Failed to parse mailFrom parameters: Invalid parameter HOLDUNTIL."});
+    CHECK(error.properties == std::vector<std::string>{"envelope"});
 }
 
 TEST_CASE("identity changes responses preserve incremental ids", "[jmap][method][mail][identity]")

@@ -57,12 +57,14 @@ namespace javelin::jmap::api
         std::vector<std::string> destroyed;
     };
 
-    struct IdentitySetError
+    struct SetError
     {
         std::string type;
         std::optional<std::string> description;
         std::vector<std::string> properties;
     };
+
+    using IdentitySetError = SetError;
 
     struct IdentitySetCreate
     {
@@ -365,7 +367,7 @@ namespace javelin::jmap::api
         std::string oldState;
         std::string newState;
         std::unordered_map<std::string, EmailSubmissionCreated> created;
-        std::vector<std::string> notCreated;
+        std::unordered_map<std::string, SetError> notCreated;
     };
 
     struct ChangesResponse

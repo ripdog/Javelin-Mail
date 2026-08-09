@@ -219,6 +219,15 @@ namespace
         };
     }
 
+    [[nodiscard]] javelin::jmap::api::HttpResponse submissionRejectedResponse()
+    {
+        return {
+            .statusCode = 200,
+            .body = QByteArrayLiteral(
+                R"({"methodResponses":[["EmailSubmission/set",{"accountId":"account-2","oldState":"submission-1","newState":"submission-1","created":{},"notCreated":{"send":{"type":"invalidProperties","description":"Failed to parse mailFrom parameters: Invalid parameter HOLDUNTIL.","properties":["envelope"]}}},"send-message"]],"sessionState":"session-3"})"),
+        };
+    }
+
 } // namespace
 
 TEST_CASE("compose uses owner credentials for a secondary submission account",
@@ -559,7 +568,7 @@ TEST_CASE("compose sending uses the account selected with the From identity",
     CHECK_FALSE(transport.requests.at(1).body.contains("identity-1"));
 }
 
-TEST_CASE("scheduled submission uses HOLDUNTIL and validates the server delay limit",
+TEST_CASE("scheduled submission uses HOLDFOR and validates the server delay limit",
           "[jmap][submission][scheduled]")
 {
     ensureApplication();
@@ -611,7 +620,8 @@ TEST_CASE("scheduled submission uses HOLDUNTIL and validates the server delay li
     CHECK(std::get<javelin::jmap::submission::SendSummary>(result).scheduled);
     REQUIRE(transport.requests.size() == 2);
     const auto& request = transport.requests.at(1).body;
-    CHECK(request.contains("\"HOLDUNTIL\""));
+    CHECK(request.contains("\"HOLDFOR\""));
+    CHECK_FALSE(request.contains("\"HOLDUNTIL\""));
     CHECK(request.contains("\"email\":\"sender@example.test\""));
     CHECK(request.contains("\"email\":\"to@example.test\""));
     CHECK(request.contains("\"email\":\"cc@example.test\""));
@@ -621,6 +631,67 @@ TEST_CASE("scheduled submission uses HOLDUNTIL and validates the server delay li
         "account-2", std::chrono::system_clock::now() + std::chrono::hours{25});
     REQUIRE(tooLate.has_value());
     CHECK(tooLate->code == javelin::jmap::OperationErrorCode::PreconditionFailed);
+}
+
+TEST_CASE("submission rejection reports the server SetError",
+          "[jmap][submission][scheduled][error]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("compose-scheduled-rejection-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    seedAccount(connection, "account-2", "https://account-2.example.test/jmap", "identity-2",
+                "sender@example.test");
+
+    FakeTransport transport;
+    transport.results = {draftCreatedResponse(), submissionRejectedResponse()};
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::JmapCore core{connection, transport, methodTransport};
+    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    const javelin::jmap::LiveConnectionSettings liveSettings{
+        .sessionUrl = "https://account-2.example.test/.well-known/jmap",
+        .loginEmail = "shared-login@example.test",
+        .apiKey = "account-2-secret",
+    };
+    auto prepared = QCoro::waitFor(service.prepareSend(
+        liveSettings, javelin::jmap::submission::DraftSnapshot{
+                          .composeSessionId = "compose-scheduled-rejected",
+                          .accountId = "account-2",
+                          .draftEmailId = std::nullopt,
+                          .mode = javelin::jmap::submission::ComposeMode::NewMessage,
+                          .editorMode = javelin::jmap::submission::BodyEditorMode::RichText,
+                          .identityId = "identity-2",
+                          .to = {{.name = std::nullopt, .email = "to@example.test"}},
+                          .cc = {},
+                          .bcc = {},
+                          .subject = "Rejected scheduled send",
+                          .plainTextBody = "Body",
+                          .htmlBody = "<p>Body</p>",
+                          .threading = {},
+                          .attachments = {},
+                      }));
+    REQUIRE(std::holds_alternative<javelin::jmap::submission::PreparedSend>(prepared));
+    const auto result = QCoro::waitFor(service.submitPreparedSendAt(
+        liveSettings, std::get<javelin::jmap::submission::PreparedSend>(std::move(prepared)),
+        std::chrono::system_clock::now() + std::chrono::hours{1}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+    const auto& error = std::get<javelin::jmap::OperationError>(result);
+    CHECK(error.message.contains(QStringLiteral("Invalid parameter HOLDUNTIL")));
+
+    javelin::jmap::sync::MutationJournalRepository journal{connection};
+    const auto rejected =
+        journal.listByStatus({.accountId = "account-2", .dataType = "EmailSubmission"},
+                             javelin::jmap::sync::MutationStatus::Rejected, 10);
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(rejected));
+    const auto& records = std::get<std::vector<javelin::jmap::sync::MutationRecord>>(rejected);
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().errorJson == std::optional<std::string>{"invalidProperties"});
 }
 
 TEST_CASE("an ambiguous submission keeps the optimistic Sent projection durable",

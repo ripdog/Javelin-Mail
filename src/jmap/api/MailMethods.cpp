@@ -311,7 +311,7 @@ namespace
         std::optional<std::string> oldState;
         std::string newState;
         std::optional<std::unordered_map<std::string, RawEmailSubmissionCreated>> created;
-        std::optional<std::unordered_map<std::string, glz::generic>> notCreated;
+        std::optional<std::unordered_map<std::string, RawIdentitySetError>> notCreated;
     };
 
     struct RawChangesResponse
@@ -1543,14 +1543,17 @@ namespace javelin::jmap::api
             created.emplace(creationId, EmailSubmissionCreated{.id = value.id});
         }
 
-        std::vector<std::string> notCreated;
-        const auto& rawNotCreated =
-            parsed.value->notCreated.value_or(std::unordered_map<std::string, glz::generic>{});
+        std::unordered_map<std::string, SetError> notCreated;
+        const auto& rawNotCreated = parsed.value->notCreated.value_or(
+            std::unordered_map<std::string, RawIdentitySetError>{});
         notCreated.reserve(rawNotCreated.size());
-        for (const auto& [creationId, ignored] : rawNotCreated)
+        for (const auto& [creationId, error] : rawNotCreated)
         {
-            static_cast<void>(ignored);
-            notCreated.push_back(creationId);
+            notCreated.emplace(creationId, SetError{
+                                               .type = error.type,
+                                               .description = error.description,
+                                               .properties = error.properties,
+                                           });
         }
 
         return {
