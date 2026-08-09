@@ -35,6 +35,7 @@
 #include <QMimeDatabase>
 #include <QRegularExpression>
 #include <QString>
+#include <QTimeZone>
 #include <QUrl>
 #include <QUuid>
 
@@ -1763,7 +1764,7 @@ namespace javelin::jmap::submission
                 .message = QStringLiteral("The scheduled send time must be in the future."),
             };
         }
-        const auto delay = std::chrono::ceil<std::chrono::seconds>(sendAt - currentTime);
+        const auto delay = std::chrono::duration_cast<std::chrono::seconds>(sendAt - currentTime);
         if (static_cast<std::uint64_t>(delay.count()) > maxDelayedSend)
         {
             return javelin::jmap::OperationError{
@@ -1991,21 +1992,17 @@ namespace javelin::jmap::submission
                 };
             }
 
-            const auto holdFor =
-                std::chrono::ceil<std::chrono::seconds>(*sendAt - std::chrono::system_clock::now())
+            const auto epochSeconds =
+                std::chrono::duration_cast<std::chrono::seconds>(sendAt->time_since_epoch())
                     .count();
-            if (holdFor <= 0)
-            {
-                co_return javelin::jmap::OperationError{
-                    .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
-                    .message = QStringLiteral("The scheduled send time must be in the future."),
-                };
-            }
+            const auto holdUntil = QDateTime::fromSecsSinceEpoch(epochSeconds, QTimeZone::UTC)
+                                       .toString(Qt::ISODate)
+                                       .toStdString();
             javelin::jmap::api::EmailSubmissionEnvelope envelope{
                 .mailFrom =
                     javelin::jmap::api::EnvelopeAddress{
                         .email = identity->email,
-                        .parameters = {{"HOLDFOR", std::to_string(holdFor)}},
+                        .parameters = {{"HOLDUNTIL", holdUntil}},
                     },
                 .rcptTo = {},
             };

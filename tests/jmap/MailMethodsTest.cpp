@@ -119,7 +119,7 @@ TEST_CASE("email submission envelopes serialize delayed send parameters",
                          javelin::jmap::api::EmailSubmissionEnvelope{
                              .mailFrom = javelin::jmap::api::EnvelopeAddress{
                                  .email = "sender@example.com",
-                                 .parameters = {{"HOLDFOR", "3600"}},
+                                 .parameters = {{"HOLDUNTIL", "2026-08-10T09:30:00Z"}},
                              },
                              .rcptTo =
                                  {javelin::jmap::api::EnvelopeAddress{
@@ -133,7 +133,7 @@ TEST_CASE("email submission envelopes serialize delayed send parameters",
     });
 
     REQUIRE(json.has_value());
-    CHECK(json->find(R"("HOLDFOR":"3600")") != std::string::npos);
+    CHECK(json->find(R"("HOLDUNTIL":"2026-08-10T09:30:00Z")") != std::string::npos);
     CHECK(json->find(R"("email":"recipient@example.com","parameters":{})") != std::string::npos);
 }
 

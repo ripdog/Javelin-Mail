@@ -568,7 +568,7 @@ TEST_CASE("compose sending uses the account selected with the From identity",
     CHECK_FALSE(transport.requests.at(1).body.contains("identity-1"));
 }
 
-TEST_CASE("scheduled submission uses HOLDFOR and validates the server delay limit",
+TEST_CASE("scheduled submission uses HOLDUNTIL and validates the server delay limit",
           "[jmap][submission][scheduled]")
 {
     ensureApplication();
@@ -620,8 +620,7 @@ TEST_CASE("scheduled submission uses HOLDFOR and validates the server delay limi
     CHECK(std::get<javelin::jmap::submission::SendSummary>(result).scheduled);
     REQUIRE(transport.requests.size() == 2);
     const auto& request = transport.requests.at(1).body;
-    CHECK(request.contains("\"HOLDFOR\""));
-    CHECK_FALSE(request.contains("\"HOLDUNTIL\""));
+    CHECK(request.contains("\"HOLDUNTIL\""));
     CHECK(request.contains("\"email\":\"sender@example.test\""));
     CHECK(request.contains("\"email\":\"to@example.test\""));
     CHECK(request.contains("\"email\":\"cc@example.test\""));
