@@ -33,4 +33,6 @@ namespace javelin::gui::messages
     [[nodiscard]] MessageSelectionRestorationPlan
     planMessageSelectionRestoration(std::span<const MessageRowIdentity> rows,
                                     const MessageSelectionRestorationRequest& request);
+    [[nodiscard]] bool shouldActivateRestoredSelection(bool selectionChanged,
+                                                       bool quickFilterActive);
 } // namespace javelin::gui::messages

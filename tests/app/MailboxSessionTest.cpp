@@ -7,7 +7,6 @@
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/SearchWindowRepository.h"
-#include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include <QCoroFuture>
@@ -451,12 +450,6 @@ TEST_CASE("quick filter keeps only the selected nonmatching message as continuit
     auto first = email("email-1", "2026-08-08T12:00:00Z");
     auto second = email("email-2", "2026-08-08T11:00:00Z");
     REQUIRE_FALSE(emails.replaceAll("account-1", {first, second}).has_value());
-    javelin::jmap::cache::ThreadRepository threads{context.connection};
-    REQUIRE_FALSE(threads
-                      .replaceAll("account-1", {{.id = "thread-email-1", .emailIds = {"email-1"}},
-                                                {.id = "thread-email-2", .emailIds = {"email-2"}}})
-                      .has_value());
-
     PendingMaterializationPort materialization;
     FakeMailEvents events;
     javelin::app::MailboxSession session{
@@ -536,13 +529,6 @@ TEST_CASE("quick filter preserves the selected email when a thread representativ
     replacement.threadId = selected.threadId;
     auto other = email("email-2", "2026-08-08T11:00:00Z");
     REQUIRE_FALSE(emails.replaceAll("account-1", {selected, replacement, other}).has_value());
-    javelin::jmap::cache::ThreadRepository threads{context.connection};
-    REQUIRE_FALSE(threads
-                      .replaceAll("account-1", {{.id = selected.threadId,
-                                                 .emailIds = {selected.id, replacement.id}},
-                                                {.id = other.threadId, .emailIds = {other.id}}})
-                      .has_value());
-
     PendingMaterializationPort materialization;
     FakeMailEvents events;
     javelin::app::MailboxSession session{

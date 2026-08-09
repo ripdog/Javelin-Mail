@@ -114,23 +114,17 @@ namespace javelin::app
                     });
                 if (!selectedEmailStillDisplayed)
                 {
-                    auto result = queryService.listMailboxThreadMessages(accountId, mailboxId,
-                                                                         *continuityThreadId);
+                    auto result =
+                        queryService.findMailboxMessage(accountId, mailboxId, *continuityEmailId);
                     if (const auto* error =
                             std::get_if<javelin::jmap::cache::DatabaseError>(&result))
                     {
                         return *error;
                     }
-                    auto messages = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(
+                    auto selected = std::get<std::optional<javelin::jmap::cache::MessageListItem>>(
                         std::move(result));
-                    const auto selected =
-                        std::ranges::find(messages, *continuityEmailId,
-                                          &javelin::jmap::cache::MessageListItem::emailId);
-                    if (selected != messages.end())
-                    {
-                        selected->threadMessageCount = messages.size();
+                    if (selected.has_value() && selected->threadId == *continuityThreadId)
                         snapshot.continuityItem = std::move(*selected);
-                    }
                 }
             }
             return snapshot;

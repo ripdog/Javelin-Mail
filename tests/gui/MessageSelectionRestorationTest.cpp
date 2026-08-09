@@ -79,6 +79,17 @@ TEST_CASE("message selection restoration keeps the nearest row after removal",
     CHECK(plan.fallbackSelected);
 }
 
+TEST_CASE("quick-filter reconciliation never activates a programmatic fallback",
+          "[gui][messages][selection][quick-filter]")
+{
+    using javelin::gui::messages::shouldActivateRestoredSelection;
+
+    CHECK(shouldActivateRestoredSelection(true, false));
+    CHECK_FALSE(shouldActivateRestoredSelection(true, true));
+    CHECK_FALSE(shouldActivateRestoredSelection(false, false));
+    CHECK_FALSE(shouldActivateRestoredSelection(false, true));
+}
+
 TEST_CASE("message selection restoration leaves an empty page unselected",
           "[gui][messages][selection]")
 {

@@ -57,7 +57,10 @@ authoritative representative. The retained Email is re-read from current effecti
 state, so a moved or deleted message cannot survive as continuity. It is not counted in the filtered
 total or window membership, and server continuation still anchors to the authoritative query
 representative rather than the continuity representative. Continuity is removed when selection or
-filter criteria change. All other filter membership remains live.
+filter criteria change. If reconciliation must choose a fallback row because the selected Email no
+longer exists in the mailbox, that programmatic fallback is presentation only: it does not count as
+user activation and therefore cannot auto-mark the fallback Email read. All other filter membership
+remains live.
 
 An Email or EmailQuery state token is not evidence that this ordered coverage exists. Push-state
 deduplication may skip a background refresh when the state tokens are current and every configured

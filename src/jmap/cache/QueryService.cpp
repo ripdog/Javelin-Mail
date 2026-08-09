@@ -1077,6 +1077,98 @@ namespace javelin::jmap::cache
         return items;
     }
 
+    std::variant<std::optional<MessageListItem>, DatabaseError>
+    QueryService::findMailboxMessage(const std::string_view accountId,
+                                     const std::string_view mailboxId,
+                                     const std::string_view emailId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT e.email_id, e.thread_id, e.subject, e.preview, e.received_at, e.sent_at, "
+            "       (SELECT COUNT(*) FROM emails thread_email "
+            "          INNER JOIN email_mailboxes thread_membership "
+            "            ON thread_membership.account_id=thread_email.account_id "
+            "           AND thread_membership.email_id=thread_email.email_id "
+            "           AND thread_membership.mailbox_id=:mailbox_id "
+            "         WHERE thread_email.account_id=e.account_id "
+            "           AND thread_email.thread_id=e.thread_id) AS mailbox_thread_message_count, "
+            "       e.has_attachment, "
+            "       CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END AS is_unread, "
+            "       CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END AS is_flagged, "
+            "       EXISTS(SELECT 1 FROM email_mailboxes junk_membership "
+            "         INNER JOIN mailboxes junk_mailbox "
+            "           ON junk_mailbox.account_id=junk_membership.account_id "
+            "          AND junk_mailbox.mailbox_id=junk_membership.mailbox_id "
+            "         WHERE junk_membership.account_id=:account_id "
+            "           AND junk_membership.email_id=e.email_id "
+            "           AND junk_mailbox.role='junk') AS is_junk, "
+            "       (SELECT a.display_name FROM email_addresses a "
+            "         WHERE a.account_id=:account_id AND a.email_id=e.email_id "
+            "           AND a.field_name='from' ORDER BY a.position LIMIT 1) AS from_name, "
+            "       (SELECT a.address FROM email_addresses a "
+            "         WHERE a.account_id=:account_id AND a.email_id=e.email_id "
+            "           AND a.field_name='from' ORDER BY a.position LIMIT 1) AS from_email "
+            "FROM emails e "
+            "INNER JOIN email_mailboxes selected_membership "
+            "  ON selected_membership.account_id=e.account_id "
+            " AND selected_membership.email_id=e.email_id "
+            " AND selected_membership.mailbox_id=:mailbox_id "
+            "LEFT JOIN email_keywords seen ON seen.account_id=e.account_id "
+            " AND seen.email_id=e.email_id AND seen.keyword='$seen' "
+            "LEFT JOIN email_keywords flagged ON flagged.account_id=e.account_id "
+            " AND flagged.email_id=e.email_id AND flagged.keyword='$flagged' "
+            "WHERE e.account_id=:account_id AND e.email_id=:email_id LIMIT 1"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":mailbox_id"),
+                        QString::fromStdString(std::string{mailboxId}));
+        query.bindValue(QStringLiteral(":email_id"), QString::fromStdString(std::string{emailId}));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Read mailbox message"), query);
+        if (!query.next())
+            return std::optional<MessageListItem>{std::nullopt};
+
+        MessageListItem item{
+            .emailId = query.value(0).toString().toStdString(),
+            .threadId = query.value(1).toString().toStdString(),
+            .subject = query.value(2).isNull()
+                           ? std::nullopt
+                           : std::optional{query.value(2).toString().toStdString()},
+            .preview = query.value(3).isNull()
+                           ? std::nullopt
+                           : std::optional{query.value(3).toString().toStdString()},
+            .receivedAt = query.value(4).toString().toStdString(),
+            .sentAt = query.value(5).isNull()
+                          ? std::nullopt
+                          : std::optional{query.value(5).toString().toStdString()},
+            .threadMessageCount = query.value(6).toULongLong(),
+            .hasAttachment = query.value(7).toInt() != 0,
+            .isUnread = query.value(8).toInt() != 0,
+            .isFlagged = query.value(9).toInt() != 0,
+            .from = std::nullopt,
+            .mailboxNames = {},
+        };
+        item.isJunk = query.value(10).toInt() != 0;
+        if (!query.value(12).isNull())
+        {
+            item.from = javelin::jmap::domain::EmailAddress{
+                .name = query.value(11).isNull()
+                            ? std::nullopt
+                            : std::optional{query.value(11).toString().toStdString()},
+                .email = query.value(12).toString().toStdString(),
+            };
+        }
+
+        std::vector<MessageListItem> items;
+        items.push_back(std::move(item));
+        if (const auto error = attachMessageTags(m_connection, accountId, items))
+            return *error;
+        return std::optional<MessageListItem>{std::move(items.front())};
+    }
+
     std::variant<std::vector<MessageListItem>, DatabaseError>
     QueryService::listMailboxWindowMessagesByEmailIds(
         const std::string_view accountId, const std::string_view mailboxId,

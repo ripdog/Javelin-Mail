@@ -29,6 +29,7 @@
 #include "gui/messages/MessageListDelegate.h"
 #include "gui/messages/MessageListModel.h"
 #include "gui/messages/MessageListPanePresenter.h"
+#include "gui/messages/MessageSelectionRestoration.h"
 #include "gui/messageview/MessageViewContainer.h"
 #include "gui/onboarding/FirstRunWizard.h"
 #include "gui/search/AdvancedSearchDialog.h"
@@ -2402,17 +2403,23 @@ namespace javelin::gui::shell
     void
     MainWindow::applyActiveTabItemsPreservingSelection(const std::optional<int> previousMessageRow)
     {
-        bool autoSelectedFallback = false;
+        bool restoredSelectionChanged = false;
         const bool wasUpdatingModel = m_modelUpdateInProgress;
         m_modelUpdateInProgress = true;
         {
             QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
             m_messageListTabBindingPresenter->applyItems(activeTab());
-            autoSelectedFallback =
+            restoredSelectionChanged =
                 m_messageSelectionController->restoreTabSelection(activeTab(), previousMessageRow);
         }
         m_modelUpdateInProgress = wasUpdatingModel;
-        if (autoSelectedFallback)
+        const auto* tab = activeTab();
+        const auto* mailbox =
+            tab == nullptr ? nullptr : std::get_if<MailboxTabState>(&tab->content);
+        const bool quickFilterActive = mailbox != nullptr && mailbox->session != nullptr &&
+                                       mailbox->session->quickFilterActive();
+        if (javelin::gui::messages::shouldActivateRestoredSelection(restoredSelectionChanged,
+                                                                    quickFilterActive))
             handleCurrentMessageChanged(m_messageView->currentIndex());
         else
             refreshSelectionFromModels();

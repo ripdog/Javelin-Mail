@@ -799,6 +799,57 @@ TEST_CASE("query service rehydrates cached representative rows by email id order
     CHECK(std::get<std::size_t>(archiveUnread) == 1);
 }
 
+TEST_CASE("query service finds a mailbox email without requiring a cached thread row",
+          "[jmap][cache][query]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    auto inbox = loadMailboxFixture();
+    auto archive = inbox;
+    archive.id = "mbx-archive";
+    archive.name = "Archive";
+    archive.role = "archive";
+    archive.sortOrder = 20;
+    javelin::jmap::cache::MailboxRepository mailboxRepository{databaseContext.connection};
+    REQUIRE_FALSE(mailboxRepository.replaceAll("account-1", {inbox, archive}).has_value());
+
+    auto selected = loadEmailFixture();
+    selected.id = "selected";
+    selected.threadId = "thread-without-row";
+    selected.mailboxIds = {inbox.id};
+    selected.keywords = {"$seen"};
+    auto sibling = selected;
+    sibling.id = "sibling";
+    sibling.keywords = {};
+    auto archived = selected;
+    archived.id = "archived";
+    archived.threadId = "archive-thread";
+    archived.mailboxIds = {archive.id};
+
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    REQUIRE_FALSE(
+        emailRepository.replaceAll("account-1", {selected, sibling, archived}).has_value());
+
+    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
+    const auto result = queryService.findMailboxMessage("account-1", inbox.id, selected.id);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MessageListItem>>(result));
+    const auto& item = std::get<std::optional<javelin::jmap::cache::MessageListItem>>(result);
+    REQUIRE(item.has_value());
+    CHECK(item->emailId == selected.id);
+    CHECK(item->threadId == selected.threadId);
+    CHECK(item->threadMessageCount == 2);
+    CHECK_FALSE(item->isUnread);
+
+    const auto missing = queryService.findMailboxMessage("account-1", inbox.id, archived.id);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MessageListItem>>(missing));
+    CHECK_FALSE(
+        std::get<std::optional<javelin::jmap::cache::MessageListItem>>(missing).has_value());
+}
+
 TEST_CASE("query service loads sparse mailbox pages from authoritative window order",
           "[jmap][cache][query][pagination]")
 {

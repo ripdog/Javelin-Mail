@@ -65,6 +65,9 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         listMessagesByEmailIds(std::string_view accountId,
                                const std::vector<std::string>& emailIds) const override;
+        [[nodiscard]] std::variant<std::optional<MessageListItem>, DatabaseError>
+        findMailboxMessage(std::string_view accountId, std::string_view mailboxId,
+                           std::string_view emailId) const;
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         searchCachedMessageText(std::string_view accountId, std::string_view text,
                                 std::size_t limit, std::size_t offset = 0) const override;
