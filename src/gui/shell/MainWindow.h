@@ -420,6 +420,7 @@ namespace javelin::gui::shell
         QAction* m_viewSourceAction = nullptr;
         QAction* m_advancedSearchAction = nullptr;
         QAction* m_composeSendAction = nullptr;
+        QAction* m_composeScheduleSendAction = nullptr;
         QAction* m_composeSaveDraftAction = nullptr;
         QAction* m_composeAttachFilesAction = nullptr;
         QAction* m_composeSignatureAction = nullptr;

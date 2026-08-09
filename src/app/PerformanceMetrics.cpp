@@ -211,6 +211,8 @@ namespace javelin::app
             return QStringLiteral("compose_save_draft");
         case Kind::ComposeSend:
             return QStringLiteral("compose_send");
+        case Kind::ComposeScheduleSend:
+            return QStringLiteral("compose_schedule_send");
         case Kind::ComposeLoadWorkingCopy:
             return QStringLiteral("compose_load_working_copy");
         case Kind::ComposeStoreWorkingCopy:

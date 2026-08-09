@@ -26,7 +26,10 @@
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
+#include <QDateTime>
+#include <QDateTimeEdit>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
@@ -36,6 +39,7 @@
 #include <QFileDialog>
 #include <QFileIconProvider>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QFrame>
 #include <QFutureWatcher>
 #include <QHBoxLayout>
@@ -65,6 +69,7 @@
 #include <QTextEdit>
 #include <QTextFragment>
 #include <QTextImageFormat>
+#include <QTimeZone>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -77,6 +82,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -750,6 +756,29 @@ namespace javelin::gui::compose
             return false;
         return !m_fromCombo->itemData(index, senderAccountIdRole).toString().isEmpty() &&
                !m_fromCombo->itemData(index, senderIdentityIdRole).toString().isEmpty();
+    }
+
+    std::optional<std::uint64_t> ComposeTabWidget::currentMaxDelayedSendSeconds() const
+    {
+        const auto index = m_fromCombo->currentIndex();
+        if (index < 0)
+            return std::nullopt;
+        const auto accountId = m_fromCombo->itemData(index, senderAccountIdRole).toString();
+        if (accountId.isEmpty())
+            return std::nullopt;
+        const auto result = m_accountReader.findById(accountId.toStdString());
+        const auto* account =
+            std::get_if<std::optional<javelin::jmap::cache::CachedAccount>>(&result);
+        if (account == nullptr || !account->has_value() ||
+            !account->value().hasSubmissionCapability ||
+            account->value().maxDelayedSendSeconds == 0)
+            return std::nullopt;
+        return account->value().maxDelayedSendSeconds;
+    }
+
+    bool ComposeTabWidget::canScheduleSend() const
+    {
+        return canSend() && currentMaxDelayedSendSeconds().has_value();
     }
 
     bool ComposeTabWidget::richTextEnabled() const
@@ -1785,6 +1814,59 @@ namespace javelin::gui::compose
         startSend();
     }
 
+    void ComposeTabWidget::scheduleMessage()
+    {
+        if (m_operationInFlight)
+            return;
+        if (!canSend())
+        {
+            Q_EMIT statusMessageRequested(
+                i18n("Choose an available sender identity before scheduling."), 10000);
+            return;
+        }
+        const auto maxDelayedSend = currentMaxDelayedSendSeconds();
+        if (!maxDelayedSend.has_value())
+        {
+            Q_EMIT statusMessageRequested(
+                i18n("This sender's server does not support scheduled sending."), 10000);
+            return;
+        }
+        if (m_pendingInlineImageJobs != 0)
+        {
+            m_deferredOperation = DeferredOperation::ScheduleSend;
+            Q_EMIT statusMessageRequested(i18n("Finishing image processing before scheduling…"),
+                                          10000);
+            return;
+        }
+
+        const auto now = QDateTime::currentDateTime();
+        const auto maximumSeconds = static_cast<qint64>(std::min<std::uint64_t>(
+            *maxDelayedSend, static_cast<std::uint64_t>(std::numeric_limits<qint64>::max())));
+        QDialog dialog{this};
+        dialog.setWindowTitle(i18n("Schedule Send"));
+        auto* layout = new QFormLayout(&dialog);
+        auto* sendAtEdit = new QDateTimeEdit(now.addSecs(3600), &dialog);
+        sendAtEdit->setCalendarPopup(true);
+        sendAtEdit->setMinimumDateTime(now.addSecs(1));
+        sendAtEdit->setMaximumDateTime(now.addSecs(maximumSeconds));
+        sendAtEdit->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm"));
+        layout->addRow(i18n("Send at:"), sendAtEdit);
+        layout->addRow(QString{}, new QLabel(i18n("Times are shown in %1.",
+                                                  QString::fromUtf8(QTimeZone::systemTimeZoneId())),
+                                             &dialog));
+        auto* buttons =
+            new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        buttons->button(QDialogButtonBox::Ok)->setText(i18n("Schedule"));
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        layout->addRow(buttons);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+
+        const auto selectedSeconds = sendAtEdit->dateTime().toSecsSinceEpoch();
+        startSend(std::chrono::system_clock::time_point{std::chrono::seconds{selectedSeconds}});
+    }
+
     void ComposeTabWidget::addAttachmentPaths(const QStringList& filePaths)
     {
         for (const auto& filePath : filePaths)
@@ -2086,6 +2168,9 @@ namespace javelin::gui::compose
                                case DeferredOperation::Send:
                                    startSend();
                                    break;
+                               case DeferredOperation::ScheduleSend:
+                                   scheduleMessage();
+                                   break;
                                }
                            });
     }
@@ -2304,7 +2389,8 @@ namespace javelin::gui::compose
             });
     }
 
-    void ComposeTabWidget::startSend()
+    void
+    ComposeTabWidget::startSend(const std::optional<std::chrono::system_clock::time_point> sendAt)
     {
         if (m_operationInFlight)
         {
@@ -2357,8 +2443,13 @@ namespace javelin::gui::compose
         }
 
         setBusy(true);
-        Q_EMIT statusMessageRequested(i18n("Sending message..."), 5000);
-        auto task = m_composeCommandPort.send(*settings, m_snapshot);
+        Q_EMIT statusMessageRequested(
+            sendAt.has_value() ? i18n("Scheduling message…") : i18n("Sending message..."), 5000);
+        QCoro::Task<
+            std::variant<javelin::jmap::submission::SendSummary, javelin::jmap::OperationError>>
+            task = sendAt.has_value() ? m_composeCommandPort.scheduleSend(
+                                            *settings, {.snapshot = m_snapshot, .sendAt = *sendAt})
+                                      : m_composeCommandPort.send(*settings, m_snapshot);
         QCoro::connect(
             std::move(task), this,
             [this](

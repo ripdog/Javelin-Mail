@@ -208,7 +208,8 @@ namespace javelin::protocol
         MailQueueSetTag,
         MailSaveTagDefinition,
         MailDeleteTag,
-        Last = MailDeleteTag,
+        ComposeScheduleSend,
+        Last = ComposeScheduleSend,
     };
 
     struct RemoteActionCommand

@@ -2036,6 +2036,16 @@ namespace javelin::jmap::cache
                                 "mail_tag_definitions(account_id,sort_order,display_name)"),
                         },
                 },
+                MigrationStep{
+                    .version = 44,
+                    .name = QStringLiteral("submission_delayed_send_capability"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "ALTER TABLE accounts ADD COLUMN submission_max_delayed_send "
+                                "INTEGER NOT NULL DEFAULT 0 CHECK(submission_max_delayed_send>=0)"),
+                        },
+                },
             },
         };
     }

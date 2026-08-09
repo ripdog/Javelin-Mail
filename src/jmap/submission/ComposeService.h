@@ -6,6 +6,7 @@
 
 #include <QCoroTask>
 
+#include <chrono>
 #include <functional>
 #include <optional>
 #include <variant>
@@ -55,6 +56,13 @@ namespace javelin::jmap::submission
         [[nodiscard]] QCoro::Task<std::variant<SendSummary, javelin::jmap::OperationError>>
         submitPreparedSend(javelin::jmap::LiveConnectionSettings settings, PreparedSend prepared,
                            std::function<void()> dispatched = {});
+        [[nodiscard]] QCoro::Task<std::variant<SendSummary, javelin::jmap::OperationError>>
+        submitPreparedSendAt(javelin::jmap::LiveConnectionSettings settings, PreparedSend prepared,
+                             std::chrono::system_clock::time_point sendAt,
+                             std::function<void()> dispatched = {});
+        [[nodiscard]] std::optional<javelin::jmap::OperationError>
+        validateScheduledSend(std::string_view accountId,
+                              std::chrono::system_clock::time_point sendAt) const;
         [[nodiscard]] std::variant<std::optional<DraftSnapshot>, javelin::jmap::OperationError>
         loadWorkingCopy(std::string_view composeSessionId) const;
         [[nodiscard]] std::optional<javelin::jmap::OperationError>
@@ -63,6 +71,12 @@ namespace javelin::jmap::submission
         discard(std::string_view composeSessionId);
 
       private:
+        [[nodiscard]] QCoro::Task<std::variant<SendSummary, javelin::jmap::OperationError>>
+        submitPreparedSendImpl(javelin::jmap::LiveConnectionSettings settings,
+                               PreparedSend prepared,
+                               std::optional<std::chrono::system_clock::time_point> sendAt,
+                               std::function<void()> dispatched);
+
         javelin::jmap::cache::DatabaseConnection& m_connection;
         javelin::jmap::api::AbstractTransport& m_resourceTransport;
         javelin::jmap::api::JmapMethodTransport& m_methodTransport;

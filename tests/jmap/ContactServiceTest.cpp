@@ -85,7 +85,7 @@ namespace
                       .isPersonal = true,
                       .isReadOnly = false,
                       .accountCapabilities = {.mail = false,
-                                              .submission = false,
+                                              .submission = std::nullopt,
                                               .contacts =
                                                   javelin::jmap::api::ContactsCapability{
                                                       .maxAddressBooksPerCard = std::nullopt,
@@ -172,7 +172,7 @@ namespace
                       .isPersonal = false,
                       .isReadOnly = false,
                       .accountCapabilities = {.mail = false,
-                                              .submission = false,
+                                              .submission = std::nullopt,
                                               .contacts =
                                                   javelin::jmap::api::ContactsCapability{
                                                       .maxAddressBooksPerCard = std::nullopt,

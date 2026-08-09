@@ -6,6 +6,7 @@
 #include <QTextCursor>
 #include <QWidget>
 
+#include <chrono>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -76,6 +77,7 @@ namespace javelin::gui::compose
         [[nodiscard]] bool hasUnsavedChanges() const;
         [[nodiscard]] bool operationInFlight() const;
         [[nodiscard]] bool canSend() const;
+        [[nodiscard]] bool canScheduleSend() const;
         [[nodiscard]] bool richTextEnabled() const;
         [[nodiscard]] QMenu* signatureMenu() const;
 
@@ -87,6 +89,7 @@ namespace javelin::gui::compose
         void attachFiles();
         void saveDraft();
         void sendMessage();
+        void scheduleMessage();
         void reloadSenderIdentities(const QString& changedAccountId = {});
 
       protected:
@@ -124,6 +127,7 @@ namespace javelin::gui::compose
             SaveDraft,
             SaveDraftAndClose,
             Send,
+            ScheduleSend,
         };
 
         void setupUi();
@@ -170,7 +174,8 @@ namespace javelin::gui::compose
         [[nodiscard]] QString stableEditorHtml();
         void reconcileInlineAttachmentReferences(const QString& html);
         void startSaveDraft(bool closeAfterSave);
-        void startSend();
+        void startSend(std::optional<std::chrono::system_clock::time_point> sendAt = std::nullopt);
+        [[nodiscard]] std::optional<std::uint64_t> currentMaxDelayedSendSeconds() const;
         void toggleCode();
 
         javelin::gui::settings::GuiSettings& m_settings;

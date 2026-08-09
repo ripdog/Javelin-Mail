@@ -148,17 +148,18 @@ namespace
                                 .calendarsAccountId = std::nullopt,
                                 .sieveAccountId = std::nullopt},
         };
-        session.accounts.emplace("account-1", javelin::jmap::api::Account{
-                                                  .id = "account-1",
-                                                  .name = "Test Account",
-                                                  .isPersonal = true,
-                                                  .isReadOnly = false,
-                                                  .accountCapabilities = {.mail = true,
-                                                                          .submission = false,
-                                                                          .contacts = std::nullopt,
-                                                                          .calendars = std::nullopt,
-                                                                          .sieve = false},
-                                              });
+        session.accounts.emplace("account-1",
+                                 javelin::jmap::api::Account{
+                                     .id = "account-1",
+                                     .name = "Test Account",
+                                     .isPersonal = true,
+                                     .isReadOnly = false,
+                                     .accountCapabilities = {.mail = true,
+                                                             .submission = std::nullopt,
+                                                             .contacts = std::nullopt,
+                                                             .calendars = std::nullopt,
+                                                             .sieve = false},
+                                 });
         return session;
     }
 

@@ -300,6 +300,42 @@ namespace javelin::app
         co_return result;
     }
 
+    QCoro::Task<std::variant<javelin::jmap::submission::SendSummary, javelin::jmap::OperationError>>
+    ComposeService::scheduleSend(AccountConnectionSettings settings,
+                                 javelin::jmap::submission::ScheduledSendRequest request)
+    {
+        const ForegroundWorkScope foreground{m_workScheduler};
+        const auto accountId = request.snapshot.accountId;
+        const auto composeSessionId = request.snapshot.composeSessionId;
+        if (const auto error = m_service.validateScheduledSend(accountId, request.sendAt))
+        {
+            m_errorCoordinator.reportFailure(settings, accountId,
+                                             QStringLiteral("Schedule message"), *error);
+            co_return *error;
+        }
+
+        auto prepared = co_await m_service.prepareSend(toLiveConnectionSettings(settings),
+                                                       std::move(request.snapshot));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
+        {
+            m_errorCoordinator.reportFailure(settings, accountId, QStringLiteral("Prepare message"),
+                                             *error);
+            co_return *error;
+        }
+        auto result = co_await m_service.submitPreparedSendAt(
+            toLiveConnectionSettings(settings),
+            std::get<javelin::jmap::submission::PreparedSend>(std::move(prepared)), request.sendAt);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+            m_errorCoordinator.reportFailure(settings, accountId,
+                                             QStringLiteral("Schedule message"), *error);
+        else
+        {
+            m_errorCoordinator.reportSuccess(settings.connectionId);
+            m_lastSavedSnapshots.erase(composeSessionId);
+        }
+        co_return result;
+    }
+
     std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
                  javelin::jmap::OperationError>
     ComposeService::loadWorkingCopy(const std::string_view composeSessionId) const

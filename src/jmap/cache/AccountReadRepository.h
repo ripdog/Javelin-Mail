@@ -2,6 +2,7 @@
 
 #include "jmap/cache/Database.h"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -21,6 +22,7 @@ namespace javelin::jmap::cache
         bool hasMailCapability = false;
         std::string ownerAccountId;
         bool hasSubmissionCapability = false;
+        std::uint64_t maxDelayedSendSeconds = 0;
     };
 
     class AccountReader

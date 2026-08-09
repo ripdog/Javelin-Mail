@@ -4,6 +4,7 @@
 #include "app/RemoteActionTypes.h"
 #include "jmap/calendar/CalendarTypes.h"
 #include "jmap/identity/IdentityCommandTypes.h"
+#include "jmap/submission/ComposeTypes.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -52,6 +53,44 @@ TEST_CASE("remote codec round-trips nested typed values", "[app][remote-codec]")
     CHECK(value->totals == fixture.totals);
     CHECK(value->status == fixture.status);
     CHECK(value->delay == fixture.delay);
+}
+
+TEST_CASE("remote codec preserves scheduled send instants", "[app][remote-codec][compose]")
+{
+    const auto sendAt = std::chrono::system_clock::time_point{std::chrono::seconds{1786325400}};
+    const javelin::jmap::submission::ScheduledSendRequest request{
+        .snapshot =
+            {
+                .composeSessionId = "compose-1",
+                .accountId = "account-1",
+                .revision = 1,
+                .draftEmailId = std::nullopt,
+                .mode = javelin::jmap::submission::ComposeMode::NewMessage,
+                .editorMode = javelin::jmap::submission::BodyEditorMode::PlainText,
+                .identityId = "identity-1",
+                .to = {{.name = std::nullopt, .email = "recipient@example.test"}},
+                .cc = {},
+                .bcc = {},
+                .subject = "Scheduled",
+                .plainTextBody = "Body",
+                .htmlBody = {},
+                .threading = {},
+                .attachments = {},
+            },
+        .sendAt = sendAt,
+    };
+
+    const auto encoded = javelin::app::remote::encode(request);
+    const auto* payload = std::get_if<QByteArray>(&encoded);
+    REQUIRE(payload != nullptr);
+    const auto decoded =
+        javelin::app::remote::decodeValue<javelin::jmap::submission::ScheduledSendRequest>(
+            *payload);
+    const auto* value = std::get_if<javelin::jmap::submission::ScheduledSendRequest>(&decoded);
+    REQUIRE(value != nullptr);
+    CHECK(value->sendAt == sendAt);
+    CHECK(value->snapshot.composeSessionId == "compose-1");
+    CHECK(value->snapshot.accountId == "account-1");
 }
 
 TEST_CASE("remote codec preserves calendar participant roles", "[app][remote-codec][calendar]")

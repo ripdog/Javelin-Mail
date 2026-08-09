@@ -328,6 +328,7 @@ namespace javelin::jmap::api
     struct EnvelopeAddress
     {
         std::string email;
+        std::unordered_map<std::string, std::optional<std::string>> parameters;
     };
 
     struct EmailSubmissionEnvelope

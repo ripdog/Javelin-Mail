@@ -117,6 +117,10 @@ namespace javelin::app
             std::variant<javelin::jmap::submission::SendSummary, javelin::jmap::OperationError>>
         send(AccountConnectionSettings settings,
              javelin::jmap::submission::DraftSnapshot snapshot) override;
+        [[nodiscard]] QCoro::Task<
+            std::variant<javelin::jmap::submission::SendSummary, javelin::jmap::OperationError>>
+        scheduleSend(AccountConnectionSettings settings,
+                     javelin::jmap::submission::ScheduledSendRequest request) override;
         [[nodiscard]] std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
                                    javelin::jmap::OperationError>
         loadWorkingCopy(std::string_view composeSessionId) const override;

@@ -50,6 +50,7 @@ namespace javelin::gui::shell
     {
         bool richText = true;
         bool canSend = false;
+        bool canScheduleSend = false;
         bool canUseSignature = false;
         bool canToggleRichText = false;
     };
@@ -77,6 +78,7 @@ namespace javelin::gui::shell
         void saveDraftAndClose(int index);
 
         void sendMessage(const TabState* tab);
+        void scheduleMessage(const TabState* tab);
         void saveDraft(const TabState* tab);
         void attachFiles(const TabState* tab);
         void setRichTextEnabled(const TabState* tab, bool enabled);

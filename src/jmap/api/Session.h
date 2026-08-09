@@ -57,6 +57,11 @@ namespace javelin::jmap::api
         std::optional<WebSocketCapability> websocket;
     };
 
+    struct SubmissionCapability
+    {
+        std::uint64_t maxDelayedSend = 0;
+    };
+
     struct ContactsCapability
     {
         std::optional<std::uint64_t> maxAddressBooksPerCard;
@@ -76,7 +81,7 @@ namespace javelin::jmap::api
     struct AccountCapabilities
     {
         bool mail = false;
-        bool submission = false;
+        std::optional<SubmissionCapability> submission;
         std::optional<ContactsCapability> contacts;
         std::optional<CalendarsCapability> calendars;
         bool sieve = false;

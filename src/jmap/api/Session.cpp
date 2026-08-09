@@ -72,7 +72,8 @@ namespace javelin::jmap::api
 
                 if (accountIt != session.accounts.end())
                 {
-                    appendIfMissing(result.errors, accountIt->second.accountCapabilities.submission,
+                    appendIfMissing(result.errors,
+                                    accountIt->second.accountCapabilities.submission.has_value(),
                                     CapabilityError::MissingSubmissionAccountCapability);
                 }
             }

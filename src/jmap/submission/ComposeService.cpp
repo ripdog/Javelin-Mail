@@ -35,6 +35,7 @@
 #include <QMimeDatabase>
 #include <QRegularExpression>
 #include <QString>
+#include <QTimeZone>
 #include <QUrl>
 #include <QUuid>
 
@@ -1731,11 +1732,80 @@ namespace javelin::jmap::submission
         };
     }
 
+    std::optional<javelin::jmap::OperationError>
+    ComposeService::validateScheduledSend(const std::string_view accountId,
+                                          const std::chrono::system_clock::time_point sendAt) const
+    {
+        const auto sessionResult = loadCachedSession(m_connection, accountId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&sessionResult))
+            return *error;
+        const auto& session = std::get<CachedSessionContext>(sessionResult).session;
+        const auto account = session.accounts.find(std::string{accountId});
+        if (account == session.accounts.end() || !account->second.accountCapabilities.submission)
+        {
+            return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                .message = QStringLiteral("This account does not support scheduled sending."),
+            };
+        }
+        const auto maxDelayedSend = account->second.accountCapabilities.submission->maxDelayedSend;
+        if (maxDelayedSend == 0)
+        {
+            return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                .message = QStringLiteral("This account does not support scheduled sending."),
+            };
+        }
+        const auto currentTime = std::chrono::system_clock::now();
+        if (sendAt <= currentTime)
+        {
+            return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                .message = QStringLiteral("The scheduled send time must be in the future."),
+            };
+        }
+        const auto delay = std::chrono::duration_cast<std::chrono::seconds>(sendAt - currentTime);
+        if (static_cast<std::uint64_t>(delay.count()) > maxDelayedSend)
+        {
+            return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                .message = QStringLiteral(
+                    "The selected send time is beyond this server's delayed-send limit."),
+            };
+        }
+        return std::nullopt;
+    }
+
     QCoro::Task<std::variant<SendSummary, javelin::jmap::OperationError>>
     ComposeService::submitPreparedSend(javelin::jmap::LiveConnectionSettings settings,
                                        PreparedSend prepared, std::function<void()> dispatched)
     {
+        co_return co_await submitPreparedSendImpl(std::move(settings), std::move(prepared),
+                                                  std::nullopt, std::move(dispatched));
+    }
+
+    QCoro::Task<std::variant<SendSummary, javelin::jmap::OperationError>>
+    ComposeService::submitPreparedSendAt(javelin::jmap::LiveConnectionSettings settings,
+                                         PreparedSend prepared,
+                                         const std::chrono::system_clock::time_point sendAt,
+                                         std::function<void()> dispatched)
+    {
+        co_return co_await submitPreparedSendImpl(std::move(settings), std::move(prepared), sendAt,
+                                                  std::move(dispatched));
+    }
+
+    QCoro::Task<std::variant<SendSummary, javelin::jmap::OperationError>>
+    ComposeService::submitPreparedSendImpl(
+        javelin::jmap::LiveConnectionSettings settings, PreparedSend prepared,
+        const std::optional<std::chrono::system_clock::time_point> sendAt,
+        std::function<void()> dispatched)
+    {
         const auto& draftSummary = prepared.draft;
+        if (sendAt.has_value())
+        {
+            if (const auto error = validateScheduledSend(draftSummary.accountId, *sendAt))
+                co_return *error;
+        }
 
         const auto sessionResult = loadCachedSession(m_connection, draftSummary.accountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&sessionResult))
@@ -1903,6 +1973,59 @@ namespace javelin::jmap::submission
                 return javelin::jmap::operationError(*error);
             return std::nullopt;
         };
+        std::optional<javelin::jmap::api::EmailSubmissionEnvelope> submissionEnvelope;
+        if (sendAt.has_value())
+        {
+            javelin::jmap::cache::IdentityRepository identities{m_connection};
+            const auto identityResult =
+                identities.find(draftSummary.accountId, draftSnapshot->identityId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&identityResult))
+                co_return javelin::jmap::operationError(*error);
+            const auto& identity =
+                std::get<std::optional<javelin::jmap::domain::Identity>>(identityResult);
+            if (!identity.has_value() || identity->email.empty())
+            {
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                    .message = QStringLiteral("The selected sender identity is unavailable."),
+                };
+            }
+
+            const auto epochSeconds =
+                std::chrono::duration_cast<std::chrono::seconds>(sendAt->time_since_epoch())
+                    .count();
+            const auto holdUntil = QDateTime::fromSecsSinceEpoch(epochSeconds, QTimeZone::UTC)
+                                       .toString(Qt::ISODate)
+                                       .toStdString();
+            javelin::jmap::api::EmailSubmissionEnvelope envelope{
+                .mailFrom =
+                    javelin::jmap::api::EnvelopeAddress{
+                        .email = identity->email,
+                        .parameters = {{"HOLDUNTIL", holdUntil}},
+                    },
+                .rcptTo = {},
+            };
+            std::unordered_set<std::string> recipients;
+            const auto appendRecipients = [&envelope, &recipients](const auto& addresses)
+            {
+                for (const auto& address : addresses)
+                {
+                    if (!address.email.empty() && recipients.insert(address.email).second)
+                    {
+                        envelope.rcptTo.push_back(javelin::jmap::api::EnvelopeAddress{
+                            .email = address.email,
+                            .parameters = {},
+                        });
+                    }
+                }
+            };
+            appendRecipients(draftSnapshot->to);
+            appendRecipients(draftSnapshot->cc);
+            appendRecipients(draftSnapshot->bcc);
+            submissionEnvelope = std::move(envelope);
+        }
+
         if (const auto error = transitionGroup(javelin::jmap::sync::MutationStatus::InFlight))
             co_return *error;
 
@@ -1918,7 +2041,7 @@ namespace javelin::jmap::submission
                      javelin::jmap::api::EmailSubmissionCreate{
                          .identityId = draftSnapshot->identityId,
                          .emailId = draftSummary.draftEmailId,
-                         .envelope = std::nullopt,
+                         .envelope = submissionEnvelope,
                      }},
                 },
             .onSuccessUpdateEmail =
@@ -2066,6 +2189,7 @@ namespace javelin::jmap::submission
                 .draftEmailId = draftSummary.draftEmailId,
                 .submissionId = createdSubmission.id,
                 .acceptedRevision = expectedRevision,
+                .scheduled = sendAt.has_value(),
             };
         }
         const auto& implicitEmailResponse =
@@ -2148,6 +2272,7 @@ namespace javelin::jmap::submission
             .draftEmailId = draftSummary.draftEmailId,
             .submissionId = createdSubmission.id,
             .acceptedRevision = expectedRevision,
+            .scheduled = sendAt.has_value(),
         };
     }
 

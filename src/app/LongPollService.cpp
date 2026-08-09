@@ -307,7 +307,7 @@ namespace javelin::app
         {
             const bool accountHasCalendar = account.accountCapabilities.calendars.has_value();
             const bool accountHasContacts = account.accountCapabilities.contacts.has_value();
-            const bool accountHasIdentities = account.accountCapabilities.submission;
+            const bool accountHasIdentities = account.accountCapabilities.submission.has_value();
             calendarCapable = calendarCapable || accountHasCalendar;
             contactsCapable = contactsCapable || accountHasContacts;
             identitiesCapable = identitiesCapable || accountHasIdentities;

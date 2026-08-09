@@ -178,6 +178,7 @@ namespace javelin::app
                 return {Domain::MessageContent};
             case Kind::ComposeSaveDraft:
             case Kind::ComposeSend:
+            case Kind::ComposeScheduleSend:
                 return {Domain::MailQueryWindows, Domain::MessageMetadata, Domain::MessageContent,
                         Domain::History};
             case Kind::ContactRequestRefresh:
@@ -695,6 +696,20 @@ namespace javelin::app
                     return launch(m_services.composeCommandPort().send(
                         std::get<AccountConnectionSettings>(std::move(hydrated)),
                         std::move(snapshot)));
+                });
+        case Kind::ComposeScheduleSend:
+            return decodeAndApply<AccountConnectionSettings,
+                                  javelin::jmap::submission::ScheduledSendRequest>(
+                command.payload, invalidPayload,
+                [&](AccountConnectionSettings settings,
+                    javelin::jmap::submission::ScheduledSendRequest request)
+                {
+                    auto hydrated = m_connectionSettingsHydrator(std::move(settings));
+                    if (const auto* error = std::get_if<QString>(&hydrated))
+                        return reject(id, *error);
+                    return launch(m_services.composeCommandPort().scheduleSend(
+                        std::get<AccountConnectionSettings>(std::move(hydrated)),
+                        std::move(request)));
                 });
         case Kind::ComposeLoadWorkingCopy:
             return decodeAndApply<std::string>(

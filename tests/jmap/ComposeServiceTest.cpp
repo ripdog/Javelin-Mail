@@ -21,6 +21,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <functional>
 #include <utility>
 #include <vector>
@@ -93,19 +94,23 @@ namespace
                     .sieveAccountId = std::nullopt,
                 },
         };
-        session.accounts.emplace(accountId, javelin::jmap::api::Account{
-                                                .id = accountId,
-                                                .name = accountId,
-                                                .isPersonal = true,
-                                                .isReadOnly = false,
-                                                .accountCapabilities =
-                                                    {
-                                                        .mail = true,
-                                                        .submission = true,
-                                                        .contacts = std::nullopt,
-                                                        .calendars = std::nullopt,
-                                                    },
-                                            });
+        session.accounts.emplace(accountId,
+                                 javelin::jmap::api::Account{
+                                     .id = accountId,
+                                     .name = accountId,
+                                     .isPersonal = true,
+                                     .isReadOnly = false,
+                                     .accountCapabilities =
+                                         {
+                                             .mail = true,
+                                             .submission =
+                                                 javelin::jmap::api::SubmissionCapability{
+                                                     .maxDelayedSend = 86400,
+                                                 },
+                                             .contacts = std::nullopt,
+                                             .calendars = std::nullopt,
+                                         },
+                                 });
         return session;
     }
 
@@ -114,20 +119,24 @@ namespace
                         const std::string& apiUrl)
     {
         auto session = sessionFor(ownerAccountId, apiUrl);
-        session.accounts.at(ownerAccountId).accountCapabilities.submission = false;
-        session.accounts.emplace(targetAccountId, javelin::jmap::api::Account{
-                                                      .id = targetAccountId,
-                                                      .name = targetAccountId,
-                                                      .isPersonal = false,
-                                                      .isReadOnly = false,
-                                                      .accountCapabilities =
-                                                          {
-                                                              .mail = true,
-                                                              .submission = true,
-                                                              .contacts = std::nullopt,
-                                                              .calendars = std::nullopt,
-                                                          },
-                                                  });
+        session.accounts.at(ownerAccountId).accountCapabilities.submission = std::nullopt;
+        session.accounts.emplace(targetAccountId,
+                                 javelin::jmap::api::Account{
+                                     .id = targetAccountId,
+                                     .name = targetAccountId,
+                                     .isPersonal = false,
+                                     .isReadOnly = false,
+                                     .accountCapabilities =
+                                         {
+                                             .mail = true,
+                                             .submission =
+                                                 javelin::jmap::api::SubmissionCapability{
+                                                     .maxDelayedSend = 86400,
+                                                 },
+                                             .contacts = std::nullopt,
+                                             .calendars = std::nullopt,
+                                         },
+                                 });
         session.primaryAccounts.submissionAccountId = targetAccountId;
         return session;
     }
@@ -548,6 +557,70 @@ TEST_CASE("compose sending uses the account selected with the From identity",
     }
     CHECK(transport.requests.at(1).body.contains("\"identityId\":\"identity-2\""));
     CHECK_FALSE(transport.requests.at(1).body.contains("identity-1"));
+}
+
+TEST_CASE("scheduled submission uses HOLDUNTIL and validates the server delay limit",
+          "[jmap][submission][scheduled]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("compose-scheduled-send-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    seedAccount(connection, "account-2", "https://account-2.example.test/jmap", "identity-2",
+                "sender@example.test");
+
+    FakeTransport transport;
+    transport.results = {draftCreatedResponse(), submittedResponse()};
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::JmapCore core{connection, transport, methodTransport};
+    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    const javelin::jmap::LiveConnectionSettings liveSettings{
+        .sessionUrl = "https://account-2.example.test/.well-known/jmap",
+        .loginEmail = "shared-login@example.test",
+        .apiKey = "account-2-secret",
+    };
+    const auto sendAt = std::chrono::system_clock::now() + std::chrono::hours{1};
+    auto prepared = QCoro::waitFor(service.prepareSend(
+        liveSettings, javelin::jmap::submission::DraftSnapshot{
+                          .composeSessionId = "compose-scheduled",
+                          .accountId = "account-2",
+                          .draftEmailId = std::nullopt,
+                          .mode = javelin::jmap::submission::ComposeMode::NewMessage,
+                          .editorMode = javelin::jmap::submission::BodyEditorMode::RichText,
+                          .identityId = "identity-2",
+                          .to = {{.name = std::nullopt, .email = "to@example.test"}},
+                          .cc = {{.name = std::nullopt, .email = "cc@example.test"}},
+                          .bcc = {{.name = std::nullopt, .email = "bcc@example.test"}},
+                          .subject = "Scheduled send",
+                          .plainTextBody = "Body",
+                          .htmlBody = "<p>Body</p>",
+                          .threading = {},
+                          .attachments = {},
+                      }));
+    REQUIRE(std::holds_alternative<javelin::jmap::submission::PreparedSend>(prepared));
+    auto result = QCoro::waitFor(service.submitPreparedSendAt(
+        liveSettings, std::get<javelin::jmap::submission::PreparedSend>(std::move(prepared)),
+        sendAt));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::submission::SendSummary>(result));
+    CHECK(std::get<javelin::jmap::submission::SendSummary>(result).scheduled);
+    REQUIRE(transport.requests.size() == 2);
+    const auto& request = transport.requests.at(1).body;
+    CHECK(request.contains("\"HOLDUNTIL\""));
+    CHECK(request.contains("\"email\":\"sender@example.test\""));
+    CHECK(request.contains("\"email\":\"to@example.test\""));
+    CHECK(request.contains("\"email\":\"cc@example.test\""));
+    CHECK(request.contains("\"email\":\"bcc@example.test\""));
+
+    const auto tooLate = service.validateScheduledSend(
+        "account-2", std::chrono::system_clock::now() + std::chrono::hours{25});
+    REQUIRE(tooLate.has_value());
+    CHECK(tooLate->code == javelin::jmap::OperationErrorCode::PreconditionFailed);
 }
 
 TEST_CASE("an ambiguous submission keeps the optimistic Sent projection durable",

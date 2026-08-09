@@ -274,6 +274,7 @@ namespace
     struct RawEnvelopeAddress
     {
         std::string email;
+        std::unordered_map<std::string, std::optional<std::string>> parameters;
     };
 
     struct RawEmailSubmissionEnvelope
@@ -605,7 +606,7 @@ template <> struct glz::meta<RawEnvelopeAddress>
 {
     using T = RawEnvelopeAddress;
 
-    static constexpr auto value = glz::object("email", &T::email);
+    static constexpr auto value = glz::object("email", &T::email, "parameters", &T::parameters);
 };
 
 template <> struct glz::meta<RawEmailSubmissionEnvelope>
@@ -1095,6 +1096,8 @@ namespace javelin::jmap::api
                                       submission.envelope->mailFrom.has_value()
                                           ? std::optional<RawEnvelopeAddress>{RawEnvelopeAddress{
                                                 .email = submission.envelope->mailFrom->email,
+                                                .parameters =
+                                                    submission.envelope->mailFrom->parameters,
                                             }}
                                           : std::nullopt,
                                   .rcptTo =
@@ -1106,6 +1109,7 @@ namespace javelin::jmap::api
                                       {
                                           recipients.push_back(RawEnvelopeAddress{
                                               .email = recipient.email,
+                                              .parameters = recipient.parameters,
                                           });
                                       }
                                       return recipients;

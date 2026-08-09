@@ -104,6 +104,39 @@ TEST_CASE("identity set updates never serialize immutable email", "[jmap][method
     CHECK(json->find(R"("email")") == std::string::npos);
 }
 
+TEST_CASE("email submission envelopes serialize delayed send parameters",
+          "[jmap][method][submission]")
+{
+    const auto json = javelin::jmap::api::serializeEmailSubmissionSetRequest({
+        .accountId = "u1",
+        .create =
+            {
+                {"send",
+                 javelin::jmap::api::EmailSubmissionCreate{
+                     .identityId = "identity-1",
+                     .emailId = "email-1",
+                     .envelope =
+                         javelin::jmap::api::EmailSubmissionEnvelope{
+                             .mailFrom = javelin::jmap::api::EnvelopeAddress{
+                                 .email = "sender@example.com",
+                                 .parameters = {{"HOLDUNTIL", "2026-08-10T09:30:00Z"}},
+                             },
+                             .rcptTo =
+                                 {javelin::jmap::api::EnvelopeAddress{
+                                     .email = "recipient@example.com",
+                                     .parameters = {},
+                                 }},
+                         },
+                 }},
+            },
+        .onSuccessUpdateEmail = {},
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(json->find(R"("HOLDUNTIL":"2026-08-10T09:30:00Z")") != std::string::npos);
+    CHECK(json->find(R"("email":"recipient@example.com","parameters":{})") != std::string::npos);
+}
+
 TEST_CASE("identity changes responses preserve incremental ids", "[jmap][method][mail][identity]")
 {
     const auto result = javelin::jmap::api::parseIdentityChangesResponse(

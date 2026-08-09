@@ -989,6 +989,14 @@ namespace javelin::gui::shell
                 [this] { m_composeTabController->sendMessage(activeTab()); });
         actionCollection()->addAction(QStringLiteral("compose_send"), m_composeSendAction);
 
+        m_composeScheduleSendAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("appointment-new")),
+                        i18nc("@action", "Schedule Send…"), this);
+        connect(m_composeScheduleSendAction, &QAction::triggered, this,
+                [this] { m_composeTabController->scheduleMessage(activeTab()); });
+        actionCollection()->addAction(QStringLiteral("compose_schedule_send"),
+                                      m_composeScheduleSendAction);
+
         m_composeSaveDraftAction = new QAction(QIcon::fromTheme(QStringLiteral("document-save")),
                                                i18n("Save Draft"), this);
         connect(m_composeSaveDraftAction, &QAction::triggered, this,
@@ -2131,6 +2139,8 @@ namespace javelin::gui::shell
             const auto state = m_composeTabController->toolbarState(activeTab());
             const QSignalBlocker blocker{m_composeRichTextAction};
             m_composeSendAction->setEnabled(state.canSend);
+            m_composeScheduleSendAction->setVisible(state.canScheduleSend);
+            m_composeScheduleSendAction->setEnabled(state.canScheduleSend);
             auto* signatureMenu = m_composeTabController->signatureMenuForTab(activeTab());
             m_composeSignatureAction->setMenu(signatureMenu);
             m_composeSignatureAction->setEnabled(state.canUseSignature && signatureMenu != nullptr);

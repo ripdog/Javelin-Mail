@@ -74,7 +74,7 @@ namespace
                       .isPersonal = true,
                       .isReadOnly = false,
                       .accountCapabilities = {.mail = false,
-                                              .submission = false,
+                                              .submission = std::nullopt,
                                               .contacts = std::nullopt,
                                               .calendars = javelin::jmap::api::CalendarsCapability{
                                                   .maxCalendarsPerEvent = 4,

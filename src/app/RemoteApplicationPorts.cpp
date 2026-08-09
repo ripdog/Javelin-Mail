@@ -331,6 +331,16 @@ namespace javelin::app
             std::move(snapshot));
     }
 
+    QCoro::Task<std::variant<javelin::jmap::submission::SendSummary, javelin::jmap::OperationError>>
+    RemoteComposeCommandPort::scheduleSend(AccountConnectionSettings settings,
+                                           javelin::jmap::submission::ScheduledSendRequest request)
+    {
+        return call<
+            std::variant<javelin::jmap::submission::SendSummary, javelin::jmap::OperationError>>(
+            m_client, javelin::protocol::RemoteActionKind::ComposeScheduleSend, std::move(settings),
+            std::move(request));
+    }
+
     std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
                  javelin::jmap::OperationError>
     RemoteComposeCommandPort::loadWorkingCopy(const std::string_view composeSessionId) const

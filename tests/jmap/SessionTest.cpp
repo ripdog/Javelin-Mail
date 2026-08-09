@@ -21,6 +21,20 @@ TEST_CASE("session capability validation succeeds when required capabilities are
     CHECK(result.session->capabilities.coreDetails->maxConcurrentRequests == 8U);
     CHECK(result.session->primaryAccounts.mailAccountId == "u1");
     CHECK(result.session->accounts.at("u1").accountCapabilities.mail);
+    REQUIRE(result.session->accounts.at("u1").accountCapabilities.submission.has_value());
+}
+
+TEST_CASE("session parser exposes delayed send limits", "[jmap][session][submission]")
+{
+    const auto result = javelin::jmap::api::parseSession(
+        R"({"username":"alice@example.com","apiUrl":"https://mail.example.com/jmap/api","downloadUrl":"https://mail.example.com/download/{accountId}/{blobId}/{name}","uploadUrl":"https://mail.example.com/upload/{accountId}","state":"s1","capabilities":{"urn:ietf:params:jmap:core":{"maxSizeRequest":1000000,"maxConcurrentRequests":8,"maxCallsInRequest":16,"maxObjectsInGet":500,"maxObjectsInSet":500},"urn:ietf:params:jmap:submission":{}},"accounts":{"u1":{"name":"Personal","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:submission":{"maxDelayedSend":2592000,"submissionExtensions":{"FUTURERELEASE":[]}}}}},"primaryAccounts":{"urn:ietf:params:jmap:submission":"u1"}})",
+        {.submission = true});
+
+    REQUIRE(result.ok());
+    REQUIRE(result.session.has_value());
+    const auto& capability = result.session->accounts.at("u1").accountCapabilities.submission;
+    REQUIRE(capability.has_value());
+    CHECK(capability->maxDelayedSend == 2592000U);
 }
 
 TEST_CASE("session parser ignores unknown server fields", "[jmap]")
@@ -152,7 +166,7 @@ TEST_CASE("session capability validation fails when primary mail account is miss
                         .isPersonal = true,
                         .isReadOnly = false,
                         .accountCapabilities = {.mail = true,
-                                                .submission = false,
+                                                .submission = std::nullopt,
                                                 .contacts = std::nullopt,
                                                 .calendars = std::nullopt},
                     },

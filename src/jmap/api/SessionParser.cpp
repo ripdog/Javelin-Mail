@@ -43,6 +43,12 @@ template <> struct glz::meta<javelin::jmap::api::CoreCapability>
         "maxObjectsInSet", &T::maxObjectsInSet, "collationAlgorithms", &T::collationAlgorithms);
 };
 
+template <> struct glz::meta<javelin::jmap::api::SubmissionCapability>
+{
+    using T = javelin::jmap::api::SubmissionCapability;
+    static constexpr auto value = glz::object("maxDelayedSend", &T::maxDelayedSend);
+};
+
 template <> struct glz::meta<javelin::jmap::api::ContactsCapability>
 {
     using T = javelin::jmap::api::ContactsCapability;
@@ -123,6 +129,21 @@ namespace javelin::jmap::api
             }
 
             return coreCapability;
+        }
+
+        [[nodiscard]] std::optional<SubmissionCapability>
+        parseSubmissionCapability(const std::unordered_map<std::string, glz::generic>& capabilities)
+        {
+            const auto it = capabilities.find(std::string{submissionCapabilityUri});
+            if (it == capabilities.end())
+                return std::nullopt;
+            std::string buffer;
+            if (glz::write_json(it->second, buffer))
+                return std::nullopt;
+            SubmissionCapability capability;
+            if (glz::read<glz::opts{.error_on_unknown_keys = false}>(capability, buffer))
+                return std::nullopt;
+            return capability;
         }
 
         [[nodiscard]] std::optional<ContactsCapability>
@@ -249,8 +270,8 @@ namespace javelin::jmap::api
                             {
                                 .mail = capabilityPresent(rawAccount.accountCapabilities,
                                                           mailCapabilityUri),
-                                .submission = capabilityPresent(rawAccount.accountCapabilities,
-                                                                submissionCapabilityUri),
+                                .submission =
+                                    parseSubmissionCapability(rawAccount.accountCapabilities),
                                 .contacts = parseContactsCapability(rawAccount.accountCapabilities),
                                 .calendars =
                                     parseCalendarsCapability(rawAccount.accountCapabilities),

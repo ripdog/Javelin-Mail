@@ -36,7 +36,7 @@ namespace javelin::jmap::cache
         QSqlQuery query{m_connection.database()};
         if (!query.exec(QStringLiteral(
                 "SELECT account_id, owner_account_id, name, is_personal, is_read_only, "
-                "is_primary, cap_mail, cap_submission FROM accounts "
+                "is_primary, cap_mail, cap_submission, submission_max_delayed_send FROM accounts "
                 "ORDER BY is_primary DESC, name, account_id")))
         {
             return makeQueryError(QStringLiteral("Read cached accounts"), query);
@@ -54,6 +54,7 @@ namespace javelin::jmap::cache
                 .hasMailCapability = query.value(6).toInt() != 0,
                 .ownerAccountId = query.value(1).toString().toStdString(),
                 .hasSubmissionCapability = query.value(7).toInt() != 0,
+                .maxDelayedSendSeconds = query.value(8).toULongLong(),
             });
         }
 
@@ -71,7 +72,7 @@ namespace javelin::jmap::cache
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "SELECT account_id, owner_account_id, name, is_personal, is_read_only, is_primary, "
-            "cap_mail, cap_submission FROM accounts "
+            "cap_mail, cap_submission, submission_max_delayed_send FROM accounts "
             "WHERE owner_account_id = :owner_account_id ORDER BY is_primary DESC, name, "
             "account_id"));
         query.bindValue(QStringLiteral(":owner_account_id"),
@@ -93,6 +94,7 @@ namespace javelin::jmap::cache
                 .hasMailCapability = query.value(6).toInt() != 0,
                 .ownerAccountId = query.value(1).toString().toStdString(),
                 .hasSubmissionCapability = query.value(7).toInt() != 0,
+                .maxDelayedSendSeconds = query.value(8).toULongLong(),
             });
         }
         return accounts;
@@ -107,7 +109,8 @@ namespace javelin::jmap::cache
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "SELECT account_id, owner_account_id, name, is_personal, is_read_only, is_primary, "
-            "cap_mail, cap_submission FROM accounts WHERE account_id = :account_id"));
+            "cap_mail, cap_submission, submission_max_delayed_send FROM accounts "
+            "WHERE account_id = :account_id"));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
         if (!query.exec())
@@ -123,6 +126,7 @@ namespace javelin::jmap::cache
             .hasMailCapability = query.value(6).toInt() != 0,
             .ownerAccountId = query.value(1).toString().toStdString(),
             .hasSubmissionCapability = query.value(7).toInt() != 0,
+            .maxDelayedSendSeconds = query.value(8).toULongLong(),
         }};
     }
 

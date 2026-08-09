@@ -2,6 +2,7 @@
 
 #include "jmap/domain/MailEntities.h"
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -63,6 +64,12 @@ namespace javelin::jmap::submission
         std::string htmlBody;
         ThreadingContext threading;
         std::vector<DraftAttachment> attachments;
+    };
+
+    struct ScheduledSendRequest
+    {
+        DraftSnapshot snapshot;
+        std::chrono::system_clock::time_point sendAt;
     };
 
     struct OpenComposeRequest

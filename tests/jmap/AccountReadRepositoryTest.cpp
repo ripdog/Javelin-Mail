@@ -38,14 +38,16 @@ namespace
 
     void seedAccount(javelin::jmap::cache::DatabaseConnection& connection, const QString& accountId,
                      const QString& name, const bool isPrimary, const bool hasMailCapability = true,
-                     const bool hasSubmissionCapability = false, const QString& ownerAccountId = {})
+                     const bool hasSubmissionCapability = false,
+                     const quint64 maxDelayedSendSeconds = 0, const QString& ownerAccountId = {})
     {
         QSqlQuery query{connection.database()};
         query.prepare(QStringLiteral(
             "INSERT INTO accounts (account_id, email_address, session_url, is_primary, name, "
-            "is_personal, is_read_only, cap_mail, cap_submission, owner_account_id) VALUES ("
-            ":account_id, :email_address, :session_url, :is_primary, :name, :is_personal, "
-            ":is_read_only, :cap_mail, :cap_submission, :owner_account_id)"));
+            "is_personal, is_read_only, cap_mail, cap_submission, submission_max_delayed_send, "
+            "owner_account_id) VALUES (:account_id, :email_address, :session_url, :is_primary, "
+            ":name, :is_personal, :is_read_only, :cap_mail, :cap_submission, "
+            ":submission_max_delayed_send, :owner_account_id)"));
         query.bindValue(QStringLiteral(":account_id"), accountId);
         query.bindValue(QStringLiteral(":email_address"),
                         QStringLiteral("%1@example.com").arg(accountId));
@@ -57,6 +59,7 @@ namespace
         query.bindValue(QStringLiteral(":is_read_only"), 0);
         query.bindValue(QStringLiteral(":cap_mail"), hasMailCapability ? 1 : 0);
         query.bindValue(QStringLiteral(":cap_submission"), hasSubmissionCapability ? 1 : 0);
+        query.bindValue(QStringLiteral(":submission_max_delayed_send"), maxDelayedSendSeconds);
         query.bindValue(QStringLiteral(":owner_account_id"),
                         ownerAccountId.isEmpty() ? accountId : ownerAccountId);
         REQUIRE(query.exec());
@@ -82,7 +85,7 @@ TEST_CASE("account read repository returns cached account metadata", "[jmap][cac
     seedAccount(writer, QStringLiteral("work"), QStringLiteral("Work"), false);
     seedAccount(writer, QStringLiteral("personal"), QStringLiteral("Personal"), true);
     seedAccount(writer, QStringLiteral("directory"), QStringLiteral("Directory"), false, false,
-                true, QStringLiteral("personal"));
+                true, 44236800, QStringLiteral("personal"));
     writer = {};
 
     auto readerResult = javelin::jmap::cache::GuiDatabaseFactory{
@@ -105,6 +108,7 @@ TEST_CASE("account read repository returns cached account metadata", "[jmap][cac
     CHECK(accounts.at(1).accountId == "directory");
     CHECK_FALSE(accounts.at(1).hasMailCapability);
     CHECK(accounts.at(1).hasSubmissionCapability);
+    CHECK(accounts.at(1).maxDelayedSendSeconds == 44236800U);
     CHECK(accounts.at(1).ownerAccountId == "personal");
     CHECK(accounts.back().accountId == "work");
 
@@ -124,6 +128,7 @@ TEST_CASE("account read repository returns cached account metadata", "[jmap][cac
     REQUIRE(directory.has_value());
     CHECK_FALSE(directory->hasMailCapability);
     CHECK(directory->hasSubmissionCapability);
+    CHECK(directory->maxDelayedSendSeconds == 44236800U);
     CHECK(directory->ownerAccountId == "personal");
 
     const auto missingResult = repository.findById("missing");

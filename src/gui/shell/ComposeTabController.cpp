@@ -153,6 +153,12 @@ namespace javelin::gui::shell
             widget->sendMessage();
     }
 
+    void ComposeTabController::scheduleMessage(const TabState* tab)
+    {
+        if (auto* widget = composeWidgetForTab(tab); widget != nullptr)
+            widget->scheduleMessage();
+    }
+
     void ComposeTabController::saveDraft(const TabState* tab)
     {
         if (auto* widget = composeWidgetForTab(tab); widget != nullptr)
@@ -186,6 +192,7 @@ namespace javelin::gui::shell
         return {
             .richText = widget->richTextEnabled(),
             .canSend = widget->canSend(),
+            .canScheduleSend = widget->canScheduleSend(),
             .canUseSignature = widget->canSend(),
             .canToggleRichText = !widget->operationInFlight(),
         };

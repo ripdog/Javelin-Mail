@@ -41,6 +41,13 @@ namespace javelin::app
         return m_service.send(std::move(settings), std::move(snapshot));
     }
 
+    QCoro::Task<std::variant<javelin::jmap::submission::SendSummary, javelin::jmap::OperationError>>
+    ComposeCommandService::scheduleSend(AccountConnectionSettings settings,
+                                        javelin::jmap::submission::ScheduledSendRequest request)
+    {
+        return m_service.scheduleSend(std::move(settings), std::move(request));
+    }
+
     std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
                  javelin::jmap::OperationError>
     ComposeCommandService::loadWorkingCopy(std::string_view composeSessionId) const
