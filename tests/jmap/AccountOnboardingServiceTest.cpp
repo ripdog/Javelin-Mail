@@ -33,6 +33,8 @@ namespace
     {
         int statusCode = 200;
         QByteArray payload;
+        QUrl finalUrl;
+        QByteArray authenticateHeader;
     };
 
     class ScriptedReply final : public QNetworkReply
@@ -42,8 +44,10 @@ namespace
             : QNetworkReply(parent), m_payload(std::move(response.payload))
         {
             setRequest(request);
-            setUrl(request.url());
+            setUrl(response.finalUrl.isEmpty() ? request.url() : response.finalUrl);
             setAttribute(QNetworkRequest::HttpStatusCodeAttribute, response.statusCode);
+            if (!response.authenticateHeader.isEmpty())
+                setRawHeader(QByteArrayLiteral("WWW-Authenticate"), response.authenticateHeader);
             setHeader(QNetworkRequest::ContentLengthHeader, m_payload.size());
             open(QIODevice::ReadOnly | QIODevice::Unbuffered);
             QTimer::singleShot(0, this,
@@ -86,10 +90,14 @@ namespace
     class ScriptedNetworkAccessManager final : public QNetworkAccessManager
     {
       public:
-        void add(const QUrl& url, const int statusCode, QByteArray payload)
+        void add(const QUrl& url, const int statusCode, QByteArray payload, QUrl finalUrl = {},
+                 QByteArray authenticateHeader = {})
         {
             m_responses.insert(
-                url, ScriptedResponse{.statusCode = statusCode, .payload = std::move(payload)});
+                url, ScriptedResponse{.statusCode = statusCode,
+                                      .payload = std::move(payload),
+                                      .finalUrl = std::move(finalUrl),
+                                      .authenticateHeader = std::move(authenticateHeader)});
         }
 
         [[nodiscard]] const QList<QUrl>& requests() const
@@ -105,7 +113,9 @@ namespace
             Q_UNUSED(outgoingData);
             m_requests.push_back(request.url());
             const auto response = m_responses.value(
-                request.url(), ScriptedResponse{.statusCode = 404, .payload = {}});
+                request.url(),
+                ScriptedResponse{
+                    .statusCode = 404, .payload = {}, .finalUrl = {}, .authenticateHeader = {}});
             return new ScriptedReply(request, response, this);
         }
 
@@ -315,8 +325,9 @@ TEST_CASE("OAuth discovery falls back after mismatched path-specific resource me
     ensureApplication();
     ScriptedNetworkAccessManager network;
     const QUrl sessionUrl{QStringLiteral("https://localhost/.well-known/jmap")};
+    const QUrl finalSessionUrl{QStringLiteral("https://localhost:443/jmap/session")};
     const QUrl pathMetadataUrl{
-        QStringLiteral("https://localhost/.well-known/oauth-protected-resource/.well-known/jmap")};
+        QStringLiteral("https://localhost/.well-known/oauth-protected-resource/jmap/session")};
     const QUrl originMetadataUrl{
         QStringLiteral("https://localhost/.well-known/oauth-protected-resource")};
     const QUrl authorizationMetadataUrl{
@@ -326,7 +337,7 @@ TEST_CASE("OAuth discovery falls back after mismatched path-specific resource me
     const QByteArray authorizationMetadata = QByteArrayLiteral(
         R"({"issuer":"https://localhost","token_endpoint":"https://localhost/auth/token","authorization_endpoint":"https://localhost/login","registration_endpoint":"https://localhost/auth/register","grant_types_supported":["authorization_code","refresh_token"],"response_types_supported":["code"],"scopes_supported":["offline_access","urn:ietf:params:oauth:scope:mail"],"token_endpoint_auth_methods_supported":["none"],"code_challenge_methods_supported":["S256"],"authorization_response_iss_parameter_supported":true})");
 
-    network.add(sessionUrl, 401, {});
+    network.add(sessionUrl, 401, {}, finalSessionUrl);
     network.add(pathMetadataUrl, 200, resourceMetadata);
     network.add(originMetadataUrl, 200, resourceMetadata);
     network.add(authorizationMetadataUrl, 200, authorizationMetadata);
@@ -342,6 +353,41 @@ TEST_CASE("OAuth discovery falls back after mismatched path-specific resource me
     CHECK(result.registrationEndpoint == QStringLiteral("https://localhost/auth/register"));
     CHECK(network.requests().contains(pathMetadataUrl));
     CHECK(network.requests().contains(originMetadataUrl));
+}
+
+TEST_CASE("OAuth discovery validates challenge metadata against the redirected resource",
+          "[jmap][auth][onboarding]")
+{
+    ensureApplication();
+    ScriptedNetworkAccessManager network;
+    const QUrl sessionUrl{QStringLiteral("https://localhost/.well-known/jmap")};
+    const QUrl finalSessionUrl{QStringLiteral("https://localhost/jmap/session")};
+    const QUrl resourceMetadataUrl{
+        QStringLiteral("https://localhost/.well-known/oauth-protected-resource/jmap/session")};
+    const QUrl authorizationMetadataUrl{
+        QStringLiteral("https://localhost/.well-known/oauth-authorization-server")};
+    const QByteArray resourceMetadata = QByteArrayLiteral(
+        R"({"resource":"https://localhost/jmap/session","authorization_servers":["https://localhost"],"scopes_supported":["offline_access","urn:ietf:params:oauth:scope:mail"]})");
+    const QByteArray authorizationMetadata = QByteArrayLiteral(
+        R"({"issuer":"https://localhost","token_endpoint":"https://localhost/auth/token","authorization_endpoint":"https://localhost/login","registration_endpoint":"https://localhost/auth/register","grant_types_supported":["authorization_code","refresh_token"],"response_types_supported":["code"],"scopes_supported":["offline_access","urn:ietf:params:oauth:scope:mail"],"token_endpoint_auth_methods_supported":["none"],"code_challenge_methods_supported":["S256"],"authorization_response_iss_parameter_supported":true})");
+    const QByteArray challenge =
+        QByteArrayLiteral("Bearer "
+                          "resource_metadata=\"https://localhost/.well-known/"
+                          "oauth-protected-resource/jmap/session\"");
+
+    network.add(sessionUrl, 401, {}, finalSessionUrl, challenge);
+    network.add(resourceMetadataUrl, 200, resourceMetadata);
+    network.add(authorizationMetadataUrl, 200, authorizationMetadata);
+
+    javelin::jmap::auth::AccountOnboardingService service{network};
+    const auto result =
+        QCoro::waitFor(service.discover({.emailAddress = QStringLiteral("alice@localhost")}));
+
+    REQUIRE(result.succeeded);
+    CHECK(result.resourceUrl == QStringLiteral("https://localhost/jmap/session"));
+    CHECK(result.authorizationEndpoint == QStringLiteral("https://localhost/login"));
+    CHECK(result.registrationEndpoint == QStringLiteral("https://localhost/auth/register"));
+    CHECK(network.requests().contains(resourceMetadataUrl));
 }
 
 TEST_CASE("OAuth dynamic registration preserves exact loopback callback addresses",

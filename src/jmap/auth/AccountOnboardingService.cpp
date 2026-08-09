@@ -209,6 +209,7 @@ namespace javelin::jmap::auth
             QByteArray body;
             QByteArray authenticateHeader;
             QString error;
+            QUrl finalUrl;
         };
 
         enum class RedirectTrust : std::uint8_t
@@ -242,6 +243,7 @@ namespace javelin::jmap::auth
                 .body = reply->readAll(),
                 .authenticateHeader = reply->rawHeader(QByteArrayLiteral("WWW-Authenticate")),
                 .error = status == 0 ? reply->errorString() : QString{},
+                .finalUrl = reply->url(),
             };
         }
 
@@ -264,7 +266,8 @@ namespace javelin::jmap::auth
             co_return HttpResult{.statusCode = status,
                                  .body = reply->readAll(),
                                  .authenticateHeader = {},
-                                 .error = status == 0 ? reply->errorString() : QString{}};
+                                 .error = status == 0 ? reply->errorString() : QString{},
+                                 .finalUrl = reply->url()};
         }
 
         [[nodiscard]] QCoro::Task<HttpResult> remove(QNetworkAccessManager& manager,
@@ -286,7 +289,8 @@ namespace javelin::jmap::auth
             co_return HttpResult{.statusCode = status,
                                  .body = reply->readAll(),
                                  .authenticateHeader = {},
-                                 .error = status == 0 ? reply->errorString() : QString{}};
+                                 .error = status == 0 ? reply->errorString() : QString{},
+                                 .finalUrl = reply->url()};
         }
 
         template <typename Value>
@@ -306,10 +310,19 @@ namespace javelin::jmap::auth
 
         [[nodiscard]] QString resourceMetadataFromChallenge(const QByteArray& header);
 
+        [[nodiscard]] QUrl canonicalHttpsResourceUrl(QUrl url)
+        {
+            if (url.scheme().compare(QStringLiteral("https"), Qt::CaseInsensitive) == 0 &&
+                url.port() == 443)
+                url.setPort(-1);
+            return url.adjusted(QUrl::NormalizePathSegments);
+        }
+
         [[nodiscard]] std::vector<ProtectedResourceMetadataCandidate>
         protectedResourceMetadataUrls(const QUrl& sessionUrl, const QByteArray& challenge)
         {
-            const auto sessionResource = sessionUrl.toString(QUrl::FullyEncoded);
+            const auto canonicalSessionUrl = canonicalHttpsResourceUrl(sessionUrl);
+            const auto sessionResource = canonicalSessionUrl.toString(QUrl::FullyEncoded);
             const auto advertised = QUrl{resourceMetadataFromChallenge(challenge)};
             if (!advertised.isEmpty())
             {
@@ -319,16 +332,17 @@ namespace javelin::jmap::auth
             }
 
             QUrl origin;
-            origin.setScheme(sessionUrl.scheme());
-            origin.setHost(sessionUrl.host());
-            origin.setPort(sessionUrl.port());
+            origin.setScheme(canonicalSessionUrl.scheme());
+            origin.setHost(canonicalSessionUrl.host());
+            origin.setPort(canonicalSessionUrl.port());
             QUrl metadataUrl = origin;
             metadataUrl.setPath(QStringLiteral("/.well-known/oauth-protected-resource"));
 
             std::vector<ProtectedResourceMetadataCandidate> candidates;
-            if (!sessionUrl.path().isEmpty() && sessionUrl.path() != QStringLiteral("/"))
+            if (!canonicalSessionUrl.path().isEmpty() &&
+                canonicalSessionUrl.path() != QStringLiteral("/"))
             {
-                auto resourcePath = sessionUrl.path();
+                auto resourcePath = canonicalSessionUrl.path();
                 if (!resourcePath.startsWith(QLatin1Char('/')))
                     resourcePath.prepend(QLatin1Char('/'));
                 auto pathUrl = metadataUrl;
@@ -651,8 +665,10 @@ namespace javelin::jmap::auth
 
         std::optional<detail::ProtectedResourceMetadata> resource;
         QString returnedResource;
-        for (const auto& candidate :
-             protectedResourceMetadataUrls(*sessionUrl, sessionResponse.authenticateHeader))
+        const auto protectedResourceUrl =
+            sessionResponse.finalUrl.isEmpty() ? *sessionUrl : sessionResponse.finalUrl;
+        for (const auto& candidate : protectedResourceMetadataUrls(
+                 protectedResourceUrl, sessionResponse.authenticateHeader))
         {
             const auto response = co_await get(m_networkAccessManager, candidate.metadataUrl);
             if (response.statusCode != 200)
