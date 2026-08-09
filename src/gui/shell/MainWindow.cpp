@@ -702,6 +702,8 @@ namespace javelin::gui::shell
 
     void MainWindow::openEmailRoute(const javelin::app::OpenEmailRoute& route)
     {
+        m_messageCommandController->markEmailRead(route.accountId, route.emailId);
+
         const auto accountId = QString::fromStdString(route.accountId);
         const auto mailboxId = QString::fromStdString(route.mailboxId);
 
