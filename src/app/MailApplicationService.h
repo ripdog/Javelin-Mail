@@ -135,7 +135,8 @@ namespace javelin::app
         [[nodiscard]] QueuedMessageSelectionMutationResult queueMarkEmailRead(std::string accountId,
                                                                               std::string emailId);
         [[nodiscard]] QueuedMessageSelectionMutationResult
-        queueSetEmailFlagged(std::string accountId, std::string emailId, bool flagged);
+        queueSetMessagesFlagged(std::string accountId, std::optional<std::string> sourceMailboxId,
+                                MessageSelection selection, bool flagged);
         [[nodiscard]] QueuedMessageSelectionMutationResult
         queueSetMessagesTag(std::string accountId, std::optional<std::string> sourceMailboxId,
                             MessageSelection selection, std::string keyword, bool enabled);
@@ -271,6 +272,10 @@ namespace javelin::app
         queueSelectedMessageMutation(std::string accountId,
                                      std::optional<std::string> sourceMailboxId,
                                      MessageSelection selection, SelectedMessageMutation mutation);
+        [[nodiscard]] QueuedMessageSelectionMutationResult
+        queueSetMessagesKeyword(std::string accountId, std::optional<std::string> sourceMailboxId,
+                                MessageSelection selection, std::string keyword, bool enabled,
+                                QString historyVerb, bool appendKeywordToHistoryLabel);
         void connectCoordinator(const std::string& accountId, AccountSyncCoordinator& coordinator);
         void scheduleContactRefresh(std::string ownerAccountId);
         void restoreContactRefreshJobs();

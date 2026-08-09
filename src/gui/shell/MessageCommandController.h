@@ -69,6 +69,8 @@ namespace javelin::gui::shell
                            MessageTransferOperation operation, QString successMessage);
         void markEmailRead(std::string accountId, std::string emailId);
         void toggleFlagged(std::optional<std::string> accountId, const QModelIndex& index);
+        void setSelectionFlagged(std::optional<std::string> accountId,
+                                 std::optional<std::string> sourceMailboxId, bool flagged);
         void markSelectionUnread(std::optional<std::string> accountId,
                                  std::optional<std::string> sourceMailboxId);
         void setSelectionJunk(std::optional<std::string> accountId,

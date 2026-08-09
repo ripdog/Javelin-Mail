@@ -44,7 +44,7 @@ namespace javelin::protocol
     struct ProtocolVersion
     {
         std::uint16_t major = 5;
-        std::uint16_t minor = 8;
+        std::uint16_t minor = 9;
 
         friend bool operator==(const ProtocolVersion&, const ProtocolVersion&) = default;
     };
@@ -210,7 +210,8 @@ namespace javelin::protocol
         MailDeleteTag,
         MailSetMailboxSubscribed,
         ComposeScheduleSend,
-        Last = ComposeScheduleSend,
+        MailQueueSetSelectionFlagged,
+        Last = MailQueueSetSelectionFlagged,
     };
 
     struct RemoteActionCommand

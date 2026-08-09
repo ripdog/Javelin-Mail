@@ -11,6 +11,7 @@ TEST_CASE("message actions are disabled without an active selection")
     CHECK(actions.newMessage);
     CHECK_FALSE(actions.reply);
     CHECK_FALSE(actions.archive);
+    CHECK_FALSE(actions.star);
     CHECK_FALSE(actions.junk);
     CHECK_FALSE(actions.permanentDelete);
     CHECK_FALSE(actions.viewSource);
@@ -31,6 +32,7 @@ TEST_CASE("mailbox selections enable mailbox and movable actions")
     CHECK(actions.forward);
     CHECK(actions.archive);
     CHECK(actions.markUnread);
+    CHECK(actions.star);
     CHECK(actions.junk);
     CHECK(actions.deleteFromMailbox);
     CHECK(actions.permanentDelete);
@@ -63,6 +65,7 @@ TEST_CASE("search selections can move but cannot use mailbox deletion")
 
     CHECK(actions.reply);
     CHECK(actions.archive);
+    CHECK(actions.star);
     CHECK(actions.junk);
     CHECK(actions.move);
     CHECK(actions.copy);
@@ -81,6 +84,7 @@ TEST_CASE("compose preserves source actions but disables reply commands")
     CHECK_FALSE(actions.reply);
     CHECK_FALSE(actions.replyAll);
     CHECK_FALSE(actions.forward);
+    CHECK_FALSE(actions.star);
     CHECK_FALSE(actions.junk);
     CHECK(actions.permanentDelete);
     CHECK(actions.viewSource);
@@ -98,6 +102,7 @@ TEST_CASE("contacts never expose message actions")
 
     CHECK_FALSE(actions.reply);
     CHECK_FALSE(actions.markUnread);
+    CHECK_FALSE(actions.star);
     CHECK_FALSE(actions.junk);
     CHECK_FALSE(actions.permanentDelete);
     CHECK_FALSE(actions.viewSource);

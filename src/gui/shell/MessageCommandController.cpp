@@ -330,8 +330,10 @@ namespace javelin::gui::shell
         const bool flagged =
             index.data(javelin::gui::messages::MessageListModel::IsFlaggedRole).toBool();
         qCInfo(logMessageCommands) << (flagged ? "remove star requested" : "add star requested");
-        auto task =
-            m_mailCommandPort.queueSetEmailFlagged(*accountId, emailId.toStdString(), !flagged);
+        javelin::app::MessageSelection selection;
+        selection.emplace_back(javelin::app::SelectedEmail{.emailId = emailId.toStdString()});
+        auto task = m_mailCommandPort.queueSetMessagesFlagged(*accountId, std::nullopt,
+                                                              std::move(selection), !flagged);
         QCoro::connect(
             std::move(task), this,
             [this, accountId = std::move(*accountId), index = QPersistentModelIndex{index},
@@ -351,6 +353,50 @@ namespace javelin::gui::shell
                     m_messageView.setCurrentIndex(index);
                 Q_EMIT messageMetadataChanged(QString::fromStdString(accountId));
                 Q_EMIT statusMessage(flagged ? i18n("Removed star.") : i18n("Added star."), 5000);
+                submitQueuedMutations(accountId,
+                                      summary.queuedMutations.front().patch.operationGroupId);
+            });
+    }
+
+    void MessageCommandController::setSelectionFlagged(std::optional<std::string> accountId,
+                                                       std::optional<std::string> sourceMailboxId,
+                                                       const bool flagged)
+    {
+        if (!accountId.has_value())
+        {
+            Q_EMIT statusMessage(i18n("Select a message to change its star."), 3000);
+            return;
+        }
+        auto selection = selectedActionItems();
+        if (selection.empty())
+            return;
+
+        qCInfo(logMessageCommands) << (flagged ? "add star requested" : "remove star requested")
+                                   << selection.size() << "selection item(s)";
+        auto task = m_mailCommandPort.queueSetMessagesFlagged(
+            *accountId, std::move(sourceMailboxId), std::move(selection), flagged);
+        QCoro::connect(
+            std::move(task), this,
+            [this, accountId = std::move(*accountId),
+             flagged](javelin::app::QueuedMessageSelectionMutationResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    Q_EMIT operationFailed(*error);
+                    return;
+                }
+
+                const auto& summary =
+                    std::get<javelin::app::QueuedMessageSelectionMutation>(result);
+                if (summary.queuedEmailCount == 0 || summary.queuedMutations.empty())
+                    return;
+                Q_EMIT messageMetadataChanged(QString::fromStdString(accountId));
+                Q_EMIT statusMessage(
+                    flagged ? i18np("Added a star to %1 message.", "Added a star to %1 messages.",
+                                    summary.queuedEmailCount)
+                            : i18np("Removed the star from %1 message.",
+                                    "Removed the star from %1 messages.", summary.queuedEmailCount),
+                    5000);
                 submitQueuedMutations(accountId,
                                       summary.queuedMutations.front().patch.operationGroupId);
             });

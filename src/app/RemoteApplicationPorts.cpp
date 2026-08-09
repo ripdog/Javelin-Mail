@@ -456,12 +456,13 @@ namespace javelin::app
     }
 
     QCoro::Task<QueuedMessageSelectionMutationResult>
-    RemoteMailCommandPort::queueSetEmailFlagged(std::string accountId, std::string emailId,
-                                                const bool flagged)
+    RemoteMailCommandPort::queueSetMessagesFlagged(std::string accountId,
+                                                   std::optional<std::string> sourceMailboxId,
+                                                   MessageSelection selection, const bool flagged)
     {
         return call<QueuedMessageSelectionMutationResult>(
-            m_client, javelin::protocol::RemoteActionKind::MailQueueSetFlagged,
-            std::move(accountId), std::move(emailId), flagged);
+            m_client, javelin::protocol::RemoteActionKind::MailQueueSetSelectionFlagged,
+            std::move(accountId), std::move(sourceMailboxId), std::move(selection), flagged);
     }
 
     QCoro::Task<QueuedMessageSelectionMutationResult> RemoteMailCommandPort::queueSetMessagesTag(

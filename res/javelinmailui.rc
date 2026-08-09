@@ -1,5 +1,5 @@
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
-<gui name="javelinmail" version="16">
+<gui name="javelinmail" version="17">
   <MenuBar>
     <Menu name="file"><text>&amp;File</text>
       <Action name="compose_new_message"/>
@@ -28,6 +28,7 @@
       <Separator/>
       <Action name="archive_email"/>
       <Action name="mark_email_unread"/>
+      <Action name="toggle_email_starred"/>
       <Action name="toggle_email_junk"/>
       <Action name="tag_email"/>
       <Action name="delete_email"/>
@@ -52,6 +53,7 @@
     <Action name="delete_email"/>
     <Action name="move_email"/>
     <Action name="copy_email"/>
+    <Action name="toggle_email_starred"/>
     <Action name="tag_email"/>
     <Separator/>
     <Action name="refresh_from_server"/>

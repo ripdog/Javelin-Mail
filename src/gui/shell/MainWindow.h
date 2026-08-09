@@ -299,6 +299,7 @@ namespace javelin::gui::shell
         void showTagManager();
         [[nodiscard]] javelin::jmap::search::EmailSearchCriteria quickFilterCriteriaFromUi() const;
         void updateMessageActions();
+        [[nodiscard]] bool selectedMessagesAreStarred() const;
         [[nodiscard]] bool selectedMessagesAreJunk() const;
         void updateSortButton();
         void setDarkModeEnabled(bool enabled);
@@ -410,6 +411,7 @@ namespace javelin::gui::shell
         QAction* m_editDraftAction = nullptr;
         QAction* m_archiveAction = nullptr;
         QAction* m_markUnreadAction = nullptr;
+        QAction* m_starAction = nullptr;
         QAction* m_junkAction = nullptr;
         QAction* m_tagsAction = nullptr;
         QMenu* m_tagsMenu = nullptr;

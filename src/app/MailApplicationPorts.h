@@ -99,7 +99,8 @@ namespace javelin::app
         [[nodiscard]] virtual QCoro::Task<QueuedMessageSelectionMutationResult>
         queueMarkEmailRead(std::string accountId, std::string emailId) = 0;
         [[nodiscard]] virtual QCoro::Task<QueuedMessageSelectionMutationResult>
-        queueSetEmailFlagged(std::string accountId, std::string emailId, bool flagged) = 0;
+        queueSetMessagesFlagged(std::string accountId, std::optional<std::string> sourceMailboxId,
+                                MessageSelection selection, bool flagged) = 0;
         [[nodiscard]] virtual QCoro::Task<QueuedMessageSelectionMutationResult>
         queueSetMessagesTag(std::string accountId, std::optional<std::string> sourceMailboxId,
                             MessageSelection selection, std::string keyword, bool enabled) = 0;

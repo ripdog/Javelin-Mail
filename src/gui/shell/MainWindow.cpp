@@ -922,6 +922,19 @@ namespace javelin::gui::shell
                 });
         actionCollection()->addAction(QStringLiteral("mark_email_unread"), m_markUnreadAction);
 
+        m_starAction =
+            new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/star.svg")),
+                        i18nc("@action", "&Star"), this);
+        m_starAction->setShortcut(QKeySequence{Qt::Key_S});
+        connect(m_starAction, &QAction::triggered, this,
+                [this]
+                {
+                    m_messageCommandController->setSelectionFlagged(
+                        activeAccountId(), activeMailboxId(), !selectedMessagesAreStarred());
+                });
+        actionCollection()->addAction(QStringLiteral("toggle_email_starred"), m_starAction);
+        actionCollection()->setDefaultShortcut(m_starAction, QKeySequence{Qt::Key_S});
+
         m_junkAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/spam.svg")),
                         i18nc("@action", "&Junk"), this);
@@ -3504,6 +3517,9 @@ namespace javelin::gui::shell
         m_editDraftAction->setEnabled(actions.editDraft);
         m_archiveAction->setEnabled(actions.archive);
         m_markUnreadAction->setEnabled(actions.markUnread);
+        m_starAction->setEnabled(actions.star);
+        m_starAction->setText(selectedMessagesAreStarred() ? i18nc("@action", "&Unstar")
+                                                           : i18nc("@action", "&Star"));
         m_junkAction->setEnabled(actions.junk);
         m_junkAction->setText(selectedMessagesAreJunk() ? i18nc("@action", "Not &Junk")
                                                         : i18nc("@action", "&Junk"));
@@ -3514,6 +3530,29 @@ namespace javelin::gui::shell
         m_moveAction->setEnabled(actions.move);
         m_copyAction->setEnabled(actions.copy);
         m_viewSourceAction->setEnabled(actions.viewSource);
+    }
+
+    bool MainWindow::selectedMessagesAreStarred() const
+    {
+        const auto* selectionModel = m_messageView->selectionModel();
+        if (selectionModel == nullptr)
+        {
+            return false;
+        }
+
+        auto rows = selectionModel->selectedRows();
+        if (rows.empty() && m_messageView->currentIndex().isValid())
+        {
+            rows.push_back(m_messageView->currentIndex());
+        }
+        return !rows.empty() &&
+               std::ranges::all_of(
+                   rows,
+                   [](const QModelIndex& index)
+                   {
+                       return index.data(javelin::gui::messages::MessageListModel::IsFlaggedRole)
+                           .toBool();
+                   });
     }
 
     bool MainWindow::selectedMessagesAreJunk() const
@@ -3653,6 +3692,7 @@ namespace javelin::gui::shell
         m_editDraftAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/draft.svg")));
         m_archiveAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/archive.svg")));
         m_markUnreadAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/unread.svg")));
+        m_starAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/star.svg")));
         m_junkAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/spam.svg")));
         m_tagsAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/tag.svg")));
         m_deleteAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/delete.svg")));
@@ -3995,6 +4035,7 @@ namespace javelin::gui::shell
         }
         menu.addAction(m_viewSourceAction);
         menu.addAction(m_markUnreadAction);
+        menu.addAction(m_starAction);
         const auto senderEmail =
             index.data(javelin::gui::messages::MessageListModel::SenderEmailRole)
                 .toString()

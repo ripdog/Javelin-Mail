@@ -41,10 +41,12 @@ namespace javelin::app
     }
 
     QCoro::Task<QueuedMessageSelectionMutationResult>
-    MailCommandService::queueSetEmailFlagged(std::string accountId, std::string emailId,
-                                             const bool flagged)
+    MailCommandService::queueSetMessagesFlagged(std::string accountId,
+                                                std::optional<std::string> sourceMailboxId,
+                                                MessageSelection selection, const bool flagged)
     {
-        co_return m_service.queueSetEmailFlagged(std::move(accountId), std::move(emailId), flagged);
+        co_return m_service.queueSetMessagesFlagged(
+            std::move(accountId), std::move(sourceMailboxId), std::move(selection), flagged);
     }
 
     QCoro::Task<QueuedMessageSelectionMutationResult> MailCommandService::queueSetMessagesTag(

@@ -1637,72 +1637,14 @@ namespace javelin::app
     }
 
     QueuedMessageSelectionMutationResult
-    MailApplicationService::queueSetEmailFlagged(std::string accountId, std::string emailId,
-                                                 const bool flagged)
+    MailApplicationService::queueSetMessagesFlagged(std::string accountId,
+                                                    std::optional<std::string> sourceMailboxId,
+                                                    MessageSelection selection, const bool flagged)
     {
-        javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
-        const auto found = emails.find(accountId, emailId);
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&found))
-            return javelin::jmap::operationError(*error);
-        const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(found);
-        if (!email.has_value())
-            return javelin::jmap::OperationError{
-                .code = javelin::jmap::OperationErrorCode::NotFound,
-                .message = i18n("Message not found."),
-            };
-        const bool currentlyFlagged =
-            std::ranges::contains(email->keywords, std::string{"$flagged"});
-        if (currentlyFlagged == flagged)
-        {
-            return QueuedMessageSelectionMutation{
-                .accountId = std::move(accountId),
-                .queuedEmailCount = 0,
-                .queuedMutations = {},
-                .historyEntryId = std::nullopt,
-            };
-        }
-
-        const auto operationGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        javelin::jmap::EmailMailboxMutation mutation{
-            .emailId = emailId,
-            .addMailboxIds = {},
-            .removeMailboxIds = {},
-            .addKeywords =
-                flagged ? std::vector<std::string>{"$flagged"} : std::vector<std::string>{},
-            .removeKeywords =
-                flagged ? std::vector<std::string>{} : std::vector<std::string>{"$flagged"},
-            .operationGroupId = operationGroupId.toStdString(),
-            .ifInState = std::nullopt,
-        };
-        javelin::app::undo::MailPatchHistory history{
-            .items = {historyItem(accountId, *email, mutation)}};
-        auto preparedResult = m_undoManager.prepareNormal(
-            flagged ? QStringLiteral("Add Star to Message")
-                    : QStringLiteral("Remove Star from Message"),
-            javelin::app::undo::HistoryDomain::Mail, std::move(history), operationGroupId);
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
-            return javelin::jmap::operationError(*error);
-        auto prepared =
-            std::get<std::optional<javelin::app::undo::HistoryEntry>>(std::move(preparedResult));
-        auto queuedResult = queueExactEmailMutation(accountId, std::move(mutation));
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queuedResult))
-        {
-            if (prepared.has_value())
-                static_cast<void>(m_undoManager.discardNormal(prepared->entryId));
-            return *error;
-        }
-        auto queued = std::get<javelin::jmap::QueuedEmailMutation>(std::move(queuedResult));
-        std::get<javelin::app::undo::MailPatchHistory>(prepared->payload).items.front().mutationId =
-            queued.mutationId;
-        auto committed = m_undoManager.commitNormal(std::move(*prepared));
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
-            return javelin::jmap::operationError(*error);
-        return QueuedMessageSelectionMutation{
-            .accountId = std::move(accountId),
-            .queuedEmailCount = 1,
-            .queuedMutations = {std::move(queued)},
-            .historyEntryId = std::get<javelin::app::undo::HistoryEntry>(committed).entryId,
-        };
+        return queueSetMessagesKeyword(
+            std::move(accountId), std::move(sourceMailboxId), std::move(selection), "$flagged",
+            flagged, flagged ? QStringLiteral("Add Star to") : QStringLiteral("Remove Star from"),
+            false);
     }
 
     QueuedMessageSelectionMutationResult MailApplicationService::queueSetMessagesTag(
@@ -1718,6 +1660,17 @@ namespace javelin::app
             };
         }
 
+        return queueSetMessagesKeyword(
+            std::move(accountId), std::move(sourceMailboxId), std::move(selection),
+            std::move(keyword), enabled,
+            enabled ? QStringLiteral("Add Tag") : QStringLiteral("Remove Tag"), true);
+    }
+
+    QueuedMessageSelectionMutationResult MailApplicationService::queueSetMessagesKeyword(
+        std::string accountId, std::optional<std::string> sourceMailboxId,
+        MessageSelection selection, std::string keyword, const bool enabled, QString historyVerb,
+        const bool appendKeywordToHistoryLabel)
+    {
         auto emailIdsResult =
             resolveMessageSelection(m_queryService, accountId, sourceMailboxId, selection);
         if (const auto* error = std::get_if<QString>(&emailIdsResult))
@@ -1786,11 +1739,12 @@ namespace javelin::app
             mutations.push_back(std::move(mutation));
         }
 
-        const auto verb = enabled ? QStringLiteral("Add Tag") : QStringLiteral("Remove Tag");
-        auto preparedResult = m_undoManager.prepareNormal(
-            messageCountLabel(verb, emails.size()) + QStringLiteral(" ") +
-                QString::fromStdString(keyword),
-            javelin::app::undo::HistoryDomain::Mail, std::move(history), operationGroupId);
+        auto historyLabel = messageCountLabel(historyVerb, emails.size());
+        if (appendKeywordToHistoryLabel)
+            historyLabel += QStringLiteral(" ") + QString::fromStdString(keyword);
+        auto preparedResult = m_undoManager.prepareNormal(std::move(historyLabel),
+                                                          javelin::app::undo::HistoryDomain::Mail,
+                                                          std::move(history), operationGroupId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
             return javelin::jmap::operationError(*error);
         auto prepared =

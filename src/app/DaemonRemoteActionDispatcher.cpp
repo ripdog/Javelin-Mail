@@ -199,6 +199,7 @@ namespace javelin::app
             case Kind::MailQueueMarkUnread:
             case Kind::MailQueueMarkRead:
             case Kind::MailQueueSetFlagged:
+            case Kind::MailQueueSetSelectionFlagged:
             case Kind::MailQueueSetTag:
             case Kind::MailSubmitPending:
                 return {Domain::MailQueryWindows, Domain::MessageMetadata, Domain::History};
@@ -848,8 +849,19 @@ namespace javelin::app
                 command.payload, invalidPayload,
                 [&](std::string accountId, std::string emailId, const bool flagged)
                 {
-                    return launch(m_services.mailCommandPort().queueSetEmailFlagged(
-                        std::move(accountId), std::move(emailId), flagged));
+                    MessageSelection selection;
+                    selection.emplace_back(SelectedEmail{.emailId = std::move(emailId)});
+                    return launch(m_services.mailCommandPort().queueSetMessagesFlagged(
+                        std::move(accountId), std::nullopt, std::move(selection), flagged));
+                });
+        case Kind::MailQueueSetSelectionFlagged:
+            return decodeAndApply<std::string, std::optional<std::string>, MessageSelection, bool>(
+                command.payload, invalidPayload,
+                [&](std::string accountId, std::optional<std::string> mailboxId,
+                    MessageSelection selection, const bool flagged)
+                {
+                    return launch(m_services.mailCommandPort().queueSetMessagesFlagged(
+                        std::move(accountId), std::move(mailboxId), std::move(selection), flagged));
                 });
         case Kind::MailQueueSetTag:
             return decodeAndApply<std::string, std::optional<std::string>, MessageSelection,
