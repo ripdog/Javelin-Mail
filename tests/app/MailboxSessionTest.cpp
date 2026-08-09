@@ -306,7 +306,7 @@ namespace
 
     [[nodiscard]] javelin::app::MailCacheInvalidation
     searchWindowInvalidation(const std::string& queryKey, const std::size_t total,
-                             const std::uint64_t epoch)
+                             const std::uint64_t epoch, const std::size_t limit = 100)
     {
         return {
             .epoch = epoch,
@@ -319,7 +319,7 @@ namespace
                     .queryWindows = {},
                     .searchWindows = {{.queryKey = QString::fromStdString(queryKey),
                                        .offset = 0,
-                                       .limit = 100,
+                                       .limit = limit,
                                        .total = total}},
                     .mailboxTreeChanged = false,
                     .hasNewMail = false,
@@ -521,6 +521,95 @@ TEST_CASE("quick filter keeps only the selected nonmatching message as continuit
     waitFor([&] { return session.state().items.size() == 1; });
     CHECK(session.state().items[0].emailId == "email-2");
     CHECK(session.state().total == std::optional<std::size_t>{1});
+}
+
+TEST_CASE("quick filter preserves the selected email when a thread representative changes",
+          "[app][mailbox-session][quick-filter]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(
+        QStringLiteral("mailbox-session-quick-filter-representative-continuity-test"));
+    seedAccountAndMailbox(context.connection);
+    javelin::jmap::cache::EmailRepository emails{context.connection};
+    auto selected = email("email-1", "2026-08-08T12:00:00Z");
+    auto replacement = email("email-1-reply", "2026-08-08T11:30:00Z");
+    replacement.threadId = selected.threadId;
+    auto other = email("email-2", "2026-08-08T11:00:00Z");
+    REQUIRE_FALSE(emails.replaceAll("account-1", {selected, replacement, other}).has_value());
+    javelin::jmap::cache::ThreadRepository threads{context.connection};
+    REQUIRE_FALSE(threads
+                      .replaceAll("account-1", {{.id = selected.threadId,
+                                                 .emailIds = {selected.id, replacement.id}},
+                                                {.id = other.threadId, .emailIds = {other.id}}})
+                      .has_value());
+
+    PendingMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::MailboxSession session{
+        "account-1", "mailbox-1",     QStringLiteral("Inbox"), std::optional<std::string>{"inbox"},
+        {},          context.queries, materialization,         2,
+        events};
+
+    session.setQuickFilter({.unreadOnly = true});
+    waitFor([&] { return materialization.lastSearchIntent.has_value(); });
+    const auto queryKey = materialization.lastSearchIntent->windowKey;
+
+    javelin::jmap::cache::SearchWindowRepository windows{context.connection};
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .queryKey = queryKey,
+                          .offset = 0,
+                          .limit = 2,
+                          .position = 0,
+                          .returnedLimit = 2,
+                          .total = 3,
+                          .queryState = "state-1",
+                          .emailIds = {"email-2", "email-1"},
+                      })
+                      .has_value());
+    events.publish(searchWindowInvalidation(queryKey, 3, 1, 2));
+    waitFor([&] { return session.state().items.size() == 2; });
+
+    session.setQuickFilterContinuitySelection(selected.id, selected.threadId);
+    selected.keywords = {"$seen"};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {selected}).has_value());
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .queryKey = queryKey,
+                          .offset = 0,
+                          .limit = 2,
+                          .position = 0,
+                          .returnedLimit = 2,
+                          .total = 3,
+                          .queryState = "state-2",
+                          .emailIds = {"email-2", "email-1-reply"},
+                      })
+                      .has_value());
+    const auto beforeRepresentativeChange = session.state().itemsRevision;
+    events.publish(searchWindowInvalidation(queryKey, 3, 2, 2));
+    waitFor([&] { return session.state().itemsRevision > beforeRepresentativeChange; });
+
+    REQUIRE(session.state().items.size() == 2);
+    CHECK(session.state().items[0].emailId == "email-2");
+    CHECK(session.state().items[1].emailId == "email-1");
+    CHECK_FALSE(session.state().items[1].isUnread);
+    CHECK(session.state().items[1].threadMessageCount == 2);
+    CHECK(session.state().total == std::optional<std::size_t>{3});
+
+    REQUIRE(session.loadMore());
+    REQUIRE(materialization.lastSearchIntent.has_value());
+    CHECK(materialization.lastSearchIntent->offset == 2);
+    CHECK(materialization.lastSearchIntent->anchor == std::optional<std::string>{"email-1-reply"});
+
+    session.setQuickFilterContinuitySelection(other.id, other.threadId);
+    waitFor(
+        [&]
+        {
+            return session.state().items.size() == 2 &&
+                   session.state().items[1].emailId == "email-1-reply";
+        });
 }
 
 TEST_CASE("changing mailbox sort invalidates an obsolete refresh completion",

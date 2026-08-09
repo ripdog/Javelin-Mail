@@ -103,16 +103,16 @@ namespace javelin::app
 
             if (searchWindows && continuityEmailId.has_value() && continuityThreadId.has_value())
             {
-                const bool selectedThreadStillMatches = std::ranges::any_of(
+                const bool selectedEmailStillDisplayed = std::ranges::any_of(
                     snapshot.windows,
-                    [&continuityThreadId](const auto& window)
+                    [&continuityEmailId](const auto& window)
                     {
                         return window.has_value() &&
-                               std::ranges::any_of(
-                                   window->items, [&continuityThreadId](const auto& item)
-                                   { return item.threadId == *continuityThreadId; });
+                               std::ranges::any_of(window->items,
+                                                   [&continuityEmailId](const auto& item)
+                                                   { return item.emailId == *continuityEmailId; });
                     });
-                if (!selectedThreadStillMatches)
+                if (!selectedEmailStillDisplayed)
                 {
                     auto result = queryService.listMailboxThreadMessages(accountId, mailboxId,
                                                                          *continuityThreadId);
@@ -442,6 +442,8 @@ namespace javelin::app
                         metadata.queryState = page.queryState;
                         metadata.itemCount = page.items.size();
                         metadata.displayCurrent = true;
+                        if (quickFilterActive() && !page.items.empty())
+                            m_quickFilterAuthoritativeAnchorEmailId = page.items.back().emailId;
 
                         std::unordered_set<std::string> threadIds;
                         threadIds.reserve(m_state.items.size() + page.items.size());
@@ -547,10 +549,13 @@ namespace javelin::app
         items.reserve(itemCapacity);
         std::unordered_set<std::string> threadIds;
         threadIds.reserve(itemCapacity);
+        m_quickFilterAuthoritativeAnchorEmailId.reset();
 
         for (std::size_t index = 0; index < windows.size(); ++index)
         {
             auto& page = windows[index];
+            if (quickFilterActive() && !page.items.empty())
+                m_quickFilterAuthoritativeAnchorEmailId = page.items.back().emailId;
             auto& metadata = m_windows[index];
             metadata.requestedOffset = page.requestedOffset;
             metadata.requestedLimit = page.requestedLimit;
@@ -568,17 +573,30 @@ namespace javelin::app
             }
         }
 
-        m_quickFilterContinuityInjected = false;
+        m_quickFilterContinuityApplied = false;
         if (quickFilterActive() && continuityItem.has_value() &&
-            m_quickFilterContinuityThreadId.has_value() &&
-            threadIds.insert(*m_quickFilterContinuityThreadId).second)
+            m_quickFilterContinuityThreadId.has_value())
         {
-            const auto insertIndex = std::min(
-                m_quickFilterContinuityPreferredIndex.value_or(items.size()), items.size());
-            items.insert(items.begin() + static_cast<std::ptrdiff_t>(insertIndex),
-                         std::move(*continuityItem));
-            m_quickFilterContinuityPreferredIndex = insertIndex;
-            m_quickFilterContinuityInjected = true;
+            const auto matchingThread =
+                std::ranges::find(items, *m_quickFilterContinuityThreadId,
+                                  &javelin::jmap::cache::MessageListItem::threadId);
+            if (matchingThread != items.end())
+            {
+                const auto index =
+                    static_cast<std::size_t>(std::distance(items.begin(), matchingThread));
+                *matchingThread = std::move(*continuityItem);
+                m_quickFilterContinuityPreferredIndex = index;
+                m_quickFilterContinuityApplied = true;
+            }
+            else if (threadIds.insert(*m_quickFilterContinuityThreadId).second)
+            {
+                const auto insertIndex = std::min(
+                    m_quickFilterContinuityPreferredIndex.value_or(items.size()), items.size());
+                items.insert(items.begin() + static_cast<std::ptrdiff_t>(insertIndex),
+                             std::move(*continuityItem));
+                m_quickFilterContinuityPreferredIndex = insertIndex;
+                m_quickFilterContinuityApplied = true;
+            }
         }
         else if (m_quickFilterContinuityThreadId.has_value())
         {
@@ -763,7 +781,8 @@ namespace javelin::app
         m_quickFilterContinuityEmailId.reset();
         m_quickFilterContinuityThreadId.reset();
         m_quickFilterContinuityPreferredIndex.reset();
-        m_quickFilterContinuityInjected = false;
+        m_quickFilterAuthoritativeAnchorEmailId.reset();
+        m_quickFilterContinuityApplied = false;
         ++m_generation;
         ++m_refreshRequestId;
         m_refreshGeneration.replaceScope();
@@ -782,7 +801,8 @@ namespace javelin::app
             m_quickFilterContinuityEmailId.reset();
             m_quickFilterContinuityThreadId.reset();
             m_quickFilterContinuityPreferredIndex.reset();
-            m_quickFilterContinuityInjected = false;
+            m_quickFilterAuthoritativeAnchorEmailId.reset();
+            m_quickFilterContinuityApplied = false;
             return;
         }
         if (!emailId.has_value() || !threadId.has_value())
@@ -796,7 +816,7 @@ namespace javelin::app
             return;
         }
 
-        const bool hadInjectedContinuity = m_quickFilterContinuityInjected;
+        const bool hadAppliedContinuity = m_quickFilterContinuityApplied;
         m_quickFilterContinuityEmailId = std::move(emailId);
         m_quickFilterContinuityThreadId = std::move(threadId);
         m_quickFilterContinuityPreferredIndex.reset();
@@ -812,7 +832,7 @@ namespace javelin::app
             }
         }
 
-        if (hadInjectedContinuity || m_projectedReloadInFlight)
+        if (hadAppliedContinuity || m_projectedReloadInFlight)
             reloadProjectedWindows();
     }
 
@@ -850,18 +870,10 @@ namespace javelin::app
             return false;
 
         const auto offset = nextOffset();
-        auto anchorItem = m_state.items.crbegin();
-        if (m_quickFilterContinuityInjected && m_quickFilterContinuityThreadId.has_value())
-        {
-            while (anchorItem != m_state.items.crend() &&
-                   anchorItem->threadId == *m_quickFilterContinuityThreadId)
-            {
-                ++anchorItem;
-            }
-        }
-        if (anchorItem == m_state.items.crend())
-            return false;
-        const auto anchor = anchorItem->emailId;
+        const auto anchor =
+            quickFilterActive() && m_quickFilterAuthoritativeAnchorEmailId.has_value()
+                ? *m_quickFilterAuthoritativeAnchorEmailId
+                : m_state.items.back().emailId;
         const auto generation = m_generation;
         const auto requestId = ++m_refreshRequestId;
         m_pendingLoadMoreOffset = offset;
@@ -1006,6 +1018,7 @@ namespace javelin::app
         });
         m_pendingLoadMoreOffset.reset();
         m_pendingLoadMoreRequestCompleted = false;
+        m_quickFilterAuthoritativeAnchorEmailId.reset();
         m_state = MessageListState{};
         m_state.itemsRevision = ++m_itemsRevision;
         m_endReached = false;

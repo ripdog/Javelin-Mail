@@ -74,7 +74,8 @@ namespace javelin::app
         std::optional<std::string> m_quickFilterContinuityEmailId;
         std::optional<std::string> m_quickFilterContinuityThreadId;
         std::optional<std::size_t> m_quickFilterContinuityPreferredIndex;
-        bool m_quickFilterContinuityInjected = false;
+        std::optional<std::string> m_quickFilterAuthoritativeAnchorEmailId;
+        bool m_quickFilterContinuityApplied = false;
         javelin::jmap::cache::QueryReader& m_queryReader;
         MessageListMaterializationPort& m_materializationPort;
         MailApplicationEventsPort& m_events;

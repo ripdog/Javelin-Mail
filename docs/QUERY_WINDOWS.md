@@ -50,11 +50,14 @@ exists only to preserve stable selection, detail content, and viewport rather th
 replacing the user's view. Reconciliation installs the replacement by stable object identity.
 
 Quick-filter presentation applies the same principle more narrowly after reconciliation. If the
-currently selected message stops matching the live filter, the session may retain that one thread as
-a continuity row while it remains selected. The row is re-read from current effective SQLite mailbox
-state before presentation, so a moved or deleted message cannot survive as continuity. It is not
-counted in the filtered total or window membership, never supplies a continuation anchor, and is
-removed when selection or filter criteria change. All other filter membership remains live.
+currently selected Email stops being the live filter's displayed representative, the session may
+retain that Email as the presentation representative for its thread while it remains selected. This
+also covers the case where another Email in the same thread still matches and becomes the query's
+authoritative representative. The retained Email is re-read from current effective SQLite mailbox
+state, so a moved or deleted message cannot survive as continuity. It is not counted in the filtered
+total or window membership, and server continuation still anchors to the authoritative query
+representative rather than the continuity representative. Continuity is removed when selection or
+filter criteria change. All other filter membership remains live.
 
 An Email or EmailQuery state token is not evidence that this ordered coverage exists. Push-state
 deduplication may skip a background refresh when the state tokens are current and every configured
