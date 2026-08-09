@@ -464,27 +464,37 @@ namespace javelin::jmap::auth
             return result;
         }
 
+        enum class FeatureEvidence
+        {
+            ServerCapabilities,
+            AuthenticatedAccount,
+        };
+
         [[nodiscard]] std::vector<javelin::app::OnboardingFeature>
-        sessionFeatures(const api::Session& session)
+        sessionFeatures(const api::Session& session, const FeatureEvidence evidence)
         {
             using Feature = javelin::app::OnboardingFeature;
             using Kind = javelin::app::OnboardingFeatureKind;
             const bool push =
                 session.capabilities.websocket.has_value() || session.eventSourceUrl.has_value();
-            const auto contactsAccount =
-                session.primaryAccounts.contactsAccountId.has_value()
-                    ? session.accounts.find(*session.primaryAccounts.contactsAccountId)
-                    : session.accounts.end();
-            const bool contacts = session.capabilities.contacts &&
-                                  contactsAccount != session.accounts.end() &&
-                                  contactsAccount->second.accountCapabilities.contacts.has_value();
-            const auto calendarsAccount =
-                session.primaryAccounts.calendarsAccountId.has_value()
-                    ? session.accounts.find(*session.primaryAccounts.calendarsAccountId)
-                    : session.accounts.end();
-            const bool calendars =
-                session.capabilities.calendars && calendarsAccount != session.accounts.end() &&
-                calendarsAccount->second.accountCapabilities.calendars.has_value();
+
+            bool contacts = session.capabilities.contacts;
+            bool calendars = session.capabilities.calendars;
+            if (evidence == FeatureEvidence::AuthenticatedAccount)
+            {
+                const auto contactsAccount =
+                    session.primaryAccounts.contactsAccountId.has_value()
+                        ? session.accounts.find(*session.primaryAccounts.contactsAccountId)
+                        : session.accounts.end();
+                contacts = contacts && contactsAccount != session.accounts.end() &&
+                           contactsAccount->second.accountCapabilities.contacts.has_value();
+                const auto calendarsAccount =
+                    session.primaryAccounts.calendarsAccountId.has_value()
+                        ? session.accounts.find(*session.primaryAccounts.calendarsAccountId)
+                        : session.accounts.end();
+                calendars = calendars && calendarsAccount != session.accounts.end() &&
+                            calendarsAccount->second.accountCapabilities.calendars.has_value();
+            }
             return {
                 Feature{.kind = Kind::Jmap, .available = session.capabilities.core, .detail = {}},
                 Feature{.kind = Kind::Mail, .available = session.capabilities.mail, .detail = {}},
@@ -648,7 +658,7 @@ namespace javelin::jmap::auth
                     QStringLiteral("The server responded, but its JMAP information was invalid.");
                 co_return result;
             }
-            result.features = sessionFeatures(*parsed.session);
+            result.features = sessionFeatures(*parsed.session, FeatureEvidence::ServerCapabilities);
         }
         else if (sessionResponse.statusCode != 401)
         {
@@ -991,7 +1001,7 @@ namespace javelin::jmap::auth
             .expiresAtEpochSeconds = token->expiresIn.has_value()
                                          ? QDateTime::currentSecsSinceEpoch() + *token->expiresIn
                                          : 0,
-            .features = sessionFeatures(*session.session),
+            .features = sessionFeatures(*session.session, FeatureEvidence::AuthenticatedAccount),
         };
         qCInfo(oauthLog).noquote() << "OAuth authorization completed"
                                    << "accessTokenPresent=" << !result.accessToken.isEmpty()
@@ -1040,7 +1050,7 @@ namespace javelin::jmap::auth
             .registrationClientUri = {},
             .registrationAccessToken = {},
             .expiresAtEpochSeconds = 0,
-            .features = sessionFeatures(*session.session),
+            .features = sessionFeatures(*session.session, FeatureEvidence::AuthenticatedAccount),
         };
     }
 

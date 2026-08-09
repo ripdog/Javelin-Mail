@@ -339,6 +339,58 @@ TEST_CASE("OAuth protected-resource metadata uses exact resource identifiers",
                                         QStringLiteral("https://mail.example.com/jmap")));
 }
 
+TEST_CASE("public JMAP discovery reports server capabilities before accounts are exposed",
+          "[jmap][auth][onboarding]")
+{
+    ensureApplication();
+    ScriptedNetworkAccessManager network;
+    const QUrl sessionUrl{QStringLiteral("https://localhost/.well-known/jmap")};
+    const QUrl finalSessionUrl{QStringLiteral("https://localhost/jmap/session")};
+    const QByteArray publicSession = QByteArrayLiteral(R"({
+        "username":"",
+        "apiUrl":"https://localhost/jmap/",
+        "downloadUrl":"https://localhost/jmap/download/{accountId}/{blobId}/{name}?type={type}",
+        "uploadUrl":"https://localhost/jmap/upload/{accountId}/",
+        "state":"public",
+        "capabilities":{
+            "urn:ietf:params:jmap:core":{
+                "maxSizeRequest":1000000,
+                "maxConcurrentRequests":4,
+                "maxCallsInRequest":16,
+                "maxObjectsInGet":500,
+                "maxObjectsInSet":500
+            },
+            "urn:ietf:params:jmap:mail":{},
+            "urn:ietf:params:jmap:submission":{},
+            "urn:ietf:params:jmap:contacts":{},
+            "urn:ietf:params:jmap:calendars":{},
+            "urn:ietf:params:jmap:sieve":{}
+        },
+        "accounts":{},
+        "primaryAccounts":{}
+    })");
+    network.add(sessionUrl, 200, publicSession, finalSessionUrl);
+
+    javelin::jmap::auth::AccountOnboardingService service{network};
+    const auto result =
+        QCoro::waitFor(service.discover({.emailAddress = QStringLiteral("alice@localhost")}));
+
+    REQUIRE(result.succeeded);
+    const auto feature = [&](const javelin::app::OnboardingFeatureKind kind)
+        -> const javelin::app::OnboardingFeature*
+    {
+        const auto found =
+            std::ranges::find(result.features, kind, &javelin::app::OnboardingFeature::kind);
+        return found == result.features.end() ? nullptr : &*found;
+    };
+    const auto* contacts = feature(javelin::app::OnboardingFeatureKind::Contacts);
+    const auto* calendars = feature(javelin::app::OnboardingFeatureKind::Calendars);
+    REQUIRE(contacts != nullptr);
+    REQUIRE(calendars != nullptr);
+    CHECK(contacts->available);
+    CHECK(calendars->available);
+}
+
 TEST_CASE("OAuth discovery falls back after mismatched path-specific resource metadata",
           "[jmap][auth][onboarding]")
 {
