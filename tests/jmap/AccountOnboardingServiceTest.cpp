@@ -4,10 +4,15 @@
 #include <QCoroTask>
 
 #include <QCoreApplication>
+#include <QHash>
 #include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QTimer>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <cstring>
 #include <variant>
 
 namespace
@@ -23,6 +28,91 @@ namespace
         static QCoreApplication application(argc, argv);
         Q_UNUSED(application);
     }
+
+    struct ScriptedResponse
+    {
+        int statusCode = 200;
+        QByteArray payload;
+    };
+
+    class ScriptedReply final : public QNetworkReply
+    {
+      public:
+        ScriptedReply(QNetworkRequest request, ScriptedResponse response, QObject* parent)
+            : QNetworkReply(parent), m_payload(std::move(response.payload))
+        {
+            setRequest(request);
+            setUrl(request.url());
+            setAttribute(QNetworkRequest::HttpStatusCodeAttribute, response.statusCode);
+            setHeader(QNetworkRequest::ContentLengthHeader, m_payload.size());
+            open(QIODevice::ReadOnly | QIODevice::Unbuffered);
+            QTimer::singleShot(0, this,
+                               [this]
+                               {
+                                   Q_EMIT readyRead();
+                                   setFinished(true);
+                                   Q_EMIT finished();
+                               });
+        }
+
+        void abort() override
+        {
+            setError(QNetworkReply::OperationCanceledError,
+                     QStringLiteral("The scripted request was cancelled."));
+            setFinished(true);
+        }
+
+        [[nodiscard]] qint64 bytesAvailable() const override
+        {
+            return (m_payload.size() - m_offset) + QNetworkReply::bytesAvailable();
+        }
+
+      protected:
+        qint64 readData(char* data, const qint64 maximumSize) override
+        {
+            if (m_offset >= m_payload.size())
+                return -1;
+            const auto count = std::min(maximumSize, m_payload.size() - m_offset);
+            std::memcpy(data, m_payload.constData() + m_offset, static_cast<std::size_t>(count));
+            m_offset += count;
+            return count;
+        }
+
+      private:
+        QByteArray m_payload;
+        qint64 m_offset = 0;
+    };
+
+    class ScriptedNetworkAccessManager final : public QNetworkAccessManager
+    {
+      public:
+        void add(const QUrl& url, const int statusCode, QByteArray payload)
+        {
+            m_responses.insert(
+                url, ScriptedResponse{.statusCode = statusCode, .payload = std::move(payload)});
+        }
+
+        [[nodiscard]] const QList<QUrl>& requests() const
+        {
+            return m_requests;
+        }
+
+      protected:
+        QNetworkReply* createRequest(Operation operation, const QNetworkRequest& request,
+                                     QIODevice* outgoingData) override
+        {
+            Q_UNUSED(operation);
+            Q_UNUSED(outgoingData);
+            m_requests.push_back(request.url());
+            const auto response = m_responses.value(
+                request.url(), ScriptedResponse{.statusCode = 404, .payload = {}});
+            return new ScriptedReply(request, response, this);
+        }
+
+      private:
+        QHash<QUrl, ScriptedResponse> m_responses;
+        QList<QUrl> m_requests;
+    };
 } // namespace
 
 TEST_CASE("manual onboarding refuses to send a token over an insecure connection",
@@ -217,6 +307,41 @@ TEST_CASE("OAuth protected-resource metadata uses exact resource identifiers",
                                         QStringLiteral("https://mail.example.com/jmap")));
     CHECK_FALSE(resourceMetadataMatches(QStringLiteral("https://mail.example.com/jmap/"),
                                         QStringLiteral("https://mail.example.com/jmap")));
+}
+
+TEST_CASE("OAuth discovery falls back after mismatched path-specific resource metadata",
+          "[jmap][auth][onboarding]")
+{
+    ensureApplication();
+    ScriptedNetworkAccessManager network;
+    const QUrl sessionUrl{QStringLiteral("https://localhost/.well-known/jmap")};
+    const QUrl pathMetadataUrl{
+        QStringLiteral("https://localhost/.well-known/oauth-protected-resource/.well-known/jmap")};
+    const QUrl originMetadataUrl{
+        QStringLiteral("https://localhost/.well-known/oauth-protected-resource")};
+    const QUrl authorizationMetadataUrl{
+        QStringLiteral("https://localhost/.well-known/oauth-authorization-server")};
+    const QByteArray resourceMetadata = QByteArrayLiteral(
+        R"({"resource":"https://localhost","authorization_servers":["https://localhost"],"scopes_supported":["offline_access","urn:ietf:params:oauth:scope:mail"]})");
+    const QByteArray authorizationMetadata = QByteArrayLiteral(
+        R"({"issuer":"https://localhost","token_endpoint":"https://localhost/auth/token","authorization_endpoint":"https://localhost/login","registration_endpoint":"https://localhost/auth/register","grant_types_supported":["authorization_code","refresh_token"],"response_types_supported":["code"],"scopes_supported":["offline_access","urn:ietf:params:oauth:scope:mail"],"token_endpoint_auth_methods_supported":["none"],"code_challenge_methods_supported":["S256"],"authorization_response_iss_parameter_supported":true})");
+
+    network.add(sessionUrl, 401, {});
+    network.add(pathMetadataUrl, 200, resourceMetadata);
+    network.add(originMetadataUrl, 200, resourceMetadata);
+    network.add(authorizationMetadataUrl, 200, authorizationMetadata);
+
+    javelin::jmap::auth::AccountOnboardingService service{network};
+    const auto result =
+        QCoro::waitFor(service.discover({.emailAddress = QStringLiteral("alice@localhost")}));
+
+    REQUIRE(result.succeeded);
+    CHECK(result.resourceUrl == QStringLiteral("https://localhost"));
+    CHECK(result.authorizationEndpoint == QStringLiteral("https://localhost/login"));
+    CHECK(result.tokenEndpoint == QStringLiteral("https://localhost/auth/token"));
+    CHECK(result.registrationEndpoint == QStringLiteral("https://localhost/auth/register"));
+    CHECK(network.requests().contains(pathMetadataUrl));
+    CHECK(network.requests().contains(originMetadataUrl));
 }
 
 TEST_CASE("OAuth dynamic registration preserves exact loopback callback addresses",

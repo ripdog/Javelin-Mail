@@ -649,30 +649,29 @@ namespace javelin::jmap::auth
             result.features = protectedSessionFeatures();
         }
 
-        HttpResult resourceResponse;
-        QString expectedResource;
+        std::optional<detail::ProtectedResourceMetadata> resource;
+        QString returnedResource;
         for (const auto& candidate :
              protectedResourceMetadataUrls(*sessionUrl, sessionResponse.authenticateHeader))
         {
-            resourceResponse = co_await get(m_networkAccessManager, candidate.metadataUrl);
-            if (resourceResponse.statusCode == 200)
-            {
-                expectedResource = candidate.expectedResource;
-                break;
-            }
+            const auto response = co_await get(m_networkAccessManager, candidate.metadataUrl);
+            if (response.statusCode != 200)
+                continue;
+
+            auto parsed = parseJson<detail::ProtectedResourceMetadata>(response.body);
+            if (!parsed.has_value() || parsed->authorizationServers.empty())
+                continue;
+
+            const auto candidateResource = QString::fromStdString(parsed->resource);
+            if (!detail::resourceMetadataMatches(candidateResource, candidate.expectedResource) ||
+                !isSecureServerUrl(QUrl{candidateResource}))
+                continue;
+
+            returnedResource = candidateResource;
+            resource = std::move(parsed);
+            break;
         }
-        if (resourceResponse.statusCode != 200)
-        {
-            appendOAuthFeatures(result, false);
-            result.succeeded = true;
-            co_return result;
-        }
-        const auto resource = parseJson<detail::ProtectedResourceMetadata>(resourceResponse.body);
-        const auto returnedResource =
-            resource.has_value() ? QString::fromStdString(resource->resource) : QString{};
-        if (!resource.has_value() || resource->authorizationServers.empty() ||
-            !detail::resourceMetadataMatches(returnedResource, expectedResource) ||
-            !isSecureServerUrl(QUrl{returnedResource}))
+        if (!resource.has_value())
         {
             appendOAuthFeatures(result, false);
             result.succeeded = true;
