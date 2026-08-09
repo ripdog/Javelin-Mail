@@ -190,7 +190,8 @@ TEST_CASE("OAuth refresh errors distinguish expired grants from transient failur
     CHECK(refreshFailureKind(QString{}) == Kind::Transient);
 }
 
-TEST_CASE("OAuth revocation reports missing endpoint for stored tokens", "[jmap][auth][onboarding]")
+TEST_CASE("OAuth revocation skips tokens when the provider advertises no revocation endpoint",
+          "[jmap][auth][onboarding]")
 {
     ensureApplication();
     QNetworkAccessManager networkAccessManager;
@@ -199,6 +200,25 @@ TEST_CASE("OAuth revocation reports missing endpoint for stored tokens", "[jmap]
     const auto result = QCoro::waitFor(service.revokeOAuth({
         .revocationEndpoint = {},
         .clientId = QStringLiteral("javelin"),
+        .accessToken = QStringLiteral("access-token"),
+        .refreshToken = QStringLiteral("refresh-token"),
+    }));
+
+    CHECK_FALSE(result.attempted);
+    CHECK(result.succeeded);
+    CHECK(result.error.isEmpty());
+}
+
+TEST_CASE("OAuth revocation rejects a missing client id when an endpoint is advertised",
+          "[jmap][auth][onboarding]")
+{
+    ensureApplication();
+    QNetworkAccessManager networkAccessManager;
+    javelin::jmap::auth::AccountOnboardingService service{networkAccessManager};
+
+    const auto result = QCoro::waitFor(service.revokeOAuth({
+        .revocationEndpoint = QStringLiteral("https://auth.example.com/revoke"),
+        .clientId = {},
         .accessToken = QStringLiteral("access-token"),
         .refreshToken = QStringLiteral("refresh-token"),
     }));

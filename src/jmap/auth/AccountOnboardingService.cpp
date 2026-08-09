@@ -1093,10 +1093,11 @@ namespace javelin::jmap::auth
     AccountOnboardingService::revokeOAuth(javelin::app::OAuthRevocationRequest request)
     {
         const bool hasTokens = !request.accessToken.isEmpty() || !request.refreshToken.isEmpty();
+        const bool hasRevocationEndpoint = !request.revocationEndpoint.isEmpty();
         const bool hasRegistration =
             !request.registrationClientUri.isEmpty() || !request.registrationAccessToken.isEmpty();
         javelin::app::OAuthRevocationResult result{
-            .attempted = hasTokens || hasRegistration,
+            .attempted = (hasTokens && hasRevocationEndpoint) || hasRegistration,
             .succeeded = true,
             .error = {},
         };
@@ -1104,10 +1105,9 @@ namespace javelin::jmap::auth
             co_return result;
 
         QStringList failures;
-        if (hasTokens)
+        if (hasTokens && hasRevocationEndpoint)
         {
-            if (request.clientId.isEmpty() || request.revocationEndpoint.isEmpty() ||
-                !isSecureServerUrl(QUrl{request.revocationEndpoint}))
+            if (request.clientId.isEmpty() || !isSecureServerUrl(QUrl{request.revocationEndpoint}))
             {
                 failures.push_back(QStringLiteral("OAuth revocation information is incomplete."));
             }

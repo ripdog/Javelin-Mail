@@ -162,7 +162,12 @@ namespace javelin::jmap::sync
 
         QTimer pingTimer;
         pingTimer.setInterval(requestedPushPingInterval);
-        QObject::connect(&pingTimer, &QTimer::timeout, &socket, [&socket]() { socket.ping(); });
+        QObject::connect(&pingTimer, &QTimer::timeout, &socket,
+                         [&socket]()
+                         {
+                             if (socket.state() == QAbstractSocket::ConnectedState)
+                                 socket.ping();
+                         });
         pingTimer.start();
 
         PushStreamSession stream{std::move(subscription), consumer};

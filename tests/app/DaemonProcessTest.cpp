@@ -184,6 +184,68 @@ TEST_CASE("daemon log subscription publishes history and live entries", "[app][d
     store.clear();
 }
 
+TEST_CASE("account bootstrap hydrates credentials before reaching the JMAP service",
+          "[app][daemon][auth]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+
+    auto locationResult = javelin::app::CacheLocationProvider{cacheRoot}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(locationResult));
+    javelin::app::DaemonServices services{
+        std::get<javelin::app::CacheLocation>(std::move(locationResult))};
+
+    struct EventSink final : javelin::protocol::BoundaryEventSink
+    {
+        void onBoundaryEvent(const javelin::protocol::BoundaryEvent&) override
+        {
+        }
+    } eventSink;
+
+    javelin::app::DaemonRemoteActionDispatcher dispatcher{
+        services,
+        eventSink,
+        [] { return javelin::protocol::InvalidationEpoch{.value = 1}; },
+        []() -> std::optional<javelin::protocol::BoundaryError> { return std::nullopt; },
+        [](javelin::app::AccountAuthenticationResult result) { return result; },
+        [](javelin::app::AccountConnectionSettings)
+            -> std::variant<javelin::app::AccountConnectionSettings, QString>
+        { return QStringLiteral("credential hydration sentinel"); },
+        [](javelin::app::OAuthRevocationRequest request)
+            -> std::variant<javelin::app::OAuthRevocationRequest, QString> { return request; }};
+
+    const javelin::app::AccountBootstrapIntent intent{
+        .settings = {.connectionId = "connection",
+                     .revision = 0,
+                     .displayName = {},
+                     .sessionUrl = "https://mail.example.com/.well-known/jmap",
+                     .loginEmail = "alice@example.com",
+                     .apiKey = {},
+                     .refreshToken = {},
+                     .tokenEndpoint = {},
+                     .oauthClientId = {}},
+        .mailboxIds = {},
+    };
+    const auto payload = javelin::app::remote::encode(intent);
+    REQUIRE(std::holds_alternative<QByteArray>(payload));
+
+    const auto reply = dispatcher.dispatch({
+        .id = {.value = QUuid::createUuid()},
+        .command =
+            javelin::protocol::RemoteActionCommand{
+                .kind = javelin::protocol::RemoteActionKind::AccountBootstrap,
+                .payload = std::get<QByteArray>(payload),
+            },
+    });
+    const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reply);
+    REQUIRE(rejected != nullptr);
+    CHECK(rejected->error.detail == QStringLiteral("credential hydration sentinel"));
+}
+
 TEST_CASE("daemon process migrates settings before exposing readiness", "[app][daemon]")
 {
     ApplicationGuard application;

@@ -967,6 +967,10 @@ namespace javelin::app
                 command.payload, invalidPayload,
                 [&](AccountBootstrapIntent intent)
                 {
+                    auto hydrated = m_connectionSettingsHydrator(std::move(intent.settings));
+                    if (const auto* error = std::get_if<QString>(&hydrated))
+                        return reject(id, *error);
+                    intent.settings = std::get<AccountConnectionSettings>(std::move(hydrated));
                     return launch(
                         m_services.accountRefreshPort().bootstrapAccount(std::move(intent)));
                 });
