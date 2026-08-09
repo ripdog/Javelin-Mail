@@ -4,11 +4,15 @@
 
 #include <KLocalizedString>
 
+#include <QAccessible>
+#include <QAccessibleWidget>
 #include <QActionGroup>
+#include <QApplication>
 #include <QColorDialog>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QEvent>
+#include <QFocusEvent>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QInputDialog>
@@ -60,6 +64,36 @@ namespace javelin::gui::calendar
             return QIcon{swatch};
         }
 
+        QDate eventLastDate(const MonthEvent& event)
+        {
+            return monthEventLastDate(event.start, event.end);
+        }
+
+        [[nodiscard]] QString eventAccessibleName(const MonthEvent& event, const QDate& cellDate)
+        {
+            QString name = event.title;
+            if (!event.allDay && cellDate == event.start.date())
+            {
+                name.prepend(QLocale{}.toString(event.start.time(), QLocale::ShortFormat) +
+                             QStringLiteral(" "));
+            }
+
+            QStringList states;
+            if (cellDate > event.start.date())
+                states.push_back(
+                    i18nc("@info accessible calendar event", "continues from previous day"));
+            if (cellDate < eventLastDate(event))
+                states.push_back(i18nc("@info accessible calendar event", "continues to next day"));
+            if (event.recurring)
+                states.push_back(i18nc("@info accessible calendar event", "recurring"));
+            if (!states.isEmpty())
+            {
+                name = i18nc("@item accessible calendar event with state", "%1, %2", name,
+                             states.join(QStringLiteral(", ")));
+            }
+            return name;
+        }
+
         class EventChip final : public QToolButton
         {
           public:
@@ -70,6 +104,7 @@ namespace javelin::gui::calendar
                     monthEventSegment(event.title, event.start, event.end, event.allDay, cellDate);
                 m_fullText = segment.label + (event.recurring ? QStringLiteral(" ↻") : QString{});
                 setText(m_fullText);
+                setAccessibleName(eventAccessibleName(event, cellDate));
                 setToolTip(event.title);
                 setMinimumWidth(0);
                 setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -105,17 +140,13 @@ namespace javelin::gui::calendar
           private:
             QString m_fullText;
         };
-
-        QDate eventLastDate(const MonthEvent& event)
-        {
-            return monthEventLastDate(event.start, event.end);
-        }
     } // namespace
 
     class DayCellWidget final : public QWidget
     {
       public:
-        explicit DayCellWidget(QWidget* parent = nullptr) : QWidget(parent)
+        explicit DayCellWidget(const int gridIndex, QWidget* parent = nullptr)
+            : QWidget(parent), m_gridIndex(gridIndex)
         {
             setMinimumSize(90, 76);
             setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
@@ -128,13 +159,22 @@ namespace javelin::gui::calendar
             m_layout->addStretch();
         }
 
-        void setDate(const QDate& date, const bool adjacent, const bool selected)
+        void setDate(const QDate& date, const bool adjacent, const bool selected,
+                     const QLocale& locale)
         {
             m_date = date;
+            m_selected = selected;
+            m_today = date == QDate::currentDate();
+            const auto weekday = locale.dayName(date.dayOfWeek(), QLocale::LongFormat);
+            m_accessibleDateLabel = adjacent
+                                        ? i18nc("@item accessible adjacent-month calendar date",
+                                                "%1 %2 %3", weekday, QString::number(date.day()),
+                                                locale.monthName(date.month(), QLocale::LongFormat))
+                                        : i18nc("@item accessible calendar date", "%1 %2", weekday,
+                                                QString::number(date.day()));
             m_day->setText(QString::number(date.day()));
-            const auto border = date == QDate::currentDate()
-                                    ? QStringLiteral("2px solid palette(highlight)")
-                                    : QStringLiteral("1px solid palette(mid)");
+            const auto border = m_today ? QStringLiteral("2px solid palette(highlight)")
+                                        : QStringLiteral("1px solid palette(mid)");
             const auto background = selected ? QStringLiteral("palette(alternate-base)")
                                              : QStringLiteral("palette(base)");
             const auto text = adjacent
@@ -158,6 +198,18 @@ namespace javelin::gui::calendar
             m_overflow = 0;
         }
 
+        void setEventCount(const int count)
+        {
+            if (m_eventCount == count)
+                return;
+            m_eventCount = count;
+            if (QAccessible::isActive())
+            {
+                QAccessibleEvent event{this, QAccessible::NameChanged};
+                QAccessible::updateAccessibility(&event);
+            }
+        }
+
         void addEvent(const MonthEvent& event, const QDate& cellDate,
                       std::function<void()> activated)
         {
@@ -171,9 +223,36 @@ namespace javelin::gui::calendar
             m_overflow = count;
             auto* button = new QToolButton(this);
             button->setText(i18nc("@action:button additional calendar events", "+%1 more", count));
+            button->setAccessibleName(i18ncp("@action:button accessible additional calendar events",
+                                             "Show %1 more event", "Show %1 more events", count));
             button->setAutoRaise(true);
             QObject::connect(button, &QToolButton::clicked, button, std::move(activated));
             m_layout->insertWidget(m_layout->count() - 1, button);
+        }
+
+        [[nodiscard]] QString accessibleName() const
+        {
+            QStringList parts{m_accessibleDateLabel};
+            if (m_today)
+                parts.push_back(i18nc("@info accessible calendar date state", "Today"));
+            if (m_eventCount > 0)
+                parts.push_back(i18np("%1 event", "%1 events", m_eventCount));
+            return parts.join(QStringLiteral(", "));
+        }
+
+        [[nodiscard]] QDate date() const
+        {
+            return m_date;
+        }
+
+        [[nodiscard]] int gridIndex() const
+        {
+            return m_gridIndex;
+        }
+
+        [[nodiscard]] bool selected() const
+        {
+            return m_selected;
         }
 
         [[nodiscard]] int overflow() const
@@ -200,16 +279,520 @@ namespace javelin::gui::calendar
 
       private:
         QDate m_date;
+        QString m_accessibleDateLabel;
         QLabel* m_day = nullptr;
         QVBoxLayout* m_layout = nullptr;
+        int m_gridIndex = 0;
+        int m_eventCount = 0;
         int m_overflow = 0;
+        bool m_selected = false;
+        bool m_today = false;
     };
+
+    namespace
+    {
+        [[nodiscard]] QList<QToolButton*> directEventButtons(const DayCellWidget* cell)
+        {
+            return cell->findChildren<QToolButton*>(QString{}, Qt::FindDirectChildrenOnly);
+        }
+
+        class AccessibleCalendarHeader final : public QAccessibleWidget
+        {
+          public:
+            explicit AccessibleCalendarHeader(QLabel* label)
+                : QAccessibleWidget(label, QAccessible::ColumnHeader)
+            {
+            }
+        };
+    } // namespace
+
+    class AccessibleMonthCalendar final : public QAccessibleWidget,
+                                          public QAccessibleTableInterface,
+                                          public QAccessibleSelectionInterface
+    {
+      public:
+        explicit AccessibleMonthCalendar(MonthCalendarWidget* calendar)
+            : QAccessibleWidget(calendar, QAccessible::Table)
+        {
+        }
+
+        [[nodiscard]] QAccessibleInterface* childAt(const int x, const int y) const override
+        {
+            for (int index = 0; index < childCount(); ++index)
+            {
+                auto* candidate = child(index);
+                if (candidate != nullptr && candidate->rect().contains(x, y))
+                    return candidate;
+            }
+            return nullptr;
+        }
+
+        [[nodiscard]] QAccessibleInterface* focusChild() const override
+        {
+            auto* calendar = calendarWidget();
+            if (calendar == nullptr)
+                return nullptr;
+
+            if (calendar->hasFocus())
+            {
+                if (auto* cell = calendar->cellForDate(calendar->m_selectedDate); cell != nullptr)
+                    return QAccessible::queryAccessibleInterface(cell);
+            }
+
+            auto* focus = QApplication::focusWidget();
+            for (auto* cell : calendar->m_cells)
+            {
+                if (focus == cell || (focus != nullptr && cell->isAncestorOf(focus)))
+                    return QAccessible::queryAccessibleInterface(cell);
+            }
+            return nullptr;
+        }
+
+        [[nodiscard]] int childCount() const override
+        {
+            return 49;
+        }
+
+        [[nodiscard]] int indexOfChild(const QAccessibleInterface* candidate) const override
+        {
+            if (candidate == nullptr)
+                return -1;
+            auto* calendar = calendarWidget();
+            if (calendar == nullptr)
+                return -1;
+            const auto* object = candidate->object();
+            for (int column = 0; column < 7; ++column)
+            {
+                if (calendar->m_weekdayHeaders[static_cast<std::size_t>(column)] == object)
+                    return column;
+            }
+            for (int index = 0; index < 42; ++index)
+            {
+                if (calendar->m_cells[static_cast<std::size_t>(index)] == object)
+                    return 7 + index;
+            }
+            return -1;
+        }
+
+        [[nodiscard]] QAccessibleInterface* child(const int index) const override
+        {
+            auto* calendar = calendarWidget();
+            if (calendar == nullptr)
+                return nullptr;
+            if (index >= 0 && index < 7)
+            {
+                return QAccessible::queryAccessibleInterface(
+                    calendar->m_weekdayHeaders[static_cast<std::size_t>(index)]);
+            }
+            if (index >= 7 && index < 49)
+            {
+                return QAccessible::queryAccessibleInterface(
+                    calendar->m_cells[static_cast<std::size_t>(index - 7)]);
+            }
+            return nullptr;
+        }
+
+        [[nodiscard]] QString text(const QAccessible::Text type) const override
+        {
+            if (type == QAccessible::Name)
+            {
+                auto* calendar = calendarWidget();
+                return calendar != nullptr ? calendar->m_title->text() : QString{};
+            }
+            return QAccessibleWidget::text(type);
+        }
+
+        [[nodiscard]] void* interface_cast(const QAccessible::InterfaceType type) override
+        {
+            if (type == QAccessible::TableInterface)
+                return static_cast<QAccessibleTableInterface*>(this);
+            if (type == QAccessible::SelectionInterface)
+                return static_cast<QAccessibleSelectionInterface*>(this);
+            return QAccessibleWidget::interface_cast(type);
+        }
+
+        [[nodiscard]] QAccessibleInterface* caption() const override
+        {
+            return nullptr;
+        }
+
+        [[nodiscard]] QAccessibleInterface* summary() const override
+        {
+            return nullptr;
+        }
+
+        [[nodiscard]] QAccessibleInterface* cellAt(const int row, const int column) const override
+        {
+            if (row < 0 || row >= rowCount() || column < 0 || column >= columnCount())
+                return nullptr;
+            return child(7 + row * 7 + column);
+        }
+
+        [[nodiscard]] int selectedCellCount() const override
+        {
+            return static_cast<int>(selectedCells().size());
+        }
+
+        [[nodiscard]] QList<QAccessibleInterface*> selectedCells() const override
+        {
+            QList<QAccessibleInterface*> result;
+            auto* calendar = calendarWidget();
+            if (calendar == nullptr)
+                return result;
+            if (auto* cell = calendar->cellForDate(calendar->m_selectedDate); cell != nullptr)
+                result.push_back(QAccessible::queryAccessibleInterface(cell));
+            return result;
+        }
+
+        [[nodiscard]] QString columnDescription(const int column) const override
+        {
+            auto* calendar = calendarWidget();
+            if (calendar == nullptr || column < 0 || column >= 7)
+                return {};
+            return calendar->m_weekdayHeaders[static_cast<std::size_t>(column)]->accessibleName();
+        }
+
+        [[nodiscard]] QString rowDescription(const int row) const override
+        {
+            Q_UNUSED(row);
+            return {};
+        }
+
+        [[nodiscard]] int selectedColumnCount() const override
+        {
+            return 0;
+        }
+
+        [[nodiscard]] int selectedRowCount() const override
+        {
+            return 0;
+        }
+
+        [[nodiscard]] int columnCount() const override
+        {
+            return 7;
+        }
+
+        [[nodiscard]] int rowCount() const override
+        {
+            return 6;
+        }
+
+        [[nodiscard]] QList<int> selectedColumns() const override
+        {
+            return {};
+        }
+
+        [[nodiscard]] QList<int> selectedRows() const override
+        {
+            return {};
+        }
+
+        [[nodiscard]] bool isColumnSelected(const int column) const override
+        {
+            Q_UNUSED(column);
+            return false;
+        }
+
+        [[nodiscard]] bool isRowSelected(const int row) const override
+        {
+            Q_UNUSED(row);
+            return false;
+        }
+
+        bool selectRow(const int row) override
+        {
+            Q_UNUSED(row);
+            return false;
+        }
+
+        bool selectColumn(const int column) override
+        {
+            Q_UNUSED(column);
+            return false;
+        }
+
+        bool unselectRow(const int row) override
+        {
+            Q_UNUSED(row);
+            return false;
+        }
+
+        bool unselectColumn(const int column) override
+        {
+            Q_UNUSED(column);
+            return false;
+        }
+
+        void modelChange(QAccessibleTableModelChangeEvent* event) override
+        {
+            Q_UNUSED(event);
+        }
+
+        [[nodiscard]] int selectedItemCount() const override
+        {
+            return selectedCellCount();
+        }
+
+        [[nodiscard]] QList<QAccessibleInterface*> selectedItems() const override
+        {
+            return selectedCells();
+        }
+
+        [[nodiscard]] bool isSelected(QAccessibleInterface* childItem) const override
+        {
+            return childItem != nullptr && childItem->tableCellInterface() != nullptr &&
+                   childItem->tableCellInterface()->table() == this &&
+                   childItem->tableCellInterface()->isSelected();
+        }
+
+        bool select(QAccessibleInterface* childItem) override
+        {
+            auto* calendar = calendarWidget();
+            if (calendar == nullptr || childItem == nullptr)
+                return false;
+            auto* cell = dynamic_cast<DayCellWidget*>(childItem->object());
+            if (cell == nullptr)
+                return false;
+            calendar->selectDate(cell->date(), false);
+            return true;
+        }
+
+        bool unselect(QAccessibleInterface* childItem) override
+        {
+            Q_UNUSED(childItem);
+            return false;
+        }
+
+        bool selectAll() override
+        {
+            return false;
+        }
+
+        bool clear() override
+        {
+            return false;
+        }
+
+      private:
+        [[nodiscard]] MonthCalendarWidget* calendarWidget() const
+        {
+            return qobject_cast<MonthCalendarWidget*>(object());
+        }
+    };
+
+    class AccessibleDayCell final : public QAccessibleWidget, public QAccessibleTableCellInterface
+    {
+      public:
+        explicit AccessibleDayCell(DayCellWidget* cell) : QAccessibleWidget(cell, QAccessible::Cell)
+        {
+        }
+
+        [[nodiscard]] QAccessibleInterface* childAt(const int x, const int y) const override
+        {
+            auto* cell = cellWidget();
+            if (cell == nullptr)
+                return nullptr;
+            for (auto* button : directEventButtons(cell))
+            {
+                auto* candidate = QAccessible::queryAccessibleInterface(button);
+                if (candidate != nullptr && candidate->rect().contains(x, y))
+                    return candidate;
+            }
+            return nullptr;
+        }
+
+        [[nodiscard]] QAccessibleInterface* focusChild() const override
+        {
+            auto* cell = cellWidget();
+            auto* focus = QApplication::focusWidget();
+            if (cell == nullptr || focus == nullptr || !cell->isAncestorOf(focus))
+                return nullptr;
+            return QAccessible::queryAccessibleInterface(focus);
+        }
+
+        [[nodiscard]] int childCount() const override
+        {
+            auto* cell = cellWidget();
+            return cell != nullptr ? static_cast<int>(directEventButtons(cell).size()) : 0;
+        }
+
+        [[nodiscard]] int indexOfChild(const QAccessibleInterface* candidate) const override
+        {
+            auto* cell = cellWidget();
+            if (cell == nullptr || candidate == nullptr)
+                return -1;
+            const auto buttons = directEventButtons(cell);
+            return static_cast<int>(
+                buttons.indexOf(qobject_cast<QToolButton*>(candidate->object())));
+        }
+
+        [[nodiscard]] QAccessibleInterface* child(const int index) const override
+        {
+            auto* cell = cellWidget();
+            if (cell == nullptr)
+                return nullptr;
+            const auto buttons = directEventButtons(cell);
+            if (index < 0 || index >= buttons.size())
+                return nullptr;
+            return QAccessible::queryAccessibleInterface(buttons[index]);
+        }
+
+        [[nodiscard]] QString text(const QAccessible::Text type) const override
+        {
+            if (type == QAccessible::Name)
+            {
+                auto* cell = cellWidget();
+                return cell != nullptr ? cell->accessibleName() : QString{};
+            }
+            return QAccessibleWidget::text(type);
+        }
+
+        [[nodiscard]] QAccessible::State state() const override
+        {
+            auto result = QAccessibleWidget::state();
+            auto* cell = cellWidget();
+            auto* calendar = calendarWidget();
+            if (cell == nullptr || calendar == nullptr)
+                return result;
+            result.selectable = true;
+            result.selected = cell->selected();
+            result.focusable = true;
+            result.focused = cell->selected() && calendar->hasFocus();
+            result.readOnly = true;
+            return result;
+        }
+
+        [[nodiscard]] void* interface_cast(const QAccessible::InterfaceType type) override
+        {
+            if (type == QAccessible::TableCellInterface)
+                return static_cast<QAccessibleTableCellInterface*>(this);
+            return QAccessibleWidget::interface_cast(type);
+        }
+
+        [[nodiscard]] QStringList actionNames() const override
+        {
+            return {QAccessibleActionInterface::setFocusAction()};
+        }
+
+        void doAction(const QString& actionName) override
+        {
+            if (actionName != QAccessibleActionInterface::setFocusAction())
+                return;
+            auto* cell = cellWidget();
+            auto* calendar = calendarWidget();
+            if (cell == nullptr || calendar == nullptr)
+                return;
+            calendar->selectDate(cell->date(), false);
+            calendar->setFocus(Qt::OtherFocusReason);
+        }
+
+        [[nodiscard]] QStringList keyBindingsForAction(const QString& actionName) const override
+        {
+            Q_UNUSED(actionName);
+            return {};
+        }
+
+        [[nodiscard]] bool isSelected() const override
+        {
+            auto* cell = cellWidget();
+            return cell != nullptr && cell->selected();
+        }
+
+        [[nodiscard]] QList<QAccessibleInterface*> columnHeaderCells() const override
+        {
+            QList<QAccessibleInterface*> result;
+            auto* cell = cellWidget();
+            auto* calendar = calendarWidget();
+            if (cell == nullptr || calendar == nullptr)
+                return result;
+            result.push_back(QAccessible::queryAccessibleInterface(
+                calendar->m_weekdayHeaders[static_cast<std::size_t>(columnIndex())]));
+            return result;
+        }
+
+        [[nodiscard]] QList<QAccessibleInterface*> rowHeaderCells() const override
+        {
+            return {};
+        }
+
+        [[nodiscard]] int columnIndex() const override
+        {
+            auto* cell = cellWidget();
+            return cell != nullptr ? cell->gridIndex() % 7 : -1;
+        }
+
+        [[nodiscard]] int rowIndex() const override
+        {
+            auto* cell = cellWidget();
+            return cell != nullptr ? cell->gridIndex() / 7 : -1;
+        }
+
+        [[nodiscard]] int columnExtent() const override
+        {
+            return 1;
+        }
+
+        [[nodiscard]] int rowExtent() const override
+        {
+            return 1;
+        }
+
+        [[nodiscard]] QAccessibleInterface* table() const override
+        {
+            auto* calendar = calendarWidget();
+            return calendar != nullptr ? QAccessible::queryAccessibleInterface(calendar) : nullptr;
+        }
+
+      private:
+        [[nodiscard]] DayCellWidget* cellWidget() const
+        {
+            return dynamic_cast<DayCellWidget*>(object());
+        }
+
+        [[nodiscard]] MonthCalendarWidget* calendarWidget() const
+        {
+            auto* cell = cellWidget();
+            return cell != nullptr ? qobject_cast<MonthCalendarWidget*>(cell->parentWidget())
+                                   : nullptr;
+        }
+    };
+
+    namespace
+    {
+        [[nodiscard]] QAccessibleInterface* calendarAccessibleFactory(const QString& key,
+                                                                      QObject* object)
+        {
+            Q_UNUSED(key);
+            if (auto* calendar = qobject_cast<MonthCalendarWidget*>(object); calendar != nullptr)
+                return new AccessibleMonthCalendar(calendar);
+            if (auto* cell = dynamic_cast<DayCellWidget*>(object); cell != nullptr)
+                return new AccessibleDayCell(cell);
+            if (auto* label = qobject_cast<QLabel*>(object);
+                label != nullptr && label->objectName() == QStringLiteral("calendarWeekdayHeader"))
+            {
+                return new AccessibleCalendarHeader(label);
+            }
+            return nullptr;
+        }
+
+        void ensureCalendarAccessibilityFactoryInstalled()
+        {
+            static const bool installed = []
+            {
+                QAccessible::installFactory(calendarAccessibleFactory);
+                return true;
+            }();
+            Q_UNUSED(installed);
+        }
+    } // namespace
 
     MonthCalendarWidget::MonthCalendarWidget(
         javelin::gui::settings::WorkspaceSettingsPort& settings, QWidget* parent)
         : QWidget(parent), m_settings(settings), m_locale(QLocale{}),
           m_displayedMonth(QDate::currentDate()), m_selectedDate(QDate::currentDate())
     {
+        ensureCalendarAccessibilityFactoryInstalled();
         setFocusPolicy(Qt::StrongFocus);
         auto* outer = new QVBoxLayout(this);
         m_title = new QLabel(this);
@@ -231,6 +814,8 @@ namespace javelin::gui::calendar
         {
             m_grid->setColumnStretch(column, 1);
             m_weekdayHeaders[static_cast<std::size_t>(column)] = new QLabel(this);
+            m_weekdayHeaders[static_cast<std::size_t>(column)]->setObjectName(
+                QStringLiteral("calendarWeekdayHeader"));
             m_weekdayHeaders[static_cast<std::size_t>(column)]->setAlignment(Qt::AlignCenter);
             m_weekdayHeaders[static_cast<std::size_t>(column)]->setSizePolicy(
                 QSizePolicy::Ignored, QSizePolicy::Preferred);
@@ -238,7 +823,7 @@ namespace javelin::gui::calendar
         }
         for (int index = 0; index < 42; ++index)
         {
-            auto* cell = new DayCellWidget(this);
+            auto* cell = new DayCellWidget(index, this);
             cell->clicked = [this](const QDate& date) { selectDate(date, true); };
             m_cells[static_cast<std::size_t>(index)] = cell;
             m_grid->addWidget(cell, 1 + index / 7, index % 7);
@@ -265,14 +850,29 @@ namespace javelin::gui::calendar
     {
         m_locale = locale;
         rebuildDates();
+        notifyAccessibilityGridChanged();
     }
 
     void MonthCalendarWidget::setDisplayedMonth(const QDate& month)
     {
         if (!month.isValid())
             return;
-        m_displayedMonth = QDate{month.year(), month.month(), 1};
+
+        const QDate targetMonth{month.year(), month.month(), 1};
+        const bool monthChanged = targetMonth != m_displayedMonth;
+        const auto previousSelection = m_selectedDate;
+        m_displayedMonth = targetMonth;
+        if (monthChanged && (m_selectedDate.year() != targetMonth.year() ||
+                             m_selectedDate.month() != targetMonth.month()))
+        {
+            m_selectedDate = QDate{targetMonth.year(), targetMonth.month(),
+                                   std::min(m_selectedDate.day(), targetMonth.daysInMonth())};
+        }
         rebuildDates();
+        if (monthChanged)
+            notifyAccessibilityGridChanged();
+        if (m_selectedDate != previousSelection)
+            Q_EMIT selectionChanged(m_selectedDate);
     }
 
     void MonthCalendarWidget::setEvents(std::vector<MonthEvent> events)
@@ -301,7 +901,7 @@ namespace javelin::gui::calendar
         {
             const auto date = cellDate(index);
             m_cells[static_cast<std::size_t>(index)]->setDate(
-                date, date.month() != m_displayedMonth.month(), date == m_selectedDate);
+                date, date.month() != m_displayedMonth.month(), date == m_selectedDate, m_locale);
         }
         applyCalendarColors();
         rebuildCalendarMenu();
@@ -601,8 +1201,17 @@ namespace javelin::gui::calendar
     }
     void MonthCalendarWidget::showToday()
     {
+        const auto previousSelection = m_selectedDate;
+        const auto previousMonth = m_displayedMonth;
         m_selectedDate = QDate::currentDate();
-        setDisplayedMonth(m_selectedDate);
+        m_displayedMonth = QDate{m_selectedDate.year(), m_selectedDate.month(), 1};
+        rebuildDates();
+        if (m_displayedMonth != previousMonth)
+            notifyAccessibilityGridChanged();
+        else if (m_selectedDate != previousSelection)
+            notifyAccessibilitySelectionChanged();
+        if (m_selectedDate != previousSelection)
+            Q_EMIT selectionChanged(m_selectedDate);
     }
 
     void MonthCalendarWidget::keyPressEvent(QKeyEvent* event)
@@ -618,12 +1227,12 @@ namespace javelin::gui::calendar
             days = 7;
         else if (event->key() == Qt::Key_PageUp)
         {
-            setDisplayedMonth(m_displayedMonth.addMonths(-1));
+            showPreviousMonth();
             return;
         }
         else if (event->key() == Qt::Key_PageDown)
         {
-            setDisplayedMonth(m_displayedMonth.addMonths(1));
+            showNextMonth();
             return;
         }
         else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
@@ -637,6 +1246,18 @@ namespace javelin::gui::calendar
             return;
         }
         selectDate(m_selectedDate.addDays(days), false);
+    }
+
+    void MonthCalendarWidget::focusInEvent(QFocusEvent* event)
+    {
+        QWidget::focusInEvent(event);
+        if (!QAccessible::isActive())
+            return;
+        if (auto* cell = cellForDate(m_selectedDate); cell != nullptr)
+        {
+            QAccessibleEvent focusEvent{cell, QAccessible::Focus};
+            QAccessible::updateAccessibility(&focusEvent);
+        }
     }
 
     void MonthCalendarWidget::resizeEvent(QResizeEvent* event)
@@ -676,14 +1297,15 @@ namespace javelin::gui::calendar
         for (int column = 0; column < 7; ++column)
         {
             const auto day = ((firstDay - 1 + column) % 7) + 1;
-            m_weekdayHeaders[static_cast<std::size_t>(column)]->setText(
-                m_locale.dayName(day, QLocale::ShortFormat));
+            auto* header = m_weekdayHeaders[static_cast<std::size_t>(column)];
+            header->setText(m_locale.dayName(day, QLocale::ShortFormat));
+            header->setAccessibleName(m_locale.dayName(day, QLocale::LongFormat));
         }
         for (int index = 0; index < 42; ++index)
         {
             const auto date = cellDate(index);
             m_cells[static_cast<std::size_t>(index)]->setDate(
-                date, date.month() != m_displayedMonth.month(), date == m_selectedDate);
+                date, date.month() != m_displayedMonth.month(), date == m_selectedDate, m_locale);
         }
         rebuildEvents();
         Q_EMIT visibleIntervalChanged(visibleStart(), visibleEnd());
@@ -702,6 +1324,8 @@ namespace javelin::gui::calendar
                 if (event.start.date() <= date && eventLastDate(event) >= date)
                     matching.push_back(&event);
             }
+            m_cells[static_cast<std::size_t>(index)]->setEventCount(
+                static_cast<int>(matching.size()));
             std::ranges::sort(matching,
                               [](const auto* left, const auto* right)
                               {
@@ -745,13 +1369,67 @@ namespace javelin::gui::calendar
     {
         if (!date.isValid())
             return;
+        const auto previousSelection = m_selectedDate;
+        const auto previousMonth = m_displayedMonth;
         m_selectedDate = date;
         if (date < visibleStart() || date >= visibleEnd())
             m_displayedMonth = QDate{date.year(), date.month(), 1};
         rebuildDates();
-        Q_EMIT selectionChanged(date);
+        if (m_displayedMonth != previousMonth)
+            notifyAccessibilityGridChanged();
+        else if (m_selectedDate != previousSelection)
+            notifyAccessibilitySelectionChanged();
+        if (m_selectedDate != previousSelection)
+            Q_EMIT selectionChanged(date);
         if (activate)
             Q_EMIT emptyTimeActivated(date);
+    }
+
+    DayCellWidget* MonthCalendarWidget::cellForDate(const QDate& date) const
+    {
+        for (auto* cell : m_cells)
+        {
+            if (cell->date() == date)
+                return cell;
+        }
+        return nullptr;
+    }
+
+    void MonthCalendarWidget::notifyAccessibilityGridChanged()
+    {
+        if (!QAccessible::isActive())
+            return;
+
+        QAccessibleEvent nameChanged{this, QAccessible::NameChanged};
+        QAccessible::updateAccessibility(&nameChanged);
+        QAccessibleTableModelChangeEvent modelChanged{this,
+                                                      QAccessibleTableModelChangeEvent::ModelReset};
+        QAccessible::updateAccessibility(&modelChanged);
+        if (hasFocus())
+        {
+            if (auto* cell = cellForDate(m_selectedDate); cell != nullptr)
+            {
+                QAccessibleEvent focusChanged{cell, QAccessible::Focus};
+                QAccessible::updateAccessibility(&focusChanged);
+            }
+        }
+    }
+
+    void MonthCalendarWidget::notifyAccessibilitySelectionChanged()
+    {
+        if (!QAccessible::isActive())
+            return;
+
+        QAccessibleEvent selectionChanged{this, QAccessible::SelectionWithin};
+        QAccessible::updateAccessibility(&selectionChanged);
+        if (hasFocus())
+        {
+            if (auto* cell = cellForDate(m_selectedDate); cell != nullptr)
+            {
+                QAccessibleEvent focusChanged{cell, QAccessible::Focus};
+                QAccessible::updateAccessibility(&focusChanged);
+            }
+        }
     }
 
     void MonthCalendarWidget::showDayAgenda(const QDate& date)

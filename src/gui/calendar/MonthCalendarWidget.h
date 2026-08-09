@@ -13,6 +13,7 @@
 #include <vector>
 
 class QLabel;
+class QFocusEvent;
 class QGridLayout;
 class QMenu;
 class QResizeEvent;
@@ -57,6 +58,8 @@ namespace javelin::gui::calendar
         QString name;
     };
 
+    class AccessibleDayCell;
+    class AccessibleMonthCalendar;
     class DayCellWidget;
 
     class MonthCalendarWidget final : public QWidget
@@ -105,10 +108,14 @@ namespace javelin::gui::calendar
 
       protected:
         void keyPressEvent(QKeyEvent* event) override;
+        void focusInEvent(QFocusEvent* event) override;
         void resizeEvent(QResizeEvent* event) override;
         void changeEvent(QEvent* event) override;
 
       private:
+        friend class AccessibleDayCell;
+        friend class AccessibleMonthCalendar;
+
         void rebuildDates();
         void rebuildEvents();
         void rebuildCalendarMenu();
@@ -118,6 +125,9 @@ namespace javelin::gui::calendar
         void showDayAgenda(const QDate& date);
         void scheduleEventRebuild();
         void reloadCalendarColors();
+        [[nodiscard]] DayCellWidget* cellForDate(const QDate& date) const;
+        void notifyAccessibilityGridChanged();
+        void notifyAccessibilitySelectionChanged();
 
         javelin::gui::settings::WorkspaceSettingsPort& m_settings;
         QLocale m_locale;
