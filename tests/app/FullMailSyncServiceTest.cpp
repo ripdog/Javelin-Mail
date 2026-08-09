@@ -169,8 +169,8 @@ namespace
         REQUIRE_FALSE(sessions.replace("account-1", testSession()).has_value());
         QSqlQuery mailbox{connection.database()};
         REQUIRE(mailbox.exec(QStringLiteral(
-            "INSERT INTO mailboxes(account_id,mailbox_id,name,role,total_emails,total_threads) "
-            "VALUES('account-1','archive','Archive','archive',0,0)")));
+            "INSERT INTO mailboxes(account_id,mailbox_id,name,role,total_emails,total_threads,"
+            "is_subscribed) VALUES('account-1','archive','Archive','archive',0,0,1)")));
     }
 
     [[nodiscard]] javelin::jmap::domain::Email
@@ -332,6 +332,38 @@ namespace
         return query.value(0).toULongLong();
     }
 } // namespace
+
+TEST_CASE("offline sync does not run for a hidden mailbox", "[app][offline][hidden-mailbox]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabase();
+    seedAccount(database.connection);
+    QSqlQuery hide{database.connection.database()};
+    REQUIRE(hide.exec(
+        QStringLiteral("UPDATE mailboxes SET is_subscribed=0 WHERE account_id='account-1' AND "
+                       "mailbox_id='archive'")));
+
+    RecordingResourceTransport resources;
+    RejectingMethodTransport methods;
+    javelin::jmap::JmapCore core{database.connection, resources, methods};
+    javelin::app::WorkScheduler scheduler{database.connection, nullptr,
+                                          std::chrono::milliseconds{0}};
+    javelin::app::MailIndexService indexer{database.connection, scheduler};
+    javelin::app::FullMailSyncService service{database.connection, core, scheduler, indexer};
+    service.applySettings({configuration()});
+
+    CHECK(scalar(database.connection,
+                 QStringLiteral("SELECT COUNT(*) FROM offline_mailbox_scopes WHERE "
+                                "account_id='account-1' AND mailbox_id='archive' AND desired=1")) ==
+          0);
+    const auto job = scheduler.find(fullSyncJobId());
+    const auto* record = std::get_if<std::optional<javelin::app::WorkRecord>>(&job);
+    REQUIRE(record != nullptr);
+    CHECK_FALSE(record->has_value());
+    CHECK(methods.calls == 0);
+    CHECK(resources.requests.empty());
+}
 
 TEST_CASE("offline body hydration resumes after restart without re-enumerating mailbox",
           "[app][offline][restart]")

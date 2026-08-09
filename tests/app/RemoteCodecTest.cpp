@@ -2,6 +2,7 @@
 #include "app/DeveloperDiagnostics.h"
 #include "app/DeveloperMaintenance.h"
 #include "app/RemoteActionTypes.h"
+#include "jmap/JmapCore.h"
 #include "jmap/calendar/CalendarTypes.h"
 #include "jmap/identity/IdentityCommandTypes.h"
 #include "jmap/submission/ComposeTypes.h"
@@ -53,6 +54,26 @@ TEST_CASE("remote codec round-trips nested typed values", "[app][remote-codec]")
     CHECK(value->totals == fixture.totals);
     CHECK(value->status == fixture.status);
     CHECK(value->delay == fixture.delay);
+}
+
+TEST_CASE("remote codec preserves mailbox visibility changes", "[app][remote-codec][mailbox]")
+{
+    const javelin::jmap::MailboxSubscriptionChange change{
+        .accountId = "account-1",
+        .mailboxId = "mailbox-1",
+        .subscribed = false,
+    };
+
+    const auto encoded = javelin::app::remote::encode(change);
+    const auto* payload = std::get_if<QByteArray>(&encoded);
+    REQUIRE(payload != nullptr);
+    const auto decoded =
+        javelin::app::remote::decodeValue<javelin::jmap::MailboxSubscriptionChange>(*payload);
+    const auto* value = std::get_if<javelin::jmap::MailboxSubscriptionChange>(&decoded);
+    REQUIRE(value != nullptr);
+    CHECK(value->accountId == "account-1");
+    CHECK(value->mailboxId == "mailbox-1");
+    CHECK_FALSE(value->subscribed);
 }
 
 TEST_CASE("remote codec preserves scheduled send instants", "[app][remote-codec][compose]")

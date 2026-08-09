@@ -5,6 +5,7 @@
 #include "jmap/api/SessionParser.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
@@ -16,6 +17,7 @@
 #include "jmap/search/EmailSearch.h"
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/EmailMutationJournal.h"
+#include "jmap/sync/MailboxMutationJournal.h"
 
 #include <QCoroFuture>
 #include <QCoroTask>
@@ -71,11 +73,14 @@ namespace
         std::vector<javelin::jmap::api::TransportResult> queuedResults;
         std::function<javelin::jmap::api::TransportResult(const javelin::jmap::api::HttpRequest&)>
             responseFactory;
+        bool invokeDispatched = false;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::api::TransportResult>
         send(javelin::jmap::api::HttpRequest request) override
         {
             requests.push_back(request);
+            if (invokeDispatched && request.dispatched)
+                request.dispatched();
             if (responseFactory)
             {
                 co_return responseFactory(request);
@@ -195,6 +200,21 @@ namespace
                         QStringLiteral("https://mail.example.com/.well-known/jmap"));
         query.bindValue(QStringLiteral(":is_primary"), 1);
         REQUIRE(query.exec());
+    }
+
+    void seedMailbox(javelin::jmap::cache::DatabaseConnection& connection)
+    {
+        const auto parsed = javelin::jmap::domain::parseMailbox(
+            javelin::tests::loadFixture("jmap/entities/mailbox.json"));
+        REQUIRE(parsed.ok());
+        REQUIRE(parsed.value.has_value());
+        javelin::jmap::cache::MailboxRepository mailboxes{connection};
+        REQUIRE_FALSE(mailboxes.replaceAll("u1", {*parsed.value}).has_value());
+        javelin::jmap::cache::SyncStateRepository states{connection};
+        REQUIRE_FALSE(states
+                          .upsert({.accountId = "u1", .objectType = "Mailbox", .queryKey = {}},
+                                  "mailbox-state-1")
+                          .has_value());
     }
 
     void seedEmail(javelin::jmap::cache::DatabaseConnection& connection)
@@ -1934,6 +1954,138 @@ TEST_CASE("JmapCore submits queued read keyword mutations through Email/set",
     CHECK(
         std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(acceptedState)->stateToken ==
         "email-state-2");
+}
+
+TEST_CASE("JmapCore hides a mailbox with optimistic Mailbox set semantics",
+          "[jmap][core][mailbox][mutation-journal]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+    REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
+    seedMailbox(databaseContext.connection);
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral(
+            R"({"methodResponses":[["Mailbox/set",{"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-2","updated":{"mbx-inbox":null},"notUpdated":{}},"mailbox-subscription-set"]],"createdIds":{},"sessionState":"session-state-2"})"),
+    });
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    bool projected = false;
+    const auto result = QCoro::waitFor(
+        core.setMailboxSubscribed({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                   .loginEmail = "alice@example.com",
+                                   .apiKey = "access-token"},
+                                  "u1", "mbx-inbox", false, [&projected] { projected = true; }));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::MailboxSubscriptionChange>(result));
+    CHECK(projected);
+    REQUIRE(transport.requests.size() == 1);
+    CHECK(transport.requests.front().body.contains(
+        QByteArrayLiteral("\"ifInState\":\"mailbox-state-1\"")));
+    CHECK(transport.requests.front().body.contains(QByteArrayLiteral("\"isSubscribed\":false")));
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    const auto mailbox = mailboxes.find("u1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(mailbox));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailbox).has_value());
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailbox)->isSubscribed);
+}
+
+TEST_CASE("JmapCore restores mailbox visibility when the server rejects Hide",
+          "[jmap][core][mailbox][mutation-journal]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+    REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
+    seedMailbox(databaseContext.connection);
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral(
+            R"({"methodResponses":[["Mailbox/set",{"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-1","updated":{},"notUpdated":{"mbx-inbox":{"type":"forbidden"}}},"mailbox-subscription-set"]],"createdIds":{},"sessionState":"session-state-2"})"),
+    });
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(
+        core.setMailboxSubscribed({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                   .loginEmail = "alice@example.com",
+                                   .apiKey = "access-token"},
+                                  "u1", "mbx-inbox", false));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+    CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+          javelin::jmap::OperationErrorCode::PermissionDenied);
+
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    const auto mailbox = mailboxes.find("u1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(mailbox));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailbox).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailbox)->isSubscribed);
+}
+
+TEST_CASE("JmapCore reconciles an ambiguous Hide before retrying Mailbox set",
+          "[jmap][core][mailbox][mutation-journal][recovery]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+    REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
+    seedMailbox(databaseContext.connection);
+
+    FakeTransport transport;
+    transport.invokeDispatched = true;
+    transport.queuedResults.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "Connection closed after request dispatch",
+    });
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto ambiguous = QCoro::waitFor(
+        core.setMailboxSubscribed({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                   .loginEmail = "alice@example.com",
+                                   .apiKey = "access-token"},
+                                  "u1", "mbx-inbox", false));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(ambiguous));
+
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    javelin::jmap::sync::MailboxMutationJournal journal{databaseContext.connection, mailboxes};
+    const auto active = journal.listActive("u1");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::sync::MailboxSubscriptionMutationRecord>>(
+            active));
+    const auto& records =
+        std::get<std::vector<javelin::jmap::sync::MailboxSubscriptionMutationRecord>>(active);
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().status == javelin::jmap::sync::MutationStatus::Unknown);
+
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral(
+            R"({"methodResponses":[["Mailbox/get",{"accountId":"u1","state":"mailbox-state-1","list":[{"id":"mbx-inbox","name":"Inbox","parentId":null,"role":"inbox","sortOrder":10,"totalEmails":125,"unreadEmails":7,"totalThreads":98,"unreadThreads":5,"isSubscribed":true,"myRights":{"mayReadItems":true,"mayAddItems":true,"mayRemoveItems":true,"maySetSeen":true,"maySetKeywords":true,"mayCreateChild":false,"mayRename":false,"mayDelete":false,"maySubmit":true}}],"notFound":[]},"mailbox-subscription-reconcile"]],"createdIds":{},"sessionState":"session-state-2"})"),
+    });
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral(
+            R"({"methodResponses":[["Mailbox/set",{"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-2","updated":{"mbx-inbox":null},"notUpdated":{}},"mailbox-subscription-set"]],"createdIds":{},"sessionState":"session-state-3"})"),
+    });
+    const auto recovered = QCoro::waitFor(core.reconcileMailboxSubscription(
+        {.sessionUrl = "https://mail.example.com/.well-known/jmap",
+         .loginEmail = "alice@example.com",
+         .apiKey = "access-token"},
+        "u1"));
+    REQUIRE(std::holds_alternative<javelin::jmap::MailboxSubscriptionChange>(recovered));
+    CHECK(transport.requests.size() == 3);
+    CHECK(transport.requests[1].body.contains(QByteArrayLiteral("Mailbox/get")));
+    CHECK(transport.requests[2].body.contains(QByteArrayLiteral("Mailbox/set")));
+    const auto settled = journal.listActive("u1");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::sync::MailboxSubscriptionMutationRecord>>(
+            settled));
+    CHECK(std::get<std::vector<javelin::jmap::sync::MailboxSubscriptionMutationRecord>>(settled)
+              .empty());
 }
 
 TEST_CASE("JmapCore preserves ambiguous Email mutation outcomes for reconciliation",

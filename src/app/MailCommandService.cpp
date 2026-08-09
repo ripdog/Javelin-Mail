@@ -67,6 +67,14 @@ namespace javelin::app
         co_return m_service.deleteTag(std::move(accountId), std::move(keyword));
     }
 
+    QCoro::Task<javelin::jmap::MailboxSubscriptionChangeResult>
+    MailCommandService::setMailboxSubscribed(std::string accountId, std::string mailboxId,
+                                             const bool subscribed)
+    {
+        co_return co_await m_service.setMailboxSubscribed(std::move(accountId),
+                                                          std::move(mailboxId), subscribed);
+    }
+
     QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
     MailCommandService::submitPendingEmailMutations(std::string accountId,
                                                     std::optional<std::string> operationGroupId)

@@ -8,6 +8,7 @@
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/sync/ConsistencyDomain.h"
+#include "jmap/sync/MailboxMutationJournal.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 #include "jmap/sync/MutationJournal.h"
 
@@ -349,6 +350,15 @@ namespace javelin::jmap::sync
             co_return summary;
 
         ConsistencyDomainRepository consistency{m_databaseConnection};
+        std::optional<RefreshFence> mailboxFence;
+        if (mailboxState.has_value())
+        {
+            const auto fence =
+                consistency.captureRefresh({.accountId = accountId, .dataType = "Mailbox"});
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&fence))
+                co_return operationError(*error);
+            mailboxFence = std::get<RefreshFence>(fence);
+        }
         std::optional<RefreshFence> emailFence;
         if (emailState.has_value())
         {
@@ -411,6 +421,17 @@ namespace javelin::jmap::sync
                 .message = QStringLiteral("The mail delta response did not match the requested "
                                           "account and state."),
             };
+        }
+        if (mailboxFence.has_value())
+        {
+            const auto canCommit = consistency.isCurrent(*mailboxFence);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&canCommit))
+                co_return operationError(*error);
+            if (!std::get<bool>(canCommit))
+            {
+                summary.superseded = true;
+                co_return summary;
+            }
         }
         if (emailFence.has_value())
         {
@@ -487,6 +508,17 @@ namespace javelin::jmap::sync
                 std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
             co_return operationError(*error);
         auto transaction = std::get<MutationProjectionTransaction>(std::move(transactionResult));
+        if (mailboxFence.has_value())
+        {
+            const auto fenceCurrent = consistency.isCurrent(*mailboxFence);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&fenceCurrent))
+                co_return operationError(*error);
+            if (!std::get<bool>(fenceCurrent))
+            {
+                summary.superseded = true;
+                co_return summary;
+            }
+        }
         if (emailFence.has_value())
         {
             const auto fenceCurrent = consistency.isCurrent(*emailFence);
@@ -536,6 +568,10 @@ namespace javelin::jmap::sync
                 co_return operationError(*error);
             if (const auto error = mailboxes.removeMany(transaction.cacheTransaction(), accountId,
                                                         parsed.lateDestroyedMailboxes))
+                co_return operationError(*error);
+            MailboxMutationJournal mailboxMutations{m_databaseConnection, mailboxes};
+            if (const auto error =
+                    mailboxMutations.rebase(transaction.cacheTransaction(), accountId))
                 co_return operationError(*error);
             summary.mailboxChanged = !parsed.mailboxChanges->created.empty() ||
                                      !parsed.mailboxChanges->updated.empty() ||

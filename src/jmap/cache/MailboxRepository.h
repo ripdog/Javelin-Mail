@@ -39,6 +39,12 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::optional<DatabaseError>
         removeMany(DatabaseTransaction& transaction, std::string_view accountId,
                    std::span<const std::string> mailboxIds);
+        [[nodiscard]] std::variant<std::optional<javelin::jmap::domain::Mailbox>, DatabaseError>
+        find(std::string_view accountId, std::string_view mailboxId) const;
+        [[nodiscard]] std::optional<DatabaseError> setSubscribed(DatabaseTransaction& transaction,
+                                                                 std::string_view accountId,
+                                                                 std::string_view mailboxId,
+                                                                 bool subscribed);
         [[nodiscard]] std::variant<std::vector<javelin::jmap::domain::Mailbox>, DatabaseError>
         listByParent(std::string_view accountId, std::optional<std::string_view> parentId) const;
 

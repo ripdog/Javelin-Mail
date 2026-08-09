@@ -52,7 +52,7 @@ namespace javelin::gui::mailboxes
                  identityGroup);
         addValue(*identityLayout, i18n("Sort order:"), QString::number(mailbox.sortOrder),
                  identityGroup);
-        addValue(*identityLayout, i18n("Subscribed:"), yesNo(mailbox.isSubscribed), identityGroup);
+        addValue(*identityLayout, i18n("Hidden:"), yesNo(!mailbox.isSubscribed), identityGroup);
         addValue(*identityLayout, i18n("Has child mailboxes:"), yesNo(mailbox.hasChildren),
                  identityGroup);
         layout->addWidget(identityGroup);

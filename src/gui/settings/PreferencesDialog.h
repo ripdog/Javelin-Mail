@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/messageview/MessageAppearance.h"
 #include "gui/settings/ConnectionSettings.h"
 #include "gui/settings/GuiSettings.h"
@@ -11,6 +12,7 @@
 #include <QModelIndex>
 
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 class QCheckBox;
@@ -24,7 +26,6 @@ class QSpinBox;
 
 namespace javelin::gui::mailboxes
 {
-    class MailboxTreeModel;
     class MailboxTreeView;
 } // namespace javelin::gui::mailboxes
 
@@ -37,6 +38,7 @@ namespace javelin::jmap::cache
 namespace javelin::app
 {
     class AccountCommandPort;
+    class MailCommandPort;
     class DeveloperDiagnosticsPort;
     class DeveloperMaintenancePort;
     class OnboardingPort;
@@ -57,6 +59,7 @@ namespace javelin::gui::settings
       public:
         explicit PreferencesDialog(
             GuiSettings& settings, javelin::app::AccountCommandPort& accountCommandPort,
+            javelin::app::MailCommandPort& mailCommandPort,
             javelin::app::OnboardingPort& onboardingPort,
             javelin::gui::translation::TranslationService& translationService,
             javelin::jmap::cache::AccountReader& accountReader,
@@ -98,9 +101,8 @@ namespace javelin::gui::settings
         void updateAttachmentDirectoryControls();
         void refreshMailboxSyncAccounts();
         void refreshMailboxSyncList();
-        void storeMailboxSyncSelection();
-        void storeMailboxNotificationSelection();
-        void mailboxSyncSelectionChanged(const QModelIndex& index, const QList<int>& roles);
+        void storeMailboxPreferences();
+        void mailboxPreferencesChanged(const QModelIndex& index, const QList<int>& roles);
         void offerMailboxCacheCleanup(const QString& accountId, const QString& mailboxId,
                                       const QString& mailboxName);
 
@@ -112,9 +114,17 @@ namespace javelin::gui::settings
             bool clearBodies = false;
         };
 
+        struct DeferredMailboxCacheCleanupOffer
+        {
+            QString accountId;
+            QString mailboxId;
+            QString mailboxName;
+        };
+
         GuiSettings& m_settings;
         javelin::protocol::SettingsRevision m_baseRevision;
         javelin::app::AccountCommandPort& m_accountCommandPort;
+        javelin::app::MailCommandPort& m_mailCommandPort;
         javelin::app::OnboardingPort& m_onboardingPort;
         javelin::gui::translation::TranslationService& m_translationService;
         javelin::jmap::cache::AccountReader& m_accountReader;
@@ -164,13 +174,13 @@ namespace javelin::gui::settings
         QSpinBox* m_undoSendDelaySpinBox = nullptr;
         QComboBox* m_mailboxSyncAccount = nullptr;
         javelin::gui::mailboxes::MailboxTreeView* m_mailboxSyncList = nullptr;
-        javelin::gui::mailboxes::MailboxTreeView* m_mailboxNotificationList = nullptr;
         javelin::gui::mailboxes::MailboxTreeModel* m_mailboxSyncModel = nullptr;
-        javelin::gui::mailboxes::MailboxTreeModel* m_mailboxNotificationModel = nullptr;
-        QHash<QString, QStringList> m_syncedMailboxIds;
-        QHash<QString, QStringList> m_notificationMailboxIds;
+        QHash<QString,
+              std::unordered_map<std::string, javelin::gui::mailboxes::MailboxPreferenceState>>
+            m_mailboxPreferences;
         QString m_mailboxSyncCurrentAccountId;
         std::vector<PendingMailboxCacheClear> m_pendingMailboxCacheClears;
+        std::vector<DeferredMailboxCacheCleanupOffer> m_deferredMailboxCacheCleanupOffers;
     };
 
 } // namespace javelin::gui::settings

@@ -270,6 +270,14 @@ namespace javelin::app
                     std::move(accountId), std::move(mailboxId), static_cast<std::size_t>(offset),
                     static_cast<std::size_t>(limit));
             });
+        QObject::connect(m_mailService.get(), &MailApplicationService::cacheCommitted,
+                         m_fullMailSyncService.get(),
+                         [this](const MailCacheChange& change)
+                         {
+                             if (change.mailboxTreeChanged)
+                                 m_fullMailSyncService->refreshMailboxVisibility(
+                                     change.accountId.toStdString());
+                         });
         m_messageNavigationCoordinator = std::make_unique<MessageNavigationCoordinator>();
         m_calendarNotificationService =
             std::make_unique<CalendarNotificationService>(m_databaseConnection, *m_mailService);

@@ -192,6 +192,9 @@ namespace javelin::app
         saveTagDefinition(SaveMailTagDefinition definition) override;
         [[nodiscard]] QCoro::Task<QueuedMailTagDeletionResult>
         deleteTag(std::string accountId, std::string keyword) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::MailboxSubscriptionChangeResult>
+        setMailboxSubscribed(std::string accountId, std::string mailboxId,
+                             bool subscribed) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
         submitPendingEmailMutations(std::string accountId,
                                     std::optional<std::string> operationGroupId) override;

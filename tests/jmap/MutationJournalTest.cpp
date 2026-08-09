@@ -1,9 +1,12 @@
 #include "jmap/sync/MutationJournal.h"
 #include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/EmailMutationQueue.h"
+#include "jmap/sync/MailboxMutationJournal.h"
 
 #include "FixtureReader.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxRepository.h"
+#include "jmap/cache/SyncStateRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 
 #include <QCoreApplication>
@@ -92,6 +95,27 @@ namespace
         return *parsed.value;
     }
 
+    [[nodiscard]] javelin::jmap::domain::Mailbox loadMailboxFixture()
+    {
+        const auto parsed = javelin::jmap::domain::parseMailbox(
+            javelin::tests::loadFixture("jmap/entities/mailbox.json"));
+        REQUIRE(parsed.ok());
+        REQUIRE(parsed.value.has_value());
+        return *parsed.value;
+    }
+
+    void seedMailboxState(javelin::jmap::cache::DatabaseConnection& connection)
+    {
+        javelin::jmap::cache::MailboxRepository mailboxes{connection};
+        REQUIRE_FALSE(mailboxes.replaceAll("account-1", {loadMailboxFixture()}).has_value());
+        javelin::jmap::cache::SyncStateRepository states{connection};
+        REQUIRE_FALSE(
+            states
+                .upsert({.accountId = "account-1", .objectType = "Mailbox", .queryKey = {}},
+                        "mailbox-state-1")
+                .has_value());
+    }
+
 } // namespace
 
 TEST_CASE("mutation journal round-trips typed Email patch mutations", "[jmap][sync]")
@@ -137,6 +161,172 @@ TEST_CASE("mutation journal round-trips typed Email patch mutations", "[jmap][sy
     CHECK(records.front().patch.destroy);
     CHECK(records.front().baseMailboxIds == std::vector<std::string>{"mbx-inbox"});
     CHECK(records.front().baseKeywords == std::vector<std::string>{"$flagged"});
+}
+
+TEST_CASE("mailbox subscription mutations project and reject atomically",
+          "[jmap][sync][mailbox][consistency]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    seedMailboxState(databaseContext.connection);
+
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    javelin::jmap::sync::MailboxMutationJournal journal{databaseContext.connection, mailboxes};
+    const javelin::jmap::sync::MailboxSubscriptionMutationRecord mutation{
+        .mutationId = "hide-1",
+        .operationGroupId = std::nullopt,
+        .accountId = "account-1",
+        .mailboxId = "mbx-inbox",
+        .status = javelin::jmap::sync::MutationStatus::Pending,
+        .beforeSubscribed = true,
+        .afterSubscribed = false,
+        .baseState = "mailbox-state-1",
+        .acceptedState = std::nullopt,
+        .errorJson = std::nullopt,
+    };
+
+    REQUIRE_FALSE(journal.queue(mutation).has_value());
+    auto projected = mailboxes.find("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(projected));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(projected).has_value());
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(projected)->isSubscribed);
+
+    REQUIRE_FALSE(journal.reject(mutation).has_value());
+    auto restored = mailboxes.find("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(restored));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(restored).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::domain::Mailbox>>(restored)->isSubscribed);
+}
+
+TEST_CASE("accepted mailbox subscription mutation advances state and clears journal",
+          "[jmap][sync][mailbox][consistency]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    seedMailboxState(databaseContext.connection);
+
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    javelin::jmap::sync::MailboxMutationJournal journal{databaseContext.connection, mailboxes};
+    const javelin::jmap::sync::MailboxSubscriptionMutationRecord mutation{
+        .mutationId = "hide-accepted",
+        .operationGroupId = std::nullopt,
+        .accountId = "account-1",
+        .mailboxId = "mbx-inbox",
+        .status = javelin::jmap::sync::MutationStatus::Pending,
+        .beforeSubscribed = true,
+        .afterSubscribed = false,
+        .baseState = "mailbox-state-1",
+        .acceptedState = std::nullopt,
+        .errorJson = std::nullopt,
+    };
+    REQUIRE_FALSE(journal.queue(mutation).has_value());
+    REQUIRE_FALSE(journal.accept(mutation, "mailbox-state-2").has_value());
+
+    const auto active = journal.listActive("account-1");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::sync::MailboxSubscriptionMutationRecord>>(
+            active));
+    CHECK(std::get<std::vector<javelin::jmap::sync::MailboxSubscriptionMutationRecord>>(active)
+              .empty());
+    javelin::jmap::cache::SyncStateRepository states{databaseContext.connection};
+    const auto state =
+        states.find({.accountId = "account-1", .objectType = "Mailbox", .queryKey = {}});
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(state));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(state).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(state)->stateToken ==
+          "mailbox-state-2");
+}
+
+TEST_CASE("mailbox mutation rebase preserves Hide over a stale server refresh",
+          "[jmap][sync][mailbox][rebase]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    seedMailboxState(databaseContext.connection);
+
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    javelin::jmap::sync::MailboxMutationJournal journal{databaseContext.connection, mailboxes};
+    const javelin::jmap::sync::MailboxSubscriptionMutationRecord mutation{
+        .mutationId = "hide-rebase",
+        .operationGroupId = std::nullopt,
+        .accountId = "account-1",
+        .mailboxId = "mbx-inbox",
+        .status = javelin::jmap::sync::MutationStatus::Pending,
+        .beforeSubscribed = true,
+        .afterSubscribed = false,
+        .baseState = "mailbox-state-1",
+        .acceptedState = std::nullopt,
+        .errorJson = std::nullopt,
+    };
+    REQUIRE_FALSE(journal.queue(mutation).has_value());
+
+    auto staleMailbox = loadMailboxFixture();
+    staleMailbox.isSubscribed = true;
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Apply stale mailbox refresh"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    REQUIRE_FALSE(mailboxes.replaceAll(transaction, "account-1", {staleMailbox}).has_value());
+    REQUIRE_FALSE(journal.rebase(transaction, "account-1").has_value());
+    REQUIRE_FALSE(transaction.commit().has_value());
+
+    const auto projected = mailboxes.find("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(projected));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(projected).has_value());
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(projected)->isSubscribed);
+}
+
+TEST_CASE("mailbox mutation recovery preserves ambiguous projection for reconciliation",
+          "[jmap][sync][mailbox][recovery]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    seedMailboxState(databaseContext.connection);
+
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    javelin::jmap::sync::MailboxMutationJournal journal{databaseContext.connection, mailboxes};
+    const javelin::jmap::sync::MailboxSubscriptionMutationRecord mutation{
+        .mutationId = "hide-recover",
+        .operationGroupId = std::nullopt,
+        .accountId = "account-1",
+        .mailboxId = "mbx-inbox",
+        .status = javelin::jmap::sync::MutationStatus::Pending,
+        .beforeSubscribed = true,
+        .afterSubscribed = false,
+        .baseState = "mailbox-state-1",
+        .acceptedState = std::nullopt,
+        .errorJson = std::nullopt,
+    };
+    REQUIRE_FALSE(journal.queue(mutation).has_value());
+    REQUIRE_FALSE(
+        journal.transition(mutation, javelin::jmap::sync::MutationStatus::InFlight).has_value());
+
+    javelin::jmap::sync::MutationJournalRepository generic{databaseContext.connection};
+    const auto recovered = generic.recoverInFlight();
+    REQUIRE(std::holds_alternative<std::size_t>(recovered));
+    CHECK(std::get<std::size_t>(recovered) == 1);
+
+    const auto active = journal.listActive("account-1");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::sync::MailboxSubscriptionMutationRecord>>(
+            active));
+    const auto& records =
+        std::get<std::vector<javelin::jmap::sync::MailboxSubscriptionMutationRecord>>(active);
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().status == javelin::jmap::sync::MutationStatus::Unknown);
+    const auto projected = mailboxes.find("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(projected));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(projected).has_value());
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(projected)->isSubscribed);
 }
 
 TEST_CASE("authoritative email mutation queues for an uncached server message without fabricating "

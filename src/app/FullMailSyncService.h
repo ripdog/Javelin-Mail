@@ -43,6 +43,7 @@ namespace javelin::app
                             MailIndexService& indexService, QObject* parent = nullptr);
 
         void applySettings(std::vector<FullSyncAccountConfiguration> configurations);
+        void refreshMailboxVisibility(std::string_view accountId);
         void requestCatchUp(std::string_view accountId);
         void requestMailboxResync(std::string_view accountId, std::string_view mailboxId);
 
@@ -64,6 +65,8 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<bool> waitForBackgroundNetwork(std::string jobId);
         [[nodiscard]] bool hasDiskSpace(std::string_view accountId, std::string_view mailboxId,
                                         std::uint64_t remainingBytes) const;
+        [[nodiscard]] std::optional<bool> mailboxSubscribed(std::string_view accountId,
+                                                            std::string_view mailboxId) const;
         [[nodiscard]] std::optional<AccountConnectionSettings>
         settingsFor(std::string_view accountId) const;
 

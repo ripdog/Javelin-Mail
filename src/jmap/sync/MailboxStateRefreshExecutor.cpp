@@ -5,6 +5,7 @@
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/sync/ConsistencyDomain.h"
+#include "jmap/sync/MailboxMutationJournal.h"
 #include "jmap/sync/SyncPlanner.h"
 
 #include <algorithm>
@@ -287,6 +288,9 @@ namespace javelin::jmap::sync
                 if (const auto error = mailboxRepository.removeMany(
                         transaction, accountId, incrementalFetch->changes.destroyed))
                     co_return javelin::jmap::operationError(*error);
+                MailboxMutationJournal mutations{m_databaseConnection, mailboxRepository};
+                if (const auto error = mutations.rebase(transaction, accountId))
+                    co_return javelin::jmap::operationError(*error);
                 if (const auto error = transaction.commit())
                     co_return javelin::jmap::operationError(*error);
 
@@ -336,6 +340,9 @@ namespace javelin::jmap::sync
 
         javelin::jmap::cache::MailboxRepository mailboxRepository{m_databaseConnection};
         if (const auto error = mailboxRepository.replaceAll(transaction, accountId, fetched.list))
+            co_return javelin::jmap::operationError(*error);
+        MailboxMutationJournal mutations{m_databaseConnection, mailboxRepository};
+        if (const auto error = mutations.rebase(transaction, accountId))
             co_return javelin::jmap::operationError(*error);
         if (const auto error = transaction.commit())
             co_return javelin::jmap::operationError(*error);

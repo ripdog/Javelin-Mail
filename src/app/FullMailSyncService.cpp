@@ -691,10 +691,12 @@ namespace javelin::app
             for (const auto& mailboxId : configuration.mailboxIds)
             {
                 const auto id = jobId(configuration.accountId, mailboxId);
-                desiredKeys.insert(configuration.accountId + "\n" + mailboxId);
                 Scope scope{
                     .accountId = configuration.accountId, .mailboxId = mailboxId, .jobId = id};
                 m_scopes.insert_or_assign(id, scope);
+                if (mailboxSubscribed(configuration.accountId, mailboxId) == std::optional{false})
+                    continue;
+                desiredKeys.insert(configuration.accountId + "\n" + mailboxId);
 
                 bool wasDisabled = false;
                 QSqlQuery previous{m_connection.database()};
@@ -791,6 +793,28 @@ namespace javelin::app
                 "'evictable' END")))
             logDatabaseFailure(QStringLiteral("Update mail retention"), retention);
         schedulePump();
+    }
+
+    void FullMailSyncService::refreshMailboxVisibility(const std::string_view accountId)
+    {
+        if (!m_settings.contains(std::string{accountId}))
+            return;
+
+        std::vector<FullSyncAccountConfiguration> configurations;
+        configurations.reserve(m_settings.size());
+        for (const auto& [configuredAccountId, settings] : m_settings)
+        {
+            FullSyncAccountConfiguration configuration{
+                .settings = settings, .accountId = configuredAccountId, .mailboxIds = {}};
+            for (const auto& [id, scope] : m_scopes)
+            {
+                Q_UNUSED(id);
+                if (scope.accountId == configuredAccountId)
+                    configuration.mailboxIds.push_back(scope.mailboxId);
+            }
+            configurations.push_back(std::move(configuration));
+        }
+        applySettings(std::move(configurations));
     }
 
     void FullMailSyncService::requestCatchUp(const std::string_view accountId)
@@ -992,6 +1016,11 @@ namespace javelin::app
         const auto accountSettings = settingsFor(scope.accountId);
         if (!accountSettings)
             co_return;
+        if (mailboxSubscribed(scope.accountId, scope.mailboxId) == std::optional{false})
+        {
+            static_cast<void>(m_scheduler.pause(scope.jobId));
+            co_return;
+        }
         WorkProgress progress;
 
         QSqlQuery state{m_connection.database()};
@@ -1113,6 +1142,11 @@ namespace javelin::app
             }
             while (true)
             {
+                if (mailboxSubscribed(scope.accountId, scope.mailboxId) == std::optional{false})
+                {
+                    static_cast<void>(m_scheduler.pause(scope.jobId));
+                    co_return;
+                }
                 const bool mayContinue = co_await waitForBackgroundNetwork(scope.jobId);
                 if (!self)
                     co_return;
@@ -1322,6 +1356,11 @@ namespace javelin::app
         std::uint64_t completedTotalBytes = 0;
         while (true)
         {
+            if (mailboxSubscribed(scope.accountId, scope.mailboxId) == std::optional{false})
+            {
+                static_cast<void>(m_scheduler.pause(scope.jobId));
+                co_return;
+            }
             OfflineBodyWork work;
             auto prepareResult = javelin::jmap::cache::DatabaseTransaction::begin(
                 m_connection, QStringLiteral("Prepare offline mailbox hydration"));
@@ -1580,6 +1619,20 @@ namespace javelin::app
         const std::uint64_t reserve =
             std::max<std::uint64_t>(2ULL * 1024ULL * 1024ULL * 1024ULL, capacity / 20ULL);
         return available >= remainingBytes && available - remainingBytes >= reserve;
+    }
+
+    std::optional<bool>
+    FullMailSyncService::mailboxSubscribed(const std::string_view accountId,
+                                           const std::string_view mailboxId) const
+    {
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral("SELECT is_subscribed FROM mailboxes WHERE "
+                                     "account_id=:account AND mailbox_id=:mailbox"));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(std::string{mailboxId}));
+        if (!query.exec() || !query.next())
+            return std::nullopt;
+        return query.value(0).toBool();
     }
 
     std::optional<AccountConnectionSettings>

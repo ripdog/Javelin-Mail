@@ -291,12 +291,20 @@ namespace javelin::app
         }
 
         std::vector<std::pair<std::string, std::string>> mailboxes;
+        std::unordered_set<std::string> subscribedMailboxIds;
         for (const auto& mailbox : *mailboxTree)
         {
+            if (!mailbox.isSubscribed)
+                continue;
+            subscribedMailboxIds.insert(mailbox.id);
             if (std::ranges::find(m_mailboxIds, mailbox.id) != m_mailboxIds.end())
-            {
                 mailboxes.emplace_back(mailbox.id, mailbox.name);
-            }
+        }
+        std::unordered_set<std::string> notificationMailboxIds;
+        for (const auto& mailboxId : m_notificationMailboxIds)
+        {
+            if (subscribedMailboxIds.contains(mailboxId))
+                notificationMailboxIds.insert(mailboxId);
         }
 
         bool calendarCapable = false;
@@ -328,8 +336,7 @@ namespace javelin::app
             .settings = *m_settings,
             .accountId = m_accountId,
             .mailboxes = std::move(mailboxes),
-            .notificationMailboxIds = {m_notificationMailboxIds.begin(),
-                                       m_notificationMailboxIds.end()},
+            .notificationMailboxIds = std::move(notificationMailboxIds),
             .apiUrl = session->value().apiUrl,
             .requestLimits = *requestLimits,
             .eventSourceUrl = session->value().eventSourceUrl.value_or(std::string{}),
@@ -483,6 +490,18 @@ namespace javelin::app
             runContext->cancellation.isCancelled())
         {
             co_return;
+        }
+
+        if (mailboxStateChanged)
+        {
+            const auto updatedConfiguration = resolveConfiguration();
+            if (updatedConfiguration.has_value() &&
+                updatedConfiguration->accountId == runContext->configuration.accountId)
+            {
+                runContext->configuration.mailboxes = updatedConfiguration->mailboxes;
+                runContext->configuration.notificationMailboxIds =
+                    updatedConfiguration->notificationMailboxIds;
+            }
         }
 
         if (!demand.emailState && !refreshEveryMailbox && demand.mailboxIds.empty())

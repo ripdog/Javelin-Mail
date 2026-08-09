@@ -17,6 +17,25 @@
 
 namespace javelin::gui::mailboxes
 {
+    struct MailboxPreferenceState
+    {
+        bool offline = false;
+        bool notifications = false;
+        bool hidden = false;
+
+        friend bool operator==(const MailboxPreferenceState&,
+                               const MailboxPreferenceState&) = default;
+    };
+
+    enum class MailboxPreference
+    {
+        Offline,
+        Notifications,
+        Hidden,
+    };
+
+    [[nodiscard]] MailboxPreferenceState
+    withMailboxPreference(MailboxPreferenceState state, MailboxPreference preference, bool enabled);
 
     class MailboxTreeModel : public QAbstractItemModel
     {
@@ -29,6 +48,8 @@ namespace javelin::gui::mailboxes
             bool showAccount = true;
             bool checkable = false;
             QStringList checkedMailboxIds;
+            bool preferenceColumns = false;
+            bool includeHidden = false;
             std::function<QString(QStringView)> accountDisplayName;
         };
 
@@ -40,6 +61,7 @@ namespace javelin::gui::mailboxes
             MailboxRoleRole = Qt::UserRole + 4,
             ConnectionStatusRole = Qt::UserRole + 5,
             MailboxNameRole = Qt::UserRole + 6,
+            MailboxHiddenRole = Qt::UserRole + 7,
         };
 
         enum class ConnectionStatus
@@ -70,6 +92,8 @@ namespace javelin::gui::mailboxes
         [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex{}) const override;
         [[nodiscard]] int columnCount(const QModelIndex& parent = QModelIndex{}) const override;
         [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
+        [[nodiscard]] QVariant headerData(int section, Qt::Orientation orientation,
+                                          int role) const override;
         [[nodiscard]] bool setData(const QModelIndex& index, const QVariant& value,
                                    int role) override;
         [[nodiscard]] Qt::ItemFlags flags(const QModelIndex& index) const override;
@@ -85,6 +109,10 @@ namespace javelin::gui::mailboxes
         void setAccountId(std::optional<std::string> accountId);
         void setCheckedMailboxIds(QStringList mailboxIds);
         [[nodiscard]] QStringList checkedMailboxIds() const;
+        void
+        setMailboxPreferences(std::unordered_map<std::string, MailboxPreferenceState> preferences);
+        [[nodiscard]] std::unordered_map<std::string, MailboxPreferenceState>
+        mailboxPreferences() const;
         void setConnectionStatus(QStringView accountId, ConnectionStatus status);
 
       Q_SIGNALS:
@@ -111,6 +139,8 @@ namespace javelin::gui::mailboxes
             std::uint64_t unreadEmails = 0;
             std::uint64_t totalThreads = 0;
             bool checked = false;
+            bool subscribed = true;
+            MailboxPreferenceState preferences;
             Node* parent = nullptr;
             std::vector<std::unique_ptr<Node>> children;
         };
@@ -133,6 +163,7 @@ namespace javelin::gui::mailboxes
         Options m_options;
         std::vector<std::unique_ptr<Node>> m_rootNodes;
         std::unordered_map<std::string, ConnectionStatus> m_connectionStatuses;
+        std::unordered_map<std::string, MailboxPreferenceState> m_mailboxPreferences;
         std::uint64_t m_rebuildGeneration = 0;
         bool m_rebuildInFlight = false;
         bool m_rebuildPending = false;

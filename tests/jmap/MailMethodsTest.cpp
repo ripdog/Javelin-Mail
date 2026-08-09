@@ -49,6 +49,39 @@ TEST_CASE("changes requests serialize typed state-token inputs", "[jmap][method]
     CHECK(*json == R"({"accountId":"u1","sinceState":"state-1","maxChanges":100})");
 }
 
+TEST_CASE("mailbox set serializes subscription visibility patches", "[jmap][method][mailbox]")
+{
+    const auto json = javelin::jmap::api::serializeMailboxSetRequest({
+        .accountId = "u1",
+        .ifInState = "mailbox-state-1",
+        .update = {{"mailbox-1", {.isSubscribed = false}}},
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(
+        *json ==
+        R"({"accountId":"u1","ifInState":"mailbox-state-1","update":{"mailbox-1":{"isSubscribed":false}}})");
+}
+
+TEST_CASE("mailbox set responses preserve updated ids and rejection details",
+          "[jmap][method][mailbox]")
+{
+    const auto parsed = javelin::jmap::api::parseMailboxSetResponse(
+        R"({"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-2","updated":{"mailbox-1":null},"notUpdated":{"mailbox-2":{"type":"forbidden","description":"Nope","properties":["isSubscribed"]}}})");
+
+    REQUIRE(parsed.ok());
+    REQUIRE(parsed.value.has_value());
+    CHECK(parsed.value->accountId == "u1");
+    CHECK(parsed.value->oldState == "mailbox-state-1");
+    CHECK(parsed.value->newState == std::optional<std::string>{"mailbox-state-2"});
+    CHECK(parsed.value->updated == std::vector<std::string>{"mailbox-1"});
+    REQUIRE(parsed.value->notUpdated.contains("mailbox-2"));
+    const auto& error = parsed.value->notUpdated.at("mailbox-2");
+    CHECK(error.type == "forbidden");
+    CHECK(error.description == std::optional<std::string>{"Nope"});
+    CHECK(error.properties == std::vector<std::string>{"isSubscribed"});
+}
+
 TEST_CASE("identity set creates serialize server-backed signature variants",
           "[jmap][method][mail][identity]")
 {

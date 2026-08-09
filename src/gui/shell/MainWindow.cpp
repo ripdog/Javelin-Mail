@@ -204,6 +204,19 @@ namespace javelin::gui::shell
                                   : std::optional<std::string>{role.toStdString()};
         }
 
+        [[nodiscard]] std::vector<javelin::protocol::MailboxSelectionSettings>
+        withoutMailboxSelection(std::vector<javelin::protocol::MailboxSelectionSettings> selections,
+                                const QStringView accountId, const QStringView mailboxId)
+        {
+            const auto account =
+                std::ranges::find(selections, accountId.toString(),
+                                  &javelin::protocol::MailboxSelectionSettings::accountId);
+            if (account == selections.end())
+                return selections;
+            std::erase(account->mailboxIds, mailboxId.toString());
+            return selections;
+        }
+
         [[nodiscard]] bool indexIsUnread(const QModelIndex& index)
         {
             return index.isValid() &&
@@ -3870,6 +3883,7 @@ namespace javelin::gui::shell
     {
         javelin::gui::settings::PreferencesDialog dialog{m_settings,
                                                          m_accountCommandPort,
+                                                         m_mailCommandPort,
                                                          m_onboardingPort,
                                                          m_translationService,
                                                          m_accountReader,
@@ -4050,9 +4064,66 @@ namespace javelin::gui::shell
             menu.exec(m_mailboxView->viewport()->mapToGlobal(position));
             return;
         }
+        const auto mailboxResult = m_mailboxReader.listMailboxTree(accountId.toStdString());
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxResult))
+        {
+            m_statusBar->showMessage(error->message, 10000);
+            return;
+        }
+        const auto& currentMailboxes =
+            std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(mailboxResult);
+        const auto currentMailbox = std::ranges::find(currentMailboxes, mailboxId.toStdString(),
+                                                      &javelin::jmap::cache::MailboxTreeItem::id);
+        if (currentMailbox == currentMailboxes.end())
+        {
+            m_statusBar->showMessage(i18n("The mailbox is no longer available."), 5000);
+            return;
+        }
+        const bool subscribed = currentMailbox->isSubscribed;
+
         auto* openAsTabAction = menu.addAction(i18n("Open as Tab"));
         connect(openAsTabAction, &QAction::triggered, this,
                 [this] { openMailboxSelectionInTab(true); });
+        auto* visibilityAction = menu.addAction(subscribed ? i18n("Hide") : i18n("Show"));
+        connect(
+            visibilityAction, &QAction::triggered, this,
+            [this, accountId, mailboxId, subscribed]
+            {
+                auto task = m_mailCommandPort.setMailboxSubscribed(
+                    accountId.toStdString(), mailboxId.toStdString(), !subscribed);
+                QCoro::connect(
+                    std::move(task), this,
+                    [this, accountId, mailboxId,
+                     subscribed](javelin::jmap::MailboxSubscriptionChangeResult result)
+                    {
+                        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                        {
+                            presentError(*error);
+                            return;
+                        }
+                        if (subscribed)
+                        {
+                            const auto& snapshot = m_settings.snapshot();
+                            javelin::protocol::SettingsUpdate update;
+                            update.syncedMailboxSelections = withoutMailboxSelection(
+                                snapshot.syncedMailboxSelections, accountId, mailboxId);
+                            update.notificationMailboxSelections = withoutMailboxSelection(
+                                snapshot.notificationMailboxSelections, accountId, mailboxId);
+                            if (const auto error =
+                                    m_settings.update(snapshot.revision, std::move(update)))
+                            {
+                                m_statusBar->showMessage(
+                                    i18n("Mailbox hidden, but its local background settings could "
+                                         "not be updated: %1",
+                                         error->detail),
+                                    10000);
+                                return;
+                            }
+                        }
+                        m_statusBar->showMessage(
+                            subscribed ? i18n("Mailbox hidden.") : i18n("Mailbox shown."), 3000);
+                    });
+            });
         menu.addSeparator();
         auto* propertiesAction = menu.addAction(i18n("Properties…"));
         connect(

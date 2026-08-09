@@ -487,8 +487,9 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
     REQUIRE(seed.exec(QStringLiteral(
         "INSERT INTO accounts(account_id,email_address,session_url,is_primary,cap_mail) "
         "VALUES('account-1','user@example.test','https://example.test/jmap',1,1)")));
-    REQUIRE(seed.exec(QStringLiteral("INSERT INTO mailboxes(account_id,mailbox_id,name,role) "
-                                     "VALUES('account-1','archive','Archive','archive')")));
+    REQUIRE(seed.exec(
+        QStringLiteral("INSERT INTO mailboxes(account_id,mailbox_id,name,role,is_subscribed) "
+                       "VALUES('account-1','archive','Archive','archive',1)")));
 
     REQUIRE_FALSE(
         testCredentialStore()
@@ -1091,10 +1092,12 @@ TEST_CASE("daemon configures only cached JMAP accounts with the Mail capability"
     REQUIRE(seed.exec(QStringLiteral(
         "INSERT INTO accounts(account_id,email_address,session_url,is_primary,name,cap_mail) "
         "VALUES('principal-account','','',0,'',0)")));
-    REQUIRE(seed.exec(QStringLiteral("INSERT INTO mailboxes(account_id,mailbox_id,name,role) "
-                                     "VALUES('mail-account','inbox','Inbox','inbox')")));
-    REQUIRE(seed.exec(QStringLiteral("INSERT INTO mailboxes(account_id,mailbox_id,name,role) "
-                                     "VALUES('principal-account','unexpected','Unexpected','')")));
+    REQUIRE(seed.exec(
+        QStringLiteral("INSERT INTO mailboxes(account_id,mailbox_id,name,role,is_subscribed) "
+                       "VALUES('mail-account','inbox','Inbox','inbox',1)")));
+    REQUIRE(seed.exec(
+        QStringLiteral("INSERT INTO mailboxes(account_id,mailbox_id,name,role,is_subscribed) "
+                       "VALUES('principal-account','unexpected','Unexpected','',1)")));
 
     const auto treeResult = javelin::app::loadMailboxTreeCache(process.databasePath());
     const auto* tree = std::get_if<javelin::app::MailboxTreeCacheSnapshot>(&treeResult);

@@ -3,6 +3,7 @@
 #include "app/AccountApplicationPorts.h"
 #include "app/DeveloperDiagnostics.h"
 #include "app/DeveloperMaintenance.h"
+#include "app/MailApplicationPorts.h"
 #include "app/OnboardingApplicationPorts.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/mailboxes/MailboxTreeView.h"
@@ -25,6 +26,7 @@
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -78,6 +80,73 @@ namespace javelin::gui::settings
             bool clearSqlite = false;
             bool clearBodies = false;
         };
+
+        struct MailboxVisibilityChangeRequest
+        {
+            std::string accountId;
+            std::string mailboxId;
+            bool subscribed = true;
+            bool previousOffline = false;
+            bool previousNotifications = false;
+        };
+
+        struct MailboxVisibilityChangeFailure
+        {
+            MailboxVisibilityChangeRequest change;
+            javelin::jmap::OperationError error;
+        };
+
+        [[nodiscard]] bool
+        mailboxSelected(const std::vector<javelin::protocol::MailboxSelectionSettings>& selections,
+                        const QStringView accountId, const QStringView mailboxId)
+        {
+            const auto account =
+                std::ranges::find(selections, accountId.toString(),
+                                  &javelin::protocol::MailboxSelectionSettings::accountId);
+            return account != selections.end() &&
+                   std::ranges::contains(account->mailboxIds, mailboxId.toString());
+        }
+
+        void
+        setMailboxSelected(std::vector<javelin::protocol::MailboxSelectionSettings>& selections,
+                           const QStringView accountId, const QStringView mailboxId,
+                           const bool selected)
+        {
+            auto account =
+                std::ranges::find(selections, accountId.toString(),
+                                  &javelin::protocol::MailboxSelectionSettings::accountId);
+            if (account == selections.end())
+            {
+                if (!selected)
+                    return;
+                selections.push_back(
+                    {.accountId = accountId.toString(), .mailboxIds = {mailboxId.toString()}});
+                return;
+            }
+            if (selected)
+            {
+                if (!std::ranges::contains(account->mailboxIds, mailboxId.toString()))
+                    account->mailboxIds.push_back(mailboxId.toString());
+            }
+            else
+            {
+                std::erase(account->mailboxIds, mailboxId.toString());
+            }
+        }
+
+        [[nodiscard]] QCoro::Task<std::optional<MailboxVisibilityChangeFailure>>
+        applyMailboxVisibilityChanges(javelin::app::MailCommandPort& mailCommands,
+                                      std::vector<MailboxVisibilityChangeRequest> changes)
+        {
+            for (const auto& change : changes)
+            {
+                auto result = co_await mailCommands.setMailboxSubscribed(
+                    change.accountId, change.mailboxId, change.subscribed);
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                    co_return MailboxVisibilityChangeFailure{.change = change, .error = *error};
+            }
+            co_return std::nullopt;
+        }
 
         [[nodiscard]] QString formattedBytes(const std::uint64_t bytes)
         {
@@ -182,6 +251,7 @@ namespace javelin::gui::settings
 
     PreferencesDialog::PreferencesDialog(
         GuiSettings& settings, javelin::app::AccountCommandPort& accountCommandPort,
+        javelin::app::MailCommandPort& mailCommandPort,
         javelin::app::OnboardingPort& onboardingPort,
         javelin::gui::translation::TranslationService& translationService,
         javelin::jmap::cache::AccountReader& accountReader,
@@ -190,9 +260,9 @@ namespace javelin::gui::settings
         javelin::app::DeveloperMaintenancePort& developerMaintenancePort, QWidget* parent)
         : KConfigDialog(parent, QStringLiteral("preferences"), nullptr), m_settings(settings),
           m_baseRevision(m_settings.snapshot().revision), m_accountCommandPort(accountCommandPort),
-          m_onboardingPort(onboardingPort), m_translationService(translationService),
-          m_accountReader(accountReader), m_mailboxReader(mailboxReader),
-          m_developerDiagnosticsPort(developerDiagnosticsPort),
+          m_mailCommandPort(mailCommandPort), m_onboardingPort(onboardingPort),
+          m_translationService(translationService), m_accountReader(accountReader),
+          m_mailboxReader(mailboxReader), m_developerDiagnosticsPort(developerDiagnosticsPort),
           m_developerMaintenancePort(developerMaintenancePort), m_accounts(m_settings.accounts()),
           m_remoteContentSenders(m_settings.remoteContentSenders()),
           m_remoteContentDomains(m_settings.remoteContentDomains()),
@@ -254,9 +324,10 @@ namespace javelin::gui::settings
         auto* mailboxSyncPage = new QWidget(this);
         auto* mailboxSyncLayout = new QVBoxLayout(mailboxSyncPage);
         auto* mailboxSyncDescription = new QLabel(
-            i18n("Download every message and attachment in selected mailboxes for complete "
-                 "offline access. Large mailboxes continue in the Task Center and can be paused. "
-                 "When you uncheck a mailbox, you can keep or clear its downloaded cache."),
+            i18n("Choose which mailboxes are kept completely offline, show new-mail "
+                 "notifications, or are hidden from the normal mailbox list. Hidden mailboxes "
+                 "cannot be kept offline or show notifications; enabling either option shows "
+                 "the mailbox again."),
             mailboxSyncPage);
         mailboxSyncDescription->setWordWrap(true);
         mailboxSyncDescription->setSizePolicy(
@@ -269,39 +340,22 @@ namespace javelin::gui::settings
             m_accountReader, m_mailboxReader,
             {.accountId = std::string{},
              .showAccount = false,
-             .checkable = true,
+             .checkable = false,
              .checkedMailboxIds = {},
+             .preferenceColumns = true,
+             .includeHidden = true,
              .accountDisplayName = [this](const QStringView accountId)
              { return m_settings.accountForCachedId(accountId).displayName; }},
             m_mailboxSyncList);
         m_mailboxSyncList->setModel(m_mailboxSyncModel);
-        auto* mailboxLists = new QGridLayout();
-        auto* syncListLayout = new QVBoxLayout();
-        syncListLayout->addWidget(new QLabel(i18n("Keep complete offline copy"), mailboxSyncPage));
+        m_mailboxSyncList->setHeaderHidden(false);
+        m_mailboxSyncList->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+        for (int column = 1; column < m_mailboxSyncModel->columnCount(); ++column)
+            m_mailboxSyncList->header()->setSectionResizeMode(column,
+                                                              QHeaderView::ResizeToContents);
         m_mailboxSyncList->setSizePolicy(QSizePolicy{QSizePolicy::Ignored, QSizePolicy::Expanding});
-        syncListLayout->addWidget(m_mailboxSyncList, 1);
-        mailboxLists->addLayout(syncListLayout, 0, 0);
-        auto* notificationListLayout = new QVBoxLayout();
-        notificationListLayout->addWidget(new QLabel(i18n("Show notifications"), mailboxSyncPage));
-        m_mailboxNotificationList = new javelin::gui::mailboxes::MailboxTreeView(mailboxSyncPage);
-        m_mailboxNotificationModel = new javelin::gui::mailboxes::MailboxTreeModel(
-            m_accountReader, m_mailboxReader,
-            {.accountId = std::string{},
-             .showAccount = false,
-             .checkable = true,
-             .checkedMailboxIds = {},
-             .accountDisplayName = [this](const QStringView accountId)
-             { return m_settings.accountForCachedId(accountId).displayName; }},
-            m_mailboxNotificationList);
-        m_mailboxNotificationList->setModel(m_mailboxNotificationModel);
-        m_mailboxNotificationList->setSizePolicy(
-            QSizePolicy{QSizePolicy::Ignored, QSizePolicy::Expanding});
-        notificationListLayout->addWidget(m_mailboxNotificationList, 1);
-        mailboxLists->addLayout(notificationListLayout, 0, 1);
-        mailboxLists->setColumnStretch(0, 1);
-        mailboxLists->setColumnStretch(1, 1);
-        mailboxSyncLayout->addLayout(mailboxLists, 1);
-        addPage(mailboxSyncPage, i18n("Mailbox Sync"), QStringLiteral("view-refresh"), QString{},
+        mailboxSyncLayout->addWidget(m_mailboxSyncList, 1);
+        addPage(mailboxSyncPage, i18n("Mailboxes"), QStringLiteral("view-refresh"), QString{},
                 false);
 
         auto* remoteContentPage = new QWidget(this);
@@ -612,19 +666,13 @@ namespace javelin::gui::settings
         connect(m_mailboxSyncAccount, &QComboBox::currentIndexChanged, this,
                 [this]
                 {
-                    storeMailboxSyncSelection();
+                    storeMailboxPreferences();
                     m_mailboxSyncCurrentAccountId = m_mailboxSyncAccount->currentData().toString();
                     refreshMailboxSyncList();
                 });
         connect(m_mailboxSyncModel, &QAbstractItemModel::dataChanged, this,
                 [this](const QModelIndex& topLeft, const QModelIndex&, const QList<int>& roles)
-                { mailboxSyncSelectionChanged(topLeft, roles); });
-        connect(m_mailboxNotificationModel, &QAbstractItemModel::dataChanged, this,
-                [this]
-                {
-                    storeMailboxNotificationSelection();
-                    noteUnsavedChanges();
-                });
+                { mailboxPreferencesChanged(topLeft, roles); });
 
         if (m_accounts.empty())
         {
@@ -810,7 +858,11 @@ namespace javelin::gui::settings
     bool PreferencesDialog::saveCurrentSettings()
     {
         storeCurrentEdits();
-        storeMailboxSyncSelection();
+        storeMailboxPreferences();
+
+        auto deferredCleanupOffers = std::exchange(m_deferredMailboxCacheCleanupOffers, {});
+        for (const auto& offer : deferredCleanupOffers)
+            offerMailboxCacheCleanup(offer.accountId, offer.mailboxId, offer.mailboxName);
 
         m_remoteContentSenders.removeAll(QString{});
         m_remoteContentSenders.removeDuplicates();
@@ -825,24 +877,69 @@ namespace javelin::gui::settings
         m_translationSettings.autoTranslateSenders = m_autoTranslateSenders;
         m_translationSettings.autoTranslateDomains = m_autoTranslateDomains;
 
-        const auto selections = [](const QHash<QString, QStringList>& values)
+        const auto selections = [this](const auto enabled)
         {
             std::vector<javelin::protocol::MailboxSelectionSettings> result;
-            result.reserve(static_cast<std::size_t>(values.size()));
-            for (auto it = values.cbegin(); it != values.cend(); ++it)
+            result.reserve(static_cast<std::size_t>(m_mailboxPreferences.size()));
+            for (auto account = m_mailboxPreferences.cbegin();
+                 account != m_mailboxPreferences.cend(); ++account)
             {
-                result.push_back({
-                    .accountId = it.key(),
-                    .mailboxIds = {it.value().begin(), it.value().end()},
-                });
+                std::vector<QString> mailboxIds;
+                for (const auto& [mailboxId, state] : account.value())
+                {
+                    if (enabled(state))
+                        mailboxIds.push_back(QString::fromStdString(mailboxId));
+                }
+                std::ranges::sort(mailboxIds);
+                result.push_back({.accountId = account.key(), .mailboxIds = std::move(mailboxIds)});
             }
             return result;
         };
 
+        std::vector<MailboxVisibilityChangeRequest> visibilityChanges;
+        for (auto account = m_mailboxPreferences.cbegin(); account != m_mailboxPreferences.cend();
+             ++account)
+        {
+            const auto cached = m_mailboxReader.listMailboxTree(account.key().toStdString());
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cached))
+            {
+                QMessageBox::critical(this, i18n("Could not read mailbox settings"),
+                                      error->message);
+                return false;
+            }
+            const auto& mailboxes =
+                std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(cached);
+            for (const auto& [mailboxId, state] : account.value())
+            {
+                const auto mailbox = std::ranges::find(mailboxes, mailboxId,
+                                                       &javelin::jmap::cache::MailboxTreeItem::id);
+                if (mailbox == mailboxes.end())
+                    continue;
+                const bool subscribed = !state.hidden;
+                if (mailbox->isSubscribed != subscribed)
+                {
+                    const auto mailboxIdText = QString::fromStdString(mailboxId);
+                    const auto& settingsSnapshot = m_settings.snapshot();
+                    visibilityChanges.push_back({
+                        .accountId = account.key().toStdString(),
+                        .mailboxId = mailboxId,
+                        .subscribed = subscribed,
+                        .previousOffline = mailboxSelected(settingsSnapshot.syncedMailboxSelections,
+                                                           account.key(), mailboxIdText),
+                        .previousNotifications =
+                            mailboxSelected(settingsSnapshot.notificationMailboxSelections,
+                                            account.key(), mailboxIdText),
+                    });
+                }
+            }
+        }
+
         javelin::protocol::SettingsUpdate update;
         update.accounts = GuiSettings::protocolAccounts(m_accounts);
-        update.syncedMailboxSelections = selections(m_syncedMailboxIds);
-        update.notificationMailboxSelections = selections(m_notificationMailboxIds);
+        update.syncedMailboxSelections =
+            selections([](const auto& state) { return state.offline; });
+        update.notificationMailboxSelections =
+            selections([](const auto& state) { return state.notifications; });
         update.remoteContentSenders =
             std::vector<QString>{m_remoteContentSenders.begin(), m_remoteContentSenders.end()};
         update.remoteContentDomains =
@@ -861,6 +958,75 @@ namespace javelin::gui::settings
             return false;
         }
         m_baseRevision = m_settings.snapshot().revision;
+
+        if (!visibilityChanges.empty())
+        {
+            QPointer<PreferencesDialog> dialog{this};
+            QPointer<QWidget> warningParent{parentWidget()};
+            auto* settings = &m_settings;
+            auto* mailboxReader = &m_mailboxReader;
+            auto task =
+                applyMailboxVisibilityChanges(m_mailCommandPort, std::move(visibilityChanges));
+            QCoro::connect(
+                std::move(task), QCoreApplication::instance(),
+                [dialog, warningParent, settings,
+                 mailboxReader](std::optional<MailboxVisibilityChangeFailure> failure)
+                {
+                    if (!failure.has_value())
+                        return;
+
+                    QString rollbackFailure;
+                    if (dialog != nullptr || warningParent != nullptr)
+                    {
+                        const auto accountId = QString::fromStdString(failure->change.accountId);
+                        const auto mailboxId = QString::fromStdString(failure->change.mailboxId);
+                        const auto cached =
+                            mailboxReader->listMailboxTree(failure->change.accountId);
+                        if (const auto* mailboxes =
+                                std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(
+                                    &cached))
+                        {
+                            const auto mailbox =
+                                std::ranges::find(*mailboxes, failure->change.mailboxId,
+                                                  &javelin::jmap::cache::MailboxTreeItem::id);
+                            if (mailbox != mailboxes->end() &&
+                                mailbox->isSubscribed != failure->change.subscribed)
+                            {
+                                const auto& snapshot = settings->snapshot();
+                                auto synced = snapshot.syncedMailboxSelections;
+                                auto notifications = snapshot.notificationMailboxSelections;
+                                setMailboxSelected(synced, accountId, mailboxId,
+                                                   failure->change.previousOffline);
+                                setMailboxSelected(notifications, accountId, mailboxId,
+                                                   failure->change.previousNotifications);
+                                javelin::protocol::SettingsUpdate rollback;
+                                rollback.syncedMailboxSelections = std::move(synced);
+                                rollback.notificationMailboxSelections = std::move(notifications);
+                                if (const auto error =
+                                        settings->update(snapshot.revision, std::move(rollback)))
+                                {
+                                    rollbackFailure = error->detail;
+                                }
+                            }
+                        }
+                    }
+
+                    if (dialog != nullptr)
+                        dialog->noteUnsavedChanges();
+                    if (warningParent != nullptr)
+                    {
+                        auto message = failure->error.message;
+                        if (!rollbackFailure.isEmpty())
+                        {
+                            message += i18n("\n\nThe previous background settings could not be "
+                                            "restored: %1",
+                                            rollbackFailure);
+                        }
+                        QMessageBox::warning(warningParent,
+                                             i18n("Could not change mailbox visibility"), message);
+                    }
+                });
+        }
 
         if (const auto error = m_translationService.saveSettings(m_translationSettings))
         {
@@ -882,8 +1048,13 @@ namespace javelin::gui::settings
         cacheClearRequests.reserve(m_pendingMailboxCacheClears.size());
         for (const auto& pending : m_pendingMailboxCacheClears)
         {
-            if (m_syncedMailboxIds.value(pending.accountId).contains(pending.mailboxId))
-                continue;
+            const auto account = m_mailboxPreferences.find(pending.accountId);
+            if (account != m_mailboxPreferences.end())
+            {
+                const auto mailbox = account.value().find(pending.mailboxId.toStdString());
+                if (mailbox != account.value().end() && mailbox->second.offline)
+                    continue;
+            }
             cacheClearRequests.push_back(
                 {.accountId = pending.accountId,
                  .mailboxId = pending.mailboxId,
@@ -930,6 +1101,7 @@ namespace javelin::gui::settings
     {
         QSignalBlocker blocker{m_mailboxSyncAccount};
         m_mailboxSyncAccount->clear();
+        m_mailboxPreferences.clear();
         const auto accountsResult = m_accountReader.listAll();
         const auto* accounts =
             std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult);
@@ -951,9 +1123,32 @@ namespace javelin::gui::settings
                     : (account.name.empty() ? i18n("Unnamed account")
                                             : QString::fromStdString(account.name));
             m_mailboxSyncAccount->addItem(accountName, accountId);
-            m_syncedMailboxIds.insert(accountId, m_settings.syncedMailboxIds(accountId));
-            m_notificationMailboxIds.insert(accountId,
-                                            m_settings.notificationMailboxIds(accountId));
+
+            const auto synced = m_settings.syncedMailboxIds(accountId);
+            const auto notifications = m_settings.notificationMailboxIds(accountId);
+            std::unordered_map<std::string, javelin::gui::mailboxes::MailboxPreferenceState>
+                preferences;
+            const auto mailboxResult = m_mailboxReader.listMailboxTree(account.accountId);
+            if (const auto* mailboxes =
+                    std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxResult))
+            {
+                preferences.reserve(mailboxes->size());
+                for (const auto& mailbox : *mailboxes)
+                {
+                    auto state = javelin::gui::mailboxes::MailboxPreferenceState{
+                        .offline = synced.contains(QString::fromStdString(mailbox.id)),
+                        .notifications = notifications.contains(QString::fromStdString(mailbox.id)),
+                        .hidden = !mailbox.isSubscribed,
+                    };
+                    if (state.hidden)
+                    {
+                        state = javelin::gui::mailboxes::withMailboxPreference(
+                            state, javelin::gui::mailboxes::MailboxPreference::Hidden, true);
+                    }
+                    preferences.emplace(mailbox.id, state);
+                }
+            }
+            m_mailboxPreferences.insert(accountId, std::move(preferences));
         }
         m_mailboxSyncCurrentAccountId = m_mailboxSyncAccount->currentData().toString();
         refreshMailboxSyncList();
@@ -962,56 +1157,28 @@ namespace javelin::gui::settings
     void PreferencesDialog::refreshMailboxSyncList()
     {
         QSignalBlocker blocker{m_mailboxSyncModel};
-        QSignalBlocker notificationBlocker{m_mailboxNotificationModel};
         const auto accountId = m_mailboxSyncCurrentAccountId;
         if (accountId.isEmpty())
         {
+            m_mailboxSyncModel->setMailboxPreferences({});
             m_mailboxSyncModel->setAccountId(std::string{});
-            m_mailboxNotificationModel->setAccountId(std::string{});
             return;
         }
-        const auto result = m_mailboxReader.listMailboxTree(accountId.toStdString());
-        const auto* mailboxes =
-            std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&result);
-        if (mailboxes == nullptr)
-        {
-            return;
-        }
-        const auto selected = m_syncedMailboxIds.value(accountId);
-        const auto notificationSelected = m_notificationMailboxIds.value(accountId);
-        const auto modelAccountId = std::optional<std::string>{accountId.toStdString()};
-        m_mailboxSyncModel->setCheckedMailboxIds(selected);
-        m_mailboxSyncModel->setAccountId(modelAccountId);
-        m_mailboxNotificationModel->setCheckedMailboxIds(notificationSelected);
-        m_mailboxNotificationModel->setAccountId(modelAccountId);
+        m_mailboxSyncModel->setAccountId(std::optional<std::string>{accountId.toStdString()});
+        m_mailboxSyncModel->setMailboxPreferences(m_mailboxPreferences.value(accountId));
         m_mailboxSyncList->expandAll();
-        m_mailboxNotificationList->expandAll();
     }
 
-    void PreferencesDialog::storeMailboxNotificationSelection()
+    void PreferencesDialog::storeMailboxPreferences()
     {
         const auto accountId = m_mailboxSyncCurrentAccountId;
         if (accountId.isEmpty())
-        {
             return;
-        }
-        const auto selected = m_mailboxNotificationModel->checkedMailboxIds();
-        m_notificationMailboxIds.insert(accountId, selected);
+        m_mailboxPreferences.insert(accountId, m_mailboxSyncModel->mailboxPreferences());
     }
 
-    void PreferencesDialog::storeMailboxSyncSelection()
-    {
-        const auto accountId = m_mailboxSyncCurrentAccountId;
-        if (accountId.isEmpty())
-        {
-            return;
-        }
-        const auto selected = m_mailboxSyncModel->checkedMailboxIds();
-        m_syncedMailboxIds.insert(accountId, selected);
-    }
-
-    void PreferencesDialog::mailboxSyncSelectionChanged(const QModelIndex& index,
-                                                        const QList<int>& roles)
+    void PreferencesDialog::mailboxPreferencesChanged(const QModelIndex& index,
+                                                      const QList<int>& roles)
     {
         if (!roles.isEmpty() && !roles.contains(Qt::CheckStateRole))
             return;
@@ -1025,20 +1192,51 @@ namespace javelin::gui::settings
         if (accountId.isEmpty() || mailboxId.isEmpty())
             return;
 
-        storeMailboxSyncSelection();
+        javelin::gui::mailboxes::MailboxPreferenceState previous;
+        const auto previousAccount = m_mailboxPreferences.find(accountId);
+        if (previousAccount != m_mailboxPreferences.end())
+        {
+            const auto previousMailbox = previousAccount.value().find(mailboxId.toStdString());
+            if (previousMailbox != previousAccount.value().end())
+                previous = previousMailbox->second;
+        }
+
+        storeMailboxPreferences();
+        const auto currentAccount = m_mailboxPreferences.find(accountId);
+        if (currentAccount == m_mailboxPreferences.end())
+            return;
+        const auto currentMailbox = currentAccount.value().find(mailboxId.toStdString());
+        if (currentMailbox == currentAccount.value().end())
+            return;
+        const auto current = currentMailbox->second;
         noteUnsavedChanges();
 
-        const bool checked = index.data(Qt::CheckStateRole).toInt() == Qt::Checked;
-        if (checked)
+        if (current.offline)
         {
             std::erase_if(
                 m_pendingMailboxCacheClears, [&](const PendingMailboxCacheClear& pending)
                 { return pending.accountId == accountId && pending.mailboxId == mailboxId; });
+            std::erase_if(m_deferredMailboxCacheCleanupOffers,
+                          [&](const DeferredMailboxCacheCleanupOffer& offer)
+                          { return offer.accountId == accountId && offer.mailboxId == mailboxId; });
             return;
         }
-
-        if (!m_settings.syncedMailboxIds(accountId).contains(mailboxId))
+        if (!previous.offline || !m_settings.syncedMailboxIds(accountId).contains(mailboxId))
             return;
+
+        if (current.hidden && !previous.hidden)
+        {
+            const auto existing = std::ranges::find_if(
+                m_deferredMailboxCacheCleanupOffers,
+                [&](const DeferredMailboxCacheCleanupOffer& offer)
+                { return offer.accountId == accountId && offer.mailboxId == mailboxId; });
+            if (existing == m_deferredMailboxCacheCleanupOffers.end())
+            {
+                m_deferredMailboxCacheCleanupOffers.push_back(
+                    {.accountId = accountId, .mailboxId = mailboxId, .mailboxName = mailboxName});
+            }
+            return;
+        }
 
         QTimer::singleShot(0, this, [this, accountId, mailboxId, mailboxName]
                            { offerMailboxCacheCleanup(accountId, mailboxId, mailboxName); });
@@ -1048,7 +1246,11 @@ namespace javelin::gui::settings
                                                      const QString& mailboxId,
                                                      const QString& mailboxName)
     {
-        if (m_syncedMailboxIds.value(accountId).contains(mailboxId) ||
+        const auto account = m_mailboxPreferences.find(accountId);
+        if (account == m_mailboxPreferences.end())
+            return;
+        const auto preference = account.value().find(mailboxId.toStdString());
+        if (preference == account.value().end() || preference->second.offline ||
             !m_settings.syncedMailboxIds(accountId).contains(mailboxId))
         {
             return;

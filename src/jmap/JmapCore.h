@@ -166,6 +166,15 @@ namespace javelin::jmap
 
     using AuthoritativeEmailsResult = std::variant<AuthoritativeEmails, OperationError>;
 
+    struct MailboxSubscriptionChange
+    {
+        std::string accountId;
+        std::string mailboxId;
+        bool subscribed = true;
+    };
+
+    using MailboxSubscriptionChangeResult = std::variant<MailboxSubscriptionChange, OperationError>;
+
     struct AttachmentDownload
     {
         std::string accountId;
@@ -285,6 +294,12 @@ namespace javelin::jmap
         [[nodiscard]] QCoro::Task<AuthoritativeEmailsResult>
         getAuthoritativeEmails(LiveConnectionSettings settings, std::string accountId,
                                std::vector<std::string> emailIds);
+        [[nodiscard]] QCoro::Task<MailboxSubscriptionChangeResult>
+        setMailboxSubscribed(LiveConnectionSettings settings, std::string accountId,
+                             std::string mailboxId, bool subscribed,
+                             std::function<void()> projectionCommitted = {});
+        [[nodiscard]] QCoro::Task<MailboxSubscriptionChangeResult>
+        reconcileMailboxSubscription(LiveConnectionSettings settings, std::string accountId);
 
       private:
         struct Impl;

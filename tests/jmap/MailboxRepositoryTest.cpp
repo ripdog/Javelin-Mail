@@ -145,6 +145,34 @@ TEST_CASE("mailbox repository replaces account mailboxes and reads root nodes",
     CHECK(roots.front().myRights.maySubmit);
 }
 
+TEST_CASE("mailbox repository projects subscription state inside a transaction",
+          "[jmap][cache][repository][mailbox]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::cache::MailboxRepository repository{databaseContext.connection};
+    REQUIRE_FALSE(repository.replaceAll("account-1", makeMailboxSet()).has_value());
+
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Hide mailbox"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    REQUIRE_FALSE(
+        repository.setSubscribed(transaction, "account-1", "mbx-inbox", false).has_value());
+    REQUIRE_FALSE(transaction.commit().has_value());
+
+    const auto found = repository.find("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(found));
+    const auto& mailbox = std::get<std::optional<javelin::jmap::domain::Mailbox>>(found);
+    REQUIRE(mailbox.has_value());
+    CHECK_FALSE(mailbox->isSubscribed);
+    CHECK(mailbox->name == "Inbox");
+}
+
 TEST_CASE("mailbox repository lists child mailboxes by parent id", "[jmap][cache][repository]")
 {
     ApplicationGuard application;

@@ -331,6 +331,81 @@ namespace javelin::jmap::cache
         return std::nullopt;
     }
 
+    std::variant<std::optional<javelin::jmap::domain::Mailbox>, DatabaseError>
+    MailboxRepository::find(const std::string_view accountId,
+                            const std::string_view mailboxId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT mailbox_id,name,parent_mailbox_id,role,sort_order,total_emails,unread_emails,"
+            "total_threads,unread_threads,is_subscribed,rights_json FROM mailboxes "
+            "WHERE account_id=:account_id AND mailbox_id=:mailbox_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":mailbox_id"),
+                        QString::fromStdString(std::string{mailboxId}));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Read mailbox"), query);
+        if (!query.next())
+            return std::optional<javelin::jmap::domain::Mailbox>{};
+
+        return std::optional<javelin::jmap::domain::Mailbox>{javelin::jmap::domain::Mailbox{
+            .id = query.value(0).toString().toStdString(),
+            .name = query.value(1).toString().toStdString(),
+            .parentId = query.value(2).isNull()
+                            ? std::nullopt
+                            : std::optional{query.value(2).toString().toStdString()},
+            .role = query.value(3).isNull()
+                        ? std::nullopt
+                        : std::optional{query.value(3).toString().toStdString()},
+            .sortOrder = query.value(4).toULongLong(),
+            .totalEmails = query.value(5).toULongLong(),
+            .unreadEmails = query.value(6).toULongLong(),
+            .totalThreads = query.value(7).toULongLong(),
+            .unreadThreads = query.value(8).toULongLong(),
+            .isSubscribed = query.value(9).toInt() != 0,
+            .myRights = deserializeMailboxRights(query.value(10).toString()),
+        }};
+    }
+
+    std::optional<DatabaseError> MailboxRepository::setSubscribed(DatabaseTransaction& transaction,
+                                                                  const std::string_view accountId,
+                                                                  const std::string_view mailboxId,
+                                                                  const bool subscribed)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral(
+                    "Mailbox subscription projection requires a matching transaction"),
+            };
+        }
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral("UPDATE mailboxes SET is_subscribed=:subscribed "
+                                     "WHERE account_id=:account_id AND mailbox_id=:mailbox_id"));
+        query.bindValue(QStringLiteral(":subscribed"), subscribed ? 1 : 0);
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":mailbox_id"),
+                        QString::fromStdString(std::string{mailboxId}));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Project mailbox subscription"), query);
+        if (query.numRowsAffected() != 1)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Mailbox subscription projection target is missing."),
+            };
+        }
+        return std::nullopt;
+    }
+
     std::variant<std::vector<javelin::jmap::domain::Mailbox>, DatabaseError>
     MailboxRepository::listByParent(const std::string_view accountId,
                                     const std::optional<std::string_view> parentId) const
