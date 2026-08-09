@@ -77,6 +77,44 @@ TEST_CASE("message list model exposes tags already carried by message rows",
               .toStringList() == QStringList{QStringLiteral("#123456")});
 }
 
+TEST_CASE("message list model exposes painted message state to accessibility",
+          "[gui][messages][model][accessibility]")
+{
+    javelin::jmap::cache::DatabaseConnection connection;
+    javelin::jmap::cache::QueryService queryService{connection};
+    javelin::gui::messages::MessageListModel model{queryService};
+
+    auto accessible = item("email-1", "thread-1", true);
+    accessible.subject = "Quarterly update";
+    accessible.preview = "The preview text";
+    accessible.receivedAt = "2026-08-10T08:15:00+12:00";
+    accessible.threadMessageCount = 2;
+    accessible.hasAttachment = true;
+    accessible.isFlagged = true;
+    accessible.from =
+        javelin::jmap::domain::EmailAddress{.name = "Alice", .email = "alice@example.com"};
+    accessible.mailboxNames = {"Inbox", "Projects"};
+    accessible.tags.push_back(javelin::jmap::cache::MessageListTag{
+        .keyword = "work",
+        .displayName = QStringLiteral("Work"),
+        .color = QStringLiteral("#123456"),
+    });
+    model.setItems(std::optional<std::string>{"account-1"}, std::nullopt, {std::move(accessible)});
+
+    const auto index = model.index(0);
+    const auto text = model.data(index, Qt::AccessibleTextRole).toString();
+    CHECK(text.contains(QStringLiteral("Alice")));
+    CHECK(text.contains(QStringLiteral("Quarterly update")));
+    CHECK(text.contains(QStringLiteral("Unread")));
+    CHECK(text.contains(QStringLiteral("Starred")));
+    CHECK(text.contains(QStringLiteral("Has attachment")));
+    CHECK(text.contains(QStringLiteral("2 messages in conversation")));
+    CHECK(text.contains(QStringLiteral("Work")));
+    CHECK(text.contains(QStringLiteral("Inbox, Projects")));
+    CHECK(model.data(index, Qt::AccessibleDescriptionRole).toString() ==
+          QStringLiteral("Preview: The preview text"));
+}
+
 TEST_CASE("message list model marks one cached row read without resetting its list",
           "[gui][messages][model]")
 {

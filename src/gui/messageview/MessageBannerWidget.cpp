@@ -41,6 +41,7 @@ namespace javelin::gui::messageview
         m_closeButton->setObjectName(QStringLiteral("messageBannerClose"));
         m_closeButton->setAutoRaise(true);
         m_closeButton->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
+        m_closeButton->setAccessibleName(i18nc("@action:button", "Close banner"));
         m_closeButton->setToolTip(i18nc("@info:tooltip", "Close"));
         connect(m_closeButton, &QToolButton::clicked, this, &MessageBannerWidget::dismissed);
 

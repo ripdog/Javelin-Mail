@@ -331,9 +331,11 @@ namespace javelin::gui::contacts
             else
                 m_value = new QLineEdit(value, this);
             m_value->setObjectName(QStringLiteral("contactFieldValue"));
+            m_value->setAccessibleName(placeholder);
             m_value->setPlaceholderText(placeholder);
             m_context = new QComboBox(this);
             m_context->setObjectName(QStringLiteral("contactFieldType"));
+            m_context->setAccessibleName(i18n("%1 type", placeholder));
             m_context->addItem(i18nc("@item contact field context", "Other"), QStringLiteral(""));
             m_context->addItem(i18nc("@item contact field context", "Home"),
                                QStringLiteral("private"));
@@ -360,17 +362,21 @@ namespace javelin::gui::contacts
                                         : QString{},
                                     this);
             m_label->setObjectName(QStringLiteral("contactFieldLabel"));
+            m_label->setAccessibleName(i18n("%1 custom label", placeholder));
             m_label->setPlaceholderText(i18nc("@info:placeholder contact field label", "Label"));
             m_moveUp = new QToolButton(this);
             m_moveUp->setObjectName(QStringLiteral("contactFieldMoveUp"));
             m_moveUp->setIcon(QIcon::fromTheme(QStringLiteral("go-up")));
+            m_moveUp->setAccessibleName(i18n("Move %1 field up", placeholder));
             m_moveUp->setToolTip(i18n("Move field up"));
             m_moveDown = new QToolButton(this);
             m_moveDown->setObjectName(QStringLiteral("contactFieldMoveDown"));
             m_moveDown->setIcon(QIcon::fromTheme(QStringLiteral("go-down")));
+            m_moveDown->setAccessibleName(i18n("Move %1 field down", placeholder));
             m_moveDown->setToolTip(i18n("Move field down"));
             m_remove = new QToolButton(this);
             m_remove->setIcon(QIcon::fromTheme(QStringLiteral("list-remove")));
+            m_remove->setAccessibleName(i18n("Remove %1 field", placeholder));
             m_remove->setToolTip(i18n("Remove field"));
             layout->addWidget(m_value, 1);
             layout->addWidget(m_context);
@@ -3699,6 +3705,7 @@ namespace javelin::gui::contacts
                 compose->setIcon(javelin::gui::themedSvgIcon(
                     QStringLiteral(":/icons/thunderbird-icons/new-mail.svg"),
                     compose->palette().color(QPalette::Active, QPalette::ButtonText)));
+                compose->setAccessibleName(i18n("Compose mail"));
                 compose->setToolTip(i18n("Compose mail"));
                 connect(compose, &QToolButton::clicked, this,
                         [this, email = *email, name]

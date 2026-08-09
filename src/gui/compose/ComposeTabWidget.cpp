@@ -878,6 +878,7 @@ namespace javelin::gui::compose
         auto* fromRow = new QHBoxLayout();
         m_fromLabel = new QLabel(i18nc("@label email sender", "From"), headerWidget);
         m_fromCombo = new QComboBox(headerWidget);
+        m_fromLabel->setBuddy(m_fromCombo);
         fromRow->addWidget(m_fromLabel);
         fromRow->addWidget(m_fromCombo, 1);
         headerLayout->addLayout(fromRow);
@@ -895,6 +896,7 @@ namespace javelin::gui::compose
         auto* subjectRow = new QHBoxLayout();
         m_subjectLabel = new QLabel(i18nc("@label email subject", "Subject"), headerWidget);
         m_subjectEdit = new QLineEdit(headerWidget);
+        m_subjectLabel->setBuddy(m_subjectEdit);
         m_subjectEdit->setPlaceholderText(i18n("Add a subject"));
         subjectRow->addWidget(m_subjectLabel);
         subjectRow->addWidget(m_subjectEdit, 1);
@@ -909,11 +911,15 @@ namespace javelin::gui::compose
 
         m_editorTabs = new QTabWidget(this);
         m_richTextEdit = new JavelinComposerEdit(m_editorTabs);
+        m_richTextEdit->setAccessibleName(
+            i18nc("@label accessible email composer", "Message body"));
         m_richTextEdit->setAcceptDrops(false);
         m_richTextEdit->setAcceptRichText(true);
         m_richTextEdit->document()->setDocumentMargin(8);
         m_previewView = new javelin::gui::messageview::HtmlMessageView(
             m_settings.messageAppearanceSettings(), m_editorTabs);
+        m_previewView->setAccessibleName(
+            i18nc("@label accessible email preview", "Message preview"));
         m_previewView->setAcceptDrops(false);
         m_previewView->setRemoteContentEnabled(false);
         m_editorTabs->addTab(m_richTextEdit, i18n("Compose"));
@@ -1589,6 +1595,8 @@ namespace javelin::gui::compose
         rowLayout->setSpacing(6);
 
         auto* typeCombo = new QComboBox(rowWidget);
+        typeCombo->setAccessibleName(
+            i18nc("@label accessible email recipient type", "Recipient type"));
         typeCombo->addItem(i18nc("@label email recipients", "To"),
                            static_cast<int>(RecipientType::To));
         typeCombo->addItem(i18nc("@label email carbon-copy recipients", "Cc"),
@@ -1602,6 +1610,12 @@ namespace javelin::gui::compose
         auto* edit = new widgets::EmailAddressLineEdit(true, rowWidget);
         edit->setPlaceholderText(QStringLiteral("alice@example.com, Bob <bob@example.com>"));
         edit->setText(text);
+        const auto updateAccessibleName = [typeCombo, edit]
+        {
+            edit->setAccessibleName(i18nc("@label accessible email recipients", "%1 recipients",
+                                          typeCombo->currentText()));
+        };
+        updateAccessibleName();
         rowLayout->addWidget(typeCombo);
         rowLayout->addWidget(edit, 1);
         m_recipientRowsLayout->addWidget(rowWidget);
@@ -1611,8 +1625,9 @@ namespace javelin::gui::compose
             typeCombo->setFixedWidth(m_headerLabelWidth);
 
         connect(typeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
-                [this](const int)
+                [this, updateAccessibleName](const int)
                 {
+                    updateAccessibleName();
                     if (!m_syncingUi)
                         scheduleWorkingCopySave();
                 });

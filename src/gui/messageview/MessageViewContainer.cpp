@@ -264,6 +264,7 @@ namespace javelin::gui::messageview
                 auto* saveButton = new QToolButton(this);
                 saveButton->setObjectName(QStringLiteral("saveAttachmentButton"));
                 saveButton->setIcon(QIcon::fromTheme(QStringLiteral("edit-download")));
+                saveButton->setAccessibleName(saveToolTip);
                 saveButton->setToolTip(std::move(saveToolTip));
                 saveButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
                 connect(saveButton, &QToolButton::clicked, this,
@@ -584,6 +585,8 @@ namespace javelin::gui::messageview
         makeLabelSelectable(m_placeholderDetailLabel);
 
         m_loadingIndicator = new javelin::gui::widgets::IndeterminateProgressBar(placeholderCard);
+        m_loadingIndicator->setAccessibleName(
+            i18nc("@info accessible progress", "Loading message"));
         m_loadingIndicator->setRange(0, 0);
         m_loadingIndicator->setTextVisible(false);
         m_loadingIndicator->setFixedHeight(8);

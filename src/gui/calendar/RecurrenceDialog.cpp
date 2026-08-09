@@ -67,11 +67,13 @@ namespace javelin::gui::calendar
         repeatRow->addWidget(new QLabel(i18n("Repeat every"), this));
         m_interval = new QSpinBox(this);
         m_interval->setObjectName(QStringLiteral("recurrenceInterval"));
+        m_interval->setAccessibleName(i18n("Repeat interval"));
         m_interval->setRange(1, std::numeric_limits<int>::max());
         m_interval->setValue(1);
         repeatRow->addWidget(m_interval);
         m_frequency = new QComboBox(this);
         m_frequency->setObjectName(QStringLiteral("recurrenceFrequency"));
+        m_frequency->setAccessibleName(i18n("Repeat interval unit"));
         m_frequency->addItem(i18nc("@item recurrence interval unit", "day"),
                              static_cast<int>(FriendlyRecurrenceFrequency::Day));
         m_frequency->addItem(i18nc("@item recurrence interval unit", "week"),
@@ -110,6 +112,7 @@ namespace javelin::gui::calendar
 
         m_monthlyMode = new QComboBox(this);
         m_monthlyMode->setObjectName(QStringLiteral("recurrenceMonthlyMode"));
+        m_monthlyMode->setAccessibleName(i18n("Monthly repeat pattern"));
         outer->addWidget(m_monthlyMode);
 
         outer->addWidget(new QLabel(i18n("Ends"), this));
@@ -126,6 +129,7 @@ namespace javelin::gui::calendar
         onRow->addWidget(m_onDate);
         m_untilDate = new QDateEdit(QDate::currentDate().addYears(1), this);
         m_untilDate->setObjectName(QStringLiteral("recurrenceUntilDate"));
+        m_untilDate->setAccessibleName(i18n("Repeat until date"));
         m_untilDate->setCalendarPopup(true);
         m_untilDate->setDisplayFormat(QLocale{}.dateFormat(QLocale::ShortFormat));
         onRow->addWidget(m_untilDate);
@@ -135,6 +139,7 @@ namespace javelin::gui::calendar
         countRow->addWidget(m_afterCount);
         m_count = new QSpinBox(this);
         m_count->setObjectName(QStringLiteral("recurrenceCount"));
+        m_count->setAccessibleName(i18n("Number of occurrences"));
         m_count->setRange(1, std::numeric_limits<int>::max());
         m_count->setValue(10);
         m_count->setSuffix(i18nc("@item recurrence count suffix", " occurrences"));

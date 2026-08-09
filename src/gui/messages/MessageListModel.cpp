@@ -6,7 +6,9 @@
 #include <KLocalizedString>
 
 #include <QDataStream>
+#include <QDateTime>
 #include <QFutureWatcher>
+#include <QLocale>
 #include <QMimeData>
 #include <QString>
 #include <QStringList>
@@ -56,6 +58,16 @@ namespace javelin::gui::messages
                    left.tags == right.tags;
         }
 
+        [[nodiscard]] QString formattedTimestamp(const std::string_view isoTimestamp)
+        {
+            const auto value =
+                QString::fromUtf8(isoTimestamp.data(), static_cast<qsizetype>(isoTimestamp.size()));
+            const auto dateTime = QDateTime::fromString(value, Qt::ISODate);
+            return dateTime.isValid()
+                       ? QLocale{}.toString(dateTime.toLocalTime(), QLocale::ShortFormat)
+                       : value;
+        }
+
     } // namespace
 
     MessageListModel::MessageListModel(javelin::jmap::cache::QueryReader& queryReader,
@@ -101,6 +113,53 @@ namespace javelin::gui::messages
         if (role == Qt::ToolTipRole)
         {
             return preview;
+        }
+
+        if (role == Qt::AccessibleTextRole)
+        {
+            QStringList parts{sender, subject};
+            if (!item.receivedAt.empty())
+                parts.push_back(formattedTimestamp(item.receivedAt));
+            if (item.isUnread)
+                parts.push_back(i18nc("@info accessible message state", "Unread"));
+            if (item.isFlagged)
+                parts.push_back(i18nc("@info accessible message state", "Starred"));
+            if (item.hasAttachment)
+                parts.push_back(i18nc("@info accessible message state", "Has attachment"));
+            if (row.kind == RowKind::ThreadSummary && item.threadMessageCount > 1)
+            {
+                parts.push_back(i18np("%1 message in conversation", "%1 messages in conversation",
+                                      item.threadMessageCount));
+                parts.push_back(isThreadExpanded(item.threadId)
+                                    ? i18nc("@info accessible conversation state", "Expanded")
+                                    : i18nc("@info accessible conversation state", "Collapsed"));
+            }
+            if (!item.tags.empty())
+            {
+                QStringList tagNames;
+                tagNames.reserve(static_cast<qsizetype>(item.tags.size()));
+                for (const auto& tag : item.tags)
+                    tagNames.push_back(tag.displayName);
+                parts.push_back(i18nc("@info accessible message tags", "Tags: %1",
+                                      tagNames.join(QStringLiteral(", "))));
+            }
+            if (!m_mailboxId.has_value() && !item.mailboxNames.empty())
+            {
+                QStringList mailboxNames;
+                mailboxNames.reserve(static_cast<qsizetype>(item.mailboxNames.size()));
+                for (const auto& name : item.mailboxNames)
+                    mailboxNames.push_back(QString::fromStdString(name));
+                parts.push_back(i18nc("@info accessible message mailboxes", "Mailboxes: %1",
+                                      mailboxNames.join(QStringLiteral(", "))));
+            }
+            return parts.join(QStringLiteral(", "));
+        }
+
+        if (role == Qt::AccessibleDescriptionRole)
+        {
+            return preview.isEmpty() ? QVariant{}
+                                     : QVariant{i18nc("@info accessible message preview",
+                                                      "Preview: %1", preview)};
         }
 
         if (role == EmailIdRole)
@@ -459,7 +518,8 @@ namespace javelin::gui::messages
                 {
                     const QModelIndex summaryIndex = index(*summaryRow, 0);
                     Q_EMIT dataChanged(summaryIndex, summaryIndex,
-                                       {IsExpandedRole, CanExpandRole, ThreadMessageCountRole});
+                                       {IsExpandedRole, CanExpandRole, ThreadMessageCountRole,
+                                        Qt::AccessibleTextRole});
                 }
                 return true;
             }
@@ -487,8 +547,9 @@ namespace javelin::gui::messages
             }
             endInsertRows();
             const QModelIndex summaryIndex = index(*summaryRow, 0);
-            Q_EMIT dataChanged(summaryIndex, summaryIndex,
-                               {IsExpandedRole, CanExpandRole, ThreadMessageCountRole});
+            Q_EMIT dataChanged(
+                summaryIndex, summaryIndex,
+                {IsExpandedRole, CanExpandRole, ThreadMessageCountRole, Qt::AccessibleTextRole});
             return true;
         }
 
@@ -509,7 +570,8 @@ namespace javelin::gui::messages
             {
                 const QModelIndex summaryIndex = index(*existingSummaryRow, 0);
                 Q_EMIT dataChanged(summaryIndex, summaryIndex,
-                                   {IsExpandedRole, CanExpandRole, ThreadMessageCountRole});
+                                   {IsExpandedRole, CanExpandRole, ThreadMessageCountRole,
+                                    Qt::AccessibleTextRole});
             }
             return true;
         }
@@ -519,8 +581,9 @@ namespace javelin::gui::messages
                      m_rows.begin() + (*summaryRow + 1 + memberCount));
         endRemoveRows();
         const QModelIndex summaryIndex = index(*summaryRow, 0);
-        Q_EMIT dataChanged(summaryIndex, summaryIndex,
-                           {IsExpandedRole, CanExpandRole, ThreadMessageCountRole});
+        Q_EMIT dataChanged(
+            summaryIndex, summaryIndex,
+            {IsExpandedRole, CanExpandRole, ThreadMessageCountRole, Qt::AccessibleTextRole});
         return true;
     }
 
@@ -573,7 +636,8 @@ namespace javelin::gui::messages
             if (itemForRow(m_rows[row]).emailId == emailId)
             {
                 const auto changedIndex = index(static_cast<int>(row), 0);
-                Q_EMIT dataChanged(changedIndex, changedIndex, {IsUnreadRole});
+                Q_EMIT dataChanged(changedIndex, changedIndex,
+                                   {IsUnreadRole, Qt::AccessibleTextRole});
             }
         }
         return true;
@@ -682,7 +746,8 @@ namespace javelin::gui::messages
                 {
                     const QModelIndex summaryIndex = index(*summaryRow, 0);
                     Q_EMIT dataChanged(summaryIndex, summaryIndex,
-                                       {IsExpandedRole, CanExpandRole, ThreadMessageCountRole});
+                                       {IsExpandedRole, CanExpandRole, ThreadMessageCountRole,
+                                        Qt::AccessibleTextRole});
                 }
             });
         watcher->setFuture(QtConcurrent::run(javelin::app::loadMessageListThreadMembers,

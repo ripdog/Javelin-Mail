@@ -1440,6 +1440,7 @@ namespace javelin::gui::shell
         m_messageSortButton->setIcon(javelin::gui::themedSvgIcon(
             QStringLiteral(":/icons/thunderbird-icons/display-options.svg"),
             palette().color(QPalette::Text)));
+        m_messageSortButton->setAccessibleName(i18n("Sort messages"));
         m_messageSortButton->setToolTip(i18n("Sort messages"));
         auto titleFont = javelin::gui::fontWithSizeDelta(m_messageListTitleLabel->font(), 4);
         titleFont.setBold(true);
@@ -3585,9 +3586,11 @@ namespace javelin::gui::shell
             return;
         }
 
-        m_messageSortButton->setToolTip(i18n("Sort messages: %1, %2",
-                                             sortPropertyLabel(m_emailListSort.property),
-                                             sortDirectionLabel(m_emailListSort.direction)));
+        const auto description =
+            i18n("Sort messages: %1, %2", sortPropertyLabel(m_emailListSort.property),
+                 sortDirectionLabel(m_emailListSort.direction));
+        m_messageSortButton->setAccessibleName(description);
+        m_messageSortButton->setToolTip(description);
     }
 
     void MainWindow::setDarkModeEnabled(const bool enabled)

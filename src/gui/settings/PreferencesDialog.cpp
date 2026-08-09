@@ -482,11 +482,15 @@ namespace javelin::gui::settings
         {
             m_localTranslationSource->addItem(language, language);
         }
-        localRouteLayout->addWidget(new QLabel(i18nc("@label translation source language", "From"),
-                                               m_localTranslationControls));
+        auto* localSourceLabel = new QLabel(i18nc("@label translation source language", "From"),
+                                            m_localTranslationControls);
+        localSourceLabel->setBuddy(m_localTranslationSource);
+        localRouteLayout->addWidget(localSourceLabel);
         localRouteLayout->addWidget(m_localTranslationSource, 1);
-        localRouteLayout->addWidget(new QLabel(i18nc("@label translation target language", "to"),
-                                               m_localTranslationControls));
+        auto* localTargetLabel = new QLabel(i18nc("@label translation target language", "to"),
+                                            m_localTranslationControls);
+        localTargetLabel->setBuddy(m_localTranslationTarget);
+        localRouteLayout->addWidget(localTargetLabel);
         localRouteLayout->addWidget(m_localTranslationTarget, 1);
         m_downloadLocalModelsButton =
             new QPushButton(i18n("Download models"), m_localTranslationControls);
@@ -495,10 +499,12 @@ namespace javelin::gui::settings
         m_localModelStatus = new QLabel(m_localTranslationControls);
         m_localModelStatus->setWordWrap(true);
         localLayout->addWidget(m_localModelStatus);
-        localLayout->addWidget(
-            new QLabel(i18n("Downloaded model directions"), m_localTranslationControls));
+        auto* installedModelsLabel =
+            new QLabel(i18n("Downloaded model directions"), m_localTranslationControls);
         m_installedLocalModels = new QListWidget(m_localTranslationControls);
+        installedModelsLabel->setBuddy(m_installedLocalModels);
         m_installedLocalModels->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        localLayout->addWidget(installedModelsLabel);
         localLayout->addWidget(m_installedLocalModels);
         auto* localButtons = new QHBoxLayout();
         localButtons->addStretch(1);
@@ -508,10 +514,12 @@ namespace javelin::gui::settings
         localLayout->addLayout(localButtons);
         translationControlsLayout->addWidget(m_localTranslationControls);
 
-        translationControlsLayout->addWidget(
-            new QLabel(i18n("Auto-Translate Entries"), m_translationControls));
+        auto* autoTranslateLabel =
+            new QLabel(i18n("Auto-Translate Entries"), m_translationControls);
         m_autoTranslateList = new QListWidget(m_translationControls);
+        autoTranslateLabel->setBuddy(m_autoTranslateList);
         m_autoTranslateList->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        translationControlsLayout->addWidget(autoTranslateLabel);
         translationControlsLayout->addWidget(m_autoTranslateList, 1);
         auto* translationButtons = new QHBoxLayout();
         translationButtons->addStretch(1);

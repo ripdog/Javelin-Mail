@@ -34,6 +34,7 @@ TEST_CASE("message banners keep one aligned row and close after their action but
     auto* closeButton = banner.findChild<QToolButton*>(QStringLiteral("messageBannerClose"));
     REQUIRE(closeButton != nullptr);
     CHECK(layout->itemAt(5)->widget() == closeButton);
+    CHECK(closeButton->accessibleName() == QStringLiteral("Close banner"));
     CHECK(link->textInteractionFlags().testFlag(Qt::LinksAccessibleByMouse));
     CHECK(link->text().contains(QStringLiteral("https://example.com/unsubscribe?token=a&amp;b")));
 
