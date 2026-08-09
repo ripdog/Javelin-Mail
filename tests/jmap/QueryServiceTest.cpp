@@ -202,6 +202,18 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
     REQUIRE_FALSE(emailRepository.replaceAll("account-1", {first, second, third}).has_value());
 
+    QSqlQuery vaultSeed{databaseContext.connection.database()};
+    REQUIRE(vaultSeed.exec(
+        QStringLiteral("INSERT INTO mail_vault_objects(content_hash,relative_path,size) "
+                       "VALUES('eml-2-hash','objects/eml-2',42)")));
+    REQUIRE(vaultSeed.exec(QStringLiteral(
+        "INSERT INTO mail_vault_email_refs(account_id,email_id,blob_id,content_hash,retention) "
+        "VALUES('account-1','eml-2','blob-2','eml-2-hash','evictable')")));
+    REQUIRE_FALSE(
+        emailRepository
+            .markSearchIndexed("account-1", "eml-2", "eml-2-hash", "Body-derived plaintext preview")
+            .has_value());
+
     javelin::jmap::cache::QueryService queryService{databaseContext.connection};
     const auto firstPage = queryService.listMailboxMessages("account-1", "mbx-inbox", 1, 0);
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(firstPage));
@@ -214,6 +226,8 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     CHECK(firstItems.front().isUnread);
     CHECK(firstItems.front().isFlagged);
     CHECK(firstItems.front().isJunk);
+    CHECK(firstItems.front().bodyPreview ==
+          std::optional<std::string>{"Body-derived plaintext preview"});
 
     const auto secondPage = queryService.listMailboxMessages("account-1", "mbx-inbox", 1, 1);
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(secondPage));

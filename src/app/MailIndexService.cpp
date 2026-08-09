@@ -175,7 +175,7 @@ namespace javelin::app
             QSqlQuery pending{m_connection.database()};
             pending.prepare(QStringLiteral(
                 "SELECT EXISTS(SELECT 1 FROM mail_vault_email_refs WHERE account_id=:account AND "
-                "(indexed_hash IS NULL OR indexed_hash<>content_hash))"));
+                "(indexed_hash IS NULL OR indexed_hash<>content_hash OR body_preview IS NULL))"));
             pending.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
             if (!pending.exec() || !pending.next())
                 continue;
@@ -276,7 +276,7 @@ namespace javelin::app
         QSqlQuery totalQuery{m_connection.database()};
         totalQuery.prepare(QStringLiteral(
             "SELECT COUNT(*) FROM mail_vault_email_refs WHERE account_id=:account AND "
-            "(indexed_hash IS NULL OR indexed_hash<>content_hash)"));
+            "(indexed_hash IS NULL OR indexed_hash<>content_hash OR body_preview IS NULL)"));
         totalQuery.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
         if (!totalQuery.exec() || !totalQuery.next())
             co_return;
@@ -312,7 +312,8 @@ namespace javelin::app
                 "o.content_hash=r.content_hash "
                 "JOIN emails e ON e.account_id=r.account_id AND e.email_id=r.email_id WHERE "
                 "r.account_id=:account AND (r.indexed_hash IS NULL OR "
-                "r.indexed_hash<>r.content_hash) ORDER BY r.updated_at LIMIT :limit"));
+                "r.indexed_hash<>r.content_hash OR r.body_preview IS NULL) "
+                "ORDER BY r.updated_at LIMIT :limit"));
             next.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
             next.bindValue(QStringLiteral(":limit"), static_cast<qulonglong>(indexBatchSize));
             if (!next.exec())

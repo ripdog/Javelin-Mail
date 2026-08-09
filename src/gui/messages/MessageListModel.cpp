@@ -50,7 +50,8 @@ namespace javelin::gui::messages
         {
             return left.emailId == right.emailId && left.threadId == right.threadId &&
                    left.subject == right.subject && left.preview == right.preview &&
-                   left.receivedAt == right.receivedAt && left.sentAt == right.sentAt &&
+                   left.bodyPreview == right.bodyPreview && left.receivedAt == right.receivedAt &&
+                   left.sentAt == right.sentAt &&
                    left.threadMessageCount == right.threadMessageCount &&
                    left.hasAttachment == right.hasAttachment && left.isUnread == right.isUnread &&
                    left.isFlagged == right.isFlagged && left.isJunk == right.isJunk &&
@@ -104,6 +105,9 @@ namespace javelin::gui::messages
         const auto subject = javelin::app::subjectForDisplay(item.subject);
         const auto preview =
             item.preview.has_value() ? QString::fromStdString(*item.preview) : QString{};
+        const auto tooltipPreview =
+            (item.bodyPreview.has_value() ? QString::fromStdString(*item.bodyPreview) : preview)
+                .simplified();
 
         if (role == Qt::DisplayRole)
         {
@@ -112,7 +116,7 @@ namespace javelin::gui::messages
 
         if (role == Qt::ToolTipRole)
         {
-            return preview;
+            return tooltipPreview;
         }
 
         if (role == Qt::AccessibleTextRole)
@@ -157,9 +161,9 @@ namespace javelin::gui::messages
 
         if (role == Qt::AccessibleDescriptionRole)
         {
-            return preview.isEmpty() ? QVariant{}
-                                     : QVariant{i18nc("@info accessible message preview",
-                                                      "Preview: %1", preview)};
+            return tooltipPreview.isEmpty() ? QVariant{}
+                                            : QVariant{i18nc("@info accessible message preview",
+                                                             "Preview: %1", tooltipPreview)};
         }
 
         if (role == EmailIdRole)

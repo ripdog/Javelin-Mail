@@ -100,8 +100,61 @@ namespace javelin::jmap::cache
         }
 
         [[nodiscard]] std::optional<DatabaseError>
-        attachMessageTags(const DatabaseReadView& connection, const std::string_view accountId,
-                          std::vector<MessageListItem>& items)
+        attachMessageBodyPreviews(const DatabaseReadView& connection,
+                                  const std::string_view accountId,
+                                  std::vector<MessageListItem>& items)
+        {
+            if (items.empty())
+                return std::nullopt;
+
+            std::vector<std::string> emailIds;
+            emailIds.reserve(items.size());
+            std::unordered_map<std::string, MessageListItem*> itemsById;
+            itemsById.reserve(items.size());
+            for (auto& item : items)
+            {
+                item.bodyPreview.reset();
+                emailIds.push_back(item.emailId);
+                itemsById.emplace(item.emailId, &item);
+            }
+
+            std::string emailIdsJson;
+            if (const auto error = glz::write_json(emailIds, emailIdsJson))
+            {
+                Q_UNUSED(error);
+                return DatabaseError{
+                    .code = DatabaseErrorCode::QueryFailed,
+                    .message =
+                        QStringLiteral("Serialize message ids for body preview lookup failed."),
+                };
+            }
+
+            QSqlQuery query{connection.database()};
+            query.prepare(QStringLiteral(
+                "WITH requested AS MATERIALIZED (SELECT value AS email_id FROM "
+                "json_each(:email_ids)) "
+                "SELECT r.email_id,r.body_preview FROM requested q "
+                "JOIN mail_vault_email_refs r ON r.account_id=:account_id AND "
+                "r.email_id=q.email_id "
+                "WHERE r.indexed_hash=r.content_hash AND r.body_preview IS NOT NULL"));
+            query.bindValue(QStringLiteral(":account_id"),
+                            QString::fromStdString(std::string{accountId}));
+            query.bindValue(QStringLiteral(":email_ids"), QString::fromStdString(emailIdsJson));
+            if (!query.exec())
+                return makeQueryError(QStringLiteral("Load message body previews"), query);
+
+            while (query.next())
+            {
+                const auto found = itemsById.find(query.value(0).toString().toStdString());
+                if (found != itemsById.end())
+                    found->second->bodyPreview = query.value(1).toString().toStdString();
+            }
+            return std::nullopt;
+        }
+
+        [[nodiscard]] std::optional<DatabaseError>
+        attachMessageTagsOnly(const DatabaseReadView& connection, const std::string_view accountId,
+                              std::vector<MessageListItem>& items)
         {
             if (items.empty())
                 return std::nullopt;
@@ -159,6 +212,15 @@ namespace javelin::jmap::cache
                 });
             }
             return std::nullopt;
+        }
+
+        [[nodiscard]] std::optional<DatabaseError>
+        attachMessageTags(const DatabaseReadView& connection, const std::string_view accountId,
+                          std::vector<MessageListItem>& items)
+        {
+            if (const auto error = attachMessageBodyPreviews(connection, accountId, items))
+                return error;
+            return attachMessageTagsOnly(connection, accountId, items);
         }
 
         [[nodiscard]] QString

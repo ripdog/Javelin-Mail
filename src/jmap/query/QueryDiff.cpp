@@ -57,10 +57,10 @@ namespace javelin::jmap::query
                                     equalEmailAddress(*left.from, *right.from));
             return left.emailId == right.emailId && left.threadId == right.threadId &&
                    left.subject == right.subject && left.preview == right.preview &&
-                   left.receivedAt == right.receivedAt && left.sentAt == right.sentAt &&
-                   left.hasAttachment == right.hasAttachment && left.isUnread == right.isUnread &&
-                   left.isFlagged == right.isFlagged && left.mailboxNames == right.mailboxNames &&
-                   left.tags == right.tags && equalFrom;
+                   left.bodyPreview == right.bodyPreview && left.receivedAt == right.receivedAt &&
+                   left.sentAt == right.sentAt && left.hasAttachment == right.hasAttachment &&
+                   left.isUnread == right.isUnread && left.isFlagged == right.isFlagged &&
+                   left.mailboxNames == right.mailboxNames && left.tags == right.tags && equalFrom;
         }
 
         [[nodiscard]] MailboxSelectionKey makeSelectionKey(const std::string& id,

@@ -32,6 +32,7 @@ namespace javelin::jmap::cache
         std::string threadId;
         std::optional<std::string> subject;
         std::optional<std::string> preview;
+        std::optional<std::string> bodyPreview = std::nullopt;
         std::string receivedAt;
         std::optional<std::string> sentAt;
         std::uint64_t threadMessageCount = 1;

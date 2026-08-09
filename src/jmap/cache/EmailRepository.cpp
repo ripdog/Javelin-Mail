@@ -845,8 +845,8 @@ namespace javelin::jmap::cache
             "AND preview=''"));
         QSqlQuery indexed{database};
         indexed.prepare(QStringLiteral(
-            "UPDATE mail_vault_email_refs SET indexed_hash=:hash WHERE account_id=:account "
-            "AND email_id=:email AND content_hash=:hash"));
+            "UPDATE mail_vault_email_refs SET indexed_hash=:hash,body_preview=:preview "
+            "WHERE account_id=:account AND email_id=:email AND content_hash=:hash"));
         const QString account = QString::fromStdString(std::string{accountId});
         for (const auto& update : updates)
         {
@@ -861,6 +861,7 @@ namespace javelin::jmap::cache
             updatePreview.finish();
 
             indexed.bindValue(QStringLiteral(":hash"), QString::fromStdString(update.contentHash));
+            indexed.bindValue(QStringLiteral(":preview"), QString::fromStdString(update.preview));
             indexed.bindValue(QStringLiteral(":account"), account);
             indexed.bindValue(QStringLiteral(":email"), email);
             if (!indexed.exec())

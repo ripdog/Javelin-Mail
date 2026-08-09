@@ -2046,6 +2046,15 @@ namespace javelin::jmap::cache
                                 "INTEGER NOT NULL DEFAULT 0 CHECK(submission_max_delayed_send>=0)"),
                         },
                 },
+                MigrationStep{
+                    .version = 45,
+                    .name = QStringLiteral("mail_vault_body_preview"),
+                    .statements =
+                        {
+                            QStringLiteral("ALTER TABLE mail_vault_email_refs ADD COLUMN "
+                                           "body_preview TEXT"),
+                        },
+                },
             },
         };
     }

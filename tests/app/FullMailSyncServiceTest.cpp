@@ -551,6 +551,9 @@ TEST_CASE("mail indexing crosses a worker batch without retaining pending rows",
                  QStringLiteral("SELECT COUNT(*) FROM mail_vault_email_refs WHERE "
                                 "account_id='account-1' AND indexed_hash=content_hash")) ==
           messageCount);
+    CHECK(scalar(database.connection,
+                 QStringLiteral("SELECT COUNT(*) FROM mail_vault_email_refs WHERE "
+                                "account_id='account-1' AND body_preview='body'")) == messageCount);
     const auto job = scheduler.find(mailIndexJobId());
     const auto* record = std::get_if<std::optional<javelin::app::WorkRecord>>(&job);
     REQUIRE(record != nullptr);

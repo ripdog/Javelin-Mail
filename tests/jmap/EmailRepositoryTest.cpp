@@ -201,13 +201,14 @@ TEST_CASE("email repository records bodyless messages as indexed without a null 
 
     QSqlQuery result{databaseContext.connection.database()};
     REQUIRE(result.exec(QStringLiteral(
-        "SELECT e.preview,e.preview IS NULL,r.indexed_hash FROM emails e JOIN "
+        "SELECT e.preview,e.preview IS NULL,r.indexed_hash,r.body_preview FROM emails e JOIN "
         "mail_vault_email_refs r ON r.account_id=e.account_id AND r.email_id=e.email_id "
         "WHERE e.account_id='account-1' AND e.email_id='eml-1'")));
     REQUIRE(result.next());
     CHECK(result.value(0).toString() == QStringLiteral(""));
     CHECK_FALSE(result.value(1).toBool());
     CHECK(result.value(2).toString() == QStringLiteral("bodyless-hash"));
+    CHECK(result.value(3).toString().isEmpty());
 }
 
 TEST_CASE("email repository replacement removes stale email rows", "[jmap][cache][repository]")

@@ -77,6 +77,28 @@ TEST_CASE("message list model exposes tags already carried by message rows",
               .toStringList() == QStringList{QStringLiteral("#123456")});
 }
 
+TEST_CASE("message list model normalizes tooltips and prefers cached body previews",
+          "[gui][messages][model][tooltip]")
+{
+    javelin::jmap::cache::DatabaseConnection connection;
+    javelin::jmap::cache::QueryService queryService{connection};
+    javelin::gui::messages::MessageListModel model{queryService};
+
+    auto serverPreview = item("email-1", "thread-1");
+    serverPreview.preview = "\n\n      Server   preview\n   text   ";
+    auto bodyPreview = item("email-2", "thread-2");
+    bodyPreview.preview = "Server preview should not win";
+    bodyPreview.bodyPreview = "\n\t  Plaintext    body\npreview  ";
+    model.setItems(std::optional<std::string>{"account-1"}, std::optional<std::string>{"mailbox-1"},
+                   {std::move(serverPreview), std::move(bodyPreview)});
+
+    REQUIRE(model.rowCount() == 2);
+    CHECK(model.data(model.index(0), Qt::ToolTipRole).toString() ==
+          QStringLiteral("Server preview text"));
+    CHECK(model.data(model.index(1), Qt::ToolTipRole).toString() ==
+          QStringLiteral("Plaintext body preview"));
+}
+
 TEST_CASE("message list model exposes painted message state to accessibility",
           "[gui][messages][model][accessibility]")
 {
