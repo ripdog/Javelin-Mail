@@ -79,6 +79,10 @@ namespace javelin::app
         acceptAsync(const javelin::protocol::CommandId& id,
                     javelin::protocol::RemoteActionKind kind,
                     const javelin::protocol::OperationId& operation) const;
+        [[nodiscard]] QCoro::Task<AccountAuthenticationResult>
+        finishOAuthAndFilter(OAuthFinishRequest request);
+        [[nodiscard]] QCoro::Task<AccountAuthenticationResult>
+        authenticateManuallyAndFilter(ManualAuthenticationRequest request);
         [[nodiscard]] QCoro::Task<RemoteUndoExecutionResult> performUndo(bool redo);
         void complete(const javelin::protocol::OperationId& operation, QByteArray result);
         void fail(const javelin::protocol::OperationId& operation, QString detail);

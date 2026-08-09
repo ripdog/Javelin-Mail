@@ -477,32 +477,12 @@ namespace javelin::app
                 { return launch(m_services.onboardingService().startOAuth(std::move(request))); });
         case Kind::OnboardingFinishOAuth:
             return decodeAndApply<OAuthFinishRequest>(
-                command.payload, invalidPayload,
-                [&](OAuthFinishRequest request)
-                {
-                    auto task = [this, request = std::move(request)]() mutable
-                        -> QCoro::Task<AccountAuthenticationResult>
-                    {
-                        auto result =
-                            co_await m_services.onboardingService().finishOAuth(std::move(request));
-                        co_return m_authenticationResultFilter(std::move(result));
-                    }();
-                    return launch(std::move(task));
-                });
+                command.payload, invalidPayload, [&](OAuthFinishRequest request)
+                { return launch(finishOAuthAndFilter(std::move(request))); });
         case Kind::OnboardingAuthenticateManually:
             return decodeAndApply<ManualAuthenticationRequest>(
-                command.payload, invalidPayload,
-                [&](ManualAuthenticationRequest request)
-                {
-                    auto task = [this, request = std::move(request)]() mutable
-                        -> QCoro::Task<AccountAuthenticationResult>
-                    {
-                        auto result = co_await m_services.onboardingService().authenticateManually(
-                            std::move(request));
-                        co_return m_authenticationResultFilter(std::move(result));
-                    }();
-                    return launch(std::move(task));
-                });
+                command.payload, invalidPayload, [&](ManualAuthenticationRequest request)
+                { return launch(authenticateManuallyAndFilter(std::move(request))); });
         case Kind::OnboardingRevokeOAuth:
             return decodeAndApply<OAuthRevocationRequest>(
                 command.payload, invalidPayload,
@@ -1189,6 +1169,21 @@ namespace javelin::app
             .affectedKeys = {},
             .immediateResult = std::nullopt,
         };
+    }
+
+    QCoro::Task<AccountAuthenticationResult>
+    DaemonRemoteActionDispatcher::finishOAuthAndFilter(OAuthFinishRequest request)
+    {
+        auto result = co_await m_services.onboardingService().finishOAuth(std::move(request));
+        co_return m_authenticationResultFilter(std::move(result));
+    }
+
+    QCoro::Task<AccountAuthenticationResult>
+    DaemonRemoteActionDispatcher::authenticateManuallyAndFilter(ManualAuthenticationRequest request)
+    {
+        auto result =
+            co_await m_services.onboardingService().authenticateManually(std::move(request));
+        co_return m_authenticationResultFilter(std::move(result));
     }
 
     QCoro::Task<RemoteUndoExecutionResult>
