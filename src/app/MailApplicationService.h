@@ -146,6 +146,8 @@ namespace javelin::app
                                                             std::string keyword);
         [[nodiscard]] QCoro::Task<javelin::jmap::MailboxSubscriptionChangeResult>
         setMailboxSubscribed(std::string accountId, std::string mailboxId, bool subscribed);
+        [[nodiscard]] QCoro::Task<javelin::jmap::MailboxDestroyResult>
+        destroyMailbox(std::string accountId, std::string mailboxId);
         [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
         queueExactEmailMutation(std::string accountId,
                                 javelin::jmap::EmailMailboxMutation mutation) override;
@@ -290,7 +292,8 @@ namespace javelin::app
         void startSessionRefresh(const std::string& ownerAccountId,
                                  const AccountConnectionSettings& settings);
         void schedulePendingEmailMutationReplay(std::string accountId);
-        void scheduleMailboxSubscriptionReconciliation(std::string accountId);
+        void scheduleMailboxMutationReconciliation(std::string accountId);
+        [[nodiscard]] QCoro::Task<void> reconcileMailboxMutations(std::string accountId);
         void scheduleTagDeletionPump();
         void pumpTagDeletions();
         [[nodiscard]] QCoro::Task<void> runTagDeletion(std::string jobId, std::string accountId,
@@ -326,7 +329,7 @@ namespace javelin::app
         std::unordered_map<std::string, AccountSyncConfiguration> m_configurations;
         std::unordered_set<std::string> m_sessionRefreshesInFlight;
         std::unordered_set<std::string> m_pendingMutationReplaysInFlight;
-        std::unordered_set<std::string> m_mailboxSubscriptionReconciliationsInFlight;
+        std::unordered_set<std::string> m_mailboxMutationReconciliationsInFlight;
         std::unordered_set<std::string> m_pendingContactRefreshes;
         std::unordered_set<std::string> m_runningContactRefreshes;
         std::unordered_set<std::string> m_runningTagDeletions;

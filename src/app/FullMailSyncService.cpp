@@ -694,7 +694,7 @@ namespace javelin::app
                 Scope scope{
                     .accountId = configuration.accountId, .mailboxId = mailboxId, .jobId = id};
                 m_scopes.insert_or_assign(id, scope);
-                if (mailboxSubscribed(configuration.accountId, mailboxId) == std::optional{false})
+                if (mailboxSubscribed(configuration.accountId, mailboxId) != std::optional{true})
                     continue;
                 desiredKeys.insert(configuration.accountId + "\n" + mailboxId);
 
@@ -1016,7 +1016,7 @@ namespace javelin::app
         const auto accountSettings = settingsFor(scope.accountId);
         if (!accountSettings)
             co_return;
-        if (mailboxSubscribed(scope.accountId, scope.mailboxId) == std::optional{false})
+        if (mailboxSubscribed(scope.accountId, scope.mailboxId) != std::optional{true})
         {
             static_cast<void>(m_scheduler.pause(scope.jobId));
             co_return;
@@ -1142,7 +1142,7 @@ namespace javelin::app
             }
             while (true)
             {
-                if (mailboxSubscribed(scope.accountId, scope.mailboxId) == std::optional{false})
+                if (mailboxSubscribed(scope.accountId, scope.mailboxId) != std::optional{true})
                 {
                     static_cast<void>(m_scheduler.pause(scope.jobId));
                     co_return;
@@ -1356,7 +1356,7 @@ namespace javelin::app
         std::uint64_t completedTotalBytes = 0;
         while (true)
         {
-            if (mailboxSubscribed(scope.accountId, scope.mailboxId) == std::optional{false})
+            if (mailboxSubscribed(scope.accountId, scope.mailboxId) != std::optional{true})
             {
                 static_cast<void>(m_scheduler.pause(scope.jobId));
                 co_return;

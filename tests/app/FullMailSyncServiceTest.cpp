@@ -365,6 +365,37 @@ TEST_CASE("offline sync does not run for a hidden mailbox", "[app][offline][hidd
     CHECK(resources.requests.empty());
 }
 
+TEST_CASE("offline sync does not run for a deleted mailbox", "[app][offline][deleted-mailbox]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabase();
+    seedAccount(database.connection);
+    QSqlQuery remove{database.connection.database()};
+    REQUIRE(remove.exec(QStringLiteral(
+        "DELETE FROM mailboxes WHERE account_id='account-1' AND mailbox_id='archive'")));
+
+    RecordingResourceTransport resources;
+    RejectingMethodTransport methods;
+    javelin::jmap::JmapCore core{database.connection, resources, methods};
+    javelin::app::WorkScheduler scheduler{database.connection, nullptr,
+                                          std::chrono::milliseconds{0}};
+    javelin::app::MailIndexService indexer{database.connection, scheduler};
+    javelin::app::FullMailSyncService service{database.connection, core, scheduler, indexer};
+    service.applySettings({configuration()});
+
+    CHECK(scalar(database.connection,
+                 QStringLiteral("SELECT COUNT(*) FROM offline_mailbox_scopes WHERE "
+                                "account_id='account-1' AND mailbox_id='archive' AND desired=1")) ==
+          0);
+    const auto job = scheduler.find(fullSyncJobId());
+    const auto* record = std::get_if<std::optional<javelin::app::WorkRecord>>(&job);
+    REQUIRE(record != nullptr);
+    CHECK_FALSE(record->has_value());
+    CHECK(methods.calls == 0);
+    CHECK(resources.requests.empty());
+}
+
 TEST_CASE("offline body hydration resumes after restart without re-enumerating mailbox",
           "[app][offline][restart]")
 {

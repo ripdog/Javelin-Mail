@@ -329,6 +329,171 @@ TEST_CASE("mailbox mutation recovery preserves ambiguous projection for reconcil
     CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(projected)->isSubscribed);
 }
 
+TEST_CASE("mailbox destroy mutations project and reject atomically",
+          "[jmap][sync][mailbox][destroy][consistency]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    seedMailboxState(databaseContext.connection);
+
+    auto before = loadMailboxFixture();
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    javelin::jmap::sync::MailboxMutationJournal journal{databaseContext.connection, mailboxes};
+    const javelin::jmap::sync::MailboxDestroyMutationRecord mutation{
+        .mutationId = "destroy-1",
+        .operationGroupId = std::nullopt,
+        .accountId = "account-1",
+        .mailboxId = before.id,
+        .status = javelin::jmap::sync::MutationStatus::Pending,
+        .beforeMailbox = before,
+        .baseState = "mailbox-state-1",
+        .acceptedState = std::nullopt,
+        .errorJson = std::nullopt,
+    };
+
+    REQUIRE_FALSE(journal.queue(mutation).has_value());
+    const auto projected = mailboxes.find("account-1", before.id);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(projected));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(projected).has_value());
+
+    REQUIRE_FALSE(journal.reject(mutation).has_value());
+    const auto restored = mailboxes.find("account-1", before.id);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(restored));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(restored).has_value());
+    const auto& value = *std::get<std::optional<javelin::jmap::domain::Mailbox>>(restored);
+    CHECK(value.name == before.name);
+    CHECK(value.totalEmails == before.totalEmails);
+    CHECK(value.myRights.mayReadItems == before.myRights.mayReadItems);
+}
+
+TEST_CASE("accepted mailbox destroy mutation advances state and clears journal",
+          "[jmap][sync][mailbox][destroy][consistency]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    seedMailboxState(databaseContext.connection);
+
+    auto before = loadMailboxFixture();
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    javelin::jmap::sync::MailboxMutationJournal journal{databaseContext.connection, mailboxes};
+    const javelin::jmap::sync::MailboxDestroyMutationRecord mutation{
+        .mutationId = "destroy-accepted",
+        .operationGroupId = std::nullopt,
+        .accountId = "account-1",
+        .mailboxId = before.id,
+        .status = javelin::jmap::sync::MutationStatus::Pending,
+        .beforeMailbox = before,
+        .baseState = "mailbox-state-1",
+        .acceptedState = std::nullopt,
+        .errorJson = std::nullopt,
+    };
+    REQUIRE_FALSE(journal.queue(mutation).has_value());
+    REQUIRE_FALSE(journal.accept(mutation, "mailbox-state-2").has_value());
+
+    const auto active = journal.listActiveDestroys("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MailboxDestroyMutationRecord>>(
+        active));
+    CHECK(std::get<std::vector<javelin::jmap::sync::MailboxDestroyMutationRecord>>(active).empty());
+    const auto projected = mailboxes.find("account-1", before.id);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(projected));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(projected).has_value());
+
+    javelin::jmap::cache::SyncStateRepository states{databaseContext.connection};
+    const auto state =
+        states.find({.accountId = "account-1", .objectType = "Mailbox", .queryKey = {}});
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(state));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(state).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(state)->stateToken ==
+          "mailbox-state-2");
+}
+
+TEST_CASE("mailbox mutation rebase preserves destroy over a stale server refresh",
+          "[jmap][sync][mailbox][destroy][rebase]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    seedMailboxState(databaseContext.connection);
+
+    auto before = loadMailboxFixture();
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    javelin::jmap::sync::MailboxMutationJournal journal{databaseContext.connection, mailboxes};
+    const javelin::jmap::sync::MailboxDestroyMutationRecord mutation{
+        .mutationId = "destroy-rebase",
+        .operationGroupId = std::nullopt,
+        .accountId = "account-1",
+        .mailboxId = before.id,
+        .status = javelin::jmap::sync::MutationStatus::Pending,
+        .beforeMailbox = before,
+        .baseState = "mailbox-state-1",
+        .acceptedState = std::nullopt,
+        .errorJson = std::nullopt,
+    };
+    REQUIRE_FALSE(journal.queue(mutation).has_value());
+
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Apply stale mailbox refresh"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    REQUIRE_FALSE(mailboxes.replaceAll(transaction, "account-1", {before}).has_value());
+    REQUIRE_FALSE(journal.rebase(transaction, "account-1").has_value());
+    REQUIRE_FALSE(transaction.commit().has_value());
+
+    const auto projected = mailboxes.find("account-1", before.id);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(projected));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(projected).has_value());
+}
+
+TEST_CASE("mailbox destroy recovery preserves ambiguous projection for reconciliation",
+          "[jmap][sync][mailbox][destroy][recovery]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    seedMailboxState(databaseContext.connection);
+
+    auto before = loadMailboxFixture();
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    javelin::jmap::sync::MailboxMutationJournal journal{databaseContext.connection, mailboxes};
+    const javelin::jmap::sync::MailboxDestroyMutationRecord mutation{
+        .mutationId = "destroy-recover",
+        .operationGroupId = std::nullopt,
+        .accountId = "account-1",
+        .mailboxId = before.id,
+        .status = javelin::jmap::sync::MutationStatus::Pending,
+        .beforeMailbox = before,
+        .baseState = "mailbox-state-1",
+        .acceptedState = std::nullopt,
+        .errorJson = std::nullopt,
+    };
+    REQUIRE_FALSE(journal.queue(mutation).has_value());
+    REQUIRE_FALSE(
+        journal.transition(mutation, javelin::jmap::sync::MutationStatus::InFlight).has_value());
+
+    javelin::jmap::sync::MutationJournalRepository generic{databaseContext.connection};
+    const auto recovered = generic.recoverInFlight();
+    REQUIRE(std::holds_alternative<std::size_t>(recovered));
+    CHECK(std::get<std::size_t>(recovered) == 1);
+
+    const auto active = journal.listActiveDestroys("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MailboxDestroyMutationRecord>>(
+        active));
+    const auto& records =
+        std::get<std::vector<javelin::jmap::sync::MailboxDestroyMutationRecord>>(active);
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().status == javelin::jmap::sync::MutationStatus::Unknown);
+    const auto projected = mailboxes.find("account-1", before.id);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(projected));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(projected).has_value());
+}
+
 TEST_CASE("authoritative email mutation queues for an uncached server message without fabricating "
           "cache data",
           "[jmap][sync][consistency]")

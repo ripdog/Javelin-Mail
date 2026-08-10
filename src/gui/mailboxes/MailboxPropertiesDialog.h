@@ -13,7 +13,13 @@ namespace javelin::gui::mailboxes
       public:
         MailboxPropertiesDialog(QString accountName, QString parentMailboxName,
                                 const javelin::jmap::cache::MailboxTreeItem& mailbox,
+                                bool availableOffline, bool notificationsEnabled,
                                 QWidget* parent = nullptr);
+
+        [[nodiscard]] bool deleteRequested() const;
+
+      private:
+        bool m_deleteRequested = false;
     };
 
 } // namespace javelin::gui::mailboxes

@@ -110,6 +110,8 @@ namespace javelin::app
         deleteTag(std::string accountId, std::string keyword) = 0;
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::MailboxSubscriptionChangeResult>
         setMailboxSubscribed(std::string accountId, std::string mailboxId, bool subscribed) = 0;
+        [[nodiscard]] virtual QCoro::Task<javelin::jmap::MailboxDestroyResult>
+        destroyMailbox(std::string accountId, std::string mailboxId) = 0;
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
         submitPendingEmailMutations(std::string accountId,
                                     std::optional<std::string> operationGroupId = std::nullopt) = 0;

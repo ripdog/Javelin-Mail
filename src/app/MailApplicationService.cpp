@@ -524,7 +524,7 @@ namespace javelin::app
         {
             coordinator->networkBecameReachable();
             schedulePendingEmailMutationReplay(accountId);
-            scheduleMailboxSubscriptionReconciliation(accountId);
+            scheduleMailboxMutationReconciliation(accountId);
         }
         const auto listed = m_workScheduler.list();
         if (const auto* jobs = std::get_if<std::vector<WorkRecord>>(&listed))
@@ -626,7 +626,7 @@ namespace javelin::app
                     if (configuration.settings.connectionId == appliedSettings.connectionId)
                     {
                         applyAccountConfiguration(accountId);
-                        scheduleMailboxSubscriptionReconciliation(accountId);
+                        scheduleMailboxMutationReconciliation(accountId);
                     }
                 }
                 Q_EMIT sessionCapabilitiesChanged(QString::fromStdString(ownerAccountId));
@@ -635,43 +635,79 @@ namespace javelin::app
             });
     }
 
-    void MailApplicationService::scheduleMailboxSubscriptionReconciliation(std::string accountId)
+    void MailApplicationService::scheduleMailboxMutationReconciliation(std::string accountId)
+    {
+        if (!m_configurations.contains(accountId) ||
+            !m_mailboxMutationReconciliationsInFlight.insert(accountId).second)
+            return;
+        auto task = reconcileMailboxMutations(accountId);
+        QCoro::connect(std::move(task), this, [] {});
+    }
+
+    QCoro::Task<void> MailApplicationService::reconcileMailboxMutations(std::string accountId)
     {
         const auto configuration = m_configurations.find(accountId);
-        if (configuration == m_configurations.end() ||
-            !m_mailboxSubscriptionReconciliationsInFlight.insert(accountId).second)
-            return;
+        if (configuration == m_configurations.end())
+        {
+            m_mailboxMutationReconciliationsInFlight.erase(accountId);
+            co_return;
+        }
+        const auto settings = toLiveConnectionSettings(configuration->second.settings);
+        bool changed = false;
+        bool reconciliationFailed = false;
 
-        auto task = m_jmapCore.reconcileMailboxSubscription(
-            toLiveConnectionSettings(configuration->second.settings), accountId);
-        QCoro::connect(
-            std::move(task), this,
-            [this, accountId](javelin::jmap::MailboxSubscriptionChangeResult result)
+        auto subscription = co_await m_jmapCore.reconcileMailboxSubscription(settings, accountId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&subscription))
+        {
+            if (error->code != javelin::jmap::OperationErrorCode::Conflict)
             {
-                m_mailboxSubscriptionReconciliationsInFlight.erase(accountId);
-                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                {
-                    if (error->code != javelin::jmap::OperationErrorCode::Conflict)
-                    {
-                        qWarning().noquote() << "Mailbox visibility reconciliation failed"
-                                             << QString::fromStdString(accountId) << error->message;
-                    }
-                    return;
-                }
-                const auto& change = std::get<javelin::jmap::MailboxSubscriptionChange>(result);
-                if (change.mailboxId.empty())
-                    return;
-                Q_EMIT cacheCommitted(MailCacheChange{
-                    .accountId = QString::fromStdString(accountId),
-                    .mailboxIds = {},
-                    .queryWindows = {},
-                    .searchWindows = {},
-                    .mailboxTreeChanged = true,
-                    .hasNewMail = false,
-                    .optimisticProjection = false,
-                });
-                applyAccountConfiguration(accountId);
-            });
+                qWarning().noquote() << "Mailbox visibility reconciliation failed"
+                                     << QString::fromStdString(accountId) << error->message;
+                reconciliationFailed = true;
+            }
+        }
+        else if (!std::get<javelin::jmap::MailboxSubscriptionChange>(subscription)
+                      .mailboxId.empty())
+        {
+            changed = true;
+        }
+
+        auto destruction = co_await m_jmapCore.reconcileMailboxDestroy(settings, accountId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&destruction))
+        {
+            if (error->code != javelin::jmap::OperationErrorCode::Conflict)
+            {
+                qWarning().noquote() << "Mailbox deletion reconciliation failed"
+                                     << QString::fromStdString(accountId) << error->message;
+                reconciliationFailed = true;
+            }
+        }
+        else if (!std::get<javelin::jmap::MailboxDestroyChange>(destruction).mailboxId.empty())
+        {
+            changed = true;
+        }
+
+        javelin::jmap::sync::MutationJournalRepository mutations{m_databaseConnection};
+        const auto active = mutations.listActive({.accountId = accountId, .dataType = "Mailbox"});
+        const bool unresolved =
+            std::holds_alternative<javelin::jmap::cache::DatabaseError>(active) ||
+            !std::get<std::vector<javelin::jmap::sync::MutationRecord>>(active).empty();
+        if (reconciliationFailed && !unresolved)
+            changed = true;
+
+        m_mailboxMutationReconciliationsInFlight.erase(accountId);
+        if (!changed)
+            co_return;
+        Q_EMIT cacheCommitted(MailCacheChange{
+            .accountId = QString::fromStdString(accountId),
+            .mailboxIds = {},
+            .queryWindows = {},
+            .searchWindows = {},
+            .mailboxTreeChanged = true,
+            .hasNewMail = false,
+            .optimisticProjection = unresolved,
+        });
+        applyAccountConfiguration(accountId);
     }
 
     void MailApplicationService::schedulePendingEmailMutationReplay(std::string accountId)
@@ -1958,7 +1994,46 @@ namespace javelin::app
         publishMailboxTree(unresolved);
         applyAccountConfiguration(accountId);
         if (unresolved)
-            scheduleMailboxSubscriptionReconciliation(accountId);
+            scheduleMailboxMutationReconciliation(accountId);
+        co_return result;
+    }
+
+    QCoro::Task<javelin::jmap::MailboxDestroyResult>
+    MailApplicationService::destroyMailbox(std::string accountId, std::string mailboxId)
+    {
+        const auto configuration = m_configurations.find(accountId);
+        if (configuration == m_configurations.end())
+        {
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::NotFound,
+                .message = i18n("The account is not configured."),
+            };
+        }
+
+        const auto publishMailboxTree = [this, accountId](const bool optimisticProjection)
+        {
+            Q_EMIT cacheCommitted(MailCacheChange{
+                .accountId = QString::fromStdString(accountId),
+                .mailboxIds = {},
+                .queryWindows = {},
+                .searchWindows = {},
+                .mailboxTreeChanged = true,
+                .hasNewMail = false,
+                .optimisticProjection = optimisticProjection,
+            });
+        };
+        auto result = co_await m_jmapCore.destroyMailbox(
+            toLiveConnectionSettings(configuration->second.settings), accountId,
+            std::move(mailboxId), [publishMailboxTree] { publishMailboxTree(true); });
+        javelin::jmap::sync::MutationJournalRepository mutations{m_databaseConnection};
+        const auto active = mutations.listActive({.accountId = accountId, .dataType = "Mailbox"});
+        const bool unresolved =
+            std::holds_alternative<javelin::jmap::cache::DatabaseError>(active) ||
+            !std::get<std::vector<javelin::jmap::sync::MutationRecord>>(active).empty();
+        publishMailboxTree(unresolved);
+        applyAccountConfiguration(accountId);
+        if (unresolved)
+            scheduleMailboxMutationReconciliation(accountId);
         co_return result;
     }
 

@@ -55,6 +55,8 @@ TEST_CASE("mailbox set serializes subscription visibility patches", "[jmap][meth
         .accountId = "u1",
         .ifInState = "mailbox-state-1",
         .update = {{"mailbox-1", {.isSubscribed = false}}},
+        .destroy = {},
+        .onDestroyRemoveEmails = false,
     });
 
     REQUIRE(json.has_value());
@@ -63,11 +65,27 @@ TEST_CASE("mailbox set serializes subscription visibility patches", "[jmap][meth
         R"({"accountId":"u1","ifInState":"mailbox-state-1","update":{"mailbox-1":{"isSubscribed":false}}})");
 }
 
-TEST_CASE("mailbox set responses preserve updated ids and rejection details",
+TEST_CASE("mailbox set serializes safe mailbox destruction", "[jmap][method][mailbox]")
+{
+    const auto json = javelin::jmap::api::serializeMailboxSetRequest({
+        .accountId = "u1",
+        .ifInState = "mailbox-state-1",
+        .update = {},
+        .destroy = {"mailbox-1"},
+        .onDestroyRemoveEmails = false,
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(
+        *json ==
+        R"({"accountId":"u1","ifInState":"mailbox-state-1","destroy":["mailbox-1"],"onDestroyRemoveEmails":false})");
+}
+
+TEST_CASE("mailbox set responses preserve updated and destroyed rejection details",
           "[jmap][method][mailbox]")
 {
     const auto parsed = javelin::jmap::api::parseMailboxSetResponse(
-        R"({"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-2","updated":{"mailbox-1":null},"notUpdated":{"mailbox-2":{"type":"forbidden","description":"Nope","properties":["isSubscribed"]}}})");
+        R"({"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-2","updated":{"mailbox-1":null},"destroyed":["mailbox-3"],"notUpdated":{"mailbox-2":{"type":"forbidden","description":"Nope","properties":["isSubscribed"]}},"notDestroyed":{"mailbox-4":{"type":"mailboxHasEmail","description":"Still occupied","properties":[]}}})");
 
     REQUIRE(parsed.ok());
     REQUIRE(parsed.value.has_value());
@@ -75,11 +93,16 @@ TEST_CASE("mailbox set responses preserve updated ids and rejection details",
     CHECK(parsed.value->oldState == "mailbox-state-1");
     CHECK(parsed.value->newState == std::optional<std::string>{"mailbox-state-2"});
     CHECK(parsed.value->updated == std::vector<std::string>{"mailbox-1"});
+    CHECK(parsed.value->destroyed == std::vector<std::string>{"mailbox-3"});
     REQUIRE(parsed.value->notUpdated.contains("mailbox-2"));
-    const auto& error = parsed.value->notUpdated.at("mailbox-2");
-    CHECK(error.type == "forbidden");
-    CHECK(error.description == std::optional<std::string>{"Nope"});
-    CHECK(error.properties == std::vector<std::string>{"isSubscribed"});
+    const auto& updateError = parsed.value->notUpdated.at("mailbox-2");
+    CHECK(updateError.type == "forbidden");
+    CHECK(updateError.description == std::optional<std::string>{"Nope"});
+    CHECK(updateError.properties == std::vector<std::string>{"isSubscribed"});
+    REQUIRE(parsed.value->notDestroyed.contains("mailbox-4"));
+    const auto& destroyError = parsed.value->notDestroyed.at("mailbox-4");
+    CHECK(destroyError.type == "mailboxHasEmail");
+    CHECK(destroyError.description == std::optional<std::string>{"Still occupied"});
 }
 
 TEST_CASE("identity set creates serialize server-backed signature variants",

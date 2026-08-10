@@ -4214,9 +4214,48 @@ namespace javelin::gui::shell
                                      : QString::fromStdString(parentMailbox->name);
                 }
 
+                const bool availableOffline =
+                    m_settings.syncedMailboxIds(accountId).contains(mailboxId);
+                const bool notificationsEnabled =
+                    m_settings.notificationMailboxIds(accountId).contains(mailboxId);
                 javelin::gui::mailboxes::MailboxPropertiesDialog dialog{
-                    std::move(accountName), std::move(parentName), *mailbox, this};
+                    std::move(accountName), std::move(parentName), *mailbox,
+                    availableOffline,       notificationsEnabled,  this};
                 dialog.exec();
+                if (!dialog.deleteRequested())
+                    return;
+
+                auto task = m_mailCommandPort.destroyMailbox(accountId.toStdString(),
+                                                             mailboxId.toStdString());
+                QCoro::connect(
+                    std::move(task), this,
+                    [this, accountId, mailboxId](javelin::jmap::MailboxDestroyResult destroyResult)
+                    {
+                        if (const auto* error =
+                                std::get_if<javelin::jmap::OperationError>(&destroyResult))
+                        {
+                            presentError(*error);
+                            return;
+                        }
+
+                        const auto& snapshot = m_settings.snapshot();
+                        javelin::protocol::SettingsUpdate update;
+                        update.syncedMailboxSelections = withoutMailboxSelection(
+                            snapshot.syncedMailboxSelections, accountId, mailboxId);
+                        update.notificationMailboxSelections = withoutMailboxSelection(
+                            snapshot.notificationMailboxSelections, accountId, mailboxId);
+                        if (const auto error =
+                                m_settings.update(snapshot.revision, std::move(update)))
+                        {
+                            m_statusBar->showMessage(
+                                i18n("Mailbox deleted, but its local background settings could not "
+                                     "be updated: %1",
+                                     error->detail),
+                                10000);
+                            return;
+                        }
+                        m_statusBar->showMessage(i18n("Mailbox deleted."), 3000);
+                    });
             });
         menu.exec(m_mailboxView->viewport()->mapToGlobal(position));
     }

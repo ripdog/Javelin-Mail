@@ -209,6 +209,7 @@ namespace javelin::protocol
         MailSaveTagDefinition,
         MailDeleteTag,
         MailSetMailboxSubscribed,
+        MailDestroyMailbox,
         ComposeScheduleSend,
         MailQueueSetSelectionFlagged,
         Last = MailQueueSetSelectionFlagged,

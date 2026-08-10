@@ -77,6 +77,12 @@ namespace javelin::app
                                                           std::move(mailboxId), subscribed);
     }
 
+    QCoro::Task<javelin::jmap::MailboxDestroyResult>
+    MailCommandService::destroyMailbox(std::string accountId, std::string mailboxId)
+    {
+        co_return co_await m_service.destroyMailbox(std::move(accountId), std::move(mailboxId));
+    }
+
     QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
     MailCommandService::submitPendingEmailMutations(std::string accountId,
                                                     std::optional<std::string> operationGroupId)

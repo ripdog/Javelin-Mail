@@ -77,6 +77,8 @@ namespace javelin::jmap::api
         std::string accountId;
         std::optional<std::string> ifInState;
         std::unordered_map<std::string, MailboxSetUpdate> update;
+        std::vector<std::string> destroy;
+        bool onDestroyRemoveEmails = false;
     };
 
     struct MailboxSetResponse
@@ -85,7 +87,9 @@ namespace javelin::jmap::api
         std::string oldState;
         std::optional<std::string> newState;
         std::vector<std::string> updated;
+        std::vector<std::string> destroyed;
         std::unordered_map<std::string, MailboxSetError> notUpdated;
+        std::unordered_map<std::string, MailboxSetError> notDestroyed;
     };
 
     struct IdentitySetCreate

@@ -32,7 +32,9 @@ namespace
     {
         std::string accountId;
         std::optional<std::string> ifInState;
-        std::unordered_map<std::string, RawMailboxSetUpdate> update;
+        std::optional<std::unordered_map<std::string, RawMailboxSetUpdate>> update;
+        std::optional<std::vector<std::string>> destroy;
+        std::optional<bool> onDestroyRemoveEmails;
     };
 
     struct RawMailboxSetError
@@ -48,7 +50,9 @@ namespace
         std::optional<std::string> oldState;
         std::optional<std::string> newState;
         std::optional<std::unordered_map<std::string, glz::generic>> updated;
+        std::optional<std::vector<std::string>> destroyed;
         std::optional<std::unordered_map<std::string, RawMailboxSetError>> notUpdated;
+        std::optional<std::unordered_map<std::string, RawMailboxSetError>> notDestroyed;
     };
 
     struct RawIdentityGetResponse
@@ -419,7 +423,8 @@ template <> struct glz::meta<RawMailboxSetRequest>
     using T = RawMailboxSetRequest;
 
     static constexpr auto value =
-        glz::object("accountId", &T::accountId, "ifInState", &T::ifInState, "update", &T::update);
+        glz::object("accountId", &T::accountId, "ifInState", &T::ifInState, "update", &T::update,
+                    "destroy", &T::destroy, "onDestroyRemoveEmails", &T::onDestroyRemoveEmails);
 };
 
 template <> struct glz::meta<RawMailboxSetError>
@@ -436,7 +441,8 @@ template <> struct glz::meta<RawMailboxSetResponse>
 
     static constexpr auto value =
         glz::object("accountId", &T::accountId, "oldState", &T::oldState, "newState", &T::newState,
-                    "updated", &T::updated, "notUpdated", &T::notUpdated);
+                    "updated", &T::updated, "destroyed", &T::destroyed, "notUpdated",
+                    &T::notUpdated, "notDestroyed", &T::notDestroyed);
 };
 
 template <> struct glz::meta<RawIdentityGetResponse>
@@ -924,16 +930,27 @@ namespace javelin::jmap::api
 
     std::optional<std::string> serializeMailboxSetRequest(const MailboxSetRequest& request)
     {
-        std::unordered_map<std::string, RawMailboxSetUpdate> update;
-        update.reserve(request.update.size());
-        for (const auto& [mailboxId, patch] : request.update)
+        std::optional<std::unordered_map<std::string, RawMailboxSetUpdate>> update;
+        if (!request.update.empty())
         {
-            update.emplace(mailboxId, RawMailboxSetUpdate{.isSubscribed = patch.isSubscribed});
+            std::unordered_map<std::string, RawMailboxSetUpdate> values;
+            values.reserve(request.update.size());
+            for (const auto& [mailboxId, patch] : request.update)
+            {
+                values.emplace(mailboxId, RawMailboxSetUpdate{.isSubscribed = patch.isSubscribed});
+            }
+            update = std::move(values);
         }
         return serializeMethod(RawMailboxSetRequest{
             .accountId = request.accountId,
             .ifInState = request.ifInState,
             .update = std::move(update),
+            .destroy = request.destroy.empty()
+                           ? std::nullopt
+                           : std::optional<std::vector<std::string>>{request.destroy},
+            .onDestroyRemoveEmails = request.destroy.empty()
+                                         ? std::nullopt
+                                         : std::optional<bool>{request.onDestroyRemoveEmails},
         });
     }
 
@@ -1366,7 +1383,9 @@ namespace javelin::jmap::api
             .oldState = parsed.value->oldState.value_or(std::string{}),
             .newState = std::move(parsed.value->newState),
             .updated = {},
+            .destroyed = parsed.value->destroyed.value_or(std::vector<std::string>{}),
             .notUpdated = {},
+            .notDestroyed = {},
         };
         for (const auto& [mailboxId, ignored] :
              parsed.value->updated.value_or(std::unordered_map<std::string, glz::generic>{}))
@@ -1378,6 +1397,15 @@ namespace javelin::jmap::api
                  std::unordered_map<std::string, RawMailboxSetError>{}))
         {
             response.notUpdated.emplace(
+                std::move(mailboxId),
+                MailboxSetError{.type = std::move(rejected.type),
+                                .description = std::move(rejected.description),
+                                .properties = std::move(rejected.properties)});
+        }
+        for (auto& [mailboxId, rejected] : parsed.value->notDestroyed.value_or(
+                 std::unordered_map<std::string, RawMailboxSetError>{}))
+        {
+            response.notDestroyed.emplace(
                 std::move(mailboxId),
                 MailboxSetError{.type = std::move(rejected.type),
                                 .description = std::move(rejected.description),

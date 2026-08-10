@@ -217,6 +217,28 @@ namespace
                           .has_value());
     }
 
+    void seedDeletableMailbox(javelin::jmap::cache::DatabaseConnection& connection,
+                              const std::uint64_t totalEmails = 0, const bool mayDelete = true)
+    {
+        const auto parsed = javelin::jmap::domain::parseMailbox(
+            javelin::tests::loadFixture("jmap/entities/mailbox.json"));
+        REQUIRE(parsed.ok());
+        REQUIRE(parsed.value.has_value());
+        auto mailbox = *parsed.value;
+        mailbox.totalEmails = totalEmails;
+        mailbox.unreadEmails = 0;
+        mailbox.totalThreads = totalEmails;
+        mailbox.unreadThreads = 0;
+        mailbox.myRights.mayDelete = mayDelete;
+        javelin::jmap::cache::MailboxRepository mailboxes{connection};
+        REQUIRE_FALSE(mailboxes.replaceAll("u1", {mailbox}).has_value());
+        javelin::jmap::cache::SyncStateRepository states{connection};
+        REQUIRE_FALSE(states
+                          .upsert({.accountId = "u1", .objectType = "Mailbox", .queryKey = {}},
+                                  "mailbox-state-1")
+                          .has_value());
+    }
+
     void seedEmail(javelin::jmap::cache::DatabaseConnection& connection)
     {
         QSqlQuery query{connection.database()};
@@ -2064,7 +2086,7 @@ TEST_CASE("JmapCore reconciles an ambiguous Hide before retrying Mailbox set",
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
         .statusCode = 200,
         .body = QByteArrayLiteral(
-            R"({"methodResponses":[["Mailbox/get",{"accountId":"u1","state":"mailbox-state-1","list":[{"id":"mbx-inbox","name":"Inbox","parentId":null,"role":"inbox","sortOrder":10,"totalEmails":125,"unreadEmails":7,"totalThreads":98,"unreadThreads":5,"isSubscribed":true,"myRights":{"mayReadItems":true,"mayAddItems":true,"mayRemoveItems":true,"maySetSeen":true,"maySetKeywords":true,"mayCreateChild":false,"mayRename":false,"mayDelete":false,"maySubmit":true}}],"notFound":[]},"mailbox-subscription-reconcile"]],"createdIds":{},"sessionState":"session-state-2"})"),
+            R"({"methodResponses":[["Mailbox/get",{"accountId":"u1","state":"mailbox-state-1","list":[{"id":"mbx-inbox","name":"Inbox","parentId":null,"role":"inbox","sortOrder":10,"totalEmails":125,"unreadEmails":7,"totalThreads":98,"unreadThreads":5,"isSubscribed":true,"myRights":{"mayReadItems":true,"mayAddItems":true,"mayRemoveItems":true,"maySetSeen":true,"maySetKeywords":true,"mayCreateChild":false,"mayRename":false,"mayDelete":false,"maySubmit":true}}],"notFound":[]},"mailbox-mutation-reconcile"]],"createdIds":{},"sessionState":"session-state-2"})"),
     });
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
         .statusCode = 200,
@@ -2086,6 +2108,321 @@ TEST_CASE("JmapCore reconciles an ambiguous Hide before retrying Mailbox set",
             settled));
     CHECK(std::get<std::vector<javelin::jmap::sync::MailboxSubscriptionMutationRecord>>(settled)
               .empty());
+}
+
+TEST_CASE("JmapCore refuses unsafe mailbox deletion before issuing Mailbox set",
+          "[jmap][core][mailbox][destroy][safety]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    SECTION("server rights deny deletion")
+    {
+        auto databaseContext = makeDatabaseContext();
+        javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+        REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
+        seedDeletableMailbox(databaseContext.connection, 0, false);
+        FakeTransport transport;
+        javelin::jmap::JmapCore core{databaseContext.connection, transport,
+                                     transport.methodTransport};
+        const auto result = QCoro::waitFor(
+            core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                 .loginEmail = "alice@example.com",
+                                 .apiKey = "access-token"},
+                                "u1", "mbx-inbox"));
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+              javelin::jmap::OperationErrorCode::PermissionDenied);
+        CHECK(transport.requests.empty());
+    }
+
+    SECTION("mailbox still contains messages")
+    {
+        auto databaseContext = makeDatabaseContext();
+        javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+        REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
+        seedDeletableMailbox(databaseContext.connection, 1, true);
+        FakeTransport transport;
+        javelin::jmap::JmapCore core{databaseContext.connection, transport,
+                                     transport.methodTransport};
+        const auto result = QCoro::waitFor(
+            core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                 .loginEmail = "alice@example.com",
+                                 .apiKey = "access-token"},
+                                "u1", "mbx-inbox"));
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+              javelin::jmap::OperationErrorCode::PreconditionFailed);
+        CHECK(transport.requests.empty());
+    }
+
+    SECTION("mailbox has a child")
+    {
+        auto databaseContext = makeDatabaseContext();
+        javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+        REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
+        seedDeletableMailbox(databaseContext.connection);
+        const auto parsed = javelin::jmap::domain::parseMailbox(
+            javelin::tests::loadFixture("jmap/entities/mailbox.json"));
+        REQUIRE(parsed.ok());
+        REQUIRE(parsed.value.has_value());
+        auto child = *parsed.value;
+        child.id = "mbx-child";
+        child.name = "Child";
+        child.parentId = "mbx-inbox";
+        child.role = std::nullopt;
+        child.totalEmails = 0;
+        child.unreadEmails = 0;
+        child.totalThreads = 0;
+        child.unreadThreads = 0;
+        javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+        REQUIRE_FALSE(mailboxes.upsertMany("u1", {child}).has_value());
+
+        FakeTransport transport;
+        javelin::jmap::JmapCore core{databaseContext.connection, transport,
+                                     transport.methodTransport};
+        const auto result = QCoro::waitFor(
+            core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                 .loginEmail = "alice@example.com",
+                                 .apiKey = "access-token"},
+                                "u1", "mbx-inbox"));
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+              javelin::jmap::OperationErrorCode::PreconditionFailed);
+        CHECK(transport.requests.empty());
+    }
+}
+
+TEST_CASE("JmapCore deletes an empty mailbox with optimistic Mailbox set semantics",
+          "[jmap][core][mailbox][destroy][mutation-journal]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+    REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
+    seedDeletableMailbox(databaseContext.connection);
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral(
+            R"({"methodResponses":[["Mailbox/set",{"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-2","destroyed":["mbx-inbox"],"notDestroyed":{}},"mailbox-destroy-set"]],"createdIds":{},"sessionState":"session-state-2"})"),
+    });
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    bool projected = false;
+    const auto result = QCoro::waitFor(
+        core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                             .loginEmail = "alice@example.com",
+                             .apiKey = "access-token"},
+                            "u1", "mbx-inbox", [&projected] { projected = true; }));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::MailboxDestroyChange>(result));
+    CHECK(projected);
+    REQUIRE(transport.requests.size() == 1);
+    CHECK(transport.requests.front().body.contains(
+        QByteArrayLiteral("\"ifInState\":\"mailbox-state-1\"")));
+    CHECK(
+        transport.requests.front().body.contains(QByteArrayLiteral("\"destroy\":[\"mbx-inbox\"]")));
+    CHECK(transport.requests.front().body.contains(
+        QByteArrayLiteral("\"onDestroyRemoveEmails\":false")));
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    const auto mailbox = mailboxes.find("u1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(mailbox));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailbox).has_value());
+}
+
+TEST_CASE("JmapCore restores a mailbox when the server rejects deletion",
+          "[jmap][core][mailbox][destroy][mutation-journal]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+    REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
+    seedDeletableMailbox(databaseContext.connection);
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral(
+            R"({"methodResponses":[["Mailbox/set",{"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-1","destroyed":[],"notDestroyed":{"mbx-inbox":{"type":"mailboxHasEmail"}}},"mailbox-destroy-set"]],"createdIds":{},"sessionState":"session-state-2"})"),
+    });
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(
+        core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                             .loginEmail = "alice@example.com",
+                             .apiKey = "access-token"},
+                            "u1", "mbx-inbox"));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+    CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+          javelin::jmap::OperationErrorCode::PreconditionFailed);
+
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    const auto mailbox = mailboxes.find("u1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(mailbox));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailbox).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailbox)->myRights.mayDelete);
+}
+
+TEST_CASE("JmapCore reconciles an ambiguous mailbox deletion before retrying",
+          "[jmap][core][mailbox][destroy][mutation-journal][recovery]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+    REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
+    seedDeletableMailbox(databaseContext.connection);
+
+    FakeTransport transport;
+    transport.invokeDispatched = true;
+    transport.queuedResults.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "Connection closed after request dispatch",
+    });
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto ambiguous = QCoro::waitFor(
+        core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                             .loginEmail = "alice@example.com",
+                             .apiKey = "access-token"},
+                            "u1", "mbx-inbox"));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(ambiguous));
+
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    javelin::jmap::sync::MailboxMutationJournal journal{databaseContext.connection, mailboxes};
+    const auto active = journal.listActiveDestroys("u1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MailboxDestroyMutationRecord>>(
+        active));
+    const auto& records =
+        std::get<std::vector<javelin::jmap::sync::MailboxDestroyMutationRecord>>(active);
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().status == javelin::jmap::sync::MutationStatus::Unknown);
+    const auto projected = mailboxes.find("u1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(projected));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(projected).has_value());
+
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral(
+            R"({"methodResponses":[["Mailbox/get",{"accountId":"u1","state":"mailbox-state-1","list":[{"id":"mbx-inbox","name":"Inbox","parentId":null,"role":"inbox","sortOrder":10,"totalEmails":0,"unreadEmails":0,"totalThreads":0,"unreadThreads":0,"isSubscribed":true,"myRights":{"mayReadItems":true,"mayAddItems":true,"mayRemoveItems":true,"maySetSeen":true,"maySetKeywords":true,"mayCreateChild":false,"mayRename":false,"mayDelete":true,"maySubmit":true}}],"notFound":[]},"mailbox-mutation-reconcile"]],"createdIds":{},"sessionState":"session-state-2"})"),
+    });
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral(
+            R"({"methodResponses":[["Mailbox/set",{"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-2","destroyed":["mbx-inbox"],"notDestroyed":{}},"mailbox-destroy-set"]],"createdIds":{},"sessionState":"session-state-3"})"),
+    });
+    const auto recovered = QCoro::waitFor(
+        core.reconcileMailboxDestroy({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                      .loginEmail = "alice@example.com",
+                                      .apiKey = "access-token"},
+                                     "u1"));
+    REQUIRE(std::holds_alternative<javelin::jmap::MailboxDestroyChange>(recovered));
+    CHECK(transport.requests.size() == 3);
+    CHECK(transport.requests[1].body.contains(QByteArrayLiteral("Mailbox/get")));
+    CHECK(transport.requests[2].body.contains(QByteArrayLiteral("Mailbox/set")));
+    const auto settled = journal.listActiveDestroys("u1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MailboxDestroyMutationRecord>>(
+        settled));
+    CHECK(
+        std::get<std::vector<javelin::jmap::sync::MailboxDestroyMutationRecord>>(settled).empty());
+}
+
+TEST_CASE("JmapCore does not repeat an ambiguous deletion already accepted by the server",
+          "[jmap][core][mailbox][destroy][mutation-journal][recovery]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+    REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
+    seedDeletableMailbox(databaseContext.connection);
+
+    FakeTransport transport;
+    transport.invokeDispatched = true;
+    transport.queuedResults.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "Connection closed after request dispatch",
+    });
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto ambiguous = QCoro::waitFor(
+        core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                             .loginEmail = "alice@example.com",
+                             .apiKey = "access-token"},
+                            "u1", "mbx-inbox"));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(ambiguous));
+
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral(
+            R"({"methodResponses":[["Mailbox/get",{"accountId":"u1","state":"mailbox-state-2","list":[],"notFound":["mbx-inbox"]},"mailbox-mutation-reconcile"]],"createdIds":{},"sessionState":"session-state-2"})"),
+    });
+    const auto recovered = QCoro::waitFor(
+        core.reconcileMailboxDestroy({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                      .loginEmail = "alice@example.com",
+                                      .apiKey = "access-token"},
+                                     "u1"));
+    REQUIRE(std::holds_alternative<javelin::jmap::MailboxDestroyChange>(recovered));
+    CHECK(transport.requests.size() == 2);
+    CHECK(transport.requests[1].body.contains(QByteArrayLiteral("Mailbox/get")));
+
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    javelin::jmap::sync::MailboxMutationJournal journal{databaseContext.connection, mailboxes};
+    const auto settled = journal.listActiveDestroys("u1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MailboxDestroyMutationRecord>>(
+        settled));
+    CHECK(
+        std::get<std::vector<javelin::jmap::sync::MailboxDestroyMutationRecord>>(settled).empty());
+}
+
+TEST_CASE("JmapCore restores an ambiguous deletion when the authoritative mailbox advanced",
+          "[jmap][core][mailbox][destroy][mutation-journal][recovery]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+    REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
+    seedDeletableMailbox(databaseContext.connection);
+
+    FakeTransport transport;
+    transport.invokeDispatched = true;
+    transport.queuedResults.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "Connection closed after request dispatch",
+    });
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto ambiguous = QCoro::waitFor(
+        core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                             .loginEmail = "alice@example.com",
+                             .apiKey = "access-token"},
+                            "u1", "mbx-inbox"));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(ambiguous));
+
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral(
+            R"({"methodResponses":[["Mailbox/get",{"accountId":"u1","state":"mailbox-state-2","list":[{"id":"mbx-inbox","name":"Inbox","parentId":null,"role":"inbox","sortOrder":10,"totalEmails":1,"unreadEmails":1,"totalThreads":1,"unreadThreads":1,"isSubscribed":true,"myRights":{"mayReadItems":true,"mayAddItems":true,"mayRemoveItems":true,"maySetSeen":true,"maySetKeywords":true,"mayCreateChild":false,"mayRename":false,"mayDelete":true,"maySubmit":true}}],"notFound":[]},"mailbox-mutation-reconcile"]],"createdIds":{},"sessionState":"session-state-2"})"),
+    });
+    const auto recovered = QCoro::waitFor(
+        core.reconcileMailboxDestroy({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                      .loginEmail = "alice@example.com",
+                                      .apiKey = "access-token"},
+                                     "u1"));
+    REQUIRE(std::holds_alternative<javelin::jmap::MailboxDestroyChange>(recovered));
+    CHECK(transport.requests.size() == 2);
+
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    const auto restored = mailboxes.find("u1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(restored));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(restored).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::domain::Mailbox>>(restored)->totalEmails == 1);
+    javelin::jmap::sync::MailboxMutationJournal journal{databaseContext.connection, mailboxes};
+    const auto settled = journal.listActiveDestroys("u1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MailboxDestroyMutationRecord>>(
+        settled));
+    CHECK(
+        std::get<std::vector<javelin::jmap::sync::MailboxDestroyMutationRecord>>(settled).empty());
 }
 
 TEST_CASE("JmapCore preserves ambiguous Email mutation outcomes for reconciliation",

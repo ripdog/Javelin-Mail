@@ -176,6 +176,25 @@ TEST_CASE("remote codec preserves structured undo failures", "[app][remote-codec
     CHECK(value->failure->acknowledgeAndRemove);
 }
 
+TEST_CASE("remote codec round-trips mailbox destroy results", "[app][remote-codec][mailbox]")
+{
+    const javelin::jmap::MailboxDestroyResult result{
+        javelin::jmap::MailboxDestroyChange{.accountId = "account-1", .mailboxId = "mailbox-1"}};
+
+    const auto encoded = javelin::app::remote::encode(result);
+    const auto* payload = std::get_if<QByteArray>(&encoded);
+    REQUIRE(payload != nullptr);
+
+    const auto decoded =
+        javelin::app::remote::decodeValue<javelin::jmap::MailboxDestroyResult>(*payload);
+    const auto* value = std::get_if<javelin::jmap::MailboxDestroyResult>(&decoded);
+    REQUIRE(value != nullptr);
+    const auto* change = std::get_if<javelin::jmap::MailboxDestroyChange>(value);
+    REQUIRE(change != nullptr);
+    CHECK(change->accountId == "account-1");
+    CHECK(change->mailboxId == "mailbox-1");
+}
+
 TEST_CASE("remote codec round-trips developer mailbox diagnostics",
           "[app][remote-codec][developer-diagnostics]")
 {

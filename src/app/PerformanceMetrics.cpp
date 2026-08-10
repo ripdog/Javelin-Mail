@@ -265,6 +265,8 @@ namespace javelin::app
             return QStringLiteral("mail_delete_tag");
         case Kind::MailSetMailboxSubscribed:
             return QStringLiteral("mail_set_mailbox_subscribed");
+        case Kind::MailDestroyMailbox:
+            return QStringLiteral("mail_destroy_mailbox");
         case Kind::MailSubmitPending:
             return QStringLiteral("mail_submit_pending");
         case Kind::SieveList:
