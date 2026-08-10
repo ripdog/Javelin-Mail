@@ -850,8 +850,10 @@ namespace javelin::jmap
             javelin::jmap::api::RequestBuilder builder;
             builder.useCore().useMail();
             const auto setHandle = builder.call(*request, "mailbox-create-set");
+            const auto createdIdPath =
+                "/" + javelin::jmap::api::patchPath("created", mutation.creationId) + "/id";
             const auto getRequest = javelin::jmap::api::mailboxGet(
-                javelin::jmap::api::getRequestFrom(accountId, setHandle, "/created/*/id"));
+                javelin::jmap::api::getRequestFrom(accountId, setHandle, createdIdPath));
             if (!getRequest.has_value())
             {
                 if (const auto error = journal.reject(mutation))

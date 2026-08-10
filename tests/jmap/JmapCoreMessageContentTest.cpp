@@ -2328,7 +2328,10 @@ TEST_CASE("JmapCore creates a top-level mailbox with an optimistic pending proje
     CHECK(transport.requests.front().body.contains(QByteArrayLiteral("\"Mailbox/set\"")));
     CHECK(transport.requests.front().body.contains(QByteArrayLiteral("\"Mailbox/get\"")));
     CHECK(transport.requests.front().body.contains(QByteArrayLiteral("\"name\":\"Projects\"")));
-    CHECK(transport.requests.front().body.contains(QByteArrayLiteral("/created/*/id")));
+    const auto requestCreationId = mailboxCreationId(transport.requests.front());
+    CHECK(transport.requests.front().body.contains(
+        QByteArray::fromStdString("/created/" + requestCreationId + "/id")));
+    CHECK_FALSE(transport.requests.front().body.contains(QByteArrayLiteral("/created/*/id")));
 
     javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
     const auto stored = mailboxes.find("u1", "mbx-projects");
