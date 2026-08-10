@@ -84,6 +84,7 @@ namespace javelin::gui::calendar
         [[nodiscard]] QDate cellDate(int index) const;
         [[nodiscard]] int cellCount() const;
         [[nodiscard]] int overflowCount(const QDate& date) const;
+        [[nodiscard]] QColor calendarColor(const QString& calendarId) const;
         [[nodiscard]] QMenu* calendarMenu() const;
 
       public Q_SLOTS:
@@ -92,11 +93,13 @@ namespace javelin::gui::calendar
         void showPreviousMonth();
         void showNextMonth();
         void showToday();
+        void setSelectedDateFromAgenda(const QDate& date);
 
       Q_SIGNALS:
         void visibleIntervalChanged(const QDate& start, const QDate& end);
         void selectionChanged(const QDate& date);
-        void dayAgendaRequested(const QDate& date);
+        void dayAgendaRequested(const QDate& date, const QString& accountId, const QString& eventId,
+                                const QString& recurrenceId);
         void eventActivated(const QString& accountId, const QString& eventId,
                             const QString& recurrenceId);
         void emptyTimeActivated(const QDate& date);
@@ -121,8 +124,7 @@ namespace javelin::gui::calendar
         void rebuildCalendarMenu();
         void applyCalendarColors();
         [[nodiscard]] QColor effectiveCalendarColor(const std::string& calendarId) const;
-        void selectDate(const QDate& date, bool activate);
-        void showDayAgenda(const QDate& date);
+        void selectDate(const QDate& date);
         void scheduleEventRebuild();
         void reloadCalendarColors();
         [[nodiscard]] DayCellWidget* cellForDate(const QDate& date) const;

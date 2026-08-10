@@ -554,7 +554,7 @@ namespace javelin::gui::calendar
             auto* cell = dynamic_cast<DayCellWidget*>(childItem->object());
             if (cell == nullptr)
                 return false;
-            calendar->selectDate(cell->date(), false);
+            calendar->selectDate(cell->date());
             return true;
         }
 
@@ -683,7 +683,7 @@ namespace javelin::gui::calendar
             auto* calendar = calendarWidget();
             if (cell == nullptr || calendar == nullptr)
                 return;
-            calendar->selectDate(cell->date(), false);
+            calendar->selectDate(cell->date());
             calendar->setFocus(Qt::OtherFocusReason);
         }
 
@@ -824,13 +824,15 @@ namespace javelin::gui::calendar
         for (int index = 0; index < 42; ++index)
         {
             auto* cell = new DayCellWidget(index, this);
-            cell->clicked = [this](const QDate& date) { selectDate(date, true); };
+            cell->clicked = [this](const QDate& date)
+            {
+                selectDate(date);
+                Q_EMIT dayAgendaRequested(date, {}, {}, {});
+            };
             m_cells[static_cast<std::size_t>(index)] = cell;
             m_grid->addWidget(cell, 1 + index / 7, index % 7);
         }
         outer->addLayout(m_grid, 1);
-        connect(this, &MonthCalendarWidget::dayAgendaRequested, this,
-                &MonthCalendarWidget::showDayAgenda);
         rebuildDates();
     }
 
@@ -1182,6 +1184,11 @@ namespace javelin::gui::calendar
         return 0;
     }
 
+    QColor MonthCalendarWidget::calendarColor(const QString& calendarId) const
+    {
+        return effectiveCalendarColor(calendarId.toStdString());
+    }
+
     QMenu* MonthCalendarWidget::calendarMenu() const
     {
         return m_calendarMenu;
@@ -1214,6 +1221,11 @@ namespace javelin::gui::calendar
             Q_EMIT selectionChanged(m_selectedDate);
     }
 
+    void MonthCalendarWidget::setSelectedDateFromAgenda(const QDate& date)
+    {
+        selectDate(date);
+    }
+
     void MonthCalendarWidget::keyPressEvent(QKeyEvent* event)
     {
         int days = 0;
@@ -1237,7 +1249,7 @@ namespace javelin::gui::calendar
         }
         else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
         {
-            Q_EMIT emptyTimeActivated(m_selectedDate);
+            Q_EMIT dayAgendaRequested(m_selectedDate, {}, {}, {});
             return;
         }
         else
@@ -1245,7 +1257,7 @@ namespace javelin::gui::calendar
             QWidget::keyPressEvent(event);
             return;
         }
-        selectDate(m_selectedDate.addDays(days), false);
+        selectDate(m_selectedDate.addDays(days));
     }
 
     void MonthCalendarWidget::focusInEvent(QFocusEvent* event)
@@ -1348,10 +1360,11 @@ namespace javelin::gui::calendar
                 const auto* event = matching[eventIndex];
                 m_cells[static_cast<std::size_t>(index)]->addEvent(
                     *event, date,
-                    [this, event]
+                    [this, event, date]
                     {
-                        Q_EMIT eventActivated(
-                            QString::fromStdString(event->accountId),
+                        selectDate(date);
+                        Q_EMIT dayAgendaRequested(
+                            date, QString::fromStdString(event->accountId),
                             QString::fromStdString(event->eventId),
                             QString::fromStdString(event->recurrenceId.value_or(std::string{})));
                     });
@@ -1359,13 +1372,18 @@ namespace javelin::gui::calendar
             if (matching.size() > visible)
             {
                 const auto overflow = static_cast<int>(matching.size() - visible);
-                m_cells[static_cast<std::size_t>(index)]->addOverflow(
-                    overflow, [this, date] { Q_EMIT dayAgendaRequested(date); });
+                m_cells[static_cast<std::size_t>(index)]->addOverflow(overflow,
+                                                                      [this, date]
+                                                                      {
+                                                                          selectDate(date);
+                                                                          Q_EMIT dayAgendaRequested(
+                                                                              date, {}, {}, {});
+                                                                      });
             }
         }
     }
 
-    void MonthCalendarWidget::selectDate(const QDate& date, const bool activate)
+    void MonthCalendarWidget::selectDate(const QDate& date)
     {
         if (!date.isValid())
             return;
@@ -1381,8 +1399,6 @@ namespace javelin::gui::calendar
             notifyAccessibilitySelectionChanged();
         if (m_selectedDate != previousSelection)
             Q_EMIT selectionChanged(date);
-        if (activate)
-            Q_EMIT emptyTimeActivated(date);
     }
 
     DayCellWidget* MonthCalendarWidget::cellForDate(const QDate& date) const
@@ -1432,32 +1448,4 @@ namespace javelin::gui::calendar
         }
     }
 
-    void MonthCalendarWidget::showDayAgenda(const QDate& date)
-    {
-        auto* dialog = new QDialog(this);
-        dialog->setAttribute(Qt::WA_DeleteOnClose);
-        dialog->setWindowTitle(m_locale.toString(date, QLocale::LongFormat));
-        dialog->setModal(true);
-        auto* layout = new QVBoxLayout(dialog);
-        for (const auto& event : m_events)
-        {
-            if (event.start.date() > date || eventLastDate(event) < date)
-                continue;
-            auto* chip = new EventChip(event, date, dialog);
-            connect(chip, &QToolButton::clicked, dialog,
-                    [this, dialog, accountId = event.accountId, eventId = event.eventId,
-                     recurrenceId = event.recurrenceId]
-                    {
-                        dialog->close();
-                        Q_EMIT eventActivated(
-                            QString::fromStdString(accountId), QString::fromStdString(eventId),
-                            QString::fromStdString(recurrenceId.value_or(std::string{})));
-                    });
-            layout->addWidget(chip);
-        }
-        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
-        connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
-        layout->addWidget(buttons);
-        dialog->open();
-    }
 } // namespace javelin::gui::calendar

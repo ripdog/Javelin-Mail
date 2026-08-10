@@ -1,7 +1,9 @@
 #include "gui/shell/CalendarTabController.h"
 
 #include "gui/calendar/CalendarPresentation.h"
+#include "gui/calendar/DayAgendaDialog.h"
 #include "gui/calendar/EventDialog.h"
+#include "gui/calendar/MonthCalendarLayout.h"
 #include "gui/calendar/MonthCalendarWidget.h"
 #include "gui/settings/GuiSettings.h"
 #include "jmap/calendar/CalendarEventEditing.h"
@@ -23,6 +25,7 @@
 #include <QStackedWidget>
 #include <QTime>
 #include <QTimeZone>
+#include <QTimer>
 
 #include <iterator>
 #include <ranges>
@@ -170,6 +173,116 @@ namespace javelin::gui::shell
                 return std::string{"declined"};
             return std::nullopt;
         }
+
+        [[nodiscard]] std::vector<javelin::gui::calendar::DayAgendaEvent>
+        buildDayAgendaEvents(javelin::gui::settings::GuiSettings& settings,
+                             javelin::jmap::calendar::CalendarReader& calendarReader,
+                             javelin::gui::calendar::MonthCalendarWidget& widget,
+                             const std::vector<javelin::jmap::cache::CalendarAccount>& accounts,
+                             const QDate& date)
+        {
+            std::vector<javelin::gui::calendar::DayAgendaEvent> result;
+            const javelin::jmap::calendar::VisibleInterval interval{
+                .start = {.value = widget.visibleStart().toString(Qt::ISODate).toStdString() +
+                                   "T00:00:00"},
+                .end = {.value =
+                            widget.visibleEnd().toString(Qt::ISODate).toStdString() + "T00:00:00"}};
+            const javelin::jmap::calendar::TimeZoneId timeZone{
+                .value = QTimeZone::systemTimeZoneId().toStdString()};
+
+            for (const auto& account : accounts)
+            {
+                const auto listed = calendarReader.calendars(account.accountId);
+                const auto* calendars =
+                    std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(&listed);
+                const auto loaded =
+                    calendarReader.loadCached(account.accountId, interval, timeZone);
+                const auto* window =
+                    std::get_if<std::optional<javelin::jmap::cache::CalendarWindow>>(&loaded);
+                if (calendars == nullptr || window == nullptr || !window->has_value())
+                    continue;
+
+                auto displayAccount = account;
+                displayAccount.name = calendarAccountLabel(settings, account).toStdString();
+                const auto presentation = javelin::gui::calendar::buildCalendarAccountPresentation(
+                    displayAccount, *calendars, *window,
+                    widget.palette().color(QPalette::Highlight));
+                for (const auto& displayEvent : presentation.events)
+                {
+                    if (displayEvent.start.date() > date ||
+                        javelin::gui::calendar::monthEventLastDate(displayEvent.start,
+                                                                   displayEvent.end) < date)
+                        continue;
+                    const auto event =
+                        std::ranges::find(window->value().events, displayEvent.eventId,
+                                          &javelin::jmap::calendar::CalendarEvent::id);
+                    if (event == window->value().events.end())
+                        continue;
+                    const auto calendar =
+                        std::ranges::find(presentation.calendars, displayEvent.calendarId,
+                                          &javelin::gui::calendar::CalendarDisplay::id);
+
+                    QString calendarName =
+                        calendar != presentation.calendars.end() ? calendar->name : QString{};
+                    if (accounts.size() > 1 && !calendarName.isEmpty())
+                    {
+                        calendarName = i18nc("calendar and account", "%1 — %2", calendarName,
+                                             calendarAccountLabel(settings, account));
+                    }
+                    QString organizer;
+                    if (event->organizerCalendarAddress ||
+                        std::ranges::any_of(event->attendees,
+                                            [](const auto& attendee) { return attendee.isOwner; }))
+                        organizer = invitationOrganizer(*event);
+                    QStringList attendees;
+                    for (const auto& attendee : event->attendees)
+                    {
+                        if (attendee.isAttendee && !attendee.isOwner)
+                            attendees.push_back(participantLabel(attendee));
+                    }
+
+                    result.push_back(javelin::gui::calendar::DayAgendaEvent{
+                        .key =
+                            {
+                                .accountId = QString::fromStdString(displayEvent.accountId),
+                                .eventId = QString::fromStdString(displayEvent.eventId),
+                                .recurrenceId = QString::fromStdString(
+                                    displayEvent.recurrenceId.value_or(std::string{})),
+                            },
+                        .title = displayEvent.title.isEmpty() ? i18n("Untitled event")
+                                                              : displayEvent.title,
+                        .calendarName = std::move(calendarName),
+                        .color =
+                            widget.calendarColor(QString::fromStdString(displayEvent.calendarId)),
+                        .start = displayEvent.start,
+                        .end = displayEvent.end,
+                        .allDay = displayEvent.allDay,
+                        .recurring = displayEvent.recurring,
+                        .editable = event->isOrigin && calendar != presentation.calendars.end() &&
+                                    calendar->writable,
+                        .invitation = !event->isOrigin,
+                        .organizer = std::move(organizer),
+                        .location =
+                            event->location ? QString::fromStdString(*event->location) : QString{},
+                        .description = event->description
+                                           ? QString::fromStdString(*event->description)
+                                           : QString{},
+                        .attendees = std::move(attendees),
+                    });
+                }
+            }
+
+            std::ranges::sort(result,
+                              [](const auto& left, const auto& right)
+                              {
+                                  if (left.allDay != right.allDay)
+                                      return left.allDay;
+                                  if (left.start != right.start)
+                                      return left.start < right.start;
+                                  return left.title.localeAwareCompare(right.title) < 0;
+                              });
+            return result;
+        }
     } // namespace
 
     CalendarTabController::CalendarTabController(
@@ -268,6 +381,59 @@ namespace javelin::gui::shell
         };
         connect(widget, &javelin::gui::calendar::MonthCalendarWidget::visibleIntervalChanged,
                 widget, loadVisible);
+        const auto agendaEvents = [this, widget, accounts = *accounts](const QDate& date)
+        { return buildDayAgendaEvents(m_settings, m_calendarReader, *widget, accounts, date); };
+        connect(
+            widget, &javelin::gui::calendar::MonthCalendarWidget::dayAgendaRequested, widget,
+            [this, widget, accounts = *accounts,
+             agendaEvents](const QDate& date, const QString& accountId, const QString& eventId,
+                           const QString& recurrenceId)
+            {
+                auto* dialog = new javelin::gui::calendar::DayAgendaDialog(widget);
+                dialog->setAttribute(Qt::WA_DeleteOnClose);
+                const auto selected = eventId.isEmpty()
+                                          ? std::nullopt
+                                          : std::optional{javelin::gui::calendar::DayAgendaEventKey{
+                                                .accountId = accountId,
+                                                .eventId = eventId,
+                                                .recurrenceId = recurrenceId,
+                                            }};
+                dialog->setDay(date, agendaEvents(date), selected);
+                connect(dialog, &javelin::gui::calendar::DayAgendaDialog::dayChanged, dialog,
+                        [widget, dialog, agendaEvents](const QDate& selectedDate)
+                        {
+                            widget->setSelectedDateFromAgenda(selectedDate);
+                            dialog->setDay(selectedDate, agendaEvents(selectedDate));
+                        });
+                connect(dialog, &javelin::gui::calendar::DayAgendaDialog::newEventRequested, widget,
+                        [widget](const QDate& selectedDate)
+                        { Q_EMIT widget->emptyTimeActivated(selectedDate); });
+                connect(dialog, &javelin::gui::calendar::DayAgendaDialog::editRequested, widget,
+                        [widget](const QString& selectedAccountId, const QString& selectedEventId,
+                                 const QString& selectedRecurrenceId)
+                        {
+                            Q_EMIT widget->eventActivated(selectedAccountId, selectedEventId,
+                                                          selectedRecurrenceId);
+                        });
+                connect(&m_calendarCommandPort,
+                        &javelin::app::CalendarCommandPort::calendarCacheCommitted, dialog,
+                        [dialog, accounts,
+                         agendaEvents](const javelin::app::CalendarCacheChange& change)
+                        {
+                            const auto owner = change.ownerAccountId.toStdString();
+                            if (std::ranges::none_of(accounts, [&owner](const auto& account)
+                                                     { return account.ownerAccountId == owner; }))
+                                return;
+                            QTimer::singleShot(0, dialog,
+                                               [dialog, agendaEvents]
+                                               {
+                                                   dialog->setDay(dialog->date(),
+                                                                  agendaEvents(dialog->date()),
+                                                                  dialog->selectedEvent());
+                                               });
+                        });
+                dialog->open();
+            });
         connect(widget, &javelin::gui::calendar::MonthCalendarWidget::calendarSubscriptionChanged,
                 widget,
                 [this, accounts = *accounts, loadVisible, widget](const QString& displayId,

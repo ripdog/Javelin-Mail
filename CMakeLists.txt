@@ -376,6 +376,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/calendar/MonthCalendarWidget.h
     src/gui/calendar/MonthCalendarLayout.cpp
     src/gui/calendar/MonthCalendarLayout.h
+    src/gui/calendar/DayAgendaDialog.cpp
+    src/gui/calendar/DayAgendaDialog.h
     src/gui/calendar/EventDialog.cpp
     src/gui/calendar/EventDialog.h
     src/gui/calendar/CalendarPresentation.cpp
@@ -1057,6 +1059,8 @@ add_library(javelin_gui STATIC
     src/gui/calendar/MonthCalendarWidget.h
     src/gui/calendar/MonthCalendarLayout.cpp
     src/gui/calendar/MonthCalendarLayout.h
+    src/gui/calendar/DayAgendaDialog.cpp
+    src/gui/calendar/DayAgendaDialog.h
     src/gui/calendar/EventDialog.cpp
     src/gui/calendar/EventDialog.h
     src/gui/calendar/CalendarPresentation.cpp
@@ -1336,6 +1340,8 @@ add_library(javelin_calendar_gui STATIC
     src/gui/calendar/MonthCalendarWidget.cpp
     src/gui/calendar/MonthCalendarWidget.h
     src/gui/settings/WorkspaceSettingsPort.h
+    src/gui/calendar/DayAgendaDialog.cpp
+    src/gui/calendar/DayAgendaDialog.h
     src/gui/calendar/EventDialog.cpp
     src/gui/calendar/EventDialog.h
     src/gui/calendar/RecurrenceDialog.cpp

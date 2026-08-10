@@ -154,3 +154,26 @@ TEST_CASE("month calendar page navigation keeps the selected cell in the display
     REQUIRE(selection->selectedItemCount() == 1);
     CHECK(selection->selectedItem(0)->text(QAccessible::Name) == QStringLiteral("Saturday 28"));
 }
+
+TEST_CASE("month calendar Enter opens the selected day instead of creating immediately",
+          "[gui][calendar][accessibility][keyboard]")
+{
+    TestWorkspaceSettingsPort settings;
+    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    widget.setDisplayedMonth(QDate{2026, 8, 1});
+
+    QDate agendaDate;
+    int createRequests = 0;
+    QObject::connect(
+        &widget, &javelin::gui::calendar::MonthCalendarWidget::dayAgendaRequested, &widget,
+        [&agendaDate](const QDate& date, const QString&, const QString&, const QString&)
+        { agendaDate = date; });
+    QObject::connect(&widget, &javelin::gui::calendar::MonthCalendarWidget::emptyTimeActivated,
+                     &widget, [&createRequests](const QDate&) { ++createRequests; });
+
+    QKeyEvent enter{QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier};
+    QApplication::sendEvent(&widget, &enter);
+
+    CHECK(agendaDate == widget.selectedDate());
+    CHECK(createRequests == 0);
+}
