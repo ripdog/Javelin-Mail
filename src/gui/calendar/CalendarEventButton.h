@@ -11,6 +11,8 @@ namespace javelin::gui::calendar
 {
     class CalendarEventButton final : public QToolButton
     {
+        Q_OBJECT
+
       public:
         explicit CalendarEventButton(QWidget* parent = nullptr);
 

@@ -353,6 +353,8 @@ add_executable(javelin_contacts_gui_tests
     gui/ContactsManagerWidgetTest.cpp
     gui/DayAgendaDialogTest.cpp
     gui/MonthCalendarAccessibilityTest.cpp
+    gui/NoRttiAccessibleObject.cpp
+    gui/NoRttiAccessibleObject.h
     gui/DeveloperOptionsDialogTest.cpp
     gui/FontUtilsTest.cpp
     gui/IconUtilsTest.cpp
@@ -363,6 +365,7 @@ add_executable(javelin_contacts_gui_tests
     gui/MailboxPropertiesDialogTest.cpp
     gui/SendingIdentitiesDialogTest.cpp
 )
+set_source_files_properties(gui/NoRttiAccessibleObject.cpp PROPERTIES COMPILE_OPTIONS -fno-rtti)
 target_include_directories(javelin_contacts_gui_tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/tests

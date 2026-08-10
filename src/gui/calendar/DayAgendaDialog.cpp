@@ -362,18 +362,36 @@ namespace javelin::gui::calendar
           private:
             [[nodiscard]] DayAgendaDetailsPane* detailsPane() const
             {
-                return dynamic_cast<DayAgendaDetailsPane*>(object());
+                auto* pane = qobject_cast<QScrollArea*>(object());
+                return pane != nullptr &&
+                               pane->objectName() == QStringLiteral("dayAgendaDetailsPane")
+                           ? static_cast<DayAgendaDetailsPane*>(pane)
+                           : nullptr;
             }
         };
 
         [[nodiscard]] QAccessibleInterface* dayAgendaAccessibleFactory(const QString& key,
                                                                        QObject* object)
         {
-            Q_UNUSED(key);
-            if (auto* timeline = dynamic_cast<DayTimelineWidget*>(object); timeline != nullptr)
-                return new AccessibleDayTimeline(timeline);
-            if (auto* details = dynamic_cast<DayAgendaDetailsPane*>(object); details != nullptr)
-                return new AccessibleDayAgendaDetails(details);
+            if (key == QStringLiteral("QWidget"))
+            {
+                auto* widget = qobject_cast<QWidget*>(object);
+                if (widget != nullptr &&
+                    widget->objectName() == QStringLiteral("dayAgendaTimeline"))
+                {
+                    return new AccessibleDayTimeline(static_cast<DayTimelineWidget*>(widget));
+                }
+            }
+            else if (key == QStringLiteral("QScrollArea"))
+            {
+                auto* scrollArea = qobject_cast<QScrollArea*>(object);
+                if (scrollArea != nullptr &&
+                    scrollArea->objectName() == QStringLiteral("dayAgendaDetailsPane"))
+                {
+                    return new AccessibleDayAgendaDetails(
+                        static_cast<DayAgendaDetailsPane*>(scrollArea));
+                }
+            }
             return nullptr;
         }
 

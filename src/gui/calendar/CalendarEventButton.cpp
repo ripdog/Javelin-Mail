@@ -91,17 +91,17 @@ namespace javelin::gui::calendar
           private:
             [[nodiscard]] CalendarEventButton* eventButton() const
             {
-                return dynamic_cast<CalendarEventButton*>(object());
+                return qobject_cast<CalendarEventButton*>(object());
             }
         };
 
         [[nodiscard]] QAccessibleInterface* calendarEventButtonFactory(const QString& key,
                                                                        QObject* object)
         {
-            Q_UNUSED(key);
-            if (auto* button = dynamic_cast<CalendarEventButton*>(object); button != nullptr)
-                return new AccessibleCalendarEventButton(button);
-            return nullptr;
+            if (key != QStringLiteral("javelin::gui::calendar::CalendarEventButton"))
+                return nullptr;
+            auto* button = qobject_cast<CalendarEventButton*>(object);
+            return button != nullptr ? new AccessibleCalendarEventButton(button) : nullptr;
         }
 
         void ensureAccessibilityFactoryInstalled()
