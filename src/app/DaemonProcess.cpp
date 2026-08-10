@@ -1368,6 +1368,9 @@ namespace javelin::app
                         .affectedKeys = std::move(invalidation.affectedKeys),
                         .accountId = std::move(invalidation.change.accountId),
                         .mailboxIds = std::move(mailboxIds),
+                        .messageContentEmailIds = {
+                            invalidation.change.messageContentEmailIds.begin(),
+                            invalidation.change.messageContentEmailIds.end()},
                         .mailboxWindows = std::move(mailboxWindows),
                         .searchWindows = std::move(searchWindows),
                     });

@@ -637,6 +637,7 @@ namespace javelin::protocol
         std::vector<QString> affectedKeys;
         QString accountId{};
         std::vector<QString> mailboxIds{};
+        std::vector<QString> messageContentEmailIds{};
         std::vector<MailboxWindowInvalidation> mailboxWindows{};
         std::vector<SearchWindowInvalidation> searchWindows{};
     };

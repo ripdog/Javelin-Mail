@@ -75,11 +75,16 @@ namespace javelin::jmap
             std::optional<int> httpStatus;
         };
 
-        [[nodiscard]] QString storeDownloadedMessageSource(const QString& databasePath,
-                                                           const std::string& accountId,
-                                                           const std::string& emailId,
-                                                           const std::string& blobId,
-                                                           QString incomingPath)
+        struct MessageSourceStoreResult
+        {
+            bool stored = false;
+            QString error;
+        };
+
+        [[nodiscard]] MessageSourceStoreResult
+        storeDownloadedMessageSource(const QString& databasePath, const std::string& accountId,
+                                     const std::string& emailId, const std::string& blobId,
+                                     QString incomingPath)
         {
             javelin::jmap::cache::ThreadConnectionFactory factory({
                 .connectionNamePrefix = QStringLiteral("message-source-store"),
@@ -89,7 +94,7 @@ namespace javelin::jmap
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&opened))
             {
                 QFile::remove(incomingPath);
-                return error->message;
+                return {.error = error->message};
             }
             auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
             const auto installed = javelin::jmap::cache::MailVault::forDatabase(connection)
@@ -97,14 +102,15 @@ namespace javelin::jmap
             if (const auto* error = std::get_if<javelin::jmap::cache::MailVaultError>(&installed))
             {
                 QFile::remove(incomingPath);
-                return error->message;
+                return {.error = error->message};
             }
             javelin::jmap::cache::RawMessageSourceRepository sources{connection};
-            if (const auto error = sources.upsertInstalled(
-                    accountId, emailId, blobId,
-                    std::get<javelin::jmap::cache::MailVaultObject>(installed)))
-                return error->message;
-            return {};
+            const auto stored = sources.upsertInstalledIfCurrent(
+                accountId, emailId, blobId,
+                std::get<javelin::jmap::cache::MailVaultObject>(installed));
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&stored))
+                return {.error = error->message};
+            return {.stored = std::get<bool>(stored), .error = {}};
         }
 
         [[nodiscard]] QString encodedTemplateValue(const std::string_view value)
@@ -1499,12 +1505,6 @@ namespace javelin::jmap
             co_return *validationError;
         }
 
-        javelin::jmap::sync::ConsistencyDomainRepository consistency{*m_impl->databaseConnection};
-        const auto refreshFence =
-            consistency.captureRefresh({.accountId = accountId, .dataType = "Email"});
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&refreshFence))
-            co_return operationError(*error);
-
         javelin::jmap::cache::RawMessageSourceRepository sourceRepository{
             *m_impl->databaseConnection};
         const auto emailResult =
@@ -1585,25 +1585,22 @@ namespace javelin::jmap
             co_return error->error;
         }
 
-        const auto currentFence =
-            consistency.isCurrent(std::get<javelin::jmap::sync::RefreshFence>(refreshFence));
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&currentFence))
-            co_return operationError(*error);
-        if (!std::get<bool>(currentFence))
-        {
-            co_return OperationError{
-                .message = QStringLiteral(
-                    "The message download was superseded by local cache maintenance."),
-            };
-        }
-
         const auto payloadSize = std::get<std::uint64_t>(downloadResult);
         auto storeFuture = QtConcurrent::run(storeDownloadedMessageSource,
                                              m_impl->databaseConnection->database().databaseName(),
                                              accountId, email.id, email.blobId, incomingPath);
-        const QString storeError = co_await qCoro(storeFuture).takeResult();
-        if (!storeError.isEmpty())
-            co_return OperationError{.message = storeError};
+        const auto storeResult = co_await qCoro(storeFuture).takeResult();
+        if (!storeResult.error.isEmpty())
+            co_return OperationError{.message = storeResult.error};
+        if (!storeResult.stored)
+        {
+            co_return MessageContentUnavailable{
+                .accountId = std::move(accountId),
+                .emailId = std::move(emailId),
+                .message = QStringLiteral(
+                    "The message changed or was removed while its content was downloading."),
+            };
+        }
 
         qCDebug(logMessageContent).noquote()
             << "JMAP core message source refresh success" << QString::fromStdString(emailId)

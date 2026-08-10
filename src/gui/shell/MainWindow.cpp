@@ -673,6 +673,28 @@ namespace javelin::gui::shell
                 [this](const javelin::app::MailCacheInvalidation& invalidation)
                 {
                     const auto& change = invalidation.change;
+                    if (!change.messageContentEmailIds.empty() &&
+                        activeAccountId() ==
+                            std::optional<std::string>{change.accountId.toStdString()})
+                    {
+                        const auto selectedEmails =
+                            m_messageSelectionController->selectedEmailIds();
+                        const auto* route =
+                            m_messageNavigationController->activeRoute(activeTab());
+                        const bool hydratesSelection = std::ranges::any_of(
+                            change.messageContentEmailIds,
+                            [&selectedEmails, route](const QString& emailId)
+                            {
+                                const auto id = emailId.toStdString();
+                                return std::ranges::contains(selectedEmails, id) ||
+                                       (route != nullptr && route->emailId == id);
+                            });
+                        if (hydratesSelection)
+                        {
+                            m_messageViewContainer->refresh(m_messageViewReader);
+                            updateEmptyStates();
+                        }
+                    }
                     if (change.mailboxTreeChanged)
                     {
                         QSignalBlocker mailboxSelectionBlocker{m_mailboxView->selectionModel()};

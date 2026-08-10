@@ -50,6 +50,7 @@ namespace javelin::app
       Q_SIGNALS:
         void mailboxWindowCommitted(QString accountId, QString mailboxId, quint64 offset,
                                     quint64 limit);
+        void messageContentCommitted(QString accountId, QString emailId);
 
       private:
         struct Scope

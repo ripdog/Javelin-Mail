@@ -1508,6 +1508,12 @@ namespace javelin::app
                         error->message));
                     co_return;
                 }
+                const auto& summary = std::get<javelin::jmap::MessageContentRefreshSummary>(result);
+                if (!summary.usedCachedContent)
+                {
+                    Q_EMIT messageContentCommitted(QString::fromStdString(summary.accountId),
+                                                   QString::fromStdString(summary.emailId));
+                }
                 ++progress.completedUnits;
                 progress.completedBytes += size;
                 if (progressPersistenceTimer.elapsed() >= 1000 ||

@@ -76,8 +76,26 @@ namespace javelin::jmap::cache
         const std::string_view accountId, const std::string_view emailId,
         const std::string_view blobId, const MailVaultObject& installed)
     {
+        const auto result = upsertInstalledImpl(accountId, emailId, blobId, installed, false);
+        if (const auto* error = std::get_if<DatabaseError>(&result))
+            return *error;
+        return std::nullopt;
+    }
+
+    std::variant<bool, DatabaseError> RawMessageSourceRepository::upsertInstalledIfCurrent(
+        const std::string_view accountId, const std::string_view emailId,
+        const std::string_view blobId, const MailVaultObject& installed)
+    {
+        return upsertInstalledImpl(accountId, emailId, blobId, installed, true);
+    }
+
+    std::variant<bool, DatabaseError> RawMessageSourceRepository::upsertInstalledImpl(
+        const std::string_view accountId, const std::string_view emailId,
+        const std::string_view blobId, const MailVaultObject& installed,
+        const bool requireCurrentEmail)
+    {
         if (const auto error = m_connection.validate())
-            return error;
+            return *error;
 
         {
             auto transactionResult = DatabaseTransaction::begin(
@@ -99,6 +117,32 @@ namespace javelin::jmap::cache
             {
                 transaction.rollback();
                 return makeQueryError(QStringLiteral("Record mail vault object"), objectQuery);
+            }
+
+            if (requireCurrentEmail)
+            {
+                QSqlQuery currentEmail{database};
+                currentEmail.prepare(QStringLiteral(
+                    "SELECT EXISTS(SELECT 1 FROM emails WHERE account_id=:account_id "
+                    "AND email_id=:email_id AND blob_id=:blob_id)"));
+                currentEmail.bindValue(QStringLiteral(":account_id"),
+                                       QString::fromStdString(std::string{accountId}));
+                currentEmail.bindValue(QStringLiteral(":email_id"),
+                                       QString::fromStdString(std::string{emailId}));
+                currentEmail.bindValue(QStringLiteral(":blob_id"),
+                                       QString::fromStdString(std::string{blobId}));
+                if (!currentEmail.exec() || !currentEmail.next())
+                {
+                    transaction.rollback();
+                    return makeQueryError(QStringLiteral("Validate downloaded message source"),
+                                          currentEmail);
+                }
+                if (currentEmail.value(0).toInt() == 0)
+                {
+                    if (const auto error = transaction.commit())
+                        return *error;
+                    return false;
+                }
             }
 
             QSqlQuery refQuery{database};
@@ -164,7 +208,7 @@ namespace javelin::jmap::cache
                 return *error;
         }
         static_cast<void>(replayProjectionJobs());
-        return std::nullopt;
+        return true;
     }
 
     std::optional<DatabaseError>

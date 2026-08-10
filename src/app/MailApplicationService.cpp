@@ -922,6 +922,17 @@ namespace javelin::app
         });
     }
 
+    void MailApplicationService::publishMessageContentCommitted(QString accountId, QString emailId)
+    {
+        Q_EMIT cacheCommitted(MailCacheChange{
+            .accountId = std::move(accountId),
+            .mailboxIds = {},
+            .queryWindows = {},
+            .searchWindows = {},
+            .messageContentEmailIds = {std::move(emailId)},
+        });
+    }
+
     QCoro::Task<MailboxWindowResult>
     MailApplicationService::requestMailboxWindow(MailboxWindowIntent intent)
     {
@@ -2307,6 +2318,12 @@ namespace javelin::app
                                         accountId, std::move(emailId)));
         if (std::holds_alternative<javelin::jmap::MessageContentUnavailable>(result))
             static_cast<void>(requestAccountSynchronization(accountId));
+        if (const auto* summary = std::get_if<javelin::jmap::MessageContentRefreshSummary>(&result);
+            summary != nullptr && !summary->usedCachedContent)
+        {
+            publishMessageContentCommitted(QString::fromStdString(summary->accountId),
+                                           QString::fromStdString(summary->emailId));
+        }
         co_return result;
     }
 

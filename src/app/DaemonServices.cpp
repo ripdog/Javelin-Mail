@@ -270,6 +270,9 @@ namespace javelin::app
                     std::move(accountId), std::move(mailboxId), static_cast<std::size_t>(offset),
                     static_cast<std::size_t>(limit));
             });
+        QObject::connect(m_fullMailSyncService.get(), &FullMailSyncService::messageContentCommitted,
+                         m_mailService.get(),
+                         &MailApplicationService::publishMessageContentCommitted);
         QObject::connect(m_mailService.get(), &MailApplicationService::cacheCommitted,
                          m_fullMailSyncService.get(),
                          [this](const MailCacheChange& change)

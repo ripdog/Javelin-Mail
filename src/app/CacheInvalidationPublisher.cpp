@@ -106,6 +106,8 @@ namespace javelin::app
             appendMailboxWindowUnique(target.queryWindows, std::move(window));
         for (auto& window : source.searchWindows)
             appendSearchWindowUnique(target.searchWindows, std::move(window));
+        for (auto& emailId : source.messageContentEmailIds)
+            appendUniqueBounded(target.messageContentEmailIds, std::move(emailId));
         target.mailboxTreeChanged = target.mailboxTreeChanged || source.mailboxTreeChanged;
         target.hasNewMail = target.hasNewMail || source.hasNewMail;
         target.optimisticProjection = target.optimisticProjection || source.optimisticProjection;
@@ -124,6 +126,8 @@ namespace javelin::app
             domains.push_back(javelin::protocol::ChangedDomain::MailQueryWindows);
         if (change.hasNewMail || change.optimisticProjection)
             domains.push_back(javelin::protocol::ChangedDomain::MessageMetadata);
+        if (!change.messageContentEmailIds.empty())
+            domains.push_back(javelin::protocol::ChangedDomain::MessageContent);
         if (change.contactsChanged)
             domains.push_back(javelin::protocol::ChangedDomain::Contacts);
         if (change.identitiesChanged)
@@ -143,6 +147,8 @@ namespace javelin::app
             appendUniqueBounded(keys, window.mailboxId);
         for (const auto& window : change.searchWindows)
             appendUniqueBounded(keys, window.queryKey);
+        for (const auto& emailId : change.messageContentEmailIds)
+            appendUniqueBounded(keys, emailId);
         return keys;
     }
 } // namespace javelin::app

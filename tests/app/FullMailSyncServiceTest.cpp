@@ -518,6 +518,10 @@ TEST_CASE("offline hydration absorbs mail added while body downloads are running
                                           std::chrono::milliseconds{0}};
     javelin::app::MailIndexService indexer{database.connection, scheduler};
     javelin::app::FullMailSyncService service{database.connection, core, scheduler, indexer};
+    QStringList hydratedEmailIds;
+    QObject::connect(&service, &javelin::app::FullMailSyncService::messageContentCommitted,
+                     [&hydratedEmailIds](const QString&, const QString& emailId)
+                     { hydratedEmailIds.push_back(emailId); });
     service.applySettings({configuration()});
 
     REQUIRE(waitUntil(
@@ -544,6 +548,8 @@ TEST_CASE("offline hydration absorbs mail added while body downloads are running
     CHECK(scalar(database.connection,
                  QStringLiteral("SELECT completed_bytes FROM offline_mailbox_scopes WHERE "
                                 "account_id='account-1' AND mailbox_id='archive'")) == 450);
+    CHECK(hydratedEmailIds.contains(QStringLiteral("email-2")));
+    CHECK(hydratedEmailIds.contains(QStringLiteral("email-middle")));
 }
 
 TEST_CASE("mail indexing crosses a worker batch without retaining pending rows",

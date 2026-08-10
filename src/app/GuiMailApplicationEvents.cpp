@@ -86,6 +86,8 @@ namespace javelin::app
         MailCacheChange change;
         change.accountId = invalidation.accountId;
         change.mailboxIds = {invalidation.mailboxIds.begin(), invalidation.mailboxIds.end()};
+        change.messageContentEmailIds = {invalidation.messageContentEmailIds.begin(),
+                                         invalidation.messageContentEmailIds.end()};
         change.queryWindows.reserve(invalidation.mailboxWindows.size());
         for (const auto& window : invalidation.mailboxWindows)
         {

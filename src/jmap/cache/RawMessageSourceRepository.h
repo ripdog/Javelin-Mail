@@ -32,6 +32,9 @@ namespace javelin::jmap::cache
                                                                    std::string_view emailId,
                                                                    std::string_view blobId,
                                                                    const MailVaultObject& object);
+        [[nodiscard]] std::variant<bool, DatabaseError>
+        upsertInstalledIfCurrent(std::string_view accountId, std::string_view emailId,
+                                 std::string_view blobId, const MailVaultObject& object);
         [[nodiscard]] std::optional<DatabaseError> remove(std::string_view accountId,
                                                           std::string_view emailId);
         [[nodiscard]] std::variant<std::optional<RawMessageSource>, DatabaseError>
@@ -48,6 +51,11 @@ namespace javelin::jmap::cache
         evictUnretained(std::size_t limit = 25);
 
       private:
+        [[nodiscard]] std::variant<bool, DatabaseError>
+        upsertInstalledImpl(std::string_view accountId, std::string_view emailId,
+                            std::string_view blobId, const MailVaultObject& object,
+                            bool requireCurrentEmail);
+
         DatabaseConnection& m_connection;
     };
 

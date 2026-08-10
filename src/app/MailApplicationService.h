@@ -119,6 +119,7 @@ namespace javelin::app
         recoverMailNotificationDispatches();
         void publishMailboxWindowCommitted(QString accountId, QString mailboxId, std::size_t offset,
                                            std::size_t limit);
+        void publishMessageContentCommitted(QString accountId, QString emailId);
         [[nodiscard]] QCoro::Task<MailboxWindowResult>
         requestMailboxWindow(MailboxWindowIntent intent) override;
         [[nodiscard]] QCoro::Task<SearchWindowResult>

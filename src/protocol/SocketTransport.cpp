@@ -793,6 +793,9 @@ namespace javelin::protocol
                    writer.string(invalidation.accountId) &&
                    writeStringVector(writer, invalidation.mailboxIds, limits.maximumAffectedKeys,
                                      QStringLiteral("mailboxIds")) &&
+                   writeStringVector(writer, invalidation.messageContentEmailIds,
+                                     limits.maximumAffectedKeys,
+                                     QStringLiteral("messageContentEmailIds")) &&
                    writeVector(writer, invalidation.mailboxWindows, limits.maximumCollectionItems,
                                QStringLiteral("mailboxWindows"),
                                [&writer](const MailboxWindowInvalidation& window)
@@ -812,6 +815,9 @@ namespace javelin::protocol
                    reader.string(invalidation.accountId) &&
                    readStringVector(reader, invalidation.mailboxIds, limits.maximumAffectedKeys,
                                     QStringLiteral("mailboxIds")) &&
+                   readStringVector(reader, invalidation.messageContentEmailIds,
+                                    limits.maximumAffectedKeys,
+                                    QStringLiteral("messageContentEmailIds")) &&
                    readVector(reader, invalidation.mailboxWindows, limits.maximumCollectionItems,
                               QStringLiteral("mailboxWindows"),
                               [&reader](MailboxWindowInvalidation& window)
@@ -1904,6 +1910,8 @@ namespace javelin::protocol
                 appendUnique(target.affectedKeys, key, limits.maximumAffectedKeys);
             for (const auto& mailboxId : source.mailboxIds)
                 appendUnique(target.mailboxIds, mailboxId, limits.maximumAffectedKeys);
+            for (const auto& emailId : source.messageContentEmailIds)
+                appendUnique(target.messageContentEmailIds, emailId, limits.maximumAffectedKeys);
             for (const auto& window : source.mailboxWindows)
             {
                 const auto found =

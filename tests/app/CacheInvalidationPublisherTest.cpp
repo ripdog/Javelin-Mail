@@ -139,3 +139,29 @@ TEST_CASE("cache invalidation publisher emits contacts for contact-only changes"
     CHECK(invalidations.front().affectedKeys ==
           std::vector<QString>{QStringLiteral("contacts-account")});
 }
+
+TEST_CASE("cache invalidation publisher targets hydrated message content",
+          "[app][cache][invalidation][message-content]")
+{
+    javelin::app::CacheInvalidationPublisher publisher;
+    std::optional<javelin::app::MailCacheInvalidation> invalidation;
+    QObject::connect(&publisher, &javelin::app::CacheInvalidationPublisher::invalidated,
+                     [&invalidation](javelin::app::MailCacheInvalidation value)
+                     { invalidation = std::move(value); });
+
+    publisher.publish(javelin::app::MailCacheChange{
+        .accountId = QStringLiteral("account-a"),
+        .mailboxIds = {},
+        .queryWindows = {},
+        .searchWindows = {},
+        .messageContentEmailIds = {QStringLiteral("email-a")},
+    });
+    publisher.flush();
+
+    REQUIRE(invalidation.has_value());
+    CHECK(invalidation->changedDomains ==
+          std::vector{javelin::protocol::ChangedDomain::MessageContent});
+    CHECK(invalidation->affectedKeys ==
+          std::vector<QString>{QStringLiteral("account-a"), QStringLiteral("email-a")});
+    CHECK(invalidation->change.messageContentEmailIds == QStringList{QStringLiteral("email-a")});
+}

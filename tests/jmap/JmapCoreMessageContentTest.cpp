@@ -370,7 +370,7 @@ TEST_CASE("JmapCore refreshMessageContent caches raw message sources",
     CHECK(source->payload.contains(QByteArrayLiteral("<img src=\"cid:chart@cid\">")));
 }
 
-TEST_CASE("JmapCore rejects message downloads superseded by cache maintenance",
+TEST_CASE("JmapCore message downloads survive concurrent Email mutations",
           "[jmap][core][message-content][consistency]")
 {
     ApplicationGuard application;
@@ -412,15 +412,69 @@ TEST_CASE("JmapCore rejects message downloads superseded by cache maintenance",
         completionLoop.exec();
 
     REQUIRE(completed.has_value());
-    const auto* error = std::get_if<javelin::jmap::OperationError>(&*completed);
-    REQUIRE(error != nullptr);
-    CHECK(error->message.contains(QStringLiteral("superseded")));
+    const auto* summary = std::get_if<javelin::jmap::MessageContentRefreshSummary>(&*completed);
+    REQUIRE(summary != nullptr);
+    CHECK_FALSE(summary->usedCachedContent);
+
+    javelin::jmap::cache::RawMessageSourceRepository sources{databaseContext.connection};
+    const auto source = sources.find("u1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::RawMessageSource>>(source));
+    CHECK(std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(source).has_value());
+}
+
+TEST_CASE("JmapCore rejects a download when the message blob changes",
+          "[jmap][core][message-content][consistency]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    REQUIRE_FALSE(sessionRepository.replace("u1", loadSessionFixture()).has_value());
+    seedEmail(databaseContext.connection);
+
+    PendingTransport transport;
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    std::optional<javelin::jmap::MessageContentRefreshResult> completed;
+    QEventLoop completionLoop;
+    auto task = core.refreshMessageContent(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1", "eml-1");
+    QCoro::connect(std::move(task), QCoreApplication::instance(),
+                   [&](javelin::jmap::MessageContentRefreshResult result)
+                   {
+                       completed = std::move(result);
+                       completionLoop.quit();
+                   });
+    REQUIRE(transport.started);
+
+    QSqlQuery changedBlob{databaseContext.connection.database()};
+    REQUIRE(changedBlob.exec(
+        QStringLiteral("UPDATE emails SET blob_id='replacement-blob' WHERE account_id='u1' "
+                       "AND email_id='eml-1'")));
+
+    transport.complete(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral("Subject: obsolete download\r\n\r\nold body\r\n"),
+    });
+    if (!completed.has_value())
+        completionLoop.exec();
+
+    REQUIRE(completed.has_value());
+    CHECK(std::holds_alternative<javelin::jmap::MessageContentUnavailable>(*completed));
 
     javelin::jmap::cache::RawMessageSourceRepository sources{databaseContext.connection};
     const auto source = sources.find("u1", "eml-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::RawMessageSource>>(source));
     CHECK_FALSE(
         std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(source).has_value());
+    const auto evicted = sources.evictUnretained();
+    REQUIRE(std::holds_alternative<std::size_t>(evicted));
+    CHECK(std::get<std::size_t>(evicted) == 1);
 }
 
 TEST_CASE("JmapCore reports missing message source downloads distinctly",
