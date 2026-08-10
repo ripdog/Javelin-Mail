@@ -3,7 +3,6 @@
 #include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/DayAgendaDialog.h"
 #include "gui/calendar/EventDialog.h"
-#include "gui/calendar/MonthCalendarLayout.h"
 #include "gui/calendar/MonthCalendarWidget.h"
 #include "gui/settings/GuiSettings.h"
 #include "jmap/calendar/CalendarEventEditing.h"
@@ -182,6 +181,11 @@ namespace javelin::gui::shell
                              const QDate& date)
         {
             std::vector<javelin::gui::calendar::DayAgendaEvent> result;
+            const auto displayEvents = widget.eventsForDate(date);
+            result.reserve(displayEvents.size());
+            if (displayEvents.empty())
+                return result;
+
             const javelin::jmap::calendar::VisibleInterval interval{
                 .start = {.value = widget.visibleStart().toString(Qt::ISODate).toStdString() +
                                    "T00:00:00"},
@@ -192,6 +196,10 @@ namespace javelin::gui::shell
 
             for (const auto& account : accounts)
             {
+                if (std::ranges::none_of(displayEvents, [&account](const auto& event)
+                                         { return event.accountId == account.accountId; }))
+                    continue;
+
                 const auto listed = calendarReader.calendars(account.accountId);
                 const auto* calendars =
                     std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(&listed);
@@ -199,46 +207,57 @@ namespace javelin::gui::shell
                     calendarReader.loadCached(account.accountId, interval, timeZone);
                 const auto* window =
                     std::get_if<std::optional<javelin::jmap::cache::CalendarWindow>>(&loaded);
-                if (calendars == nullptr || window == nullptr || !window->has_value())
-                    continue;
 
-                auto displayAccount = account;
-                displayAccount.name = calendarAccountLabel(settings, account).toStdString();
-                const auto presentation = javelin::gui::calendar::buildCalendarAccountPresentation(
-                    displayAccount, *calendars, *window,
-                    widget.palette().color(QPalette::Highlight));
-                for (const auto& displayEvent : presentation.events)
+                for (const auto& displayEvent : displayEvents)
                 {
-                    if (displayEvent.start.date() > date ||
-                        javelin::gui::calendar::monthEventLastDate(displayEvent.start,
-                                                                   displayEvent.end) < date)
+                    if (displayEvent.accountId != account.accountId)
                         continue;
-                    const auto event =
-                        std::ranges::find(window->value().events, displayEvent.eventId,
-                                          &javelin::jmap::calendar::CalendarEvent::id);
-                    if (event == window->value().events.end())
-                        continue;
-                    const auto calendar =
-                        std::ranges::find(presentation.calendars, displayEvent.calendarId,
-                                          &javelin::gui::calendar::CalendarDisplay::id);
+
+                    const javelin::jmap::calendar::CalendarEvent* event = nullptr;
+                    if (window != nullptr && window->has_value())
+                    {
+                        const auto found =
+                            std::ranges::find(window->value().events, displayEvent.eventId,
+                                              &javelin::jmap::calendar::CalendarEvent::id);
+                        if (found != window->value().events.end())
+                            event = &*found;
+                    }
+
+                    const javelin::jmap::calendar::Calendar* calendar = nullptr;
+                    if (calendars != nullptr)
+                    {
+                        const auto separator = displayEvent.calendarId.find('\n');
+                        if (separator != std::string::npos)
+                        {
+                            const auto calendarId = displayEvent.calendarId.substr(separator + 1);
+                            const auto found = std::ranges::find(
+                                *calendars, calendarId, &javelin::jmap::calendar::Calendar::id);
+                            if (found != calendars->end())
+                                calendar = &*found;
+                        }
+                    }
 
                     QString calendarName =
-                        calendar != presentation.calendars.end() ? calendar->name : QString{};
+                        calendar != nullptr ? QString::fromStdString(calendar->name) : QString{};
                     if (accounts.size() > 1 && !calendarName.isEmpty())
                     {
                         calendarName = i18nc("calendar and account", "%1 — %2", calendarName,
                                              calendarAccountLabel(settings, account));
                     }
+
                     QString organizer;
-                    if (event->organizerCalendarAddress ||
-                        std::ranges::any_of(event->attendees,
-                                            [](const auto& attendee) { return attendee.isOwner; }))
-                        organizer = invitationOrganizer(*event);
                     QStringList attendees;
-                    for (const auto& attendee : event->attendees)
+                    if (event != nullptr)
                     {
-                        if (attendee.isAttendee && !attendee.isOwner)
-                            attendees.push_back(participantLabel(attendee));
+                        if (event->organizerCalendarAddress ||
+                            std::ranges::any_of(event->attendees, [](const auto& attendee)
+                                                { return attendee.isOwner; }))
+                            organizer = invitationOrganizer(*event);
+                        for (const auto& attendee : event->attendees)
+                        {
+                            if (attendee.isAttendee && !attendee.isOwner)
+                                attendees.push_back(participantLabel(attendee));
+                        }
                     }
 
                     result.push_back(javelin::gui::calendar::DayAgendaEvent{
@@ -252,19 +271,20 @@ namespace javelin::gui::shell
                         .title = displayEvent.title.isEmpty() ? i18n("Untitled event")
                                                               : displayEvent.title,
                         .calendarName = std::move(calendarName),
-                        .color =
-                            widget.calendarColor(QString::fromStdString(displayEvent.calendarId)),
+                        .color = displayEvent.color,
                         .start = displayEvent.start,
                         .end = displayEvent.end,
                         .allDay = displayEvent.allDay,
                         .recurring = displayEvent.recurring,
-                        .editable = event->isOrigin && calendar != presentation.calendars.end() &&
-                                    calendar->writable,
-                        .invitation = !event->isOrigin,
+                        .editable =
+                            event != nullptr && event->isOrigin && calendar != nullptr &&
+                            (calendar->myRights.mayWriteAll || calendar->myRights.mayWriteOwn),
+                        .invitation = event != nullptr && !event->isOrigin,
                         .organizer = std::move(organizer),
-                        .location =
-                            event->location ? QString::fromStdString(*event->location) : QString{},
-                        .description = event->description
+                        .location = event != nullptr && event->location
+                                        ? QString::fromStdString(*event->location)
+                                        : QString{},
+                        .description = event != nullptr && event->description
                                            ? QString::fromStdString(*event->description)
                                            : QString{},
                         .attendees = std::move(attendees),

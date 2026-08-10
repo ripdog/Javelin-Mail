@@ -3,14 +3,18 @@
 
 #include <QAccessible>
 #include <QApplication>
+#include <QFontMetrics>
 #include <QImage>
 #include <QLabel>
+#include <QLocale>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QToolButton>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
 
 namespace
 {
@@ -53,6 +57,7 @@ TEST_CASE("day agenda renders a midnight-to-midnight timeline and starts at eigh
     dialog.show();
     settleGui();
 
+    CHECK(dialog.windowTitle().contains(QStringLiteral("10 August 2026")));
     auto* timeline = dialog.findChild<QWidget*>(QStringLiteral("dayAgendaTimeline"));
     REQUIRE(timeline != nullptr);
     CHECK(timeline->minimumHeight() == 24 * 64 + 1);
@@ -72,6 +77,33 @@ TEST_CASE("day agenda renders a midnight-to-midnight timeline and starts at eigh
     REQUIRE(buttons.size() == 1);
     CHECK(buttons.front()->y() >= 9 * 64);
     CHECK(buttons.front()->accessibleName().contains(QStringLiteral("Morning meeting")));
+    dialog.close();
+}
+
+TEST_CASE("day agenda time gutter expands for the active font", "[gui][calendar][agenda]")
+{
+    javelin::gui::calendar::DayAgendaDialog dialog;
+    auto font = dialog.font();
+    font.setPointSize(28);
+    dialog.setFont(font);
+    dialog.setDay(QDate{2026, 8, 10}, {event(QStringLiteral("morning"), QTime{9, 0}, QTime{10, 0},
+                                             QStringLiteral("Morning meeting"))});
+    dialog.show();
+    settleGui();
+
+    auto* timeline = dialog.findChild<QWidget*>(QStringLiteral("dayAgendaTimeline"));
+    REQUIRE(timeline != nullptr);
+    const auto buttons = dialog.findChildren<QToolButton*>(QStringLiteral("dayAgendaEventButton"));
+    REQUIRE(buttons.size() == 1);
+
+    const QFontMetrics metrics{timeline->font()};
+    int widestHour = 0;
+    for (int hour = 0; hour < 24; ++hour)
+    {
+        widestHour = std::max(widestHour, metrics.horizontalAdvance(QLocale{}.toString(
+                                              QTime{hour, 0}, QLocale::ShortFormat)));
+    }
+    CHECK(buttons.front()->x() > widestHour);
     dialog.close();
 }
 
@@ -246,6 +278,7 @@ TEST_CASE("day agenda navigation changes its day and leaves creation explicit",
     next->click();
     CHECK(requestedDay == QDate{2026, 8, 11});
     CHECK(dialog.date() == QDate{2026, 8, 11});
+    CHECK(dialog.windowTitle().contains(QStringLiteral("11 August 2026")));
 
     QPushButton* create = nullptr;
     for (auto* candidate : dialog.findChildren<QPushButton*>())

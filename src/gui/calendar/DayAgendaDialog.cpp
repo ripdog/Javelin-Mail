@@ -7,6 +7,7 @@
 #include <QAccessibleWidget>
 #include <QDialogButtonBox>
 #include <QFont>
+#include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPainter>
@@ -33,8 +34,20 @@ namespace javelin::gui::calendar
         constexpr int PixelsPerHour = 64;
         constexpr int QuarterHourPixels = PixelsPerHour / 4;
         constexpr int TimelineHeight = 24 * PixelsPerHour + 1;
-        constexpr int TimeGutterWidth = 58;
+        constexpr int TimeGutterHorizontalPadding = 12;
         constexpr int EventGap = 3;
+
+        [[nodiscard]] int timeGutterWidth(const QFontMetrics& metrics)
+        {
+            const QLocale locale;
+            int widest = 0;
+            for (int hour = 0; hour < 24; ++hour)
+            {
+                widest = std::max(widest, metrics.horizontalAdvance(locale.toString(
+                                              QTime{hour, 0}, QLocale::ShortFormat)));
+            }
+            return widest + TimeGutterHorizontalPadding;
+        }
 
         [[nodiscard]] int minuteOfDay(const QDateTime& value, const QDate& day, const bool end)
         {
@@ -260,17 +273,19 @@ namespace javelin::gui::calendar
                 const auto pale = palette().color(QPalette::Midlight);
                 const auto dark = palette().color(QPalette::Mid);
                 const auto text = palette().color(QPalette::Text);
+                const auto gutterWidth = timeGutterWidth(fontMetrics());
                 for (int quarter = 0; quarter <= 24 * 4; ++quarter)
                 {
                     const auto y = quarter * QuarterHourPixels;
                     painter.setPen(quarter % 4 == 0 ? dark : pale);
-                    painter.drawLine(TimeGutterWidth, y, width(), y);
+                    painter.drawLine(gutterWidth, y, width(), y);
                     if (quarter < 24 * 4 && quarter % 4 == 0)
                     {
                         painter.setPen(text);
                         const auto hour = quarter / 4;
-                        painter.drawText(QRect{0, y - 9, TimeGutterWidth - 6, 18},
-                                         Qt::AlignRight | Qt::AlignVCenter,
+                        painter.drawText(QRect{4, y + 2, gutterWidth - TimeGutterHorizontalPadding,
+                                               fontMetrics().height()},
+                                         Qt::AlignRight | Qt::AlignTop,
                                          QLocale{}.toString(QTime{hour, 0}, QLocale::ShortFormat));
                     }
                 }
@@ -285,7 +300,8 @@ namespace javelin::gui::calendar
           private:
             void layoutButtons()
             {
-                const auto availableWidth = std::max(1, width() - TimeGutterWidth - EventGap);
+                const auto gutterWidth = timeGutterWidth(fontMetrics());
+                const auto availableWidth = std::max(1, width() - gutterWidth - EventGap);
                 for (auto* button : m_buttons)
                 {
                     const auto columns = std::max(1, button->property("agendaColumns").toInt());
@@ -297,7 +313,7 @@ namespace javelin::gui::calendar
                         std::clamp(button->property("agendaEndMinute").toInt(), 0, 24 * 60);
                     if (endMinute <= startMinute)
                         endMinute = std::min(24 * 60, startMinute + 15);
-                    const auto x = TimeGutterWidth + column * columnWidth + EventGap;
+                    const auto x = gutterWidth + column * columnWidth + EventGap;
                     const auto y = startMinute * PixelsPerHour / 60 + 1;
                     const auto height =
                         std::max(22, (endMinute - startMinute) * PixelsPerHour / 60 - 2);
@@ -525,8 +541,7 @@ namespace javelin::gui::calendar
             m_selectedEvent = std::move(selectedEvent);
         else if (dayChanged)
             m_selectedEvent.reset();
-        m_dateLabel->setText(QLocale{}.toString(m_date, QLocale::LongFormat));
-        setAccessibleName(i18n("Agenda for %1", QLocale{}.toString(m_date, QLocale::LongFormat)));
+        updateDatePresentation();
         rebuildEvents();
         if (m_selectedEvent && eventForKey(*m_selectedEvent) != nullptr)
             selectEvent(*m_selectedEvent);
@@ -558,9 +573,17 @@ namespace javelin::gui::calendar
             return;
         m_selectedEvent.reset();
         m_date = date;
-        m_dateLabel->setText(QLocale{}.toString(m_date, QLocale::LongFormat));
+        updateDatePresentation();
         clearDetails();
         Q_EMIT dayChanged(m_date);
+    }
+
+    void DayAgendaDialog::updateDatePresentation()
+    {
+        const auto dateText = QLocale{}.toString(m_date, QLocale::LongFormat);
+        m_dateLabel->setText(dateText);
+        setWindowTitle(i18nc("@title:window", "Day Agenda — %1", dateText));
+        setAccessibleName(i18n("Agenda for %1", dateText));
     }
 
     void DayAgendaDialog::rebuildEvents()

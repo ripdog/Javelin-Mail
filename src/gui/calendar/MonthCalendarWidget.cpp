@@ -1126,6 +1126,17 @@ namespace javelin::gui::calendar
         return 0;
     }
 
+    std::vector<MonthEvent> MonthCalendarWidget::eventsForDate(const QDate& date) const
+    {
+        std::vector<MonthEvent> result;
+        for (const auto& event : m_events)
+        {
+            if (event.start.date() <= date && eventLastDate(event) >= date)
+                result.push_back(event);
+        }
+        return result;
+    }
+
     QColor MonthCalendarWidget::calendarColor(const QString& calendarId) const
     {
         return effectiveCalendarColor(calendarId.toStdString());

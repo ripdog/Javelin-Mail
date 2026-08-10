@@ -84,6 +84,7 @@ namespace javelin::gui::calendar
         [[nodiscard]] QDate cellDate(int index) const;
         [[nodiscard]] int cellCount() const;
         [[nodiscard]] int overflowCount(const QDate& date) const;
+        [[nodiscard]] std::vector<MonthEvent> eventsForDate(const QDate& date) const;
         [[nodiscard]] QColor calendarColor(const QString& calendarId) const;
         [[nodiscard]] QMenu* calendarMenu() const;
 

@@ -136,6 +136,31 @@ TEST_CASE("month calendar accessibility reports event counts and full event butt
     CHECK(eventName.contains(QStringLiteral("recurring")));
 }
 
+TEST_CASE("month calendar exposes the materialized events for a requested day", "[gui][calendar]")
+{
+    TestWorkspaceSettingsPort settings;
+    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    widget.setDisplayedMonth(QDate{2026, 8, 1});
+
+    javelin::gui::calendar::MonthEvent event;
+    event.accountId = "account";
+    event.calendarId = "account\ncalendar";
+    event.eventId = "event";
+    event.title = QStringLiteral("Overnight event");
+    event.start = QDateTime{QDate{2026, 8, 9}, QTime{23, 0}};
+    event.end = QDateTime{QDate{2026, 8, 10}, QTime{1, 0}};
+    widget.setEvents({event});
+
+    const auto augustNine = widget.eventsForDate(QDate{2026, 8, 9});
+    const auto augustTen = widget.eventsForDate(QDate{2026, 8, 10});
+    const auto augustEleven = widget.eventsForDate(QDate{2026, 8, 11});
+    REQUIRE(augustNine.size() == 1);
+    REQUIRE(augustTen.size() == 1);
+    CHECK(augustNine.front().eventId == "event");
+    CHECK(augustTen.front().eventId == "event");
+    CHECK(augustEleven.empty());
+}
+
 TEST_CASE("month calendar page navigation keeps the selected cell in the displayed month",
           "[gui][calendar][accessibility][keyboard]")
 {

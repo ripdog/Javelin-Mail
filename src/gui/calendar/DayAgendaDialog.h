@@ -71,6 +71,7 @@ namespace javelin::gui::calendar
 
       private:
         void requestDay(QDate date);
+        void updateDatePresentation();
         void rebuildEvents();
         void selectEvent(const DayAgendaEventKey& key, bool focusButton = false);
         void clearDetails();
