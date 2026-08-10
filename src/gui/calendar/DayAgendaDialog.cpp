@@ -192,8 +192,9 @@ namespace javelin::gui::calendar
         {
             auto* button = new CalendarEventButton(parent);
             button->setObjectName(QStringLiteral("dayAgendaEventButton"));
-            button->setEventPresentation(event.title, eventAccessibleName(event, date), event.color,
-                                         CalendarEventButtonAppearance::AgendaBlock);
+            button->setCheckable(true);
+            button->setEventPresentation(event.title, eventAccessibleName(event, date),
+                                         event.color);
             button->setControlledWidget(detailsTarget);
             button->setProperty("agendaAccountId", event.key.accountId);
             button->setProperty("agendaEventId", event.key.eventId);

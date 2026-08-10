@@ -153,8 +153,7 @@ namespace javelin::gui::calendar
             auto* chip = new CalendarEventButton(this);
             chip->setEventPresentation(
                 segment.label + (event.recurring ? QStringLiteral(" ↻") : QString{}),
-                eventAccessibleName(event, cellDate), event.color,
-                CalendarEventButtonAppearance::MonthSegment, segment.begins, segment.ends);
+                eventAccessibleName(event, cellDate), event.color, segment.begins, segment.ends);
             chip->setToolTip(event.title);
             QObject::connect(chip, &QToolButton::clicked, chip, std::move(activated));
             m_layout->insertWidget(m_layout->count() - 1, chip);

@@ -75,6 +75,12 @@ TEST_CASE("day agenda renders a midnight-to-midnight timeline and starts at eigh
 
     const auto buttons = dialog.findChildren<QToolButton*>(QStringLiteral("dayAgendaEventButton"));
     REQUIRE(buttons.size() == 1);
+    auto monthPresentation = javelin::gui::calendar::CalendarEventButton{};
+    monthPresentation.setEventPresentation(QStringLiteral("Morning meeting"),
+                                           QStringLiteral("Morning meeting"),
+                                           QColor{QStringLiteral("#336699")});
+    CHECK(buttons.front()->styleSheet() == monthPresentation.styleSheet());
+    CHECK(buttons.front()->sizePolicy() == monthPresentation.sizePolicy());
     CHECK(buttons.front()->y() >= 9 * 64);
     CHECK(buttons.front()->accessibleName().contains(QStringLiteral("Morning meeting")));
     dialog.close();

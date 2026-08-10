@@ -122,13 +122,11 @@ namespace javelin::gui::calendar
     }
 
     void CalendarEventButton::setEventPresentation(QString visualText, QString accessibleText,
-                                                   QColor color,
-                                                   const CalendarEventButtonAppearance appearance,
-                                                   const bool segmentBegins, const bool segmentEnds)
+                                                   QColor color, const bool segmentBegins,
+                                                   const bool segmentEnds)
     {
         m_fullText = std::move(visualText);
         m_color = std::move(color);
-        m_appearance = appearance;
         m_segmentBegins = segmentBegins;
         m_segmentEnds = segmentEnds;
         setAccessibleName(std::move(accessibleText));
@@ -148,10 +146,7 @@ namespace javelin::gui::calendar
     void CalendarEventButton::resizeEvent(QResizeEvent* event)
     {
         QToolButton::resizeEvent(event);
-        if (m_appearance == CalendarEventButtonAppearance::MonthSegment)
-        {
-            setText(fontMetrics().elidedText(m_fullText, Qt::ElideRight, std::max(0, width() - 8)));
-        }
+        setText(fontMetrics().elidedText(m_fullText, Qt::ElideRight, std::max(0, width() - 8)));
     }
 
     void CalendarEventButton::applyPresentation()
@@ -162,33 +157,18 @@ namespace javelin::gui::calendar
         const auto foreground =
             contrastRatio(color, text) >= contrastRatio(color, base) ? text : base;
 
-        if (m_appearance == CalendarEventButtonAppearance::MonthSegment)
-        {
-            setCheckable(false);
-            setAutoRaise(true);
-            setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-            const auto leftRadius = m_segmentBegins ? QStringLiteral("3px") : QStringLiteral("0px");
-            const auto rightRadius = m_segmentEnds ? QStringLiteral("3px") : QStringLiteral("0px");
-            setStyleSheet(
-                QStringLiteral("QToolButton { background: %1; color: %2; "
-                               "border-top-left-radius: %3; border-bottom-left-radius: %3; "
-                               "border-top-right-radius: %4; border-bottom-right-radius: %4; "
-                               "padding: 1px 4px; text-align: left; }")
-                    .arg(color.name(QColor::HexArgb), foreground.name(QColor::HexArgb), leftRadius,
-                         rightRadius));
-            setText(fontMetrics().elidedText(m_fullText, Qt::ElideRight, std::max(0, width() - 8)));
-            return;
-        }
-
-        setCheckable(true);
-        setAutoRaise(false);
-        setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+        setAutoRaise(true);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        const auto leftRadius = m_segmentBegins ? QStringLiteral("3px") : QStringLiteral("0px");
+        const auto rightRadius = m_segmentEnds ? QStringLiteral("3px") : QStringLiteral("0px");
         setStyleSheet(
-            QStringLiteral(
-                "QToolButton { background: %1; color: %2; border: 1px solid palette(mid); "
-                "border-radius: 3px; padding: 3px 5px; text-align: left; } "
-                "QToolButton:checked { border: 2px solid palette(highlight); }")
-                .arg(color.name(QColor::HexArgb), foreground.name(QColor::HexArgb)));
-        setText(m_fullText);
+            QStringLiteral("QToolButton { background: %1; color: %2; "
+                           "border-top-left-radius: %3; border-bottom-left-radius: %3; "
+                           "border-top-right-radius: %4; border-bottom-right-radius: %4; "
+                           "padding: 1px 4px; text-align: left; } "
+                           "QToolButton:checked { border: 2px solid palette(highlight); }")
+                .arg(color.name(QColor::HexArgb), foreground.name(QColor::HexArgb), leftRadius,
+                     rightRadius));
+        setText(fontMetrics().elidedText(m_fullText, Qt::ElideRight, std::max(0, width() - 8)));
     }
 } // namespace javelin::gui::calendar
