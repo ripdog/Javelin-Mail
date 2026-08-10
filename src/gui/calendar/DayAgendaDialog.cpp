@@ -1,12 +1,16 @@
 #include "gui/calendar/DayAgendaDialog.h"
+#include "gui/calendar/CalendarEventButton.h"
 
 #include <KLocalizedString>
 
+#include <QAccessible>
+#include <QAccessibleWidget>
 #include <QDialogButtonBox>
 #include <QFont>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPainter>
+#include <QPointer>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -18,7 +22,6 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
-#include <cmath>
 #include <functional>
 #include <limits>
 #include <utility>
@@ -32,25 +35,6 @@ namespace javelin::gui::calendar
         constexpr int TimelineHeight = 24 * PixelsPerHour + 1;
         constexpr int TimeGutterWidth = 58;
         constexpr int EventGap = 3;
-
-        [[nodiscard]] double relativeLuminance(const QColor& color)
-        {
-            const auto channel = [](const double value)
-            {
-                const auto normalized = value / 255.0;
-                return normalized <= 0.04045 ? normalized / 12.92
-                                             : std::pow((normalized + 0.055) / 1.055, 2.4);
-            };
-            return 0.2126 * channel(color.red()) + 0.7152 * channel(color.green()) +
-                   0.0722 * channel(color.blue());
-        }
-
-        [[nodiscard]] double contrastRatio(const QColor& left, const QColor& right)
-        {
-            const auto lighter = std::max(relativeLuminance(left), relativeLuminance(right));
-            const auto darker = std::min(relativeLuminance(left), relativeLuminance(right));
-            return (lighter + 0.05) / (darker + 0.05);
-        }
 
         [[nodiscard]] int minuteOfDay(const QDateTime& value, const QDate& day, const bool end)
         {
@@ -169,18 +153,39 @@ namespace javelin::gui::calendar
             return name;
         }
 
-        [[nodiscard]] QString buttonStyle(const QColor& requested, const QPalette& palette)
+        class DayAgendaDetailsPane final : public QScrollArea
         {
-            const auto color = requested.isValid() ? requested : palette.color(QPalette::Highlight);
-            const auto text = palette.color(QPalette::Text);
-            const auto base = palette.color(QPalette::Base);
-            const auto foreground =
-                contrastRatio(color, text) >= contrastRatio(color, base) ? text : base;
-            return QStringLiteral(
-                       "QToolButton { background: %1; color: %2; border: 1px solid palette(mid); "
-                       "border-radius: 3px; padding: 3px 5px; text-align: left; } "
-                       "QToolButton:checked { border: 2px solid palette(highlight); }")
-                .arg(color.name(QColor::HexArgb), foreground.name(QColor::HexArgb));
+          public:
+            using QScrollArea::QScrollArea;
+
+            void setControllingButton(CalendarEventButton* button)
+            {
+                m_controllingButton = button;
+            }
+
+            [[nodiscard]] CalendarEventButton* controllingButton() const
+            {
+                return m_controllingButton;
+            }
+
+          private:
+            QPointer<CalendarEventButton> m_controllingButton;
+        };
+
+        [[nodiscard]] CalendarEventButton* createAgendaEventButton(const DayAgendaEvent& event,
+                                                                   const QDate& date,
+                                                                   QWidget* detailsTarget,
+                                                                   QWidget* parent)
+        {
+            auto* button = new CalendarEventButton(parent);
+            button->setObjectName(QStringLiteral("dayAgendaEventButton"));
+            button->setEventPresentation(event.title, eventAccessibleName(event, date), event.color,
+                                         CalendarEventButtonAppearance::AgendaBlock);
+            button->setControlledWidget(detailsTarget);
+            button->setProperty("agendaAccountId", event.key.accountId);
+            button->setProperty("agendaEventId", event.key.eventId);
+            button->setProperty("agendaRecurrenceId", event.key.recurrenceId);
+            return button;
         }
 
         class DayTimelineWidget final : public QWidget
@@ -194,6 +199,7 @@ namespace javelin::gui::calendar
             }
 
             void setEvents(const QDate& date, const std::vector<DayAgendaEvent>& events,
+                           QWidget* detailsTarget,
                            std::function<void(const DayAgendaEventKey&)> selected)
             {
                 m_date = date;
@@ -205,18 +211,23 @@ namespace javelin::gui::calendar
                 for (const auto& event : events)
                     if (!event.allDay)
                         timed.push_back(&event);
+                setAccessibleName(
+                    i18n("Timed schedule for %1", QLocale{}.toString(date, QLocale::LongFormat)));
+                setAccessibleDescription(i18ncp("accessible timed calendar event count",
+                                                "%1 timed event from midnight to midnight",
+                                                "%1 timed events from midnight to midnight",
+                                                static_cast<int>(timed.size())));
+                if (QAccessible::isActive())
+                {
+                    QAccessibleEvent nameChanged{this, QAccessible::NameChanged};
+                    QAccessible::updateAccessibility(&nameChanged);
+                    QAccessibleEvent descriptionChanged{this, QAccessible::DescriptionChanged};
+                    QAccessible::updateAccessibility(&descriptionChanged);
+                }
                 for (const auto& placement : timedPlacements(timed, date))
                 {
-                    auto* button = new QToolButton(this);
-                    button->setObjectName(QStringLiteral("dayAgendaEventButton"));
-                    button->setText(placement.event->title);
-                    button->setAccessibleName(eventAccessibleName(*placement.event, date));
-                    button->setCheckable(true);
-                    button->setAutoRaise(false);
-                    button->setStyleSheet(buttonStyle(placement.event->color, palette()));
-                    button->setProperty("agendaAccountId", placement.event->key.accountId);
-                    button->setProperty("agendaEventId", placement.event->key.eventId);
-                    button->setProperty("agendaRecurrenceId", placement.event->key.recurrenceId);
+                    auto* button =
+                        createAgendaEventButton(*placement.event, date, detailsTarget, this);
                     button->setProperty("agendaColumn", placement.column);
                     button->setProperty("agendaColumns", placement.columns);
                     button->setProperty("agendaStartMinute",
@@ -235,7 +246,7 @@ namespace javelin::gui::calendar
                 update();
             }
 
-            [[nodiscard]] const std::vector<QToolButton*>& buttons() const
+            [[nodiscard]] const std::vector<CalendarEventButton*>& buttons() const
             {
                 return m_buttons;
             }
@@ -296,10 +307,71 @@ namespace javelin::gui::calendar
 
             QDate m_date;
             std::function<void(const DayAgendaEventKey&)> m_selected;
-            std::vector<QToolButton*> m_buttons;
+            std::vector<CalendarEventButton*> m_buttons;
         };
 
-        [[nodiscard]] bool buttonMatches(const QToolButton* button, const DayAgendaEventKey& key)
+        class AccessibleDayTimeline final : public QAccessibleWidget
+        {
+          public:
+            explicit AccessibleDayTimeline(DayTimelineWidget* timeline)
+                : QAccessibleWidget(timeline, QAccessible::Pane)
+            {
+            }
+        };
+
+        class AccessibleDayAgendaDetails final : public QAccessibleWidget
+        {
+          public:
+            explicit AccessibleDayAgendaDetails(DayAgendaDetailsPane* details)
+                : QAccessibleWidget(details, QAccessible::Pane)
+            {
+            }
+
+            [[nodiscard]] QList<std::pair<QAccessibleInterface*, QAccessible::Relation>>
+            relations(const QAccessible::Relation match = QAccessible::AllRelations) const override
+            {
+                auto result = QAccessibleWidget::relations(match);
+                const auto* details = detailsPane();
+                if (details == nullptr || details->controllingButton() == nullptr ||
+                    !match.testFlag(QAccessible::Controlled))
+                    return result;
+                if (auto* controller =
+                        QAccessible::queryAccessibleInterface(details->controllingButton());
+                    controller != nullptr)
+                    result.push_back({controller, QAccessible::Controlled});
+                return result;
+            }
+
+          private:
+            [[nodiscard]] DayAgendaDetailsPane* detailsPane() const
+            {
+                return dynamic_cast<DayAgendaDetailsPane*>(object());
+            }
+        };
+
+        [[nodiscard]] QAccessibleInterface* dayAgendaAccessibleFactory(const QString& key,
+                                                                       QObject* object)
+        {
+            Q_UNUSED(key);
+            if (auto* timeline = dynamic_cast<DayTimelineWidget*>(object); timeline != nullptr)
+                return new AccessibleDayTimeline(timeline);
+            if (auto* details = dynamic_cast<DayAgendaDetailsPane*>(object); details != nullptr)
+                return new AccessibleDayAgendaDetails(details);
+            return nullptr;
+        }
+
+        void ensureDayAgendaAccessibilityFactoryInstalled()
+        {
+            static const bool installed = []
+            {
+                QAccessible::installFactory(dayAgendaAccessibleFactory);
+                return true;
+            }();
+            Q_UNUSED(installed);
+        }
+
+        [[nodiscard]] bool buttonMatches(const CalendarEventButton* button,
+                                         const DayAgendaEventKey& key)
         {
             return button != nullptr &&
                    button->property("agendaAccountId").toString() == key.accountId &&
@@ -318,6 +390,7 @@ namespace javelin::gui::calendar
 
     DayAgendaDialog::DayAgendaDialog(QWidget* parent) : QDialog(parent)
     {
+        ensureDayAgendaAccessibilityFactoryInstalled();
         setWindowTitle(i18n("Day Agenda"));
         setModal(true);
         resize(980, 720);
@@ -350,6 +423,7 @@ namespace javelin::gui::calendar
         auto* scheduleLayout = new QVBoxLayout(schedule);
         scheduleLayout->setContentsMargins(0, 0, 0, 0);
         m_allDayPanel = new QWidget(schedule);
+        m_allDayPanel->setAccessibleName(i18n("All-day events"));
         m_allDayLayout = new QVBoxLayout(m_allDayPanel);
         m_allDayLayout->setContentsMargins(4, 0, 4, 4);
         auto* allDayLabel = new QLabel(i18n("All day"), m_allDayPanel);
@@ -367,7 +441,8 @@ namespace javelin::gui::calendar
         m_timelineScroll->setWidget(m_timeline);
         scheduleLayout->addWidget(m_timelineScroll, 1);
 
-        m_detailsScroll = new QScrollArea(splitter);
+        m_detailsScroll = new DayAgendaDetailsPane(splitter);
+        m_detailsScroll->setObjectName(QStringLiteral("dayAgendaDetailsPane"));
         m_detailsScroll->setAccessibleName(i18n("Event details"));
         m_detailsScroll->setWidgetResizable(true);
         m_detailsScroll->setMinimumWidth(300);
@@ -453,13 +528,8 @@ namespace javelin::gui::calendar
         m_dateLabel->setText(QLocale{}.toString(m_date, QLocale::LongFormat));
         setAccessibleName(i18n("Agenda for %1", QLocale{}.toString(m_date, QLocale::LongFormat)));
         rebuildEvents();
-        if (m_selectedEvent)
-        {
-            if (const auto* selected = eventForKey(*m_selectedEvent); selected != nullptr)
-                updateDetails(*selected);
-            else
-                clearDetails();
-        }
+        if (m_selectedEvent && eventForKey(*m_selectedEvent) != nullptr)
+            selectEvent(*m_selectedEvent);
         else
             clearDetails();
         if (isVisible() && m_initialScrollPending)
@@ -509,15 +579,7 @@ namespace javelin::gui::calendar
             if (!event.allDay)
                 continue;
             hasAllDay = true;
-            auto* button = new QToolButton(m_allDayPanel);
-            button->setObjectName(QStringLiteral("dayAgendaEventButton"));
-            button->setText(event.title);
-            button->setAccessibleName(eventAccessibleName(event, m_date));
-            button->setCheckable(true);
-            button->setStyleSheet(buttonStyle(event.color, palette()));
-            button->setProperty("agendaAccountId", event.key.accountId);
-            button->setProperty("agendaEventId", event.key.eventId);
-            button->setProperty("agendaRecurrenceId", event.key.recurrenceId);
+            auto* button = createAgendaEventButton(event, m_date, m_detailsScroll, m_allDayPanel);
             connect(button, &QToolButton::clicked, this,
                     [this, key = event.key] { selectEvent(key); });
             m_allDayLayout->addWidget(button);
@@ -526,7 +588,7 @@ namespace javelin::gui::calendar
         m_allDayPanel->setVisible(hasAllDay);
 
         auto* timeline = static_cast<DayTimelineWidget*>(m_timeline);
-        timeline->setEvents(m_date, m_events,
+        timeline->setEvents(m_date, m_events, m_detailsScroll,
                             [this](const DayAgendaEventKey& key) { selectEvent(key); });
         for (auto* button : timeline->buttons())
             m_eventButtons.push_back(button);
@@ -545,18 +607,32 @@ namespace javelin::gui::calendar
         if (selected == nullptr)
             return;
         m_selectedEvent = key;
+        CalendarEventButton* controllingButton = nullptr;
         for (auto* button : m_eventButtons)
         {
             const auto matches = buttonMatches(button, key);
             button->setChecked(matches);
-            if (matches && focusButton)
-                button->setFocus(Qt::OtherFocusReason);
+            if (matches)
+            {
+                controllingButton = button;
+                if (focusButton)
+                    button->setFocus(Qt::OtherFocusReason);
+            }
         }
+        static_cast<DayAgendaDetailsPane*>(m_detailsScroll)
+            ->setControllingButton(controllingButton);
         updateDetails(*selected);
+        if (QAccessible::isActive())
+        {
+            QAccessibleEvent relationChanged{m_detailsScroll, QAccessible::ObjectAttributeChanged};
+            QAccessible::updateAccessibility(&relationChanged);
+        }
     }
 
     void DayAgendaDialog::clearDetails()
     {
+        static_cast<DayAgendaDetailsPane*>(m_detailsScroll)->setControllingButton(nullptr);
+        m_detailsScroll->setAccessibleDescription(i18n("No event selected"));
         m_detailsTitle->setText(i18n("Select an event to see details"));
         for (auto* label : {m_detailsWhen, m_detailsCalendar, m_detailsLocation, m_detailsOrganizer,
                             m_detailsAttendees, m_detailsDescription})
@@ -567,6 +643,13 @@ namespace javelin::gui::calendar
         m_edit->setEnabled(false);
         m_edit->hide();
         rebuildTabOrder();
+        if (QAccessible::isActive())
+        {
+            QAccessibleEvent descriptionChanged{m_detailsScroll, QAccessible::DescriptionChanged};
+            QAccessible::updateAccessibility(&descriptionChanged);
+            QAccessibleEvent relationChanged{m_detailsScroll, QAccessible::ObjectAttributeChanged};
+            QAccessible::updateAccessibility(&relationChanged);
+        }
     }
 
     void DayAgendaDialog::updateDetails(const DayAgendaEvent& event)
@@ -591,9 +674,30 @@ namespace javelin::gui::calendar
                        event.attendees.join(QStringLiteral(", ")));
         m_detailsDescription->setVisible(!event.description.isEmpty());
         m_detailsDescription->setText(event.description);
+        QStringList accessibleDetails{
+            event.title.isEmpty() ? i18n("Untitled event") : event.title,
+            i18n("When: %1", when),
+        };
+        if (!event.calendarName.isEmpty())
+            accessibleDetails.push_back(i18n("Calendar: %1", event.calendarName));
+        if (!event.location.isEmpty())
+            accessibleDetails.push_back(i18n("Location: %1", event.location));
+        if (!event.organizer.isEmpty())
+            accessibleDetails.push_back(i18n("Organizer: %1", event.organizer));
+        if (!event.attendees.isEmpty())
+            accessibleDetails.push_back(
+                i18n("Attendees: %1", event.attendees.join(QStringLiteral(", "))));
+        if (!event.description.isEmpty())
+            accessibleDetails.push_back(event.description);
+        m_detailsScroll->setAccessibleDescription(accessibleDetails.join(QLatin1Char('\n')));
         m_edit->setVisible(event.editable);
         m_edit->setEnabled(event.editable);
         rebuildTabOrder();
+        if (QAccessible::isActive())
+        {
+            QAccessibleEvent descriptionChanged{m_detailsScroll, QAccessible::DescriptionChanged};
+            QAccessible::updateAccessibility(&descriptionChanged);
+        }
     }
 
     void DayAgendaDialog::rebuildTabOrder()

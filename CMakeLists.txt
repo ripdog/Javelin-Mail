@@ -1304,6 +1304,10 @@ foreach(refresh_content_gui_source IN LISTS javelin_refresh_content_gui_sources)
     endif()
 endforeach()
 
+target_sources(javelin_gui PRIVATE
+    src/gui/calendar/CalendarEventButton.cpp
+    src/gui/calendar/CalendarEventButton.h
+)
 target_include_directories(javelin_gui PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
 )
@@ -1348,6 +1352,10 @@ add_library(javelin_calendar_gui STATIC
     src/gui/calendar/RecurrenceDialog.h
     src/gui/calendar/RecurrencePattern.cpp
     src/gui/calendar/RecurrencePattern.h
+)
+target_sources(javelin_calendar_gui PRIVATE
+    src/gui/calendar/CalendarEventButton.cpp
+    src/gui/calendar/CalendarEventButton.h
 )
 target_include_directories(javelin_calendar_gui PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>

@@ -1,3 +1,4 @@
+#include "gui/calendar/CalendarEventButton.h"
 #include "gui/calendar/MonthCalendarWidget.h"
 #include "gui/settings/WorkspaceSettingsPort.h"
 
@@ -123,6 +124,13 @@ TEST_CASE("month calendar accessibility reports event counts and full event butt
     REQUIRE(cell->childCount() == 1);
     auto* eventButton = cell->child(0);
     REQUIRE(eventButton != nullptr);
+    CHECK(dynamic_cast<javelin::gui::calendar::CalendarEventButton*>(eventButton->object()) !=
+          nullptr);
+    CHECK(eventButton->role() == QAccessible::Button);
+    CHECK_FALSE(eventButton->state().checkable);
+    REQUIRE(eventButton->actionInterface() != nullptr);
+    CHECK(eventButton->actionInterface()->actionNames().contains(
+        QAccessibleActionInterface::pressAction()));
     const auto eventName = eventButton->text(QAccessible::Name);
     CHECK(eventName.contains(QStringLiteral("A deliberately long planning meeting title")));
     CHECK(eventName.contains(QStringLiteral("recurring")));

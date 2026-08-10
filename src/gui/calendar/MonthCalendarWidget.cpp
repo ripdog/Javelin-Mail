@@ -1,4 +1,5 @@
 #include "gui/calendar/MonthCalendarWidget.h"
+#include "gui/calendar/CalendarEventButton.h"
 #include "gui/calendar/MonthCalendarLayout.h"
 #include "gui/settings/WorkspaceSettingsPort.h"
 
@@ -31,32 +32,12 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
-#include <cmath>
 #include <functional>
 
 namespace javelin::gui::calendar
 {
     namespace
     {
-        [[nodiscard]] double relativeLuminance(const QColor& color)
-        {
-            const auto channel = [](const double value)
-            {
-                const auto normalized = value / 255.0;
-                return normalized <= 0.04045 ? normalized / 12.92
-                                             : std::pow((normalized + 0.055) / 1.055, 2.4);
-            };
-            return 0.2126 * channel(color.red()) + 0.7152 * channel(color.green()) +
-                   0.0722 * channel(color.blue());
-        }
-
-        [[nodiscard]] double contrastRatio(const QColor& left, const QColor& right)
-        {
-            const auto lighter = std::max(relativeLuminance(left), relativeLuminance(right));
-            const auto darker = std::min(relativeLuminance(left), relativeLuminance(right));
-            return (lighter + 0.05) / (darker + 0.05);
-        }
-
         [[nodiscard]] QIcon colorSwatch(const QColor& color)
         {
             QPixmap swatch{12, 12};
@@ -94,52 +75,6 @@ namespace javelin::gui::calendar
             return name;
         }
 
-        class EventChip final : public QToolButton
-        {
-          public:
-            EventChip(const MonthEvent& event, const QDate& cellDate, QWidget* parent)
-                : QToolButton(parent)
-            {
-                const auto segment =
-                    monthEventSegment(event.title, event.start, event.end, event.allDay, cellDate);
-                m_fullText = segment.label + (event.recurring ? QStringLiteral(" ↻") : QString{});
-                setText(m_fullText);
-                setAccessibleName(eventAccessibleName(event, cellDate));
-                setToolTip(event.title);
-                setMinimumWidth(0);
-                setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-                setAutoRaise(true);
-                const auto color = event.color.isValid()
-                                       ? event.color
-                                       : palette().color(QPalette::Active, QPalette::Highlight);
-                const auto text = palette().color(QPalette::Active, QPalette::Text);
-                const auto base = palette().color(QPalette::Active, QPalette::Base);
-                const auto foreground =
-                    contrastRatio(color, text) >= contrastRatio(color, base) ? text : base;
-                const auto leftRadius =
-                    segment.begins ? QStringLiteral("3px") : QStringLiteral("0px");
-                const auto rightRadius =
-                    segment.ends ? QStringLiteral("3px") : QStringLiteral("0px");
-                setStyleSheet(
-                    QStringLiteral("QToolButton { background: %1; color: %2; "
-                                   "border-top-left-radius: %3; border-bottom-left-radius: %3; "
-                                   "border-top-right-radius: %4; border-bottom-right-radius: %4; "
-                                   "padding: 1px 4px; text-align: left; }")
-                        .arg(color.name(QColor::HexArgb), foreground.name(QColor::HexArgb),
-                             leftRadius, rightRadius));
-            }
-
-          protected:
-            void resizeEvent(QResizeEvent* event) override
-            {
-                QToolButton::resizeEvent(event);
-                setText(
-                    fontMetrics().elidedText(m_fullText, Qt::ElideRight, std::max(0, width() - 8)));
-            }
-
-          private:
-            QString m_fullText;
-        };
     } // namespace
 
     class DayCellWidget final : public QWidget
@@ -213,7 +148,14 @@ namespace javelin::gui::calendar
         void addEvent(const MonthEvent& event, const QDate& cellDate,
                       std::function<void()> activated)
         {
-            auto* chip = new EventChip(event, cellDate, this);
+            const auto segment =
+                monthEventSegment(event.title, event.start, event.end, event.allDay, cellDate);
+            auto* chip = new CalendarEventButton(this);
+            chip->setEventPresentation(
+                segment.label + (event.recurring ? QStringLiteral(" ↻") : QString{}),
+                eventAccessibleName(event, cellDate), event.color,
+                CalendarEventButtonAppearance::MonthSegment, segment.begins, segment.ends);
+            chip->setToolTip(event.title);
             QObject::connect(chip, &QToolButton::clicked, chip, std::move(activated));
             m_layout->insertWidget(m_layout->count() - 1, chip);
         }

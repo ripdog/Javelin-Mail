@@ -1,5 +1,7 @@
 #include "gui/calendar/DayAgendaDialog.h"
+#include "gui/calendar/CalendarEventButton.h"
 
+#include <QAccessible>
 #include <QApplication>
 #include <QImage>
 #include <QLabel>
@@ -141,6 +143,78 @@ TEST_CASE("day agenda event selection fills details and exposes edit explicitly"
                      { editRequested = true; });
     edit->click();
     CHECK(editRequested);
+    dialog.close();
+}
+
+TEST_CASE("day agenda accessibility exposes schedule events and selected details relations",
+          "[gui][calendar][agenda][accessibility]")
+{
+    javelin::gui::calendar::DayAgendaDialog dialog;
+    const auto first =
+        event(QStringLiteral("first"), QTime{9, 0}, QTime{10, 0}, QStringLiteral("First meeting"));
+    const auto second = event(QStringLiteral("second"), QTime{11, 0}, QTime{12, 0},
+                              QStringLiteral("Second meeting"));
+    dialog.setDay(QDate{2026, 8, 10}, {first, second});
+    dialog.show();
+    settleGui();
+
+    auto* timeline = dialog.findChild<QWidget*>(QStringLiteral("dayAgendaTimeline"));
+    REQUIRE(timeline != nullptr);
+    auto* timelineAccessible = QAccessible::queryAccessibleInterface(timeline);
+    REQUIRE(timelineAccessible != nullptr);
+    CHECK(timelineAccessible->role() == QAccessible::Pane);
+    CHECK(timelineAccessible->text(QAccessible::Name).contains(QStringLiteral("10 August 2026")));
+    CHECK(timelineAccessible->text(QAccessible::Description).contains(QStringLiteral("2 timed")));
+    CHECK(timelineAccessible->childCount() == 2);
+
+    auto* details = dialog.findChild<QScrollArea*>(QStringLiteral("dayAgendaDetailsPane"));
+    REQUIRE(details != nullptr);
+    auto* detailsAccessible = QAccessible::queryAccessibleInterface(details);
+    REQUIRE(detailsAccessible != nullptr);
+    CHECK(detailsAccessible->role() == QAccessible::Pane);
+    CHECK(detailsAccessible->text(QAccessible::Name) == QStringLiteral("Event details"));
+    CHECK(detailsAccessible->text(QAccessible::Description) == QStringLiteral("No event selected"));
+    CHECK(detailsAccessible->relations(QAccessible::Controlled).isEmpty());
+
+    const auto buttons = dialog.findChildren<QToolButton*>(QStringLiteral("dayAgendaEventButton"));
+    REQUIRE(buttons.size() == 2);
+    auto* firstButton = dynamic_cast<javelin::gui::calendar::CalendarEventButton*>(buttons[0]);
+    auto* secondButton = dynamic_cast<javelin::gui::calendar::CalendarEventButton*>(buttons[1]);
+    REQUIRE(firstButton != nullptr);
+    REQUIRE(secondButton != nullptr);
+
+    auto* firstAccessible = QAccessible::queryAccessibleInterface(firstButton);
+    REQUIRE(firstAccessible != nullptr);
+    CHECK(firstAccessible->role() == QAccessible::Button);
+    REQUIRE(firstAccessible->actionInterface() != nullptr);
+    CHECK(firstAccessible->actionInterface()->actionNames().contains(
+        QAccessibleActionInterface::pressAction()));
+    const auto controlled = firstAccessible->relations(QAccessible::Controller);
+    REQUIRE(controlled.size() == 1);
+    CHECK(controlled.front().first->object() == details);
+    CHECK(controlled.front().second == QAccessible::Controller);
+
+    firstButton->click();
+    settleGui();
+    CHECK(firstAccessible->state().checkable);
+    CHECK(firstAccessible->state().checked);
+    CHECK(detailsAccessible->text(QAccessible::Description)
+              .contains(QStringLiteral("First meeting")));
+    CHECK(
+        detailsAccessible->text(QAccessible::Description).contains(QStringLiteral("Meeting room")));
+    auto selectedController = detailsAccessible->relations(QAccessible::Controlled);
+    REQUIRE(selectedController.size() == 1);
+    CHECK(selectedController.front().first->object() == firstButton);
+    CHECK(selectedController.front().second == QAccessible::Controlled);
+
+    secondButton->click();
+    settleGui();
+    CHECK_FALSE(firstAccessible->state().checked);
+    CHECK(detailsAccessible->text(QAccessible::Description)
+              .contains(QStringLiteral("Second meeting")));
+    selectedController = detailsAccessible->relations(QAccessible::Controlled);
+    REQUIRE(selectedController.size() == 1);
+    CHECK(selectedController.front().first->object() == secondButton);
     dialog.close();
 }
 

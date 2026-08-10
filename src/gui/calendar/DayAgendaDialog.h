@@ -20,6 +20,8 @@ class QWidget;
 
 namespace javelin::gui::calendar
 {
+    class CalendarEventButton;
+
     struct DayAgendaEventKey
     {
         QString accountId;
@@ -98,7 +100,7 @@ namespace javelin::gui::calendar
         QLabel* m_detailsDescription = nullptr;
         QPushButton* m_edit = nullptr;
         QPushButton* m_close = nullptr;
-        std::vector<QToolButton*> m_eventButtons;
+        std::vector<CalendarEventButton*> m_eventButtons;
         bool m_initialScrollPending = true;
     };
 } // namespace javelin::gui::calendar
