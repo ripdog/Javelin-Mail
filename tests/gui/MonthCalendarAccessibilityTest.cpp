@@ -5,10 +5,13 @@
 #include <QAccessible>
 #include <QApplication>
 #include <QKeyEvent>
+#include <QMouseEvent>
+#include <QPointer>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <optional>
+#include <ranges>
 
 namespace
 {
@@ -159,6 +162,61 @@ TEST_CASE("month calendar exposes the materialized events for a requested day", 
     CHECK(augustNine.front().eventId == "event");
     CHECK(augustTen.front().eventId == "event");
     CHECK(augustEleven.empty());
+}
+
+TEST_CASE("month calendar event activation requests the event's actual day", "[gui][calendar]")
+{
+    TestWorkspaceSettingsPort settings;
+    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    widget.setDisplayedMonth(QDate{2026, 8, 1});
+    widget.setSelectedDateFromAgenda(QDate{2026, 8, 19});
+    widget.resize(900, 700);
+
+    javelin::gui::calendar::MonthEvent event;
+    event.accountId = "account";
+    event.calendarId = "account\ncalendar";
+    event.eventId = "event";
+    event.title = QStringLiteral("Water Softener Running");
+    event.start = QDateTime{QDate{2026, 8, 12}, QTime{2, 20}};
+    event.end = QDateTime{QDate{2026, 8, 12}, QTime{4, 30}};
+    widget.setEvents({event});
+    widget.show();
+    QApplication::processEvents();
+
+    QDate agendaDate;
+    QString agendaEventId;
+    QObject::connect(&widget, &javelin::gui::calendar::MonthCalendarWidget::dayAgendaRequested,
+                     &widget,
+                     [&agendaDate, &agendaEventId](const QDate& date, const QString&,
+                                                   const QString& eventId, const QString&)
+                     {
+                         agendaDate = date;
+                         agendaEventId = eventId;
+                     });
+
+    const auto buttons = widget.findChildren<QToolButton*>();
+    const auto eventButton = std::ranges::find_if(
+        buttons, [](QToolButton* button)
+        { return dynamic_cast<javelin::gui::calendar::CalendarEventButton*>(button) != nullptr; });
+    REQUIRE(eventButton != buttons.end());
+    QPointer<QToolButton> activatedButton{*eventButton};
+    const auto localPosition = QPointF{(*eventButton)->rect().center()};
+    const auto globalPosition = QPointF{(*eventButton)->mapToGlobal(localPosition.toPoint())};
+    QMouseEvent press{QEvent::MouseButtonPress, localPosition,  globalPosition,
+                      Qt::LeftButton,           Qt::LeftButton, Qt::NoModifier};
+    QMouseEvent release{QEvent::MouseButtonRelease,
+                        localPosition,
+                        globalPosition,
+                        Qt::LeftButton,
+                        Qt::NoButton,
+                        Qt::NoModifier};
+    QApplication::sendEvent(*eventButton, &press);
+    QApplication::sendEvent(*eventButton, &release);
+
+    CHECK_FALSE(activatedButton.isNull());
+    CHECK(agendaDate == QDate{2026, 8, 12});
+    CHECK(agendaEventId == QStringLiteral("event"));
+    CHECK(widget.selectedDate() == QDate{2026, 8, 12});
 }
 
 TEST_CASE("month calendar page navigation keeps the selected cell in the displayed month",

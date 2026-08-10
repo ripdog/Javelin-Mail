@@ -455,6 +455,12 @@ namespace javelin::gui::calendar
         m_timelineScroll->setWidgetResizable(true);
         m_timeline = new DayTimelineWidget(m_timelineScroll);
         m_timelineScroll->setWidget(m_timeline);
+        connect(m_timelineScroll->verticalScrollBar(), &QScrollBar::rangeChanged, this,
+                [this](const int, const int maximum)
+                {
+                    if (m_initialScrollPending && maximum > 0 && isVisible())
+                        scheduleInitialScroll();
+                });
         scheduleLayout->addWidget(m_timelineScroll, 1);
 
         m_detailsScroll = new DayAgendaDetailsPane(splitter);
@@ -748,28 +754,40 @@ namespace javelin::gui::calendar
 
     void DayAgendaDialog::scheduleInitialScroll()
     {
-        QTimer::singleShot(0, this,
-                           [this]
-                           {
-                               if (!m_initialScrollPending || !isVisible())
-                                   return;
-                               m_timelineScroll->verticalScrollBar()->setValue(8 * PixelsPerHour);
-                               if (!m_selectedEvent)
-                               {
-                                   m_initialScrollPending = false;
-                                   return;
-                               }
-                               for (auto* button : m_eventButtons)
-                               {
-                                   if (!buttonMatches(button, *m_selectedEvent))
-                                       continue;
-                                   if (m_timeline->isAncestorOf(button))
-                                       m_timelineScroll->ensureWidgetVisible(button, 0, 24);
-                                   button->setFocus(Qt::OtherFocusReason);
-                                   m_initialScrollPending = false;
-                                   return;
-                               }
-                           });
+        QTimer::singleShot(
+            0, this,
+            [this]
+            {
+                if (!m_initialScrollPending || !isVisible())
+                    return;
+
+                auto* scrollBar = m_timelineScroll->verticalScrollBar();
+                if (scrollBar->maximum() <= 0)
+                {
+                    if (m_timeline->height() > m_timelineScroll->viewport()->height())
+                        return;
+                    m_initialScrollPending = false;
+                    return;
+                }
+
+                scrollBar->setValue(std::min(8 * PixelsPerHour, scrollBar->maximum()));
+                if (!m_selectedEvent)
+                {
+                    m_initialScrollPending = false;
+                    return;
+                }
+                for (auto* button : m_eventButtons)
+                {
+                    if (!buttonMatches(button, *m_selectedEvent))
+                        continue;
+                    if (m_timeline->isAncestorOf(button))
+                        m_timelineScroll->ensureWidgetVisible(button, 0, 24);
+                    button->setFocus(Qt::OtherFocusReason);
+                    m_initialScrollPending = false;
+                    return;
+                }
+                m_initialScrollPending = false;
+            });
     }
 
     const DayAgendaEvent* DayAgendaDialog::eventForKey(const DayAgendaEventKey& key) const

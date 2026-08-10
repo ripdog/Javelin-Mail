@@ -1338,20 +1338,29 @@ namespace javelin::gui::calendar
 
     void MonthCalendarWidget::selectDate(const QDate& date)
     {
-        if (!date.isValid())
+        if (!date.isValid() || date == m_selectedDate)
             return;
-        const auto previousSelection = m_selectedDate;
-        const auto previousMonth = m_displayedMonth;
+
+        const auto gridChanged = date < visibleStart() || date >= visibleEnd();
         m_selectedDate = date;
-        if (date < visibleStart() || date >= visibleEnd())
+        if (gridChanged)
+        {
             m_displayedMonth = QDate{date.year(), date.month(), 1};
-        rebuildDates();
-        if (m_displayedMonth != previousMonth)
+            rebuildDates();
             notifyAccessibilityGridChanged();
-        else if (m_selectedDate != previousSelection)
+        }
+        else
+        {
+            for (int index = 0; index < 42; ++index)
+            {
+                const auto cellDate = this->cellDate(index);
+                m_cells[static_cast<std::size_t>(index)]->setDate(
+                    cellDate, cellDate.month() != m_displayedMonth.month(),
+                    cellDate == m_selectedDate, m_locale);
+            }
             notifyAccessibilitySelectionChanged();
-        if (m_selectedDate != previousSelection)
-            Q_EMIT selectionChanged(date);
+        }
+        Q_EMIT selectionChanged(date);
     }
 
     DayCellWidget* MonthCalendarWidget::cellForDate(const QDate& date) const
