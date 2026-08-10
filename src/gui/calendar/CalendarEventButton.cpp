@@ -1,4 +1,5 @@
 #include "gui/calendar/CalendarEventButton.h"
+#include "gui/accessibility/AccessibleFactory.h"
 
 #include <QAccessible>
 #include <QAccessibleWidget>
@@ -98,9 +99,7 @@ namespace javelin::gui::calendar
         [[nodiscard]] QAccessibleInterface* calendarEventButtonFactory(const QString& key,
                                                                        QObject* object)
         {
-            if (key != QStringLiteral("javelin::gui::calendar::CalendarEventButton"))
-                return nullptr;
-            auto* button = qobject_cast<CalendarEventButton*>(object);
+            auto* button = accessibility::factoryObject<CalendarEventButton>(key, object);
             return button != nullptr ? new AccessibleCalendarEventButton(button) : nullptr;
         }
 

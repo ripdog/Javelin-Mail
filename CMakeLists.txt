@@ -1305,6 +1305,7 @@ foreach(refresh_content_gui_source IN LISTS javelin_refresh_content_gui_sources)
 endforeach()
 
 target_sources(javelin_gui PRIVATE
+    src/gui/accessibility/AccessibleFactory.h
     src/gui/calendar/CalendarEventButton.cpp
     src/gui/calendar/CalendarEventButton.h
 )
@@ -1339,6 +1340,7 @@ javelin_enable_sanitizers(javelin_gui)
 target_compile_options(javelin_gui PRIVATE -fexceptions)
 
 add_library(javelin_calendar_gui STATIC
+    src/gui/accessibility/AccessibleFactory.h
     src/gui/calendar/MonthCalendarLayout.cpp
     src/gui/calendar/MonthCalendarLayout.h
     src/gui/calendar/MonthCalendarWidget.cpp

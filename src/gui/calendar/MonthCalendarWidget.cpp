@@ -1,4 +1,5 @@
 #include "gui/calendar/MonthCalendarWidget.h"
+#include "gui/accessibility/AccessibleFactory.h"
 #include "gui/calendar/CalendarEventButton.h"
 #include "gui/calendar/MonthCalendarLayout.h"
 #include "gui/settings/WorkspaceSettingsPort.h"
@@ -492,11 +493,10 @@ namespace javelin::gui::calendar
             auto* calendar = calendarWidget();
             if (calendar == nullptr || childItem == nullptr)
                 return false;
-            auto* cellObject = qobject_cast<QWidget*>(childItem->object());
-            if (cellObject == nullptr ||
-                cellObject->objectName() != QStringLiteral("calendarDayCell"))
+            auto* cell = accessibility::namedObject<DayCellWidget, QWidget>(
+                childItem->object(), QLatin1StringView{"calendarDayCell"});
+            if (cell == nullptr)
                 return false;
-            auto* cell = static_cast<DayCellWidget*>(cellObject);
             calendar->selectDate(cell->date());
             return true;
         }
@@ -690,10 +690,8 @@ namespace javelin::gui::calendar
       private:
         [[nodiscard]] DayCellWidget* cellWidget() const
         {
-            auto* cell = qobject_cast<QWidget*>(object());
-            return cell != nullptr && cell->objectName() == QStringLiteral("calendarDayCell")
-                       ? static_cast<DayCellWidget*>(cell)
-                       : nullptr;
+            return accessibility::namedObject<DayCellWidget, QWidget>(
+                object(), QLatin1StringView{"calendarDayCell"});
         }
 
         [[nodiscard]] MonthCalendarWidget* calendarWidget() const
@@ -709,24 +707,17 @@ namespace javelin::gui::calendar
         [[nodiscard]] QAccessibleInterface* calendarAccessibleFactory(const QString& key,
                                                                       QObject* object)
         {
-            if (key == QStringLiteral("javelin::gui::calendar::MonthCalendarWidget"))
-            {
-                auto* calendar = qobject_cast<MonthCalendarWidget*>(object);
-                return calendar != nullptr ? new AccessibleMonthCalendar(calendar) : nullptr;
-            }
-            if (key == QStringLiteral("QWidget"))
-            {
-                auto* widget = qobject_cast<QWidget*>(object);
-                if (widget != nullptr && widget->objectName() == QStringLiteral("calendarDayCell"))
-                    return new AccessibleDayCell(static_cast<DayCellWidget*>(widget));
-            }
-            else if (key == QStringLiteral("QLabel"))
-            {
-                auto* label = qobject_cast<QLabel*>(object);
-                if (label != nullptr &&
-                    label->objectName() == QStringLiteral("calendarWeekdayHeader"))
-                    return new AccessibleCalendarHeader(label);
-            }
+            if (auto* calendar = accessibility::factoryObject<MonthCalendarWidget>(key, object);
+                calendar != nullptr)
+                return new AccessibleMonthCalendar(calendar);
+            if (auto* cell = accessibility::namedFactoryObject<DayCellWidget, QWidget>(
+                    key, object, QLatin1StringView{"calendarDayCell"});
+                cell != nullptr)
+                return new AccessibleDayCell(cell);
+            if (auto* label = accessibility::namedFactoryObject<QLabel, QLabel>(
+                    key, object, QLatin1StringView{"calendarWeekdayHeader"});
+                label != nullptr)
+                return new AccessibleCalendarHeader(label);
             return nullptr;
         }
 

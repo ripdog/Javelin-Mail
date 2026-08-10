@@ -1,4 +1,5 @@
 #include "gui/calendar/DayAgendaDialog.h"
+#include "gui/accessibility/AccessibleFactory.h"
 #include "gui/calendar/CalendarEventButton.h"
 
 #include <KLocalizedString>
@@ -362,36 +363,23 @@ namespace javelin::gui::calendar
           private:
             [[nodiscard]] DayAgendaDetailsPane* detailsPane() const
             {
-                auto* pane = qobject_cast<QScrollArea*>(object());
-                return pane != nullptr &&
-                               pane->objectName() == QStringLiteral("dayAgendaDetailsPane")
-                           ? static_cast<DayAgendaDetailsPane*>(pane)
-                           : nullptr;
+                return accessibility::namedObject<DayAgendaDetailsPane, QScrollArea>(
+                    object(), QLatin1StringView{"dayAgendaDetailsPane"});
             }
         };
 
         [[nodiscard]] QAccessibleInterface* dayAgendaAccessibleFactory(const QString& key,
                                                                        QObject* object)
         {
-            if (key == QStringLiteral("QWidget"))
-            {
-                auto* widget = qobject_cast<QWidget*>(object);
-                if (widget != nullptr &&
-                    widget->objectName() == QStringLiteral("dayAgendaTimeline"))
-                {
-                    return new AccessibleDayTimeline(static_cast<DayTimelineWidget*>(widget));
-                }
-            }
-            else if (key == QStringLiteral("QScrollArea"))
-            {
-                auto* scrollArea = qobject_cast<QScrollArea*>(object);
-                if (scrollArea != nullptr &&
-                    scrollArea->objectName() == QStringLiteral("dayAgendaDetailsPane"))
-                {
-                    return new AccessibleDayAgendaDetails(
-                        static_cast<DayAgendaDetailsPane*>(scrollArea));
-                }
-            }
+            if (auto* timeline = accessibility::namedFactoryObject<DayTimelineWidget, QWidget>(
+                    key, object, QLatin1StringView{"dayAgendaTimeline"});
+                timeline != nullptr)
+                return new AccessibleDayTimeline(timeline);
+            if (auto* details =
+                    accessibility::namedFactoryObject<DayAgendaDetailsPane, QScrollArea>(
+                        key, object, QLatin1StringView{"dayAgendaDetailsPane"});
+                details != nullptr)
+                return new AccessibleDayAgendaDetails(details);
             return nullptr;
         }
 
