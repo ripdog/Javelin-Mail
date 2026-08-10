@@ -24,6 +24,19 @@ TEST_CASE("session capability validation succeeds when required capabilities are
     REQUIRE(result.session->accounts.at("u1").accountCapabilities.submission.has_value());
 }
 
+TEST_CASE("session parser exposes top-level mailbox creation rights", "[jmap][session][mailbox]")
+{
+    const auto result = javelin::jmap::api::parseSession(
+        R"({"username":"alice@example.com","apiUrl":"https://mail.example.com/jmap/api","downloadUrl":"https://mail.example.com/download/{accountId}/{blobId}/{name}","uploadUrl":"https://mail.example.com/upload/{accountId}","state":"s1","capabilities":{"urn:ietf:params:jmap:core":{"maxSizeRequest":1000000,"maxConcurrentRequests":8,"maxCallsInRequest":16,"maxObjectsInGet":500,"maxObjectsInSet":500},"urn:ietf:params:jmap:mail":{}},"accounts":{"u1":{"name":"Personal","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:mail":{"mayCreateTopLevelMailbox":true}}}},"primaryAccounts":{"urn:ietf:params:jmap:mail":"u1"}})",
+        {.mail = true});
+
+    REQUIRE(result.ok());
+    REQUIRE(result.session.has_value());
+    const auto& mail = result.session->accounts.at("u1").accountCapabilities.mailDetails;
+    REQUIRE(mail.has_value());
+    CHECK(mail->mayCreateTopLevelMailbox);
+}
+
 TEST_CASE("session parser exposes delayed send limits", "[jmap][session][submission]")
 {
     const auto result = javelin::jmap::api::parseSession(

@@ -86,6 +86,9 @@ TEST_CASE("account read repository returns cached account metadata", "[jmap][cac
     seedAccount(writer, QStringLiteral("personal"), QStringLiteral("Personal"), true);
     seedAccount(writer, QStringLiteral("directory"), QStringLiteral("Directory"), false, false,
                 true, 44236800, QStringLiteral("personal"));
+    QSqlQuery mailboxPermission{writer.database()};
+    REQUIRE(mailboxPermission.exec(QStringLiteral(
+        "UPDATE accounts SET mail_may_create_top_level_mailbox=1 WHERE account_id='personal'")));
     writer = {};
 
     auto readerResult = javelin::jmap::cache::GuiDatabaseFactory{
@@ -105,6 +108,7 @@ TEST_CASE("account read repository returns cached account metadata", "[jmap][cac
     CHECK(accounts.front().accountId == "personal");
     CHECK(accounts.front().isPrimary);
     CHECK(accounts.front().hasMailCapability);
+    CHECK(accounts.front().mayCreateTopLevelMailbox);
     CHECK(accounts.at(1).accountId == "directory");
     CHECK_FALSE(accounts.at(1).hasMailCapability);
     CHECK(accounts.at(1).hasSubmissionCapability);
@@ -119,6 +123,7 @@ TEST_CASE("account read repository returns cached account metadata", "[jmap][cac
         std::get<std::optional<javelin::jmap::cache::CachedAccount>>(personalResult);
     REQUIRE(personal.has_value());
     CHECK(personal->name == "Personal");
+    CHECK(personal->mayCreateTopLevelMailbox);
 
     const auto directoryResult = repository.findById("directory");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CachedAccount>>(

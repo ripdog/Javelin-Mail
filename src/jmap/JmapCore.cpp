@@ -698,6 +698,7 @@ namespace javelin::jmap
             const auto request = javelin::jmap::api::mailboxSet({
                 .accountId = accountId,
                 .ifInState = mutation.baseState,
+                .create = {},
                 .update = {{mutation.mailboxId, {.isSubscribed = mutation.afterSubscribed}}},
                 .destroy = {},
                 .onDestroyRemoveEmails = false,
@@ -806,6 +807,183 @@ namespace javelin::jmap
             co_return response;
         }
 
+        [[nodiscard]] QCoro::Task<std::variant<javelin::jmap::domain::Mailbox, OperationError>>
+        submitMailboxCreateMutation(
+            javelin::jmap::api::JmapMethodTransport& transport,
+            const LiveConnectionSettings& settings, const std::string& accountId,
+            const javelin::jmap::api::Session& session,
+            javelin::jmap::sync::MailboxMutationJournal& journal,
+            const javelin::jmap::sync::MailboxCreateMutationRecord& mutation)
+        {
+            if (const auto error =
+                    journal.transition(mutation, javelin::jmap::sync::MutationStatus::InFlight))
+                co_return operationError(*error);
+
+            const auto request = javelin::jmap::api::mailboxSet({
+                .accountId = accountId,
+                .ifInState = mutation.baseState,
+                .create = {{mutation.creationId,
+                            {.name = mutation.name,
+                             .parentId = mutation.parentId,
+                             .sortOrder = mutation.sortOrder,
+                             .isSubscribed = mutation.isSubscribed}}},
+                .update = {},
+                .destroy = {},
+                .onDestroyRemoveEmails = false,
+            });
+            if (!request.has_value())
+            {
+                if (const auto error = journal.reject(mutation))
+                    co_return operationError(*error);
+                co_return OperationError{
+                    .code = OperationErrorCode::InvalidRequest,
+                    .message = QStringLiteral("Failed to encode Mailbox/set."),
+                };
+            }
+
+            javelin::jmap::api::RequestBuilder builder;
+            builder.useCore().useMail();
+            const auto setHandle = builder.call(*request, "mailbox-create-set");
+            const auto getRequest = javelin::jmap::api::mailboxGet(
+                javelin::jmap::api::getRequestFrom(accountId, setHandle, "/created/*/id"));
+            if (!getRequest.has_value())
+            {
+                if (const auto error = journal.reject(mutation))
+                    co_return operationError(*error);
+                co_return OperationError{
+                    .code = OperationErrorCode::InvalidRequest,
+                    .message = QStringLiteral("Failed to encode Mailbox/get."),
+                };
+            }
+            const auto getHandle = builder.call(*getRequest, "mailbox-create-get");
+
+            javelin::jmap::api::MethodCaller caller{transport};
+            bool dispatched = false;
+            auto result = co_await caller.call(buildApiRequestContext(settings, accountId, session),
+                                               builder, {}, [&dispatched] { dispatched = true; });
+            const auto settleCallError = [&](const OperationError& callError)
+                -> std::optional<javelin::jmap::cache::DatabaseError>
+            {
+                const bool deterministic = !dispatched || callError.protocolType.has_value();
+                return deterministic
+                           ? journal.reject(mutation, std::nullopt, callError.protocolType)
+                           : journal.transition(mutation,
+                                                javelin::jmap::sync::MutationStatus::Unknown);
+            };
+            if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
+            {
+                const auto callError = operationError(*error);
+                if (const auto cacheError = settleCallError(callError))
+                    co_return operationError(*cacheError);
+                co_return callError;
+            }
+            if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&result))
+            {
+                const auto callError = operationError(*error);
+                if (const auto cacheError = settleCallError(callError))
+                    co_return operationError(*cacheError);
+                co_return callError;
+            }
+            if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&result))
+            {
+                const auto callError = operationError(*error);
+                if (const auto cacheError = settleCallError(callError))
+                    co_return operationError(*cacheError);
+                co_return callError;
+            }
+
+            const javelin::jmap::api::ResponseReader reader{
+                std::get<javelin::jmap::api::ResponseEnvelope>(result)};
+            auto parsedSet = reader.require(setHandle);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::api::ResponseReaderError>(&parsedSet))
+            {
+                const auto callError = operationError(*error);
+                if (const auto cacheError = settleCallError(callError))
+                    co_return operationError(*cacheError);
+                co_return callError;
+            }
+            auto response = std::get<javelin::jmap::api::MailboxSetResponse>(std::move(parsedSet));
+            if (response.accountId != accountId)
+            {
+                if (const auto error =
+                        journal.transition(mutation, javelin::jmap::sync::MutationStatus::Unknown))
+                    co_return operationError(*error);
+                co_return OperationError{
+                    .code = OperationErrorCode::ProtocolViolation,
+                    .message =
+                        QStringLiteral("The server returned Mailbox/set for another account."),
+                };
+            }
+            if (const auto rejected = response.notCreated.find(mutation.creationId);
+                rejected != response.notCreated.end())
+            {
+                if (const auto error =
+                        journal.reject(mutation, response.newState, rejected->second.type))
+                    co_return operationError(*error);
+                co_return mailboxSetError(rejected->second,
+                                          QStringLiteral("The server rejected the new mailbox."));
+            }
+            const auto created = response.created.find(mutation.creationId);
+            if (created == response.created.end() || created->second.empty() ||
+                !response.newState.has_value())
+            {
+                if (const auto error =
+                        journal.transition(mutation, javelin::jmap::sync::MutationStatus::Unknown))
+                    co_return operationError(*error);
+                co_return OperationError{
+                    .code = OperationErrorCode::ProtocolViolation,
+                    .message = QStringLiteral("The server did not confirm the new mailbox."),
+                };
+            }
+
+            auto parsedGet = reader.require(getHandle);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::api::ResponseReaderError>(&parsedGet))
+            {
+                if (const auto cacheError =
+                        journal.transition(mutation, javelin::jmap::sync::MutationStatus::Unknown))
+                    co_return operationError(*cacheError);
+                co_return operationError(*error);
+            }
+            auto fetched = std::get<javelin::jmap::api::MailboxGetResponse>(std::move(parsedGet));
+            if (fetched.accountId != accountId)
+            {
+                if (const auto error =
+                        journal.transition(mutation, javelin::jmap::sync::MutationStatus::Unknown))
+                    co_return operationError(*error);
+                co_return OperationError{
+                    .code = OperationErrorCode::ProtocolViolation,
+                    .message =
+                        QStringLiteral("The server returned Mailbox/get for another account."),
+                };
+            }
+            const auto mailbox = std::ranges::find(fetched.list, created->second,
+                                                   &javelin::jmap::domain::Mailbox::id);
+            if (mailbox == fetched.list.end())
+            {
+                if (const auto error =
+                        journal.transition(mutation, javelin::jmap::sync::MutationStatus::Unknown))
+                    co_return operationError(*error);
+                co_return OperationError{
+                    .code = OperationErrorCode::ProtocolViolation,
+                    .message = QStringLiteral("The new mailbox could not be materialized."),
+                };
+            }
+            if (const auto error = journal.accept(mutation, *mailbox, *response.newState))
+            {
+                if (const auto transitionError =
+                        journal.transition(mutation, javelin::jmap::sync::MutationStatus::Unknown))
+                    co_return operationError(*transitionError);
+                co_return OperationError{
+                    .code = OperationErrorCode::Conflict,
+                    .message = QStringLiteral(
+                        "Mailbox state advanced while the new mailbox was being confirmed."),
+                };
+            }
+            co_return *mailbox;
+        }
+
         [[nodiscard]] QCoro::Task<
             std::variant<javelin::jmap::api::MailboxSetResponse, OperationError>>
         submitMailboxDestroyMutation(
@@ -822,6 +1000,7 @@ namespace javelin::jmap
             const auto request = javelin::jmap::api::mailboxSet({
                 .accountId = accountId,
                 .ifInState = mutation.baseState,
+                .create = {},
                 .update = {},
                 .destroy = {mutation.mailboxId},
                 .onDestroyRemoveEmails = false,
@@ -960,6 +1139,46 @@ namespace javelin::jmap
             javelin::jmap::api::RequestBuilder builder;
             builder.useCore().useMail();
             const auto handle = builder.call(*request, "mailbox-mutation-reconcile");
+            javelin::jmap::api::MethodCaller caller{transport};
+            auto result =
+                co_await caller.call(buildApiRequestContext(settings, accountId, session), builder);
+            if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
+                co_return operationError(*error);
+            if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&result))
+                co_return operationError(*error);
+            if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&result))
+                co_return operationError(*error);
+            const javelin::jmap::api::ResponseReader reader{
+                std::get<javelin::jmap::api::ResponseEnvelope>(result)};
+            auto parsed = reader.require(handle);
+            if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&parsed))
+                co_return operationError(*error);
+            co_return std::get<javelin::jmap::api::MailboxGetResponse>(std::move(parsed));
+        }
+
+        [[nodiscard]] QCoro::Task<
+            std::variant<javelin::jmap::api::MailboxGetResponse, OperationError>>
+        fetchAllMailboxesForReconciliation(javelin::jmap::api::JmapMethodTransport& transport,
+                                           const LiveConnectionSettings& settings,
+                                           const std::string& accountId,
+                                           const javelin::jmap::api::Session& session)
+        {
+            const auto request = javelin::jmap::api::mailboxGet({
+                .accountId = accountId,
+                .ids = std::nullopt,
+                .idsReference = std::nullopt,
+                .properties = std::nullopt,
+            });
+            if (!request.has_value())
+            {
+                co_return OperationError{
+                    .code = OperationErrorCode::InvalidRequest,
+                    .message = QStringLiteral("Failed to encode Mailbox/get."),
+                };
+            }
+            javelin::jmap::api::RequestBuilder builder;
+            builder.useCore().useMail();
+            const auto handle = builder.call(*request, "mailbox-create-reconcile");
             javelin::jmap::api::MethodCaller caller{transport};
             auto result =
                 co_await caller.call(buildApiRequestContext(settings, accountId, session), builder);
@@ -2690,6 +2909,232 @@ namespace javelin::jmap
             .accountId = std::move(accountId),
             .mailboxId = std::move(mutation.mailboxId),
             .subscribed = mutation.afterSubscribed,
+        };
+    }
+
+    QCoro::Task<MailboxCreateResult>
+    JmapCore::createMailbox(LiveConnectionSettings settings, std::string accountId,
+                            std::string name, std::function<void()> projectionCommitted)
+    {
+        if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
+        {
+            co_return OperationError{
+                .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
+            };
+        }
+        if (const auto validationError = validateLoginSettings(settings, true))
+            co_return *validationError;
+        if (name.empty())
+        {
+            co_return OperationError{
+                .code = OperationErrorCode::InvalidUserInput,
+                .message = QStringLiteral("Enter a mailbox name."),
+            };
+        }
+
+        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<OperationError>(&sessionResult))
+            co_return *error;
+        const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
+        if (!session.capabilities.mail)
+        {
+            co_return OperationError{
+                .code = OperationErrorCode::UnsupportedCapability,
+                .message = QStringLiteral("This server does not support JMAP Mail."),
+            };
+        }
+        const auto account = session.accounts.find(accountId);
+        if (account == session.accounts.end() || !account->second.accountCapabilities.mail)
+        {
+            co_return OperationError{
+                .code = OperationErrorCode::UnsupportedCapability,
+                .message = QStringLiteral("This account does not support JMAP Mail."),
+            };
+        }
+        if (account->second.isReadOnly ||
+            !account->second.accountCapabilities.mailDetails.has_value() ||
+            !account->second.accountCapabilities.mailDetails->mayCreateTopLevelMailbox)
+        {
+            co_return OperationError{
+                .code = OperationErrorCode::PermissionDenied,
+                .message = QStringLiteral(
+                    "You do not have permission to create top-level mailboxes in this account."),
+            };
+        }
+
+        javelin::jmap::cache::MailboxRepository repository{*m_impl->databaseConnection};
+        const auto topLevel = repository.listByParent(accountId, std::nullopt);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&topLevel))
+            co_return operationError(*error);
+        if (std::ranges::find(std::get<std::vector<javelin::jmap::domain::Mailbox>>(topLevel), name,
+                              &javelin::jmap::domain::Mailbox::name) !=
+            std::get<std::vector<javelin::jmap::domain::Mailbox>>(topLevel).end())
+        {
+            co_return OperationError{
+                .code = OperationErrorCode::InvalidUserInput,
+                .message = QStringLiteral("A top-level mailbox with this name already exists."),
+            };
+        }
+
+        javelin::jmap::sync::MailboxMutationJournal journal{*m_impl->databaseConnection,
+                                                            repository};
+        const auto active = journal.hasActive(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&active))
+            co_return operationError(*error);
+        if (std::get<bool>(active))
+        {
+            co_return OperationError{
+                .code = OperationErrorCode::Conflict,
+                .message = QStringLiteral("Another mailbox change is still unresolved."),
+            };
+        }
+
+        javelin::jmap::cache::SyncStateRepository states{*m_impl->databaseConnection};
+        auto state = states.find({.accountId = accountId, .objectType = "Mailbox", .queryKey = {}});
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&state))
+            co_return operationError(*error);
+        const auto& stateRecord =
+            std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(state);
+        if (!stateRecord.has_value())
+        {
+            co_return OperationError{
+                .code = OperationErrorCode::PreconditionFailed,
+                .message = QStringLiteral("Mailbox state has not been synchronized yet."),
+            };
+        }
+
+        javelin::jmap::sync::MailboxCreateMutationRecord mutation{
+            .mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
+            .operationGroupId = std::nullopt,
+            .accountId = accountId,
+            .creationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
+            .name = name,
+            .parentId = std::nullopt,
+            .sortOrder = 0,
+            .isSubscribed = true,
+            .status = javelin::jmap::sync::MutationStatus::Pending,
+            .baseState = stateRecord->stateToken,
+            .acceptedState = std::nullopt,
+            .errorJson = std::nullopt,
+        };
+        if (const auto error = journal.queue(mutation))
+            co_return operationError(*error);
+        if (projectionCommitted)
+            projectionCommitted();
+
+        auto result = co_await submitMailboxCreateMutation(*m_impl->methodTransport, settings,
+                                                           accountId, session, journal, mutation);
+        if (const auto* error = std::get_if<OperationError>(&result))
+            co_return *error;
+        auto mailbox = std::get<javelin::jmap::domain::Mailbox>(std::move(result));
+        co_return MailboxCreateChange{
+            .accountId = std::move(accountId),
+            .mailboxId = std::move(mailbox.id),
+            .name = std::move(mailbox.name),
+        };
+    }
+
+    QCoro::Task<MailboxCreateResult>
+    JmapCore::reconcileMailboxCreate(LiveConnectionSettings settings, std::string accountId)
+    {
+        if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
+        {
+            co_return OperationError{
+                .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
+            };
+        }
+        if (const auto validationError = validateLoginSettings(settings, true))
+            co_return *validationError;
+        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<OperationError>(&sessionResult))
+            co_return *error;
+        const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
+
+        javelin::jmap::cache::MailboxRepository repository{*m_impl->databaseConnection};
+        javelin::jmap::sync::MailboxMutationJournal journal{*m_impl->databaseConnection,
+                                                            repository};
+        auto activeResult = journal.listActiveCreates(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&activeResult))
+            co_return operationError(*error);
+        auto active = std::get<std::vector<javelin::jmap::sync::MailboxCreateMutationRecord>>(
+            std::move(activeResult));
+        if (active.empty())
+        {
+            co_return MailboxCreateChange{
+                .accountId = std::move(accountId), .mailboxId = {}, .name = {}};
+        }
+        if (active.size() != 1)
+        {
+            co_return OperationError{
+                .code = OperationErrorCode::Conflict,
+                .message = QStringLiteral("Multiple mailbox creations are unresolved."),
+            };
+        }
+        auto mutation = std::move(active.front());
+        if (mutation.status == javelin::jmap::sync::MutationStatus::InFlight)
+        {
+            co_return OperationError{
+                .code = OperationErrorCode::Conflict,
+                .message = QStringLiteral("A mailbox creation is still in flight."),
+            };
+        }
+
+        if (mutation.status == javelin::jmap::sync::MutationStatus::Unknown)
+        {
+            auto fetched = co_await fetchAllMailboxesForReconciliation(
+                *m_impl->methodTransport, settings, accountId, session);
+            if (const auto* error = std::get_if<OperationError>(&fetched))
+                co_return *error;
+            auto response = std::get<javelin::jmap::api::MailboxGetResponse>(std::move(fetched));
+            if (response.accountId != accountId)
+            {
+                co_return OperationError{
+                    .code = OperationErrorCode::ProtocolViolation,
+                    .message =
+                        QStringLiteral("The server returned Mailbox/get for another account."),
+                };
+            }
+
+            const auto matches = [&](const javelin::jmap::domain::Mailbox& mailbox)
+            { return mailbox.name == mutation.name && mailbox.parentId == mutation.parentId; };
+            const auto first = std::ranges::find_if(response.list, matches);
+            if (first != response.list.end())
+            {
+                if (std::ranges::find_if(std::next(first), response.list.end(), matches) !=
+                    response.list.end())
+                {
+                    co_return OperationError{
+                        .code = OperationErrorCode::ProtocolViolation,
+                        .message = QStringLiteral(
+                            "The server returned duplicate sibling mailboxes with the same name."),
+                    };
+                }
+                if (const auto error =
+                        journal.reconcileCreated(mutation, response.list, response.state))
+                    co_return operationError(*error);
+                co_return MailboxCreateChange{
+                    .accountId = std::move(accountId),
+                    .mailboxId = first->id,
+                    .name = first->name,
+                };
+            }
+
+            if (const auto error =
+                    journal.retryCreateAtState(mutation, response.list, response.state))
+                co_return operationError(*error);
+            mutation.status = javelin::jmap::sync::MutationStatus::Pending;
+            mutation.baseState = response.state;
+        }
+
+        auto submitted = co_await submitMailboxCreateMutation(
+            *m_impl->methodTransport, settings, accountId, session, journal, mutation);
+        if (const auto* error = std::get_if<OperationError>(&submitted))
+            co_return *error;
+        auto mailbox = std::get<javelin::jmap::domain::Mailbox>(std::move(submitted));
+        co_return MailboxCreateChange{
+            .accountId = std::move(accountId),
+            .mailboxId = std::move(mailbox.id),
+            .name = std::move(mailbox.name),
         };
     }
 

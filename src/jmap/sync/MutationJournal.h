@@ -63,6 +63,8 @@ namespace javelin::jmap::sync
         transition(std::string_view mutationId, MutationStatus status,
                    std::optional<std::string_view> acceptedState = std::nullopt,
                    std::optional<std::string_view> errorJson = std::nullopt);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        resetPending(std::string_view mutationId, std::string_view baseState);
         [[nodiscard]] std::variant<std::size_t, javelin::jmap::cache::DatabaseError>
         recoverInFlight();
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
@@ -91,6 +93,8 @@ namespace javelin::jmap::sync
         transition(std::string_view mutationId, MutationStatus status,
                    std::optional<std::string_view> acceptedState = std::nullopt,
                    std::optional<std::string_view> errorJson = std::nullopt);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        resetPending(std::string_view mutationId, std::string_view baseState);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         remove(std::string_view mutationId);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>

@@ -24,6 +24,9 @@
 
 #include <QCoreApplication>
 #include <QEventLoop>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QPromise>
 #include <QSqlQuery>
 #include <QTemporaryDir>
@@ -237,6 +240,38 @@ namespace
                           .upsert({.accountId = "u1", .objectType = "Mailbox", .queryKey = {}},
                                   "mailbox-state-1")
                           .has_value());
+    }
+
+    [[nodiscard]] std::string mailboxCreationId(const javelin::jmap::api::HttpRequest& request)
+    {
+        const auto document = QJsonDocument::fromJson(request.body);
+        REQUIRE(document.isObject());
+        const auto calls = document.object().value(QStringLiteral("methodCalls")).toArray();
+        REQUIRE_FALSE(calls.isEmpty());
+        const auto call = calls.at(0).toArray();
+        REQUIRE(call.size() >= 2);
+        const auto create = call.at(1).toObject().value(QStringLiteral("create")).toObject();
+        REQUIRE(create.size() == 1);
+        return create.begin().key().toStdString();
+    }
+
+    [[nodiscard]] QByteArray mailboxCreateSuccessEnvelope(const std::string& creationId,
+                                                          const std::string_view oldState,
+                                                          const std::string_view newState)
+    {
+        return QStringLiteral(
+                   R"({"methodResponses":[["Mailbox/set",{"accountId":"u1","oldState":"%1","newState":"%2","created":{"%3":{"id":"mbx-projects"}},"notCreated":{}},"mailbox-create-set"],["Mailbox/get",{"accountId":"u1","state":"%2","list":[{"id":"mbx-projects","name":"Projects","parentId":null,"role":null,"sortOrder":0,"totalEmails":0,"unreadEmails":0,"totalThreads":0,"unreadThreads":0,"isSubscribed":true,"myRights":{"mayReadItems":true,"mayAddItems":true,"mayRemoveItems":true,"maySetSeen":true,"maySetKeywords":true,"mayCreateChild":true,"mayRename":true,"mayDelete":true,"maySubmit":true}}],"notFound":[]},"mailbox-create-get"]],"createdIds":{"%3":"mbx-projects"},"sessionState":"session-state-2"})")
+            .arg(QString::fromStdString(std::string{oldState}),
+                 QString::fromStdString(std::string{newState}), QString::fromStdString(creationId))
+            .toUtf8();
+    }
+
+    [[nodiscard]] javelin::jmap::api::Session mailboxCreateSession()
+    {
+        auto session = loadSessionFixture();
+        session.accounts.at("u1").accountCapabilities.mailDetails =
+            javelin::jmap::api::MailAccountCapability{.mayCreateTopLevelMailbox = true};
+        return session;
     }
 
     void seedEmail(javelin::jmap::cache::DatabaseConnection& connection)
@@ -2191,6 +2226,246 @@ TEST_CASE("JmapCore refuses unsafe mailbox deletion before issuing Mailbox set",
               javelin::jmap::OperationErrorCode::PreconditionFailed);
         CHECK(transport.requests.empty());
     }
+}
+
+TEST_CASE("JmapCore creates a top-level mailbox with an optimistic pending projection",
+          "[jmap][core][mailbox][create][mutation-journal]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+    REQUIRE_FALSE(sessions.replace("u1", mailboxCreateSession()).has_value());
+    seedMailbox(databaseContext.connection);
+
+    FakeTransport transport;
+    transport.responseFactory = [](const javelin::jmap::api::HttpRequest& request)
+    {
+        const auto creationId = mailboxCreationId(request);
+        return javelin::jmap::api::TransportResult{javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body = mailboxCreateSuccessEnvelope(creationId, "mailbox-state-1", "mailbox-state-2"),
+        }};
+    };
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    bool projected = false;
+    const auto result = QCoro::waitFor(core.createMailbox(
+        {.sessionUrl = "https://mail.example.com/.well-known/jmap",
+         .loginEmail = "alice@example.com",
+         .apiKey = "access-token"},
+        "u1", "Projects",
+        [&]
+        {
+            projected = true;
+            QSqlQuery query{databaseContext.connection.database()};
+            REQUIRE(query.exec(QStringLiteral(
+                "SELECT COUNT(*) FROM mailbox_create_projections WHERE account_id='u1' AND "
+                "name='Projects'")));
+            REQUIRE(query.next());
+            CHECK(query.value(0).toInt() == 1);
+        }));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::MailboxCreateChange>(result));
+    const auto& change = std::get<javelin::jmap::MailboxCreateChange>(result);
+    CHECK(projected);
+    CHECK(change.mailboxId == "mbx-projects");
+    CHECK(change.name == "Projects");
+    REQUIRE(transport.requests.size() == 1);
+    CHECK(transport.requests.front().body.contains(QByteArrayLiteral("\"Mailbox/set\"")));
+    CHECK(transport.requests.front().body.contains(QByteArrayLiteral("\"Mailbox/get\"")));
+    CHECK(transport.requests.front().body.contains(QByteArrayLiteral("\"name\":\"Projects\"")));
+    CHECK(transport.requests.front().body.contains(QByteArrayLiteral("/created/*/id")));
+
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    const auto stored = mailboxes.find("u1", "mbx-projects");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(stored));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(stored).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::domain::Mailbox>>(stored)->name == "Projects");
+    QSqlQuery projection{databaseContext.connection.database()};
+    REQUIRE(projection.exec(
+        QStringLiteral("SELECT COUNT(*) FROM mailbox_create_projections WHERE account_id='u1'")));
+    REQUIRE(projection.next());
+    CHECK(projection.value(0).toInt() == 0);
+}
+
+TEST_CASE("JmapCore validates top-level mailbox creation before projection",
+          "[jmap][core][mailbox][create][permission]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    SECTION("server denies top-level creation")
+    {
+        auto databaseContext = makeDatabaseContext();
+        javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+        REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
+        seedMailbox(databaseContext.connection);
+        FakeTransport transport;
+        javelin::jmap::JmapCore core{databaseContext.connection, transport,
+                                     transport.methodTransport};
+        const auto result = QCoro::waitFor(
+            core.createMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                .loginEmail = "alice@example.com",
+                                .apiKey = "access-token"},
+                               "u1", "Projects"));
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+              javelin::jmap::OperationErrorCode::PermissionDenied);
+        CHECK(transport.requests.empty());
+    }
+
+    SECTION("duplicate sibling name")
+    {
+        auto databaseContext = makeDatabaseContext();
+        javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+        REQUIRE_FALSE(sessions.replace("u1", mailboxCreateSession()).has_value());
+        seedMailbox(databaseContext.connection);
+        FakeTransport transport;
+        javelin::jmap::JmapCore core{databaseContext.connection, transport,
+                                     transport.methodTransport};
+        const auto result = QCoro::waitFor(
+            core.createMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                .loginEmail = "alice@example.com",
+                                .apiKey = "access-token"},
+                               "u1", "Inbox"));
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+              javelin::jmap::OperationErrorCode::InvalidUserInput);
+        CHECK(transport.requests.empty());
+    }
+}
+
+TEST_CASE("JmapCore removes a mailbox create projection after server rejection",
+          "[jmap][core][mailbox][create][mutation-journal]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+    REQUIRE_FALSE(sessions.replace("u1", mailboxCreateSession()).has_value());
+    seedMailbox(databaseContext.connection);
+
+    FakeTransport transport;
+    transport.responseFactory = [](const javelin::jmap::api::HttpRequest& request)
+    {
+        const auto creationId = mailboxCreationId(request);
+        return javelin::jmap::api::TransportResult{javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body =
+                QStringLiteral(
+                    R"({"methodResponses":[["Mailbox/set",{"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-1","created":{},"notCreated":{"%1":{"type":"invalidProperties","description":"A sibling already has this name","properties":["name"]}}},"mailbox-create-set"],["error",{"type":"invalidResultReference"},"mailbox-create-get"]],"createdIds":{},"sessionState":"session-state-2"})")
+                    .arg(QString::fromStdString(creationId))
+                    .toUtf8(),
+        }};
+    };
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(
+        core.createMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                            .loginEmail = "alice@example.com",
+                            .apiKey = "access-token"},
+                           "u1", "Projects"));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+    CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+          javelin::jmap::OperationErrorCode::InvalidUserInput);
+    QSqlQuery projection{databaseContext.connection.database()};
+    REQUIRE(projection.exec(
+        QStringLiteral("SELECT COUNT(*) FROM mailbox_create_projections WHERE account_id='u1'")));
+    REQUIRE(projection.next());
+    CHECK(projection.value(0).toInt() == 0);
+}
+
+TEST_CASE("JmapCore adopts an ambiguous mailbox creation already accepted by the server",
+          "[jmap][core][mailbox][create][mutation-journal][recovery]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+    REQUIRE_FALSE(sessions.replace("u1", mailboxCreateSession()).has_value());
+    seedMailbox(databaseContext.connection);
+
+    FakeTransport transport;
+    transport.invokeDispatched = true;
+    transport.queuedResults.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "Connection closed after request dispatch",
+    });
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto ambiguous = QCoro::waitFor(
+        core.createMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                            .loginEmail = "alice@example.com",
+                            .apiKey = "access-token"},
+                           "u1", "Projects"));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(ambiguous));
+
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral(
+            R"({"methodResponses":[["Mailbox/get",{"accountId":"u1","state":"mailbox-state-2","list":[{"id":"mbx-projects","name":"Projects","parentId":null,"role":null,"sortOrder":0,"totalEmails":0,"unreadEmails":0,"totalThreads":0,"unreadThreads":0,"isSubscribed":true,"myRights":{"mayReadItems":true,"mayAddItems":true,"mayRemoveItems":true,"maySetSeen":true,"maySetKeywords":true,"mayCreateChild":true,"mayRename":true,"mayDelete":true,"maySubmit":true}}],"notFound":[]},"mailbox-create-reconcile"]],"createdIds":{},"sessionState":"session-state-2"})"),
+    });
+    const auto recovered = QCoro::waitFor(
+        core.reconcileMailboxCreate({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                     .loginEmail = "alice@example.com",
+                                     .apiKey = "access-token"},
+                                    "u1"));
+    REQUIRE(std::holds_alternative<javelin::jmap::MailboxCreateChange>(recovered));
+    CHECK(std::get<javelin::jmap::MailboxCreateChange>(recovered).mailboxId == "mbx-projects");
+    CHECK(transport.requests.size() == 2);
+
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    const auto stored = mailboxes.find("u1", "mbx-projects");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(stored));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(stored).has_value());
+}
+
+TEST_CASE("JmapCore safely retries an ambiguous mailbox creation proven absent",
+          "[jmap][core][mailbox][create][mutation-journal][recovery]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+    REQUIRE_FALSE(sessions.replace("u1", mailboxCreateSession()).has_value());
+    seedMailbox(databaseContext.connection);
+
+    FakeTransport transport;
+    transport.invokeDispatched = true;
+    transport.queuedResults.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "Connection closed after request dispatch",
+    });
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto ambiguous = QCoro::waitFor(
+        core.createMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                            .loginEmail = "alice@example.com",
+                            .apiKey = "access-token"},
+                           "u1", "Projects"));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(ambiguous));
+
+    QSqlQuery pending{databaseContext.connection.database()};
+    REQUIRE(pending.exec(QStringLiteral(
+        "SELECT creation_id FROM mailbox_create_projections WHERE account_id='u1'")));
+    REQUIRE(pending.next());
+    const auto creationId = pending.value(0).toString().toStdString();
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral(
+            R"({"methodResponses":[["Mailbox/get",{"accountId":"u1","state":"mailbox-state-2","list":[],"notFound":[]},"mailbox-create-reconcile"]],"createdIds":{},"sessionState":"session-state-2"})"),
+    });
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = mailboxCreateSuccessEnvelope(creationId, "mailbox-state-2", "mailbox-state-3"),
+    });
+    const auto recovered = QCoro::waitFor(
+        core.reconcileMailboxCreate({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                     .loginEmail = "alice@example.com",
+                                     .apiKey = "access-token"},
+                                    "u1"));
+    REQUIRE(std::holds_alternative<javelin::jmap::MailboxCreateChange>(recovered));
+    CHECK(std::get<javelin::jmap::MailboxCreateChange>(recovered).mailboxId == "mbx-projects");
+    REQUIRE(transport.requests.size() == 3);
+    CHECK(transport.requests[2].body.contains(
+        QByteArrayLiteral("\"ifInState\":\"mailbox-state-2\"")));
 }
 
 TEST_CASE("JmapCore deletes an empty mailbox with optimistic Mailbox set semantics",

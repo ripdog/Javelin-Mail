@@ -234,6 +234,8 @@ namespace javelin::gui::mailboxes
         {
             if (index.column() != 0)
                 return {};
+            if (node->pendingCreate)
+                return i18n("%1 (creating…)", QString::fromStdString(node->displayName));
             if (!node->mailboxId.empty() && node->unreadEmails > 0)
             {
                 return QStringLiteral("%1 (%2)")
@@ -247,6 +249,8 @@ namespace javelin::gui::mailboxes
         {
             if (!node->mailboxId.empty())
             {
+                if (node->pendingCreate)
+                    return i18n("This mailbox is being created on the server.");
                 if (m_options.preferenceColumns)
                 {
                     switch (index.column())
@@ -294,7 +298,8 @@ namespace javelin::gui::mailboxes
                                QApplication::palette().color(QPalette::Active, QPalette::Text));
         }
 
-        if (role == Qt::ForegroundRole && index.column() == 0 && node->preferences.hidden)
+        if (role == Qt::ForegroundRole && index.column() == 0 &&
+            (node->preferences.hidden || node->pendingCreate))
             return QApplication::palette().color(QPalette::Disabled, QPalette::Text);
 
         if (role == Qt::CheckStateRole && m_options.preferenceColumns && !node->mailboxId.empty())
@@ -347,6 +352,9 @@ namespace javelin::gui::mailboxes
 
         if (role == MailboxHiddenRole && !node->mailboxId.empty())
             return m_options.preferenceColumns ? node->preferences.hidden : !node->subscribed;
+
+        if (role == MailboxPendingCreateRole && !node->mailboxId.empty())
+            return node->pendingCreate;
 
         if (role == ConnectionStatusRole && node->kind == Node::Kind::Account)
         {
@@ -434,6 +442,12 @@ namespace javelin::gui::mailboxes
         }
 
         auto result = QAbstractItemModel::flags(index);
+        if (node->pendingCreate)
+        {
+            result &= ~(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDropEnabled |
+                        Qt::ItemIsUserCheckable);
+            return result;
+        }
         if (!node->mailboxId.empty())
         {
             if (m_options.preferenceColumns)
@@ -841,6 +855,7 @@ namespace javelin::gui::mailboxes
                         child->checked =
                             checkedMailboxIds.contains(QString::fromStdString(childItem.id));
                         child->subscribed = childItem.isSubscribed;
+                        child->pendingCreate = childItem.pendingCreate;
                         child->preferences = preferencesFor(childItem);
                         child->parent = parentNode;
                         nodesById.emplace(child->mailboxId, child.get());
@@ -874,6 +889,7 @@ namespace javelin::gui::mailboxes
                     child->checked =
                         m_options.checkedMailboxIds.contains(QString::fromStdString(item.id));
                     child->subscribed = item.isSubscribed;
+                    child->pendingCreate = item.pendingCreate;
                     child->preferences = preferencesFor(item);
                     child->parent = parentIt->second;
                     nodesById.emplace(child->mailboxId, child.get());
@@ -893,6 +909,7 @@ namespace javelin::gui::mailboxes
                     rootMailboxNode->checked =
                         m_options.checkedMailboxIds.contains(QString::fromStdString(rootItem.id));
                     rootMailboxNode->subscribed = rootItem.isSubscribed;
+                    rootMailboxNode->pendingCreate = rootItem.pendingCreate;
                     rootMailboxNode->preferences = preferencesFor(rootItem);
                     rootMailboxNode->parent = accountNode.get();
                     nodesById.emplace(rootMailboxNode->mailboxId, rootMailboxNode.get());

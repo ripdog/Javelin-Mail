@@ -2055,6 +2055,31 @@ namespace javelin::jmap::cache
                                            "body_preview TEXT"),
                         },
                 },
+                MigrationStep{
+                    .version = 46,
+                    .name = QStringLiteral("mailbox_create_projections"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "ALTER TABLE accounts ADD COLUMN mail_may_create_top_level_mailbox "
+                                "INTEGER NOT NULL DEFAULT 0 "
+                                "CHECK(mail_may_create_top_level_mailbox "
+                                "IN (0,1))"),
+                            QStringLiteral(
+                                "CREATE TABLE mailbox_create_projections (account_id TEXT NOT "
+                                "NULL REFERENCES accounts(account_id) ON DELETE "
+                                "CASCADE,creation_id "
+                                "TEXT NOT NULL,mutation_id TEXT NOT NULL UNIQUE,name TEXT NOT NULL,"
+                                "parent_mailbox_id TEXT,sort_order INTEGER NOT NULL DEFAULT 0,"
+                                "is_subscribed INTEGER NOT NULL DEFAULT 1 CHECK(is_subscribed IN "
+                                "(0,1)),PRIMARY KEY(account_id,creation_id),FOREIGN "
+                                "KEY(mutation_id) "
+                                "REFERENCES mutation_journal(mutation_id) ON DELETE CASCADE) "
+                                "STRICT"),
+                            QStringLiteral("CREATE INDEX idx_mailbox_create_projection_account ON "
+                                           "mailbox_create_projections(account_id,creation_id)"),
+                        },
+                },
             },
         };
     }

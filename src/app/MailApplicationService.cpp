@@ -672,6 +672,21 @@ namespace javelin::app
             changed = true;
         }
 
+        auto creation = co_await m_jmapCore.reconcileMailboxCreate(settings, accountId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&creation))
+        {
+            if (error->code != javelin::jmap::OperationErrorCode::Conflict)
+            {
+                qWarning().noquote() << "Mailbox creation reconciliation failed"
+                                     << QString::fromStdString(accountId) << error->message;
+                reconciliationFailed = true;
+            }
+        }
+        else if (!std::get<javelin::jmap::MailboxCreateChange>(creation).mailboxId.empty())
+        {
+            changed = true;
+        }
+
         auto destruction = co_await m_jmapCore.reconcileMailboxDestroy(settings, accountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&destruction))
         {
@@ -1986,6 +2001,45 @@ namespace javelin::app
         auto result = co_await m_jmapCore.setMailboxSubscribed(
             toLiveConnectionSettings(configuration->second.settings), accountId,
             std::move(mailboxId), subscribed, [publishMailboxTree] { publishMailboxTree(true); });
+        javelin::jmap::sync::MutationJournalRepository mutations{m_databaseConnection};
+        const auto active = mutations.listActive({.accountId = accountId, .dataType = "Mailbox"});
+        const bool unresolved =
+            std::holds_alternative<javelin::jmap::cache::DatabaseError>(active) ||
+            !std::get<std::vector<javelin::jmap::sync::MutationRecord>>(active).empty();
+        publishMailboxTree(unresolved);
+        applyAccountConfiguration(accountId);
+        if (unresolved)
+            scheduleMailboxMutationReconciliation(accountId);
+        co_return result;
+    }
+
+    QCoro::Task<javelin::jmap::MailboxCreateResult>
+    MailApplicationService::createMailbox(std::string accountId, std::string name)
+    {
+        const auto configuration = m_configurations.find(accountId);
+        if (configuration == m_configurations.end())
+        {
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::NotFound,
+                .message = i18n("The account is not configured."),
+            };
+        }
+
+        const auto publishMailboxTree = [this, accountId](const bool optimisticProjection)
+        {
+            Q_EMIT cacheCommitted(MailCacheChange{
+                .accountId = QString::fromStdString(accountId),
+                .mailboxIds = {},
+                .queryWindows = {},
+                .searchWindows = {},
+                .mailboxTreeChanged = true,
+                .hasNewMail = false,
+                .optimisticProjection = optimisticProjection,
+            });
+        };
+        auto result = co_await m_jmapCore.createMailbox(
+            toLiveConnectionSettings(configuration->second.settings), accountId, std::move(name),
+            [publishMailboxTree] { publishMailboxTree(true); });
         javelin::jmap::sync::MutationJournalRepository mutations{m_databaseConnection};
         const auto active = mutations.listActive({.accountId = accountId, .dataType = "Mailbox"});
         const bool unresolved =

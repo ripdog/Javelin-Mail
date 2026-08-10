@@ -88,6 +88,8 @@ TEST_CASE("session repository round-trips cached session bootstrap", "[jmap][cac
     auto databaseContext = makeDatabaseContext();
     javelin::jmap::cache::SessionRepository repository{databaseContext.connection};
     auto session = loadSessionFixture();
+    session.accounts.at("u1").accountCapabilities.mailDetails =
+        javelin::jmap::api::MailAccountCapability{.mayCreateTopLevelMailbox = true};
     REQUIRE(session.accounts.at("u1").accountCapabilities.submission.has_value());
     session.accounts.at("u1").accountCapabilities.submission->maxDelayedSend = 2592000;
     session.capabilities.contacts = true;
@@ -131,6 +133,8 @@ TEST_CASE("session repository round-trips cached session bootstrap", "[jmap][cac
     CHECK(loaded.primaryAccounts.calendarsAccountId == "u1");
     REQUIRE(loaded.accounts.contains("u1"));
     CHECK(loaded.accounts.at("u1").accountCapabilities.mail);
+    REQUIRE(loaded.accounts.at("u1").accountCapabilities.mailDetails.has_value());
+    CHECK(loaded.accounts.at("u1").accountCapabilities.mailDetails->mayCreateTopLevelMailbox);
     REQUIRE(loaded.accounts.at("u1").accountCapabilities.submission.has_value());
     CHECK(loaded.accounts.at("u1").accountCapabilities.submission->maxDelayedSend == 2592000U);
     REQUIRE(loaded.accounts.at("u1").accountCapabilities.contacts.has_value());

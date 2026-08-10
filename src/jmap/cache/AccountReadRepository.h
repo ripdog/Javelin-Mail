@@ -20,6 +20,7 @@ namespace javelin::jmap::cache
         bool isReadOnly = false;
         bool isPrimary = false;
         bool hasMailCapability = false;
+        bool mayCreateTopLevelMailbox = false;
         std::string ownerAccountId;
         bool hasSubmissionCapability = false;
         std::uint64_t maxDelayedSendSeconds = 0;

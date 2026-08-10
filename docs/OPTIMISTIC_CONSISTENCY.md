@@ -166,6 +166,7 @@ to decide product behavior.
 | JMAP action | Optimistic projection | Ambiguous-result reconciliation |
 | --- | --- | --- |
 | `Email/set` mailbox, keyword, and destroy changes | Exact Email patch projected into SQLite | Refreshed server Email is compared with the requested patch; satisfied unknown patches retire atomically |
+| `Mailbox/set` subscription, create, and destroy changes | Visibility and deletion project into the confirmed mailbox tree; creates use a separate noninteractive pending projection until the server assigns an ID | Unknown creates correlate by sibling-unique `(parentId, name)` against an authoritative full mailbox snapshot; absent creates rebase to that snapshot before retry, while visibility and deletion reconcile exact server state |
 | `ContactCard/set` and `AddressBook/set` | Full typed document projection; contact-group membership uses exact `members/{uid}` patches | Full snapshots are rebased; exact updates, absent destroys, and correlatable creates retire unknown records |
 | `ContactCard/copy` move/copy workflows | Destination and optional source projections are one operation group | Destination and source outcomes reconcile independently, preserving RFC 8620 non-atomic copy semantics |
 | `CalendarEvent/set` | Event and visible occurrence projection | Full ranges are rebased; stale recurrence expansions are suppressed until the base event is confirmed |

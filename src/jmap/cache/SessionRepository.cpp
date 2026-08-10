@@ -156,6 +156,12 @@ namespace javelin::jmap::cache
             query.bindValue(QStringLiteral(":is_personal"), account.isPersonal ? 1 : 0);
             query.bindValue(QStringLiteral(":is_read_only"), account.isReadOnly ? 1 : 0);
             query.bindValue(QStringLiteral(":cap_mail"), account.accountCapabilities.mail ? 1 : 0);
+            query.bindValue(
+                QStringLiteral(":mail_may_create_top_level_mailbox"),
+                account.accountCapabilities.mailDetails.has_value() &&
+                        account.accountCapabilities.mailDetails->mayCreateTopLevelMailbox
+                    ? 1
+                    : 0);
             query.bindValue(QStringLiteral(":cap_submission"),
                             account.accountCapabilities.submission.has_value() ? 1 : 0);
             query.bindValue(QStringLiteral(":submission_max_delayed_send"),
@@ -245,12 +251,14 @@ namespace javelin::jmap::cache
             "INSERT INTO accounts ("
             "account_id, email_address, session_url, is_primary, name, is_personal, "
             "is_read_only, owner_account_id, "
-            "cap_mail, cap_submission, submission_max_delayed_send, cap_contacts, "
+            "cap_mail, mail_may_create_top_level_mailbox, cap_submission, "
+            "submission_max_delayed_send, cap_contacts, "
             "contacts_capabilities_json, cap_calendars, calendars_capabilities_json"
             ") VALUES ("
             ":account_id, :email_address, :session_url, :is_primary, :name, :is_personal, "
-            ":is_read_only, :owner_account_id, :cap_mail, :cap_submission, "
-            ":submission_max_delayed_send, :cap_contacts, :contacts_capabilities_json, "
+            ":is_read_only, :owner_account_id, :cap_mail, :mail_may_create_top_level_mailbox, "
+            ":cap_submission, :submission_max_delayed_send, :cap_contacts, "
+            ":contacts_capabilities_json, "
             ":cap_calendars, :calendars_capabilities_json"
             ") ON CONFLICT(account_id) DO UPDATE SET "
             "email_address = excluded.email_address, "
@@ -261,6 +269,7 @@ namespace javelin::jmap::cache
             "is_read_only = excluded.is_read_only, "
             "owner_account_id = excluded.owner_account_id, "
             "cap_mail = excluded.cap_mail, "
+            "mail_may_create_top_level_mailbox = excluded.mail_may_create_top_level_mailbox, "
             "cap_submission = excluded.cap_submission, "
             "submission_max_delayed_send = excluded.submission_max_delayed_send, "
             "cap_contacts = excluded.cap_contacts, "
@@ -461,9 +470,9 @@ namespace javelin::jmap::cache
 
         QSqlQuery accountQuery{m_connection.database()};
         accountQuery.prepare(QStringLiteral(
-            "SELECT account_id, name, is_personal, is_read_only, cap_mail, cap_submission, "
-            "submission_max_delayed_send, cap_contacts, contacts_capabilities_json, "
-            "cap_calendars, calendars_capabilities_json "
+            "SELECT account_id, name, is_personal, is_read_only, cap_mail, "
+            "mail_may_create_top_level_mailbox, cap_submission, submission_max_delayed_send, "
+            "cap_contacts, contacts_capabilities_json, cap_calendars, calendars_capabilities_json "
             "FROM accounts WHERE owner_account_id = :owner_account_id ORDER BY account_id"));
         accountQuery.bindValue(QStringLiteral(":owner_account_id"),
                                QString::fromStdString(std::string{ownerAccountId}));
@@ -482,21 +491,28 @@ namespace javelin::jmap::cache
                 .accountCapabilities =
                     {
                         .mail = accountQuery.value(4).toInt() != 0,
+                        .mailDetails =
+                            accountQuery.value(4).toInt() != 0
+                                ? std::optional{javelin::jmap::api::MailAccountCapability{
+                                      .mayCreateTopLevelMailbox =
+                                          accountQuery.value(5).toInt() != 0,
+                                  }}
+                                : std::nullopt,
                         .submission = std::nullopt,
                         .contacts = std::nullopt,
                         .calendars = std::nullopt,
                     },
             };
-            if (accountQuery.value(5).toInt() != 0)
+            if (accountQuery.value(6).toInt() != 0)
             {
                 account.accountCapabilities.submission = javelin::jmap::api::SubmissionCapability{
-                    .maxDelayedSend = accountQuery.value(6).toULongLong(),
+                    .maxDelayedSend = accountQuery.value(7).toULongLong(),
                 };
             }
-            if (accountQuery.value(7).toInt() != 0)
+            if (accountQuery.value(8).toInt() != 0)
             {
                 detail::RawContactsCapability raw;
-                auto json = accountQuery.value(8).toString().toStdString();
+                auto json = accountQuery.value(9).toString().toStdString();
                 if (!glz::read<glz::opts{.error_on_unknown_keys = false}>(raw, json))
                 {
                     account.accountCapabilities.contacts = javelin::jmap::api::ContactsCapability{
@@ -505,10 +521,10 @@ namespace javelin::jmap::cache
                     };
                 }
             }
-            if (accountQuery.value(9).toInt() != 0)
+            if (accountQuery.value(10).toInt() != 0)
             {
                 detail::RawCalendarsCapability raw;
-                auto json = accountQuery.value(10).toString().toStdString();
+                auto json = accountQuery.value(11).toString().toStdString();
                 if (!glz::read<glz::opts{.error_on_unknown_keys = false}>(raw, json))
                 {
                     account.accountCapabilities.calendars = javelin::jmap::api::CalendarsCapability{

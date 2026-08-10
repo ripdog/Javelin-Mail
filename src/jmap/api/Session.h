@@ -57,6 +57,11 @@ namespace javelin::jmap::api
         std::optional<WebSocketCapability> websocket;
     };
 
+    struct MailAccountCapability
+    {
+        bool mayCreateTopLevelMailbox = false;
+    };
+
     struct SubmissionCapability
     {
         std::uint64_t maxDelayedSend = 0;
@@ -81,6 +86,7 @@ namespace javelin::jmap::api
     struct AccountCapabilities
     {
         bool mail = false;
+        std::optional<MailAccountCapability> mailDetails = std::nullopt;
         std::optional<SubmissionCapability> submission;
         std::optional<ContactsCapability> contacts;
         std::optional<CalendarsCapability> calendars;

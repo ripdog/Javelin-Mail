@@ -359,6 +359,7 @@ add_executable(javelin_contacts_gui_tests
     gui/IndeterminateProgressBarTest.cpp
     gui/MessageBannerWidgetTest.cpp
     gui/MailboxPreferenceStateTest.cpp
+    gui/MailboxPendingCreateTest.cpp
     gui/MailboxPropertiesDialogTest.cpp
     gui/SendingIdentitiesDialogTest.cpp
 )

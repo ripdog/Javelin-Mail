@@ -54,6 +54,7 @@ TEST_CASE("mailbox set serializes subscription visibility patches", "[jmap][meth
     const auto json = javelin::jmap::api::serializeMailboxSetRequest({
         .accountId = "u1",
         .ifInState = "mailbox-state-1",
+        .create = {},
         .update = {{"mailbox-1", {.isSubscribed = false}}},
         .destroy = {},
         .onDestroyRemoveEmails = false,
@@ -65,11 +66,33 @@ TEST_CASE("mailbox set serializes subscription visibility patches", "[jmap][meth
         R"({"accountId":"u1","ifInState":"mailbox-state-1","update":{"mailbox-1":{"isSubscribed":false}}})");
 }
 
+TEST_CASE("mailbox set serializes top-level mailbox creation", "[jmap][method][mailbox]")
+{
+    const auto json = javelin::jmap::api::serializeMailboxSetRequest({
+        .accountId = "u1",
+        .ifInState = "mailbox-state-1",
+        .create = {{"new-mailbox",
+                    {.name = "Projects",
+                     .parentId = std::nullopt,
+                     .sortOrder = 0,
+                     .isSubscribed = true}}},
+        .update = {},
+        .destroy = {},
+        .onDestroyRemoveEmails = false,
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(
+        *json ==
+        R"({"accountId":"u1","ifInState":"mailbox-state-1","create":{"new-mailbox":{"name":"Projects","sortOrder":0,"isSubscribed":true}}})");
+}
+
 TEST_CASE("mailbox set serializes safe mailbox destruction", "[jmap][method][mailbox]")
 {
     const auto json = javelin::jmap::api::serializeMailboxSetRequest({
         .accountId = "u1",
         .ifInState = "mailbox-state-1",
+        .create = {},
         .update = {},
         .destroy = {"mailbox-1"},
         .onDestroyRemoveEmails = false,
@@ -81,17 +104,21 @@ TEST_CASE("mailbox set serializes safe mailbox destruction", "[jmap][method][mai
         R"({"accountId":"u1","ifInState":"mailbox-state-1","destroy":["mailbox-1"],"onDestroyRemoveEmails":false})");
 }
 
-TEST_CASE("mailbox set responses preserve updated and destroyed rejection details",
+TEST_CASE("mailbox set responses preserve create update and destroy details",
           "[jmap][method][mailbox]")
 {
     const auto parsed = javelin::jmap::api::parseMailboxSetResponse(
-        R"({"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-2","updated":{"mailbox-1":null},"destroyed":["mailbox-3"],"notUpdated":{"mailbox-2":{"type":"forbidden","description":"Nope","properties":["isSubscribed"]}},"notDestroyed":{"mailbox-4":{"type":"mailboxHasEmail","description":"Still occupied","properties":[]}}})");
+        R"({"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-2","created":{"new-mailbox":{"id":"mailbox-new"}},"updated":{"mailbox-1":null},"destroyed":["mailbox-3"],"notCreated":{"bad-mailbox":{"type":"invalidProperties","description":"Duplicate","properties":["name"]}},"notUpdated":{"mailbox-2":{"type":"forbidden","description":"Nope","properties":["isSubscribed"]}},"notDestroyed":{"mailbox-4":{"type":"mailboxHasEmail","description":"Still occupied","properties":[]}}})");
 
     REQUIRE(parsed.ok());
     REQUIRE(parsed.value.has_value());
     CHECK(parsed.value->accountId == "u1");
     CHECK(parsed.value->oldState == "mailbox-state-1");
     CHECK(parsed.value->newState == std::optional<std::string>{"mailbox-state-2"});
+    REQUIRE(parsed.value->created.contains("new-mailbox"));
+    CHECK(parsed.value->created.at("new-mailbox") == "mailbox-new");
+    REQUIRE(parsed.value->notCreated.contains("bad-mailbox"));
+    CHECK(parsed.value->notCreated.at("bad-mailbox").type == "invalidProperties");
     CHECK(parsed.value->updated == std::vector<std::string>{"mailbox-1"});
     CHECK(parsed.value->destroyed == std::vector<std::string>{"mailbox-3"});
     REQUIRE(parsed.value->notUpdated.contains("mailbox-2"));

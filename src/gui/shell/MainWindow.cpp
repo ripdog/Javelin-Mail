@@ -4095,12 +4095,59 @@ namespace javelin::gui::shell
         {
             return;
         }
+        if (index.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxPendingCreateRole)
+                .toBool())
+            return;
 
         m_mailboxView->setCurrentIndex(index);
 
         QMenu menu{this};
         if (mailboxId.isEmpty())
         {
+            auto* newMailboxAction = menu.addAction(QIcon::fromTheme(QStringLiteral("folder-new")),
+                                                    i18n("New Mailbox…"));
+            const auto accountResult = m_accountReader.findById(accountId.toStdString());
+            const auto* account =
+                std::get_if<std::optional<javelin::jmap::cache::CachedAccount>>(&accountResult);
+            const bool canCreate = account != nullptr && account->has_value() &&
+                                   !(*account)->isReadOnly && (*account)->hasMailCapability &&
+                                   (*account)->mayCreateTopLevelMailbox;
+            newMailboxAction->setEnabled(canCreate);
+            if (!canCreate)
+            {
+                newMailboxAction->setToolTip(i18n(
+                    "The server does not allow creating top-level mailboxes in this account."));
+            }
+            connect(newMailboxAction, &QAction::triggered, this,
+                    [this, accountId]
+                    {
+                        bool accepted = false;
+                        auto name =
+                            QInputDialog::getText(this, i18n("New Mailbox"), i18n("Mailbox name:"),
+                                                  QLineEdit::Normal, {}, &accepted)
+                                .trimmed();
+                        if (!accepted || name.isEmpty())
+                            return;
+                        auto task = m_mailCommandPort.createMailbox(accountId.toStdString(),
+                                                                    name.toStdString());
+                        QCoro::connect(
+                            std::move(task), this,
+                            [this](javelin::jmap::MailboxCreateResult result)
+                            {
+                                if (const auto* error =
+                                        std::get_if<javelin::jmap::OperationError>(&result))
+                                {
+                                    presentError(*error);
+                                    return;
+                                }
+                                const auto& created =
+                                    std::get<javelin::jmap::MailboxCreateChange>(result);
+                                m_statusBar->showMessage(i18n("Mailbox “%1” created.",
+                                                              QString::fromStdString(created.name)),
+                                                         3000);
+                            });
+                    });
+            menu.addSeparator();
             auto* refreshAccountAction = menu.addAction(i18n("Refresh Account"));
             connect(refreshAccountAction, &QAction::triggered, this,
                     [this, account = accountId.toStdString()]

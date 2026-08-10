@@ -27,6 +27,7 @@ namespace javelin::jmap::cache
         bool isSubscribed = false;
         javelin::jmap::domain::MailboxRights myRights;
         bool hasChildren = false;
+        bool pendingCreate = false;
     };
 
     class MailboxReader

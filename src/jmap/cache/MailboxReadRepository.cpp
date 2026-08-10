@@ -73,6 +73,41 @@ namespace javelin::jmap::cache
                 .isSubscribed = query.value(9).toInt() != 0,
                 .myRights = deserializeMailboxRights(query.value(10).toString()),
                 .hasChildren = query.value(11).toInt() != 0,
+                .pendingCreate = false,
+            });
+        }
+
+        QSqlQuery pending{m_connection.database()};
+        pending.prepare(QStringLiteral(
+            "SELECT p.creation_id,p.name,p.parent_mailbox_id,p.sort_order,p.is_subscribed FROM "
+            "mailbox_create_projections p WHERE p.account_id=:account_id AND NOT EXISTS(SELECT 1 "
+            "FROM mailboxes m WHERE m.account_id=p.account_id AND m.name=p.name AND "
+            "((m.parent_mailbox_id IS NULL AND p.parent_mailbox_id IS NULL) OR "
+            "m.parent_mailbox_id=p.parent_mailbox_id)) ORDER BY p.sort_order,p.name"));
+        pending.bindValue(QStringLiteral(":account_id"),
+                          QString::fromStdString(std::string{accountId}));
+        if (!pending.exec())
+            return makeQueryError(QStringLiteral("Read pending mailbox creations"), pending);
+        while (pending.next())
+        {
+            items.push_back(MailboxTreeItem{
+                .id = QStringLiteral("pending-mailbox:%1")
+                          .arg(pending.value(0).toString())
+                          .toStdString(),
+                .name = pending.value(1).toString().toStdString(),
+                .parentId = pending.value(2).isNull()
+                                ? std::nullopt
+                                : std::optional{pending.value(2).toString().toStdString()},
+                .role = std::nullopt,
+                .sortOrder = pending.value(3).toULongLong(),
+                .totalEmails = 0,
+                .unreadEmails = 0,
+                .totalThreads = 0,
+                .unreadThreads = 0,
+                .isSubscribed = pending.value(4).toInt() != 0,
+                .myRights = {},
+                .hasChildren = false,
+                .pendingCreate = true,
             });
         }
 

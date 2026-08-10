@@ -146,6 +146,8 @@ namespace javelin::app
                                                             std::string keyword);
         [[nodiscard]] QCoro::Task<javelin::jmap::MailboxSubscriptionChangeResult>
         setMailboxSubscribed(std::string accountId, std::string mailboxId, bool subscribed);
+        [[nodiscard]] QCoro::Task<javelin::jmap::MailboxCreateResult>
+        createMailbox(std::string accountId, std::string name);
         [[nodiscard]] QCoro::Task<javelin::jmap::MailboxDestroyResult>
         destroyMailbox(std::string accountId, std::string mailboxId);
         [[nodiscard]] javelin::jmap::QueuedEmailMutationResult

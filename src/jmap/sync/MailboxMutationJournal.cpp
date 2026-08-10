@@ -14,6 +14,7 @@ namespace javelin::jmap::sync
     namespace
     {
         constexpr std::string_view subscriptionMutationKind{"mailbox_subscription"};
+        constexpr std::string_view createMutationKind{"mailbox_create"};
         constexpr std::string_view destroyMutationKind{"mailbox_destroy"};
         constexpr std::string_view dataType{"Mailbox"};
 
@@ -68,6 +69,72 @@ namespace javelin::jmap::sync
                 .status = record.status,
                 .beforeSubscribed = object.value(QStringLiteral("beforeSubscribed")).toBool(),
                 .afterSubscribed = object.value(QStringLiteral("afterSubscribed")).toBool(),
+                .baseState = std::move(record.baseState),
+                .acceptedState = std::move(record.acceptedState),
+                .errorJson = std::move(record.errorJson),
+            };
+        }
+
+        [[nodiscard]] MutationRecord genericRecord(const MailboxCreateMutationRecord& record)
+        {
+            const QJsonObject payload{
+                {QStringLiteral("name"), QString::fromStdString(record.name)},
+                {QStringLiteral("parentId"),
+                 record.parentId.has_value() ? QJsonValue{QString::fromStdString(*record.parentId)}
+                                             : QJsonValue{QJsonValue::Null}},
+                {QStringLiteral("sortOrder"), QString::number(record.sortOrder)},
+                {QStringLiteral("isSubscribed"), record.isSubscribed},
+            };
+            return MutationRecord{
+                .mutationId = record.mutationId,
+                .operationGroupId = record.operationGroupId,
+                .domain = {.accountId = record.accountId, .dataType = std::string{dataType}},
+                .objectId = record.creationId,
+                .mutationKind = std::string{createMutationKind},
+                .status = record.status,
+                .payloadJson = QJsonDocument{payload}.toJson(QJsonDocument::Compact).toStdString(),
+                .baseState = record.baseState,
+                .acceptedState = record.acceptedState,
+                .errorJson = record.errorJson,
+            };
+        }
+
+        [[nodiscard]] std::variant<MailboxCreateMutationRecord, javelin::jmap::cache::DatabaseError>
+        typedCreateRecord(MutationRecord record)
+        {
+            const auto document =
+                QJsonDocument::fromJson(QByteArray::fromStdString(record.payloadJson));
+            if (record.mutationKind != createMutationKind || !document.isObject())
+            {
+                return javelin::jmap::cache::DatabaseError{
+                    .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Invalid Mailbox create journal payload."),
+                };
+            }
+            const auto object = document.object();
+            const auto name = object.value(QStringLiteral("name"));
+            if (!name.isString() || name.toString().isEmpty())
+            {
+                return javelin::jmap::cache::DatabaseError{
+                    .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Incomplete Mailbox create journal payload."),
+                };
+            }
+            return MailboxCreateMutationRecord{
+                .mutationId = std::move(record.mutationId),
+                .operationGroupId = std::move(record.operationGroupId),
+                .accountId = std::move(record.domain.accountId),
+                .creationId = std::move(record.objectId),
+                .name = name.toString().toStdString(),
+                .parentId =
+                    object.value(QStringLiteral("parentId")).isString()
+                        ? std::optional<std::string>{object.value(QStringLiteral("parentId"))
+                                                         .toString()
+                                                         .toStdString()}
+                        : std::nullopt,
+                .sortOrder = object.value(QStringLiteral("sortOrder")).toString().toULongLong(),
+                .isSubscribed = object.value(QStringLiteral("isSubscribed")).toBool(true),
+                .status = record.status,
                 .baseState = std::move(record.baseState),
                 .acceptedState = std::move(record.acceptedState),
                 .errorJson = std::move(record.errorJson),
@@ -251,6 +318,30 @@ namespace javelin::jmap::sync
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
+    MailboxMutationJournal::queue(const MailboxCreateMutationRecord& record)
+    {
+        auto transactionResult = MutationProjectionTransaction::begin(
+            m_connection, QStringLiteral("Queue Mailbox create mutation"));
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<MutationProjectionTransaction>(std::move(transactionResult));
+        if (const auto error = transaction.append(genericRecord(record)))
+            return error;
+        const auto parentId = record.parentId.has_value()
+                                  ? std::optional<std::string_view>{*record.parentId}
+                                  : std::nullopt;
+        if (const auto error = m_repository.projectPendingCreate(
+                transaction.cacheTransaction(), record.accountId, record.creationId,
+                record.mutationId, record.name, parentId, record.sortOrder, record.isSubscribed))
+            return error;
+        const std::array domains{domain(record.accountId)};
+        if (const auto error = transaction.advance(domains))
+            return error;
+        return transaction.commit();
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
     MailboxMutationJournal::queue(const MailboxDestroyMutationRecord& record)
     {
         auto transactionResult = MutationProjectionTransaction::begin(
@@ -273,6 +364,16 @@ namespace javelin::jmap::sync
 
     std::optional<javelin::jmap::cache::DatabaseError>
     MailboxMutationJournal::transition(const MailboxSubscriptionMutationRecord& record,
+                                       const MutationStatus status,
+                                       const std::optional<std::string_view> acceptedState,
+                                       const std::optional<std::string_view> errorJson)
+    {
+        MutationJournalRepository journal{m_connection};
+        return journal.transition(record.mutationId, status, acceptedState, errorJson);
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    MailboxMutationJournal::transition(const MailboxCreateMutationRecord& record,
                                        const MutationStatus status,
                                        const std::optional<std::string_view> acceptedState,
                                        const std::optional<std::string_view> errorJson)
@@ -351,6 +452,128 @@ namespace javelin::jmap::sync
         if (const auto error = transaction.advance(domains))
             return error;
         if (const auto error = transaction.remove(record.mutationId))
+            return error;
+        return transaction.commit();
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    MailboxMutationJournal::reject(const MailboxCreateMutationRecord& record,
+                                   const std::optional<std::string_view> acceptedState,
+                                   const std::optional<std::string_view> errorJson)
+    {
+        auto transactionResult = MutationProjectionTransaction::begin(
+            m_connection, QStringLiteral("Reject Mailbox create mutation"));
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<MutationProjectionTransaction>(std::move(transactionResult));
+        if (const auto error = transaction.transition(record.mutationId, MutationStatus::Rejected,
+                                                      acceptedState, errorJson))
+            return error;
+        if (const auto error = m_repository.removePendingCreate(
+                transaction.cacheTransaction(), record.accountId, record.creationId))
+            return error;
+        const std::array domains{domain(record.accountId)};
+        if (const auto error = transaction.advance(domains))
+            return error;
+        return transaction.commit();
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    MailboxMutationJournal::accept(const MailboxCreateMutationRecord& record,
+                                   const javelin::jmap::domain::Mailbox& mailbox,
+                                   const std::string_view state)
+    {
+        auto transactionResult = MutationProjectionTransaction::begin(
+            m_connection, QStringLiteral("Accept Mailbox create mutation"));
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<MutationProjectionTransaction>(std::move(transactionResult));
+        if (const auto error =
+                transaction.transition(record.mutationId, MutationStatus::Accepted, state))
+            return error;
+        if (const auto error = m_repository.removePendingCreate(
+                transaction.cacheTransaction(), record.accountId, record.creationId))
+            return error;
+        if (const auto error = m_repository.upsertMany(transaction.cacheTransaction(),
+                                                       record.accountId, {mailbox}))
+            return error;
+        javelin::jmap::cache::SyncStateRepository states{m_connection};
+        const auto expected = record.baseState.has_value()
+                                  ? std::optional<std::string_view>{*record.baseState}
+                                  : std::nullopt;
+        const auto advanced = states.replaceIfCurrent(transaction.cacheTransaction(),
+                                                      stateKey(record.accountId), expected, state);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&advanced))
+            return *error;
+        if (!std::get<bool>(advanced))
+        {
+            return javelin::jmap::cache::DatabaseError{
+                .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Mailbox state changed before create acceptance."),
+            };
+        }
+        const std::array domains{domain(record.accountId)};
+        if (const auto error = transaction.advance(domains))
+            return error;
+        if (const auto error = transaction.remove(record.mutationId))
+            return error;
+        return transaction.commit();
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError> MailboxMutationJournal::reconcileCreated(
+        const MailboxCreateMutationRecord& record,
+        const std::vector<javelin::jmap::domain::Mailbox>& mailboxes, const std::string_view state)
+    {
+        auto transactionResult = MutationProjectionTransaction::begin(
+            m_connection, QStringLiteral("Reconcile created Mailbox mutation"));
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<MutationProjectionTransaction>(std::move(transactionResult));
+        if (const auto error =
+                transaction.transition(record.mutationId, MutationStatus::Accepted, state))
+            return error;
+        if (const auto error = m_repository.removePendingCreate(
+                transaction.cacheTransaction(), record.accountId, record.creationId))
+            return error;
+        if (const auto error = m_repository.replaceAll(transaction.cacheTransaction(),
+                                                       record.accountId, mailboxes))
+            return error;
+        javelin::jmap::cache::SyncStateRepository states{m_connection};
+        if (const auto error =
+                states.upsert(transaction.cacheTransaction(), stateKey(record.accountId), state))
+            return error;
+        const std::array domains{domain(record.accountId)};
+        if (const auto error = transaction.advance(domains))
+            return error;
+        if (const auto error = transaction.remove(record.mutationId))
+            return error;
+        return transaction.commit();
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError> MailboxMutationJournal::retryCreateAtState(
+        const MailboxCreateMutationRecord& record,
+        const std::vector<javelin::jmap::domain::Mailbox>& mailboxes, const std::string_view state)
+    {
+        auto transactionResult = MutationProjectionTransaction::begin(
+            m_connection, QStringLiteral("Rebase Mailbox create mutation"));
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<MutationProjectionTransaction>(std::move(transactionResult));
+        if (const auto error = transaction.resetPending(record.mutationId, state))
+            return error;
+        if (const auto error = m_repository.replaceAll(transaction.cacheTransaction(),
+                                                       record.accountId, mailboxes))
+            return error;
+        javelin::jmap::cache::SyncStateRepository states{m_connection};
+        if (const auto error =
+                states.upsert(transaction.cacheTransaction(), stateKey(record.accountId), state))
+            return error;
+        const std::array domains{domain(record.accountId)};
+        if (const auto error = transaction.advance(domains))
             return error;
         return transaction.commit();
     }
@@ -526,6 +749,26 @@ namespace javelin::jmap::sync
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&typed))
                 return *error;
             records.push_back(std::get<MailboxSubscriptionMutationRecord>(std::move(typed)));
+        }
+        return records;
+    }
+
+    std::variant<std::vector<MailboxCreateMutationRecord>, javelin::jmap::cache::DatabaseError>
+    MailboxMutationJournal::listActiveCreates(const std::string_view accountId) const
+    {
+        MutationJournalRepository journal{m_connection};
+        auto result = journal.listActive(domain(accountId));
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+            return *error;
+        std::vector<MailboxCreateMutationRecord> records;
+        for (auto& generic : std::get<std::vector<MutationRecord>>(result))
+        {
+            if (generic.mutationKind != createMutationKind)
+                continue;
+            auto typed = typedCreateRecord(std::move(generic));
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&typed))
+                return *error;
+            records.push_back(std::get<MailboxCreateMutationRecord>(std::move(typed)));
         }
         return records;
     }

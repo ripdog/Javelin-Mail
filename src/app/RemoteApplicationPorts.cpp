@@ -499,6 +499,14 @@ namespace javelin::app
             std::move(accountId), std::move(mailboxId), subscribed);
     }
 
+    QCoro::Task<javelin::jmap::MailboxCreateResult>
+    RemoteMailCommandPort::createMailbox(std::string accountId, std::string name)
+    {
+        return call<javelin::jmap::MailboxCreateResult>(
+            m_client, javelin::protocol::RemoteActionKind::MailCreateMailbox, std::move(accountId),
+            std::move(name));
+    }
+
     QCoro::Task<javelin::jmap::MailboxDestroyResult>
     RemoteMailCommandPort::destroyMailbox(std::string accountId, std::string mailboxId)
     {

@@ -357,6 +357,35 @@ namespace javelin::jmap::sync
         return std::nullopt;
     }
 
+    std::optional<javelin::jmap::cache::DatabaseError>
+    MutationJournalRepository::resetPending(const std::string_view mutationId,
+                                            const std::string_view baseState)
+    {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
+        if (const auto error = m_connection.validate())
+            return error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(
+            QStringLiteral("UPDATE mutation_journal SET status='pending',base_state=:base_state,"
+                           "accepted_state=NULL,error_json=NULL,updated_at=CURRENT_TIMESTAMP WHERE "
+                           "mutation_id=:mutation_id"));
+        query.bindValue(QStringLiteral(":base_state"),
+                        QString::fromStdString(std::string{baseState}));
+        query.bindValue(QStringLiteral(":mutation_id"),
+                        QString::fromStdString(std::string{mutationId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Reset mutation journal record"), query);
+        if (query.numRowsAffected() != 1)
+        {
+            return javelin::jmap::cache::DatabaseError{
+                .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Reset mutation journal record: record does not exist"),
+            };
+        }
+        return std::nullopt;
+    }
+
     std::variant<std::size_t, javelin::jmap::cache::DatabaseError>
     MutationJournalRepository::recoverInFlight()
     {
@@ -437,6 +466,14 @@ namespace javelin::jmap::sync
     {
         MutationJournalRepository journal{*m_connection};
         return journal.transition(mutationId, status, acceptedState, errorJson);
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    MutationProjectionTransaction::resetPending(const std::string_view mutationId,
+                                                const std::string_view baseState)
+    {
+        MutationJournalRepository journal{*m_connection};
+        return journal.resetPending(mutationId, baseState);
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>

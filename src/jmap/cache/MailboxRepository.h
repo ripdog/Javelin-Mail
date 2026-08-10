@@ -5,6 +5,7 @@
 
 #include <QString>
 
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -45,6 +46,14 @@ namespace javelin::jmap::cache
                                                                  std::string_view accountId,
                                                                  std::string_view mailboxId,
                                                                  bool subscribed);
+        [[nodiscard]] std::optional<DatabaseError>
+        projectPendingCreate(DatabaseTransaction& transaction, std::string_view accountId,
+                             std::string_view creationId, std::string_view mutationId,
+                             std::string_view name, std::optional<std::string_view> parentId,
+                             std::uint64_t sortOrder, bool subscribed);
+        [[nodiscard]] std::optional<DatabaseError>
+        removePendingCreate(DatabaseTransaction& transaction, std::string_view accountId,
+                            std::string_view creationId);
         [[nodiscard]] std::variant<std::vector<javelin::jmap::domain::Mailbox>, DatabaseError>
         listByParent(std::string_view accountId, std::optional<std::string_view> parentId) const;
 

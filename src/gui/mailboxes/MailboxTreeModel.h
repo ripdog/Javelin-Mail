@@ -62,6 +62,7 @@ namespace javelin::gui::mailboxes
             ConnectionStatusRole = Qt::UserRole + 5,
             MailboxNameRole = Qt::UserRole + 6,
             MailboxHiddenRole = Qt::UserRole + 7,
+            MailboxPendingCreateRole = Qt::UserRole + 8,
         };
 
         enum class ConnectionStatus
@@ -140,6 +141,7 @@ namespace javelin::gui::mailboxes
             std::uint64_t totalThreads = 0;
             bool checked = false;
             bool subscribed = true;
+            bool pendingCreate = false;
             MailboxPreferenceState preferences;
             Node* parent = nullptr;
             std::vector<std::unique_ptr<Node>> children;

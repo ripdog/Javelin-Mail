@@ -175,6 +175,15 @@ namespace javelin::jmap
 
     using MailboxSubscriptionChangeResult = std::variant<MailboxSubscriptionChange, OperationError>;
 
+    struct MailboxCreateChange
+    {
+        std::string accountId;
+        std::string mailboxId;
+        std::string name;
+    };
+
+    using MailboxCreateResult = std::variant<MailboxCreateChange, OperationError>;
+
     struct MailboxDestroyChange
     {
         std::string accountId;
@@ -308,6 +317,11 @@ namespace javelin::jmap
                              std::function<void()> projectionCommitted = {});
         [[nodiscard]] QCoro::Task<MailboxSubscriptionChangeResult>
         reconcileMailboxSubscription(LiveConnectionSettings settings, std::string accountId);
+        [[nodiscard]] QCoro::Task<MailboxCreateResult>
+        createMailbox(LiveConnectionSettings settings, std::string accountId, std::string name,
+                      std::function<void()> projectionCommitted = {});
+        [[nodiscard]] QCoro::Task<MailboxCreateResult>
+        reconcileMailboxCreate(LiveConnectionSettings settings, std::string accountId);
         [[nodiscard]] QCoro::Task<MailboxDestroyResult>
         destroyMailbox(LiveConnectionSettings settings, std::string accountId,
                        std::string mailboxId, std::function<void()> projectionCommitted = {});

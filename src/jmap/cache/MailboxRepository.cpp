@@ -406,6 +406,70 @@ namespace javelin::jmap::cache
         return std::nullopt;
     }
 
+    std::optional<DatabaseError> MailboxRepository::projectPendingCreate(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::string_view creationId, const std::string_view mutationId,
+        const std::string_view name, const std::optional<std::string_view> parentId,
+        const std::uint64_t sortOrder, const bool subscribed)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message =
+                    QStringLiteral("Mailbox create projection requires a matching transaction"),
+            };
+        }
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "INSERT INTO mailbox_create_projections(account_id,creation_id,mutation_id,name,"
+            "parent_mailbox_id,sort_order,is_subscribed) VALUES(:account,:creation,:mutation,:name,"
+            ":parent,:sort_order,:subscribed)"));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":creation"),
+                        QString::fromStdString(std::string{creationId}));
+        query.bindValue(QStringLiteral(":mutation"),
+                        QString::fromStdString(std::string{mutationId}));
+        query.bindValue(QStringLiteral(":name"), QString::fromStdString(std::string{name}));
+        query.bindValue(QStringLiteral(":parent"),
+                        parentId.has_value()
+                            ? QVariant{QString::fromStdString(std::string{*parentId})}
+                            : QVariant{});
+        query.bindValue(QStringLiteral(":sort_order"), static_cast<qulonglong>(sortOrder));
+        query.bindValue(QStringLiteral(":subscribed"), subscribed ? 1 : 0);
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Project mailbox creation"), query);
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError>
+    MailboxRepository::removePendingCreate(DatabaseTransaction& transaction,
+                                           const std::string_view accountId,
+                                           const std::string_view creationId)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral(
+                    "Mailbox create projection removal requires a matching transaction"),
+            };
+        }
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral("DELETE FROM mailbox_create_projections WHERE "
+                                     "account_id=:account AND creation_id=:creation"));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":creation"),
+                        QString::fromStdString(std::string{creationId}));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Remove mailbox create projection"), query);
+        return std::nullopt;
+    }
+
     std::variant<std::vector<javelin::jmap::domain::Mailbox>, DatabaseError>
     MailboxRepository::listByParent(const std::string_view accountId,
                                     const std::optional<std::string_view> parentId) const

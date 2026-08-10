@@ -43,6 +43,13 @@ template <> struct glz::meta<javelin::jmap::api::CoreCapability>
         "maxObjectsInSet", &T::maxObjectsInSet, "collationAlgorithms", &T::collationAlgorithms);
 };
 
+template <> struct glz::meta<javelin::jmap::api::MailAccountCapability>
+{
+    using T = javelin::jmap::api::MailAccountCapability;
+    static constexpr auto value =
+        glz::object("mayCreateTopLevelMailbox", &T::mayCreateTopLevelMailbox);
+};
+
 template <> struct glz::meta<javelin::jmap::api::SubmissionCapability>
 {
     using T = javelin::jmap::api::SubmissionCapability;
@@ -129,6 +136,21 @@ namespace javelin::jmap::api
             }
 
             return coreCapability;
+        }
+
+        [[nodiscard]] std::optional<MailAccountCapability> parseMailAccountCapability(
+            const std::unordered_map<std::string, glz::generic>& capabilities)
+        {
+            const auto it = capabilities.find(std::string{mailCapabilityUri});
+            if (it == capabilities.end())
+                return std::nullopt;
+            std::string buffer;
+            if (glz::write_json(it->second, buffer))
+                return std::nullopt;
+            MailAccountCapability capability;
+            if (glz::read<glz::opts{.error_on_unknown_keys = false}>(capability, buffer))
+                return std::nullopt;
+            return capability;
         }
 
         [[nodiscard]] std::optional<SubmissionCapability>
@@ -270,6 +292,8 @@ namespace javelin::jmap::api
                             {
                                 .mail = capabilityPresent(rawAccount.accountCapabilities,
                                                           mailCapabilityUri),
+                                .mailDetails =
+                                    parseMailAccountCapability(rawAccount.accountCapabilities),
                                 .submission =
                                     parseSubmissionCapability(rawAccount.accountCapabilities),
                                 .contacts = parseContactsCapability(rawAccount.accountCapabilities),

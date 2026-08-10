@@ -34,6 +34,8 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::MailboxSubscriptionChangeResult>
         setMailboxSubscribed(std::string accountId, std::string mailboxId,
                              bool subscribed) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::MailboxCreateResult>
+        createMailbox(std::string accountId, std::string name) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::MailboxDestroyResult>
         destroyMailbox(std::string accountId, std::string mailboxId) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>

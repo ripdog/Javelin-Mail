@@ -208,6 +208,7 @@ namespace javelin::app
             case Kind::MailDeleteTag:
                 return {Domain::MailQueryWindows, Domain::MessageMetadata, Domain::BackgroundJobs};
             case Kind::MailSetMailboxSubscribed:
+            case Kind::MailCreateMailbox:
             case Kind::MailDestroyMailbox:
                 return {Domain::MailboxTree};
             case Kind::SieveSave:
@@ -898,6 +899,14 @@ namespace javelin::app
                 {
                     return launch(m_services.mailCommandPort().setMailboxSubscribed(
                         std::move(accountId), std::move(mailboxId), subscribed));
+                });
+        case Kind::MailCreateMailbox:
+            return decodeAndApply<std::string, std::string>(
+                command.payload, invalidPayload,
+                [&](std::string accountId, std::string name)
+                {
+                    return launch(m_services.mailCommandPort().createMailbox(std::move(accountId),
+                                                                             std::move(name)));
                 });
         case Kind::MailDestroyMailbox:
             return decodeAndApply<std::string, std::string>(

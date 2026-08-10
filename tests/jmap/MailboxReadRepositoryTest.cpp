@@ -1,4 +1,6 @@
 #include "jmap/cache/MailboxReadRepository.h"
+#include "jmap/cache/MailboxRepository.h"
+#include "jmap/sync/MailboxMutationJournal.h"
 
 #include <QCoreApplication>
 #include <QSqlQuery>
@@ -109,6 +111,24 @@ TEST_CASE("mailbox read repository returns cached mailbox tree metadata", "[jmap
                 QStringLiteral("inbox"), 10, true, QStringLiteral("{\"mayReadItems\":true}"));
     seedMailbox(writer, QStringLiteral("archive"), QStringLiteral("inbox"),
                 QStringLiteral("Archive"), QString{}, 20, false, QStringLiteral("{}"));
+    javelin::jmap::cache::MailboxRepository writableMailboxes{writer};
+    javelin::jmap::sync::MailboxMutationJournal mutations{writer, writableMailboxes};
+    REQUIRE_FALSE(mutations
+                      .queue({
+                          .mutationId = "create-projects",
+                          .operationGroupId = std::nullopt,
+                          .accountId = "account-1",
+                          .creationId = "creation-projects",
+                          .name = "Projects",
+                          .parentId = std::nullopt,
+                          .sortOrder = 30,
+                          .isSubscribed = true,
+                          .status = javelin::jmap::sync::MutationStatus::Pending,
+                          .baseState = "mailbox-state-1",
+                          .acceptedState = std::nullopt,
+                          .errorJson = std::nullopt,
+                      })
+                      .has_value());
     writer = {};
 
     auto readerResult = javelin::jmap::cache::GuiDatabaseFactory{
@@ -124,13 +144,17 @@ TEST_CASE("mailbox read repository returns cached mailbox tree metadata", "[jmap
     const auto result = repository.listMailboxTree("account-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailboxTreeItem>>(result));
     const auto& mailboxes = std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(result);
-    REQUIRE(mailboxes.size() == 2);
+    REQUIRE(mailboxes.size() == 3);
     CHECK(mailboxes.front().id == "inbox");
     CHECK(mailboxes.front().role == std::optional<std::string>{"inbox"});
     CHECK(mailboxes.front().isSubscribed);
     CHECK(mailboxes.front().myRights.mayReadItems);
     CHECK(mailboxes.front().hasChildren);
-    CHECK(mailboxes.back().id == "archive");
-    CHECK(mailboxes.back().parentId == std::optional<std::string>{"inbox"});
-    CHECK_FALSE(mailboxes.back().isSubscribed);
+    CHECK(mailboxes.at(1).id == "archive");
+    CHECK(mailboxes.at(1).parentId == std::optional<std::string>{"inbox"});
+    CHECK_FALSE(mailboxes.at(1).isSubscribed);
+    CHECK(mailboxes.back().id == "pending-mailbox:creation-projects");
+    CHECK(mailboxes.back().name == "Projects");
+    CHECK(mailboxes.back().pendingCreate);
+    CHECK(mailboxes.back().isSubscribed);
 }
