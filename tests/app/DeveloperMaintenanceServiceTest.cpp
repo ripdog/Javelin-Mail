@@ -184,7 +184,7 @@ TEST_CASE("mailbox maintenance registry serializes the same target",
     CHECK(second->generation() == 2);
 }
 
-TEST_CASE("developer SQLite clear preserves mailbox bodies and active optimistic membership",
+TEST_CASE("developer SQLite clear invalidates Thread cache and preserves optimistic membership",
           "[app][developer-maintenance][sqlite]")
 {
     ensureApplication();
@@ -197,26 +197,60 @@ TEST_CASE("developer SQLite clear preserves mailbox bodies and active optimistic
               QStringLiteral("inbox"));
     seedEmail(database, QStringLiteral("archive-email"), QStringLiteral("blob-archive"),
               QStringLiteral("archive"));
+    seedEmail(database, QStringLiteral("shared-inbox"), QStringLiteral("blob-shared-inbox"),
+              QStringLiteral("inbox"));
+    seedEmail(database, QStringLiteral("shared-archive"), QStringLiteral("blob-shared-archive"),
+              QStringLiteral("archive"));
+    execute(database,
+            QStringLiteral("INSERT INTO emails(account_id,email_id,thread_id,subject) VALUES"
+                           "('account-1','window-only','thread-window-only','window-only'),"
+                           "('account-1','offline-only','thread-offline-only','offline-only')"));
+
+    execute(database,
+            QStringLiteral("INSERT INTO threads(account_id,thread_id,state,membership_freshness,"
+                           "member_count) VALUES"
+                           "('account-1','thread-ordinary','thread-state','current',2),"
+                           "('account-1','thread-optimistic','thread-state','current',1),"
+                           "('account-1','thread-archive-email','thread-state','current',1),"
+                           "('account-1','thread-shared','thread-state','current',2),"
+                           "('account-1','thread-window-only','thread-state','current',1),"
+                           "('account-1','thread-offline-only','thread-state','current',1)"));
+    execute(database, QStringLiteral("UPDATE emails SET thread_id='thread-shared' WHERE "
+                                     "account_id='account-1' AND email_id IN "
+                                     "('shared-inbox','shared-archive')"));
+    execute(database, QStringLiteral(
+                          "INSERT INTO thread_email_members(account_id,thread_id,position,email_id)"
+                          " VALUES"
+                          "('account-1','thread-ordinary',0,'ordinary'),"
+                          "('account-1','thread-ordinary',1,'ordinary-child'),"
+                          "('account-1','thread-optimistic',0,'optimistic'),"
+                          "('account-1','thread-archive-email',0,'archive-email'),"
+                          "('account-1','thread-shared',0,'shared-inbox'),"
+                          "('account-1','thread-shared',1,'shared-archive'),"
+                          "('account-1','thread-window-only',0,'window-only'),"
+                          "('account-1','thread-offline-only',0,'offline-only')"));
 
     execute(database,
             QStringLiteral("INSERT INTO mailbox_query_windows(account_id,mailbox_id,query_key,"
                            "requested_offset,requested_limit,position,returned_limit,total,"
-                           "query_state) VALUES('account-1','inbox','inbox-query',0,100,0,100,2,"
+                           "query_state) VALUES('account-1','inbox','inbox-query',0,100,0,100,3,"
                            "'q1'),('account-1','archive','archive-query',0,100,0,100,1,'q2')"));
     execute(database, QStringLiteral("INSERT INTO mailbox_query_window_items(account_id,query_key,"
                                      "requested_offset,requested_limit,position,email_id) VALUES"
                                      "('account-1','inbox-query',0,100,0,'ordinary'),"
                                      "('account-1','inbox-query',0,100,1,'optimistic'),"
+                                     "('account-1','inbox-query',0,100,2,'window-only'),"
                                      "('account-1','archive-query',0,100,0,'archive-email')"));
     execute(database,
             QStringLiteral("INSERT INTO offline_mailbox_scopes(account_id,mailbox_id,desired,"
                            "status,generation,completed_generation,completed_total) VALUES"
-                           "('account-1','inbox',1,'complete',3,3,2),"
+                           "('account-1','inbox',1,'complete',3,3,3),"
                            "('account-1','archive',1,'complete',8,8,1)"));
     execute(database,
             QStringLiteral("INSERT INTO offline_mailbox_membership(account_id,mailbox_id,email_id,"
                            "generation,position) VALUES('account-1','inbox','ordinary',3,0),"
                            "('account-1','inbox','optimistic',3,1),"
+                           "('account-1','inbox','offline-only',3,2),"
                            "('account-1','archive','archive-email',8,0)"));
     execute(database,
             QStringLiteral("INSERT INTO mutation_journal(mutation_id,account_id,data_type,"
@@ -267,7 +301,7 @@ TEST_CASE("developer SQLite clear preserves mailbox bodies and active optimistic
                                             "'account-1' AND mailbox_id='inbox'")) ==
         QStringLiteral("optimistic"));
     CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM email_mailboxes WHERE account_id="
-                                          "'account-1' AND mailbox_id='archive'")) == 1);
+                                          "'account-1' AND mailbox_id='archive'")) == 2);
     CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mailbox_query_windows WHERE "
                                           "account_id='account-1' AND mailbox_id='inbox'")) == 0);
     CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mailbox_query_windows WHERE "
@@ -276,6 +310,50 @@ TEST_CASE("developer SQLite clear preserves mailbox bodies and active optimistic
                                           "account_id='account-1' AND mailbox_id='inbox'")) == 0);
     CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM offline_mailbox_membership WHERE "
                                           "account_id='account-1' AND mailbox_id='archive'")) == 1);
+    CHECK(textScalar(database, QStringLiteral("SELECT membership_freshness FROM threads WHERE "
+                                              "account_id='account-1' AND "
+                                              "thread_id='thread-ordinary'")) ==
+          QStringLiteral("stale"));
+    CHECK(scalar(database, QStringLiteral("SELECT member_count FROM threads WHERE account_id="
+                                          "'account-1' AND thread_id='thread-ordinary'")) == 0);
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM thread_email_members WHERE "
+                                          "account_id='account-1' AND "
+                                          "thread_id='thread-ordinary'")) == 0);
+    CHECK(textScalar(database, QStringLiteral("SELECT membership_freshness FROM threads WHERE "
+                                              "account_id='account-1' AND "
+                                              "thread_id='thread-window-only'")) ==
+          QStringLiteral("stale"));
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM thread_email_members WHERE "
+                                          "account_id='account-1' AND "
+                                          "thread_id='thread-window-only'")) == 0);
+    CHECK(textScalar(database, QStringLiteral("SELECT membership_freshness FROM threads WHERE "
+                                              "account_id='account-1' AND "
+                                              "thread_id='thread-offline-only'")) ==
+          QStringLiteral("stale"));
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM thread_email_members WHERE "
+                                          "account_id='account-1' AND "
+                                          "thread_id='thread-offline-only'")) == 0);
+    CHECK(textScalar(database, QStringLiteral("SELECT membership_freshness FROM threads WHERE "
+                                              "account_id='account-1' AND "
+                                              "thread_id='thread-shared'")) ==
+          QStringLiteral("stale"));
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM thread_email_members WHERE "
+                                          "account_id='account-1' AND "
+                                          "thread_id='thread-shared'")) == 0);
+    CHECK(textScalar(database, QStringLiteral("SELECT membership_freshness FROM threads WHERE "
+                                              "account_id='account-1' AND "
+                                              "thread_id='thread-optimistic'")) ==
+          QStringLiteral("current"));
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM thread_email_members WHERE "
+                                          "account_id='account-1' AND "
+                                          "thread_id='thread-optimistic'")) == 1);
+    CHECK(textScalar(database, QStringLiteral("SELECT membership_freshness FROM threads WHERE "
+                                              "account_id='account-1' AND "
+                                              "thread_id='thread-archive-email'")) ==
+          QStringLiteral("current"));
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM thread_email_members WHERE "
+                                          "account_id='account-1' AND "
+                                          "thread_id='thread-archive-email'")) == 1);
     CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_mailbox_refs WHERE "
                                           "account_id='account-1' AND mailbox_id='inbox'")) == 2);
     CHECK(scalar(database, QStringLiteral("SELECT desired FROM offline_mailbox_scopes WHERE "
@@ -289,7 +367,8 @@ TEST_CASE("developer SQLite clear preserves mailbox bodies and active optimistic
                                           "WHERE account_id='account-1' AND data_type='Email'")) ==
           5);
     REQUIRE(publisher.changes.size() == 1);
-    CHECK(publisher.changes.front().mailboxIds == QStringList{QStringLiteral("inbox")});
+    CHECK(publisher.changes.front().mailboxIds.contains(QStringLiteral("inbox")));
+    CHECK(publisher.changes.front().mailboxIds.contains(QStringLiteral("archive")));
     REQUIRE(resync.has_value());
     CHECK(resync->first == "account-1");
     CHECK(resync->second == "inbox");

@@ -198,6 +198,19 @@ namespace javelin::app
             return std::nullopt;
         }
 
+        [[nodiscard]] std::optional<DatabaseError> executeAccount(QSqlDatabase& database,
+                                                                  const QString& operation,
+                                                                  const QString& statement,
+                                                                  const QString& accountId)
+        {
+            QSqlQuery query{database};
+            query.prepare(statement);
+            query.bindValue(QStringLiteral(":account"), accountId);
+            if (!query.exec())
+                return queryError(operation, query);
+            return std::nullopt;
+        }
+
         [[nodiscard]] std::variant<std::uint64_t, DatabaseError>
         advanceEmailGeneration(QSqlDatabase& database, const QString& accountId)
         {
@@ -274,6 +287,86 @@ namespace javelin::app
             if (const auto error = validateMailbox(database, command))
                 return *error;
 
+            QSqlQuery createThreadTargets{database};
+            if (!createThreadTargets.exec(
+                    QStringLiteral("CREATE TEMP TABLE mailbox_cache_clear_threads("
+                                   "thread_id TEXT PRIMARY KEY) WITHOUT ROWID")))
+            {
+                return queryError(QStringLiteral("Create mailbox Thread cleanup targets"),
+                                  createThreadTargets);
+            }
+
+            QSqlQuery targetThreads{database};
+            targetThreads.prepare(QStringLiteral(
+                "INSERT INTO mailbox_cache_clear_threads(thread_id) "
+                "WITH candidate_emails(email_id) AS ("
+                "SELECT em.email_id FROM email_mailboxes em WHERE em.account_id=:account AND "
+                "em.mailbox_id=:mailbox UNION SELECT i.email_id FROM "
+                "mailbox_query_window_items i JOIN mailbox_query_windows w ON "
+                "w.account_id=i.account_id AND w.query_key=i.query_key AND "
+                "w.requested_offset=i.requested_offset AND "
+                "w.requested_limit=i.requested_limit WHERE w.account_id=:account AND "
+                "w.mailbox_id=:mailbox UNION SELECT offline.email_id FROM "
+                "offline_mailbox_membership offline WHERE offline.account_id=:account AND "
+                "offline.mailbox_id=:mailbox) "
+                "SELECT DISTINCT e.thread_id FROM candidate_emails candidate JOIN emails e ON "
+                "e.account_id=:account AND e.email_id=candidate.email_id WHERE "
+                "e.thread_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM emails active_email JOIN "
+                "mutation_journal mutation ON mutation.account_id=active_email.account_id AND "
+                "mutation.data_type='Email' AND mutation.object_id=active_email.email_id AND "
+                "mutation.status IN ('pending','in_flight','accepted','unknown') WHERE "
+                "active_email.account_id=e.account_id AND active_email.thread_id=e.thread_id)"));
+            targetThreads.bindValue(QStringLiteral(":account"), command.accountId);
+            targetThreads.bindValue(QStringLiteral(":mailbox"), command.mailboxId);
+            if (!targetThreads.exec())
+                return queryError(QStringLiteral("Resolve mailbox Thread cleanup targets"),
+                                  targetThreads);
+
+            QSqlQuery threadRows{database};
+            threadRows.prepare(QStringLiteral(
+                "SELECT COUNT(*) FROM threads t JOIN mailbox_cache_clear_threads target ON "
+                "target.thread_id=t.thread_id WHERE t.account_id=:account"));
+            threadRows.bindValue(QStringLiteral(":account"), command.accountId);
+            if (!threadRows.exec() || !threadRows.next())
+            {
+                return queryError(QStringLiteral("Measure mailbox Thread cache rows"), threadRows);
+            }
+            const std::uint64_t cachedThreads = threadRows.value(0).toULongLong();
+
+            QSqlQuery threadMemberRows{database};
+            threadMemberRows.prepare(QStringLiteral(
+                "SELECT COUNT(*) FROM thread_email_members member JOIN "
+                "mailbox_cache_clear_threads target ON target.thread_id=member.thread_id WHERE "
+                "member.account_id=:account"));
+            threadMemberRows.bindValue(QStringLiteral(":account"), command.accountId);
+            if (!threadMemberRows.exec() || !threadMemberRows.next())
+            {
+                return queryError(QStringLiteral("Measure mailbox Thread member cache rows"),
+                                  threadMemberRows);
+            }
+            const std::uint64_t cachedThreadMembers = threadMemberRows.value(0).toULongLong();
+
+            QStringList invalidatedMailboxIds{command.mailboxId};
+            QSqlQuery affectedMailboxes{database};
+            affectedMailboxes.prepare(QStringLiteral(
+                "SELECT DISTINCT membership.mailbox_id FROM email_mailboxes membership JOIN "
+                "emails e ON e.account_id=membership.account_id AND "
+                "e.email_id=membership.email_id JOIN mailbox_cache_clear_threads target ON "
+                "target.thread_id=e.thread_id WHERE membership.account_id=:account ORDER BY "
+                "membership.mailbox_id"));
+            affectedMailboxes.bindValue(QStringLiteral(":account"), command.accountId);
+            if (!affectedMailboxes.exec())
+            {
+                return queryError(QStringLiteral("Resolve mailbox Thread invalidations"),
+                                  affectedMailboxes);
+            }
+            while (affectedMailboxes.next())
+            {
+                const QString mailboxId = affectedMailboxes.value(0).toString();
+                if (!invalidatedMailboxIds.contains(mailboxId))
+                    invalidatedMailboxIds.push_back(mailboxId);
+            }
+
             auto windowItems = count(
                 database,
                 QStringLiteral(
@@ -315,6 +408,22 @@ namespace javelin::app
                                    "AND mailbox_id=:mailbox"),
                     command.accountId, command.mailboxId))
                 return *error;
+            if (const auto error = executeAccount(
+                    database, QStringLiteral("Delete mailbox Thread membership cache"),
+                    QStringLiteral("DELETE FROM thread_email_members AS member WHERE "
+                                   "member.account_id=:account AND EXISTS(SELECT 1 FROM "
+                                   "mailbox_cache_clear_threads target WHERE "
+                                   "target.thread_id=member.thread_id)"),
+                    command.accountId))
+                return *error;
+            if (const auto error = executeAccount(
+                    database, QStringLiteral("Invalidate mailbox Thread cache"),
+                    QStringLiteral("UPDATE threads AS t SET membership_freshness='stale',"
+                                   "member_count=0,state=NULL WHERE t.account_id=:account AND "
+                                   "EXISTS(SELECT 1 FROM mailbox_cache_clear_threads target WHERE "
+                                   "target.thread_id=t.thread_id)"),
+                    command.accountId))
+                return *error;
             if (const auto error =
                     executeTarget(database, QStringLiteral("Delete offline mailbox membership"),
                                   QStringLiteral("DELETE FROM offline_mailbox_membership WHERE "
@@ -345,12 +454,14 @@ namespace javelin::app
             return DeveloperMailboxClearSummary{
                 .accountId = command.accountId,
                 .mailboxId = command.mailboxId,
+                .invalidatedMailboxIds = std::move(invalidatedMailboxIds),
                 .kind = DeveloperMailboxCacheKind::Sqlite,
                 .maintenanceGeneration = maintenanceGeneration,
                 .rowsDiscarded = std::get<std::uint64_t>(windowItems) +
                                  std::get<std::uint64_t>(windows) +
                                  std::get<std::uint64_t>(memberships) +
-                                 std::get<std::uint64_t>(offlineMemberships),
+                                 std::get<std::uint64_t>(offlineMemberships) + cachedThreads +
+                                 cachedThreadMembers,
                 .projectionsRemoved = 0,
                 .logicalBytesReleased = 0,
                 .reclaimedBytes = 0,
@@ -606,6 +717,7 @@ namespace javelin::app
             return DeveloperMailboxClearSummary{
                 .accountId = command.accountId,
                 .mailboxId = command.mailboxId,
+                .invalidatedMailboxIds = {command.mailboxId},
                 .kind = DeveloperMailboxCacheKind::Bodies,
                 .maintenanceGeneration = maintenanceGeneration,
                 .rowsDiscarded = referenceCount + removedEmailRefs,
@@ -649,6 +761,7 @@ namespace javelin::app
             return DeveloperMailboxClearSummary{
                 .accountId = command.accountId,
                 .mailboxId = command.mailboxId,
+                .invalidatedMailboxIds = sqliteSummary.invalidatedMailboxIds,
                 .kind = DeveloperMailboxCacheKind::SqliteAndBodies,
                 .maintenanceGeneration = maintenanceGeneration,
                 .rowsDiscarded = bodySummary.rowsDiscarded + sqliteSummary.rowsDiscarded,
@@ -810,7 +923,7 @@ namespace javelin::app
         const auto& summary = std::get<DeveloperMailboxClearSummary>(result);
         m_cacheChangePublisher.publishCacheChange(MailCacheChange{
             .accountId = summary.accountId,
-            .mailboxIds = {summary.mailboxId},
+            .mailboxIds = summary.invalidatedMailboxIds,
             .queryWindows = {},
             .searchWindows = {},
             .mailboxTreeChanged = false,

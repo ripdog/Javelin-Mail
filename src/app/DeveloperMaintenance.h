@@ -5,6 +5,7 @@
 #include <QCoroTask>
 
 #include <QString>
+#include <QStringList>
 
 #include <cstdint>
 #include <variant>
@@ -36,6 +37,7 @@ namespace javelin::app
     {
         QString accountId;
         QString mailboxId;
+        QStringList invalidatedMailboxIds;
         DeveloperMailboxCacheKind kind = DeveloperMailboxCacheKind::Sqlite;
         std::uint64_t maintenanceGeneration = 0;
         std::uint64_t rowsDiscarded = 0;

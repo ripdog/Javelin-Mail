@@ -107,7 +107,17 @@ namespace javelin::app
                 "w.requested_limit=i.requested_limit WHERE w.account_id=:account AND "
                 "w.mailbox_id=:mailbox),0)+"
                 "COALESCE((SELECT SUM(length(o.email_id)+64) FROM offline_mailbox_membership o "
-                "WHERE o.account_id=:account AND o.mailbox_id=:mailbox),0)"));
+                "WHERE o.account_id=:account AND o.mailbox_id=:mailbox),0)+"
+                "COALESCE((SELECT SUM(length(t.thread_id)+96) FROM threads t WHERE "
+                "t.account_id=:account AND EXISTS(SELECT 1 FROM emails e JOIN email_mailboxes em "
+                "ON em.account_id=e.account_id AND em.email_id=e.email_id WHERE "
+                "e.account_id=t.account_id AND e.thread_id=t.thread_id AND "
+                "em.mailbox_id=:mailbox)),0)+"
+                "COALESCE((SELECT SUM(length(member.email_id)+64) FROM thread_email_members member "
+                "WHERE member.account_id=:account AND EXISTS(SELECT 1 FROM emails e JOIN "
+                "email_mailboxes em ON em.account_id=e.account_id AND em.email_id=e.email_id "
+                "WHERE e.account_id=member.account_id AND e.thread_id=member.thread_id AND "
+                "em.mailbox_id=:mailbox)),0)"));
             sqliteEstimate.bindValue(QStringLiteral(":account"), accountId);
             sqliteEstimate.bindValue(QStringLiteral(":mailbox"), mailboxId);
             if (!sqliteEstimate.exec() || !sqliteEstimate.next())
