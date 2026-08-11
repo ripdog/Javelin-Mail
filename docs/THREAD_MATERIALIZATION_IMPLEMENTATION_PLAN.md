@@ -57,6 +57,17 @@ checkpoint. Batch progress and post-commit signals are emitted without persisten
 and invalidation is limited to committed mailbox/search windows containing affected
 representatives. No child `Email/get` is issued yet.
 
+Phase 6 is complete. Missing child Email ids are selected from normalized membership in bounded
+SQLite slices and sent as explicit `Email/get.ids`; no result reference connects membership to
+hydration. Each request is capped by `maxObjectsInGet`, reduced further when necessary to fit
+`maxSizeRequest`, and committed independently through the optimistic-consistency projection
+transaction before its affected Thread rows are invalidated. Current membership with missing child
+coverage is now restart-recoverable work. Child `notFound` or a mismatched returned `threadId`
+stales the membership and triggers a fresh bounded `Thread/get`; reconciliation is capped at two
+attempts, after which the Thread remains stale for normal freshness retry. Successful completion is
+derived from SQLite having no missing current members, without retaining an unbounded child-id
+checkpoint in memory.
+
 The target architecture is:
 
 ```text

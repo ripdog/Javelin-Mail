@@ -32,6 +32,7 @@ namespace javelin::app
         std::vector<std::string> threadIds;
         std::vector<std::string> missingEmailIds;
         std::size_t completedThreadCount = 0;
+        std::size_t completedEmailCount = 0;
     };
 
     using ThreadMaterializationResult =

@@ -64,7 +64,8 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::variant<std::optional<std::string>, DatabaseError>
         findThreadIdByEmailId(std::string_view accountId, std::string_view emailId) const;
         [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
-        missingEmailIds(std::string_view accountId, std::string_view threadId) const;
+        missingEmailIds(std::string_view accountId, std::string_view threadId,
+                        std::size_t limit) const;
         [[nodiscard]] std::variant<std::optional<ThreadCoverage>, DatabaseError>
         coverage(std::string_view accountId, std::string_view threadId) const;
         [[nodiscard]] std::variant<std::optional<std::size_t>, DatabaseError>

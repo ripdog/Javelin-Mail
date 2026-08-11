@@ -137,6 +137,7 @@ namespace
                 .threadIds = std::move(target.threadIds),
                 .missingEmailIds = {},
                 .completedThreadCount = 0,
+                .completedEmailCount = 0,
             };
         }
 
@@ -193,19 +194,20 @@ TEST_CASE("thread materialization coordinator restores incomplete durable window
     ensureApplication();
     Fixture fixture;
     javelin::jmap::cache::ThreadRepository threads{fixture.database};
-    REQUIRE_FALSE(threads
-                      .upsertMany("account-1", {javelin::jmap::domain::Thread{
-                                                   .id = "thread-1",
-                                                   .emailIds = {"email-1", "email-2"},
-                                               }})
-                      .has_value());
+    REQUIRE_FALSE(
+        threads
+            .upsertMany("account-1", {javelin::jmap::domain::Thread{
+                                         .id = "thread-1",
+                                         .emailIds = {"email-1", "email-2", "missing-child"},
+                                     }})
+            .has_value());
     javelin::app::WorkScheduler scheduler{fixture.database, nullptr, std::chrono::milliseconds{0}};
     javelin::app::ThreadMaterializationCoordinator coordinator{fixture.database, scheduler};
 
     REQUIRE_FALSE(coordinator.restoreAccount("account-1").has_value());
-    CHECK(coordinator.pendingThreadCount("account-1") == 1);
+    CHECK(coordinator.pendingThreadCount("account-1") == 2);
     CHECK(coordinator.isMaterializing("account-1", "thread-2"));
-    CHECK_FALSE(coordinator.isMaterializing("account-1", "thread-1"));
+    CHECK(coordinator.isMaterializing("account-1", "thread-1"));
 }
 
 TEST_CASE("interactive Thread demand raises queued prefetch through foreground work",

@@ -195,7 +195,10 @@ TEST_CASE("thread repository distinguishes membership freshness from child cover
     REQUIRE(std::holds_alternative<std::optional<std::string>>(reverse));
     CHECK(std::get<std::optional<std::string>>(reverse) == std::optional<std::string>{"th-1"});
 
-    auto missing = repository.missingEmailIds("account-1", "th-1");
+    const auto boundedMissing = repository.missingEmailIds("account-1", "th-1", 1);
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(boundedMissing));
+    CHECK(std::get<std::vector<std::string>>(boundedMissing) == std::vector<std::string>{"em-1"});
+    auto missing = repository.missingEmailIds("account-1", "th-1", 100);
     REQUIRE(std::holds_alternative<std::vector<std::string>>(missing));
     CHECK(std::get<std::vector<std::string>>(missing) == std::vector<std::string>{"em-1", "em-2"});
 
@@ -217,7 +220,7 @@ TEST_CASE("thread repository distinguishes membership freshness from child cover
               QStringLiteral("mbx-inbox"));
     seedEmail(databaseContext.connection, QStringLiteral("em-2"), QStringLiteral("th-1"));
 
-    missing = repository.missingEmailIds("account-1", "th-1");
+    missing = repository.missingEmailIds("account-1", "th-1", 100);
     REQUIRE(std::holds_alternative<std::vector<std::string>>(missing));
     CHECK(std::get<std::vector<std::string>>(missing).empty());
     coverage = repository.coverage("account-1", "th-1");

@@ -58,7 +58,11 @@ namespace javelin::app
         query.prepare(QStringLiteral(
             "SELECT e.thread_id FROM emails e LEFT JOIN threads t ON t.account_id=e.account_id "
             "AND t.thread_id=e.thread_id WHERE e.account_id=:account_id AND e.email_id=:email_id "
-            "AND (t.thread_id IS NULL OR t.membership_freshness<>'current')"));
+            "AND (t.thread_id IS NULL OR t.membership_freshness<>'current' OR EXISTS(SELECT 1 FROM "
+            "thread_email_members tm LEFT JOIN emails child ON child.account_id=tm.account_id AND "
+            "child.email_id=tm.email_id AND child.thread_id=tm.thread_id WHERE "
+            "tm.account_id=e.account_id AND "
+            "tm.thread_id=e.thread_id AND child.email_id IS NULL))"));
         std::vector<std::string> threadIds;
         threadIds.reserve(emailIds.size());
         for (const auto& emailId : emailIds)
@@ -152,7 +156,11 @@ namespace javelin::app
             "w.materialization='complete') represented ON represented.email_id=e.email_id LEFT "
             "JOIN threads t ON t.account_id=e.account_id AND t.thread_id=e.thread_id WHERE "
             "e.account_id=:email_account AND (t.thread_id IS NULL OR "
-            "t.membership_freshness<>'current')"));
+            "t.membership_freshness<>'current' OR EXISTS(SELECT 1 FROM thread_email_members tm "
+            "LEFT JOIN emails child ON child.account_id=tm.account_id AND "
+            "child.email_id=tm.email_id AND child.thread_id=tm.thread_id WHERE "
+            "tm.account_id=e.account_id AND "
+            "tm.thread_id=e.thread_id AND child.email_id IS NULL))"));
         const auto account = QString::fromStdString(std::string{accountId});
         query.bindValue(QStringLiteral(":mailbox_account"), account);
         query.bindValue(QStringLiteral(":search_account"), account);
@@ -173,7 +181,11 @@ namespace javelin::app
     {
         QSqlQuery query{m_databaseConnection.database()};
         query.prepare(QStringLiteral(
-            "SELECT membership_freshness FROM threads WHERE account_id=:account_id AND "
+            "SELECT membership_freshness,EXISTS(SELECT 1 FROM thread_email_members tm LEFT JOIN "
+            "emails e ON e.account_id=tm.account_id AND e.email_id=tm.email_id AND "
+            "e.thread_id=tm.thread_id WHERE "
+            "tm.account_id=threads.account_id AND tm.thread_id=threads.thread_id AND "
+            "e.email_id IS NULL) FROM threads WHERE account_id=:account_id AND "
             "thread_id=:thread_id"));
         std::vector<std::string> incompleteThreadIds;
         incompleteThreadIds.reserve(threadIds.size());
@@ -183,7 +195,8 @@ namespace javelin::app
             query.bindValue(QStringLiteral(":thread_id"), QString::fromStdString(threadId));
             if (!query.exec())
                 return queryError(QStringLiteral("Inspect Thread materialization state"), query);
-            if (!query.next() || query.value(0).toString() != QStringLiteral("current"))
+            if (!query.next() || query.value(0).toString() != QStringLiteral("current") ||
+                query.value(1).toBool())
                 incompleteThreadIds.push_back(threadId);
             query.finish();
         }

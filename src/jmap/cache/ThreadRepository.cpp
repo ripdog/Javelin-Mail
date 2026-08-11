@@ -276,20 +276,22 @@ namespace javelin::jmap::cache
 
     std::variant<std::vector<std::string>, DatabaseError>
     ThreadRepository::missingEmailIds(const std::string_view accountId,
-                                      const std::string_view threadId) const
+                                      const std::string_view threadId,
+                                      const std::size_t limit) const
     {
         if (const auto error = m_connection.validate())
             return *error;
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "SELECT m.email_id FROM thread_email_members m LEFT JOIN emails e ON "
-            "e.account_id=m.account_id AND e.email_id=m.email_id WHERE "
+            "e.account_id=m.account_id AND e.email_id=m.email_id AND e.thread_id=m.thread_id WHERE "
             "m.account_id=:account_id AND m.thread_id=:thread_id AND e.email_id IS NULL ORDER BY "
-            "m.position"));
+            "m.position LIMIT :limit"));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
         query.bindValue(QStringLiteral(":thread_id"),
                         QString::fromStdString(std::string{threadId}));
+        query.bindValue(QStringLiteral(":limit"), static_cast<qulonglong>(limit));
         if (!query.exec())
             return makeQueryError(QStringLiteral("Read missing thread email ids"), query);
         std::vector<std::string> ids;
@@ -309,7 +311,8 @@ namespace javelin::jmap::cache
             "SELECT t.membership_freshness,t.member_count,COUNT(e.email_id) FROM threads t LEFT "
             "JOIN thread_email_members m ON m.account_id=t.account_id AND "
             "m.thread_id=t.thread_id LEFT JOIN emails e ON e.account_id=m.account_id AND "
-            "e.email_id=m.email_id WHERE t.account_id=:account_id AND t.thread_id=:thread_id "
+            "e.email_id=m.email_id AND e.thread_id=m.thread_id WHERE t.account_id=:account_id AND "
+            "t.thread_id=:thread_id "
             "GROUP BY t.account_id,t.thread_id,t.membership_freshness,t.member_count"));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
@@ -345,7 +348,8 @@ namespace javelin::jmap::cache
             "t.member_count=COUNT(e.email_id) THEN COUNT(em.email_id) ELSE NULL END FROM threads t "
             "LEFT JOIN thread_email_members m ON m.account_id=t.account_id AND "
             "m.thread_id=t.thread_id LEFT JOIN emails e ON e.account_id=m.account_id AND "
-            "e.email_id=m.email_id LEFT JOIN email_mailboxes em ON em.account_id=e.account_id AND "
+            "e.email_id=m.email_id AND e.thread_id=m.thread_id LEFT JOIN email_mailboxes em ON "
+            "em.account_id=e.account_id AND "
             "em.email_id=e.email_id AND em.mailbox_id=:mailbox_id WHERE "
             "t.account_id=:account_id AND t.thread_id=:thread_id GROUP BY "
             "t.account_id,t.thread_id,t.membership_freshness,t.member_count"));

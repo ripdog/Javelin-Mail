@@ -199,6 +199,14 @@ namespace javelin::app
                              m_mailService->publishThreadMaterializationCommitted(
                                  std::move(accountId), threadIds);
                          });
+        QObject::connect(m_threadMembershipMaterializationWorker.get(),
+                         &ThreadMembershipMaterializationWorker::childEmailsCommitted,
+                         m_mailService.get(),
+                         [this](QString accountId, const QStringList& threadIds, const QStringList&)
+                         {
+                             m_mailService->publishThreadMaterializationCommitted(
+                                 std::move(accountId), threadIds);
+                         });
         m_developerMaintenanceService = std::make_unique<DeveloperMaintenanceService>(
             location.databasePath, location.vaultRootPath, *m_mailboxMaintenanceRegistry,
             *m_mailService, *m_workScheduler,

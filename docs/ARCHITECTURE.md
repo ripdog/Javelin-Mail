@@ -154,7 +154,7 @@ The principal runtime objects are:
 | `SettingsRepository` | daemon | Owns the canonical revisioned settings snapshot and migration |
 | `WorkScheduler` | daemon | Prioritizes foreground, synchronization, indexing, offline, and maintenance work |
 | `ThreadMaterializationCoordinator` | daemon | Coalesces transient Thread targets from committed query windows and admits prefetch or interactive demand without persistent job rows |
-| `ThreadMembershipMaterializationWorker` | daemon | Fetches represented Thread membership in negotiated bounded batches, commits exact current snapshots, and checkpoints missing child Email ids for later hydration |
+| `ThreadMembershipMaterializationWorker` | daemon | Fetches represented Thread membership and missing child Emails in explicit negotiated bounded batches, commits through optimistic consistency, and reconciles membership races |
 | `DaemonBackgroundController` | daemon | Owns notifications, reminders, delayed-send actions, network recovery, and tray integration |
 | `GuiDaemonSession` | GUI | Connects, negotiates protocol/build identity, handles reconnect, and coordinates cache barriers |
 | `GuiServices` | GUI | Constructs read-only repositories and typed remote application-port adapters |

@@ -8,10 +8,14 @@
 #include "jmap/api/RequestBuilder.h"
 #include "jmap/api/ResponseReader.h"
 #include "jmap/api/Session.h"
+#include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/ThreadRepository.h"
+#include "jmap/sync/MailboxRefreshExecutor.h"
+#include "jmap/sync/MutationJournal.h"
 
 #include <algorithm>
+#include <array>
 #include <ranges>
 #include <unordered_set>
 #include <utility>
@@ -71,6 +75,41 @@ namespace javelin::app
             }
             return std::nullopt;
         }
+
+        [[nodiscard]] std::optional<QString>
+        validateAccounting(const std::string_view accountId,
+                           const std::vector<std::string>& requested,
+                           const javelin::jmap::api::EmailGetResponse& response)
+        {
+            if (response.accountId != accountId)
+                return QStringLiteral("Email/get returned the wrong account id.");
+
+            const std::unordered_set<std::string> expected(requested.begin(), requested.end());
+            std::unordered_set<std::string> accounted;
+            accounted.reserve(requested.size());
+            const auto account = [&](const std::string& id) -> bool
+            { return expected.contains(id) && accounted.insert(id).second; };
+            if (!std::ranges::all_of(response.list,
+                                     [&](const auto& email) { return account(email.id); }) ||
+                !std::ranges::all_of(response.notFound, account) ||
+                accounted.size() != expected.size())
+            {
+                return QStringLiteral(
+                    "Email/get list and notFound did not exactly account for the requested ids.");
+            }
+            return std::nullopt;
+        }
+
+        [[nodiscard]] const std::vector<std::string>& emailSummaryProperties()
+        {
+            static const std::vector<std::string> properties{
+                "id",         "blobId",        "threadId", "mailboxIds", "keywords",
+                "size",       "receivedAt",    "sentAt",   "messageId",  "inReplyTo",
+                "references", "hasAttachment", "subject",  "from",       "to",
+                "cc",         "bcc",           "replyTo",  "preview",
+            };
+            return properties;
+        }
     } // namespace
 
     ThreadMembershipMaterializationWorker::ThreadMembershipMaterializationWorker(
@@ -94,6 +133,7 @@ namespace javelin::app
                 .threadIds = {},
                 .missingEmailIds = {},
                 .completedThreadCount = 0,
+                .completedEmailCount = 0,
             };
         }
 
@@ -141,25 +181,25 @@ namespace javelin::app
         const auto batchSize = static_cast<std::size_t>(limits->maxObjectsInGet);
         javelin::jmap::api::MethodCaller caller{m_methodTransport};
         javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
+        javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
         ThreadMaterializationSummary summary;
         summary.threadIds.reserve(target.threadIds.size());
 
-        for (std::size_t offset = 0; offset < target.threadIds.size(); offset += batchSize)
+        const auto fetchThreads = [&caller, &requestContext, &target](std::vector<std::string> ids)
+            -> QCoro::Task<
+                std::variant<javelin::jmap::api::ThreadGetResponse, javelin::jmap::OperationError>>
         {
-            const auto count = std::min(batchSize, target.threadIds.size() - offset);
-            std::vector<std::string> batch{
-                target.threadIds.begin() + static_cast<std::ptrdiff_t>(offset),
-                target.threadIds.begin() + static_cast<std::ptrdiff_t>(offset + count)};
             const auto request = javelin::jmap::api::threadGet({
                 .accountId = target.accountId,
-                .ids = batch,
+                .ids = std::move(ids),
                 .idsReference = std::nullopt,
                 .properties = std::nullopt,
             });
             if (!request.has_value())
+            {
                 co_return error(javelin::jmap::OperationErrorCode::InvalidRequest,
                                 QStringLiteral("Unable to serialize the Thread/get request."));
-
+            }
             javelin::jmap::api::RequestBuilder builder;
             builder.useCore().useMail();
             const auto handle = builder.call(*request, "thread-membership");
@@ -170,26 +210,60 @@ namespace javelin::app
             const auto read = javelin::jmap::api::ResponseReader{*envelope}.require(handle);
             if (const auto* readError = std::get_if<javelin::jmap::api::ResponseReaderError>(&read))
                 co_return javelin::jmap::operationError(*readError);
-            auto response = std::get<javelin::jmap::api::ThreadGetResponse>(read);
-            if (const auto accountingError = validateAccounting(target.accountId, batch, response))
-                co_return error(javelin::jmap::OperationErrorCode::ProtocolViolation,
-                                *accountingError);
-
+            co_return std::get<javelin::jmap::api::ThreadGetResponse>(read);
+        };
+        const auto commitThreads = [this, &threads,
+                                    &target](const javelin::jmap::api::ThreadGetResponse& response)
+            -> std::optional<javelin::jmap::OperationError>
+        {
             auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
                 m_databaseConnection, QStringLiteral("Begin Thread materialization commit"));
             if (const auto* databaseError =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
-                co_return javelin::jmap::operationError(*databaseError);
+                return javelin::jmap::operationError(*databaseError);
             auto transaction =
                 std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
             if (const auto databaseError = threads.upsertMany(transaction, target.accountId,
                                                               response.list, response.state))
-                co_return javelin::jmap::operationError(*databaseError);
+                return javelin::jmap::operationError(*databaseError);
             if (const auto databaseError =
                     threads.markStale(transaction, target.accountId, response.notFound))
-                co_return javelin::jmap::operationError(*databaseError);
+                return javelin::jmap::operationError(*databaseError);
             if (const auto databaseError = transaction.commit())
+                return javelin::jmap::operationError(*databaseError);
+            return std::nullopt;
+        };
+
+        std::vector<std::string> membershipTargets;
+        membershipTargets.reserve(target.threadIds.size());
+        for (const auto& threadId : target.threadIds)
+        {
+            const auto membership = threads.findMembership(target.accountId, threadId);
+            if (const auto* databaseError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&membership))
                 co_return javelin::jmap::operationError(*databaseError);
+            const auto& record =
+                std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(membership);
+            if (!record.has_value() ||
+                record->freshness != javelin::jmap::cache::ThreadMembershipFreshness::Current)
+                membershipTargets.push_back(threadId);
+        }
+
+        for (std::size_t offset = 0; offset < membershipTargets.size(); offset += batchSize)
+        {
+            const auto count = std::min(batchSize, membershipTargets.size() - offset);
+            std::vector<std::string> batch{
+                membershipTargets.begin() + static_cast<std::ptrdiff_t>(offset),
+                membershipTargets.begin() + static_cast<std::ptrdiff_t>(offset + count)};
+            auto fetched = co_await fetchThreads(batch);
+            if (const auto* fetchError = std::get_if<javelin::jmap::OperationError>(&fetched))
+                co_return *fetchError;
+            auto response = std::get<javelin::jmap::api::ThreadGetResponse>(std::move(fetched));
+            if (const auto accountingError = validateAccounting(target.accountId, batch, response))
+                co_return error(javelin::jmap::OperationErrorCode::ProtocolViolation,
+                                *accountingError);
+            if (const auto commitError = commitThreads(response))
+                co_return *commitError;
 
             std::vector<std::string> committedIds;
             committedIds.reserve(response.list.size());
@@ -197,13 +271,6 @@ namespace javelin::app
             {
                 committedIds.push_back(thread.id);
                 summary.threadIds.push_back(thread.id);
-                const auto missing = threads.missingEmailIds(target.accountId, thread.id);
-                if (const auto* databaseError =
-                        std::get_if<javelin::jmap::cache::DatabaseError>(&missing))
-                    co_return javelin::jmap::operationError(*databaseError);
-                const auto& ids = std::get<std::vector<std::string>>(missing);
-                summary.missingEmailIds.insert(summary.missingEmailIds.end(), ids.begin(),
-                                               ids.end());
             }
             summary.completedThreadCount += response.list.size() + response.notFound.size();
             if (!committedIds.empty())
@@ -222,10 +289,149 @@ namespace javelin::app
             }
         }
 
-        std::ranges::sort(summary.missingEmailIds);
-        summary.missingEmailIds.erase(
-            std::unique(summary.missingEmailIds.begin(), summary.missingEmailIds.end()),
-            summary.missingEmailIds.end());
+        constexpr std::size_t maximumMembershipReconciliations = 2;
+        for (const auto& threadId : target.threadIds)
+        {
+            std::size_t reconciliationCount = 0;
+            while (true)
+            {
+                auto missingResult = threads.missingEmailIds(target.accountId, threadId, batchSize);
+                if (const auto* databaseError =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&missingResult))
+                    co_return javelin::jmap::operationError(*databaseError);
+                auto missing = std::get<std::vector<std::string>>(std::move(missingResult));
+                if (missing.empty())
+                    break;
+
+                javelin::jmap::api::RequestBuilder builder;
+                javelin::jmap::api::CallHandle<javelin::jmap::api::EmailGetResponse> handle;
+                while (true)
+                {
+                    const auto request = javelin::jmap::api::emailGet({
+                        .accountId = target.accountId,
+                        .ids = missing,
+                        .idsReference = std::nullopt,
+                        .properties = emailSummaryProperties(),
+                    });
+                    if (!request.has_value())
+                        co_return error(
+                            javelin::jmap::OperationErrorCode::InvalidRequest,
+                            QStringLiteral("Unable to serialize the Email/get request."));
+                    builder = {};
+                    builder.useCore().useMail();
+                    handle = builder.call(*request, "thread-child-emails");
+                    const auto encoded =
+                        javelin::jmap::api::serializeRequestEnvelope(builder.build());
+                    if (encoded.has_value() && encoded->size() <= limits->maxSizeRequest)
+                        break;
+                    if (missing.size() == 1)
+                    {
+                        co_return error(
+                            javelin::jmap::OperationErrorCode::InvalidRequest,
+                            QStringLiteral("One child Email id exceeds the negotiated JMAP request "
+                                           "size limit."));
+                    }
+                    missing.pop_back();
+                }
+
+                const auto called = co_await caller.call(requestContext, builder);
+                const auto* envelope = std::get_if<javelin::jmap::api::ResponseEnvelope>(&called);
+                if (envelope == nullptr)
+                    co_return callError(called);
+                const auto read = javelin::jmap::api::ResponseReader{*envelope}.require(handle);
+                if (const auto* readError =
+                        std::get_if<javelin::jmap::api::ResponseReaderError>(&read))
+                    co_return javelin::jmap::operationError(*readError);
+                auto response = std::get<javelin::jmap::api::EmailGetResponse>(read);
+                if (const auto accountingError =
+                        validateAccounting(target.accountId, missing, response))
+                    co_return error(javelin::jmap::OperationErrorCode::ProtocolViolation,
+                                    *accountingError);
+
+                const bool membershipRace =
+                    !response.notFound.empty() ||
+                    std::ranges::any_of(response.list, [&threadId](const auto& email)
+                                        { return email.threadId != threadId; });
+                auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+                    m_databaseConnection,
+                    QStringLiteral("Commit Thread child Email materialization"));
+                if (const auto* databaseError =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+                    co_return javelin::jmap::operationError(*databaseError);
+                auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+                    std::move(transactionResult));
+                if (const auto databaseError = emails.upsertMany(transaction.cacheTransaction(),
+                                                                 target.accountId, response.list))
+                    co_return javelin::jmap::operationError(*databaseError);
+                std::vector<std::string> committedEmailIds;
+                committedEmailIds.reserve(response.list.size());
+                std::vector<std::string> affectedThreadIds{threadId};
+                for (const auto& email : response.list)
+                {
+                    committedEmailIds.push_back(email.id);
+                    if (std::ranges::find(affectedThreadIds, email.threadId) ==
+                        affectedThreadIds.end())
+                        affectedThreadIds.push_back(email.threadId);
+                }
+                if (const auto rebaseError = javelin::jmap::sync::rebaseActiveEmailProjections(
+                        transaction, m_databaseConnection, target.accountId, committedEmailIds,
+                        response.state))
+                    co_return *rebaseError;
+                if (membershipRace)
+                {
+                    const std::array staleThreadIds{threadId};
+                    if (const auto databaseError = threads.markStale(
+                            transaction.cacheTransaction(), target.accountId, staleThreadIds))
+                        co_return javelin::jmap::operationError(*databaseError);
+                }
+                if (const auto databaseError = transaction.commit())
+                    co_return javelin::jmap::operationError(*databaseError);
+
+                summary.completedEmailCount += response.list.size();
+                if (!committedEmailIds.empty())
+                    Q_EMIT childEmailsCommitted(QString::fromStdString(target.accountId),
+                                                qStringIds(affectedThreadIds),
+                                                qStringIds(committedEmailIds));
+                Q_EMIT childProgressChanged(QString::fromStdString(target.accountId),
+                                            static_cast<quint64>(summary.completedEmailCount));
+
+                if (!membershipRace)
+                    continue;
+                if (reconciliationCount >= maximumMembershipReconciliations)
+                {
+                    co_return error(
+                        javelin::jmap::OperationErrorCode::Conflict,
+                        QStringLiteral("Thread membership kept changing while child Emails were "
+                                       "materialized."));
+                }
+                ++reconciliationCount;
+                const std::vector<std::string> reconciliationBatch{threadId};
+                auto fetched = co_await fetchThreads(reconciliationBatch);
+                if (const auto* fetchError = std::get_if<javelin::jmap::OperationError>(&fetched))
+                    co_return *fetchError;
+                auto threadResponse =
+                    std::get<javelin::jmap::api::ThreadGetResponse>(std::move(fetched));
+                if (const auto accountingError =
+                        validateAccounting(target.accountId, reconciliationBatch, threadResponse))
+                    co_return error(javelin::jmap::OperationErrorCode::ProtocolViolation,
+                                    *accountingError);
+                if (const auto commitError = commitThreads(threadResponse))
+                    co_return *commitError;
+                if (!threadResponse.list.empty())
+                    Q_EMIT membershipCommitted(QString::fromStdString(target.accountId),
+                                               {QString::fromStdString(threadId)});
+                if (!threadResponse.notFound.empty())
+                {
+                    co_return error(javelin::jmap::OperationErrorCode::NotFound,
+                                    QStringLiteral("The represented Thread disappeared during "
+                                                   "child Email reconciliation."));
+                }
+            }
+        }
+
+        summary.threadIds = target.threadIds;
+        summary.completedThreadCount = target.threadIds.size();
+        summary.missingEmailIds.clear();
         co_return summary;
     }
 } // namespace javelin::app
