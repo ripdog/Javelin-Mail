@@ -268,6 +268,16 @@ namespace javelin::jmap::sync
     }
 
     std::variant<std::vector<EmailMutationRecord>, javelin::jmap::cache::DatabaseError>
+    EmailMutationJournal::listPendingForOperationGroup(const std::string_view accountId,
+                                                       const std::string_view operationGroupId,
+                                                       const std::size_t objectLimit) const
+    {
+        return typedRecords(m_repository.listPendingForOperationGroup(
+            {.accountId = std::string{accountId}, .dataType = "Email"}, operationGroupId,
+            objectLimit));
+    }
+
+    std::variant<std::vector<EmailMutationRecord>, javelin::jmap::cache::DatabaseError>
     EmailMutationJournal::listByStatus(const std::string_view accountId,
                                        const MutationStatus status, const std::size_t limit) const
     {

@@ -244,6 +244,48 @@ namespace javelin::jmap::sync
     }
 
     std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
+    MutationJournalRepository::listPendingForOperationGroup(const ConsistencyDomain& domain,
+                                                            const std::string_view operationGroupId,
+                                                            const std::size_t objectLimit) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(
+            QStringLiteral(
+                "SELECT %1 FROM mutation_journal WHERE account_id=:account_id "
+                "AND data_type=:data_type AND operation_group_id=:operation_group_id "
+                "AND status='pending' AND object_id IN ("
+                "SELECT object_id FROM mutation_journal WHERE account_id=:account_id "
+                "AND data_type=:data_type AND operation_group_id=:operation_group_id "
+                "AND status='pending' GROUP BY object_id ORDER BY MIN(sequence) LIMIT :limit) "
+                "ORDER BY sequence")
+                .arg(selectColumns()));
+        query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(domain.accountId));
+        query.bindValue(QStringLiteral(":data_type"), QString::fromStdString(domain.dataType));
+        query.bindValue(QStringLiteral(":operation_group_id"),
+                        QString::fromStdString(std::string{operationGroupId}));
+        query.bindValue(QStringLiteral(":limit"), static_cast<qulonglong>(objectLimit));
+        if (!query.exec())
+            return queryError(QStringLiteral("Read pending mutation journal operation batch"),
+                              query);
+
+        std::vector<MutationRecord> records;
+        while (query.next())
+        {
+            const auto record = recordFromQuery(query);
+            if (!record.has_value())
+                return javelin::jmap::cache::DatabaseError{
+                    .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Mutation journal record has an invalid status."),
+                };
+            records.push_back(*record);
+        }
+        return records;
+    }
+
+    std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
     MutationJournalRepository::listByStatus(const ConsistencyDomain& domain,
                                             const MutationStatus status,
                                             const std::size_t limit) const
@@ -386,6 +428,31 @@ namespace javelin::jmap::sync
         return std::nullopt;
     }
 
+    std::optional<javelin::jmap::cache::DatabaseError>
+    MutationJournalRepository::rebasePendingOperationGroup(const ConsistencyDomain& domain,
+                                                           const std::string_view operationGroupId,
+                                                           const std::string_view baseState)
+    {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
+        if (const auto error = m_connection.validate())
+            return error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "UPDATE mutation_journal SET base_state=:base_state,updated_at=CURRENT_TIMESTAMP "
+            "WHERE account_id=:account_id AND data_type=:data_type "
+            "AND operation_group_id=:operation_group_id AND status='pending'"));
+        query.bindValue(QStringLiteral(":base_state"),
+                        QString::fromStdString(std::string{baseState}));
+        query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(domain.accountId));
+        query.bindValue(QStringLiteral(":data_type"), QString::fromStdString(domain.dataType));
+        query.bindValue(QStringLiteral(":operation_group_id"),
+                        QString::fromStdString(std::string{operationGroupId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Rebase pending mutation operation group"), query);
+        return std::nullopt;
+    }
+
     std::variant<std::size_t, javelin::jmap::cache::DatabaseError>
     MutationJournalRepository::recoverInFlight()
     {
@@ -474,6 +541,15 @@ namespace javelin::jmap::sync
     {
         MutationJournalRepository journal{*m_connection};
         return journal.resetPending(mutationId, baseState);
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    MutationProjectionTransaction::rebasePendingOperationGroup(
+        const ConsistencyDomain& domain, const std::string_view operationGroupId,
+        const std::string_view baseState)
+    {
+        MutationJournalRepository journal{*m_connection};
+        return journal.rebasePendingOperationGroup(domain, operationGroupId, baseState);
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>

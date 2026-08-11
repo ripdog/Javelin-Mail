@@ -63,6 +63,10 @@ namespace javelin::jmap::sync
         listForOperationGroup(std::string_view accountId, std::string_view operationGroupId) const;
         [[nodiscard]]
         std::variant<std::vector<EmailMutationRecord>, javelin::jmap::cache::DatabaseError>
+        listPendingForOperationGroup(std::string_view accountId, std::string_view operationGroupId,
+                                     std::size_t objectLimit) const;
+        [[nodiscard]]
+        std::variant<std::vector<EmailMutationRecord>, javelin::jmap::cache::DatabaseError>
         listByStatus(std::string_view accountId, MutationStatus status, std::size_t limit) const;
         [[nodiscard]]
         std::variant<std::vector<EmailMutationRecord>, javelin::jmap::cache::DatabaseError>

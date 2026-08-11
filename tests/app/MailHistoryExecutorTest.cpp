@@ -34,6 +34,7 @@ namespace
                 .attemptedEmailCount = 1,
                 .updatedEmailCount = 1,
                 .failedEmailCount = 0,
+                .statePreconditionUsed = false,
                 .items = {},
                 .receipt = {},
             };
@@ -221,6 +222,7 @@ TEST_CASE("mail history executor blocks mixed server outcomes as partial",
         .attemptedEmailCount = 2,
         .updatedEmailCount = 1,
         .failedEmailCount = 1,
+        .statePreconditionUsed = false,
         .items = {},
         .receipt = {},
     };

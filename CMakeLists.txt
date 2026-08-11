@@ -318,6 +318,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/OAuthRefreshSingleFlight.h
     src/app/MailApplicationService.cpp
     src/app/MailApplicationService.h
+    src/app/EmailMutationBatchSubmitter.cpp
+    src/app/EmailMutationBatchSubmitter.h
     src/app/ThreadMaterializationCoordinator.cpp
     src/app/ThreadMaterializationCoordinator.h
     src/app/ThreadMembershipMaterializationWorker.cpp
@@ -1496,6 +1498,8 @@ add_library(javelin_daemon_core STATIC
     src/app/OAuthRefreshSingleFlight.h
     src/app/MailApplicationService.cpp
     src/app/MailApplicationService.h
+    src/app/EmailMutationBatchSubmitter.cpp
+    src/app/EmailMutationBatchSubmitter.h
     src/app/ThreadMaterializationCoordinator.cpp
     src/app/ThreadMaterializationCoordinator.h
     src/app/ThreadMembershipMaterializationWorker.cpp

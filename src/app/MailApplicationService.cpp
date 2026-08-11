@@ -1,6 +1,7 @@
 #include "app/MailApplicationService.h"
 
 #include "app/ApplicationErrorCoordinator.h"
+#include "app/EmailMutationBatchSubmitter.h"
 #include "app/MailboxMaintenanceRegistry.h"
 #include "app/StateChangePolicy.h"
 #include "app/ThreadMaterializationCoordinator.h"
@@ -76,17 +77,16 @@ namespace javelin::app
                                              mailboxIds);
         }
 
-        [[nodiscard]] QStringList
-        affectedMailboxIdsForPendingMutations(javelin::jmap::cache::DatabaseConnection& connection,
-                                              const std::string_view accountId,
-                                              const std::optional<std::string>& operationGroupId)
+        [[nodiscard]] QStringList affectedMailboxIdsForPendingMutations(
+            javelin::jmap::cache::DatabaseConnection& connection, const std::string_view accountId,
+            const std::optional<std::string>& operationGroupId, const std::size_t limit)
         {
             javelin::jmap::sync::EmailMutationJournal journal{connection};
             auto recordsResult =
                 operationGroupId.has_value()
-                    ? journal.listForOperationGroup(accountId, *operationGroupId)
+                    ? journal.listPendingForOperationGroup(accountId, *operationGroupId, limit)
                     : journal.listByStatus(accountId, javelin::jmap::sync::MutationStatus::Pending,
-                                           pendingEmailMutationBatchSize);
+                                           limit);
             const auto* records =
                 std::get_if<std::vector<javelin::jmap::sync::EmailMutationRecord>>(&recordsResult);
             if (records == nullptr)
@@ -2379,10 +2379,60 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .message = accountSynchronizationNotConfigured(),
             };
-        auto affectedMailboxIds = affectedMailboxIdsForPendingMutations(
-            m_databaseConnection, accountId, operationGroupId);
-        auto result = co_await m_jmapCore.submitPendingEmailMutations(
-            toLiveConnectionSettings(configuration->second.settings), accountId, operationGroupId);
+        javelin::jmap::cache::SessionRepository sessions{m_databaseConnection};
+        const auto sessionResult = sessions.load(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&sessionResult))
+            co_return javelin::jmap::operationError(*error);
+        const auto& session = std::get<std::optional<javelin::jmap::api::Session>>(sessionResult);
+        if (!session.has_value())
+            co_return javelin::jmap::OperationError{
+                .message = QStringLiteral("No cached JMAP session is available for the account."),
+            };
+        const auto requestLimits = javelin::jmap::api::coreRequestLimits(*session);
+        if (!requestLimits.has_value())
+            co_return javelin::jmap::OperationError{
+                .message = QStringLiteral("The cached JMAP session has invalid request limits."),
+            };
+        const auto batchLimit = static_cast<std::size_t>(std::min<std::uint64_t>(
+            requestLimits->maxObjectsInSet, operationGroupId.has_value()
+                                                ? std::numeric_limits<std::size_t>::max()
+                                                : pendingEmailMutationBatchSize));
+        QStringList affectedMailboxIds;
+        EmailMutationBatchSubmission groupedSubmission;
+        if (operationGroupId.has_value())
+        {
+            EmailMutationBatchSubmitter submitter{m_jmapCore};
+            groupedSubmission = co_await submitter.submit(
+                toLiveConnectionSettings(configuration->second.settings), accountId,
+                *operationGroupId, batchLimit,
+                [&]
+                {
+                    const auto batchMailboxIds = affectedMailboxIdsForPendingMutations(
+                        m_databaseConnection, accountId, operationGroupId, batchLimit);
+                    for (const auto& mailboxId : batchMailboxIds)
+                        if (!affectedMailboxIds.contains(mailboxId))
+                            affectedMailboxIds.push_back(mailboxId);
+                });
+        }
+        else
+        {
+            affectedMailboxIds = affectedMailboxIdsForPendingMutations(
+                m_databaseConnection, accountId, operationGroupId, batchLimit);
+            auto single = co_await m_jmapCore.submitPendingEmailMutations(
+                toLiveConnectionSettings(configuration->second.settings), accountId,
+                operationGroupId, batchLimit);
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&single))
+                groupedSubmission.error = *error;
+            else
+                groupedSubmission.submitted =
+                    std::get<javelin::jmap::SubmittedEmailMutations>(std::move(single));
+        }
+        auto& submittedAll = groupedSubmission.submitted;
+
+        javelin::jmap::SubmittedEmailMutationsResult result =
+            groupedSubmission.error.has_value()
+                ? javelin::jmap::SubmittedEmailMutationsResult{*groupedSubmission.error}
+                : javelin::jmap::SubmittedEmailMutationsResult{submittedAll};
 
         if (operationGroupId.has_value())
         {
@@ -2395,7 +2445,14 @@ namespace javelin::app
                 });
             if (historyEntry != m_undoManager.entries().end())
             {
-                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                std::unordered_set<std::string> accepted;
+                for (const auto& item : submittedAll.items)
+                {
+                    if (item.accepted)
+                        accepted.insert(item.emailId);
+                }
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result);
+                    error != nullptr && accepted.empty())
                 {
                     using enum javelin::jmap::OperationErrorCode;
                     if (error->code == NetworkUnavailable || error->code == Timeout ||
@@ -2407,19 +2464,11 @@ namespace javelin::app
                             error->message));
                     }
                 }
-                else
+                else if (!submittedAll.items.empty())
                 {
-                    const auto& submitted =
-                        std::get<javelin::jmap::SubmittedEmailMutations>(result);
                     if (auto* history = std::get_if<javelin::app::undo::MailPatchHistory>(
                             &historyEntry->payload))
                     {
-                        std::unordered_set<std::string> accepted;
-                        for (const auto& item : submitted.items)
-                        {
-                            if (item.accepted)
-                                accepted.insert(item.emailId);
-                        }
                         auto updatedEntry = *historyEntry;
                         auto& updatedHistory =
                             std::get<javelin::app::undo::MailPatchHistory>(updatedEntry.payload);
@@ -2432,7 +2481,7 @@ namespace javelin::app
                     }
                     else if (std::holds_alternative<javelin::app::undo::ImpossibleHistory>(
                                  historyEntry->payload) &&
-                             submitted.updatedEmailCount == 0)
+                             submittedAll.updatedEmailCount == 0)
                     {
                         static_cast<void>(m_undoManager.forget(historyEntry->entryId));
                     }
@@ -2443,8 +2492,7 @@ namespace javelin::app
         auto observed =
             observeResult(m_errorCoordinator, configuration->second.settings, accountId,
                           QStringLiteral("Submit pending mail changes"), std::move(result));
-        if (const auto* submitted = std::get_if<javelin::jmap::SubmittedEmailMutations>(&observed);
-            submitted != nullptr && submitted->attemptedEmailCount > 0)
+        if (submittedAll.attemptedEmailCount > 0)
         {
             Q_EMIT cacheCommitted(MailCacheChange{
                 .accountId = QString::fromStdString(accountId),

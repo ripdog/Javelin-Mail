@@ -150,6 +150,7 @@ namespace javelin::jmap
         std::size_t attemptedEmailCount = 0;
         std::size_t updatedEmailCount = 0;
         std::size_t failedEmailCount = 0;
+        bool statePreconditionUsed = false;
         std::vector<Item> items;
         javelin::jmap::sync::MutationCommitReceipt receipt;
     };
@@ -307,7 +308,8 @@ namespace javelin::jmap
         [[nodiscard]] QCoro::Task<SubmittedEmailMutationsResult>
         submitPendingEmailMutations(LiveConnectionSettings settings, std::string accountId,
                                     std::optional<std::string> operationGroupId = std::nullopt,
-                                    std::size_t limit = 25);
+                                    std::size_t limit = 25,
+                                    std::optional<std::string> ifInStateOverride = std::nullopt);
         [[nodiscard]] QCoro::Task<AuthoritativeEmailsResult>
         getAuthoritativeEmails(LiveConnectionSettings settings, std::string accountId,
                                std::vector<std::string> emailIds);

@@ -119,6 +119,8 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/WorkTaskPort.h
     ${PROJECT_SOURCE_DIR}/src/app/CacheInvalidationPublisher.cpp
     ${PROJECT_SOURCE_DIR}/src/app/CacheInvalidationPublisher.h
+    ${PROJECT_SOURCE_DIR}/src/app/EmailMutationBatchSubmitter.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/EmailMutationBatchSubmitter.h
     FixtureReader.cpp
     FixtureReader.h
     jmap/AccountReadRepositoryTest.cpp
@@ -168,6 +170,7 @@ add_executable(javelin_jmap_tests
     app/CalendarPreferenceExecutorTest.cpp
     app/ContactHistoryExecutorTest.cpp
     app/DeferredSendRepositoryTest.cpp
+    app/EmailMutationBatchSubmitterTest.cpp
     app/MailHistoryExecutorTest.cpp
     app/SieveHistoryExecutorTest.cpp
     app/UndoManagerTest.cpp

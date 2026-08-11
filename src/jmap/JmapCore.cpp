@@ -1924,7 +1924,8 @@ namespace javelin::jmap
     QCoro::Task<SubmittedEmailMutationsResult>
     JmapCore::submitPendingEmailMutations(LiveConnectionSettings settings, std::string accountId,
                                           std::optional<std::string> operationGroupId,
-                                          const std::size_t limit)
+                                          const std::size_t limit,
+                                          std::optional<std::string> ifInStateOverride)
     {
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
@@ -1944,13 +1945,29 @@ namespace javelin::jmap
             co_return *error;
         }
         const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
+        const auto requestLimits = javelin::jmap::api::coreRequestLimits(session);
+        if (!requestLimits.has_value())
+        {
+            co_return OperationError{
+                .message = QStringLiteral("The cached JMAP session has invalid request limits."),
+            };
+        }
+        const auto batchLimit = static_cast<std::size_t>(std::min<std::uint64_t>(
+            requestLimits->maxObjectsInSet, static_cast<std::uint64_t>(limit)));
+        if (batchLimit == 0)
+        {
+            co_return OperationError{
+                .message = QStringLiteral("Email/set batch size must be greater than zero."),
+            };
+        }
 
         javelin::jmap::sync::EmailMutationJournal emailMutationJournal{*m_impl->databaseConnection};
         auto pendingResult =
             operationGroupId.has_value()
-                ? emailMutationJournal.listForOperationGroup(accountId, *operationGroupId)
+                ? emailMutationJournal.listPendingForOperationGroup(accountId, *operationGroupId,
+                                                                    batchLimit)
                 : emailMutationJournal.listByStatus(
-                      accountId, javelin::jmap::sync::MutationStatus::Pending, limit);
+                      accountId, javelin::jmap::sync::MutationStatus::Pending, batchLimit);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&pendingResult))
         {
             co_return javelin::jmap::operationError(*error);
@@ -1967,9 +1984,28 @@ namespace javelin::jmap
                 .attemptedEmailCount = 0,
                 .updatedEmailCount = 0,
                 .failedEmailCount = 0,
+                .statePreconditionUsed = false,
                 .items = {},
                 .receipt = {},
             };
+        }
+
+        const bool hasIfInStateOverride = ifInStateOverride.has_value();
+        auto ifInState = std::move(ifInStateOverride);
+        for (const auto& action : pendingActions)
+        {
+            if (hasIfInStateOverride)
+                break;
+            if (!action.baseState.has_value())
+                continue;
+            if (ifInState.has_value() && *ifInState != *action.baseState)
+            {
+                co_return OperationError{
+                    .message = QStringLiteral(
+                        "A mutation group contains inconsistent Email state preconditions."),
+                };
+            }
+            ifInState = action.baseState;
         }
 
         std::vector<std::string> emailIds;
@@ -2103,21 +2139,7 @@ namespace javelin::jmap
             updates.emplace(emailId, std::move(update));
         }
 
-        std::optional<std::string> ifInState;
-        for (const auto& action : pendingActions)
-        {
-            if (!action.baseState.has_value())
-                continue;
-            if (ifInState.has_value() && *ifInState != *action.baseState)
-            {
-                co_return OperationError{
-                    .message = QStringLiteral(
-                        "A mutation group contains inconsistent Email state preconditions."),
-                };
-            }
-            ifInState = action.baseState;
-        }
-
+        const bool statePreconditionUsed = ifInState.has_value();
         const auto requestMethod = javelin::jmap::api::emailSet({
             .accountId = accountId,
             .ifInState = std::move(ifInState),
@@ -2471,6 +2493,16 @@ namespace javelin::jmap
             }
         }
 
+        if (statePreconditionUsed && operationGroupId.has_value())
+        {
+            if (const auto error = transaction.rebasePendingOperationGroup(
+                    {.accountId = accountId, .dataType = "Email"}, *operationGroupId,
+                    parsed.newState))
+            {
+                co_return javelin::jmap::operationError(*error);
+            }
+        }
+
         if (const auto error = transaction.commit())
         {
             co_return javelin::jmap::operationError(*error);
@@ -2497,6 +2529,7 @@ namespace javelin::jmap
             .attemptedEmailCount = mergedEmails.size(),
             .updatedEmailCount = updatedEmailIds.size() + destroyedEmailIds.size(),
             .failedEmailCount = failedEmailIds.size(),
+            .statePreconditionUsed = statePreconditionUsed,
             .items = std::move(items),
             .receipt =
                 {

@@ -55,6 +55,10 @@ namespace javelin::jmap::sync
         listForOperationGroup(const ConsistencyDomain& domain,
                               std::string_view operationGroupId) const;
         [[nodiscard]] std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
+        listPendingForOperationGroup(const ConsistencyDomain& domain,
+                                     std::string_view operationGroupId,
+                                     std::size_t objectLimit) const;
+        [[nodiscard]] std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
         listByStatus(const ConsistencyDomain& domain, MutationStatus status,
                      std::size_t limit) const;
         [[nodiscard]] std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
@@ -65,6 +69,9 @@ namespace javelin::jmap::sync
                    std::optional<std::string_view> errorJson = std::nullopt);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         resetPending(std::string_view mutationId, std::string_view baseState);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        rebasePendingOperationGroup(const ConsistencyDomain& domain,
+                                    std::string_view operationGroupId, std::string_view baseState);
         [[nodiscard]] std::variant<std::size_t, javelin::jmap::cache::DatabaseError>
         recoverInFlight();
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
@@ -95,6 +102,9 @@ namespace javelin::jmap::sync
                    std::optional<std::string_view> errorJson = std::nullopt);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         resetPending(std::string_view mutationId, std::string_view baseState);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        rebasePendingOperationGroup(const ConsistencyDomain& domain,
+                                    std::string_view operationGroupId, std::string_view baseState);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         remove(std::string_view mutationId);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
