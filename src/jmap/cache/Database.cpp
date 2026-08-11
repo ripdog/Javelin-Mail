@@ -2114,6 +2114,15 @@ namespace javelin::jmap::cache
                             QStringLiteral("ALTER TABLE threads DROP COLUMN email_ids_json"),
                         },
                 },
+                MigrationStep{
+                    .version = 48,
+                    .name = QStringLiteral("mailbox_window_item_email_lookup"),
+                    .statements =
+                        {
+                            QStringLiteral("CREATE INDEX idx_mailbox_query_window_items_email ON "
+                                           "mailbox_query_window_items(account_id,email_id)"),
+                        },
+                },
             },
         };
     }

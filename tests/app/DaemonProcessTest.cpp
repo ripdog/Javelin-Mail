@@ -12,6 +12,7 @@
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/QueryService.h"
+#include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
@@ -892,6 +893,110 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     REQUIRE(mutationCount.exec(QStringLiteral("SELECT COUNT(*) FROM mutation_journal")));
     REQUIRE(mutationCount.next());
     CHECK(mutationCount.value(0).toInt() == 4);
+}
+
+TEST_CASE("Thread materialization invalidates affected windows once per batch",
+          "[app][daemon][mail][thread-coverage]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+
+    const auto locationResult =
+        javelin::app::CacheLocationProvider{temporaryDirectory.path()}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(locationResult));
+    javelin::app::DaemonServices services{std::get<javelin::app::CacheLocation>(locationResult)};
+    auto& connection = services.databaseConnection();
+
+    QSqlQuery seed{connection.database()};
+    REQUIRE(seed.exec(
+        QStringLiteral("INSERT INTO accounts(account_id,email_address,session_url,is_primary) "
+                       "VALUES('account-1','user@example.test','http://127.0.0.1:9/jmap',1)")));
+    REQUIRE(seed.exec(
+        QStringLiteral("INSERT INTO emails(account_id,email_id,thread_id) VALUES"
+                       "('account-1','email-a','thread-a'),('account-1','email-b','thread-b'),"
+                       "('account-1','email-c','thread-c')")));
+
+    javelin::jmap::cache::MailboxWindowRepository mailboxWindows{connection};
+    REQUIRE_FALSE(mailboxWindows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "affected-mailbox",
+                          .queryKey = "affected-mailbox-query",
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 2,
+                          .total = 2,
+                          .queryState = "mailbox-state",
+                          .emailIds = {"email-a", "email-b"},
+                      })
+                      .has_value());
+    REQUIRE_FALSE(mailboxWindows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "unaffected-mailbox",
+                          .queryKey = "unaffected-mailbox-query",
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 1,
+                          .total = 1,
+                          .queryState = "mailbox-state",
+                          .emailIds = {"email-c"},
+                      })
+                      .has_value());
+
+    javelin::jmap::cache::SearchWindowRepository searchWindows{connection};
+    REQUIRE_FALSE(searchWindows
+                      .replace({
+                          .accountId = "account-1",
+                          .queryKey = "affected-search",
+                          .offset = 25,
+                          .limit = 25,
+                          .position = 25,
+                          .returnedLimit = 2,
+                          .total = 50,
+                          .queryState = "search-state",
+                          .emailIds = {"email-a", "email-b"},
+                      })
+                      .has_value());
+    REQUIRE_FALSE(searchWindows
+                      .replace({
+                          .accountId = "account-1",
+                          .queryKey = "unaffected-search",
+                          .offset = 0,
+                          .limit = 25,
+                          .position = 0,
+                          .returnedLimit = 1,
+                          .total = 1,
+                          .queryState = "search-state",
+                          .emailIds = {"email-c"},
+                      })
+                      .has_value());
+
+    std::vector<javelin::app::MailCacheChange> changes;
+    QObject::connect(&services.mailService(), &javelin::app::MailApplicationService::cacheCommitted,
+                     &services.mailService(), [&changes](javelin::app::MailCacheChange change)
+                     { changes.push_back(std::move(change)); });
+
+    services.mailService().publishThreadMaterializationCommitted(QStringLiteral("account-1"), {});
+    CHECK(changes.empty());
+    services.mailService().publishThreadMaterializationCommitted(
+        QStringLiteral("account-1"), {QStringLiteral("thread-a"), QStringLiteral("thread-b")});
+
+    REQUIRE(changes.size() == 1);
+    REQUIRE(changes.front().queryWindows.size() == 1);
+    CHECK(changes.front().queryWindows.front().mailboxId == QStringLiteral("affected-mailbox"));
+    CHECK(changes.front().queryWindows.front().offset == 0);
+    CHECK(changes.front().queryWindows.front().limit == 100);
+    CHECK(changes.front().queryWindows.front().total == std::optional<std::size_t>{2});
+    REQUIRE(changes.front().searchWindows.size() == 1);
+    CHECK(changes.front().searchWindows.front().queryKey == QStringLiteral("affected-search"));
+    CHECK(changes.front().searchWindows.front().offset == 25);
+    CHECK(changes.front().searchWindows.front().limit == 25);
+    CHECK(changes.front().searchWindows.front().total == std::optional<std::size_t>{50});
 }
 
 TEST_CASE("daemon rejects requests after shutdown without pretending to be offline",

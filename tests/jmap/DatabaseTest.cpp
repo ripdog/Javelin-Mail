@@ -97,6 +97,15 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
               .compare(QStringLiteral("wal"), Qt::CaseInsensitive) == 0);
     CHECK(pragmaValue(connection.database(), QStringLiteral("busy_timeout")) ==
           QStringLiteral("5000"));
+
+    QSqlQuery mailboxWindowEmailIndex{connection.database()};
+    REQUIRE(mailboxWindowEmailIndex.exec(
+        QStringLiteral("PRAGMA index_info(idx_mailbox_query_window_items_email)")));
+    std::vector<QString> indexedColumns;
+    while (mailboxWindowEmailIndex.next())
+        indexedColumns.push_back(mailboxWindowEmailIndex.value(2).toString());
+    CHECK(indexedColumns ==
+          std::vector<QString>{QStringLiteral("account_id"), QStringLiteral("email_id")});
 }
 
 TEST_CASE("database migrations are repeatable when reopening an existing cache",
@@ -161,8 +170,11 @@ TEST_CASE("thread membership migration normalizes JSON members in order",
 
         const auto currentRunner = javelin::jmap::cache::createDefaultMigrationRunner();
         REQUIRE(currentRunner.steps().size() >= 2);
-        std::vector<javelin::jmap::cache::MigrationStep> legacySteps{
-            currentRunner.steps().begin(), currentRunner.steps().end() - 1};
+        const auto normalization = std::ranges::find_if(currentRunner.steps(), [](const auto& step)
+                                                        { return step.version == 47; });
+        REQUIRE(normalization != currentRunner.steps().end());
+        std::vector<javelin::jmap::cache::MigrationStep> legacySteps{currentRunner.steps().begin(),
+                                                                     normalization};
         const javelin::jmap::cache::MigrationRunner legacyRunner{std::move(legacySteps)};
         const auto migrationError = legacyRunner.migrate(fixture);
         REQUIRE_FALSE(migrationError.has_value());
