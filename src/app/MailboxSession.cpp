@@ -979,6 +979,14 @@ namespace javelin::app
         return true;
     }
 
+    void MailboxSession::ensureThreadMaterialized(std::string threadId)
+    {
+        m_materializationPort.ensureThread(ThreadMaterializationIntent{
+            .accountId = m_accountId,
+            .threadId = std::move(threadId),
+        });
+    }
+
     std::vector<MessageListWindowRequest> MailboxSession::windowRequests() const
     {
         if (quickFilterActive())

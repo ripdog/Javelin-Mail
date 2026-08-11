@@ -110,6 +110,11 @@ namespace
             retiredSearchWindow = std::pair{std::move(accountId), std::move(windowKey)};
         }
 
+        void ensureThread(javelin::app::ThreadMaterializationIntent intent) override
+        {
+            ensuredThread = std::move(intent);
+        }
+
         void complete(javelin::app::MailboxWindowResult result)
         {
             REQUIRE_FALSE(m_completed);
@@ -121,6 +126,7 @@ namespace
         std::optional<javelin::app::MailboxWindowIntent> lastMailboxIntent;
         std::optional<javelin::app::SearchWindowIntent> lastSearchIntent;
         std::optional<std::pair<std::string, std::string>> retiredSearchWindow;
+        std::optional<javelin::app::ThreadMaterializationIntent> ensuredThread;
 
       private:
         QPromise<javelin::app::MailboxWindowResult> m_mailboxPromise;
@@ -328,6 +334,25 @@ namespace
         };
     }
 } // namespace
+
+TEST_CASE("mailbox session raises Thread expansion materialization priority",
+          "[app][mailbox-session][thread-coverage]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("mailbox-session-thread-test"));
+    PendingMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::MailboxSession session{
+        "account-1", "mailbox-1",     QStringLiteral("Inbox"), std::optional<std::string>{"inbox"},
+        {},          context.queries, materialization,         100,
+        events};
+
+    session.ensureThreadMaterialized("thread-1");
+
+    REQUIRE(materialization.ensuredThread.has_value());
+    CHECK(materialization.ensuredThread->accountId == "account-1");
+    CHECK(materialization.ensuredThread->threadId == "thread-1");
+}
 
 TEST_CASE("mailbox cache commit terminates its visible refresh", "[app][mailbox-session]")
 {

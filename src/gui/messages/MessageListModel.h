@@ -70,6 +70,9 @@ namespace javelin::gui::messages
         summaryEmailIdForThread(std::string_view threadId) const;
         [[nodiscard]] bool setEmailRead(std::string_view emailId);
 
+      Q_SIGNALS:
+        void threadMaterializationRequired(QString threadId);
+
       private:
         struct ThreadEntry
         {
@@ -91,6 +94,7 @@ namespace javelin::gui::messages
         [[nodiscard]] std::optional<std::size_t> findThreadIndex(std::string_view threadId) const;
         [[nodiscard]] std::optional<int> visibleSummaryRowForThread(std::size_t threadIndex) const;
         void startThreadMembersLoad(std::size_t threadIndex);
+        void retryPendingThreadMembersLoads();
         [[nodiscard]] int visibleBlockStartForThread(std::size_t threadIndex) const;
         [[nodiscard]] int visibleBlockSizeForThread(std::size_t threadIndex) const;
         void reindexVisibleRows();

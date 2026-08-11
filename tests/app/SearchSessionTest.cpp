@@ -106,6 +106,11 @@ namespace
         {
         }
 
+        void ensureThread(javelin::app::ThreadMaterializationIntent intent) override
+        {
+            ensuredThread = std::move(intent);
+        }
+
         void complete(javelin::app::SearchWindowResult result)
         {
             REQUIRE_FALSE(m_completed);
@@ -115,6 +120,7 @@ namespace
         }
 
         std::optional<javelin::app::SearchWindowIntent> lastSearchIntent;
+        std::optional<javelin::app::ThreadMaterializationIntent> ensuredThread;
 
       private:
         QPromise<javelin::app::SearchWindowResult> m_searchPromise;
@@ -276,6 +282,25 @@ namespace
         };
     }
 } // namespace
+
+TEST_CASE("search session raises Thread expansion materialization priority",
+          "[app][search-session][thread-coverage]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("search-session-thread-test"));
+    PendingSearchMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::SearchSession session{
+        "account-1", {.from = "sender@example.test"}, {}, context.queries, materialization, events,
+        100,
+    };
+
+    session.ensureThreadMaterialized("thread-1");
+
+    REQUIRE(materialization.ensuredThread.has_value());
+    CHECK(materialization.ensuredThread->accountId == "account-1");
+    CHECK(materialization.ensuredThread->threadId == "thread-1");
+}
 
 TEST_CASE("search cache commit terminates its visible refresh", "[app][search-session]")
 {

@@ -127,6 +127,7 @@ namespace javelin::app
             case Kind::MailboxWindow:
             case Kind::SearchWindow:
             case Kind::SearchRetire:
+            case Kind::ThreadEnsure:
             case Kind::UndoSnapshot:
             case Kind::WorkList:
             case Kind::WorkSummary:
@@ -228,6 +229,7 @@ namespace javelin::app
             case Kind::MailboxWindow:
             case Kind::SearchWindow:
             case Kind::SearchRetire:
+            case Kind::ThreadEnsure:
                 return {Domain::MailQueryWindows, Domain::MessageMetadata};
             case Kind::Undo:
             case Kind::Redo:
@@ -1082,6 +1084,14 @@ namespace javelin::app
                 {
                     m_services.mailService().retireSearchWindow(std::move(accountId),
                                                                 std::move(windowKey));
+                    return empty();
+                });
+        case Kind::ThreadEnsure:
+            return decodeAndApply<ThreadMaterializationIntent>(
+                command.payload, invalidPayload,
+                [&](ThreadMaterializationIntent intent)
+                {
+                    m_services.mailService().ensureThread(std::move(intent));
                     return empty();
                 });
         case Kind::Undo:

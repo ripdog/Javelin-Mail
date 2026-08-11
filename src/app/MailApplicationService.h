@@ -127,6 +127,7 @@ namespace javelin::app
         requestMailboxWindow(MailboxWindowIntent intent) override;
         [[nodiscard]] QCoro::Task<SearchWindowResult>
         requestSearchWindow(SearchWindowIntent intent) override;
+        void ensureThread(ThreadMaterializationIntent intent) override;
         void retireSearchWindow(std::string accountId, std::string windowKey) override;
         [[nodiscard]] QueuedMailboxSelectionMutationResult
         queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent);

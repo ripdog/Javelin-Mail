@@ -400,6 +400,7 @@ namespace javelin::gui::messages
                 }
                 endInsertRows();
             }
+            retryPendingThreadMembersLoads();
             return;
         }
 
@@ -735,14 +736,20 @@ namespace javelin::gui::messages
                     return;
                 auto& loadedThread = m_threads[*resolvedThreadIndex];
                 loadedThread.membersLoading = false;
-                const auto* items =
-                    std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&result);
-                if (items == nullptr)
+                const auto* snapshot =
+                    std::get_if<javelin::app::MessageListThreadMembersSnapshot>(&result);
+                if (snapshot == nullptr)
                     return;
+                if (!snapshot->complete)
+                {
+                    if (isThreadExpanded(threadId))
+                        Q_EMIT threadMaterializationRequired(QString::fromStdString(threadId));
+                    return;
+                }
 
                 loadedThread.members.clear();
-                loadedThread.members.reserve(items->size());
-                for (const auto& item : *items)
+                loadedThread.members.reserve(snapshot->items.size());
+                for (const auto& item : snapshot->items)
                 {
                     if (item.emailId != loadedThread.summary.emailId)
                         loadedThread.members.push_back(item);
@@ -779,6 +786,25 @@ namespace javelin::gui::messages
         watcher->setFuture(QtConcurrent::run(javelin::app::loadMessageListThreadMembers,
                                              m_queryReader.databasePath(), accountId, mailboxId,
                                              threadId));
+    }
+
+    void MessageListModel::retryPendingThreadMembersLoads()
+    {
+        const bool hasPending = std::ranges::any_of(
+            m_threads, [this](const ThreadEntry& thread)
+            { return !thread.membersLoaded && isThreadExpanded(thread.summary.threadId); });
+        if (!hasPending)
+            return;
+
+        ++m_generation;
+        for (std::size_t threadIndex = 0; threadIndex < m_threads.size(); ++threadIndex)
+        {
+            auto& thread = m_threads[threadIndex];
+            if (thread.membersLoaded || !isThreadExpanded(thread.summary.threadId))
+                continue;
+            thread.membersLoading = false;
+            startThreadMembersLoad(threadIndex);
+        }
     }
 
     int MessageListModel::visibleBlockStartForThread(const std::size_t threadIndex) const

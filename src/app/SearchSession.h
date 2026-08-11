@@ -51,6 +51,7 @@ namespace javelin::app
         void setSort(javelin::jmap::query::EmailListSort sort) override;
         [[nodiscard]] bool canLoadMore() const override;
         [[nodiscard]] bool loadMore() override;
+        void ensureThreadMaterialized(std::string threadId) override;
         [[nodiscard]] std::vector<MessageListWindowRequest> windowRequests() const;
 
       private:

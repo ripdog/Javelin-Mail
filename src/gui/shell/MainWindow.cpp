@@ -1293,6 +1293,15 @@ namespace javelin::gui::shell
              { return m_settings.accountForCachedId(accountId).displayName; }},
             this);
         m_messageModel = new javelin::gui::messages::MessageListModel(m_queryReader, this);
+        connect(m_messageModel,
+                &javelin::gui::messages::MessageListModel::threadMaterializationRequired, this,
+                [this](const QString& threadId)
+                {
+                    auto* tab = activeTab();
+                    auto* session = tab == nullptr ? nullptr : messageListSession(*tab);
+                    if (session != nullptr)
+                        session->ensureThreadMaterialized(threadId.toStdString());
+                });
 
         m_mailboxSearchEdit = new QLineEdit(this);
         m_mailboxSearchEdit->setClearButtonEnabled(true);

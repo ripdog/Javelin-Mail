@@ -307,6 +307,8 @@ namespace javelin::app
             return QStringLiteral("search_window");
         case Kind::SearchRetire:
             return QStringLiteral("search_retire");
+        case Kind::ThreadEnsure:
+            return QStringLiteral("thread_ensure");
         case Kind::Undo:
             return QStringLiteral("undo");
         case Kind::Redo:

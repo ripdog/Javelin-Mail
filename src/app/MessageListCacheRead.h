@@ -2,6 +2,8 @@
 
 #include "jmap/cache/QueryService.h"
 
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QString>
 
 #include <optional>
@@ -12,9 +14,14 @@
 
 namespace javelin::app
 {
+    struct MessageListThreadMembersSnapshot
+    {
+        std::vector<javelin::jmap::cache::MessageListItem> items;
+        bool complete = false;
+    };
+
     using MessageListThreadMembersResult =
-        std::variant<std::vector<javelin::jmap::cache::MessageListItem>,
-                     javelin::jmap::cache::DatabaseError>;
+        std::variant<MessageListThreadMembersSnapshot, javelin::jmap::cache::DatabaseError>;
 
     [[nodiscard]] inline MessageListThreadMembersResult
     loadMessageListThreadMembers(const QString& databasePath, const std::string& accountId,
@@ -31,9 +38,61 @@ namespace javelin::app
         }
         auto connection =
             std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(std::move(connectionResult));
+        auto database = connection.database();
+        if (!database.transaction())
+        {
+            return javelin::jmap::cache::databaseError(
+                QStringLiteral("Begin message-list Thread snapshot"), database.lastError());
+        }
+        QSqlQuery coverage{database};
+        coverage.prepare(QStringLiteral(
+            "SELECT t.membership_freshness,t.member_count,COUNT(e.email_id) FROM threads t LEFT "
+            "JOIN thread_email_members m ON m.account_id=t.account_id AND "
+            "m.thread_id=t.thread_id LEFT JOIN emails e ON e.account_id=m.account_id AND "
+            "e.email_id=m.email_id AND e.thread_id=m.thread_id WHERE t.account_id=:account_id AND "
+            "t.thread_id=:thread_id GROUP BY t.account_id,t.thread_id,t.membership_freshness,"
+            "t.member_count"));
+        coverage.bindValue(QStringLiteral(":account_id"), QString::fromStdString(accountId));
+        coverage.bindValue(QStringLiteral(":thread_id"), QString::fromStdString(threadId));
+        if (!coverage.exec())
+        {
+            static_cast<void>(database.rollback());
+            return javelin::jmap::cache::databaseError(
+                QStringLiteral("Read message-list Thread coverage"), coverage.lastError());
+        }
+        if (!coverage.next() || coverage.value(0).toString() != QStringLiteral("current") ||
+            coverage.value(1).toULongLong() != coverage.value(2).toULongLong())
+        {
+            if (!database.commit())
+            {
+                return javelin::jmap::cache::databaseError(
+                    QStringLiteral("Finish incomplete message-list Thread snapshot"),
+                    database.lastError());
+            }
+            return MessageListThreadMembersSnapshot{};
+        }
+
         javelin::jmap::cache::QueryService queryService{connection};
-        return mailboxId.has_value()
-                   ? queryService.listMailboxThreadMessages(accountId, *mailboxId, threadId)
-                   : queryService.listThreadMessages(accountId, threadId);
+        auto itemsResult =
+            mailboxId.has_value()
+                ? queryService.listMailboxThreadMessages(accountId, *mailboxId, threadId)
+                : queryService.listThreadMessages(accountId, threadId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&itemsResult))
+        {
+            static_cast<void>(database.rollback());
+            return *error;
+        }
+        auto snapshot = MessageListThreadMembersSnapshot{
+            .items = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(
+                std::move(itemsResult)),
+            .complete = true,
+        };
+        if (!database.commit())
+        {
+            return javelin::jmap::cache::databaseError(
+                QStringLiteral("Finish complete message-list Thread snapshot"),
+                database.lastError());
+        }
+        return snapshot;
     }
 } // namespace javelin::app

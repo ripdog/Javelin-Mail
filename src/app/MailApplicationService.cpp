@@ -1246,6 +1246,21 @@ namespace javelin::app
         co_return summary;
     }
 
+    void MailApplicationService::ensureThread(ThreadMaterializationIntent intent)
+    {
+        if (m_threadMaterializationCoordinator == nullptr || intent.accountId.empty() ||
+            intent.threadId.empty())
+        {
+            return;
+        }
+        if (const auto error = m_threadMaterializationCoordinator->ensureThreads(
+                std::move(intent.accountId), {std::move(intent.threadId)},
+                WorkPriority::Interactive))
+        {
+            qWarning().noquote() << "Could not ensure Thread materialization" << error->message;
+        }
+    }
+
     QCoro::Task<SearchWindowResult>
     MailApplicationService::requestSearchWindow(SearchWindowIntent intent)
     {

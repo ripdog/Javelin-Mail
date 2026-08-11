@@ -39,6 +39,12 @@ namespace javelin::app
         std::string windowKey;
     };
 
+    struct ThreadMaterializationIntent
+    {
+        std::string accountId;
+        std::string threadId;
+    };
+
     struct MailboxWindowSummary
     {
         std::string accountId;
@@ -126,6 +132,7 @@ namespace javelin::app
         requestMailboxWindow(MailboxWindowIntent intent) = 0;
         [[nodiscard]] virtual QCoro::Task<SearchWindowResult>
         requestSearchWindow(SearchWindowIntent intent) = 0;
+        virtual void ensureThread(ThreadMaterializationIntent intent) = 0;
         virtual void retireSearchWindow(std::string accountId, std::string windowKey) = 0;
     };
 } // namespace javelin::app

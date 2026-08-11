@@ -73,6 +73,7 @@ namespace javelin::app
         virtual void setSort(javelin::jmap::query::EmailListSort sort) = 0;
         [[nodiscard]] virtual bool canLoadMore() const = 0;
         [[nodiscard]] virtual bool loadMore() = 0;
+        virtual void ensureThreadMaterialized(std::string threadId) = 0;
 
       Q_SIGNALS:
         void stateChanged();

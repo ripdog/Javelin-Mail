@@ -68,6 +68,15 @@ attempts, after which the Thread remains stale for normal freshness retry. Succe
 derived from SQLite having no missing current members, without retaining an unbounded child-id
 checkpoint in memory.
 
+Phase 7 is complete. Expansion is now a persistent presentation intent in the message-list model:
+one read-only SQLite snapshot proves current membership and complete child Email coverage before
+any child rows are inserted. Incomplete expansion requests travel through the active mailbox or
+search session and the typed GUI/daemon boundary to raise the existing coordinator target to
+interactive priority; the GUI does not perform JMAP work or create placeholder rows. Normal
+post-commit window invalidation retries pending reads, and a completed snapshot inserts all scoped
+children in one model update. Collapsing clears the intent without cancelling shared prefetch.
+Mailbox sessions retain mailbox filtering, while search sessions load the complete conversation.
+
 The target architecture is:
 
 ```text

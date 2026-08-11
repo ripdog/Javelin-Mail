@@ -213,7 +213,8 @@ namespace javelin::protocol
         MailDestroyMailbox,
         ComposeScheduleSend,
         MailQueueSetSelectionFlagged,
-        Last = MailQueueSetSelectionFlagged,
+        ThreadEnsure,
+        Last = ThreadEnsure,
     };
 
     struct RemoteActionCommand

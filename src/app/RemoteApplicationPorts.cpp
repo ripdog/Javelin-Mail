@@ -676,6 +676,13 @@ namespace javelin::app
                                         std::move(intent));
     }
 
+    void RemoteMessageListMaterializationPort::ensureThread(ThreadMaterializationIntent intent)
+    {
+        auto task = m_client.callDiscardingResult(javelin::protocol::RemoteActionKind::ThreadEnsure,
+                                                  std::move(intent));
+        QCoro::connect(std::move(task), &m_client, [](bool) {});
+    }
+
     void RemoteMessageListMaterializationPort::retireSearchWindow(std::string accountId,
                                                                   std::string windowKey)
     {

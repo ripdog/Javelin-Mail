@@ -987,6 +987,14 @@ namespace javelin::app
         return true;
     }
 
+    void SearchSession::ensureThreadMaterialized(std::string threadId)
+    {
+        m_materializationPort.ensureThread(ThreadMaterializationIntent{
+            .accountId = m_accountId,
+            .threadId = std::move(threadId),
+        });
+    }
+
     void SearchSession::startLocalSnapshot()
     {
         if (m_mode != SearchMode::Local || m_localSearchInFlight ||

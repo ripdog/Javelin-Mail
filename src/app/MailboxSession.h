@@ -49,6 +49,7 @@ namespace javelin::app
         void reveal(std::string emailId);
         [[nodiscard]] bool canLoadMore() const override;
         [[nodiscard]] bool loadMore() override;
+        void ensureThreadMaterialized(std::string threadId) override;
         [[nodiscard]] std::vector<MessageListWindowRequest> windowRequests() const;
 
       private:

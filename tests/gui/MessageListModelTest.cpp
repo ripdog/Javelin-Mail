@@ -1,17 +1,133 @@
 #include "gui/messages/MessageListModel.h"
 #include "jmap/cache/Database.h"
 #include "jmap/cache/QueryService.h"
+#include "jmap/cache/ThreadRepository.h"
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <QCoreApplication>
+#include <QElapsedTimer>
+#include <QSqlQuery>
 #include <QString>
+#include <QTemporaryDir>
+#include <QThread>
 
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace
 {
+    class ApplicationGuard
+    {
+      public:
+        ApplicationGuard()
+        {
+            if (QCoreApplication::instance() != nullptr)
+                return;
+            static int argc = 1;
+            static char applicationName[] = "javelin-message-list-model-tests";
+            static char* argv[] = {applicationName, nullptr};
+            m_application = std::make_unique<QCoreApplication>(argc, argv);
+        }
+
+      private:
+        std::unique_ptr<QCoreApplication> m_application;
+    };
+
+    struct TestDatabase
+    {
+        QTemporaryDir directory;
+        javelin::jmap::cache::DatabaseConnection connection;
+        javelin::jmap::cache::QueryService queries;
+
+        TestDatabase(QTemporaryDir temporaryDirectory,
+                     javelin::jmap::cache::DatabaseConnection databaseConnection)
+            : directory(std::move(temporaryDirectory)), connection(std::move(databaseConnection)),
+              queries(connection)
+        {
+        }
+    };
+
+    [[nodiscard]] TestDatabase makeTestDatabase()
+    {
+        static int connectionCounter = 0;
+        QTemporaryDir directory;
+        REQUIRE(directory.isValid());
+        auto opened = javelin::jmap::cache::DatabaseConnection::open({
+            .connectionName = QStringLiteral("message-list-model-%1").arg(++connectionCounter),
+            .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+        });
+        REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+        return {std::move(directory),
+                std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened))};
+    }
+
+    void seedThreadContext(javelin::jmap::cache::DatabaseConnection& connection)
+    {
+        QSqlQuery query{connection.database()};
+        REQUIRE(query.exec(QStringLiteral(
+            "INSERT INTO accounts(account_id,email_address,session_url,is_primary) VALUES("
+            "'account-1','alice@example.com','https://example.com/jmap',1)")));
+        REQUIRE(
+            query.exec(QStringLiteral("INSERT INTO mailboxes(account_id,mailbox_id,name) VALUES("
+                                      "'account-1','mailbox-1','Inbox')")));
+        REQUIRE(query.exec(QStringLiteral(
+            "INSERT INTO emails(account_id,email_id,thread_id,subject,received_at) VALUES("
+            "'account-1','email-1','thread-1','First','2026-08-10T10:00:00Z')")));
+        REQUIRE(query.exec(
+            QStringLiteral("INSERT INTO email_mailboxes(account_id,email_id,mailbox_id) VALUES("
+                           "'account-1','email-1','mailbox-1')")));
+        javelin::jmap::cache::ThreadRepository threads{connection};
+        REQUIRE_FALSE(threads
+                          .upsertMany("account-1",
+                                      {{.id = "thread-1", .emailIds = {"email-1", "email-2"}}},
+                                      "thread-state-1")
+                          .has_value());
+    }
+
+    void seedSecondThreadEmail(javelin::jmap::cache::DatabaseConnection& connection,
+                               const bool inMailbox)
+    {
+        QSqlQuery query{connection.database()};
+        REQUIRE(query.exec(QStringLiteral(
+            "INSERT INTO emails(account_id,email_id,thread_id,subject,received_at) VALUES("
+            "'account-1','email-2','thread-1','Second','2026-08-10T11:00:00Z')")));
+        if (inMailbox)
+        {
+            REQUIRE(query.exec(
+                QStringLiteral("INSERT INTO email_mailboxes(account_id,email_id,mailbox_id) VALUES("
+                               "'account-1','email-2','mailbox-1')")));
+        }
+    }
+
+    [[nodiscard]] bool waitUntil(const std::function<bool()>& predicate)
+    {
+        QElapsedTimer timer;
+        timer.start();
+        while (!predicate() && timer.elapsed() < 2000)
+        {
+            QCoreApplication::processEvents();
+            QThread::msleep(1);
+        }
+        QCoreApplication::processEvents();
+        return predicate();
+    }
+
+    void processEventsFor(const qint64 milliseconds)
+    {
+        QElapsedTimer timer;
+        timer.start();
+        while (timer.elapsed() < milliseconds)
+        {
+            QCoreApplication::processEvents();
+            QThread::msleep(1);
+        }
+        QCoreApplication::processEvents();
+    }
+
     [[nodiscard]] javelin::jmap::cache::MessageListItem
     item(std::string emailId, std::string threadId, bool unread = false)
     {
@@ -34,6 +150,95 @@ namespace
         };
     }
 } // namespace
+
+TEST_CASE("message list expansion waits for complete Thread cache coverage",
+          "[gui][messages][model][thread-coverage]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeTestDatabase();
+    seedThreadContext(database.connection);
+    javelin::gui::messages::MessageListModel model{database.queries};
+    auto summary = item("email-1", "thread-1");
+    summary.mailboxThreadMessageCount.reset();
+    summary.globalThreadMessageCount = 2;
+    model.setItems("account-1", "mailbox-1", {summary});
+
+    int materializationRequests = 0;
+    QObject::connect(
+        &model, &javelin::gui::messages::MessageListModel::threadMaterializationRequired, &model,
+        [&](const QString& threadId)
+        {
+            CHECK(threadId == QStringLiteral("thread-1"));
+            ++materializationRequests;
+        });
+
+    REQUIRE(model.setThreadExpanded("thread-1", true));
+    REQUIRE(waitUntil([&] { return materializationRequests == 1; }));
+    CHECK(model.rowCount() == 1);
+    CHECK(model.isThreadExpanded("thread-1"));
+
+    seedSecondThreadEmail(database.connection, true);
+    model.setItems("account-1", "mailbox-1", {summary});
+    REQUIRE(waitUntil([&] { return model.rowCount() == 2; }));
+    CHECK(model.data(model.index(1), javelin::gui::messages::MessageListModel::EmailIdRole)
+              .toString() == QStringLiteral("email-2"));
+    CHECK(materializationRequests == 1);
+}
+
+TEST_CASE("collapsing a pending Thread clears only the presentation intent",
+          "[gui][messages][model][thread-coverage]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeTestDatabase();
+    seedThreadContext(database.connection);
+    javelin::gui::messages::MessageListModel model{database.queries};
+    auto summary = item("email-1", "thread-1");
+    summary.globalThreadMessageCount = 2;
+    model.setItems("account-1", "mailbox-1", {summary});
+
+    int materializationRequests = 0;
+    QObject::connect(&model,
+                     &javelin::gui::messages::MessageListModel::threadMaterializationRequired,
+                     &model, [&](const QString&) { ++materializationRequests; });
+    REQUIRE(model.setThreadExpanded("thread-1", true));
+    REQUIRE(model.setThreadExpanded("thread-1", false));
+    processEventsFor(100);
+    REQUIRE(model.rowCount() == 1);
+    CHECK_FALSE(model.isThreadExpanded("thread-1"));
+    CHECK(materializationRequests == 0);
+}
+
+TEST_CASE("search Thread expansion includes children outside the represented mailbox",
+          "[gui][messages][model][thread-coverage][search]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeTestDatabase();
+    seedThreadContext(database.connection);
+    seedSecondThreadEmail(database.connection, false);
+    auto summary = item("email-1", "thread-1");
+    summary.globalThreadMessageCount = 2;
+
+    javelin::gui::messages::MessageListModel mailboxModel{database.queries};
+    mailboxModel.setItems("account-1", "mailbox-1", {summary});
+    int mailboxChanges = 0;
+    QObject::connect(&mailboxModel, &QAbstractItemModel::dataChanged, &mailboxModel,
+                     [&](const QModelIndex&, const QModelIndex&, const QList<int>&)
+                     { ++mailboxChanges; });
+    REQUIRE(mailboxModel.setThreadExpanded("thread-1", true));
+    REQUIRE(waitUntil([&] { return mailboxChanges >= 2; }));
+    CHECK(mailboxModel.rowCount() == 1);
+
+    javelin::gui::messages::MessageListModel searchModel{database.queries};
+    searchModel.setItems("account-1", std::nullopt, {summary});
+    REQUIRE(searchModel.setThreadExpanded("thread-1", true));
+    REQUIRE(waitUntil([&] { return searchModel.rowCount() == 2; }));
+    CHECK(searchModel
+              .data(searchModel.index(1), javelin::gui::messages::MessageListModel::EmailIdRole)
+              .toString() == QStringLiteral("email-2"));
+}
 
 TEST_CASE("message list model displays a placeholder for missing subjects",
           "[gui][messages][model]")
