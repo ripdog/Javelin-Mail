@@ -58,6 +58,11 @@ namespace
         {
             Q_EMIT cacheInvalidated(std::move(invalidation));
         }
+
+        void publish(javelin::app::ThreadMaterializationProgress progress)
+        {
+            Q_EMIT threadMaterializationProgress(std::move(progress));
+        }
     };
 
     class PendingSearchMaterializationPort final
@@ -491,4 +496,45 @@ TEST_CASE("online search infinite scrolling consumes a compatible prefetched bou
     CHECK(session.state().items[0].emailId == "email-1");
     CHECK(session.state().items[3].emailId == "email-4");
     CHECK_FALSE(session.canLoadMore());
+}
+
+TEST_CASE("online search exposes visible Thread materialization progress",
+          "[app][search-session][thread-coverage][progress]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("search-session-thread-progress-test"));
+    seedSearchData(context.connection, false);
+    PendingSearchMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::SearchSession session{
+        "account-1",
+        {.from = "sender@example.test"},
+        {},
+        context.queries,
+        materialization,
+        events,
+        2,
+        javelin::app::RestoredSearchState{
+            .mode = javelin::app::SearchMode::Online,
+            .sessionId = "test-session",
+            .windows = {{.offset = 0, .limit = 2}},
+        },
+    };
+
+    session.loadCachedState();
+    waitFor([&] { return session.state().items.size() == 2; });
+    events.publish({.accountId = QStringLiteral("account-1"),
+                    .threadIds = {QStringLiteral("thread-email-2")},
+                    .inFlight = true,
+                    .success = true,
+                    .error = {}});
+    CHECK(session.state().threadMaterializationInFlight);
+    CHECK_FALSE(session.state().refreshInFlight);
+
+    events.publish({.accountId = QStringLiteral("account-1"),
+                    .threadIds = {QStringLiteral("thread-email-2")},
+                    .inFlight = false,
+                    .success = true,
+                    .error = {}});
+    CHECK_FALSE(session.state().threadMaterializationInFlight);
 }

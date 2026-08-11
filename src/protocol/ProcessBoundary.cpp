@@ -588,6 +588,13 @@ namespace javelin::protocol
                         size += 16 + stringSize(entry.subsystem) + stringSize(entry.message);
                     return size;
                 }
+                else if constexpr (std::is_same_v<Event, ThreadMaterializationProgress>)
+                {
+                    std::size_t size = 24 + stringSize(value.accountId) + stringSize(value.error);
+                    for (const auto& threadId : value.threadIds)
+                        size += stringSize(threadId);
+                    return size;
+                }
                 else
                     return 48;
             },

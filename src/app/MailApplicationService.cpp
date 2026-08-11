@@ -525,7 +525,33 @@ namespace javelin::app
     void MailApplicationService::setThreadMaterializationCoordinator(
         ThreadMaterializationCoordinator* coordinator)
     {
+        if (m_threadMaterializationCoordinator != nullptr)
+            disconnect(m_threadMaterializationCoordinator, nullptr, this, nullptr);
         m_threadMaterializationCoordinator = coordinator;
+        if (coordinator == nullptr)
+            return;
+        connect(coordinator, &ThreadMaterializationCoordinator::materializationStarted, this,
+                [this](QString accountId, QStringList threadIds)
+                {
+                    Q_EMIT threadMaterializationProgress({
+                        .accountId = std::move(accountId),
+                        .threadIds = std::move(threadIds),
+                        .inFlight = true,
+                        .success = true,
+                        .error = {},
+                    });
+                });
+        connect(coordinator, &ThreadMaterializationCoordinator::materializationFinished, this,
+                [this](QString accountId, QStringList threadIds, const bool success, QString error)
+                {
+                    Q_EMIT threadMaterializationProgress({
+                        .accountId = std::move(accountId),
+                        .threadIds = std::move(threadIds),
+                        .inFlight = false,
+                        .success = success,
+                        .error = std::move(error),
+                    });
+                });
     }
 
     void MailApplicationService::setAuthenticationRefreshHandler(

@@ -259,6 +259,20 @@ namespace javelin::app
                         reloadProjectedWindows();
                     }
                 });
+        connect(&m_events, &MailApplicationEventsPort::threadMaterializationProgress, this,
+                [this](const ThreadMaterializationProgress& progress)
+                {
+                    if (progress.accountId.toStdString() != m_accountId)
+                        return;
+                    m_materializingThreadIds.clear();
+                    if (progress.inFlight)
+                    {
+                        for (const auto& threadId : progress.threadIds)
+                            m_materializingThreadIds.insert(threadId.toStdString());
+                    }
+                    if (updateThreadMaterializationState())
+                        Q_EMIT stateChanged();
+                });
     }
 
     MailboxSession::~MailboxSession()
@@ -605,6 +619,7 @@ namespace javelin::app
         }
 
         m_state.items = std::move(items);
+        static_cast<void>(updateThreadMaterializationState());
         m_state.itemsRevision = ++m_itemsRevision;
         m_state.cacheLoaded = !m_windows.empty() && m_windows.front().displayCurrent;
         if (!m_windows.empty())
@@ -622,6 +637,17 @@ namespace javelin::app
             m_state.total.reset();
             m_endReached = true;
         }
+    }
+
+    bool MailboxSession::updateThreadMaterializationState()
+    {
+        const bool inFlight = std::ranges::any_of(
+            m_state.items, [this](const javelin::jmap::cache::MessageListItem& item)
+            { return m_materializingThreadIds.contains(item.threadId); });
+        if (m_state.threadMaterializationInFlight == inFlight)
+            return false;
+        m_state.threadMaterializationInFlight = inFlight;
+        return true;
     }
 
     void MailboxSession::refresh(const MessageListRefreshMode mode)

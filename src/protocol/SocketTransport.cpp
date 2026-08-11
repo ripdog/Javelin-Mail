@@ -1598,6 +1598,17 @@ namespace javelin::protocol
                                                writer.string(entry.message);
                                     });
                             }
+                            else if constexpr (std::is_same_v<Event, ThreadMaterializationProgress>)
+                            {
+                                return writer.string(value.accountId) &&
+                                       writeVector(writer, value.threadIds,
+                                                   limits.maximumMaterializationItems,
+                                                   QStringLiteral("thread_progress.thread_ids"),
+                                                   [&writer](const QString& threadId)
+                                                   { return writer.string(threadId); }) &&
+                                       writer.boolean(value.inFlight) &&
+                                       writer.boolean(value.success) && writer.string(value.error);
+                            }
                             else
                                 return writeCacheIdentity(writer, value.cache) &&
                                        writer.string(value.cacheDatabasePath) &&
@@ -1710,6 +1721,18 @@ namespace javelin::protocol
                                     return true;
                                 }))
                     return malformed(QStringLiteral("invalid daemon log event"));
+                return finishReply(reader, BoundaryEvent{std::move(event)});
+            }
+            if (kind == 10)
+            {
+                ThreadMaterializationProgress event;
+                if (!reader.string(event.accountId) ||
+                    !readVector(reader, event.threadIds, limits.maximumMaterializationItems,
+                                QStringLiteral("thread_progress.thread_ids"),
+                                [&reader](QString& threadId) { return reader.string(threadId); }) ||
+                    !reader.boolean(event.inFlight) || !reader.boolean(event.success) ||
+                    !reader.string(event.error))
+                    return malformed(QStringLiteral("invalid Thread materialization progress"));
                 return finishReply(reader, BoundaryEvent{std::move(event)});
             }
             return malformed(QStringLiteral("unknown boundary event variant"));

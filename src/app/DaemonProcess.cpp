@@ -1377,6 +1377,17 @@ namespace javelin::app
             });
         connect(&events, &MailApplicationEventsPort::accountStatusChanged, this,
                 [this](const QString&, MailAccountStatus) { publishStatus(); });
+        connect(&events, &MailApplicationEventsPort::threadMaterializationProgress, this,
+                [this](ThreadMaterializationProgress progress)
+                {
+                    onBoundaryEvent(protocol::ThreadMaterializationProgress{
+                        .accountId = std::move(progress.accountId),
+                        .threadIds = {progress.threadIds.begin(), progress.threadIds.end()},
+                        .inFlight = progress.inFlight,
+                        .success = progress.success,
+                        .error = std::move(progress.error),
+                    });
+                });
         connect(&m_services->undoCommandPort(), &UndoCommandPort::historyStateChanged, this,
                 [this](const undo::HistoryState&)
                 {

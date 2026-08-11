@@ -61,6 +61,11 @@ namespace
         {
             Q_EMIT cacheInvalidated(std::move(invalidation));
         }
+
+        void publish(javelin::app::ThreadMaterializationProgress progress)
+        {
+            Q_EMIT threadMaterializationProgress(std::move(progress));
+        }
     };
 
     class PendingMaterializationPort final : public javelin::app::MessageListMaterializationPort
@@ -689,6 +694,45 @@ TEST_CASE("mailbox session restores a loaded infinite-scroll prefix from SQLite 
     CHECK(session.state().items[3].emailId == "email-4");
     CHECK(session.windowRequests().size() == 2);
     CHECK_FALSE(materialization.lastMailboxIntent.has_value());
+}
+
+TEST_CASE("mailbox session exposes materialization progress only for visible Threads",
+          "[app][mailbox-session][thread-coverage][progress]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("mailbox-session-thread-progress-test"));
+    seedInfiniteScrollData(context.connection, false);
+    PendingMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::MailboxSession session{
+        "account-1", "mailbox-1",     QStringLiteral("Inbox"), std::optional<std::string>{"inbox"},
+        {},          context.queries, materialization,         2,
+        events};
+
+    session.loadCachedState();
+    waitFor([&] { return session.state().items.size() == 2; });
+    events.publish({.accountId = QStringLiteral("account-1"),
+                    .threadIds = {QStringLiteral("thread-not-visible")},
+                    .inFlight = true,
+                    .success = true,
+                    .error = {}});
+    CHECK_FALSE(session.state().threadMaterializationInFlight);
+
+    events.publish({.accountId = QStringLiteral("account-1"),
+                    .threadIds = {QStringLiteral("thread-email-1")},
+                    .inFlight = true,
+                    .success = true,
+                    .error = {}});
+    CHECK(session.state().threadMaterializationInFlight);
+    CHECK_FALSE(session.state().refreshInFlight);
+
+    events.publish({.accountId = QStringLiteral("account-1"),
+                    .threadIds = {QStringLiteral("thread-email-1")},
+                    .inFlight = false,
+                    .success = false,
+                    .error = QStringLiteral("temporary failure")});
+    CHECK_FALSE(session.state().threadMaterializationInFlight);
+    CHECK(session.state().refreshError.isEmpty());
 }
 
 TEST_CASE("mailbox infinite scrolling appends a bounded anchored window and ignores late IPC",

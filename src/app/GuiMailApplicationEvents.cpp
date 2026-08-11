@@ -40,6 +40,8 @@ namespace javelin::app
     {
         connect(&m_session, &GuiDaemonSession::cacheInvalidated, this,
                 &GuiMailApplicationEvents::publishInvalidation);
+        connect(&m_session, &GuiDaemonSession::threadMaterializationProgress, this,
+                &GuiMailApplicationEvents::publishThreadMaterializationProgress);
         connect(&m_session, &GuiDaemonSession::daemonStatusChanged, this,
                 &GuiMailApplicationEvents::applyStatus);
         connect(&m_session, &GuiDaemonSession::recoveryStarted, this,
@@ -124,6 +126,18 @@ namespace javelin::app
             .changedDomains = invalidation.changedDomains,
             .affectedKeys = invalidation.affectedKeys,
             .change = std::move(change),
+        });
+    }
+
+    void GuiMailApplicationEvents::publishThreadMaterializationProgress(
+        const javelin::protocol::ThreadMaterializationProgress& progress)
+    {
+        Q_EMIT threadMaterializationProgress({
+            .accountId = progress.accountId,
+            .threadIds = {progress.threadIds.begin(), progress.threadIds.end()},
+            .inFlight = progress.inFlight,
+            .success = progress.success,
+            .error = progress.error,
         });
     }
 } // namespace javelin::app

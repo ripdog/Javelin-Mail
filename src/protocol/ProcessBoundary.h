@@ -643,6 +643,15 @@ namespace javelin::protocol
         std::vector<SearchWindowInvalidation> searchWindows{};
     };
 
+    struct ThreadMaterializationProgress
+    {
+        QString accountId;
+        std::vector<QString> threadIds;
+        bool inFlight = false;
+        bool success = true;
+        QString error;
+    };
+
     struct ActivationRequested
     {
         ActivationRoute route;
@@ -669,7 +678,8 @@ namespace javelin::protocol
     using BoundaryEvent =
         std::variant<CacheInvalidation, OperationFailed, OperationCompleted, SettingsUpdated,
                      ActivationRequested, DaemonStatusChanged, CacheAccessSuspendRequested,
-                     CacheAccessResumed, DaemonShutdownRequested, DaemonLogEntries>;
+                     CacheAccessResumed, DaemonShutdownRequested, DaemonLogEntries,
+                     ThreadMaterializationProgress>;
 
     struct BoundaryLimits
     {

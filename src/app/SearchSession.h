@@ -66,6 +66,7 @@ namespace javelin::app
         void resetOnlineWindows();
         [[nodiscard]] std::size_t nextOnlineOffset() const;
         [[nodiscard]] std::string onlineWindowKey() const;
+        [[nodiscard]] bool updateThreadMaterializationState();
 
         std::string m_accountId;
         std::string m_query;
@@ -99,6 +100,7 @@ namespace javelin::app
         std::uint64_t m_itemsRevision = 0;
         std::uint64_t m_cacheEpoch = 0;
         RefreshGeneration m_refreshGeneration;
+        std::unordered_set<std::string> m_materializingThreadIds;
     };
 
 } // namespace javelin::app

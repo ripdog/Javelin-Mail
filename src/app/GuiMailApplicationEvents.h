@@ -19,6 +19,8 @@ namespace javelin::app
       private:
         void applyStatus(const javelin::protocol::DaemonStatus& status);
         void publishInvalidation(const javelin::protocol::CacheInvalidation& invalidation);
+        void publishThreadMaterializationProgress(
+            const javelin::protocol::ThreadMaterializationProgress& progress);
 
         GuiDaemonSession& m_session;
         std::unordered_map<std::string, MailAccountStatus> m_statuses;

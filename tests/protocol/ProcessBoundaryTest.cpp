@@ -751,6 +751,25 @@ TEST_CASE("socket endpoint runs the transport-neutral typed surface", "[protocol
     CHECK(invalidation->searchWindows.front().queryKey == QStringLiteral("search-1"));
 
     sink.received.reset();
+    endpoint.publishEvent(ThreadMaterializationProgress{
+        .accountId = QStringLiteral("account-1"),
+        .threadIds = {QStringLiteral("thread-1"), QStringLiteral("thread-2")},
+        .inFlight = false,
+        .success = false,
+        .error = QStringLiteral("temporary failure"),
+    });
+    processUntil([&sink] { return sink.received.has_value(); });
+    REQUIRE(sink.received.has_value());
+    const auto* progress = std::get_if<ThreadMaterializationProgress>(&*sink.received);
+    REQUIRE(progress != nullptr);
+    CHECK(progress->accountId == QStringLiteral("account-1"));
+    CHECK(progress->threadIds ==
+          std::vector{QStringLiteral("thread-1"), QStringLiteral("thread-2")});
+    CHECK_FALSE(progress->inFlight);
+    CHECK_FALSE(progress->success);
+    CHECK(progress->error == QStringLiteral("temporary failure"));
+
+    sink.received.reset();
     endpoint.publishEvent(DaemonLogEntries{
         .entries = {{.timestampMilliseconds = 123456789,
                      .level = 2,

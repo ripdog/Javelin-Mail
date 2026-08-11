@@ -34,5 +34,6 @@ namespace javelin::app
         void accountStatusChanged(const QString& accountId, MailAccountStatus status);
         void sessionCapabilitiesChanged(const QString& ownerAccountId);
         void cacheInvalidated(javelin::app::MailCacheInvalidation invalidation);
+        void threadMaterializationProgress(javelin::app::ThreadMaterializationProgress progress);
     };
 } // namespace javelin::app

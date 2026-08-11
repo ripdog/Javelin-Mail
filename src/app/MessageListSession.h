@@ -30,6 +30,7 @@ namespace javelin::app
         std::uint64_t itemsRevision = 0;
         bool cacheLoaded = false;
         bool refreshInFlight = false;
+        bool threadMaterializationInFlight = false;
         bool loadMoreInFlight = false;
         bool stale = false;
         QString refreshError;

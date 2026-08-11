@@ -106,6 +106,8 @@ namespace javelin::app
         void recoveryFinished();
         void cacheChanged();
         void cacheInvalidated(const javelin::protocol::CacheInvalidation& invalidation);
+        void threadMaterializationProgress(
+            const javelin::protocol::ThreadMaterializationProgress& progress);
         void operationCompleted(const javelin::protocol::OperationId& operation,
                                 const QByteArray& result);
         void operationFailed(const javelin::protocol::OperationId& operation,

@@ -518,6 +518,10 @@ namespace javelin::app
                     Q_EMIT cacheInvalidated(value);
                     Q_EMIT cacheChanged();
                 }
+                else if constexpr (std::is_same_v<Event, protocol::ThreadMaterializationProgress>)
+                {
+                    Q_EMIT threadMaterializationProgress(value);
+                }
                 else if constexpr (std::is_same_v<Event, protocol::OperationCompleted>)
                 {
                     Q_EMIT operationCompleted(value.operation, value.result);

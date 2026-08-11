@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace javelin::app
@@ -64,6 +65,7 @@ namespace javelin::app
         [[nodiscard]] std::string quickFilterWindowKey() const;
         [[nodiscard]] javelin::jmap::search::EmailSearchCriteria filteredCriteria() const;
         [[nodiscard]] std::size_t nextOffset() const;
+        [[nodiscard]] bool updateThreadMaterializationState();
 
         std::string m_accountId;
         std::string m_mailboxId;
@@ -95,5 +97,6 @@ namespace javelin::app
         bool m_projectedReloadPending = false;
         bool m_refreshAwaitingCache = false;
         bool m_endReached = false;
+        std::unordered_set<std::string> m_materializingThreadIds;
     };
 } // namespace javelin::app

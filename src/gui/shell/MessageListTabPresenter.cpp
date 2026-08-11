@@ -62,7 +62,8 @@ namespace javelin::gui::shell
                     input.title = m_tabBarPresenter.mailboxTitle(content);
                     input.itemCount = state.items.size();
                     input.refreshError = state.refreshError;
-                    input.refreshInFlight = state.refreshInFlight;
+                    input.refreshInFlight =
+                        state.refreshInFlight || state.threadMaterializationInFlight;
                     input.list = javelin::gui::messages::MessageListHeader{
                         .title = input.title,
                         .itemCount = state.items.size(),
@@ -70,7 +71,8 @@ namespace javelin::gui::shell
                         .search = false,
                         .indexedSearch = false,
                         .canSearchServer = false,
-                        .refreshInFlight = state.refreshInFlight,
+                        .refreshInFlight =
+                            state.refreshInFlight || state.threadMaterializationInFlight,
                         .loadMoreInFlight = state.loadMoreInFlight,
                         .loadMoreError = state.loadMoreError,
                     };
@@ -83,7 +85,8 @@ namespace javelin::gui::shell
                     input.title = content.session->title();
                     input.itemCount = state.items.size();
                     input.refreshError = state.refreshError;
-                    input.refreshInFlight = state.refreshInFlight;
+                    input.refreshInFlight =
+                        state.refreshInFlight || state.threadMaterializationInFlight;
                     input.localSearch = content.session->mode() == javelin::app::SearchMode::Local;
                     input.list = javelin::gui::messages::MessageListHeader{
                         .title = input.title,
@@ -92,7 +95,8 @@ namespace javelin::gui::shell
                         .search = true,
                         .indexedSearch = input.localSearch,
                         .canSearchServer = content.session->canPromoteToOnline(),
-                        .refreshInFlight = state.refreshInFlight,
+                        .refreshInFlight =
+                            state.refreshInFlight || state.threadMaterializationInFlight,
                         .loadMoreInFlight = state.loadMoreInFlight,
                         .loadMoreError = state.loadMoreError,
                     };

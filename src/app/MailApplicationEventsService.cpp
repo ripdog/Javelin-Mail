@@ -39,6 +39,8 @@ namespace javelin::app
                 { m_invalidationPublisher.publish(std::move(change)); });
         connect(&m_invalidationPublisher, &CacheInvalidationPublisher::invalidated, this,
                 &MailApplicationEventsPort::cacheInvalidated);
+        connect(&m_service, &MailApplicationService::threadMaterializationProgress, this,
+                &MailApplicationEventsPort::threadMaterializationProgress);
     }
 
     std::unordered_map<std::string, MailAccountStatus>

@@ -143,6 +143,42 @@ TEST_CASE("GUI mail events preserve hydrated message content identifiers", "[app
           std::vector{javelin::protocol::ChangedDomain::MessageContent});
 }
 
+TEST_CASE("GUI mail events preserve Thread materialization progress", "[app][gui][thread]")
+{
+    javelin::app::GuiDaemonSession session{
+        {.runtimeDirectory = QStringLiteral("/tmp"),
+         .socketPath = QStringLiteral("/tmp/unused-javelin-test.sock"),
+         .daemonExecutable = {},
+         .protocol = {.major = 3, .minor = 0},
+         .build = {.application = QStringLiteral("Javelin-Mail"),
+                   .revision = QStringLiteral("test")},
+         .startTimeoutMilliseconds = 10,
+         .startDaemonIfMissing = false}};
+
+    javelin::app::GuiMailApplicationEvents events{session};
+    std::optional<javelin::app::ThreadMaterializationProgress> received;
+    QObject::connect(&events,
+                     &javelin::app::MailApplicationEventsPort::threadMaterializationProgress,
+                     [&received](javelin::app::ThreadMaterializationProgress progress)
+                     { received = std::move(progress); });
+
+    session.onBoundaryEvent(javelin::protocol::ThreadMaterializationProgress{
+        .accountId = QStringLiteral("account-a"),
+        .threadIds = {QStringLiteral("thread-a"), QStringLiteral("thread-b")},
+        .inFlight = false,
+        .success = false,
+        .error = QStringLiteral("temporary failure"),
+    });
+
+    REQUIRE(received.has_value());
+    CHECK(received->accountId == QStringLiteral("account-a"));
+    CHECK(received->threadIds ==
+          QStringList{QStringLiteral("thread-a"), QStringLiteral("thread-b")});
+    CHECK_FALSE(received->inFlight);
+    CHECK_FALSE(received->success);
+    CHECK(received->error == QStringLiteral("temporary failure"));
+}
+
 TEST_CASE("GUI bootstrap does not offer the packaged service for a source build", "[app][gui]")
 {
     javelin::app::GuiDaemonSession session{

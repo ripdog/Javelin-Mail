@@ -52,6 +52,15 @@ namespace javelin::app
         MailCacheChange change;
     };
 
+    struct ThreadMaterializationProgress
+    {
+        QString accountId;
+        QStringList threadIds;
+        bool inFlight = false;
+        bool success = true;
+        QString error;
+    };
+
     struct CalendarCacheChange
     {
         QString ownerAccountId;
