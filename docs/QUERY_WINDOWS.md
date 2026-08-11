@@ -32,16 +32,55 @@ payloads into settings. On restore the session rebuilds the longest available cu
 SQLite; unavailable trailing windows are discarded and can be loaded again by scrolling. A wholly
 missing first window triggers normal bounded materialization after the cache read.
 
-Every watched mailbox has a canonical window: offset 0, limit 100, `receivedAt` descending, and
-`collapseThreads: true`. Window validity has two independent axes. Provenance is `server`,
+Every watched mailbox has a canonical window: offset 0, nominal limit 100, `receivedAt` descending,
+and `collapseThreads: true`. The effective request limit is clamped to negotiated JMAP request
+limits; continuation uses the server-returned position and result count rather than assuming 100
+representatives were returned. Window validity has two independent axes. Provenance is `server`,
 `locallyProjected`, or `stale`; materialization is `complete` or `partial`. Authoritative current
 presentation requires a complete non-stale materialization. Server-relative continuation metadata
 requires server provenance. This prevents a locally complete mutation projection from being
 mistaken for authoritative query positioning, and prevents a partially materialized server response
 from being shown merely because it carries a new query state. Background synchronization
 materializes a missing, partial, or stale canonical window. A post-commit cache change names the
-window so an open
-view reloads effective SQLite state.
+window so an open view reloads effective SQLite state.
+
+### Thread membership and child materialization (accepted target; implementation pending)
+
+The following coverage split is the accepted target for
+[THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md). A
+collapsed query window is complete when every ordered representative id returned by `Email/query`
+has the representative Email data required by the message-list row. It is deliberately **not** a
+claim that every Email in every represented Thread is cached. Query-window coverage, Thread
+membership coverage, and child Email-object materialization are separate facts.
+
+The foreground materialization path therefore stops after the collapsed `Email/query` and bounded
+representative `Email/get` have committed. Once that window is displayable, daemon-owned background
+work automatically obtains Thread membership for its representatives and then fetches missing child
+Email objects in explicit bounded batches. The implementation must parse `Thread.emailIds` locally
+before issuing child `Email/get` calls; a result reference that flattens `/list/*/emailIds` directly
+into one `/get` is forbidden because the resulting id count is not bounded by the collapsed query
+limit.
+
+Thread membership is durable SQLite data with explicit freshness. Presence of one or more cached
+child Emails never proves complete Thread coverage. Conversely, a complete Thread membership
+snapshot does not prove that every referenced Email object is currently materialized. This
+separation allows a page to render promptly, permits thread hydration to resume after interruption,
+and prevents cache contents from changing product semantics merely because background prefetch has
+progressed further.
+
+Collapsed-row summary state that cannot be proven from the representative alone is not opportunistic
+aggregate state. Unread, flagged, attachment, tag, and similar row properties describe the query
+representative unless a future product design introduces an explicitly complete aggregate summary.
+Mailbox-local thread counts are shown only when mailbox-local child coverage proves them; global
+Thread membership may be used to know that a conversation can expand, but it must not be presented
+as a mailbox-local count when some members live outside the current mailbox.
+
+Opening a Thread whose children are not yet completely materialized records presentation intent and
+waits for the existing daemon materialization to finish. The existing message-list-wide progress
+indicator is the loading indication; the message list does not need a second per-row loading UI or a
+competing fetch path. Once coverage is complete, the GUI reloads the children from SQLite.
+Collapsing the row before completion cancels only that presentation intent, not the background cache
+work.
 
 A GUI already presenting a complete window may retain its rows as a continuity snapshot while that
 window is stale and an authoritative replacement is pending. Such a snapshot is not evidence of
@@ -131,6 +170,8 @@ If `/get.state` differs from `/changes.newState`, the fetched objects are commit
 immediately continues `/changes` from the committed token. Duplicate, missing, unexpected, or
 wrong-account materialization is not published as complete.
 
-Totals are authoritative conversation counts for `collapseThreads: true`. Partial cached counts
-are diagnostic values only and must not replace query totals. Expanded thread members and retained
+Query totals are authoritative conversation counts for `collapseThreads: true`. Partial cached
+counts are diagnostic values only and must not replace query totals. Per-row Thread counts are a
+separate concern: global Thread membership count and current-mailbox child count must not be
+conflated. Expanded thread members, partially or completely prefetched child Emails, and retained
 message-view selections are outside query-window accounting and do not alter the loaded prefix.

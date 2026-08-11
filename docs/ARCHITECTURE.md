@@ -14,7 +14,9 @@ release validation are tracked in
 in the focused documents for [optimistic consistency](OPTIMISTIC_CONSISTENCY.md),
 [offline mail](OFFLINE_MAIL_ARCHITECTURE.md), [query windows](QUERY_WINDOWS.md),
 [database access](DATABASE_ACCESS.md), [Undo/Redo](UNDO_REDO.md),
-[email signatures](EMAIL_SIGNATURES_DESIGN.md), and [message rendering](RENDERING.md).
+[email signatures](EMAIL_SIGNATURES_DESIGN.md), and [message rendering](RENDERING.md). The planned
+split between foreground collapsed-query materialization and bounded background thread hydration is
+specified in [THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md).
 
 Javelin targets Qt 6.6 or newer, KDE Frameworks 6, and C++23. Glaze provides typed JSON parsing at
 the JMAP boundary; QCoro provides coroutine-based Qt networking. KDE Plasma is the primary desktop
@@ -272,14 +274,29 @@ materialize confirmed objects and authoritative query membership, rebase active 
 publish one typed post-commit cache change. There is no generic cross-type object table and no
 untyped JMAP value bag.
 
-For Email, an authoritative mailbox materialization includes both the fetched Email/Thread objects
-and the exact ordered `Email/query` window. Background watched-mailbox refresh uses the canonical
-received-at-descending collapsed window, so a synchronized mailbox is immediately loadable from
-SQLite. Any page fetch that writes server Email objects reapplies active Email projections before
-the cache can be rendered. Contacts continue to materialize AddressBook and ContactCard snapshots
-through their repositories; calendars continue to materialize CalendarEvent objects and bounded
-occurrence windows through `CalendarService`. Their state tokens, eviction rules, and optimistic
-adapters remain independent.
+The accepted next Email materialization architecture, pending implementation in
+[THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md), makes
+authoritative collapsed-query materialization intentionally narrower than complete conversation
+hydration. A complete mailbox or search query window contains the exact ordered `Email/query`
+representative ids and enough representative Email objects to render every row in that window.
+Thread membership and non-representative child Email objects are separate cache coverage. Their
+absence does not make the query window partial or stale.
+
+After a collapsed window commits and becomes renderable, the daemon automatically schedules
+bounded background thread materialization for its representatives. That work obtains Thread
+membership, persists it, and fetches missing child Email objects in explicit batches no larger than
+the server's negotiated object limits. It never uses a result reference that can flatten an
+unbounded set of `Thread.emailIds` into one `Email/get`. A user-opened thread may wait for this
+already-running materialization, while the global work/progress surface communicates the wait; the
+GUI does not create a second thread-loading source of truth or perform network work itself.
+
+Background watched-mailbox refresh uses the canonical received-at-descending collapsed window, so a
+synchronized mailbox is immediately loadable from SQLite even while its conversation children are
+still being prefetched. Any page or thread fetch that writes server Email objects reapplies active
+Email projections before the cache can be rendered. Contacts continue to materialize AddressBook
+and ContactCard snapshots through their repositories; calendars continue to materialize
+CalendarEvent objects and bounded occurrence windows through `CalendarService`. Their state tokens,
+eviction rules, and optimistic adapters remain independent.
 
 Starting or restarting an account coordinator schedules an immediate synchronization pass for all
 configured mailboxes; a quiet push stream is not proof that their cache already exists. Likewise,
@@ -299,9 +316,12 @@ Mail notification discovery writes a persistent pending outbox before publicatio
 delivered only after the desktop-notification signal is emitted, making a process failure in that
 gap retryable instead of silently losing the notification. Discovery is limited to threads present
 in an authoritative mailbox query window; raw Email mailbox membership alone cannot produce a
-notification for a message the mailbox view cannot render. Because a collapsed thread fetch may
-materialize related Emails from other mailboxes, those other mailbox windows are invalidated in the
-same transaction as the Email upsert and must be rematerialized before notification discovery.
+notification for a message the mailbox view cannot render. Notification routing to a concrete Email
+requires only that target and its contextual query coverage; it does not synchronously hydrate all
+other members of the conversation. Automatic thread materialization follows as ordinary background
+work. Child Email commits may affect other cached mailbox views according to normal Email delta and
+query-window invalidation rules, but the initial representative-window commit must not manufacture
+cross-mailbox invalidations merely because related children have not yet been fetched.
 Calendar reminder acknowledgement and snooze state remains in its separate calendar notification
 repository.
 

@@ -158,11 +158,15 @@ changes since the last known state. A "full fallback" is the recovery path when
 the server cannot calculate that delta, the local state is missing, or local
 cache drift makes the delta unsafe to apply.
 
-Full fallback does not mean fetching every message in the account. In the
-current implementation it means rebuilding a mailbox's collapsed query window
-from `Email/query`, representative `Email/get`, `Thread/get`, and final
-`Email/get`. The reliability problem is that this mailbox-window rebuild is
-currently written through account-wide destructive replacement methods.
+Full fallback does not mean fetching every message in the account. The accepted
+replacement architecture rebuilds the collapsed query window from `Email/query`
+and bounded representative `Email/get`, commits that renderable window, and then
+runs automatic bounded Thread child materialization separately. This avoids making
+query-window recovery depend on a final `Email/get` whose ids are flattened from
+all `Thread.emailIds` and may exceed `maxObjectsInGet`. The migration is specified
+in [THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md).
+The reliability rule from this plan remains unchanged: rebuilding one mailbox
+window must never use account-wide destructive replacement methods.
 
 ### Refresh coalescing
 
@@ -178,14 +182,13 @@ needed and run exactly one follow-up refresh after the current one completes.
 
 ### Recovery from missing updated ids
 
-If `Email/changes.updated` references ids missing from the local cache, the
-executor should treat that as recoverable cache drift:
-
-- fetch those ids directly when possible, or
-- force a full mailbox-window refresh, or
-- mark the mailbox query state as needing rebuild without advancing email state
-
-Do not advance email state after silently ignoring missing updated ids.
+This section records the eager-cache recovery policy that was implemented for this reliability
+milestone. It is superseded by the accepted sparse-cache rules in
+[THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md).
+Once that migration lands, an uncached `Email/changes.updated` id is not automatically cache drift:
+Javelin reconciles it only when it intersects tracked query, Thread, mutation, or other required
+state. Untracked updated ids may remain unmaterialized while the account Email state advances;
+authoritative query membership is proven independently through `Email/queryChanges`.
 
 ### UI propagation
 
@@ -235,12 +238,15 @@ Suggested behavior:
 - Add a failure-injection-style unit test if the existing database test helpers
   make that reasonable.
 
-### Phase 5: Recover from local cache drift - done
+### Phase 5: Recover from local cache drift - done for the eager-cache architecture
 
 - Detect `Email/changes.updated` ids missing from the local cache.
 - Fetch missing ids or force a mailbox-window rebuild before advancing state.
 - Add a regression test where an updated email is missing locally and verify the
   cache/state do not silently skip it.
+
+The Thread-materialization migration intentionally replaces this blanket rule with intersection-
+based sparse-cache handling; see its Phase 10.
 
 ### Phase 6: Broaden UI invalidation - done
 
@@ -277,7 +283,8 @@ Suggested behavior:
 - Full fallback reports notification candidates only for genuinely new unread
   emails in the watched mailbox.
 - Refresh failure does not advance query or email sync state.
-- Missing local updated ids do not get skipped while advancing email state.
+- Under the eager-cache implementation, missing local updated ids do not get skipped while advancing
+  email state; the pending sparse-cache migration replaces this with tracked-intersection coverage.
 - Restart during in-flight refresh does not emit stale mailbox or notification
   signals.
 - Multiple rapid long-poll updates do not overlap refresh writes.

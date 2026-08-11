@@ -10,8 +10,11 @@ selection restoration.
 
 Current invariants are defined in [ARCHITECTURE.md](ARCHITECTURE.md),
 [QUERY_WINDOWS.md](QUERY_WINDOWS.md), [OPTIMISTIC_CONSISTENCY.md](OPTIMISTIC_CONSISTENCY.md), and
-[DAEMON_GUI_ARCHITECTURE.md](DAEMON_GUI_ARCHITECTURE.md). This document remains useful as design
-history and for understanding the intended progression that produced those subsystems.
+[DAEMON_GUI_ARCHITECTURE.md](DAEMON_GUI_ARCHITECTURE.md). The current plan for collapsed-query and
+Thread child materialization is
+[THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md).
+This document remains useful as design history and for understanding the intended progression that
+produced those subsystems.
 
 ## Goal
 
@@ -151,14 +154,15 @@ The intent is that mailbox refresh code should read like a sequence of typed met
 
 ### First deliverable
 
-The first deliverable should be enough generic support to express the mailbox refresh sequence as one request envelope:
+Historically, this phase targeted one chained envelope containing `Email/query`, representative
+`Email/get`, `Thread/get`, and a final `Email/get` derived from all `Thread.emailIds`. Generic chained
+method support was still the correct foundation, but that final fan-out is no longer an accepted
+materialization shape: the nested Thread membership can exceed `maxObjectsInGet` even when the
+collapsed query itself is bounded.
 
-1. `Email/query`
-2. `Email/get` using `#ids` from `Email/query`
-3. `Thread/get` using `#ids` from representative `Email/get`
-4. `Email/get` using `#ids` from `Thread/get`
-
-Once that generic support exists, mailbox refresh should be rewritten to use it immediately.
+The current design commits the query representatives first, then performs automatic daemon-owned
+Thread hydration as separate bounded background work. See
+[THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md).
 
 ## Canonical Query Identity
 
@@ -247,25 +251,16 @@ If the mailbox tree still causes noticeable churn later, give it the same increm
 
 ## Phase 2: Single HTTP Transaction For Full Mailbox Refresh
 
-Replace the current sequential mailbox fetch sequence with a single JMAP request envelope containing chained method calls.
+This historical phase has been superseded. Chaining the final `Email/get` directly from
+`Thread/get /list/*/emailIds` creates an object-count fan-out that is not bounded by the collapsed
+query limit and can violate the server's `maxObjectsInGet` capability.
 
-Target call shape:
-
-1. `Email/query` for the mailbox window
-2. `Email/get` for representative rows using a result reference to `Email/query`
-3. `Thread/get` for thread ids derived from the representative `Email/get`
-4. `Email/get` for all thread member emails derived from `Thread/get`
-
-Even though the server still processes multiple methods, this should be one HTTP POST.
-
-Benefits:
-
-- lower latency
-- less visible refresh delay
-- lower transport overhead
-- same logical fetch behavior as today, with reduced user-facing slowness
-
-This phase should be implemented using the generic chained-method/request-builder API from the immediate-priority work above, not with mailbox-specific request glue inside `JmapCore`.
+The replacement design keeps the latency benefit where it matters: the foreground page fetch
+contains only the collapsed `Email/query` and bounded representative `Email/get`, commits that
+window immediately, and lets the GUI render. Automatic daemon-owned background work then fetches
+Thread membership and explicit child Email batches within negotiated request limits. The complete
+replacement sequence and migration order are specified in
+[THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md).
 
 ## Phase 3: Incremental Mailbox Refresh
 

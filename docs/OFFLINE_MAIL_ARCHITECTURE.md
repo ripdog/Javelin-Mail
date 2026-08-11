@@ -6,7 +6,10 @@
   membership: confirmed server state with active optimistic mutations already rebased onto it.
 - Selecting **Keep complete offline copy** means every Email in that server mailbox has cached
   metadata and a complete raw RFC 5322/MIME source. A mailbox is never marked complete while any
-  source is missing.
+  source is missing. Under the accepted pending Thread-materialization design, this full-mirror
+  guarantee remains stronger than ordinary online collapsed-query materialization: online query
+  windows may be display-complete while non-representative Thread children are still being
+  prefetched, but an offline-complete mailbox may not.
 - Raw sources live in `mail-vault/v1`, beside the application cache database. SQLite records
   identity, retention, progress, and recovery work; it does not contain multi-gigabyte MIME BLOBs.
 - Confirmed server destruction removes the local reference and mailbox projection. Unchecking a
@@ -47,12 +50,20 @@ reads stop consulting the old table.
 
 ## Full synchronization and pagination
 
-A full-sync job enumerates an uncollapsed, newest-first `Email/query` in 100-object pages and
-materializes each page through `Email/get`. Every commit advances the durable crawl cursor and task
-progress and also extends the ordinary collapsed `mailbox_query_windows` prefix using the real
-server `queryState`. The GUI therefore consumes background pages through exactly the same cache
-records as user-requested pages; no private staging read path exists. Explicitly synchronized
-mailboxes retain every materialized window instead of the bounded online working set.
+A full-sync job enumerates an uncollapsed, newest-first `Email/query` in bounded pages and
+materializes each page through `Email/get`, with the effective page size clamped to negotiated JMAP
+object limits. Every commit advances the durable crawl cursor and task progress and also extends the
+ordinary collapsed `mailbox_query_windows` prefix using the real server `queryState`. The GUI
+therefore consumes background pages through exactly the same cache records as user-requested pages;
+no private staging read path exists. Explicitly synchronized mailboxes retain every materialized
+window instead of the bounded online working set.
+
+The accepted online Thread-materialization coordinator is not the completeness mechanism for an
+offline mailbox and must not replace this uncollapsed crawl when that implementation lands. Offline
+synchronization already has complete Email membership and should continue to materialize every Email
+directly. Thread membership tables may be populated or reused as cache metadata, but failure or
+delay of online-style thread prefetch cannot weaken, block, or redefine the offline-complete
+contract.
 
 The first id anchors subsequent pages. Generation, anchor, committed position, totals, and state
 tokens survive process termination, so recovery resumes at the first uncommitted page. Transient

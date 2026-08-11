@@ -114,6 +114,10 @@ an accepted mutation remains authoritative and may legitimately show a subsequen
 
 ## Protocol Rules
 
+The Thread-specific resolution and batching rules below are the accepted target for
+[THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md) and
+remain pending until that migration lands.
+
 - Mutations use exact PatchObject paths for changed properties. They do not send complete
   collection-valued properties when the intent changes individual entries.
 - Per-object `/set` success and failure are handled independently.
@@ -122,6 +126,13 @@ an accepted mutation remains authoritative and may legitimately show a subsequen
   substitute for exact patches or local causal fencing.
 - Capability and rights checks fail before optimistic projection when the operation is known to be
   unsupported.
+- A collapsed-thread command remains a Thread-level application intent until the daemon can resolve
+  the intended Email membership from authoritative or complete cached Thread coverage. Missing
+  children are materialized before per-Email mutation records are created. The command must never
+  silently narrow to the representative Email merely because child cache coverage is incomplete.
+- Object-limit batching is application coordination, not GUI policy. A logical operation group may
+  span several bounded `/set` requests while retaining one user-visible command identity and exact
+  per-object lifecycle state.
 
 ## Atomicity
 
@@ -193,6 +204,12 @@ anchor without a second API request.
 5. Cache objects, projections, mutation lifecycle, and state tokens advance atomically.
 6. Recovery after a crash preserves uncertainty and cannot silently duplicate a mutation.
 7. The GUI observes only committed effective states, never intermediate reconciliation writes.
+8. Partial Thread child coverage can never reduce a whole-thread command to the locally cached subset.
+9. Every `/get` and `/set` object list is partitioned to the server's negotiated limits before
+   dispatch; a JMAP result reference cannot be used to bypass that bound indirectly.
+10. When one logical whole-thread command spans several `/set` batches, accepted, rejected, and
+    unknown outcomes remain individually represented so partial completion and Undo reflect what the
+    server actually settled rather than attempting speculative compensating mutations.
 
 Ordered Email query membership follows the additional invariants in
 [`QUERY_WINDOWS.md`](QUERY_WINDOWS.md). A mailbox or search mutation invalidates affected query
@@ -218,8 +235,13 @@ a complete local query projection would risk silently omitting or misordering an
 
 Core request limits are mandatory session data. Every request envelope is checked against
 `maxCallsInRequest` and `maxSizeRequest` before dispatch, and typed materializers use negotiated
-object limits when choosing change pages and `/get` batches. A response may advance a domain state
-only after its requested IDs are accounted for exactly by returned objects or `notFound`.
+object limits when choosing change pages and `/get` batches. Collapsed Email query limits are also
+clamped so their representative `Email/get` is legal. Thread hydration first persists or reads the
+explicit `Thread.emailIds` membership and then partitions child `Email/get` calls; it must not chain
+all nested member ids through a result reference into a single unbounded get. Whole-thread Email
+mutations likewise partition operation-group submission by `maxObjectsInSet`. A response may advance
+a domain state only after its requested IDs are accounted for exactly by returned objects or
+`notFound`.
 
 ## Extension Checklist
 
