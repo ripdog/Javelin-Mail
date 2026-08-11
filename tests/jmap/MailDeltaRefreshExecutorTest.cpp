@@ -8,6 +8,7 @@
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
@@ -199,8 +200,7 @@ namespace
                created + R"(],"updated":[)" + updated + R"(],"destroyed":[)" + destroyed + R"(]})";
     }
 
-    [[nodiscard]] javelin::jmap::api::TransportResult
-    deltaResponse(const std::string& updatedMailboxId, const bool seen)
+    [[nodiscard]] javelin::jmap::api::TransportResult deltaResponse(const bool seen)
     {
         const auto envelope = javelin::jmap::api::ResponseEnvelope{
             .methodResponses =
@@ -223,9 +223,6 @@ namespace
                     {.name = "Email/get",
                      .arguments = getArguments("email-state-2", {}),
                      .callId = "created-emails"},
-                    {.name = "Email/get",
-                     .arguments = getArguments("email-state-2", emailJson(updatedMailboxId, seen)),
-                     .callId = "updated-emails"},
                 },
             .createdIds = std::nullopt,
             .sessionState = "session-state",
@@ -236,6 +233,62 @@ namespace
             .statusCode = 200,
             .body = QByteArray::fromStdString(*serialized),
         };
+    }
+
+    [[nodiscard]] javelin::jmap::api::TransportResult
+    updatedEmailResponse(const std::string& updatedMailboxId, const bool seen)
+    {
+        const auto envelope = javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {
+                    {.name = "Email/get",
+                     .arguments = getArguments("email-state-2", emailJson(updatedMailboxId, seen)),
+                     .callId = "relevant-updated-emails"},
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "session-state",
+        };
+        const auto serialized = javelin::jmap::api::serializeResponseEnvelope(envelope);
+        REQUIRE(serialized.has_value());
+        return javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body = QByteArray::fromStdString(*serialized),
+        };
+    }
+
+    [[nodiscard]] javelin::jmap::api::TransportResult
+    emailDeltaResponse(const std::string& created, const std::string& updated,
+                       const std::string& destroyed, const std::string& createdObjects = {})
+    {
+        const auto envelope = javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {
+                    {.name = "Email/changes",
+                     .arguments = changesArguments("email-state-1", "email-state-2", created,
+                                                   updated, destroyed),
+                     .callId = "email-changes"},
+                    {.name = "Email/get",
+                     .arguments = getArguments("email-state-2", createdObjects),
+                     .callId = "created-emails"},
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "session-state",
+        };
+        const auto serialized = javelin::jmap::api::serializeResponseEnvelope(envelope);
+        REQUIRE(serialized.has_value());
+        return javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body = QByteArray::fromStdString(*serialized),
+        };
+    }
+
+    void seedEmailState(javelin::jmap::cache::DatabaseConnection& connection)
+    {
+        javelin::jmap::cache::SyncStateRepository states{connection};
+        REQUIRE_FALSE(states
+                          .upsert({.accountId = "account-1", .objectType = "Email", .queryKey = {}},
+                                  "email-state-1")
+                          .has_value());
     }
 
     void seedMail(javelin::jmap::cache::DatabaseConnection& connection)
@@ -312,7 +365,8 @@ TEST_CASE("account mail delta applies an external seen change without invalidati
     REQUIRE_FALSE(projection.commit().has_value());
 
     FakeTransport transport;
-    transport.queuedResults.push_back(deltaResponse("archive", true));
+    transport.queuedResults.push_back(deltaResponse(true));
+    transport.queuedResults.push_back(updatedEmailResponse("archive", true));
     javelin::jmap::api::MethodCaller caller{transport};
     javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
                                                            requestContext()};
@@ -325,7 +379,7 @@ TEST_CASE("account mail delta applies an external seen change without invalidati
     CHECK(summary.emailChanged);
     CHECK(summary.changedMailboxIds == std::vector<std::string>{"archive"});
     CHECK(summary.queryAffectedMailboxIds.empty());
-    REQUIRE(transport.requests.size() == 1);
+    REQUIRE(transport.requests.size() == 2);
     CHECK(transport.requests.front().body.contains("\"Mailbox/changes\""));
     CHECK(transport.requests.front().body.contains("\"Email/changes\""));
     CHECK_FALSE(transport.requests.front().body.contains("\"Email/query\""));
@@ -360,7 +414,8 @@ TEST_CASE("account mail delta targets only old and new mailboxes for an external
     const auto archiveQueryKey = seedMailboxWindow(database.connection, "archive");
 
     FakeTransport transport;
-    transport.queuedResults.push_back(deltaResponse("inbox", false));
+    transport.queuedResults.push_back(deltaResponse(false));
+    transport.queuedResults.push_back(updatedEmailResponse("inbox", false));
     javelin::jmap::api::MethodCaller caller{transport};
     javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
                                                            requestContext()};
@@ -370,7 +425,7 @@ TEST_CASE("account mail delta targets only old and new mailboxes for an external
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
     const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
     CHECK(summary.queryAffectedMailboxIds == std::vector<std::string>{"archive", "inbox"});
-    REQUIRE(transport.requests.size() == 1);
+    REQUIRE(transport.requests.size() == 2);
 
     javelin::jmap::cache::MailboxWindowRepository windows{database.connection};
     for (const auto& queryKey : {archiveQueryKey, inboxQueryKey})
@@ -441,7 +496,8 @@ TEST_CASE("account mail delta rebases retained accepted overlays over an externa
                       .has_value());
 
     FakeTransport transport;
-    transport.queuedResults.push_back(deltaResponse("archive", false));
+    transport.queuedResults.push_back(deltaResponse(false));
+    transport.queuedResults.push_back(updatedEmailResponse("archive", false));
     javelin::jmap::api::MethodCaller caller{transport};
     javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
                                                            requestContext()};
@@ -453,7 +509,7 @@ TEST_CASE("account mail delta rebases retained accepted overlays over an externa
     CHECK_FALSE(summary.superseded);
     CHECK(summary.emailChanged);
     CHECK(summary.queryAffectedMailboxIds.empty());
-    REQUIRE(transport.requests.size() == 1);
+    REQUIRE(transport.requests.size() == 2);
 
     const auto cachedResult = emails.find("account-1", "email-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cachedResult));
@@ -469,4 +525,166 @@ TEST_CASE("account mail delta rebases retained accepted overlays over an externa
     const auto& state = std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult);
     REQUIRE(state.has_value());
     CHECK(state->stateToken == "email-state-2");
+}
+
+TEST_CASE("account mail delta skips an updated unmaterialized Thread child",
+          "[jmap][sync][mail-delta][thread-materialization]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    javelin::jmap::cache::ThreadRepository threads{database.connection};
+    REQUIRE_FALSE(
+        threads.upsertMany("account-1", {{.id = "thread-1", .emailIds = {"email-1"}}}).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(emailDeltaResponse({}, R"("email-1")", {}));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
+    CHECK(summary.emailChanged);
+    CHECK_FALSE(summary.emailNeedsFullRefresh);
+    REQUIRE(transport.requests.size() == 1);
+    CHECK_FALSE(transport.requests.front().body.contains("/updated"));
+    CHECK_FALSE(transport.requests.front().body.contains("relevant-updated-emails"));
+
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    const auto cached = emails.find("account-1", "email-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cached));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(cached).has_value());
+    const auto coverage = threads.coverage("account-1", "thread-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverage));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverage).has_value());
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverage)
+                    ->childEmailsComplete);
+    javelin::jmap::cache::SyncStateRepository states{database.connection};
+    const auto stateResult =
+        states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult));
+    const auto& state = std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult);
+    REQUIRE(state.has_value());
+    CHECK(state->stateToken == "email-state-2");
+}
+
+TEST_CASE("account mail delta fetches an uncached updated Email tracked by a mailbox window",
+          "[jmap][sync][mail-delta][query-window]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    const auto archiveQueryKey = seedMailboxWindow(database.connection, "archive");
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(emailDeltaResponse({}, R"("email-1")", {}));
+    transport.queuedResults.push_back(updatedEmailResponse("inbox", false));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
+    CHECK_FALSE(summary.emailNeedsFullRefresh);
+    CHECK(summary.queryAffectedMailboxIds == std::vector<std::string>{"archive", "inbox"});
+    REQUIRE(transport.requests.size() == 2);
+    CHECK(transport.requests.back().body.contains("relevant-updated-emails"));
+    CHECK(transport.requests.back().body.contains("email-1"));
+
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    const auto cached = emails.find("account-1", "email-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cached));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(cached).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(cached)->mailboxIds ==
+          std::vector<std::string>{"inbox"});
+    javelin::jmap::cache::MailboxWindowRepository windows{database.connection};
+    const auto window = windows.find("account-1", archiveQueryKey, 0, 100);
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(window));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(window).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(window)->coverage ==
+          javelin::jmap::cache::QueryWindowCoverage::Stale);
+}
+
+TEST_CASE("account mail delta makes an uncached tracked destruction sparse-cache safe",
+          "[jmap][sync][mail-delta][thread-materialization]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    const auto archiveQueryKey = seedMailboxWindow(database.connection, "archive");
+    javelin::jmap::cache::ThreadRepository threads{database.connection};
+    REQUIRE_FALSE(
+        threads.upsertMany("account-1", {{.id = "thread-1", .emailIds = {"email-1"}}}).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(emailDeltaResponse({}, {}, R"("email-1")"));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
+    CHECK(summary.emailChanged);
+    CHECK_FALSE(summary.emailNeedsFullRefresh);
+    CHECK(summary.queryAffectedMailboxIds == std::vector<std::string>{"archive"});
+    REQUIRE(transport.requests.size() == 1);
+
+    const auto membership = threads.findMembership("account-1", "thread-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(
+        membership));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(membership)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(membership)
+              ->freshness == javelin::jmap::cache::ThreadMembershipFreshness::Stale);
+    javelin::jmap::cache::MailboxWindowRepository windows{database.connection};
+    const auto window = windows.find("account-1", archiveQueryKey, 0, 100);
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(window));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(window).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(window)->coverage ==
+          javelin::jmap::cache::QueryWindowCoverage::Stale);
+}
+
+TEST_CASE("account mail delta marks cached Thread membership stale for a created Email",
+          "[jmap][sync][mail-delta][thread-materialization]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    javelin::jmap::cache::ThreadRepository threads{database.connection};
+    REQUIRE_FALSE(threads.upsertMany("account-1", {{.id = "thread-1", .emailIds = {"older-email"}}})
+                      .has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(
+        emailDeltaResponse(R"("email-1")", {}, {}, emailJson("archive", false)));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    CHECK_FALSE(
+        std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result).emailNeedsFullRefresh);
+    const auto membership = threads.findMembership("account-1", "thread-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(
+        membership));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(membership)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(membership)
+              ->freshness == javelin::jmap::cache::ThreadMembershipFreshness::Stale);
 }

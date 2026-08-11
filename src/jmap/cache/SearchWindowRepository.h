@@ -40,6 +40,8 @@ namespace javelin::jmap::cache
                                                            const SearchWindowRecord& window);
         [[nodiscard]] SearchWindowResult find(std::string_view accountId, std::string_view queryKey,
                                               std::size_t offset, std::size_t limit) const;
+        [[nodiscard]] std::variant<bool, DatabaseError>
+        containsEmail(std::string_view accountId, std::string_view emailId) const;
         [[nodiscard]] std::optional<DatabaseError>
         invalidateAccount(DatabaseTransaction& transaction, std::string_view accountId);
         [[nodiscard]] std::optional<DatabaseError> projectAccount(DatabaseTransaction& transaction,

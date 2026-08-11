@@ -237,6 +237,24 @@ namespace javelin::jmap::cache
         return std::optional<SearchWindowRecord>{std::move(record)};
     }
 
+    std::variant<bool, DatabaseError>
+    SearchWindowRepository::containsEmail(const std::string_view accountId,
+                                          const std::string_view emailId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT EXISTS(SELECT 1 FROM search_window_items WHERE account_id=:account_id "
+            "AND email_id=:email_id)"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":email_id"), QString::fromStdString(std::string{emailId}));
+        if (!query.exec() || !query.next())
+            return queryError(QStringLiteral("Check search windows for Email"), query);
+        return query.value(0).toBool();
+    }
+
     std::optional<DatabaseError>
     SearchWindowRepository::invalidateAccount(DatabaseTransaction& transaction,
                                               const std::string_view accountId)

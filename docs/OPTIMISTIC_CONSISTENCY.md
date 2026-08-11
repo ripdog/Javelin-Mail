@@ -221,12 +221,15 @@ must rebase active Email projections after writing confirmed server objects and 
 cache change. A specialized page loader is not permission to bypass the mutation journal or expose
 a raw server snapshot to the GUI.
 
-Unmatched mail push is reconciled account-wide before any query is refreshed. One sequential JMAP
-envelope obtains `Mailbox/changes`, `Email/changes`, and result-referenced `/get` materialization.
-The confirmed pre-change and fetched Email documents determine which cached queries can actually
-have changed. Keyword-only updates therefore commit object metadata and Mailbox counts without
-querying unrelated mailboxes. State tokens are opaque: equality suppresses a push, while a
-different token is resolved through `/changes`; tokens are never ordered lexically.
+Unmatched mail push is reconciled account-wide before any query is refreshed. A bounded first JMAP
+envelope obtains `Mailbox/changes`, `Email/changes`, Mailbox materialization, and created Email
+materialization. Updated Emails are fetched in a second bounded request only when they intersect
+the object cache, tracked query windows, or active mutation state. Uncached normalized Thread
+children remain sparse, while destroyed members make their cached Thread membership stale. The
+confirmed pre-change and fetched Email documents determine which cached queries can actually have
+changed. Keyword-only updates therefore commit object metadata and Mailbox counts without querying
+unrelated mailboxes. State tokens are opaque: equality suppresses a push, while a different token
+is resolved through `/changes`; tokens are never ordered lexically.
 When an external Email delta changes locally known mailbox membership, the same cache transaction
 marks only the source and destination windows stale and partially materialized. The changed Email
 and Mailbox objects remain immediately usable, while affected visible queries are reconciled

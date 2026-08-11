@@ -311,6 +311,30 @@ namespace javelin::jmap::cache
         return std::optional<MailboxWindowRecord>{std::move(record)};
     }
 
+    std::variant<std::vector<std::string>, DatabaseError>
+    MailboxWindowRepository::mailboxIdsContainingEmail(const std::string_view accountId,
+                                                       const std::string_view emailId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT DISTINCT w.mailbox_id FROM mailbox_query_window_items i INNER JOIN "
+            "mailbox_query_windows w ON w.account_id=i.account_id AND w.query_key=i.query_key "
+            "AND w.requested_offset=i.requested_offset AND "
+            "w.requested_limit=i.requested_limit WHERE i.account_id=:account_id AND "
+            "i.email_id=:email_id ORDER BY w.mailbox_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":email_id"), QString::fromStdString(std::string{emailId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Read mailboxes containing window Email"), query);
+        std::vector<std::string> mailboxIds;
+        while (query.next())
+            mailboxIds.push_back(query.value(0).toString().toStdString());
+        return mailboxIds;
+    }
+
     std::optional<DatabaseError>
     MailboxWindowRepository::invalidateMailbox(const std::string_view accountId,
                                                const std::string_view mailboxId)

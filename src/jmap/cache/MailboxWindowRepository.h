@@ -49,6 +49,8 @@ namespace javelin::jmap::cache
                                                std::string_view queryKey,
                                                std::size_t requestedOffset,
                                                std::size_t requestedLimit) const;
+        [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
+        mailboxIdsContainingEmail(std::string_view accountId, std::string_view emailId) const;
         [[nodiscard]] std::optional<DatabaseError> invalidateMailbox(std::string_view accountId,
                                                                      std::string_view mailboxId);
         [[nodiscard]] std::optional<DatabaseError>
