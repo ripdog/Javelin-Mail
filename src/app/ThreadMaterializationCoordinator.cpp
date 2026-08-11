@@ -162,7 +162,9 @@ namespace javelin::app
             "LEFT JOIN emails child ON child.account_id=tm.account_id AND "
             "child.email_id=tm.email_id AND child.thread_id=tm.thread_id WHERE "
             "tm.account_id=e.account_id AND "
-            "tm.thread_id=e.thread_id AND child.email_id IS NULL))"));
+            "tm.thread_id=e.thread_id AND (child.email_id IS NULL OR EXISTS(SELECT 1 FROM "
+            "email_summary_refresh_requests refresh WHERE refresh.account_id=tm.account_id AND "
+            "refresh.email_id=tm.email_id))))"));
         const auto account = QString::fromStdString(std::string{accountId});
         query.bindValue(QStringLiteral(":mailbox_account"), account);
         query.bindValue(QStringLiteral(":search_account"), account);
@@ -198,7 +200,9 @@ namespace javelin::app
             "SELECT t.membership_freshness,t.member_count,COUNT(tm.email_id),COUNT(e.email_id) "
             "FROM threads t LEFT JOIN thread_email_members tm ON tm.account_id=t.account_id AND "
             "tm.thread_id=t.thread_id LEFT JOIN emails e ON e.account_id=tm.account_id AND "
-            "e.email_id=tm.email_id AND e.thread_id=tm.thread_id WHERE t.account_id=:account_id "
+            "e.email_id=tm.email_id AND e.thread_id=tm.thread_id AND NOT EXISTS(SELECT 1 FROM "
+            "email_summary_refresh_requests refresh WHERE refresh.account_id=tm.account_id AND "
+            "refresh.email_id=tm.email_id) WHERE t.account_id=:account_id "
             "AND t.thread_id=:thread_id GROUP BY t.account_id,t.thread_id,"
             "t.membership_freshness,t.member_count"));
         std::vector<std::string> incomplete;

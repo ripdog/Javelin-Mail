@@ -2123,6 +2123,19 @@ namespace javelin::jmap::cache
                                            "mailbox_query_window_items(account_id,email_id)"),
                         },
                 },
+                MigrationStep{
+                    .version = 49,
+                    .name = QStringLiteral("email_summary_refresh_requests"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE email_summary_refresh_requests ("
+                                "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON "
+                                "DELETE CASCADE,email_id TEXT NOT NULL,requested_at TEXT NOT NULL "
+                                "DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(account_id,email_id)) "
+                                "STRICT"),
+                        },
+                },
             },
         };
     }

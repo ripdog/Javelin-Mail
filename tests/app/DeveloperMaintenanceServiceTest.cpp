@@ -340,6 +340,15 @@ TEST_CASE("developer SQLite clear invalidates Thread cache and preserves optimis
     CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM thread_email_members WHERE "
                                           "account_id='account-1' AND "
                                           "thread_id='thread-shared'")) == 0);
+    CHECK(
+        scalar(database, QStringLiteral("SELECT COUNT(*) FROM email_summary_refresh_requests WHERE "
+                                        "account_id='account-1'")) == 6);
+    CHECK(scalar(database,
+                 QStringLiteral("SELECT COUNT(*) FROM email_summary_refresh_requests WHERE "
+                                "account_id='account-1' AND email_id='shared-archive'")) == 1);
+    CHECK(
+        scalar(database, QStringLiteral("SELECT COUNT(*) FROM email_summary_refresh_requests WHERE "
+                                        "account_id='account-1' AND email_id='optimistic'")) == 0);
     CHECK(textScalar(database, QStringLiteral("SELECT membership_freshness FROM threads WHERE "
                                               "account_id='account-1' AND "
                                               "thread_id='thread-optimistic'")) ==

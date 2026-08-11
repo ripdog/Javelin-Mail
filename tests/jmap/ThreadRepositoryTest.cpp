@@ -233,6 +233,23 @@ TEST_CASE("thread repository distinguishes membership freshness from child cover
     REQUIRE(std::holds_alternative<std::optional<std::size_t>>(mailboxCount));
     CHECK(std::get<std::optional<std::size_t>>(mailboxCount) == std::optional<std::size_t>{1});
 
+    QSqlQuery refresh{databaseContext.connection.database()};
+    REQUIRE(refresh.exec(
+        QStringLiteral("INSERT INTO email_summary_refresh_requests(account_id,email_id) "
+                       "VALUES('account-1','em-2')")));
+    missing = repository.missingEmailIds("account-1", "th-1", 100);
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(missing));
+    CHECK(std::get<std::vector<std::string>>(missing) == std::vector<std::string>{"em-2"});
+    coverage = repository.coverage("account-1", "th-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverage));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverage).has_value());
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverage)
+                    ->childEmailsComplete);
+    const auto refreshingMailboxCount =
+        repository.countMailboxMembersIfComplete("account-1", "mbx-inbox", "th-1");
+    REQUIRE(std::holds_alternative<std::optional<std::size_t>>(refreshingMailboxCount));
+    CHECK_FALSE(std::get<std::optional<std::size_t>>(refreshingMailboxCount).has_value());
+
     REQUIRE_FALSE(repository.markStale("account-1", std::vector<std::string>{"th-1"}).has_value());
     const auto staleMembership = repository.findMembership("account-1", "th-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(

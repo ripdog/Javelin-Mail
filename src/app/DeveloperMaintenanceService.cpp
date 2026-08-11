@@ -346,6 +346,16 @@ namespace javelin::app
             }
             const std::uint64_t cachedThreadMembers = threadMemberRows.value(0).toULongLong();
 
+            if (const auto error = executeAccount(
+                    database, QStringLiteral("Queue mailbox Thread Email summary refreshes"),
+                    QStringLiteral(
+                        "INSERT OR IGNORE INTO email_summary_refresh_requests(account_id,email_id) "
+                        "SELECT member.account_id,member.email_id FROM thread_email_members member "
+                        "JOIN mailbox_cache_clear_threads target ON "
+                        "target.thread_id=member.thread_id WHERE member.account_id=:account"),
+                    command.accountId))
+                return *error;
+
             QStringList invalidatedMailboxIds{command.mailboxId};
             QSqlQuery affectedMailboxes{database};
             affectedMailboxes.prepare(QStringLiteral(

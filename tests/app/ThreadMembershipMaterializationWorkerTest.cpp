@@ -405,6 +405,47 @@ TEST_CASE("represented Thread notFound remains a reconciliation failure",
     CHECK(stale->thread.emailIds == std::vector<std::string>{"old-child"});
 }
 
+TEST_CASE("pending Email summary refresh survives a completed Thread membership",
+          "[app][thread-materialization]")
+{
+    ensureApplication();
+    Fixture fixture;
+    fixture.seedRepresentative("thread-1");
+    QSqlQuery seed{fixture.database.database()};
+    REQUIRE(
+        seed.exec(QStringLiteral("INSERT INTO emails(account_id,email_id,thread_id,subject) VALUES"
+                                 "('account-1','child-thread-1','thread-1','stale child')")));
+    javelin::jmap::cache::ThreadRepository threads{fixture.database};
+    REQUIRE_FALSE(threads
+                      .upsertMany("account-1",
+                                  {{.id = "thread-1",
+                                    .emailIds = {"representative-thread-1", "child-thread-1"}}},
+                                  "thread-state")
+                      .has_value());
+    REQUIRE(
+        seed.exec(QStringLiteral("INSERT INTO email_summary_refresh_requests(account_id,email_id) "
+                                 "VALUES('account-1','child-thread-1')")));
+
+    RecordingTransport transport;
+    ConnectionProvider connections;
+    javelin::app::ThreadMembershipMaterializationWorker worker{fixture.database, transport,
+                                                               connections};
+    const auto result = QCoro::waitFor(worker.materialize({
+        .accountId = "account-1",
+        .threadIds = {"thread-1"},
+    }));
+
+    REQUIRE(std::holds_alternative<javelin::app::ThreadMaterializationSummary>(result));
+    CHECK(std::get<javelin::app::ThreadMaterializationSummary>(result).completedEmailCount == 1);
+    CHECK(transport.batches.empty());
+    REQUIRE(transport.emailBatches.size() == 1);
+    CHECK(transport.emailBatches.front() == std::vector<std::string>{"child-thread-1"});
+    REQUIRE(seed.exec(QStringLiteral("SELECT COUNT(*) FROM email_summary_refresh_requests WHERE "
+                                     "account_id='account-1' AND email_id='child-thread-1'")));
+    REQUIRE(seed.next());
+    CHECK(seed.value(0).toInt() == 0);
+}
+
 TEST_CASE("one pathological Thread hydrates child Emails without exceeding get limits",
           "[app][thread-materialization]")
 {

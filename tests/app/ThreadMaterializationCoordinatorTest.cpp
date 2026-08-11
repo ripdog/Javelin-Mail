@@ -290,13 +290,16 @@ TEST_CASE("thread materialization coordinator restores incomplete durable window
     ensureApplication();
     Fixture fixture;
     javelin::jmap::cache::ThreadRepository threads{fixture.database};
-    REQUIRE_FALSE(
-        threads
-            .upsertMany("account-1", {javelin::jmap::domain::Thread{
-                                         .id = "thread-1",
-                                         .emailIds = {"email-1", "email-2", "missing-child"},
-                                     }})
-            .has_value());
+    REQUIRE_FALSE(threads
+                      .upsertMany("account-1", {javelin::jmap::domain::Thread{
+                                                   .id = "thread-1",
+                                                   .emailIds = {"email-1", "email-2"},
+                                               }})
+                      .has_value());
+    QSqlQuery refresh{fixture.database.database()};
+    REQUIRE(refresh.exec(
+        QStringLiteral("INSERT INTO email_summary_refresh_requests(account_id,email_id) "
+                       "VALUES('account-1','email-2')")));
     javelin::app::WorkScheduler scheduler{fixture.database, nullptr, std::chrono::milliseconds{0}};
     javelin::app::ThreadMaterializationCoordinator coordinator{fixture.database, scheduler};
 

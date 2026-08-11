@@ -431,6 +431,22 @@ namespace javelin::jmap::cache
                 }
             }
 
+            QSqlQuery clearRefresh{database};
+            clearRefresh.prepare(QStringLiteral(
+                "DELETE FROM email_summary_refresh_requests WHERE account_id=:account_id AND "
+                "email_id=:email_id"));
+            for (const auto& email : emails)
+            {
+                clearRefresh.bindValue(QStringLiteral(":account_id"),
+                                       QString::fromStdString(std::string{accountId}));
+                clearRefresh.bindValue(QStringLiteral(":email_id"),
+                                       QString::fromStdString(email.id));
+                if (!clearRefresh.exec())
+                    return makeQueryError(QStringLiteral("Complete Email summary refresh"),
+                                          clearRefresh);
+                clearRefresh.finish();
+            }
+
             return std::nullopt;
         }
 
@@ -474,6 +490,17 @@ namespace javelin::jmap::cache
                 {
                     return makeQueryError(QStringLiteral("Delete email"), deleteEmailQuery);
                 }
+                QSqlQuery clearRefresh{database};
+                clearRefresh.prepare(QStringLiteral(
+                    "DELETE FROM email_summary_refresh_requests WHERE account_id=:account_id AND "
+                    "email_id=:email_id"));
+                clearRefresh.bindValue(QStringLiteral(":account_id"),
+                                       QString::fromStdString(std::string{accountId}));
+                clearRefresh.bindValue(QStringLiteral(":email_id"),
+                                       QString::fromStdString(emailId));
+                if (!clearRefresh.exec())
+                    return makeQueryError(QStringLiteral("Discard Email summary refresh"),
+                                          clearRefresh);
             }
             return std::nullopt;
         }
@@ -521,7 +548,8 @@ namespace javelin::jmap::cache
 
         for (const QString& table :
              {QStringLiteral("email_addresses"), QStringLiteral("email_keywords"),
-              QStringLiteral("email_mailboxes"), QStringLiteral("emails")})
+              QStringLiteral("email_mailboxes"), QStringLiteral("emails"),
+              QStringLiteral("email_summary_refresh_requests")})
         {
             QSqlQuery deleteQuery{database};
             deleteQuery.prepare(

@@ -292,7 +292,9 @@ namespace javelin::jmap::cache
         query.prepare(QStringLiteral(
             "SELECT m.email_id FROM thread_email_members m LEFT JOIN emails e ON "
             "e.account_id=m.account_id AND e.email_id=m.email_id AND e.thread_id=m.thread_id WHERE "
-            "m.account_id=:account_id AND m.thread_id=:thread_id AND e.email_id IS NULL ORDER BY "
+            "m.account_id=:account_id AND m.thread_id=:thread_id AND (e.email_id IS NULL OR "
+            "EXISTS(SELECT 1 FROM email_summary_refresh_requests refresh WHERE "
+            "refresh.account_id=m.account_id AND refresh.email_id=m.email_id)) ORDER BY "
             "m.position LIMIT :limit"));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
@@ -318,7 +320,9 @@ namespace javelin::jmap::cache
             "SELECT t.membership_freshness,t.member_count,COUNT(e.email_id) FROM threads t LEFT "
             "JOIN thread_email_members m ON m.account_id=t.account_id AND "
             "m.thread_id=t.thread_id LEFT JOIN emails e ON e.account_id=m.account_id AND "
-            "e.email_id=m.email_id AND e.thread_id=m.thread_id WHERE t.account_id=:account_id AND "
+            "e.email_id=m.email_id AND e.thread_id=m.thread_id AND NOT EXISTS(SELECT 1 FROM "
+            "email_summary_refresh_requests refresh WHERE refresh.account_id=m.account_id AND "
+            "refresh.email_id=m.email_id) WHERE t.account_id=:account_id AND "
             "t.thread_id=:thread_id "
             "GROUP BY t.account_id,t.thread_id,t.membership_freshness,t.member_count"));
         query.bindValue(QStringLiteral(":account_id"),
@@ -355,7 +359,9 @@ namespace javelin::jmap::cache
             "t.member_count=COUNT(e.email_id) THEN COUNT(em.email_id) ELSE NULL END FROM threads t "
             "LEFT JOIN thread_email_members m ON m.account_id=t.account_id AND "
             "m.thread_id=t.thread_id LEFT JOIN emails e ON e.account_id=m.account_id AND "
-            "e.email_id=m.email_id AND e.thread_id=m.thread_id LEFT JOIN email_mailboxes em ON "
+            "e.email_id=m.email_id AND e.thread_id=m.thread_id AND NOT EXISTS(SELECT 1 FROM "
+            "email_summary_refresh_requests refresh WHERE refresh.account_id=m.account_id AND "
+            "refresh.email_id=m.email_id) LEFT JOIN email_mailboxes em ON "
             "em.account_id=e.account_id AND "
             "em.email_id=e.email_id AND em.mailbox_id=:mailbox_id WHERE "
             "t.account_id=:account_id AND t.thread_id=:thread_id GROUP BY "
