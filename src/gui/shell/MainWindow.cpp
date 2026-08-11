@@ -669,54 +669,52 @@ namespace javelin::gui::shell
                 applyAccountStatus);
         for (const auto& [accountId, status] : m_mailEvents.accountStatuses())
             applyAccountStatus(QString::fromStdString(accountId), status);
-        connect(&m_mailEvents, &javelin::app::MailApplicationEventsPort::cacheInvalidated, this,
-                [this](const javelin::app::MailCacheInvalidation& invalidation)
+        connect(
+            &m_mailEvents, &javelin::app::MailApplicationEventsPort::cacheInvalidated, this,
+            [this](const javelin::app::MailCacheInvalidation& invalidation)
+            {
+                const auto& change = invalidation.change;
+                if (!change.messageContentEmailIds.empty() &&
+                    activeAccountId() == std::optional<std::string>{change.accountId.toStdString()})
                 {
-                    const auto& change = invalidation.change;
-                    if (!change.messageContentEmailIds.empty() &&
-                        activeAccountId() ==
-                            std::optional<std::string>{change.accountId.toStdString()})
+                    const auto selectedEmails = m_messageSelectionController->selectedEmailIds();
+                    const auto* route = m_messageNavigationController->activeRoute(activeTab());
+                    const bool hydratesSelection =
+                        std::ranges::any_of(change.messageContentEmailIds,
+                                            [&selectedEmails, route](const QString& emailId)
+                                            {
+                                                const auto id = emailId.toStdString();
+                                                return std::ranges::contains(selectedEmails, id) ||
+                                                       (route != nullptr && route->emailId == id);
+                                            });
+                    if (hydratesSelection)
                     {
-                        const auto selectedEmails =
-                            m_messageSelectionController->selectedEmailIds();
-                        const auto* route =
-                            m_messageNavigationController->activeRoute(activeTab());
-                        const bool hydratesSelection = std::ranges::any_of(
-                            change.messageContentEmailIds,
-                            [&selectedEmails, route](const QString& emailId)
-                            {
-                                const auto id = emailId.toStdString();
-                                return std::ranges::contains(selectedEmails, id) ||
-                                       (route != nullptr && route->emailId == id);
-                            });
-                        if (hydratesSelection)
-                        {
-                            m_messageViewContainer->refresh(m_messageViewReader);
-                            updateEmptyStates();
-                        }
+                        m_messageViewContainer->refresh(m_messageViewReader);
+                        updateEmptyStates();
                     }
-                    if (change.mailboxTreeChanged)
-                    {
-                        QSignalBlocker mailboxSelectionBlocker{m_mailboxView->selectionModel()};
-                        if (m_mailboxModel->refreshAccount(change.accountId))
-                            m_mailboxView->expandAll();
-                    }
+                }
+                if (change.mailboxTreeChanged)
+                {
+                    QSignalBlocker mailboxSelectionBlocker{m_mailboxView->selectionModel()};
+                    if (m_mailboxModel->refreshAccount(change.accountId))
+                        m_mailboxView->expandAll();
+                }
 
-                    for (const auto& mailboxId : change.mailboxIds)
+                for (const auto& mailboxId : change.mailboxIds)
+                {
+                    const auto mailbox = mailboxId.toStdString();
+                    if (change.hasNewMail && activeTabIsMailbox() &&
+                        activeAccountId() ==
+                            std::optional<std::string>{change.accountId.toStdString()} &&
+                        activeMailboxId() == std::optional<std::string>{mailbox} &&
+                        m_messageModel->rowCount() > 0 &&
+                        m_messageView->verticalScrollBar()->value() == 0)
                     {
-                        const auto mailbox = mailboxId.toStdString();
-                        if (change.hasNewMail && activeTabIsMailbox() &&
-                            activeAccountId() ==
-                                std::optional<std::string>{change.accountId.toStdString()} &&
-                            activeMailboxId() == std::optional<std::string>{mailbox} &&
-                            m_messageModel->rowCount() > 0 &&
-                            m_messageView->verticalScrollBar()->value() == 0)
-                        {
-                            m_messageView->scrollTo(m_messageModel->index(0, 0));
-                        }
+                        m_messageView->scrollTo(m_messageModel->index(0, 0));
                     }
-                    resolveOpenEmailRoute();
-                });
+                }
+                resolveOpenEmailRoute();
+            });
         restorePersistentState();
 
         const auto accounts = m_settings.accounts();
