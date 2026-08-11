@@ -107,22 +107,33 @@ namespace javelin::app
                 "w.requested_limit=i.requested_limit WHERE w.account_id=:account AND "
                 "w.mailbox_id=:mailbox),0)+"
                 "COALESCE((SELECT SUM(length(o.email_id)+64) FROM offline_mailbox_membership o "
-                "WHERE o.account_id=:account AND o.mailbox_id=:mailbox),0)+"
-                "COALESCE((SELECT SUM(length(t.thread_id)+96) FROM threads t WHERE "
-                "t.account_id=:account AND EXISTS(SELECT 1 FROM emails e JOIN email_mailboxes em "
-                "ON em.account_id=e.account_id AND em.email_id=e.email_id WHERE "
-                "e.account_id=t.account_id AND e.thread_id=t.thread_id AND "
-                "em.mailbox_id=:mailbox)),0)+"
-                "COALESCE((SELECT SUM(length(member.email_id)+64) FROM thread_email_members member "
-                "WHERE member.account_id=:account AND EXISTS(SELECT 1 FROM emails e JOIN "
-                "email_mailboxes em ON em.account_id=e.account_id AND em.email_id=e.email_id "
-                "WHERE e.account_id=member.account_id AND e.thread_id=member.thread_id AND "
-                "em.mailbox_id=:mailbox)),0)"));
+                "WHERE o.account_id=:account AND o.mailbox_id=:mailbox),0)"));
             sqliteEstimate.bindValue(QStringLiteral(":account"), accountId);
             sqliteEstimate.bindValue(QStringLiteral(":mailbox"), mailboxId);
             if (!sqliteEstimate.exec() || !sqliteEstimate.next())
                 return queryError(QStringLiteral("Measure mailbox SQLite usage"), sqliteEstimate);
             usage.sqliteEstimatedBytes = sqliteEstimate.value(0).toULongLong();
+
+            QSqlQuery threadEstimate{database};
+            threadEstimate.prepare(QStringLiteral(
+                "WITH mailbox_threads(thread_id) AS MATERIALIZED (SELECT DISTINCT e.thread_id "
+                "FROM email_mailboxes em INDEXED BY idx_email_mailboxes_mailbox JOIN emails e "
+                "INDEXED BY sqlite_autoindex_emails_1 ON e.account_id=em.account_id AND "
+                "e.email_id=em.email_id WHERE em.account_id=:account AND "
+                "em.mailbox_id=:mailbox AND e.thread_id IS NOT NULL) SELECT "
+                "COALESCE((SELECT SUM(length(t.thread_id)+96) FROM mailbox_threads target CROSS "
+                "JOIN threads t INDEXED BY sqlite_autoindex_threads_1 WHERE "
+                "t.account_id=:account AND t.thread_id=target.thread_id),0)+"
+                "COALESCE((SELECT SUM(length(member.email_id)+64) FROM mailbox_threads target "
+                "CROSS JOIN thread_email_members member INDEXED BY "
+                "sqlite_autoindex_thread_email_members_1 WHERE member.account_id=:account AND "
+                "member.thread_id=target.thread_id),0)"));
+            threadEstimate.bindValue(QStringLiteral(":account"), accountId);
+            threadEstimate.bindValue(QStringLiteral(":mailbox"), mailboxId);
+            if (!threadEstimate.exec() || !threadEstimate.next())
+                return queryError(QStringLiteral("Measure mailbox Thread cache usage"),
+                                  threadEstimate);
+            usage.sqliteEstimatedBytes += threadEstimate.value(0).toULongLong();
 
             QSqlQuery objects{database};
             objects.prepare(QStringLiteral(
