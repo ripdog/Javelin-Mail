@@ -3931,6 +3931,7 @@ namespace javelin::gui::shell
                      accountName),
                 QMessageBox::NoButton, this};
             auto* signInButton = prompt.addButton(i18n("Sign In Again"), QMessageBox::AcceptRole);
+            prompt.setDefaultButton(signInButton);
             prompt.addButton(i18nc("@action:button", "Later"), QMessageBox::RejectRole);
             m_authenticationPromptOpen = true;
             prompt.exec();
