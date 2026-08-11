@@ -1446,8 +1446,9 @@ namespace javelin::app
     }
 
     QCoro::Task<std::optional<javelin::jmap::OperationError>>
-    MailApplicationService::ensureMessageSelectionMaterialized(std::string accountId,
-                                                               MessageSelection selection)
+    MailApplicationService::ensureMessageSelectionMaterialized(
+        std::string accountId, std::optional<std::string> sourceMailboxId,
+        MessageSelection selection)
     {
         std::vector<std::string> threadIds;
         for (const auto& item : selection)
@@ -1462,6 +1463,15 @@ namespace javelin::app
         threadIds.erase(std::unique(threadIds.begin(), threadIds.end()), threadIds.end());
         if (threadIds.empty())
             co_return std::nullopt;
+        if (sourceMailboxId.has_value())
+        {
+            const auto offlineState =
+                m_queryService.offlineMailboxComplete(accountId, *sourceMailboxId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&offlineState))
+                co_return javelin::jmap::operationError(*error);
+            if (std::get<bool>(offlineState))
+                co_return std::nullopt;
+        }
 
         javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
         bool incomplete = false;
@@ -1496,8 +1506,8 @@ namespace javelin::app
     QCoro::Task<QueuedMailboxSelectionMutationResult>
     MailApplicationService::queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent)
     {
-        if (const auto error =
-                co_await ensureMessageSelectionMaterialized(intent.accountId, intent.selection))
+        if (const auto error = co_await ensureMessageSelectionMaterialized(
+                intent.accountId, intent.sourceMailboxId, intent.selection))
             co_return *error;
         co_return queueResolvedMailboxSelectionMutation(std::move(intent));
     }
@@ -1680,7 +1690,8 @@ namespace javelin::app
                                                  std::optional<std::string> sourceMailboxId,
                                                  MessageSelection selection)
     {
-        if (const auto error = co_await ensureMessageSelectionMaterialized(accountId, selection))
+        if (const auto error =
+                co_await ensureMessageSelectionMaterialized(accountId, sourceMailboxId, selection))
             co_return *error;
         co_return queueSelectedMessageMutation(std::move(accountId), std::move(sourceMailboxId),
                                                std::move(selection),
@@ -1692,7 +1703,8 @@ namespace javelin::app
                                                     std::optional<std::string> sourceMailboxId,
                                                     MessageSelection selection)
     {
-        if (const auto error = co_await ensureMessageSelectionMaterialized(accountId, selection))
+        if (const auto error =
+                co_await ensureMessageSelectionMaterialized(accountId, sourceMailboxId, selection))
             co_return *error;
         co_return queueSelectedMessageMutation(std::move(accountId), std::move(sourceMailboxId),
                                                std::move(selection),
@@ -1916,7 +1928,8 @@ namespace javelin::app
                                                     std::optional<std::string> sourceMailboxId,
                                                     MessageSelection selection, const bool flagged)
     {
-        if (const auto error = co_await ensureMessageSelectionMaterialized(accountId, selection))
+        if (const auto error =
+                co_await ensureMessageSelectionMaterialized(accountId, sourceMailboxId, selection))
             co_return *error;
         co_return queueSetMessagesKeyword(
             std::move(accountId), std::move(sourceMailboxId), std::move(selection), "$flagged",
@@ -1937,7 +1950,8 @@ namespace javelin::app
             };
         }
 
-        if (const auto error = co_await ensureMessageSelectionMaterialized(accountId, selection))
+        if (const auto error =
+                co_await ensureMessageSelectionMaterialized(accountId, sourceMailboxId, selection))
             co_return *error;
         co_return queueSetMessagesKeyword(
             std::move(accountId), std::move(sourceMailboxId), std::move(selection),

@@ -63,7 +63,9 @@ offline mailbox and must not replace this uncollapsed crawl when that implementa
 synchronization already has complete Email membership and should continue to materialize every Email
 directly. Thread membership tables may be populated or reused as cache metadata, but failure or
 delay of online-style thread prefetch cannot weaken, block, or redefine the offline-complete
-contract.
+contract. Once the durable offline generation is complete, mailbox-scoped conversation expansion
+and actions resolve from cached Email/mailbox membership even when normalized Thread membership is
+missing or stale; global conversation actions still require authoritative Thread coverage.
 
 The first id anchors subsequent pages. Generation, anchor, committed position, totals, and state
 tokens survive process termination, so recovery resumes at the first uncommitted page. Transient

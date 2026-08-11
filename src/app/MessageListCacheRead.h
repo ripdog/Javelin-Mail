@@ -44,6 +44,40 @@ namespace javelin::app
             return javelin::jmap::cache::databaseError(
                 QStringLiteral("Begin message-list Thread snapshot"), database.lastError());
         }
+        javelin::jmap::cache::QueryService queryService{connection};
+        if (mailboxId.has_value())
+        {
+            const auto offlineState = queryService.offlineMailboxComplete(accountId, *mailboxId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&offlineState))
+            {
+                static_cast<void>(database.rollback());
+                return *error;
+            }
+            if (std::get<bool>(offlineState))
+            {
+                auto itemsResult = queryService.listMailboxThreadMessages(
+                    accountId, *mailboxId, threadId,
+                    javelin::jmap::cache::MailboxThreadMembershipSource::CompleteOfflineMailbox);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&itemsResult))
+                {
+                    static_cast<void>(database.rollback());
+                    return *error;
+                }
+                auto snapshot = MessageListThreadMembersSnapshot{
+                    .items = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(
+                        std::move(itemsResult)),
+                    .complete = true,
+                };
+                if (!database.commit())
+                {
+                    return javelin::jmap::cache::databaseError(
+                        QStringLiteral("Finish complete offline message-list Thread snapshot"),
+                        database.lastError());
+                }
+                return snapshot;
+            }
+        }
         QSqlQuery coverage{database};
         coverage.prepare(QStringLiteral(
             "SELECT t.membership_freshness,t.member_count,COUNT(e.email_id) FROM threads t LEFT "
@@ -72,7 +106,6 @@ namespace javelin::app
             return MessageListThreadMembersSnapshot{};
         }
 
-        javelin::jmap::cache::QueryService queryService{connection};
         auto itemsResult =
             mailboxId.has_value()
                 ? queryService.listMailboxThreadMessages(accountId, *mailboxId, threadId)

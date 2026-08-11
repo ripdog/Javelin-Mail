@@ -99,6 +99,12 @@ namespace javelin::jmap::cache
         bool enumerationComplete = false;
     };
 
+    enum class MailboxThreadMembershipSource
+    {
+        NormalizedThread,
+        CompleteOfflineMailbox,
+    };
+
     class QueryReader
     {
       public:
@@ -112,6 +118,8 @@ namespace javelin::jmap::cache
                             javelin::jmap::query::EmailListSort sort = {}) const = 0;
         [[nodiscard]] virtual std::variant<std::optional<OfflineMailboxCoverage>, DatabaseError>
         offlineMailboxCoverage(std::string_view accountId, std::string_view mailboxId) const = 0;
+        [[nodiscard]] virtual std::variant<bool, DatabaseError>
+        offlineMailboxComplete(std::string_view accountId, std::string_view mailboxId) const = 0;
         [[nodiscard]] virtual std::variant<std::optional<std::string>, DatabaseError>
         completeOfflineMailboxQueryState(std::string_view accountId, std::string_view mailboxId,
                                          std::string_view canonicalQueryKey) const = 0;
@@ -173,7 +181,9 @@ namespace javelin::jmap::cache
         listThreadMessages(std::string_view accountId, std::string_view threadId) const = 0;
         [[nodiscard]] virtual std::variant<std::vector<MessageListItem>, DatabaseError>
         listMailboxThreadMessages(std::string_view accountId, std::string_view mailboxId,
-                                  std::string_view threadId) const = 0;
+                                  std::string_view threadId,
+                                  MailboxThreadMembershipSource membershipSource =
+                                      MailboxThreadMembershipSource::NormalizedThread) const = 0;
     };
 
 } // namespace javelin::jmap::cache

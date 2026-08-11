@@ -24,6 +24,9 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::variant<std::optional<OfflineMailboxCoverage>, DatabaseError>
         offlineMailboxCoverage(std::string_view accountId,
                                std::string_view mailboxId) const override;
+        [[nodiscard]] std::variant<bool, DatabaseError>
+        offlineMailboxComplete(std::string_view accountId,
+                               std::string_view mailboxId) const override;
         [[nodiscard]] std::variant<std::optional<std::string>, DatabaseError>
         completeOfflineMailboxQueryState(std::string_view accountId, std::string_view mailboxId,
                                          std::string_view canonicalQueryKey) const override;
@@ -88,8 +91,10 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         listThreadMessages(std::string_view accountId, std::string_view threadId) const override;
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
-        listMailboxThreadMessages(std::string_view accountId, std::string_view mailboxId,
-                                  std::string_view threadId) const override;
+        listMailboxThreadMessages(
+            std::string_view accountId, std::string_view mailboxId, std::string_view threadId,
+            MailboxThreadMembershipSource membershipSource =
+                MailboxThreadMembershipSource::NormalizedThread) const override;
 
       private:
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>

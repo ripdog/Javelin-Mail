@@ -811,6 +811,24 @@ namespace javelin::jmap::cache
         }};
     }
 
+    std::variant<bool, DatabaseError>
+    QueryService::offlineMailboxComplete(const std::string_view accountId,
+                                         const std::string_view mailboxId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT EXISTS(SELECT 1 FROM offline_mailbox_scopes WHERE account_id=:account "
+            "AND mailbox_id=:mailbox AND desired=1 AND status='complete' AND "
+            "completed_generation=generation)"));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(std::string{mailboxId}));
+        if (!query.exec() || !query.next())
+            return makeQueryError(QStringLiteral("Read complete offline mailbox status"), query);
+        return query.value(0).toBool();
+    }
+
     std::variant<std::optional<std::string>, DatabaseError>
     QueryService::completeOfflineMailboxQueryState(const std::string_view accountId,
                                                    const std::string_view mailboxId,
@@ -1681,9 +1699,9 @@ namespace javelin::jmap::cache
     }
 
     std::variant<std::vector<MessageListItem>, DatabaseError>
-    QueryService::listMailboxThreadMessages(const std::string_view accountId,
-                                            const std::string_view mailboxId,
-                                            const std::string_view threadId) const
+    QueryService::listMailboxThreadMessages(
+        const std::string_view accountId, const std::string_view mailboxId,
+        const std::string_view threadId, const MailboxThreadMembershipSource membershipSource) const
     {
         if (const auto error = m_connection.validate())
         {
@@ -1691,7 +1709,7 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare(QStringLiteral(
+        const auto select = QStringLiteral(
             "SELECT e.email_id, e.thread_id, e.subject, e.preview, e.received_at, e.sent_at, "
             "       NULL AS mailbox_thread_message_count, e.has_attachment, "
             "       CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END AS is_unread, "
@@ -1714,19 +1732,32 @@ namespace javelin::jmap::cache
             "         WHERE a.account_id = :account_id AND a.email_id = e.email_id "
             "           AND a.field_name = 'from' "
             "         ORDER BY a.position LIMIT 1"
-            "       ) AS from_email "
-            "FROM thread_email_members thread_email "
-            "INNER JOIN emails e ON e.account_id = thread_email.account_id "
-            "     AND e.email_id = thread_email.email_id "
-            "INNER JOIN email_mailboxes em ON em.account_id = e.account_id "
-            "     AND em.email_id = e.email_id AND em.mailbox_id = :mailbox_id "
+            "       ) AS from_email ");
+        const auto source =
+            membershipSource == MailboxThreadMembershipSource::CompleteOfflineMailbox
+                ? QStringLiteral(
+                      "FROM emails e "
+                      "INNER JOIN email_mailboxes em ON em.account_id = e.account_id "
+                      "     AND em.email_id = e.email_id AND em.mailbox_id = :mailbox_id ")
+                : QStringLiteral(
+                      "FROM thread_email_members thread_email "
+                      "INNER JOIN emails e ON e.account_id = thread_email.account_id "
+                      "     AND e.email_id = thread_email.email_id "
+                      "INNER JOIN email_mailboxes em ON em.account_id = e.account_id "
+                      "     AND em.email_id = e.email_id AND em.mailbox_id = :mailbox_id ");
+        const auto joins = QStringLiteral(
             "LEFT JOIN email_keywords seen ON seen.account_id = e.account_id "
             "     AND seen.email_id = e.email_id AND seen.keyword = '$seen' "
             "LEFT JOIN email_keywords flagged ON flagged.account_id = e.account_id "
-            "     AND flagged.email_id = e.email_id AND flagged.keyword = '$flagged' "
-            "WHERE thread_email.account_id = :account_id "
-            "  AND thread_email.thread_id = :thread_id "
-            "ORDER BY thread_email.position ASC"));
+            "     AND flagged.email_id = e.email_id AND flagged.keyword = '$flagged' ");
+        const auto predicateAndOrder =
+            membershipSource == MailboxThreadMembershipSource::CompleteOfflineMailbox
+                ? QStringLiteral("WHERE e.account_id = :account_id AND e.thread_id = :thread_id "
+                                 "ORDER BY e.received_at ASC,e.email_id ASC")
+                : QStringLiteral("WHERE thread_email.account_id = :account_id "
+                                 "  AND thread_email.thread_id = :thread_id "
+                                 "ORDER BY thread_email.position ASC");
+        query.prepare(select + source + joins + predicateAndOrder);
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
         query.bindValue(QStringLiteral(":mailbox_id"),

@@ -1,5 +1,6 @@
 #include "jmap/cache/QueryService.h"
 #include "FixtureReader.h"
+#include "app/MessageListCacheRead.h"
 #include "app/MessageSelection.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailSearchIndex.h"
@@ -765,6 +766,59 @@ TEST_CASE("mailbox thread queries exclude members moved to another mailbox", "[j
     const auto incomplete = javelin::app::resolveMessageSelection(
         queryService, threadRepository, "account-1", "mbx-inbox", selection);
     CHECK(std::holds_alternative<QString>(incomplete));
+}
+
+TEST_CASE("complete offline mailbox threads resolve and expand without normalized membership",
+          "[jmap][cache][query][offline][thread-materialization]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    auto inbox = loadMailboxFixture();
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    REQUIRE_FALSE(mailboxes.replaceAll("account-1", {inbox}).has_value());
+
+    auto older = loadEmailFixture();
+    older.id = "offline-older";
+    older.threadId = "offline-thread";
+    older.mailboxIds = {inbox.id};
+    older.receivedAt = "2026-03-30T06:06:00Z";
+    auto newer = older;
+    newer.id = "offline-newer";
+    newer.receivedAt = "2026-04-01T21:56:00Z";
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(emails.replaceAll("account-1", {older, newer}).has_value());
+
+    QSqlQuery scope{databaseContext.connection.database()};
+    REQUIRE(scope.exec(QStringLiteral(
+        "INSERT INTO offline_mailbox_scopes(account_id,mailbox_id,desired,status,generation,"
+        "completed_generation) VALUES('account-1','mbx-inbox',1,'complete',4,4)")));
+    QSqlQuery membership{databaseContext.connection.database()};
+    REQUIRE(membership.exec(QStringLiteral(
+        "INSERT INTO offline_mailbox_membership(account_id,mailbox_id,email_id,generation,"
+        "position) VALUES('account-1','mbx-inbox','offline-older',4,0),"
+        "('account-1','mbx-inbox','offline-newer',4,1)")));
+    javelin::jmap::cache::QueryService queries{databaseContext.connection};
+    javelin::jmap::cache::ThreadRepository threads{databaseContext.connection};
+    const javelin::app::MessageSelection selection{
+        javelin::app::SelectedCollapsedThread{.threadId = "offline-thread"}};
+    const auto resolved = javelin::app::resolveMessageSelection(queries, threads, "account-1",
+                                                                "mbx-inbox", selection);
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(resolved));
+    CHECK(std::get<std::vector<std::string>>(resolved) ==
+          std::vector<std::string>{"offline-older", "offline-newer"});
+
+    const auto snapshot = javelin::app::loadMessageListThreadMembers(
+        databaseContext.connection.database().databaseName(), "account-1", "mbx-inbox",
+        "offline-thread");
+    REQUIRE(std::holds_alternative<javelin::app::MessageListThreadMembersSnapshot>(snapshot));
+    const auto& members = std::get<javelin::app::MessageListThreadMembersSnapshot>(snapshot);
+    REQUIRE(members.complete);
+    REQUIRE(members.items.size() == 2);
+    CHECK(members.items[0].emailId == "offline-older");
+    CHECK(members.items[1].emailId == "offline-newer");
 }
 
 TEST_CASE("mailbox window summaries stay representative-only as thread coverage completes",

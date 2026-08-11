@@ -14,6 +14,7 @@ namespace javelin::app
     {
         std::vector<std::string> emailIds;
         std::unordered_set<std::string> seen;
+        std::optional<bool> completeOfflineMailbox;
         const auto appendEmailId = [&emailIds, &seen](const std::string_view emailId)
         {
             if (!emailId.empty() && seen.emplace(emailId).second)
@@ -31,6 +32,28 @@ namespace javelin::app
             }
 
             const auto& thread = std::get<SelectedCollapsedThread>(item);
+            if (mailboxId.has_value() && !completeOfflineMailbox.has_value())
+            {
+                const auto stateResult = queryReader.offlineMailboxComplete(accountId, *mailboxId);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&stateResult))
+                    return error->message;
+                completeOfflineMailbox = std::get<bool>(stateResult);
+            }
+            if (completeOfflineMailbox.value_or(false))
+            {
+                const auto messagesResult = queryReader.listMailboxThreadMessages(
+                    accountId, *mailboxId, thread.threadId,
+                    javelin::jmap::cache::MailboxThreadMembershipSource::CompleteOfflineMailbox);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&messagesResult))
+                    return error->message;
+                const auto& messages =
+                    std::get<std::vector<javelin::jmap::cache::MessageListItem>>(messagesResult);
+                for (const auto& member : messages)
+                    appendEmailId(member.emailId);
+                continue;
+            }
             const auto coverageResult = threadRepository.coverage(accountId, thread.threadId);
             if (const auto* error =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&coverageResult))

@@ -1590,6 +1590,22 @@ namespace javelin::jmap
         const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
         if (const auto* error = std::get_if<OperationError>(&sessionResult))
             co_return *error;
+        const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
+        const auto requestLimits = javelin::jmap::api::coreRequestLimits(session);
+        if (!requestLimits.has_value())
+        {
+            co_return OperationError{
+                .message = QStringLiteral("The cached JMAP session has invalid request limits."),
+            };
+        }
+        const auto boundedLimit = static_cast<std::size_t>(std::min<std::uint64_t>(
+            requestLimits->maxObjectsInGet, static_cast<std::uint64_t>(limit)));
+        if (boundedLimit == 0)
+        {
+            co_return OperationError{
+                .message = QStringLiteral("Full mailbox page size must be greater than zero."),
+            };
+        }
 
         javelin::jmap::api::MethodCaller caller{*m_impl->methodTransport};
         javelin::jmap::api::RequestBuilder builder;
@@ -1604,7 +1620,7 @@ namespace javelin::jmap
                             : std::optional<std::uint64_t>{static_cast<std::uint64_t>(position)},
             .anchor = std::move(anchor),
             .anchorOffset = static_cast<std::int64_t>(position),
-            .limit = static_cast<std::uint64_t>(limit),
+            .limit = static_cast<std::uint64_t>(boundedLimit),
             .collapseThreads = false,
             .calculateTotal = true,
         });
@@ -1628,10 +1644,8 @@ namespace javelin::jmap
             };
         }
         const auto getHandle = builder.call(*getRequest, "full-mailbox-get");
-        const auto envelopeResult = co_await caller.call(
-            buildApiRequestContext(settings, accountId,
-                                   std::get<javelin::jmap::api::Session>(sessionResult)),
-            builder);
+        const auto envelopeResult =
+            co_await caller.call(buildApiRequestContext(settings, accountId, session), builder);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
             co_return operationError(*error);
         if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))

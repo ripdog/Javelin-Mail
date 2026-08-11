@@ -512,7 +512,7 @@ TEST_CASE("JmapCore reports missing message source downloads distinctly",
     CHECK(unavailable.message.contains(QStringLiteral("HTTP 404")));
 }
 
-TEST_CASE("JmapCore full mailbox pages do not request unsafe server previews",
+TEST_CASE("JmapCore full mailbox pages stay uncollapsed and within negotiated get limits",
           "[jmap][core][offline]")
 {
     ApplicationGuard application;
@@ -520,7 +520,10 @@ TEST_CASE("JmapCore full mailbox pages do not request unsafe server previews",
 
     auto databaseContext = makeDatabaseContext();
     javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
-    REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
+    auto session = loadSessionFixture();
+    REQUIRE(session.capabilities.coreDetails.has_value());
+    session.capabilities.coreDetails->maxObjectsInGet = 1;
+    REQUIRE_FALSE(sessions.replace("u1", session).has_value());
 
     FakeTransport transport;
     transport.responseFactory = [](const javelin::jmap::api::HttpRequest& request)
@@ -529,6 +532,11 @@ TEST_CASE("JmapCore full mailbox pages do not request unsafe server previews",
         REQUIRE(envelope.ok());
         REQUIRE(envelope.value.has_value());
         REQUIRE(envelope.value->methodCalls.size() == 2);
+        const QString queryArguments =
+            QString::fromStdString(envelope.value->methodCalls[0].arguments);
+        const auto queryObject = QJsonDocument::fromJson(queryArguments.toUtf8()).object();
+        CHECK_FALSE(queryObject.value(QStringLiteral("collapseThreads")).toBool(true));
+        CHECK(queryObject.value(QStringLiteral("limit")).toInteger() == 1);
         const QString getArguments =
             QString::fromStdString(envelope.value->methodCalls[1].arguments);
         CHECK(getArguments.contains(QStringLiteral("\"subject\"")));

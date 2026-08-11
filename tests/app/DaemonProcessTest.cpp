@@ -866,6 +866,21 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     CHECK(materializedSummary->total == std::optional<std::size_t>{1});
 
     REQUIRE_FALSE(threads.markStale("account-1", std::vector<std::string>{"thread-1"}).has_value());
+    QSqlQuery offlineScope{connection.database()};
+    REQUIRE(offlineScope.exec(QStringLiteral(
+        "INSERT INTO offline_mailbox_scopes(account_id,mailbox_id,desired,status,generation,"
+        "completed_generation) VALUES('account-1','archive',1,'complete',3,3)")));
+    const auto offlineFlagged = QCoro::waitFor(
+        services.mailService().queueSetMessagesFlagged("account-1", "archive",
+                                                       {javelin::app::SelectedCollapsedThread{
+                                                           .threadId = "thread-1",
+                                                       }},
+                                                       true));
+    const auto* offlineSummary =
+        std::get_if<javelin::app::QueuedMessageSelectionMutation>(&offlineFlagged);
+    REQUIRE(offlineSummary != nullptr);
+    CHECK(offlineSummary->queuedEmailCount == 2);
+
     const auto unavailable = QCoro::waitFor(
         services.mailService().queueSetMessagesFlagged("account-1", std::nullopt,
                                                        {javelin::app::SelectedCollapsedThread{
@@ -876,7 +891,7 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     QSqlQuery mutationCount{connection.database()};
     REQUIRE(mutationCount.exec(QStringLiteral("SELECT COUNT(*) FROM mutation_journal")));
     REQUIRE(mutationCount.next());
-    CHECK(mutationCount.value(0).toInt() == 2);
+    CHECK(mutationCount.value(0).toInt() == 4);
 }
 
 TEST_CASE("daemon rejects requests after shutdown without pretending to be offline",
