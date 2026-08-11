@@ -40,6 +40,14 @@ Email fan-out. Representatives, active-projection rebasing, and exact complete q
 commit atomically, so sparse cached children are neither required for rendering nor mistaken for
 authoritative mailbox membership.
 
+Phase 4 is complete. A daemon-owned `ThreadMaterializationCoordinator` now derives targets from
+committed mailbox and search windows, coalesces duplicate Thread ids per account, exposes exact
+interactive ensure/priority escalation, and restores incomplete targets from durable window and
+Thread freshness state after restart. Its queue uses a scheduler-owned transient admission path, so
+prefetch obeys foreground quiet periods and account serialization without creating Task Center
+jobs. Start and terminal signals provide the narrow materialization lifecycle event; Phase 5 plugs
+the bounded `Thread/get` worker into the coordinator's execution seam.
+
 The target architecture is:
 
 ```text

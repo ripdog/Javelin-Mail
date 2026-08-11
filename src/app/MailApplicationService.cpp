@@ -3,6 +3,7 @@
 #include "app/ApplicationErrorCoordinator.h"
 #include "app/MailboxMaintenanceRegistry.h"
 #include "app/StateChangePolicy.h"
+#include "app/ThreadMaterializationCoordinator.h"
 #include "app/WorkScheduler.h"
 #include "app/undo/HistoryTypes.h"
 #include "app/undo/UndoManager.h"
@@ -506,9 +507,25 @@ namespace javelin::app
                 m_errorCoordinator.forgetConnection(connectionId);
         }
         restoreContactRefreshJobs();
+        if (m_threadMaterializationCoordinator != nullptr)
+        {
+            for (const auto& accountId : configuredAccountIds)
+            {
+                if (const auto error =
+                        m_threadMaterializationCoordinator->restoreAccount(accountId))
+                    qWarning().noquote() << "Could not restore Thread materialization targets"
+                                         << QString::fromStdString(accountId) << error->message;
+            }
+        }
         scheduleTagDeletionPump();
         if (accountConfigurationsChanged)
             refreshConfiguredSessions();
+    }
+
+    void MailApplicationService::setThreadMaterializationCoordinator(
+        ThreadMaterializationCoordinator* coordinator)
+    {
+        m_threadMaterializationCoordinator = coordinator;
     }
 
     void MailApplicationService::setAuthenticationRefreshHandler(
@@ -933,6 +950,17 @@ namespace javelin::app
         });
     }
 
+    void MailApplicationService::publishThreadMaterializationCommitted(QString accountId)
+    {
+        Q_EMIT cacheCommitted(MailCacheChange{
+            .accountId = std::move(accountId),
+            .mailboxIds = {},
+            .queryWindows = {},
+            .searchWindows = {},
+            .hasNewMail = false,
+        });
+    }
+
     QCoro::Task<MailboxWindowResult>
     MailApplicationService::requestMailboxWindow(MailboxWindowIntent intent)
     {
@@ -991,6 +1019,15 @@ namespace javelin::app
                     (!offlineState.has_value() || (*cached)->queryState == *offlineState);
                 if (projectedDisplayCurrent || authoritativeCurrent)
                 {
+                    if (m_threadMaterializationCoordinator != nullptr)
+                    {
+                        if (const auto error =
+                                m_threadMaterializationCoordinator->enqueueMailboxWindow(
+                                    intent.accountId, queryKey, intent.offset, intent.limit))
+                            qWarning().noquote()
+                                << "Could not enqueue cached mailbox Thread materialization"
+                                << error->message;
+                    }
                     co_return MailboxWindowSummary{
                         .accountId = std::move(intent.accountId),
                         .mailboxId = std::move(intent.mailboxId),
@@ -1094,6 +1131,13 @@ namespace javelin::app
         m_errorCoordinator.reportSuccess(configuration->second.settings.connectionId);
 
         auto page = std::get<javelin::jmap::MailboxPageSummary>(std::move(result));
+        if (m_threadMaterializationCoordinator != nullptr)
+        {
+            if (const auto error = m_threadMaterializationCoordinator->enqueueMailboxWindow(
+                    page.accountId, queryKey, page.offset, page.limit))
+                qWarning().noquote()
+                    << "Could not enqueue mailbox Thread materialization" << error->message;
+        }
         MailboxWindowSummary summary{
             .accountId = page.accountId,
             .mailboxId = page.mailboxId,
@@ -1260,6 +1304,13 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .message = i18n("The search tab has been closed."),
             };
+        }
+        if (m_threadMaterializationCoordinator != nullptr)
+        {
+            if (const auto error = m_threadMaterializationCoordinator->enqueueSearchWindow(
+                    page.accountId, queryKey, page.offset, page.limit))
+                qWarning().noquote()
+                    << "Could not enqueue search Thread materialization" << error->message;
         }
         SearchWindowSummary summary{
             .accountId = page.accountId,
@@ -3859,7 +3910,29 @@ namespace javelin::app
                 [this, accountId](const auto status)
                 { Q_EMIT accountStatusChanged(QString::fromStdString(accountId), status); });
         connect(&coordinator, &AccountSyncCoordinator::cacheCommitted, this,
-                &MailApplicationService::cacheCommitted);
+                [this](const MailCacheChange& change)
+                {
+                    if (m_threadMaterializationCoordinator != nullptr)
+                    {
+                        for (const auto& window : change.queryWindows)
+                        {
+                            const auto queryKey = javelin::jmap::sync::mailboxQueryKey({
+                                .mailboxId = window.mailboxId.toStdString(),
+                                .sortProperty = "receivedAt",
+                                .isAscending = false,
+                                .collapseThreads = true,
+                            });
+                            if (const auto error =
+                                    m_threadMaterializationCoordinator->enqueueMailboxWindow(
+                                        change.accountId.toStdString(), queryKey, window.offset,
+                                        window.limit))
+                                qWarning().noquote()
+                                    << "Could not enqueue refreshed mailbox Thread materialization"
+                                    << error->message;
+                        }
+                    }
+                    Q_EMIT cacheCommitted(change);
+                });
         connect(&coordinator, &AccountSyncCoordinator::contactStateChanged, this,
                 [this](const QString& ownerAccountId, const auto& changedStates)
                 {

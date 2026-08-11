@@ -153,6 +153,7 @@ The principal runtime objects are:
 | `CommandDispatcher` | daemon | Admits stateful commands, preserves command identity, and separates rejection from later failure |
 | `SettingsRepository` | daemon | Owns the canonical revisioned settings snapshot and migration |
 | `WorkScheduler` | daemon | Prioritizes foreground, synchronization, indexing, offline, and maintenance work |
+| `ThreadMaterializationCoordinator` | daemon | Coalesces transient Thread targets from committed query windows and admits prefetch or interactive demand without persistent job rows |
 | `DaemonBackgroundController` | daemon | Owns notifications, reminders, delayed-send actions, network recovery, and tray integration |
 | `GuiDaemonSession` | GUI | Connects, negotiates protocol/build identity, handles reconnect, and coordinates cache barriers |
 | `GuiServices` | GUI | Constructs read-only repositories and typed remote application-port adapters |

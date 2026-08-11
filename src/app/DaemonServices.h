@@ -70,6 +70,7 @@ namespace javelin::app
     class MessageNavigationPort;
     class MessageNavigationCoordinator;
     class MailApplicationService;
+    class ThreadMaterializationCoordinator;
 } // namespace javelin::app
 
 namespace javelin::app::undo
@@ -168,6 +169,7 @@ namespace javelin::app
         [[nodiscard]] ApplicationErrorCoordinator& errorCoordinator();
         [[nodiscard]] CalendarNotificationService& calendarNotificationService();
         [[nodiscard]] WorkScheduler& workScheduler();
+        [[nodiscard]] ThreadMaterializationCoordinator& threadMaterializationCoordinator();
         [[nodiscard]] LocalMaintenanceService& localMaintenanceService();
         [[nodiscard]] DeveloperDiagnosticsPort& developerDiagnosticsPort();
         [[nodiscard]] DeveloperMaintenancePort& developerMaintenancePort();
@@ -240,6 +242,7 @@ namespace javelin::app
         std::unique_ptr<MessageNavigationCoordinator> m_messageNavigationCoordinator;
         std::unique_ptr<CalendarNotificationService> m_calendarNotificationService;
         std::unique_ptr<WorkScheduler> m_workScheduler;
+        std::unique_ptr<ThreadMaterializationCoordinator> m_threadMaterializationCoordinator;
         std::unique_ptr<MailIndexService> m_mailIndexService;
         std::unique_ptr<FullMailSyncService> m_fullMailSyncService;
         std::unique_ptr<LocalMaintenanceService> m_localMaintenanceService;

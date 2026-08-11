@@ -27,6 +27,7 @@
 #include "app/MessageListSessionFactoryService.h"
 #include "app/MessageNavigationCoordinator.h"
 #include "app/SieveCommandService.h"
+#include "app/ThreadMaterializationCoordinator.h"
 #include "app/UndoCommandService.h"
 #include "app/WorkScheduler.h"
 #include "app/undo/AddressBookHistoryExecutor.h"
@@ -110,6 +111,8 @@ namespace javelin::app
         m_cacheAccessBarrier = std::make_unique<CacheAccessBarrier>();
         m_mailboxMaintenanceRegistry = std::make_unique<MailboxMaintenanceRegistry>();
         m_workScheduler = std::make_unique<WorkScheduler>(m_databaseConnection);
+        m_threadMaterializationCoordinator = std::make_unique<ThreadMaterializationCoordinator>(
+            m_databaseConnection, *m_workScheduler);
         m_localMaintenanceService =
             std::make_unique<LocalMaintenanceService>(m_databaseConnection, *m_workScheduler);
         javelin::jmap::sync::MutationJournalRepository mutationJournal{m_databaseConnection};
@@ -180,6 +183,16 @@ namespace javelin::app
             *m_queryService, *m_contactRepository, *m_contactService, *m_calendarService,
             *m_sieveService, *m_errorCoordinator, *m_workScheduler, *m_mailboxMaintenanceRegistry,
             *m_undoManager);
+        m_mailService->setThreadMaterializationCoordinator(
+            m_threadMaterializationCoordinator.get());
+        QObject::connect(
+            m_threadMaterializationCoordinator.get(),
+            &ThreadMaterializationCoordinator::materializationFinished, m_mailService.get(),
+            [this](QString accountId, const QStringList&, const bool successful, const QString&)
+            {
+                if (successful)
+                    m_mailService->publishThreadMaterializationCommitted(std::move(accountId));
+            });
         m_developerMaintenanceService = std::make_unique<DeveloperMaintenanceService>(
             location.databasePath, location.vaultRootPath, *m_mailboxMaintenanceRegistry,
             *m_mailService, *m_workScheduler,
@@ -469,6 +482,11 @@ namespace javelin::app
     WorkScheduler& DaemonServices::workScheduler()
     {
         return *m_workScheduler;
+    }
+
+    ThreadMaterializationCoordinator& DaemonServices::threadMaterializationCoordinator()
+    {
+        return *m_threadMaterializationCoordinator;
     }
 
     LocalMaintenanceService& DaemonServices::localMaintenanceService()

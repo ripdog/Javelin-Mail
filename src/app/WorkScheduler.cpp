@@ -350,6 +350,63 @@ namespace javelin::app
         return admission;
     }
 
+    std::optional<WorkAdmission> WorkScheduler::admitTransient(std::string jobId,
+                                                               std::optional<std::string> accountId,
+                                                               const WorkPriority priority)
+    {
+        if (m_admissions.contains(jobId) || m_admissions.size() >= m_maxConcurrentAdmissions ||
+            (accountId.has_value() && m_activeAccounts.contains(*accountId)) ||
+            (static_cast<int>(priority) < static_cast<int>(WorkPriority::Foreground) &&
+             !mayStartBackgroundNetwork()))
+        {
+            ++m_admissionMetrics.rejected;
+            return std::nullopt;
+        }
+
+        const auto records = list();
+        const auto* queued = std::get_if<std::vector<WorkRecord>>(&records);
+        if (queued == nullptr)
+        {
+            ++m_admissionMetrics.rejected;
+            return std::nullopt;
+        }
+        const auto higherPriorityJob = std::ranges::find_if(
+            *queued,
+            [this, priority](const WorkRecord& candidate)
+            {
+                if (candidate.status != WorkStatus::Queued || candidate.pauseRequested)
+                    return false;
+                if (static_cast<int>(candidate.priority) <
+                        static_cast<int>(WorkPriority::Foreground) &&
+                    !mayStartBackgroundNetwork())
+                    return false;
+                if (candidate.accountId.has_value() &&
+                    m_activeAccounts.contains(*candidate.accountId))
+                    return false;
+                return static_cast<int>(candidate.priority) >= static_cast<int>(priority);
+            });
+        if (higherPriorityJob != queued->end())
+        {
+            ++m_admissionMetrics.rejected;
+            return std::nullopt;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        WorkAdmission admission{
+            .jobId = std::move(jobId),
+            .accountId = std::move(accountId),
+            .priority = priority,
+            .sequence = m_nextAdmissionSequence++,
+            .admittedAt = now,
+        };
+        m_admissions.emplace(admission.jobId, admission);
+        if (admission.accountId.has_value())
+            ++m_activeAccounts[*admission.accountId];
+        ++m_admissionMetrics.admitted;
+        Q_EMIT foregroundAvailabilityChanged();
+        return admission;
+    }
+
     void WorkScheduler::release(const std::string_view jobId)
     {
         const auto found = m_admissions.find(std::string{jobId});

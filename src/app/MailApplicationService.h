@@ -51,6 +51,7 @@ namespace javelin::app
 {
     class ApplicationErrorCoordinator;
     class MailboxMaintenanceRegistry;
+    class ThreadMaterializationCoordinator;
     class WorkScheduler;
 
     class MailboxObservation;
@@ -98,6 +99,7 @@ namespace javelin::app
                                QObject* parent = nullptr);
 
         void applySettings(std::vector<AccountSyncConfiguration> configurations);
+        void setThreadMaterializationCoordinator(ThreadMaterializationCoordinator* coordinator);
         void
         setAuthenticationRefreshHandler(javelin::jmap::auth::AccessTokenRefreshHandler handler);
         void networkBecameReachable();
@@ -120,6 +122,7 @@ namespace javelin::app
         void publishMailboxWindowCommitted(QString accountId, QString mailboxId, std::size_t offset,
                                            std::size_t limit);
         void publishMessageContentCommitted(QString accountId, QString emailId);
+        void publishThreadMaterializationCommitted(QString accountId);
         [[nodiscard]] QCoro::Task<MailboxWindowResult>
         requestMailboxWindow(MailboxWindowIntent intent) override;
         [[nodiscard]] QCoro::Task<SearchWindowResult>
@@ -320,6 +323,7 @@ namespace javelin::app
         ApplicationErrorCoordinator& m_errorCoordinator;
         WorkScheduler& m_workScheduler;
         MailboxMaintenanceRegistry& m_mailboxMaintenanceRegistry;
+        ThreadMaterializationCoordinator* m_threadMaterializationCoordinator = nullptr;
         javelin::jmap::auth::AccessTokenRefreshHandler m_authenticationRefreshHandler;
         javelin::app::undo::UndoManager& m_undoManager;
         struct VisibleCalendarRange

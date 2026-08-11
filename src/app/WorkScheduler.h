@@ -90,6 +90,9 @@ namespace javelin::app
         find(std::string_view jobId) const;
 
         [[nodiscard]] std::optional<WorkAdmission> admit(std::string_view jobId);
+        [[nodiscard]] std::optional<WorkAdmission>
+        admitTransient(std::string jobId, std::optional<std::string> accountId,
+                       WorkPriority priority);
         void release(std::string_view jobId);
         void recordTransactionDuration(std::chrono::microseconds duration);
         void recordForegroundAdmissionLatency(std::chrono::microseconds duration);
