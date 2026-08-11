@@ -2080,6 +2080,40 @@ namespace javelin::jmap::cache
                                            "mailbox_create_projections(account_id,creation_id)"),
                         },
                 },
+                MigrationStep{
+                    .version = 47,
+                    .name = QStringLiteral("normalized_thread_membership"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "ALTER TABLE threads ADD COLUMN membership_freshness TEXT NOT "
+                                "NULL DEFAULT 'current' CHECK(membership_freshness IN "
+                                "('current','stale'))"),
+                            QStringLiteral(
+                                "ALTER TABLE threads ADD COLUMN member_count INTEGER NOT NULL "
+                                "DEFAULT 0 CHECK(member_count>=0)"),
+                            QStringLiteral("UPDATE threads SET "
+                                           "member_count=json_array_length(email_ids_json)"),
+                            QStringLiteral(
+                                "CREATE TABLE thread_email_members (account_id TEXT NOT NULL,"
+                                "thread_id TEXT NOT NULL,position INTEGER NOT NULL "
+                                "CHECK(position>=0),"
+                                "email_id TEXT NOT NULL,PRIMARY KEY(account_id,thread_id,email_id),"
+                                "FOREIGN KEY(account_id,thread_id) REFERENCES "
+                                "threads(account_id,thread_id) ON DELETE CASCADE) STRICT"),
+                            QStringLiteral(
+                                "INSERT INTO thread_email_members(account_id,thread_id,position,"
+                                "email_id) SELECT t.account_id,t.thread_id,CAST(member.key AS "
+                                "INTEGER),member.value FROM threads t CROSS JOIN "
+                                "json_each(t.email_ids_json) member"),
+                            QStringLiteral(
+                                "CREATE UNIQUE INDEX idx_thread_email_members_position ON "
+                                "thread_email_members(account_id,thread_id,position)"),
+                            QStringLiteral("CREATE INDEX idx_thread_email_members_email ON "
+                                           "thread_email_members(account_id,email_id)"),
+                            QStringLiteral("ALTER TABLE threads DROP COLUMN email_ids_json"),
+                        },
+                },
             },
         };
     }

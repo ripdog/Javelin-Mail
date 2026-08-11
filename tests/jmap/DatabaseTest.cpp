@@ -142,6 +142,89 @@ TEST_CASE("database migrations are repeatable when reopening an existing cache",
     CHECK(connection.schemaVersion() == runner.latestVersion());
 }
 
+TEST_CASE("thread membership migration normalizes JSON members in order",
+          "[jmap][cache][database][thread-coverage]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+    const QString databasePath =
+        temporaryDir.filePath(QStringLiteral("legacy-thread-cache.sqlite3"));
+    const QString fixtureConnectionName = makeConnectionName();
+    {
+        QSqlDatabase fixture =
+            QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), fixtureConnectionName);
+        fixture.setDatabaseName(databasePath);
+        REQUIRE(fixture.open());
+
+        const auto currentRunner = javelin::jmap::cache::createDefaultMigrationRunner();
+        REQUIRE(currentRunner.steps().size() >= 2);
+        std::vector<javelin::jmap::cache::MigrationStep> legacySteps{
+            currentRunner.steps().begin(), currentRunner.steps().end() - 1};
+        const javelin::jmap::cache::MigrationRunner legacyRunner{std::move(legacySteps)};
+        const auto migrationError = legacyRunner.migrate(fixture);
+        REQUIRE_FALSE(migrationError.has_value());
+
+        QSqlQuery seed{fixture};
+        REQUIRE(seed.exec(QStringLiteral(
+            "INSERT INTO accounts(account_id,email_address,session_url,is_primary) "
+            "VALUES('account-1','alice@example.test','https://example.test/jmap',1)")));
+        REQUIRE(seed.exec(
+            QStringLiteral("INSERT INTO threads(account_id,thread_id,email_ids_json,state) "
+                           "VALUES('account-1','thread-1','[\"email-2\",\"email-1\",\"email-3\"]',"
+                           "'thread-state-1')")));
+        seed.finish();
+        fixture.close();
+    }
+    QSqlDatabase::removeDatabase(fixtureConnectionName);
+
+    auto migratedResult = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = databasePath,
+    });
+    if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
+        FAIL(error->message.toStdString());
+    auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
+
+    QSqlQuery columns{migrated.database()};
+    REQUIRE(columns.exec(QStringLiteral("PRAGMA table_info(threads)")));
+    bool hasLegacyJson = false;
+    bool hasFreshness = false;
+    bool hasMemberCount = false;
+    while (columns.next())
+    {
+        const auto name = columns.value(1).toString();
+        hasLegacyJson = hasLegacyJson || name == QStringLiteral("email_ids_json");
+        hasFreshness = hasFreshness || name == QStringLiteral("membership_freshness");
+        hasMemberCount = hasMemberCount || name == QStringLiteral("member_count");
+    }
+    CHECK_FALSE(hasLegacyJson);
+    CHECK(hasFreshness);
+    CHECK(hasMemberCount);
+
+    QSqlQuery thread{migrated.database()};
+    REQUIRE(
+        thread.exec(QStringLiteral("SELECT membership_freshness,member_count,state FROM threads "
+                                   "WHERE account_id='account-1' AND thread_id='thread-1'")));
+    REQUIRE(thread.next());
+    CHECK(thread.value(0).toString() == QStringLiteral("current"));
+    CHECK(thread.value(1).toInt() == 3);
+    CHECK(thread.value(2).toString() == QStringLiteral("thread-state-1"));
+
+    QSqlQuery members{migrated.database()};
+    REQUIRE(members.exec(QStringLiteral(
+        "SELECT position,email_id FROM thread_email_members WHERE account_id='account-1' AND "
+        "thread_id='thread-1' ORDER BY position")));
+    std::vector<std::pair<int, QString>> orderedMembers;
+    while (members.next())
+        orderedMembers.emplace_back(members.value(0).toInt(), members.value(1).toString());
+    CHECK(orderedMembers == std::vector<std::pair<int, QString>>{{0, QStringLiteral("email-2")},
+                                                                 {1, QStringLiteral("email-1")},
+                                                                 {2, QStringLiteral("email-3")}});
+}
+
 TEST_CASE("GUI database factory opens an existing cache read-only", "[jmap][cache][database]")
 {
     ApplicationGuard application;

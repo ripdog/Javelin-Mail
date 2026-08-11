@@ -606,7 +606,8 @@ namespace javelin::jmap
             }
 
             javelin::jmap::cache::ThreadRepository threadRepository{databaseConnection};
-            if (const auto error = threadRepository.upsertMany(accountId, parsedThreads.list))
+            if (const auto error =
+                    threadRepository.upsertMany(accountId, parsedThreads.list, parsedThreads.state))
             {
                 co_return javelin::jmap::operationError(*error);
             }

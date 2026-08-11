@@ -765,6 +765,7 @@ TEST_CASE("query service rehydrates cached representative rows by email id order
     first.threadId = "thr-1";
     first.receivedAt = "2026-04-05T11:22:33Z";
     first.keywords = {"$seen"};
+    first.hasAttachment = false;
 
     auto second = first;
     second.id = "eml-2";
@@ -782,8 +783,23 @@ TEST_CASE("query service rehydrates cached representative rows by email id order
     third.keywords = {"$junk"};
     third.mailboxIds = {"mbx-inbox", "mbx-archive"};
 
+    auto nonMember = first;
+    nonMember.id = "eml-not-a-member";
+    nonMember.threadId = "thr-1";
+    nonMember.hasAttachment = true;
+
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
-    REQUIRE_FALSE(emailRepository.replaceAll("account-1", {first, second, third}).has_value());
+    REQUIRE_FALSE(
+        emailRepository.replaceAll("account-1", {first, second, third, nonMember}).has_value());
+
+    javelin::jmap::cache::ThreadRepository threadRepository{databaseContext.connection};
+    REQUIRE_FALSE(threadRepository
+                      .replaceAll("account-1",
+                                  {
+                                      {.id = "thr-1", .emailIds = {"eml-1", "eml-2"}},
+                                      {.id = "thr-2", .emailIds = {"eml-3"}},
+                                  })
+                      .has_value());
 
     javelin::jmap::cache::QueryService queryService{databaseContext.connection};
     const auto result = queryService.listMessagesByEmailIds("account-1", {"eml-3", "eml-2"});
@@ -801,6 +817,7 @@ TEST_CASE("query service rehydrates cached representative rows by email id order
     CHECK(items[1].emailId == "eml-2");
     CHECK(items[1].threadId == "thr-1");
     CHECK(items[1].threadMessageCount == 2);
+    CHECK_FALSE(items[1].hasAttachment);
     CHECK(items[1].isUnread);
     CHECK(items[1].isFlagged);
     CHECK(items[1].isJunk);

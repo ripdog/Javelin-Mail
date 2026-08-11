@@ -3,8 +3,8 @@
 ## Status
 
 This document is the accepted implementation plan for replacing unbounded collapsed-thread fan-out
-with a split foreground/background materialization model. Implementation has not landed yet. It
-records the product decisions agreed before implementation and should be updated as phases land.
+with a split foreground/background materialization model. Implementation is in progress. It records
+the product decisions agreed before implementation and is updated as phases land.
 
 Phase 0 is complete. Deterministic `maxObjectsInGet = 2` fixtures now cover both collapsed-page
 implementations: canonical watched-mailbox refresh and the shared continuation/server-search page
@@ -17,6 +17,13 @@ window totals, mailbox-scoped expansion, whole-conversation server-search expans
 selection continuity, notification activation/navigation policy, complete-offline browsing,
 collapsed-thread action selection and resolution, and mail Undo/Redo. Later phases should evolve
 these assertions rather than removing the protected behavior.
+
+Phase 1 is complete. Migration 47 replaces `threads.email_ids_json` with ordered
+`thread_email_members` rows and records membership freshness, global member count, and associated
+Thread state on `threads`. `ThreadRepository` now atomically replaces membership, preserves stale
+snapshots, resolves reverse membership, reports missing child Emails and coverage, and only reports
+a mailbox-local member count when coverage proves it. Operational Thread membership readers in
+`QueryService` now use the normalized table, including ordered expansion and list aggregation.
 
 The target architecture is:
 

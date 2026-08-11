@@ -343,6 +343,7 @@ namespace javelin::jmap::sync
         {
             std::string queryState;
             std::string emailState;
+            std::string threadState;
             std::vector<std::string> representativeIds;
             std::vector<javelin::jmap::domain::Thread> threads;
             std::vector<javelin::jmap::domain::Email> emails;
@@ -497,6 +498,7 @@ namespace javelin::jmap::sync
                 co_return CollapsedMailboxFetch{
                     .queryState = parsedQuery.queryState,
                     .emailState = {},
+                    .threadState = {},
                     .representativeIds = {},
                     .threads = {},
                     .emails = {},
@@ -541,6 +543,7 @@ namespace javelin::jmap::sync
             co_return CollapsedMailboxFetch{
                 .queryState = parsedQuery.queryState,
                 .emailState = parsedEmails.state,
+                .threadState = parsedThreads.state,
                 .representativeIds = parsedQuery.ids,
                 .threads = parsedThreads.list,
                 .emails = parsedEmails.list,
@@ -1254,8 +1257,8 @@ namespace javelin::jmap::sync
             }
 
             javelin::jmap::cache::ThreadRepository threadRepository{m_databaseConnection};
-            if (const auto error =
-                    threadRepository.upsertMany(cacheTransaction, accountId, fetch.threads))
+            if (const auto error = threadRepository.upsertMany(cacheTransaction, accountId,
+                                                               fetch.threads, fetch.threadState))
                 co_return javelin::jmap::operationError(*error);
             if (const auto error =
                     emailRepository.upsertMany(cacheTransaction, accountId, fetch.emails))
