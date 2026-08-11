@@ -110,11 +110,18 @@ namespace javelin::gui::messages
             {
                 return {};
             }
-            const auto threadCount =
-                index.data(MessageListModel::ThreadMessageCountRole).toULongLong();
+            const auto threadCount = index.data(MessageListModel::ThreadMessageCountRole);
+            if (!threadCount.isValid())
+            {
+                return i18nc("@action:button open conversation", "Replies");
+            }
             // threadCount includes the parent summary row itself; replies are the rest.
-            const auto replyCount =
-                threadCount > 0 ? static_cast<qulonglong>(threadCount - 1) : qulonglong{0};
+            const auto count = threadCount.toULongLong();
+            if (count <= 1)
+            {
+                return i18nc("@action:button open conversation", "Replies");
+            }
+            const auto replyCount = count > 0 ? static_cast<qulonglong>(count - 1) : qulonglong{0};
             return i18np("%1 reply", "%1 replies", replyCount);
         }
 

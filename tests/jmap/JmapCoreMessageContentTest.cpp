@@ -721,7 +721,8 @@ TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thre
     REQUIRE(summary.results.size() == 1);
     CHECK(summary.results.front().emailId == "eml-2");
     CHECK(summary.results.front().threadId == "thr-1");
-    CHECK(summary.results.front().threadMessageCount == 2);
+    CHECK_FALSE(summary.results.front().mailboxThreadMessageCount.has_value());
+    CHECK(summary.results.front().globalThreadMessageCount == std::optional<std::uint64_t>{2});
     CHECK(summary.results.front().isUnread);
     CHECK(summary.results.front().isFlagged);
     REQUIRE(summary.results.front().from.has_value());

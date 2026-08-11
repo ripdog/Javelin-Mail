@@ -53,11 +53,10 @@ namespace javelin::gui::messages
             auto threadId = index.data(MessageListModel::ThreadIdRole).toString().toStdString();
             const auto rowKind = static_cast<MessageListModel::RowKind>(
                 index.data(MessageListModel::RowKindRole).toInt());
-            const auto threadMessageCount =
-                index.data(MessageListModel::ThreadMessageCountRole).toULongLong();
             const bool collapsedThreadSummary =
                 rowKind == MessageListModel::RowKind::ThreadSummary &&
-                !index.data(MessageListModel::IsExpandedRole).toBool() && threadMessageCount > 1;
+                !index.data(MessageListModel::IsExpandedRole).toBool() &&
+                index.data(MessageListModel::CanExpandRole).toBool();
             if (collapsedThreadSummary)
             {
                 if (!threadId.empty() && seenThreadIds.insert(threadId).second)

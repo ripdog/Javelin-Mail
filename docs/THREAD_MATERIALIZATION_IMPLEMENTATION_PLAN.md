@@ -25,6 +25,14 @@ snapshots, resolves reverse membership, reports missing child Emails and coverag
 a mailbox-local member count when coverage proves it. Operational Thread membership readers in
 `QueryService` now use the normalized table, including ordered expansion and list aggregation.
 
+Phase 2 is complete. Message-list rows now carry independent optional mailbox-local and global
+Thread counts. Representative Email data is the sole source for row subject, preview, sender, date,
+unread, flagged, attachment, tags, and similar state. Mailbox counts remain unknown until complete
+Thread or complete-offline mailbox coverage proves them, while a known multi-message global Thread
+still enables expansion. Accessibility and reply controls avoid presenting the global count as an
+exact mailbox-local count, and authoritative query-window representatives remain stable as newer
+children are hydrated.
+
 The target architecture is:
 
 ```text

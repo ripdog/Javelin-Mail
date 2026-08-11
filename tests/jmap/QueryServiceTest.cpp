@@ -185,12 +185,14 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     first.threadId = "thr-1";
     first.subject = "Alpha thread";
     first.keywords = {"$flagged"};
+    first.hasAttachment = true;
     auto second = first;
     second.id = "eml-2";
     second.threadId = "thr-1";
     second.receivedAt = "2026-04-06T11:22:33Z";
     second.subject = "Beta thread";
     second.keywords = {"$seen"};
+    second.hasAttachment = false;
     second.mailboxIds = {"mbx-inbox", "mbx-junk"};
     auto third = first;
     third.id = "eml-3";
@@ -201,6 +203,14 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
 
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
     REQUIRE_FALSE(emailRepository.replaceAll("account-1", {first, second, third}).has_value());
+    javelin::jmap::cache::ThreadRepository threadRepository{databaseContext.connection};
+    REQUIRE_FALSE(threadRepository
+                      .replaceAll("account-1",
+                                  {
+                                      {.id = "thr-1", .emailIds = {first.id, second.id}},
+                                      {.id = "thr-2", .emailIds = {third.id}},
+                                  })
+                      .has_value());
 
     QSqlQuery vaultSeed{databaseContext.connection.database()};
     REQUIRE(vaultSeed.exec(
@@ -222,9 +232,11 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     REQUIRE(firstItems.size() == 1);
     CHECK(firstItems.front().emailId == "eml-2");
     CHECK(firstItems.front().threadId == "thr-1");
-    CHECK(firstItems.front().threadMessageCount == 2);
-    CHECK(firstItems.front().isUnread);
-    CHECK(firstItems.front().isFlagged);
+    CHECK(firstItems.front().mailboxThreadMessageCount == std::optional<std::uint64_t>{2});
+    CHECK(firstItems.front().globalThreadMessageCount == std::optional<std::uint64_t>{2});
+    CHECK_FALSE(firstItems.front().hasAttachment);
+    CHECK_FALSE(firstItems.front().isUnread);
+    CHECK_FALSE(firstItems.front().isFlagged);
     CHECK(firstItems.front().isJunk);
     CHECK(firstItems.front().bodyPreview ==
           std::optional<std::string>{"Body-derived plaintext preview"});
@@ -236,7 +248,8 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     REQUIRE(secondItems.size() == 1);
     CHECK(secondItems.front().emailId == "eml-3");
     CHECK(secondItems.front().threadId == "thr-2");
-    CHECK(secondItems.front().threadMessageCount == 1);
+    CHECK(secondItems.front().mailboxThreadMessageCount == std::optional<std::uint64_t>{1});
+    CHECK(secondItems.front().globalThreadMessageCount == std::optional<std::uint64_t>{1});
     CHECK_FALSE(secondItems.front().isUnread);
     CHECK_FALSE(secondItems.front().isFlagged);
     CHECK_FALSE(secondItems.front().isJunk);
@@ -497,6 +510,10 @@ TEST_CASE("offline mailbox coverage exposes only the published crawl generation 
     CHECK(page[0].emailId == "staged-newest");
     CHECK(page[1].emailId == "staged-second");
     CHECK(page[2].emailId == "projected-addition");
+    CHECK(std::ranges::all_of(page, [](const auto& item)
+                              { return !item.mailboxThreadMessageCount.has_value(); }));
+    CHECK(std::ranges::all_of(page, [](const auto& item)
+                              { return !item.globalThreadMessageCount.has_value(); }));
     CHECK(std::ranges::none_of(page,
                                [](const auto& item) { return item.emailId == "old-window-only"; }));
 
@@ -688,7 +705,8 @@ TEST_CASE("mailbox thread queries exclude members moved to another mailbox", "[j
         std::get<std::vector<javelin::jmap::cache::MessageListItem>>(mailboxPage);
     REQUIRE(summaries.size() == 1);
     CHECK(summaries.front().emailId == "eml-inbox");
-    CHECK(summaries.front().threadMessageCount == 1);
+    CHECK(summaries.front().mailboxThreadMessageCount == std::optional<std::uint64_t>{1});
+    CHECK(summaries.front().globalThreadMessageCount == std::optional<std::uint64_t>{2});
 
     const std::string queryKey = "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true";
     javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
@@ -713,7 +731,8 @@ TEST_CASE("mailbox thread queries exclude members moved to another mailbox", "[j
         std::get<std::optional<javelin::jmap::cache::MailboxWindowPage>>(cachedWindow);
     REQUIRE(cachedPage.has_value());
     REQUIRE(cachedPage->items.size() == 1);
-    CHECK(cachedPage->items.front().threadMessageCount == 1);
+    CHECK(cachedPage->items.front().mailboxThreadMessageCount == std::optional<std::uint64_t>{1});
+    CHECK(cachedPage->items.front().globalThreadMessageCount == std::optional<std::uint64_t>{2});
 
     const auto mailboxThread =
         queryService.listMailboxThreadMessages("account-1", "mbx-inbox", "thr-1");
@@ -735,6 +754,88 @@ TEST_CASE("mailbox thread queries exclude members moved to another mailbox", "[j
         javelin::app::resolveMessageSelection(queryService, "account-1", "mbx-inbox", selection);
     REQUIRE(std::holds_alternative<std::vector<std::string>>(resolved));
     CHECK(std::get<std::vector<std::string>>(resolved) == std::vector<std::string>{"eml-inbox"});
+}
+
+TEST_CASE("mailbox window summaries stay representative-only as thread coverage completes",
+          "[jmap][cache][query][pagination][thread-coverage]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    auto inbox = loadMailboxFixture();
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    REQUIRE_FALSE(mailboxes.replaceAll("account-1", {inbox}).has_value());
+
+    auto representative = loadEmailFixture();
+    representative.id = "representative";
+    representative.threadId = "thread-1";
+    representative.mailboxIds = {inbox.id};
+    representative.receivedAt = "2026-08-01T10:00:00Z";
+    representative.keywords = {"$seen"};
+    representative.hasAttachment = false;
+
+    auto newerChild = representative;
+    newerChild.id = "newer-child";
+    newerChild.receivedAt = "2026-08-02T10:00:00Z";
+    newerChild.keywords = {"$flagged"};
+    newerChild.hasAttachment = true;
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(emails.replaceAll("account-1", {representative}).has_value());
+    javelin::jmap::cache::ThreadRepository threads{databaseContext.connection};
+    REQUIRE_FALSE(threads
+                      .replaceAll("account-1", {{.id = "thread-1",
+                                                 .emailIds = {representative.id, newerChild.id}}})
+                      .has_value());
+
+    const std::string queryKey = "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true";
+    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = inbox.id,
+                          .queryKey = queryKey,
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 1,
+                          .total = 1,
+                          .queryState = "query-state-1",
+                          .emailIds = {representative.id},
+                      })
+                      .has_value());
+
+    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
+    const auto partialResult = queryService.loadMailboxWindow("account-1", queryKey, 0, 100, {});
+    const auto* partial =
+        std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&partialResult);
+    REQUIRE(partial != nullptr);
+    REQUIRE(partial->has_value());
+    REQUIRE((*partial)->items.size() == 1);
+    const auto& partialItem = (*partial)->items.front();
+    CHECK(partialItem.emailId == representative.id);
+    CHECK_FALSE(partialItem.mailboxThreadMessageCount.has_value());
+    CHECK(partialItem.globalThreadMessageCount == std::optional<std::uint64_t>{2});
+    CHECK_FALSE(partialItem.hasAttachment);
+    CHECK_FALSE(partialItem.isUnread);
+    CHECK_FALSE(partialItem.isFlagged);
+
+    REQUIRE_FALSE(emails.upsertMany("account-1", {newerChild}).has_value());
+    const auto completeResult = queryService.loadMailboxWindow("account-1", queryKey, 0, 100, {});
+    const auto* complete =
+        std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&completeResult);
+    REQUIRE(complete != nullptr);
+    REQUIRE(complete->has_value());
+    REQUIRE((*complete)->items.size() == 1);
+    const auto& completeItem = (*complete)->items.front();
+    CHECK(completeItem.emailId == representative.id);
+    CHECK(completeItem.mailboxThreadMessageCount == std::optional<std::uint64_t>{2});
+    CHECK(completeItem.globalThreadMessageCount == std::optional<std::uint64_t>{2});
+    CHECK_FALSE(completeItem.hasAttachment);
+    CHECK_FALSE(completeItem.isUnread);
+    CHECK_FALSE(completeItem.isFlagged);
 }
 
 TEST_CASE("query service rehydrates cached representative rows by email id order",
@@ -809,14 +910,16 @@ TEST_CASE("query service rehydrates cached representative rows by email id order
     REQUIRE(items.size() == 2);
     CHECK(items[0].emailId == "eml-3");
     CHECK(items[0].threadId == "thr-2");
-    CHECK(items[0].threadMessageCount == 1);
+    CHECK_FALSE(items[0].mailboxThreadMessageCount.has_value());
+    CHECK(items[0].globalThreadMessageCount == std::optional<std::uint64_t>{1});
     CHECK(items[0].isUnread);
     CHECK_FALSE(items[0].isFlagged);
     CHECK_FALSE(items[0].isJunk);
     CHECK(items[0].mailboxNames == std::vector<std::string>{"Inbox", "Archive"});
     CHECK(items[1].emailId == "eml-2");
     CHECK(items[1].threadId == "thr-1");
-    CHECK(items[1].threadMessageCount == 2);
+    CHECK_FALSE(items[1].mailboxThreadMessageCount.has_value());
+    CHECK(items[1].globalThreadMessageCount == std::optional<std::uint64_t>{2});
     CHECK_FALSE(items[1].hasAttachment);
     CHECK(items[1].isUnread);
     CHECK(items[1].isFlagged);
@@ -872,7 +975,8 @@ TEST_CASE("query service finds a mailbox email without requiring a cached thread
     REQUIRE(item.has_value());
     CHECK(item->emailId == selected.id);
     CHECK(item->threadId == selected.threadId);
-    CHECK(item->threadMessageCount == 2);
+    CHECK_FALSE(item->mailboxThreadMessageCount.has_value());
+    CHECK_FALSE(item->globalThreadMessageCount.has_value());
     CHECK_FALSE(item->isUnread);
 
     const auto missing = queryService.findMailboxMessage("account-1", inbox.id, archived.id);

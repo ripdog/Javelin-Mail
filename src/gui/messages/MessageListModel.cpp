@@ -52,7 +52,8 @@ namespace javelin::gui::messages
                    left.subject == right.subject && left.preview == right.preview &&
                    left.bodyPreview == right.bodyPreview && left.receivedAt == right.receivedAt &&
                    left.sentAt == right.sentAt &&
-                   left.threadMessageCount == right.threadMessageCount &&
+                   left.mailboxThreadMessageCount == right.mailboxThreadMessageCount &&
+                   left.globalThreadMessageCount == right.globalThreadMessageCount &&
                    left.hasAttachment == right.hasAttachment && left.isUnread == right.isUnread &&
                    left.isFlagged == right.isFlagged && left.isJunk == right.isJunk &&
                    sameAddress(left.from, right.from) && left.mailboxNames == right.mailboxNames &&
@@ -130,10 +131,20 @@ namespace javelin::gui::messages
                 parts.push_back(i18nc("@info accessible message state", "Starred"));
             if (item.hasAttachment)
                 parts.push_back(i18nc("@info accessible message state", "Has attachment"));
-            if (row.kind == RowKind::ThreadSummary && item.threadMessageCount > 1)
+            const bool canExpand = item.mailboxThreadMessageCount.value_or(0) > 1 ||
+                                   item.globalThreadMessageCount.value_or(0) > 1;
+            if (row.kind == RowKind::ThreadSummary && canExpand)
             {
-                parts.push_back(i18np("%1 message in conversation", "%1 messages in conversation",
-                                      item.threadMessageCount));
+                if (item.mailboxThreadMessageCount.has_value())
+                {
+                    parts.push_back(i18np("%1 message in this mailbox",
+                                          "%1 messages in this mailbox",
+                                          *item.mailboxThreadMessageCount));
+                }
+                else
+                {
+                    parts.push_back(i18nc("@info accessible conversation", "Conversation"));
+                }
                 parts.push_back(isThreadExpanded(item.threadId)
                                     ? i18nc("@info accessible conversation state", "Expanded")
                                     : i18nc("@info accessible conversation state", "Collapsed"));
@@ -230,7 +241,16 @@ namespace javelin::gui::messages
 
         if (role == ThreadMessageCountRole)
         {
-            return static_cast<qulonglong>(item.threadMessageCount);
+            return item.mailboxThreadMessageCount.has_value()
+                       ? QVariant{static_cast<qulonglong>(*item.mailboxThreadMessageCount)}
+                       : QVariant{};
+        }
+
+        if (role == GlobalThreadMessageCountRole)
+        {
+            return item.globalThreadMessageCount.has_value()
+                       ? QVariant{static_cast<qulonglong>(*item.globalThreadMessageCount)}
+                       : QVariant{};
         }
 
         if (role == RowKindRole)
@@ -245,7 +265,9 @@ namespace javelin::gui::messages
 
         if (role == CanExpandRole)
         {
-            return row.kind == RowKind::ThreadSummary && item.threadMessageCount > 1;
+            return row.kind == RowKind::ThreadSummary &&
+                   (item.mailboxThreadMessageCount.value_or(0) > 1 ||
+                    item.globalThreadMessageCount.value_or(0) > 1);
         }
 
         if (role == MailboxNamesRole)
@@ -523,7 +545,7 @@ namespace javelin::gui::messages
                     const QModelIndex summaryIndex = index(*summaryRow, 0);
                     Q_EMIT dataChanged(summaryIndex, summaryIndex,
                                        {IsExpandedRole, CanExpandRole, ThreadMessageCountRole,
-                                        Qt::AccessibleTextRole});
+                                        GlobalThreadMessageCountRole, Qt::AccessibleTextRole});
                 }
                 return true;
             }
@@ -551,9 +573,9 @@ namespace javelin::gui::messages
             }
             endInsertRows();
             const QModelIndex summaryIndex = index(*summaryRow, 0);
-            Q_EMIT dataChanged(
-                summaryIndex, summaryIndex,
-                {IsExpandedRole, CanExpandRole, ThreadMessageCountRole, Qt::AccessibleTextRole});
+            Q_EMIT dataChanged(summaryIndex, summaryIndex,
+                               {IsExpandedRole, CanExpandRole, ThreadMessageCountRole,
+                                GlobalThreadMessageCountRole, Qt::AccessibleTextRole});
             return true;
         }
 
@@ -575,7 +597,7 @@ namespace javelin::gui::messages
                 const QModelIndex summaryIndex = index(*existingSummaryRow, 0);
                 Q_EMIT dataChanged(summaryIndex, summaryIndex,
                                    {IsExpandedRole, CanExpandRole, ThreadMessageCountRole,
-                                    Qt::AccessibleTextRole});
+                                    GlobalThreadMessageCountRole, Qt::AccessibleTextRole});
             }
             return true;
         }
@@ -585,9 +607,9 @@ namespace javelin::gui::messages
                      m_rows.begin() + (*summaryRow + 1 + memberCount));
         endRemoveRows();
         const QModelIndex summaryIndex = index(*summaryRow, 0);
-        Q_EMIT dataChanged(
-            summaryIndex, summaryIndex,
-            {IsExpandedRole, CanExpandRole, ThreadMessageCountRole, Qt::AccessibleTextRole});
+        Q_EMIT dataChanged(summaryIndex, summaryIndex,
+                           {IsExpandedRole, CanExpandRole, ThreadMessageCountRole,
+                            GlobalThreadMessageCountRole, Qt::AccessibleTextRole});
         return true;
     }
 
@@ -751,7 +773,7 @@ namespace javelin::gui::messages
                     const QModelIndex summaryIndex = index(*summaryRow, 0);
                     Q_EMIT dataChanged(summaryIndex, summaryIndex,
                                        {IsExpandedRole, CanExpandRole, ThreadMessageCountRole,
-                                        Qt::AccessibleTextRole});
+                                        GlobalThreadMessageCountRole, Qt::AccessibleTextRole});
                 }
             });
         watcher->setFuture(QtConcurrent::run(javelin::app::loadMessageListThreadMembers,

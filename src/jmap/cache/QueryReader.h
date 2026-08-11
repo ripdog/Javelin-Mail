@@ -35,7 +35,8 @@ namespace javelin::jmap::cache
         std::optional<std::string> bodyPreview = std::nullopt;
         std::string receivedAt;
         std::optional<std::string> sentAt;
-        std::uint64_t threadMessageCount = 1;
+        std::optional<std::uint64_t> mailboxThreadMessageCount = std::nullopt;
+        std::optional<std::uint64_t> globalThreadMessageCount = std::nullopt;
         bool hasAttachment = false;
         bool isUnread = false;
         bool isFlagged = false;

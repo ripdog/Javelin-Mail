@@ -22,6 +22,8 @@ namespace
                       javelin::gui::messages::MessageListModel::RowKindRole);
         item->setData(threadMessageCount,
                       javelin::gui::messages::MessageListModel::ThreadMessageCountRole);
+        item->setData(threadMessageCount > 1,
+                      javelin::gui::messages::MessageListModel::CanExpandRole);
         item->setData(expanded, javelin::gui::messages::MessageListModel::IsExpandedRole);
         item->setData(unread, javelin::gui::messages::MessageListModel::IsUnreadRole);
         return item;

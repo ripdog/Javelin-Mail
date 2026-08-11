@@ -22,7 +22,8 @@ namespace
             .preview = std::nullopt,
             .receivedAt = {},
             .sentAt = std::nullopt,
-            .threadMessageCount = 1,
+            .mailboxThreadMessageCount = 1,
+            .globalThreadMessageCount = 1,
             .hasAttachment = false,
             .isUnread = unread,
             .isFlagged = false,
@@ -110,7 +111,8 @@ TEST_CASE("message list model exposes painted message state to accessibility",
     accessible.subject = "Quarterly update";
     accessible.preview = "The preview text";
     accessible.receivedAt = "2026-08-10T08:15:00+12:00";
-    accessible.threadMessageCount = 2;
+    accessible.mailboxThreadMessageCount = 2;
+    accessible.globalThreadMessageCount = 2;
     accessible.hasAttachment = true;
     accessible.isFlagged = true;
     accessible.from =
@@ -130,11 +132,35 @@ TEST_CASE("message list model exposes painted message state to accessibility",
     CHECK(text.contains(QStringLiteral("Unread")));
     CHECK(text.contains(QStringLiteral("Starred")));
     CHECK(text.contains(QStringLiteral("Has attachment")));
-    CHECK(text.contains(QStringLiteral("2 messages in conversation")));
+    CHECK(text.contains(QStringLiteral("2 messages in this mailbox")));
     CHECK(text.contains(QStringLiteral("Work")));
     CHECK(text.contains(QStringLiteral("Inbox, Projects")));
     CHECK(model.data(index, Qt::AccessibleDescriptionRole).toString() ==
           QStringLiteral("Preview: The preview text"));
+}
+
+TEST_CASE("message list model expands a known conversation without an exact mailbox count",
+          "[gui][messages][model][accessibility][thread-coverage]")
+{
+    javelin::jmap::cache::DatabaseConnection connection;
+    javelin::jmap::cache::QueryService queryService{connection};
+    javelin::gui::messages::MessageListModel model{queryService};
+
+    auto conversation = item("email-1", "thread-1");
+    conversation.mailboxThreadMessageCount.reset();
+    conversation.globalThreadMessageCount = 3;
+    model.setItems(std::optional<std::string>{"account-1"}, std::optional<std::string>{"mailbox-1"},
+                   {std::move(conversation)});
+
+    const auto index = model.index(0);
+    CHECK(model.data(index, javelin::gui::messages::MessageListModel::CanExpandRole).toBool());
+    CHECK_FALSE(model.data(index, javelin::gui::messages::MessageListModel::ThreadMessageCountRole)
+                    .isValid());
+    CHECK(model.data(index, javelin::gui::messages::MessageListModel::GlobalThreadMessageCountRole)
+              .toULongLong() == 3);
+    const auto accessibleText = model.data(index, Qt::AccessibleTextRole).toString();
+    CHECK(accessibleText.contains(QStringLiteral("Conversation")));
+    CHECK_FALSE(accessibleText.contains(QStringLiteral("3 messages")));
 }
 
 TEST_CASE("message list model marks one cached row read without resetting its list",

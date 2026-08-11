@@ -389,7 +389,7 @@ namespace javelin::jmap
 
         [[nodiscard]] javelin::jmap::cache::MessageListItem
         messageListItemFromEmail(const javelin::jmap::domain::Email& email,
-                                 const std::size_t threadMessageCount)
+                                 const std::optional<std::uint64_t> globalThreadMessageCount)
         {
             return javelin::jmap::cache::MessageListItem{
                 .emailId = email.id,
@@ -398,7 +398,8 @@ namespace javelin::jmap
                 .preview = email.preview,
                 .receivedAt = email.receivedAt,
                 .sentAt = email.sentAt,
-                .threadMessageCount = threadMessageCount,
+                .mailboxThreadMessageCount = std::nullopt,
+                .globalThreadMessageCount = globalThreadMessageCount,
                 .hasAttachment = email.hasAttachment,
                 .isUnread =
                     std::ranges::find(email.keywords, std::string{"$seen"}) == email.keywords.end(),
@@ -612,11 +613,12 @@ namespace javelin::jmap
                 co_return javelin::jmap::operationError(*error);
             }
 
-            std::unordered_map<std::string, std::size_t> threadMessageCounts;
+            std::unordered_map<std::string, std::uint64_t> threadMessageCounts;
             threadMessageCounts.reserve(parsedThreads.list.size());
             for (const auto& thread : parsedThreads.list)
             {
-                threadMessageCounts.emplace(thread.id, thread.emailIds.size());
+                threadMessageCounts.emplace(thread.id,
+                                            static_cast<std::uint64_t>(thread.emailIds.size()));
             }
 
             std::unordered_map<std::string, const javelin::jmap::domain::Email*>
@@ -640,8 +642,9 @@ namespace javelin::jmap
                 const auto* email = representativeIt->second;
                 const auto threadCountIt = threadMessageCounts.find(email->threadId);
                 results.push_back(messageListItemFromEmail(
-                    *email,
-                    threadCountIt == threadMessageCounts.end() ? 1 : threadCountIt->second));
+                    *email, threadCountIt == threadMessageCounts.end()
+                                ? std::nullopt
+                                : std::optional<std::uint64_t>{threadCountIt->second}));
             }
             if (results.size() != parsedQuery.ids.size())
             {

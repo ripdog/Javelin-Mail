@@ -32,6 +32,12 @@ namespace javelin::jmap::cache
             };
         }
 
+        [[nodiscard]] std::optional<std::uint64_t> optionalCount(const QVariant& value)
+        {
+            return value.isNull() ? std::nullopt
+                                  : std::optional<std::uint64_t>{value.toULongLong()};
+        }
+
         [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
         queryUserKeywords(const DatabaseReadView& connection, const std::string_view accountId,
                           const std::string_view mailboxId = {})
@@ -650,15 +656,26 @@ namespace javelin::jmap::cache
                 "         ROW_NUMBER() OVER (PARTITION BY e.thread_id "
                 "                            ORDER BY %2 %1, e.email_id %1) AS "
                 "thread_rank, "
-                "         COUNT(*) OVER (PARTITION BY e.thread_id) AS thread_message_count, "
-                "         MAX(e.has_attachment) OVER (PARTITION BY e.thread_id) AS "
-                "thread_has_attachment, "
-                "         MAX(CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END) OVER "
-                "             (PARTITION BY e.thread_id) AS thread_has_unread, "
-                "         MAX(CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END) OVER "
-                "             (PARTITION BY e.thread_id) AS thread_has_flagged "
+                "         (SELECT COUNT(mailbox_member.email_id) "
+                "          FROM thread_email_members member "
+                "          INNER JOIN email_mailboxes mailbox_member "
+                "            ON mailbox_member.account_id=member.account_id "
+                "            AND mailbox_member.email_id=member.email_id "
+                "            AND mailbox_member.mailbox_id=:mailbox_id "
+                "          WHERE member.account_id=e.account_id "
+                "            AND member.thread_id=e.thread_id) AS cached_mailbox_count, "
+                "         t.membership_freshness,t.member_count,"
+                "         (SELECT COUNT(cached.email_id) FROM thread_email_members member "
+                "          LEFT JOIN emails cached ON cached.account_id=member.account_id "
+                "            AND cached.email_id=member.email_id "
+                "          WHERE member.account_id=e.account_id "
+                "            AND member.thread_id=e.thread_id) AS cached_global_count,"
+                "         e.has_attachment,CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END "
+                "           AS is_unread,"
+                "         CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END AS is_flagged "
                 "  FROM mailbox_email_ids me "
                 "  CROSS JOIN emails e ON e.account_id = :account_id AND e.email_id = me.email_id "
+                "  LEFT JOIN threads t ON t.account_id=e.account_id AND t.thread_id=e.thread_id "
                 "  LEFT JOIN email_keywords seen ON seen.account_id = e.account_id "
                 "       AND seen.email_id = e.email_id AND seen.keyword = '$seen' "
                 "  LEFT JOIN email_keywords flagged ON flagged.account_id = e.account_id "
@@ -666,8 +683,9 @@ namespace javelin::jmap::cache
                 ") "
                 "SELECT rt.email_id, rt.thread_id, rt.subject, rt.preview, rt.received_at, "
                 "rt.sent_at, "
-                "rt.thread_message_count, rt.thread_has_attachment, rt.thread_has_unread, "
-                "rt.thread_has_flagged, "
+                "CASE WHEN rt.membership_freshness='current' "
+                " AND rt.member_count=rt.cached_global_count THEN rt.cached_mailbox_count "
+                " ELSE NULL END,rt.member_count,rt.has_attachment,rt.is_unread,rt.is_flagged, "
                 "EXISTS(SELECT 1 FROM email_mailboxes junk_membership "
                 "INNER JOIN mailboxes junk_mailbox "
                 "ON junk_mailbox.account_id=junk_membership.account_id "
@@ -721,22 +739,23 @@ namespace javelin::jmap::cache
                 .sentAt = query.value(5).isNull()
                               ? std::nullopt
                               : std::optional{query.value(5).toString().toStdString()},
-                .threadMessageCount = query.value(6).toULongLong(),
-                .hasAttachment = query.value(7).toInt() != 0,
-                .isUnread = query.value(8).toInt() != 0,
-                .isFlagged = query.value(9).toInt() != 0,
+                .mailboxThreadMessageCount = optionalCount(query.value(6)),
+                .globalThreadMessageCount = optionalCount(query.value(7)),
+                .hasAttachment = query.value(8).toInt() != 0,
+                .isUnread = query.value(9).toInt() != 0,
+                .isFlagged = query.value(10).toInt() != 0,
                 .from = std::nullopt,
                 .mailboxNames = {},
             };
 
-            item.isJunk = query.value(10).toInt() != 0;
-            if (!query.value(12).isNull())
+            item.isJunk = query.value(11).toInt() != 0;
+            if (!query.value(13).isNull())
             {
                 item.from = javelin::jmap::domain::EmailAddress{
-                    .name = query.value(11).isNull()
+                    .name = query.value(12).isNull()
                                 ? std::nullopt
-                                : std::optional{query.value(11).toString().toStdString()},
-                    .email = query.value(12).toString().toStdString(),
+                                : std::optional{query.value(12).toString().toStdString()},
+                    .email = query.value(13).toString().toStdString(),
                 };
             }
 
@@ -886,7 +905,10 @@ namespace javelin::jmap::cache
         QSqlQuery query{m_connection.database()};
         query.prepare(
             QStringLiteral(
-                "WITH candidates AS ("
+                "WITH scope AS ("
+                "  SELECT status='complete' AS mailbox_complete FROM offline_mailbox_scopes "
+                "  WHERE account_id=:account_id AND mailbox_id=:mailbox_id"
+                "),candidates AS ("
                 "  SELECT m.email_id FROM offline_mailbox_membership m "
                 "  INNER JOIN email_mailboxes em ON em.account_id=m.account_id "
                 "    AND em.email_id=m.email_id AND em.mailbox_id=m.mailbox_id "
@@ -902,22 +924,38 @@ namespace javelin::jmap::cache
                 "         %2 AS sort_key,"
                 "         ROW_NUMBER() OVER (PARTITION BY e.thread_id "
                 "           ORDER BY %2 %1,e.email_id %1) AS thread_rank,"
-                "         COUNT(*) OVER (PARTITION BY e.thread_id) AS thread_message_count,"
-                "         MAX(e.has_attachment) OVER (PARTITION BY e.thread_id) AS "
-                "thread_has_attachment,"
-                "         MAX(CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END) OVER "
-                "           (PARTITION BY e.thread_id) AS thread_has_unread,"
-                "         MAX(CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END) OVER "
-                "           (PARTITION BY e.thread_id) AS thread_has_flagged "
-                "  FROM candidates c INNER JOIN emails e ON e.account_id=:account_id "
+                "         COUNT(*) OVER (PARTITION BY e.thread_id) AS candidate_thread_count,"
+                "         scope.mailbox_complete,t.membership_freshness,t.member_count,"
+                "         (SELECT COUNT(cached.email_id) FROM thread_email_members member "
+                "          LEFT JOIN emails cached ON cached.account_id=member.account_id "
+                "            AND cached.email_id=member.email_id "
+                "          WHERE member.account_id=e.account_id "
+                "            AND member.thread_id=e.thread_id) AS cached_global_count,"
+                "         (SELECT COUNT(mailbox_member.email_id) "
+                "          FROM thread_email_members member "
+                "          INNER JOIN email_mailboxes mailbox_member "
+                "            ON mailbox_member.account_id=member.account_id "
+                "            AND mailbox_member.email_id=member.email_id "
+                "            AND mailbox_member.mailbox_id=:mailbox_id "
+                "          WHERE member.account_id=e.account_id "
+                "            AND member.thread_id=e.thread_id) AS normalized_mailbox_count,"
+                "         e.has_attachment,"
+                "         CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END AS is_unread,"
+                "         CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END AS is_flagged "
+                "  FROM candidates c CROSS JOIN scope "
+                "  INNER JOIN emails e ON e.account_id=:account_id "
                 "    AND e.email_id=c.email_id "
+                "  LEFT JOIN threads t ON t.account_id=e.account_id AND t.thread_id=e.thread_id "
                 "  LEFT JOIN email_keywords seen ON seen.account_id=e.account_id "
                 "    AND seen.email_id=e.email_id AND seen.keyword='$seen' "
                 "  LEFT JOIN email_keywords flagged ON flagged.account_id=e.account_id "
                 "    AND flagged.email_id=e.email_id AND flagged.keyword='$flagged'"
                 ") SELECT rt.email_id,rt.thread_id,rt.subject,rt.preview,rt.received_at,"
-                "rt.sent_at,rt.thread_message_count,rt.thread_has_attachment,"
-                "rt.thread_has_unread,rt.thread_has_flagged,"
+                "rt.sent_at,CASE WHEN rt.mailbox_complete THEN rt.candidate_thread_count "
+                " WHEN rt.membership_freshness='current' "
+                "  AND rt.member_count=rt.cached_global_count THEN rt.normalized_mailbox_count "
+                " ELSE NULL END,rt.member_count,rt.has_attachment,"
+                "rt.is_unread,rt.is_flagged,"
                 "EXISTS(SELECT 1 FROM email_mailboxes junk_membership "
                 "INNER JOIN mailboxes junk_mailbox "
                 "ON junk_mailbox.account_id=junk_membership.account_id "
@@ -957,21 +995,22 @@ namespace javelin::jmap::cache
                 .sentAt = query.value(5).isNull()
                               ? std::nullopt
                               : std::optional{query.value(5).toString().toStdString()},
-                .threadMessageCount = query.value(6).toULongLong(),
-                .hasAttachment = query.value(7).toInt() != 0,
-                .isUnread = query.value(8).toInt() != 0,
-                .isFlagged = query.value(9).toInt() != 0,
+                .mailboxThreadMessageCount = optionalCount(query.value(6)),
+                .globalThreadMessageCount = optionalCount(query.value(7)),
+                .hasAttachment = query.value(8).toInt() != 0,
+                .isUnread = query.value(9).toInt() != 0,
+                .isFlagged = query.value(10).toInt() != 0,
                 .from = std::nullopt,
                 .mailboxNames = {},
             };
-            item.isJunk = query.value(10).toInt() != 0;
-            if (!query.value(12).isNull())
+            item.isJunk = query.value(11).toInt() != 0;
+            if (!query.value(13).isNull())
             {
                 item.from = javelin::jmap::domain::EmailAddress{
-                    .name = query.value(11).isNull()
+                    .name = query.value(12).isNull()
                                 ? std::nullopt
-                                : std::optional{query.value(11).toString().toStdString()},
-                    .email = query.value(12).toString().toStdString(),
+                                : std::optional{query.value(12).toString().toStdString()},
+                    .email = query.value(13).toString().toStdString(),
                 };
             }
             items.push_back(std::move(item));
@@ -1010,19 +1049,11 @@ namespace javelin::jmap::cache
             "WITH requested AS MATERIALIZED ("
             "  SELECT value AS email_id, CAST(key AS INTEGER) AS sort_index "
             "  FROM json_each(:email_ids_json)"
-            "), requested_threads AS MATERIALIZED ("
-            "  SELECT DISTINCT e.thread_id FROM requested r "
-            "  CROSS JOIN emails e ON e.account_id=:account_id AND e.email_id=r.email_id"
             ") "
             "SELECT e.email_id, e.thread_id, e.subject, e.preview, e.received_at, e.sent_at, "
-            "       COALESCE(thread_record.member_count, 1) AS thread_message_count, "
-            "       COALESCE(thread_flags.thread_has_attachment, e.has_attachment) AS "
-            "thread_has_attachment, "
-            "       COALESCE(thread_flags.thread_has_unread, CASE WHEN seen.email_id IS NULL THEN "
-            "1 "
-            "ELSE 0 END) AS thread_has_unread, "
-            "       COALESCE(thread_flags.thread_has_flagged, CASE WHEN flagged.email_id IS NULL "
-            "THEN 0 ELSE 1 END) AS thread_has_flagged, "
+            "       NULL AS mailbox_thread_message_count, thread_record.member_count, "
+            "       e.has_attachment, CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END, "
+            "       CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END, "
             "       EXISTS(SELECT 1 FROM email_mailboxes junk_membership "
             "         INNER JOIN mailboxes junk_mailbox "
             "           ON junk_mailbox.account_id=junk_membership.account_id "
@@ -1056,23 +1087,6 @@ namespace javelin::jmap::cache
             "CROSS JOIN emails e ON e.account_id = :account_id AND e.email_id = r.email_id "
             "LEFT JOIN threads thread_record ON thread_record.account_id=e.account_id "
             "     AND thread_record.thread_id=e.thread_id "
-            "LEFT JOIN ("
-            "  SELECT e3.thread_id, MAX(e3.has_attachment) AS thread_has_attachment, "
-            "         MAX(CASE WHEN seen3.email_id IS NULL THEN 1 ELSE 0 END) AS "
-            "thread_has_unread, "
-            "         MAX(CASE WHEN flagged3.email_id IS NULL THEN 0 ELSE 1 END) AS "
-            "thread_has_flagged "
-            "  FROM requested_threads rt "
-            "  CROSS JOIN thread_email_members tm ON tm.account_id=:account_id "
-            "       AND tm.thread_id=rt.thread_id "
-            "  CROSS JOIN emails e3 ON e3.account_id=tm.account_id "
-            "       AND e3.email_id=tm.email_id "
-            "  LEFT JOIN email_keywords seen3 ON seen3.account_id = e3.account_id "
-            "       AND seen3.email_id = e3.email_id AND seen3.keyword = '$seen' "
-            "  LEFT JOIN email_keywords flagged3 ON flagged3.account_id = e3.account_id "
-            "       AND flagged3.email_id = e3.email_id AND flagged3.keyword = '$flagged' "
-            "  GROUP BY e3.thread_id"
-            ") AS thread_flags ON thread_flags.thread_id = e.thread_id "
             "LEFT JOIN email_keywords seen ON seen.account_id = e.account_id "
             "     AND seen.email_id = e.email_id AND seen.keyword = '$seen' "
             "LEFT JOIN email_keywords flagged ON flagged.account_id = e.account_id "
@@ -1103,26 +1117,27 @@ namespace javelin::jmap::cache
                 .sentAt = query.value(5).isNull()
                               ? std::nullopt
                               : std::optional{query.value(5).toString().toStdString()},
-                .threadMessageCount = query.value(6).toULongLong(),
-                .hasAttachment = query.value(7).toInt() != 0,
-                .isUnread = query.value(8).toInt() != 0,
-                .isFlagged = query.value(9).toInt() != 0,
+                .mailboxThreadMessageCount = optionalCount(query.value(6)),
+                .globalThreadMessageCount = optionalCount(query.value(7)),
+                .hasAttachment = query.value(8).toInt() != 0,
+                .isUnread = query.value(9).toInt() != 0,
+                .isFlagged = query.value(10).toInt() != 0,
                 .from = std::nullopt,
                 .mailboxNames = {},
             };
 
-            item.isJunk = query.value(10).toInt() != 0;
-            if (!query.value(12).isNull())
+            item.isJunk = query.value(11).toInt() != 0;
+            if (!query.value(13).isNull())
             {
                 item.from = javelin::jmap::domain::EmailAddress{
-                    .name = query.value(11).isNull()
+                    .name = query.value(12).isNull()
                                 ? std::nullopt
-                                : std::optional{query.value(11).toString().toStdString()},
-                    .email = query.value(12).toString().toStdString(),
+                                : std::optional{query.value(12).toString().toStdString()},
+                    .email = query.value(13).toString().toStdString(),
                 };
             }
 
-            if (const auto mailboxNamesJson = query.value(13).toString().toStdString();
+            if (const auto mailboxNamesJson = query.value(14).toString().toStdString();
                 !mailboxNamesJson.empty())
             {
                 static_cast<void>(glz::read_json(item.mailboxNames, mailboxNamesJson));
@@ -1147,23 +1162,20 @@ namespace javelin::jmap::cache
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "SELECT e.email_id, e.thread_id, e.subject, e.preview, e.received_at, e.sent_at, "
-            "       CASE WHEN EXISTS(SELECT 1 FROM threads t WHERE t.account_id=e.account_id "
-            "                         AND t.thread_id=e.thread_id) THEN "
-            "         (SELECT COUNT(*) FROM thread_email_members thread_member "
+            "       CASE WHEN t.membership_freshness='current' AND t.member_count=("
+            "         SELECT COUNT(cached.email_id) FROM thread_email_members thread_member "
+            "         LEFT JOIN emails cached ON cached.account_id=thread_member.account_id "
+            "           AND cached.email_id=thread_member.email_id "
+            "         WHERE thread_member.account_id=e.account_id "
+            "           AND thread_member.thread_id=e.thread_id"
+            "       ) THEN (SELECT COUNT(*) FROM thread_email_members thread_member "
             "          INNER JOIN email_mailboxes thread_membership "
             "            ON thread_membership.account_id=thread_member.account_id "
             "           AND thread_membership.email_id=thread_member.email_id "
             "           AND thread_membership.mailbox_id=:mailbox_id "
             "          WHERE thread_member.account_id=e.account_id "
-            "            AND thread_member.thread_id=e.thread_id) ELSE "
-            "         (SELECT COUNT(*) FROM emails thread_email "
-            "          INNER JOIN email_mailboxes thread_membership "
-            "            ON thread_membership.account_id=thread_email.account_id "
-            "           AND thread_membership.email_id=thread_email.email_id "
-            "           AND thread_membership.mailbox_id=:mailbox_id "
-            "          WHERE thread_email.account_id=e.account_id "
-            "            AND thread_email.thread_id=e.thread_id) "
-            "       END AS mailbox_thread_message_count, "
+            "            AND thread_member.thread_id=e.thread_id) ELSE NULL END,"
+            "       t.member_count, "
             "       e.has_attachment, "
             "       CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END AS is_unread, "
             "       CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END AS is_flagged, "
@@ -1181,6 +1193,7 @@ namespace javelin::jmap::cache
             "         WHERE a.account_id=:account_id AND a.email_id=e.email_id "
             "           AND a.field_name='from' ORDER BY a.position LIMIT 1) AS from_email "
             "FROM emails e "
+            "LEFT JOIN threads t ON t.account_id=e.account_id AND t.thread_id=e.thread_id "
             "INNER JOIN email_mailboxes selected_membership "
             "  ON selected_membership.account_id=e.account_id "
             " AND selected_membership.email_id=e.email_id "
@@ -1213,21 +1226,22 @@ namespace javelin::jmap::cache
             .sentAt = query.value(5).isNull()
                           ? std::nullopt
                           : std::optional{query.value(5).toString().toStdString()},
-            .threadMessageCount = query.value(6).toULongLong(),
-            .hasAttachment = query.value(7).toInt() != 0,
-            .isUnread = query.value(8).toInt() != 0,
-            .isFlagged = query.value(9).toInt() != 0,
+            .mailboxThreadMessageCount = optionalCount(query.value(6)),
+            .globalThreadMessageCount = optionalCount(query.value(7)),
+            .hasAttachment = query.value(8).toInt() != 0,
+            .isUnread = query.value(9).toInt() != 0,
+            .isFlagged = query.value(10).toInt() != 0,
             .from = std::nullopt,
             .mailboxNames = {},
         };
-        item.isJunk = query.value(10).toInt() != 0;
-        if (!query.value(12).isNull())
+        item.isJunk = query.value(11).toInt() != 0;
+        if (!query.value(13).isNull())
         {
             item.from = javelin::jmap::domain::EmailAddress{
-                .name = query.value(11).isNull()
+                .name = query.value(12).isNull()
                             ? std::nullopt
-                            : std::optional{query.value(11).toString().toStdString()},
-                .email = query.value(12).toString().toStdString(),
+                            : std::optional{query.value(12).toString().toStdString()},
+                .email = query.value(13).toString().toStdString(),
             };
         }
 
@@ -1243,6 +1257,7 @@ namespace javelin::jmap::cache
         const std::string_view accountId, const std::string_view mailboxId,
         const std::vector<std::string>& emailIds, javelin::jmap::query::EmailListSort sort) const
     {
+        Q_UNUSED(sort);
         if (const auto error = m_connection.validate())
             return *error;
         if (emailIds.empty())
@@ -1258,42 +1273,33 @@ namespace javelin::jmap::cache
             };
         }
 
-        const auto orderDirection = javelin::jmap::query::isAscending(sort)
-                                        ? QStringLiteral("ASC")
-                                        : QStringLiteral("DESC");
-        const auto sortKey = sortKeyExpression(sort.property);
         QSqlQuery query{m_connection.database()};
-        query.prepare(
-            QStringLiteral(
-                "WITH requested AS MATERIALIZED ("
-                "  SELECT value AS email_id,CAST(key AS INTEGER) AS window_position "
-                "  FROM json_each(:email_ids_json)"
-                "),requested_threads AS ("
-                "  SELECT r.window_position,r.email_id AS representative_email_id,e.thread_id "
-                "  FROM requested r "
-                "  CROSS JOIN emails e ON e.account_id=:account_id AND e.email_id=r.email_id"
-                "),member_ids AS ("
-                "  SELECT rt.window_position,tm.email_id FROM requested_threads rt "
-                "  CROSS JOIN thread_email_members tm ON tm.account_id=:account_id "
-                "    AND tm.thread_id=rt.thread_id "
-                "  UNION ALL "
-                "  SELECT rt.window_position,rt.representative_email_id FROM requested_threads rt "
-                "  WHERE NOT EXISTS(SELECT 1 FROM thread_email_members tm "
-                "    WHERE tm.account_id=:account_id AND tm.thread_id=rt.thread_id)"
-                "),ranked_members AS ("
-                "  SELECT mi.window_position,e.email_id,"
-                "         ROW_NUMBER() OVER (PARTITION BY mi.window_position "
-                "           ORDER BY %2 %1,e.email_id %1) AS thread_rank,"
-                "         COUNT(*) OVER (PARTITION BY mi.window_position) AS "
-                "mailbox_thread_message_count "
-                "  FROM member_ids mi "
-                "  CROSS JOIN emails e ON e.account_id=:account_id AND e.email_id=mi.email_id "
-                "  CROSS JOIN email_mailboxes em ON em.account_id=e.account_id "
-                "    AND em.email_id=e.email_id AND em.mailbox_id=:mailbox_id"
-                ") SELECT email_id,mailbox_thread_message_count "
-                "FROM ranked_members WHERE thread_rank=1 "
-                "ORDER BY window_position")
-                .arg(orderDirection, sortKey));
+        query.prepare(QStringLiteral(
+            "WITH requested AS MATERIALIZED ("
+            "  SELECT value AS email_id,CAST(key AS INTEGER) AS window_position "
+            "  FROM json_each(:email_ids_json)"
+            ") SELECT r.email_id,"
+            "  CASE WHEN t.membership_freshness='current' AND t.member_count=("
+            "    SELECT COUNT(cached.email_id) FROM thread_email_members member "
+            "    LEFT JOIN emails cached ON cached.account_id=member.account_id "
+            "      AND cached.email_id=member.email_id "
+            "    WHERE member.account_id=e.account_id AND member.thread_id=e.thread_id"
+            "  ) THEN ("
+            "    SELECT COUNT(mailbox_member.email_id) FROM thread_email_members member "
+            "    INNER JOIN email_mailboxes mailbox_member "
+            "      ON mailbox_member.account_id=member.account_id "
+            "      AND mailbox_member.email_id=member.email_id "
+            "      AND mailbox_member.mailbox_id=:mailbox_id "
+            "    WHERE member.account_id=e.account_id AND member.thread_id=e.thread_id"
+            "  ) ELSE NULL END "
+            "FROM requested r "
+            "CROSS JOIN emails e ON e.account_id=:account_id AND e.email_id=r.email_id "
+            "CROSS JOIN email_mailboxes selected_membership "
+            "  ON selected_membership.account_id=e.account_id "
+            "  AND selected_membership.email_id=e.email_id "
+            "  AND selected_membership.mailbox_id=:mailbox_id "
+            "LEFT JOIN threads t ON t.account_id=e.account_id AND t.thread_id=e.thread_id "
+            "ORDER BY r.window_position"));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
         query.bindValue(QStringLiteral(":mailbox_id"),
@@ -1303,13 +1309,13 @@ namespace javelin::jmap::cache
             return makeQueryError(QStringLiteral("Project mailbox-window membership"), query);
 
         std::vector<std::string> projectedIds;
-        std::vector<std::uint64_t> mailboxThreadMessageCounts;
+        std::vector<std::optional<std::uint64_t>> mailboxThreadMessageCounts;
         projectedIds.reserve(emailIds.size());
         mailboxThreadMessageCounts.reserve(emailIds.size());
         while (query.next())
         {
             projectedIds.push_back(query.value(0).toString().toStdString());
-            mailboxThreadMessageCounts.push_back(query.value(1).toULongLong());
+            mailboxThreadMessageCounts.push_back(optionalCount(query.value(1)));
         }
 
         auto messagesResult = listMessagesByEmailIds(accountId, projectedIds);
@@ -1325,7 +1331,7 @@ namespace javelin::jmap::cache
             };
         }
         for (std::size_t index = 0; index < messages->size(); ++index)
-            (*messages)[index].threadMessageCount = mailboxThreadMessageCounts[index];
+            (*messages)[index].mailboxThreadMessageCount = mailboxThreadMessageCounts[index];
         return std::move(*messages);
     }
 
@@ -1589,7 +1595,7 @@ namespace javelin::jmap::cache
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "SELECT e.email_id, e.thread_id, e.subject, e.preview, e.received_at, e.sent_at, "
-            "       1 AS thread_message_count, e.has_attachment, "
+            "       NULL AS mailbox_thread_message_count, e.has_attachment, "
             "       CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END AS is_unread, "
             "       CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END AS is_flagged, "
             "       EXISTS(SELECT 1 FROM email_mailboxes junk_membership "
@@ -1646,7 +1652,8 @@ namespace javelin::jmap::cache
                 .sentAt = query.value(5).isNull()
                               ? std::nullopt
                               : std::optional{query.value(5).toString().toStdString()},
-                .threadMessageCount = query.value(6).toULongLong(),
+                .mailboxThreadMessageCount = optionalCount(query.value(6)),
+                .globalThreadMessageCount = std::nullopt,
                 .hasAttachment = query.value(7).toInt() != 0,
                 .isUnread = query.value(8).toInt() != 0,
                 .isFlagged = query.value(9).toInt() != 0,
@@ -1686,7 +1693,7 @@ namespace javelin::jmap::cache
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "SELECT e.email_id, e.thread_id, e.subject, e.preview, e.received_at, e.sent_at, "
-            "       1 AS thread_message_count, e.has_attachment, "
+            "       NULL AS mailbox_thread_message_count, e.has_attachment, "
             "       CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END AS is_unread, "
             "       CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END AS is_flagged, "
             "       EXISTS(SELECT 1 FROM email_mailboxes junk_membership "
@@ -1747,7 +1754,8 @@ namespace javelin::jmap::cache
                 .sentAt = query.value(5).isNull()
                               ? std::nullopt
                               : std::optional{query.value(5).toString().toStdString()},
-                .threadMessageCount = query.value(6).toULongLong(),
+                .mailboxThreadMessageCount = optionalCount(query.value(6)),
+                .globalThreadMessageCount = std::nullopt,
                 .hasAttachment = query.value(7).toInt() != 0,
                 .isUnread = query.value(8).toInt() != 0,
                 .isFlagged = query.value(9).toInt() != 0,

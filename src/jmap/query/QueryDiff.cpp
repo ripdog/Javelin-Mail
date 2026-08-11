@@ -58,9 +58,12 @@ namespace javelin::jmap::query
             return left.emailId == right.emailId && left.threadId == right.threadId &&
                    left.subject == right.subject && left.preview == right.preview &&
                    left.bodyPreview == right.bodyPreview && left.receivedAt == right.receivedAt &&
-                   left.sentAt == right.sentAt && left.hasAttachment == right.hasAttachment &&
-                   left.isUnread == right.isUnread && left.isFlagged == right.isFlagged &&
-                   left.mailboxNames == right.mailboxNames && left.tags == right.tags && equalFrom;
+                   left.sentAt == right.sentAt &&
+                   left.mailboxThreadMessageCount == right.mailboxThreadMessageCount &&
+                   left.globalThreadMessageCount == right.globalThreadMessageCount &&
+                   left.hasAttachment == right.hasAttachment && left.isUnread == right.isUnread &&
+                   left.isFlagged == right.isFlagged && left.mailboxNames == right.mailboxNames &&
+                   left.tags == right.tags && equalFrom;
         }
 
         [[nodiscard]] MailboxSelectionKey makeSelectionKey(const std::string& id,

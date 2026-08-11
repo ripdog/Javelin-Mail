@@ -581,7 +581,8 @@ TEST_CASE("quick filter preserves the selected email when a thread representativ
     CHECK(session.state().items[0].emailId == "email-2");
     CHECK(session.state().items[1].emailId == "email-1");
     CHECK_FALSE(session.state().items[1].isUnread);
-    CHECK(session.state().items[1].threadMessageCount == 2);
+    CHECK_FALSE(session.state().items[1].mailboxThreadMessageCount.has_value());
+    CHECK_FALSE(session.state().items[1].globalThreadMessageCount.has_value());
     CHECK(session.state().total == std::optional<std::size_t>{3});
 
     REQUIRE(session.loadMore());

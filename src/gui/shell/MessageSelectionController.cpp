@@ -146,9 +146,25 @@ namespace javelin::gui::shell
                                   .toString()
                                   .toStdString(),
                 .sentAt = std::nullopt,
-                .threadMessageCount =
+                .mailboxThreadMessageCount =
                     index.data(javelin::gui::messages::MessageListModel::ThreadMessageCountRole)
-                        .toULongLong(),
+                            .isValid()
+                        ? std::optional<
+                              std::uint64_t>{index
+                                                 .data(javelin::gui::messages::MessageListModel::
+                                                           ThreadMessageCountRole)
+                                                 .toULongLong()}
+                        : std::nullopt,
+                .globalThreadMessageCount =
+                    index.data(
+                             javelin::gui::messages::MessageListModel::GlobalThreadMessageCountRole)
+                            .isValid()
+                        ? std::optional<
+                              std::uint64_t>{index
+                                                 .data(javelin::gui::messages::MessageListModel::
+                                                           GlobalThreadMessageCountRole)
+                                                 .toULongLong()}
+                        : std::nullopt,
                 .hasAttachment =
                     index.data(javelin::gui::messages::MessageListModel::HasAttachmentRole)
                         .toBool(),
