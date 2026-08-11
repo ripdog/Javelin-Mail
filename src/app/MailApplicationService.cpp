@@ -1445,10 +1445,69 @@ namespace javelin::app
             m_searchWindowRequests.erase(leaseKey);
     }
 
-    QueuedMailboxSelectionMutationResult
+    QCoro::Task<std::optional<javelin::jmap::OperationError>>
+    MailApplicationService::ensureMessageSelectionMaterialized(std::string accountId,
+                                                               MessageSelection selection)
+    {
+        std::vector<std::string> threadIds;
+        for (const auto& item : selection)
+        {
+            if (const auto* thread = std::get_if<SelectedCollapsedThread>(&item);
+                thread != nullptr && !thread->threadId.empty())
+            {
+                threadIds.push_back(thread->threadId);
+            }
+        }
+        std::ranges::sort(threadIds);
+        threadIds.erase(std::unique(threadIds.begin(), threadIds.end()), threadIds.end());
+        if (threadIds.empty())
+            co_return std::nullopt;
+
+        javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
+        bool incomplete = false;
+        for (const auto& threadId : threadIds)
+        {
+            const auto coverageResult = threads.coverage(accountId, threadId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&coverageResult))
+                co_return javelin::jmap::operationError(*error);
+            const auto& coverage =
+                std::get<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverageResult);
+            incomplete = incomplete || !coverage.has_value() || !coverage->childEmailsComplete;
+        }
+        if (!incomplete)
+            co_return std::nullopt;
+        if (m_threadMaterializationCoordinator == nullptr)
+        {
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::NetworkUnavailable,
+                .message = i18n("The selected conversation is not fully available. Connect to "
+                                "the network and try again."),
+            };
+        }
+
+        auto result = co_await m_threadMaterializationCoordinator->waitForThreads(
+            std::move(accountId), std::move(threadIds), WorkPriority::Interactive);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+            co_return *error;
+        co_return std::nullopt;
+    }
+
+    QCoro::Task<QueuedMailboxSelectionMutationResult>
     MailApplicationService::queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent)
     {
-        auto emailIdsResult = resolveMessageSelection(m_queryService, intent.accountId,
+        if (const auto error =
+                co_await ensureMessageSelectionMaterialized(intent.accountId, intent.selection))
+            co_return *error;
+        co_return queueResolvedMailboxSelectionMutation(std::move(intent));
+    }
+
+    QueuedMailboxSelectionMutationResult
+    MailApplicationService::queueResolvedMailboxSelectionMutation(
+        MailboxSelectionMutationIntent intent)
+    {
+        javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
+        auto emailIdsResult = resolveMessageSelection(m_queryService, threads, intent.accountId,
                                                       intent.sourceMailboxId, intent.selection);
         if (const auto* error = std::get_if<QString>(&emailIdsResult))
         {
@@ -1616,31 +1675,37 @@ namespace javelin::app
         };
     }
 
-    QueuedMessageSelectionMutationResult
+    QCoro::Task<QueuedMessageSelectionMutationResult>
     MailApplicationService::queueDestroyMessages(std::string accountId,
                                                  std::optional<std::string> sourceMailboxId,
                                                  MessageSelection selection)
     {
-        return queueSelectedMessageMutation(std::move(accountId), std::move(sourceMailboxId),
-                                            std::move(selection), SelectedMessageMutation::Destroy);
+        if (const auto error = co_await ensureMessageSelectionMaterialized(accountId, selection))
+            co_return *error;
+        co_return queueSelectedMessageMutation(std::move(accountId), std::move(sourceMailboxId),
+                                               std::move(selection),
+                                               SelectedMessageMutation::Destroy);
     }
 
-    QueuedMessageSelectionMutationResult
+    QCoro::Task<QueuedMessageSelectionMutationResult>
     MailApplicationService::queueMarkMessagesUnread(std::string accountId,
                                                     std::optional<std::string> sourceMailboxId,
                                                     MessageSelection selection)
     {
-        return queueSelectedMessageMutation(std::move(accountId), std::move(sourceMailboxId),
-                                            std::move(selection),
-                                            SelectedMessageMutation::MarkUnread);
+        if (const auto error = co_await ensureMessageSelectionMaterialized(accountId, selection))
+            co_return *error;
+        co_return queueSelectedMessageMutation(std::move(accountId), std::move(sourceMailboxId),
+                                               std::move(selection),
+                                               SelectedMessageMutation::MarkUnread);
     }
 
     QueuedMessageSelectionMutationResult MailApplicationService::queueSelectedMessageMutation(
         std::string accountId, std::optional<std::string> sourceMailboxId,
         MessageSelection selection, const SelectedMessageMutation mutation)
     {
+        javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
         auto emailIdsResult =
-            resolveMessageSelection(m_queryService, accountId, sourceMailboxId, selection);
+            resolveMessageSelection(m_queryService, threads, accountId, sourceMailboxId, selection);
         if (const auto* error = std::get_if<QString>(&emailIdsResult))
         {
             return javelin::jmap::OperationError{.message = *error};
@@ -1846,18 +1911,20 @@ namespace javelin::app
         };
     }
 
-    QueuedMessageSelectionMutationResult
+    QCoro::Task<QueuedMessageSelectionMutationResult>
     MailApplicationService::queueSetMessagesFlagged(std::string accountId,
                                                     std::optional<std::string> sourceMailboxId,
                                                     MessageSelection selection, const bool flagged)
     {
-        return queueSetMessagesKeyword(
+        if (const auto error = co_await ensureMessageSelectionMaterialized(accountId, selection))
+            co_return *error;
+        co_return queueSetMessagesKeyword(
             std::move(accountId), std::move(sourceMailboxId), std::move(selection), "$flagged",
             flagged, flagged ? QStringLiteral("Add Star to") : QStringLiteral("Remove Star from"),
             false);
     }
 
-    QueuedMessageSelectionMutationResult MailApplicationService::queueSetMessagesTag(
+    QCoro::Task<QueuedMessageSelectionMutationResult> MailApplicationService::queueSetMessagesTag(
         std::string accountId, std::optional<std::string> sourceMailboxId,
         MessageSelection selection, std::string keyword, const bool enabled)
     {
@@ -1865,12 +1932,14 @@ namespace javelin::app
         if (!javelin::jmap::domain::isValidKeyword(keyword) ||
             javelin::jmap::domain::hasStandardKeywordSemantics(keyword))
         {
-            return javelin::jmap::OperationError{
+            co_return javelin::jmap::OperationError{
                 .message = i18n("This is not a valid user tag keyword."),
             };
         }
 
-        return queueSetMessagesKeyword(
+        if (const auto error = co_await ensureMessageSelectionMaterialized(accountId, selection))
+            co_return *error;
+        co_return queueSetMessagesKeyword(
             std::move(accountId), std::move(sourceMailboxId), std::move(selection),
             std::move(keyword), enabled,
             enabled ? QStringLiteral("Add Tag") : QStringLiteral("Remove Tag"), true);
@@ -1881,8 +1950,9 @@ namespace javelin::app
         MessageSelection selection, std::string keyword, const bool enabled, QString historyVerb,
         const bool appendKeywordToHistoryLabel)
     {
+        javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
         auto emailIdsResult =
-            resolveMessageSelection(m_queryService, accountId, sourceMailboxId, selection);
+            resolveMessageSelection(m_queryService, threads, accountId, sourceMailboxId, selection);
         if (const auto* error = std::get_if<QString>(&emailIdsResult))
             return javelin::jmap::OperationError{.message = *error};
         const auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));

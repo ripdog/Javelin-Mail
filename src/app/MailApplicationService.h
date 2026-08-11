@@ -129,20 +129,20 @@ namespace javelin::app
         requestSearchWindow(SearchWindowIntent intent) override;
         void ensureThread(ThreadMaterializationIntent intent) override;
         void retireSearchWindow(std::string accountId, std::string windowKey) override;
-        [[nodiscard]] QueuedMailboxSelectionMutationResult
+        [[nodiscard]] QCoro::Task<QueuedMailboxSelectionMutationResult>
         queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent);
-        [[nodiscard]] QueuedMessageSelectionMutationResult
+        [[nodiscard]] QCoro::Task<QueuedMessageSelectionMutationResult>
         queueDestroyMessages(std::string accountId, std::optional<std::string> sourceMailboxId,
                              MessageSelection selection);
-        [[nodiscard]] QueuedMessageSelectionMutationResult
+        [[nodiscard]] QCoro::Task<QueuedMessageSelectionMutationResult>
         queueMarkMessagesUnread(std::string accountId, std::optional<std::string> sourceMailboxId,
                                 MessageSelection selection);
         [[nodiscard]] QueuedMessageSelectionMutationResult queueMarkEmailRead(std::string accountId,
                                                                               std::string emailId);
-        [[nodiscard]] QueuedMessageSelectionMutationResult
+        [[nodiscard]] QCoro::Task<QueuedMessageSelectionMutationResult>
         queueSetMessagesFlagged(std::string accountId, std::optional<std::string> sourceMailboxId,
                                 MessageSelection selection, bool flagged);
-        [[nodiscard]] QueuedMessageSelectionMutationResult
+        [[nodiscard]] QCoro::Task<QueuedMessageSelectionMutationResult>
         queueSetMessagesTag(std::string accountId, std::optional<std::string> sourceMailboxId,
                             MessageSelection selection, std::string keyword, bool enabled);
         [[nodiscard]] SaveMailTagDefinitionResult
@@ -276,6 +276,11 @@ namespace javelin::app
             Destroy,
             MarkUnread,
         };
+
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::OperationError>>
+        ensureMessageSelectionMaterialized(std::string accountId, MessageSelection selection);
+        [[nodiscard]] QueuedMailboxSelectionMutationResult
+        queueResolvedMailboxSelectionMutation(MailboxSelectionMutationIntent intent);
 
         [[nodiscard]] QueuedMessageSelectionMutationResult
         queueSelectedMessageMutation(std::string accountId,

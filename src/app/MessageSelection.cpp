@@ -5,9 +5,12 @@
 namespace javelin::app
 {
 
-    ResolvedMessageSelection resolveMessageSelection(
-        const javelin::jmap::cache::QueryReader& queryReader, const std::string_view accountId,
-        const std::optional<std::string_view> mailboxId, const MessageSelection& selection)
+    ResolvedMessageSelection
+    resolveMessageSelection(const javelin::jmap::cache::QueryReader& queryReader,
+                            const javelin::jmap::cache::ThreadRepository& threadRepository,
+                            const std::string_view accountId,
+                            const std::optional<std::string_view> mailboxId,
+                            const MessageSelection& selection)
     {
         std::vector<std::string> emailIds;
         std::unordered_set<std::string> seen;
@@ -28,6 +31,19 @@ namespace javelin::app
             }
 
             const auto& thread = std::get<SelectedCollapsedThread>(item);
+            const auto coverageResult = threadRepository.coverage(accountId, thread.threadId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&coverageResult))
+            {
+                return error->message;
+            }
+            const auto& coverage =
+                std::get<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverageResult);
+            if (!coverage.has_value() || !coverage->childEmailsComplete)
+            {
+                return QStringLiteral("The selected conversation is not fully available in the "
+                                      "local cache.");
+            }
             const auto messagesResult =
                 mailboxId.has_value()
                     ? queryReader.listMailboxThreadMessages(accountId, *mailboxId, thread.threadId)
@@ -40,11 +56,6 @@ namespace javelin::app
 
             const auto& messages =
                 std::get<std::vector<javelin::jmap::cache::MessageListItem>>(messagesResult);
-            if (messages.empty())
-            {
-                appendEmailId(thread.representativeEmailId);
-                continue;
-            }
             for (const auto& message : messages)
             {
                 appendEmailId(message.emailId);

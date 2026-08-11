@@ -63,7 +63,6 @@ namespace javelin::gui::messages
                 {
                     selection.emplace_back(javelin::app::SelectedCollapsedThread{
                         .threadId = std::move(threadId),
-                        .representativeEmailId = std::move(emailId),
                     });
                 }
                 continue;

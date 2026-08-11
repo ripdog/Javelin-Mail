@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/cache/QueryReader.h"
+#include "jmap/cache/ThreadRepository.h"
 
 #include <QString>
 
@@ -20,7 +21,6 @@ namespace javelin::app
     struct SelectedCollapsedThread
     {
         std::string threadId;
-        std::string representativeEmailId;
     };
 
     using MessageSelectionItem = std::variant<SelectedEmail, SelectedCollapsedThread>;
@@ -29,6 +29,7 @@ namespace javelin::app
 
     [[nodiscard]] ResolvedMessageSelection
     resolveMessageSelection(const javelin::jmap::cache::QueryReader& queryReader,
+                            const javelin::jmap::cache::ThreadRepository& threadRepository,
                             std::string_view accountId, std::optional<std::string_view> mailboxId,
                             const MessageSelection& selection);
 

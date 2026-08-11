@@ -7,9 +7,11 @@
 #include <QCoroTask>
 
 #include <QObject>
+#include <QPromise>
 #include <QStringList>
 
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -73,6 +75,9 @@ namespace javelin::app
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         ensureThreads(std::string accountId, const std::vector<std::string>& threadIds,
                       WorkPriority priority = WorkPriority::Interactive);
+        [[nodiscard]] QCoro::Task<ThreadMaterializationResult>
+        waitForThreads(std::string accountId, std::vector<std::string> threadIds,
+                       WorkPriority priority = WorkPriority::Interactive);
         [[nodiscard]] std::size_t pendingThreadCount(std::string_view accountId) const;
         [[nodiscard]] bool isMaterializing(std::string_view accountId,
                                            std::string_view threadId) const;
@@ -90,6 +95,15 @@ namespace javelin::app
             WorkPriority priority = WorkPriority::Freshness;
         };
 
+        struct Waiter
+        {
+            std::vector<std::string> threadIds;
+            std::shared_ptr<QPromise<ThreadMaterializationResult>> promise;
+        };
+
+        [[nodiscard]] std::variant<std::vector<std::string>, javelin::jmap::cache::DatabaseError>
+        incompleteThreadIds(std::string_view accountId,
+                            const std::vector<std::string>& threadIds) const;
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         queueThreadIds(std::string accountId, std::vector<std::string> threadIds,
                        WorkPriority priority);
@@ -98,11 +112,15 @@ namespace javelin::app
         void finish(std::string accountId, std::string admissionId,
                     std::vector<std::string> requestedThreadIds,
                     ThreadMaterializationResult result);
+        void completeWaiters(std::string_view accountId,
+                             const std::vector<std::string>& requestedThreadIds,
+                             const javelin::jmap::OperationError* error);
 
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
         WorkScheduler& m_workScheduler;
         ThreadMaterializationWorker* m_worker = nullptr;
         std::unordered_map<std::string, AccountQueue> m_accounts;
+        std::unordered_map<std::string, std::vector<Waiter>> m_waiters;
         bool m_pumpScheduled = false;
     };
 

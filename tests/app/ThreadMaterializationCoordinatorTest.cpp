@@ -143,7 +143,103 @@ namespace
 
         std::vector<javelin::app::ThreadMaterializationTarget> targets;
     };
+
+    class CompletingWorker final : public javelin::app::ThreadMaterializationWorker
+    {
+      public:
+        explicit CompletingWorker(javelin::jmap::cache::DatabaseConnection& database)
+            : m_database(database)
+        {
+        }
+
+        QCoro::Task<javelin::app::ThreadMaterializationResult>
+        materialize(javelin::app::ThreadMaterializationTarget target) override
+        {
+            targets.push_back(target);
+            std::vector<javelin::jmap::domain::Thread> threads;
+            for (const auto& threadId : target.threadIds)
+            {
+                threads.push_back({
+                    .id = threadId,
+                    .emailIds = threadId == "thread-1"
+                                    ? std::vector<std::string>{"email-1", "email-2"}
+                                    : std::vector<std::string>{"email-3"},
+                });
+            }
+            javelin::jmap::cache::ThreadRepository repository{m_database};
+            if (const auto error = repository.upsertMany(target.accountId, threads))
+                co_return javelin::jmap::operationError(*error);
+            co_return javelin::app::ThreadMaterializationSummary{
+                .threadIds = std::move(target.threadIds),
+                .missingEmailIds = {},
+                .completedThreadCount = threads.size(),
+                .completedEmailCount = 0,
+            };
+        }
+
+        std::vector<javelin::app::ThreadMaterializationTarget> targets;
+
+      private:
+        javelin::jmap::cache::DatabaseConnection& m_database;
+    };
+
+    class FailingWorker final : public javelin::app::ThreadMaterializationWorker
+    {
+      public:
+        QCoro::Task<javelin::app::ThreadMaterializationResult>
+        materialize(javelin::app::ThreadMaterializationTarget) override
+        {
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::NetworkUnavailable,
+                .message = QStringLiteral("Network unavailable."),
+            };
+        }
+    };
 } // namespace
+
+TEST_CASE("authoritative Thread wait resumes only after complete cache coverage",
+          "[app][thread-materialization][selection]")
+{
+    ensureApplication();
+    Fixture fixture;
+    javelin::app::WorkScheduler scheduler{fixture.database, nullptr, std::chrono::milliseconds{0}};
+    CompletingWorker worker{fixture.database};
+    javelin::app::ThreadMaterializationCoordinator coordinator{fixture.database, scheduler,
+                                                               &worker};
+
+    const auto result =
+        QCoro::waitFor(coordinator.waitForThreads("account-1", {"thread-2", "thread-1", "thread-1"},
+                                                  javelin::app::WorkPriority::Interactive));
+
+    const auto* summary = std::get_if<javelin::app::ThreadMaterializationSummary>(&result);
+    REQUIRE(summary != nullptr);
+    CHECK(summary->threadIds == std::vector<std::string>{"thread-1", "thread-2"});
+    REQUIRE(worker.targets.size() == 1);
+    CHECK(worker.targets.front().priority == javelin::app::WorkPriority::Interactive);
+    javelin::jmap::cache::ThreadRepository threads{fixture.database};
+    const auto threadOne = threads.coverage("account-1", "thread-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::ThreadCoverage>>(threadOne));
+    const auto& coverage = std::get<std::optional<javelin::jmap::cache::ThreadCoverage>>(threadOne);
+    REQUIRE(coverage.has_value());
+    CHECK(coverage->childEmailsComplete);
+}
+
+TEST_CASE("authoritative Thread wait returns materialization failure without partial resolution",
+          "[app][thread-materialization][selection]")
+{
+    ensureApplication();
+    Fixture fixture;
+    javelin::app::WorkScheduler scheduler{fixture.database, nullptr, std::chrono::milliseconds{0}};
+    FailingWorker worker;
+    javelin::app::ThreadMaterializationCoordinator coordinator{fixture.database, scheduler,
+                                                               &worker};
+
+    const auto result = QCoro::waitFor(coordinator.waitForThreads("account-1", {"thread-1"}));
+
+    const auto* error = std::get_if<javelin::jmap::OperationError>(&result);
+    REQUIRE(error != nullptr);
+    CHECK(error->code == javelin::jmap::OperationErrorCode::NetworkUnavailable);
+}
 
 TEST_CASE("thread materialization coordinator coalesces mailbox and search targets",
           "[app][thread-materialization]")

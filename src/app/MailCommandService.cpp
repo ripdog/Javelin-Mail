@@ -13,7 +13,7 @@ namespace javelin::app
     QCoro::Task<QueuedMailboxSelectionMutationResult>
     MailCommandService::queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent)
     {
-        co_return m_service.queueMailboxSelectionMutation(std::move(intent));
+        co_return co_await m_service.queueMailboxSelectionMutation(std::move(intent));
     }
 
     QCoro::Task<QueuedMessageSelectionMutationResult>
@@ -21,8 +21,8 @@ namespace javelin::app
                                              std::optional<std::string> sourceMailboxId,
                                              MessageSelection selection)
     {
-        co_return m_service.queueDestroyMessages(std::move(accountId), std::move(sourceMailboxId),
-                                                 std::move(selection));
+        co_return co_await m_service.queueDestroyMessages(
+            std::move(accountId), std::move(sourceMailboxId), std::move(selection));
     }
 
     QCoro::Task<QueuedMessageSelectionMutationResult>
@@ -30,7 +30,7 @@ namespace javelin::app
                                                 std::optional<std::string> sourceMailboxId,
                                                 MessageSelection selection)
     {
-        co_return m_service.queueMarkMessagesUnread(
+        co_return co_await m_service.queueMarkMessagesUnread(
             std::move(accountId), std::move(sourceMailboxId), std::move(selection));
     }
 
@@ -45,7 +45,7 @@ namespace javelin::app
                                                 std::optional<std::string> sourceMailboxId,
                                                 MessageSelection selection, const bool flagged)
     {
-        co_return m_service.queueSetMessagesFlagged(
+        co_return co_await m_service.queueSetMessagesFlagged(
             std::move(accountId), std::move(sourceMailboxId), std::move(selection), flagged);
     }
 
@@ -53,8 +53,9 @@ namespace javelin::app
         std::string accountId, std::optional<std::string> sourceMailboxId,
         MessageSelection selection, std::string keyword, const bool enabled)
     {
-        co_return m_service.queueSetMessagesTag(std::move(accountId), std::move(sourceMailboxId),
-                                                std::move(selection), std::move(keyword), enabled);
+        co_return co_await m_service.queueSetMessagesTag(
+            std::move(accountId), std::move(sourceMailboxId), std::move(selection),
+            std::move(keyword), enabled);
     }
 
     QCoro::Task<SaveMailTagDefinitionResult>

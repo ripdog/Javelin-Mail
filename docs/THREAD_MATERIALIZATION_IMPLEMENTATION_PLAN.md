@@ -77,6 +77,16 @@ post-commit window invalidation retries pending reads, and a completed snapshot 
 children in one model update. Collapsing clears the intent without cancelling shared prefetch.
 Mailbox sessions retain mailbox filtering, while search sessions load the complete conversation.
 
+Phase 8 is complete. Collapsed-Thread command admission now remains asynchronous through daemon
+application coordination. The coordinator exposes a coalesced interactive wait that resumes only
+after SQLite proves current membership, exact membership cardinality, and complete child Email
+coverage, and propagates materialization/network failure to every affected waiter. Only then does
+the application resolve mailbox-scoped or global Email ids, load exact Email metadata, check
+rights, prepare optimistic records, and construct Undo history. Strict selection resolution rejects
+incomplete coverage and never falls back to the representative Email. The parallel GUI tag-menu
+helper no longer expands cached Thread subsets; it leaves aggregate check state unknown for a
+collapsed Thread and sends the original Thread intent unchanged when an action is chosen.
+
 The target architecture is:
 
 ```text

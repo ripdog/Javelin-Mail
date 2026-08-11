@@ -12,6 +12,7 @@
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/QueryService.h"
+#include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include <QCoroTask>
@@ -688,8 +689,8 @@ TEST_CASE("completed offline mailbox pages materialize without server access",
     CHECK(summary->queryState == "state-current");
 }
 
-TEST_CASE("optimistic archive publishes and materializes both mailboxes locally",
-          "[app][daemon][mail][optimistic]")
+TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritatively",
+          "[app][daemon][mail][optimistic][thread-coverage]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -718,7 +719,7 @@ TEST_CASE("optimistic archive publishes and materializes both mailboxes locally"
     inbox.id = "inbox";
     inbox.name = "Inbox";
     inbox.role = "inbox";
-    inbox.totalEmails = 1;
+    inbox.totalEmails = 2;
     inbox.totalThreads = 1;
     inbox.isSubscribed = true;
     inbox.myRights = rights;
@@ -738,8 +739,15 @@ TEST_CASE("optimistic archive publishes and materializes both mailboxes locally"
     email.receivedAt = "2026-08-06T04:00:00Z";
     email.subject = "Projected message";
     email.preview = "Projection test";
+    auto child = email;
+    child.id = "email-2";
+    child.receivedAt = "2026-08-06T03:00:00Z";
     javelin::jmap::cache::EmailRepository emails{connection};
-    REQUIRE_FALSE(emails.replaceAll("account-1", {email}).has_value());
+    REQUIRE_FALSE(emails.replaceAll("account-1", {email, child}).has_value());
+    javelin::jmap::cache::ThreadRepository threads{connection};
+    REQUIRE_FALSE(
+        threads.upsertMany("account-1", {{.id = "thread-1", .emailIds = {"email-1", "email-2"}}})
+            .has_value());
 
     const auto inboxQueryKey = javelin::jmap::sync::mailboxQueryKey({
         .mailboxId = "inbox",
@@ -788,16 +796,19 @@ TEST_CASE("optimistic archive publishes and materializes both mailboxes locally"
                      &services.mailService(), [&cacheChanges](javelin::app::MailCacheChange change)
                      { cacheChanges.push_back(std::move(change)); });
 
-    const auto queued = services.mailService().queueMailboxSelectionMutation({
+    const auto queued = QCoro::waitFor(services.mailService().queueMailboxSelectionMutation({
         .accountId = "account-1",
-        .selection = {javelin::app::SelectedEmail{.emailId = "email-1"}},
+        .selection = {javelin::app::SelectedCollapsedThread{
+            .threadId = "thread-1",
+        }},
         .operation = javelin::app::MailboxSelectionOperation::Archive,
         .sourceMailboxId = "inbox",
         .destinationMailboxId = std::nullopt,
-    });
+    }));
     const auto* summary = std::get_if<javelin::app::QueuedMailboxSelectionMutation>(&queued);
     REQUIRE(summary != nullptr);
-    CHECK(summary->queuedEmailCount == 1);
+    CHECK(summary->queuedEmailCount == 2);
+    CHECK(summary->queuedMutations.size() == 2);
     REQUIRE(cacheChanges.size() == 1);
     CHECK(cacheChanges.front().optimisticProjection);
     CHECK(cacheChanges.front().mailboxIds.size() == 2);
@@ -853,6 +864,19 @@ TEST_CASE("optimistic archive publishes and materializes both mailboxes locally"
     REQUIRE(materializedSummary != nullptr);
     CHECK(materializedSummary->representativeCount == 1);
     CHECK(materializedSummary->total == std::optional<std::size_t>{1});
+
+    REQUIRE_FALSE(threads.markStale("account-1", std::vector<std::string>{"thread-1"}).has_value());
+    const auto unavailable = QCoro::waitFor(
+        services.mailService().queueSetMessagesFlagged("account-1", std::nullopt,
+                                                       {javelin::app::SelectedCollapsedThread{
+                                                           .threadId = "thread-1",
+                                                       }},
+                                                       true));
+    CHECK(std::holds_alternative<javelin::jmap::OperationError>(unavailable));
+    QSqlQuery mutationCount{connection.database()};
+    REQUIRE(mutationCount.exec(QStringLiteral("SELECT COUNT(*) FROM mutation_journal")));
+    REQUIRE(mutationCount.next());
+    CHECK(mutationCount.value(0).toInt() == 2);
 }
 
 TEST_CASE("daemon rejects requests after shutdown without pretending to be offline",

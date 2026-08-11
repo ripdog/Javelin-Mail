@@ -747,13 +747,24 @@ TEST_CASE("mailbox thread queries exclude members moved to another mailbox", "[j
         javelin::app::SelectedEmail{.emailId = "eml-inbox"},
         javelin::app::SelectedCollapsedThread{
             .threadId = "thr-1",
-            .representativeEmailId = "eml-archive",
         },
     };
-    const auto resolved =
-        javelin::app::resolveMessageSelection(queryService, "account-1", "mbx-inbox", selection);
+    const auto resolved = javelin::app::resolveMessageSelection(
+        queryService, threadRepository, "account-1", "mbx-inbox", selection);
     REQUIRE(std::holds_alternative<std::vector<std::string>>(resolved));
     CHECK(std::get<std::vector<std::string>>(resolved) == std::vector<std::string>{"eml-inbox"});
+
+    const auto globalResolved = javelin::app::resolveMessageSelection(
+        queryService, threadRepository, "account-1", std::nullopt, selection);
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(globalResolved));
+    CHECK(std::get<std::vector<std::string>>(globalResolved) ==
+          std::vector<std::string>{"eml-inbox", "eml-archive"});
+
+    REQUIRE_FALSE(
+        threadRepository.markStale("account-1", std::vector<std::string>{"thr-1"}).has_value());
+    const auto incomplete = javelin::app::resolveMessageSelection(
+        queryService, threadRepository, "account-1", "mbx-inbox", selection);
+    CHECK(std::holds_alternative<QString>(incomplete));
 }
 
 TEST_CASE("mailbox window summaries stay representative-only as thread coverage completes",

@@ -51,7 +51,6 @@ TEST_CASE("message action selection preserves collapsed threads and filters unre
     const auto* collapsed = std::get_if<javelin::app::SelectedCollapsedThread>(&selection[0]);
     REQUIRE(collapsed != nullptr);
     CHECK(collapsed->threadId == "thread-1");
-    CHECK(collapsed->representativeEmailId == "email-1");
 
     const auto* email = std::get_if<javelin::app::SelectedEmail>(&selection[1]);
     REQUIRE(email != nullptr);

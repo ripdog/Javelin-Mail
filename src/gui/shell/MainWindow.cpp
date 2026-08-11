@@ -288,11 +288,8 @@ namespace javelin::gui::shell
             return QIcon{swatch};
         }
 
-        [[nodiscard]] std::vector<std::string>
-        resolveSelectionEmailIds(const javelin::jmap::cache::QueryReader& queryReader,
-                                 const std::string_view accountId,
-                                 const std::optional<std::string>& mailboxId,
-                                 const javelin::app::MessageSelection& selection)
+        [[nodiscard]] std::optional<std::vector<std::string>>
+        explicitSelectionEmailIds(const javelin::app::MessageSelection& selection)
         {
             std::vector<std::string> emailIds;
             std::unordered_set<std::string> seen;
@@ -308,22 +305,7 @@ namespace javelin::gui::shell
                     append(email->emailId);
                     continue;
                 }
-                const auto& thread = std::get<javelin::app::SelectedCollapsedThread>(item);
-                const auto messagesResult =
-                    mailboxId.has_value()
-                        ? queryReader.listMailboxThreadMessages(accountId, *mailboxId,
-                                                                thread.threadId)
-                        : queryReader.listThreadMessages(accountId, thread.threadId);
-                const auto* messages =
-                    std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(
-                        &messagesResult);
-                if (messages == nullptr || messages->empty())
-                {
-                    append(thread.representativeEmailId);
-                    continue;
-                }
-                for (const auto& message : *messages)
-                    append(message.emailId);
+                return std::nullopt;
             }
             return emailIds;
         }
@@ -3176,8 +3158,8 @@ namespace javelin::gui::shell
         const auto selection = m_messageCommandController->selectedActionItems();
         if (!selection.empty())
         {
-            selectedEmailIds =
-                resolveSelectionEmailIds(m_queryReader, *accountId, activeMailboxId(), selection);
+            if (auto explicitIds = explicitSelectionEmailIds(selection))
+                selectedEmailIds = std::move(*explicitIds);
         }
 
         std::unordered_map<std::string, std::size_t> selectedKeywordCounts;
