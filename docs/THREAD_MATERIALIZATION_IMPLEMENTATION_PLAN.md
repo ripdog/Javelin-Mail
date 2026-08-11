@@ -48,6 +48,15 @@ prefetch obeys foreground quiet periods and account serialization without creati
 jobs. Start and terminal signals provide the narrow materialization lifecycle event; Phase 5 plugs
 the bounded `Thread/get` worker into the coordinator's execution seam.
 
+Phase 5 is complete. The coordinator now owns a production membership worker that sorts and
+deduplicates explicit Thread targets, bounds every `Thread/get` by the cached session's negotiated
+`maxObjectsInGet`, and rejects any response whose `list` plus `notFound` does not exactly account for
+the requested ids. Each valid batch atomically replaces returned membership and marks represented
+`notFound` snapshots stale, then derives missing child Email ids from SQLite as the Phase 6
+checkpoint. Batch progress and post-commit signals are emitted without persistent Task Center jobs,
+and invalidation is limited to committed mailbox/search windows containing affected
+representatives. No child `Email/get` is issued yet.
+
 The target architecture is:
 
 ```text

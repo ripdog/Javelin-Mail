@@ -30,6 +30,8 @@ namespace javelin::app
     struct ThreadMaterializationSummary
     {
         std::vector<std::string> threadIds;
+        std::vector<std::string> missingEmailIds;
+        std::size_t completedThreadCount = 0;
     };
 
     using ThreadMaterializationResult =

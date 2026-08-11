@@ -71,6 +71,7 @@ namespace javelin::app
     class MessageNavigationCoordinator;
     class MailApplicationService;
     class ThreadMaterializationCoordinator;
+    class ThreadMembershipMaterializationWorker;
 } // namespace javelin::app
 
 namespace javelin::app::undo
@@ -243,6 +244,8 @@ namespace javelin::app
         std::unique_ptr<CalendarNotificationService> m_calendarNotificationService;
         std::unique_ptr<WorkScheduler> m_workScheduler;
         std::unique_ptr<ThreadMaterializationCoordinator> m_threadMaterializationCoordinator;
+        std::unique_ptr<ThreadMembershipMaterializationWorker>
+            m_threadMembershipMaterializationWorker;
         std::unique_ptr<MailIndexService> m_mailIndexService;
         std::unique_ptr<FullMailSyncService> m_fullMailSyncService;
         std::unique_ptr<LocalMaintenanceService> m_localMaintenanceService;

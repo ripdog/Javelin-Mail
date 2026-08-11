@@ -950,15 +950,97 @@ namespace javelin::app
         });
     }
 
-    void MailApplicationService::publishThreadMaterializationCommitted(QString accountId)
+    void MailApplicationService::publishThreadMaterializationCommitted(QString accountId,
+                                                                       const QStringList& threadIds)
     {
-        Q_EMIT cacheCommitted(MailCacheChange{
-            .accountId = std::move(accountId),
+        MailCacheChange change{
+            .accountId = accountId,
             .mailboxIds = {},
             .queryWindows = {},
             .searchWindows = {},
-            .hasNewMail = false,
-        });
+        };
+        QSqlQuery mailboxWindows{m_databaseConnection.database()};
+        mailboxWindows.prepare(QStringLiteral(
+            "SELECT DISTINCT w.mailbox_id,w.requested_offset,w.requested_limit,w.total FROM "
+            "mailbox_query_windows w INNER JOIN mailbox_query_window_items i ON "
+            "i.account_id=w.account_id AND i.query_key=w.query_key AND "
+            "i.requested_offset=w.requested_offset AND i.requested_limit=w.requested_limit "
+            "INNER JOIN emails e ON e.account_id=i.account_id AND e.email_id=i.email_id WHERE "
+            "w.account_id=:account_id AND e.thread_id=:thread_id"));
+        QSqlQuery searchWindows{m_databaseConnection.database()};
+        searchWindows.prepare(QStringLiteral(
+            "SELECT DISTINCT w.query_key,w.window_offset,w.window_limit,w.total FROM "
+            "search_windows w INNER JOIN search_window_items i ON i.account_id=w.account_id AND "
+            "i.query_key=w.query_key AND i.window_offset=w.window_offset AND "
+            "i.window_limit=w.window_limit INNER JOIN emails e ON e.account_id=i.account_id AND "
+            "e.email_id=i.email_id WHERE w.account_id=:account_id AND e.thread_id=:thread_id"));
+        for (const auto& threadId : threadIds)
+        {
+            mailboxWindows.bindValue(QStringLiteral(":account_id"), accountId);
+            mailboxWindows.bindValue(QStringLiteral(":thread_id"), threadId);
+            if (!mailboxWindows.exec())
+            {
+                qWarning().noquote() << "Could not resolve Thread mailbox-window invalidation"
+                                     << mailboxWindows.lastError().text();
+                return;
+            }
+            while (mailboxWindows.next())
+            {
+                MailboxQueryWindowChange window{
+                    .mailboxId = mailboxWindows.value(0).toString(),
+                    .offset = mailboxWindows.value(1).toULongLong(),
+                    .limit = mailboxWindows.value(2).toULongLong(),
+                    .total =
+                        mailboxWindows.value(3).isNull()
+                            ? std::nullopt
+                            : std::optional<std::size_t>{mailboxWindows.value(3).toULongLong()},
+                };
+                const auto existing =
+                    std::ranges::find_if(change.queryWindows,
+                                         [&window](const auto& value)
+                                         {
+                                             return value.mailboxId == window.mailboxId &&
+                                                    value.offset == window.offset &&
+                                                    value.limit == window.limit;
+                                         });
+                if (existing == change.queryWindows.end())
+                    change.queryWindows.push_back(std::move(window));
+            }
+            mailboxWindows.finish();
+
+            searchWindows.bindValue(QStringLiteral(":account_id"), accountId);
+            searchWindows.bindValue(QStringLiteral(":thread_id"), threadId);
+            if (!searchWindows.exec())
+            {
+                qWarning().noquote() << "Could not resolve Thread search-window invalidation"
+                                     << searchWindows.lastError().text();
+                return;
+            }
+            while (searchWindows.next())
+            {
+                SearchQueryWindowChange window{
+                    .queryKey = searchWindows.value(0).toString(),
+                    .offset = searchWindows.value(1).toULongLong(),
+                    .limit = searchWindows.value(2).toULongLong(),
+                    .total = searchWindows.value(3).isNull()
+                                 ? std::nullopt
+                                 : std::optional<std::size_t>{searchWindows.value(3).toULongLong()},
+                };
+                const auto existing =
+                    std::ranges::find_if(change.searchWindows,
+                                         [&window](const auto& value)
+                                         {
+                                             return value.queryKey == window.queryKey &&
+                                                    value.offset == window.offset &&
+                                                    value.limit == window.limit;
+                                         });
+                if (existing == change.searchWindows.end())
+                    change.searchWindows.push_back(std::move(window));
+            }
+            searchWindows.finish();
+        }
+        if (!change.queryWindows.empty() || !change.searchWindows.empty())
+            Q_EMIT cacheCommitted(std::move(change));
     }
 
     QCoro::Task<MailboxWindowResult>

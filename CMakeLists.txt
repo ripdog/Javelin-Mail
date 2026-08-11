@@ -320,6 +320,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/MailApplicationService.h
     src/app/ThreadMaterializationCoordinator.cpp
     src/app/ThreadMaterializationCoordinator.h
+    src/app/ThreadMembershipMaterializationWorker.cpp
+    src/app/ThreadMembershipMaterializationWorker.h
     src/app/MailboxSelectionMutation.cpp
     src/app/MailboxSelectionMutation.h
     src/app/MessageSelection.cpp
@@ -1496,6 +1498,8 @@ add_library(javelin_daemon_core STATIC
     src/app/MailApplicationService.h
     src/app/ThreadMaterializationCoordinator.cpp
     src/app/ThreadMaterializationCoordinator.h
+    src/app/ThreadMembershipMaterializationWorker.cpp
+    src/app/ThreadMembershipMaterializationWorker.h
     src/app/MailboxSelectionMutation.cpp
     src/app/MailboxSelectionMutation.h
     src/app/MailboxSession.cpp

@@ -122,7 +122,7 @@ namespace javelin::app
         void publishMailboxWindowCommitted(QString accountId, QString mailboxId, std::size_t offset,
                                            std::size_t limit);
         void publishMessageContentCommitted(QString accountId, QString emailId);
-        void publishThreadMaterializationCommitted(QString accountId);
+        void publishThreadMaterializationCommitted(QString accountId, const QStringList& threadIds);
         [[nodiscard]] QCoro::Task<MailboxWindowResult>
         requestMailboxWindow(MailboxWindowIntent intent) override;
         [[nodiscard]] QCoro::Task<SearchWindowResult>

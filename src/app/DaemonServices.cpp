@@ -28,6 +28,7 @@
 #include "app/MessageNavigationCoordinator.h"
 #include "app/SieveCommandService.h"
 #include "app/ThreadMaterializationCoordinator.h"
+#include "app/ThreadMembershipMaterializationWorker.h"
 #include "app/UndoCommandService.h"
 #include "app/WorkScheduler.h"
 #include "app/undo/AddressBookHistoryExecutor.h"
@@ -185,14 +186,19 @@ namespace javelin::app
             *m_undoManager);
         m_mailService->setThreadMaterializationCoordinator(
             m_threadMaterializationCoordinator.get());
-        QObject::connect(
-            m_threadMaterializationCoordinator.get(),
-            &ThreadMaterializationCoordinator::materializationFinished, m_mailService.get(),
-            [this](QString accountId, const QStringList&, const bool successful, const QString&)
-            {
-                if (successful)
-                    m_mailService->publishThreadMaterializationCommitted(std::move(accountId));
-            });
+        m_threadMembershipMaterializationWorker =
+            std::make_unique<ThreadMembershipMaterializationWorker>(
+                m_databaseConnection, *m_methodTransport, *m_mailService);
+        m_threadMaterializationCoordinator->setWorker(
+            m_threadMembershipMaterializationWorker.get());
+        QObject::connect(m_threadMembershipMaterializationWorker.get(),
+                         &ThreadMembershipMaterializationWorker::membershipCommitted,
+                         m_mailService.get(),
+                         [this](QString accountId, const QStringList& threadIds)
+                         {
+                             m_mailService->publishThreadMaterializationCommitted(
+                                 std::move(accountId), threadIds);
+                         });
         m_developerMaintenanceService = std::make_unique<DeveloperMaintenanceService>(
             location.databasePath, location.vaultRootPath, *m_mailboxMaintenanceRegistry,
             *m_mailService, *m_workScheduler,

@@ -324,6 +324,7 @@ add_executable(javelin_daemon_tests
     app/ProcessInstanceLockTest.cpp
     app/SearchSessionTest.cpp
     app/ThreadMaterializationCoordinatorTest.cpp
+    app/ThreadMembershipMaterializationWorkerTest.cpp
 )
 target_include_directories(javelin_daemon_tests
     PRIVATE

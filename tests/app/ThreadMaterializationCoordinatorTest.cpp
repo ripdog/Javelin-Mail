@@ -135,6 +135,8 @@ namespace
             targets.push_back(target);
             co_return javelin::app::ThreadMaterializationSummary{
                 .threadIds = std::move(target.threadIds),
+                .missingEmailIds = {},
+                .completedThreadCount = 0,
             };
         }
 
