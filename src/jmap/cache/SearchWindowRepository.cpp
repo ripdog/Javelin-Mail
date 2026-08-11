@@ -17,15 +17,6 @@ namespace javelin::jmap::cache
             };
         }
 
-        [[nodiscard]] DatabaseError databaseError(const QString& operation,
-                                                  const QSqlDatabase& database)
-        {
-            return DatabaseError{
-                .code = DatabaseErrorCode::QueryFailed,
-                .message = operation + QStringLiteral(": ") + database.lastError().text(),
-            };
-        }
-
         void bindWindowKey(QSqlQuery& query, const std::string_view accountId,
                            const std::string_view queryKey, const std::size_t offset,
                            const std::size_t limit)
@@ -61,17 +52,30 @@ namespace javelin::jmap::cache
 
     std::optional<DatabaseError> SearchWindowRepository::replace(const SearchWindowRecord& window)
     {
-        if (const auto error = m_connection.validate())
-        {
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Begin search-window transaction"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = replace(transaction, window))
             return error;
-        }
+        return transaction.commit();
+    }
 
-        const DatabaseWriteScope writeScope{m_connection};
-        auto database = m_connection.database();
-        if (!database.transaction())
+    std::optional<DatabaseError> SearchWindowRepository::replace(DatabaseTransaction& transaction,
+                                                                 const SearchWindowRecord& window)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
         {
-            return databaseError(QStringLiteral("Begin search-window transaction"), database);
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message =
+                    QStringLiteral("Search-window replacement requires a matching transaction"),
+            };
         }
+        auto& database = m_connection.database();
 
         QSqlQuery deleteStaleWindows{database};
         deleteStaleWindows.prepare(QStringLiteral(
@@ -87,7 +91,6 @@ namespace javelin::jmap::cache
         {
             const auto error =
                 queryError(QStringLiteral("Invalidate stale search windows"), deleteStaleWindows);
-            database.rollback();
             return error;
         }
 
@@ -118,7 +121,6 @@ namespace javelin::jmap::cache
         if (!replaceWindow.exec())
         {
             const auto error = queryError(QStringLiteral("Replace search window"), replaceWindow);
-            database.rollback();
             return error;
         }
 
@@ -131,7 +133,6 @@ namespace javelin::jmap::cache
         {
             const auto error =
                 queryError(QStringLiteral("Delete search-window items"), deleteItems);
-            database.rollback();
             return error;
         }
 
@@ -151,7 +152,6 @@ namespace javelin::jmap::cache
             {
                 const auto error =
                     queryError(QStringLiteral("Insert search-window item"), insertItem);
-                database.rollback();
                 return error;
             }
         }
@@ -169,15 +169,6 @@ namespace javelin::jmap::cache
         if (!evictWindows.exec())
         {
             const auto error = queryError(QStringLiteral("Evict old search windows"), evictWindows);
-            database.rollback();
-            return error;
-        }
-
-        if (!database.commit())
-        {
-            const auto error =
-                databaseError(QStringLiteral("Commit search-window transaction"), database);
-            database.rollback();
             return error;
         }
 

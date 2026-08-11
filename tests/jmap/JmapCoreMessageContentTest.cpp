@@ -641,7 +641,7 @@ TEST_CASE("JmapCore caches message content from junk and trash mailboxes",
         std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(sourceResult).has_value());
 }
 
-TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thread results",
+TEST_CASE("JmapCore searchMessages caches representatives before thread results",
           "[jmap][core][search]")
 {
     ApplicationGuard application;
@@ -658,7 +658,7 @@ TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thre
         const auto envelope = javelin::jmap::api::parseRequestEnvelope(request.body.toStdString());
         REQUIRE(envelope.ok());
         REQUIRE(envelope.value.has_value());
-        REQUIRE(envelope.value->methodCalls.size() == 4);
+        REQUIRE(envelope.value->methodCalls.size() == 2);
 
         javelin::jmap::api::ResponseEnvelope response{
             .methodResponses =
@@ -674,18 +674,6 @@ TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thre
                         .arguments =
                             R"({"accountId":"u1","state":"email-state-1","list":[{"id":"eml-2","blobId":"blob-2","threadId":"thr-1","mailboxIds":{"mbx-inbox":true},"keywords":{"$flagged":true},"size":4096,"receivedAt":"2026-04-06T11:22:33Z","sentAt":"2026-04-06T11:21:00Z","hasAttachment":true,"subject":"Quarterly update","from":[{"name":"Alice Sender","email":"alice@example.com"}],"to":[{"name":"Bob Recipient","email":"bob@example.com"}],"cc":[],"bcc":[],"replyTo":[],"preview":"Quarterly preview"}],"notFound":[]})",
                         .callId = envelope.value->methodCalls[1].callId,
-                    },
-                    javelin::jmap::api::MethodInvocation{
-                        .name = "Thread/get",
-                        .arguments =
-                            R"({"accountId":"u1","state":"thread-state-1","list":[{"id":"thr-1","emailIds":["eml-1","eml-2"]}],"notFound":[]})",
-                        .callId = envelope.value->methodCalls[2].callId,
-                    },
-                    javelin::jmap::api::MethodInvocation{
-                        .name = "Email/get",
-                        .arguments =
-                            R"({"accountId":"u1","state":"email-state-1","list":[{"id":"eml-1","blobId":"blob-1","threadId":"thr-1","mailboxIds":{"mbx-inbox":true},"keywords":{"$seen":true},"size":1024,"receivedAt":"2026-04-05T11:22:33Z","sentAt":"2026-04-05T11:21:00Z","hasAttachment":false,"subject":"Earlier note","from":[{"name":"Alice Sender","email":"alice@example.com"}],"to":[{"name":"Bob Recipient","email":"bob@example.com"}],"cc":[],"bcc":[],"replyTo":[],"preview":"Earlier preview"},{"id":"eml-2","blobId":"blob-2","threadId":"thr-1","mailboxIds":{"mbx-inbox":true},"keywords":{"$flagged":true},"size":4096,"receivedAt":"2026-04-06T11:22:33Z","sentAt":"2026-04-06T11:21:00Z","hasAttachment":true,"subject":"Quarterly update","from":[{"name":"Alice Sender","email":"alice@example.com"}],"to":[{"name":"Bob Recipient","email":"bob@example.com"}],"cc":[],"bcc":[],"replyTo":[],"preview":"Quarterly preview"}],"notFound":[]})",
-                        .callId = envelope.value->methodCalls[3].callId,
                     },
                 },
             .createdIds = std::unordered_map<std::string, std::string>{},
@@ -722,7 +710,7 @@ TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thre
     CHECK(summary.results.front().emailId == "eml-2");
     CHECK(summary.results.front().threadId == "thr-1");
     CHECK_FALSE(summary.results.front().mailboxThreadMessageCount.has_value());
-    CHECK(summary.results.front().globalThreadMessageCount == std::optional<std::uint64_t>{2});
+    CHECK_FALSE(summary.results.front().globalThreadMessageCount.has_value());
     CHECK(summary.results.front().isUnread);
     CHECK(summary.results.front().isFlagged);
     REQUIRE(summary.results.front().from.has_value());
@@ -752,17 +740,11 @@ TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thre
     const auto threadResult = threadRepository.find("u1", "thr-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Thread>>(threadResult));
     const auto& cachedThread = std::get<std::optional<javelin::jmap::domain::Thread>>(threadResult);
-    REQUIRE(cachedThread.has_value());
-    CHECK(cachedThread->emailIds == std::vector<std::string>{"eml-1", "eml-2"});
+    CHECK_FALSE(cachedThread.has_value());
 
-    const auto expandedThread = queryService.listThreadMessages("u1", "thr-1");
-    REQUIRE(
-        std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(expandedThread));
-    const auto& expandedMessages =
-        std::get<std::vector<javelin::jmap::cache::MessageListItem>>(expandedThread);
-    REQUIRE(expandedMessages.size() == 2);
-    CHECK(expandedMessages[0].emailId == "eml-1");
-    CHECK(expandedMessages[1].emailId == "eml-2");
+    const auto childResult = emailRepository.find("u1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(childResult));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(childResult).has_value());
 }
 
 TEST_CASE("JmapCore queues archive and delete mailbox moves as mutations",

@@ -269,7 +269,7 @@ TEST_CASE("JmapCore mailbox pages use one requested-page envelope", "[jmap][core
           QUrl{QStringLiteral("https://mail.example.com/jmap/api")});
 }
 
-TEST_CASE("JmapCore collapsed page baseline exposes thread fan-out beyond get limits",
+TEST_CASE("JmapCore collapsed page materializes representatives within get limits",
           "[jmap][core][pagination][thread-materialization]")
 {
     ensureApplication();
@@ -310,63 +310,53 @@ TEST_CASE("JmapCore collapsed page baseline exposes thread fan-out beyond get li
 
     const auto firstRepresentative = emailFixtureWithIdentity("eml-1", "thr-1");
     const auto secondRepresentative = emailFixtureWithIdentity("eml-4", "thr-2");
-    transport.queuedResults
-        .push_back(
-            javelin::jmap::api::HttpResponse{
-                .statusCode = 200,
-                .body =
-                    QByteArray::fromStdString(
-                        serializeResponseEnvelope(
-                            {
-                                .methodResponses =
-                                    {
-                                        {
-                                            .name = "Email/query",
-                                            .arguments =
-                                                R"({"accountId":"u1","queryState":"query-state-1","canCalculateChanges":true,"position":100,"ids":["eml-1","eml-4"],"total":102,"limit":100})",
-                                            .callId = "page-query",
-                                        },
-                                        {
-                                            .name = "Email/get",
-                                            .arguments = std::string{R"({"accountId":"u1","state":"email-state-1","list":[)"} +
-                                                         firstRepresentative +
-                                                         ',' + secondRepresentative + R"(],"notFound":[]})",
-                                            .callId = "page-representatives-get",
-                                        },
-                                        {
-                                            .name = "Thread/get",
-                                            .arguments =
-                                                R"({"accountId":"u1","state":"thread-state-1","list":[{"id":"thr-1","emailIds":["eml-1","eml-2","eml-3"]},{"id":"thr-2","emailIds":["eml-4","eml-5"]}],"notFound":[]})",
-                                            .callId = "page-threads-get",
-                                        },
-                                        {
-                                            .name = "error",
-                                            .arguments =
-                                                R"({"type":"tooManyObjects","description":"The resolved Email/get contains 5 ids but maxObjectsInGet is 2."})",
-                                            .callId = "page-emails-get",
-                                        },
-                                    },
-                                .createdIds = std::nullopt,
-                                .sessionState = "session-state-2",
-                            })),
-            });
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(serializeResponseEnvelope({
+            .methodResponses =
+                {
+                    {
+                        .name = "Email/query",
+                        .arguments =
+                            R"({"accountId":"u1","queryState":"query-state-1","canCalculateChanges":true,"position":100,"ids":["eml-1","eml-4"],"total":102,"limit":2})",
+                        .callId = "page-query",
+                    },
+                    {
+                        .name = "Email/get",
+                        .arguments =
+                            std::string{R"({"accountId":"u1","state":"email-state-1","list":[)"} +
+                            firstRepresentative + ',' + secondRepresentative +
+                            R"(],"notFound":[]})",
+                        .callId = "page-representatives-get",
+                    },
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "session-state-2",
+        })),
+    });
 
     const auto result = QCoro::waitFor(core.queryMailboxPage(settings, "u1", "mbx-inbox", 100));
-    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
-    CHECK(std::get<javelin::jmap::OperationError>(result).message.contains(
-        QStringLiteral("maxObjectsInGet is 2")));
+    REQUIRE(std::holds_alternative<javelin::jmap::MailboxPageSummary>(result));
+    const auto& page = std::get<javelin::jmap::MailboxPageSummary>(result);
+    CHECK(page.position == 100);
+    CHECK(page.returnedLimit == 2);
+    CHECK(page.representativeCount == 2);
+    CHECK(page.total == std::optional<std::size_t>{102});
+    REQUIRE(page.results.size() == 2);
+    CHECK(page.results[0].emailId == "eml-1");
+    CHECK(page.results[1].emailId == "eml-4");
+    CHECK_FALSE(page.results[0].globalThreadMessageCount.has_value());
     REQUIRE(transport.requests.size() == 2);
 
     const auto requestEnvelope =
         javelin::jmap::api::parseRequestEnvelope(transport.requests.back().body.toStdString());
     REQUIRE(requestEnvelope.ok());
     REQUIRE(requestEnvelope.value.has_value());
-    REQUIRE(requestEnvelope.value->methodCalls.size() == 4);
-    CHECK(requestEnvelope.value->methodCalls[0].arguments.find(R"("limit":100)") !=
+    REQUIRE(requestEnvelope.value->methodCalls.size() == 2);
+    CHECK(requestEnvelope.value->methodCalls[0].arguments.find(R"("limit":2)") !=
           std::string::npos);
-    CHECK(requestEnvelope.value->methodCalls[3].name == "Email/get");
-    CHECK(
-        requestEnvelope.value->methodCalls[3].arguments.find(
-            R"("#ids":{"resultOf":"page-threads-get","name":"Thread/get","path":"/list/*/emailIds"})") !=
-        std::string::npos);
+    CHECK(requestEnvelope.value->methodCalls[1].name == "Email/get");
+    CHECK(requestEnvelope.value->methodCalls[1].arguments.find(
+              R"("#ids":{"resultOf":"page-query","name":"Email/query","path":"/ids"})") !=
+          std::string::npos);
 }

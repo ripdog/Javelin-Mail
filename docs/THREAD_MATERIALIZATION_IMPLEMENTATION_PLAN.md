@@ -6,11 +6,11 @@ This document is the accepted implementation plan for replacing unbounded collap
 with a split foreground/background materialization model. Implementation is in progress. It records
 the product decisions agreed before implementation and is updated as phases land.
 
-Phase 0 is complete. Deterministic `maxObjectsInGet = 2` fixtures now cover both collapsed-page
+Phase 0 is complete. Deterministic `maxObjectsInGet = 2` fixtures cover both collapsed-page
 implementations: canonical watched-mailbox refresh and the shared continuation/server-search page
-path. Each fixture uses two representatives whose Threads contain five Emails and records the
-current oversized nested-result-reference failure so the later foreground/background split can
-replace it with bounded explicit child requests.
+path. They originally reproduced the oversized nested-result-reference failure with two
+representatives whose Threads contain five Emails; Phase 3 evolved them to assert the bounded
+representative-only foreground request and committed sparse window.
 
 The stable product baselines are covered by production-path tests for representative order and
 window totals, mailbox-scoped expansion, whole-conversation server-search expansion, quick-filter
@@ -32,6 +32,13 @@ Thread or complete-offline mailbox coverage proves them, while a known multi-mes
 still enables expansion. Accessibility and reply controls avoid presenting the global count as an
 exact mailbox-local count, and authoritative query-window representatives remain stable as newer
 children are hydrated.
+
+Phase 3 is complete. Canonical mailbox bootstrap, continuation pages, and server-search pages now
+finish after a collapsed `Email/query` and bounded representative `Email/get`. Their query limit is
+clamped to the negotiated `maxObjectsInGet`; no foreground request depends on `Thread/get` or child
+Email fan-out. Representatives, active-projection rebasing, and exact complete query-window state
+commit atomically, so sparse cached children are neither required for rendering nor mistaken for
+authoritative mailbox membership.
 
 The target architecture is:
 

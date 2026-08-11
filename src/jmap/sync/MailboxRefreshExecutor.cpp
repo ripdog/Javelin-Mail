@@ -5,7 +5,6 @@
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
-#include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
@@ -107,55 +106,6 @@ namespace javelin::jmap::sync
                 parts.push_back(QString::fromStdString(id));
             }
             return parts.join(QStringLiteral(","));
-        }
-
-        [[nodiscard]] QString
-        emailMailboxSummary(const std::vector<javelin::jmap::domain::Email>& emails)
-        {
-            QStringList parts;
-            for (const auto& email : emails)
-            {
-                QStringList mailboxIds;
-                for (const auto& mailboxId : email.mailboxIds)
-                {
-                    mailboxIds.push_back(QString::fromStdString(mailboxId));
-                }
-                parts.push_back(QStringLiteral("%1[%2]").arg(QString::fromStdString(email.id),
-                                                             mailboxIds.join(QStringLiteral(","))));
-            }
-            return parts.join(QStringLiteral(";"));
-        }
-
-        [[nodiscard]] std::vector<std::string>
-        fetchedMailboxEmailIds(const std::vector<javelin::jmap::domain::Email>& emails,
-                               const std::string_view mailboxId)
-        {
-            std::vector<std::string> emailIds;
-            emailIds.reserve(emails.size());
-            for (const auto& email : emails)
-            {
-                if (std::ranges::find(email.mailboxIds, std::string{mailboxId}) !=
-                    email.mailboxIds.end())
-                {
-                    emailIds.push_back(email.id);
-                }
-            }
-
-            return deduplicatedIds(std::move(emailIds));
-        }
-
-        [[nodiscard]] std::variant<std::vector<std::string>, OperationError>
-        mailboxEmailIds(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                        const std::string_view accountId, const std::string_view mailboxId)
-        {
-            javelin::jmap::cache::EmailRepository emailRepository{databaseConnection};
-            const auto result = emailRepository.listMailboxEmailIds(accountId, mailboxId);
-            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
-            {
-                return javelin::jmap::operationError(*error);
-            }
-
-            return std::get<std::vector<std::string>>(result);
         }
 
         [[nodiscard]] std::variant<std::vector<std::string>, OperationError>
@@ -343,9 +293,7 @@ namespace javelin::jmap::sync
         {
             std::string queryState;
             std::string emailState;
-            std::string threadState;
             std::vector<std::string> representativeIds;
-            std::vector<javelin::jmap::domain::Thread> threads;
             std::vector<javelin::jmap::domain::Email> emails;
             std::size_t representativeCount = 0;
             std::size_t returnedLimit = 100;
@@ -381,6 +329,13 @@ namespace javelin::jmap::sync
                     reportProgress(message);
                 }
             };
+            constexpr std::size_t nominalLimit = 100;
+            const auto effectiveLimit =
+                apiRequestContext.requestLimits.has_value()
+                    ? std::min<std::size_t>(nominalLimit,
+                                            static_cast<std::size_t>(
+                                                apiRequestContext.requestLimits->maxObjectsInGet))
+                    : nominalLimit;
 
             javelin::jmap::api::RequestBuilder builder;
             builder.useCore().useMail();
@@ -401,7 +356,7 @@ namespace javelin::jmap::sync
                 .position = 0,
                 .anchor = std::nullopt,
                 .anchorOffset = 0,
-                .limit = 100,
+                .limit = static_cast<std::uint64_t>(effectiveLimit),
                 .collapseThreads = true,
                 .calculateTotal = true,
             });
@@ -414,8 +369,7 @@ namespace javelin::jmap::sync
             const auto queryHandle = builder.call(*queryRequest, "mailbox-query");
 
             const auto representativeRequest = javelin::jmap::api::emailGet(
-                javelin::jmap::api::getRequestFrom(std::string{accountId}, queryHandle, "/ids",
-                                                   std::vector<std::string>{"threadId"}));
+                javelin::jmap::api::getRequestFrom(std::string{accountId}, queryHandle, "/ids"));
             if (!representativeRequest.has_value())
             {
                 co_return OperationError{
@@ -425,28 +379,6 @@ namespace javelin::jmap::sync
             }
             const auto representativeHandle =
                 builder.call(*representativeRequest, "thread-ids-get");
-
-            const auto threadRequest =
-                javelin::jmap::api::threadGet(javelin::jmap::api::getRequestFrom(
-                    std::string{accountId}, representativeHandle, "/list/*/threadId"));
-            if (!threadRequest.has_value())
-            {
-                co_return OperationError{
-                    .message = QStringLiteral("Failed to encode the Thread/get request."),
-                };
-            }
-            const auto threadHandle = builder.call(*threadRequest, "threads-get");
-
-            const auto emailRequest =
-                javelin::jmap::api::emailGet(javelin::jmap::api::getRequestFrom(
-                    std::string{accountId}, threadHandle, "/list/*/emailIds"));
-            if (!emailRequest.has_value())
-            {
-                co_return OperationError{
-                    .message = QStringLiteral("Failed to encode the mailbox Email/get request."),
-                };
-            }
-            const auto emailHandle = builder.call(*emailRequest, "mailbox-emails-get");
 
             const auto envelopeResult = co_await methodCaller.call(apiRequestContext, builder);
             if (const auto* error =
@@ -493,62 +425,41 @@ namespace javelin::jmap::sync
             const auto& parsedRepresentatives =
                 std::get<javelin::jmap::api::EmailGetResponse>(representativeResult);
 
-            if (parsedQuery.ids.empty())
-            {
-                co_return CollapsedMailboxFetch{
-                    .queryState = parsedQuery.queryState,
-                    .emailState = {},
-                    .threadState = {},
-                    .representativeIds = {},
-                    .threads = {},
-                    .emails = {},
-                    .representativeCount = 0,
-                    .returnedLimit = static_cast<std::size_t>(parsedQuery.limit.value_or(100)),
-                    .total = parsedQuery.total,
-                };
-            }
-
             emitProgress(
                 QStringLiteral("Fetched %1 representative emails for the selected mailbox.")
                     .arg(parsedRepresentatives.list.size()));
 
-            const auto threadResult = reader.require(threadHandle);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::api::ResponseReaderError>(&threadResult))
+            std::unordered_map<std::string, const javelin::jmap::domain::Email*>
+                representativesById;
+            representativesById.reserve(parsedRepresentatives.list.size());
+            for (const auto& email : parsedRepresentatives.list)
+                representativesById.emplace(email.id, &email);
+            std::vector<javelin::jmap::domain::Email> representatives;
+            representatives.reserve(parsedQuery.ids.size());
+            for (const auto& representativeId : parsedQuery.ids)
             {
-                co_return operationError(*error);
+                const auto representativeIt = representativesById.find(representativeId);
+                if (representativeIt != representativesById.end())
+                    representatives.push_back(*representativeIt->second);
             }
-            const auto& parsedThreads =
-                std::get<javelin::jmap::api::ThreadGetResponse>(threadResult);
-
-            emitProgress(
-                QStringLiteral("Fetched %1 thread records.").arg(parsedThreads.list.size()));
-
-            const auto emailResult = reader.require(emailHandle);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::api::ResponseReaderError>(&emailResult))
+            if (representatives.size() != parsedQuery.ids.size())
             {
-                co_return operationError(*error);
+                co_return OperationError{
+                    .message = QStringLiteral(
+                                   "Email/get omitted %1 representatives from the mailbox window.")
+                                   .arg(static_cast<qulonglong>(parsedQuery.ids.size() -
+                                                                representatives.size())),
+                };
             }
-            const auto& parsedEmails = std::get<javelin::jmap::api::EmailGetResponse>(emailResult);
-            qCDebug(logMailboxSync).noquote()
-                << "fetched thread emails" << QString::fromStdString(accountId)
-                << QString::fromStdString(mailboxId) << "state"
-                << QString::fromStdString(parsedEmails.state) << "emails"
-                << emailMailboxSummary(parsedEmails.list);
-
-            emitProgress(
-                QStringLiteral("Fetched %1 thread messages.").arg(parsedEmails.list.size()));
 
             co_return CollapsedMailboxFetch{
                 .queryState = parsedQuery.queryState,
-                .emailState = parsedEmails.state,
-                .threadState = parsedThreads.state,
+                .emailState = parsedRepresentatives.state,
                 .representativeIds = parsedQuery.ids,
-                .threads = parsedThreads.list,
-                .emails = parsedEmails.list,
+                .emails = std::move(representatives),
                 .representativeCount = parsedQuery.ids.size(),
-                .returnedLimit = static_cast<std::size_t>(parsedQuery.limit.value_or(100)),
+                .returnedLimit =
+                    static_cast<std::size_t>(parsedQuery.limit.value_or(effectiveLimit)),
                 .total = parsedQuery.total,
             };
         }
@@ -962,6 +873,10 @@ namespace javelin::jmap::sync
             canonicalWindow->has_value() &&
             javelin::jmap::cache::isPaginationAuthoritative((*canonicalWindow)->coverage,
                                                             (*canonicalWindow)->materialization);
+        const auto previousRepresentativeIds =
+            canonicalWindow->has_value()
+                ? std::optional<std::vector<std::string>>{(*canonicalWindow)->emailIds}
+                : std::nullopt;
         const bool requireFullMaterialization = forceFullRefresh || !canonicalWindowIsAuthoritative;
         std::optional<std::string> cachedPrefixTail;
         {
@@ -998,11 +913,6 @@ namespace javelin::jmap::sync
         std::vector<std::string> destroyedEmailIds;
         bool requiresNotificationScan = false;
         std::vector<RefreshNotificationCandidate> notificationCandidates;
-        std::optional<std::vector<std::string>> previousMailboxEmailIds;
-
-        const bool hasMailboxBaseline =
-            queryPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
-            queryPlan.sinceState.has_value();
 
         if (!requireFullMaterialization &&
             queryPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
@@ -1157,60 +1067,25 @@ namespace javelin::jmap::sync
             }
             if (!std::get<bool>(current))
                 co_return supersededMailboxRefresh();
-            const bool fetchedCompleteMailbox =
-                fetch.total.has_value() && *fetch.total == fetch.representativeCount;
-            if (hasMailboxBaseline && fetchedCompleteMailbox)
+            if (previousRepresentativeIds.has_value())
             {
-                const auto previousIdsResult =
-                    mailboxEmailIds(m_databaseConnection, accountId, mailboxId);
-                if (const auto* error = std::get_if<OperationError>(&previousIdsResult))
+                const std::unordered_set<std::string> previousIds(
+                    previousRepresentativeIds->begin(), previousRepresentativeIds->end());
+                std::vector<std::string> insertedRepresentatives;
+                for (const auto& representativeId : fetch.representativeIds)
                 {
-                    co_return *error;
+                    if (!previousIds.contains(representativeId))
+                        insertedRepresentatives.push_back(representativeId);
                 }
-
-                previousMailboxEmailIds =
-                    std::get<std::vector<std::string>>(std::move(previousIdsResult));
-            }
-            const auto currentFetchedMailboxEmailIds =
-                fetchedMailboxEmailIds(fetch.emails, mailboxId);
-
-            std::vector<std::string> removedMailboxEmailIds;
-            if (previousMailboxEmailIds.has_value() && fetchedCompleteMailbox)
-            {
-                const std::unordered_set<std::string> previousIdsSet(
-                    previousMailboxEmailIds->begin(), previousMailboxEmailIds->end());
-                const std::unordered_set<std::string> currentIdsSet(
-                    currentFetchedMailboxEmailIds.begin(), currentFetchedMailboxEmailIds.end());
-
-                std::vector<std::string> insertedAfterFullFetch;
-                insertedAfterFullFetch.reserve(currentFetchedMailboxEmailIds.size());
-                for (const auto& emailId : currentFetchedMailboxEmailIds)
-                    if (!previousIdsSet.contains(emailId))
-                        insertedAfterFullFetch.push_back(emailId);
-                for (const auto& emailId : *previousMailboxEmailIds)
-                    if (!currentIdsSet.contains(emailId))
-                        removedMailboxEmailIds.push_back(emailId);
-
-                if (!insertedAfterFullFetch.empty())
+                if (!insertedRepresentatives.empty())
                 {
-                    insertedAfterFullFetch.insert(insertedAfterFullFetch.end(),
-                                                  insertedEmailIds.begin(), insertedEmailIds.end());
-                    insertedEmailIds = deduplicatedIds(std::move(insertedAfterFullFetch));
+                    insertedRepresentatives.insert(insertedRepresentatives.end(),
+                                                   insertedEmailIds.begin(),
+                                                   insertedEmailIds.end());
+                    insertedEmailIds = deduplicatedIds(std::move(insertedRepresentatives));
                     requiresNotificationScan = true;
                 }
-                if (!removedMailboxEmailIds.empty())
-                {
-                    qCDebug(logMailboxSync).noquote()
-                        << "removing stale mailbox membership" << QString::fromStdString(accountId)
-                        << QString::fromStdString(mailboxId) << "emailIds"
-                        << joinIds(removedMailboxEmailIds);
-                    auto combinedRemovals = removedMailboxEmailIds;
-                    combinedRemovals.insert(combinedRemovals.end(), removedEmailIds.begin(),
-                                            removedEmailIds.end());
-                    removedEmailIds = deduplicatedIds(std::move(combinedRemovals));
-                }
             }
-
             const auto affectedMailboxIdsResult =
                 changedMailboxIds(m_databaseConnection, accountId, fetch.emails);
             if (const auto* error = std::get_if<OperationError>(&affectedMailboxIdsResult))
@@ -1256,10 +1131,6 @@ namespace javelin::jmap::sync
                     co_return supersededMailboxRefresh();
             }
 
-            javelin::jmap::cache::ThreadRepository threadRepository{m_databaseConnection};
-            if (const auto error = threadRepository.upsertMany(cacheTransaction, accountId,
-                                                               fetch.threads, fetch.threadState))
-                co_return javelin::jmap::operationError(*error);
             if (const auto error =
                     emailRepository.upsertMany(cacheTransaction, accountId, fetch.emails))
                 co_return javelin::jmap::operationError(*error);
@@ -1276,12 +1147,6 @@ namespace javelin::jmap::sync
                     reapplyPendingEmailPatches(transaction, m_databaseConnection, accountId,
                                                std::move(fetchedEmailIds), fetch.emailState))
                 co_return *error;
-            if (!removedMailboxEmailIds.empty())
-            {
-                if (const auto error = emailRepository.removeFromMailbox(
-                        cacheTransaction, accountId, mailboxId, removedMailboxEmailIds))
-                    co_return javelin::jmap::operationError(*error);
-            }
             if (const auto error = canonicalWindows.replace(
                     cacheTransaction,
                     {

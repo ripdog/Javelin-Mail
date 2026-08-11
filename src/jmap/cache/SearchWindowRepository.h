@@ -36,6 +36,8 @@ namespace javelin::jmap::cache
         explicit SearchWindowRepository(DatabaseConnection& connection);
 
         [[nodiscard]] std::optional<DatabaseError> replace(const SearchWindowRecord& window);
+        [[nodiscard]] std::optional<DatabaseError> replace(DatabaseTransaction& transaction,
+                                                           const SearchWindowRecord& window);
         [[nodiscard]] SearchWindowResult find(std::string_view accountId, std::string_view queryKey,
                                               std::size_t offset, std::size_t limit) const;
         [[nodiscard]] std::optional<DatabaseError>

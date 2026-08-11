@@ -387,32 +387,6 @@ namespace javelin::jmap
             return std::nullopt;
         }
 
-        [[nodiscard]] javelin::jmap::cache::MessageListItem
-        messageListItemFromEmail(const javelin::jmap::domain::Email& email,
-                                 const std::optional<std::uint64_t> globalThreadMessageCount)
-        {
-            return javelin::jmap::cache::MessageListItem{
-                .emailId = email.id,
-                .threadId = email.threadId,
-                .subject = email.subject,
-                .preview = email.preview,
-                .receivedAt = email.receivedAt,
-                .sentAt = email.sentAt,
-                .mailboxThreadMessageCount = std::nullopt,
-                .globalThreadMessageCount = globalThreadMessageCount,
-                .hasAttachment = email.hasAttachment,
-                .isUnread =
-                    std::ranges::find(email.keywords, std::string{"$seen"}) == email.keywords.end(),
-                .isFlagged = std::ranges::find(email.keywords, std::string{"$flagged"}) !=
-                             email.keywords.end(),
-                .from =
-                    email.from.empty()
-                        ? std::nullopt
-                        : std::optional<javelin::jmap::domain::EmailAddress>{email.from.front()},
-                .mailboxNames = {},
-            };
-        }
-
         [[nodiscard]] javelin::jmap::api::ApiRequestContext
         buildApiRequestContext(const LiveConnectionSettings& settings, std::string accountId,
                                const javelin::jmap::api::Session& session)
@@ -431,7 +405,9 @@ namespace javelin::jmap
             std::size_t returnedLimit = 0;
             std::optional<std::size_t> total;
             std::string queryState;
-            std::vector<javelin::jmap::cache::MessageListItem> results;
+            std::string emailState;
+            std::vector<std::string> representativeIds;
+            std::vector<javelin::jmap::domain::Email> representatives;
         };
 
         [[nodiscard]] QCoro::Task<std::variant<CollapsedQueryPage, OperationError>>
@@ -459,6 +435,8 @@ namespace javelin::jmap
 
             javelin::jmap::api::MethodCaller methodCaller{methodTransport};
             const auto apiRequestContext = buildApiRequestContext(settings, accountId, session);
+            const auto effectiveLimit = std::min<std::size_t>(
+                limit, static_cast<std::size_t>(apiRequestContext.requestLimits->maxObjectsInGet));
 
             javelin::jmap::api::RequestBuilder builder;
             builder.useCore().useMail();
@@ -472,7 +450,7 @@ namespace javelin::jmap
                                 : std::optional<std::uint64_t>{static_cast<std::uint64_t>(offset)},
                 .anchor = std::move(anchor),
                 .anchorOffset = anchorOffset,
-                .limit = static_cast<std::uint64_t>(limit),
+                .limit = static_cast<std::uint64_t>(effectiveLimit),
                 .collapseThreads = true,
                 .calculateTotal = true,
             });
@@ -495,27 +473,6 @@ namespace javelin::jmap
             }
             const auto representativeHandle =
                 builder.call(*representativeRequest, "page-representatives-get");
-
-            const auto threadRequest =
-                javelin::jmap::api::threadGet(javelin::jmap::api::getRequestFrom(
-                    accountId, representativeHandle, "/list/*/threadId"));
-            if (!threadRequest.has_value())
-            {
-                co_return OperationError{
-                    .message = QStringLiteral("Failed to encode the Thread/get request."),
-                };
-            }
-            const auto threadHandle = builder.call(*threadRequest, "page-threads-get");
-
-            const auto emailRequest = javelin::jmap::api::emailGet(
-                javelin::jmap::api::getRequestFrom(accountId, threadHandle, "/list/*/emailIds"));
-            if (!emailRequest.has_value())
-            {
-                co_return OperationError{
-                    .message = QStringLiteral("Failed to encode the page Email/get request."),
-                };
-            }
-            const auto emailHandle = builder.call(*emailRequest, "page-emails-get");
 
             const auto envelopeResult = co_await methodCaller.call(apiRequestContext, builder);
             if (const auto* error =
@@ -548,21 +505,6 @@ namespace javelin::jmap
                                    .arg(static_cast<qulonglong>(parsedQuery.ids.size())));
             }
 
-            if (parsedQuery.ids.empty())
-            {
-                co_return CollapsedQueryPage{
-                    .representativeCount = 0,
-                    .position = static_cast<std::size_t>(parsedQuery.position),
-                    .returnedLimit = static_cast<std::size_t>(parsedQuery.limit.value_or(limit)),
-                    .total = parsedQuery.total.has_value()
-                                 ? std::optional<std::size_t>{static_cast<std::size_t>(
-                                       *parsedQuery.total)}
-                                 : std::nullopt,
-                    .queryState = parsedQuery.queryState,
-                    .results = {},
-                };
-            }
-
             const auto representativeResult = reader.require(representativeHandle);
             if (const auto* error =
                     std::get_if<javelin::jmap::api::ResponseReaderError>(&representativeResult))
@@ -572,55 +514,6 @@ namespace javelin::jmap
             const auto& parsedRepresentatives =
                 std::get<javelin::jmap::api::EmailGetResponse>(representativeResult);
 
-            const auto threadResult = reader.require(threadHandle);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::api::ResponseReaderError>(&threadResult))
-            {
-                co_return operationError(*error);
-            }
-            const auto& parsedThreads =
-                std::get<javelin::jmap::api::ThreadGetResponse>(threadResult);
-
-            const auto emailResult = reader.require(emailHandle);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::api::ResponseReaderError>(&emailResult))
-            {
-                co_return operationError(*error);
-            }
-            const auto& parsedEmails = std::get<javelin::jmap::api::EmailGetResponse>(emailResult);
-
-            javelin::jmap::cache::EmailRepository emailRepository{databaseConnection};
-            if (const auto error = emailRepository.upsertMany(accountId, parsedEmails.list))
-            {
-                co_return javelin::jmap::operationError(*error);
-            }
-
-            std::vector<std::string> materializedEmailIds;
-            materializedEmailIds.reserve(parsedEmails.list.size());
-            for (const auto& email : parsedEmails.list)
-                materializedEmailIds.push_back(email.id);
-            if (const auto error = javelin::jmap::sync::rebaseActiveEmailProjections(
-                    databaseConnection, accountId, std::move(materializedEmailIds),
-                    parsedEmails.state))
-            {
-                co_return *error;
-            }
-
-            javelin::jmap::cache::ThreadRepository threadRepository{databaseConnection};
-            if (const auto error =
-                    threadRepository.upsertMany(accountId, parsedThreads.list, parsedThreads.state))
-            {
-                co_return javelin::jmap::operationError(*error);
-            }
-
-            std::unordered_map<std::string, std::uint64_t> threadMessageCounts;
-            threadMessageCounts.reserve(parsedThreads.list.size());
-            for (const auto& thread : parsedThreads.list)
-            {
-                threadMessageCounts.emplace(thread.id,
-                                            static_cast<std::uint64_t>(thread.emailIds.size()));
-            }
-
             std::unordered_map<std::string, const javelin::jmap::domain::Email*>
                 representativesById;
             representativesById.reserve(parsedRepresentatives.list.size());
@@ -629,43 +522,38 @@ namespace javelin::jmap
                 representativesById.emplace(email.id, &email);
             }
 
-            std::vector<javelin::jmap::cache::MessageListItem> results;
-            results.reserve(parsedQuery.ids.size());
+            std::vector<javelin::jmap::domain::Email> representatives;
+            representatives.reserve(parsedQuery.ids.size());
             for (const auto& representativeId : parsedQuery.ids)
             {
                 const auto representativeIt = representativesById.find(representativeId);
                 if (representativeIt == representativesById.end())
-                {
                     continue;
-                }
-
-                const auto* email = representativeIt->second;
-                const auto threadCountIt = threadMessageCounts.find(email->threadId);
-                results.push_back(messageListItemFromEmail(
-                    *email, threadCountIt == threadMessageCounts.end()
-                                ? std::nullopt
-                                : std::optional<std::uint64_t>{threadCountIt->second}));
+                representatives.push_back(*representativeIt->second);
             }
-            if (results.size() != parsedQuery.ids.size())
+            if (representatives.size() != parsedQuery.ids.size())
             {
                 co_return OperationError{
-                    .message =
-                        QStringLiteral(
-                            "Email/get omitted %1 representatives from the query window.")
-                            .arg(static_cast<qulonglong>(parsedQuery.ids.size() - results.size())),
+                    .message = QStringLiteral(
+                                   "Email/get omitted %1 representatives from the query window.")
+                                   .arg(static_cast<qulonglong>(parsedQuery.ids.size() -
+                                                                representatives.size())),
                 };
             }
 
             co_return CollapsedQueryPage{
-                .representativeCount = results.size(),
+                .representativeCount = representatives.size(),
                 .position = static_cast<std::size_t>(parsedQuery.position),
-                .returnedLimit = static_cast<std::size_t>(parsedQuery.limit.value_or(limit)),
+                .returnedLimit =
+                    static_cast<std::size_t>(parsedQuery.limit.value_or(effectiveLimit)),
                 .total =
                     parsedQuery.total.has_value()
                         ? std::optional<std::size_t>{static_cast<std::size_t>(*parsedQuery.total)}
                         : std::nullopt,
                 .queryState = parsedQuery.queryState,
-                .results = std::move(results),
+                .emailState = parsedRepresentatives.state,
+                .representativeIds = parsedQuery.ids,
+                .representatives = std::move(representatives),
             };
         }
 
@@ -3412,28 +3300,38 @@ namespace javelin::jmap
         }
 
         auto page = std::get<CollapsedQueryPage>(std::move(pageResult));
-        std::vector<std::string> emailIds;
-        emailIds.reserve(page.results.size());
-        for (const auto& item : page.results)
-        {
-            emailIds.push_back(item.emailId);
-        }
+        auto emailIds = page.representativeIds;
+        auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+            *m_impl->databaseConnection, QStringLiteral("Materialize search window"));
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+            co_return javelin::jmap::operationError(*error);
+        auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+            std::move(transactionResult));
+        javelin::jmap::cache::EmailRepository emailRepository{*m_impl->databaseConnection};
+        if (const auto error = emailRepository.upsertMany(transaction.cacheTransaction(), accountId,
+                                                          page.representatives))
+            co_return javelin::jmap::operationError(*error);
+        if (const auto error = javelin::jmap::sync::rebaseActiveEmailProjections(
+                transaction, *m_impl->databaseConnection, accountId, emailIds, page.emailState))
+            co_return *error;
         javelin::jmap::cache::SearchWindowRepository searchWindowRepository{
             *m_impl->databaseConnection};
-        if (const auto error = searchWindowRepository.replace({
-                .accountId = accountId,
-                .queryKey = queryKey,
-                .offset = offset,
-                .limit = limit,
-                .position = page.position,
-                .returnedLimit = page.returnedLimit,
-                .total = page.total,
-                .queryState = page.queryState,
-                .emailIds = emailIds,
-            }))
-        {
+        if (const auto error = searchWindowRepository.replace(
+                transaction.cacheTransaction(), {
+                                                    .accountId = accountId,
+                                                    .queryKey = queryKey,
+                                                    .offset = offset,
+                                                    .limit = limit,
+                                                    .position = page.position,
+                                                    .returnedLimit = page.returnedLimit,
+                                                    .total = page.total,
+                                                    .queryState = page.queryState,
+                                                    .emailIds = emailIds,
+                                                }))
             co_return javelin::jmap::operationError(*error);
-        }
+        if (const auto error = transaction.commit())
+            co_return javelin::jmap::operationError(*error);
 
         javelin::jmap::cache::QueryService queryService{*m_impl->databaseConnection};
         const auto cachedResults = queryService.listMessagesByEmailIds(accountId, emailIds);
@@ -3441,7 +3339,7 @@ namespace javelin::jmap
         {
             co_return javelin::jmap::operationError(*error);
         }
-        page.results = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(cachedResults);
+        auto results = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(cachedResults);
 
         co_return MessageSearchSummary{
             .accountId = std::move(accountId),
@@ -3453,7 +3351,7 @@ namespace javelin::jmap
             .representativeCount = page.representativeCount,
             .total = page.total,
             .queryState = std::move(page.queryState),
-            .results = std::move(page.results),
+            .results = std::move(results),
         };
     }
 
@@ -3499,32 +3397,52 @@ namespace javelin::jmap
         auto page = std::get<CollapsedQueryPage>(std::move(pageResult));
         const auto materializedOffset = javelin::jmap::sync::materializedMailboxWindowOffset(
             offset, anchoredRequest, page.position);
-        std::vector<std::string> representativeIds;
-        representativeIds.reserve(page.results.size());
-        for (const auto& item : page.results)
-            representativeIds.push_back(item.emailId);
+        auto representativeIds = page.representativeIds;
         const auto queryKey = javelin::jmap::sync::mailboxQueryKey({
             .mailboxId = mailboxId,
             .sortProperty = javelin::jmap::query::propertyName(sort.property),
             .isAscending = javelin::jmap::query::isAscending(sort),
             .collapseThreads = true,
         });
-        javelin::jmap::cache::MailboxWindowRepository windowRepository{*m_impl->databaseConnection};
-        if (const auto error = windowRepository.replace({
-                .accountId = accountId,
-                .mailboxId = mailboxId,
-                .queryKey = queryKey,
-                .requestedOffset = materializedOffset,
-                .requestedLimit = limit,
-                .position = page.position,
-                .returnedLimit = page.returnedLimit,
-                .total = page.total,
-                .queryState = page.queryState,
-                .emailIds = std::move(representativeIds),
-            }))
-        {
+        auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+            *m_impl->databaseConnection, QStringLiteral("Materialize mailbox window"));
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
             co_return javelin::jmap::operationError(*error);
-        }
+        auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+            std::move(transactionResult));
+        javelin::jmap::cache::EmailRepository emailRepository{*m_impl->databaseConnection};
+        if (const auto error = emailRepository.upsertMany(transaction.cacheTransaction(), accountId,
+                                                          page.representatives))
+            co_return javelin::jmap::operationError(*error);
+        if (const auto error = javelin::jmap::sync::rebaseActiveEmailProjections(
+                transaction, *m_impl->databaseConnection, accountId, representativeIds,
+                page.emailState))
+            co_return *error;
+        javelin::jmap::cache::MailboxWindowRepository windowRepository{*m_impl->databaseConnection};
+        if (const auto error = windowRepository.replace(
+                transaction.cacheTransaction(), {
+                                                    .accountId = accountId,
+                                                    .mailboxId = mailboxId,
+                                                    .queryKey = queryKey,
+                                                    .requestedOffset = materializedOffset,
+                                                    .requestedLimit = limit,
+                                                    .position = page.position,
+                                                    .returnedLimit = page.returnedLimit,
+                                                    .total = page.total,
+                                                    .queryState = page.queryState,
+                                                    .emailIds = std::move(representativeIds),
+                                                }))
+            co_return javelin::jmap::operationError(*error);
+        if (const auto error = transaction.commit())
+            co_return javelin::jmap::operationError(*error);
+
+        javelin::jmap::cache::QueryService queryService{*m_impl->databaseConnection};
+        const auto cachedResults =
+            queryService.listMessagesByEmailIds(accountId, page.representativeIds);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedResults))
+            co_return javelin::jmap::operationError(*error);
+        auto results = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(cachedResults);
         co_return MailboxPageSummary{
             .accountId = std::move(accountId),
             .mailboxId = std::move(mailboxId),
@@ -3535,7 +3453,7 @@ namespace javelin::jmap
             .representativeCount = page.representativeCount,
             .total = page.total,
             .queryState = std::move(page.queryState),
-            .results = std::move(page.results),
+            .results = std::move(results),
         };
     }
 

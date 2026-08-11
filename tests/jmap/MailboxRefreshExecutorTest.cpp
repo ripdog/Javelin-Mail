@@ -408,7 +408,7 @@ TEST_CASE("mailbox refresh executor bootstraps a collapsed mailbox into the cach
     CHECK(window->emailIds == std::vector<std::string>{"eml-1"});
 }
 
-TEST_CASE("mailbox refresh baseline exposes collapsed thread fan-out beyond get limits",
+TEST_CASE("mailbox refresh materializes representatives within get limits",
           "[jmap][sync][refresh][thread-materialization]")
 {
     ApplicationGuard application;
@@ -420,46 +420,28 @@ TEST_CASE("mailbox refresh baseline exposes collapsed thread fan-out beyond get 
     const auto firstRepresentative = emailFixtureWithIdentity("eml-1", "thr-1");
     const auto secondRepresentative = emailFixtureWithIdentity("eml-4", "thr-2");
     FakeTransport transport;
-    transport.queuedResults
-        .push_back(
-            javelin::jmap::api::HttpResponse{
-                .statusCode = 200,
-                .body =
-                    QByteArray::fromStdString(
-                        serializeResponseEnvelope(
-                            {
-                                .methodResponses =
-                                    {
-                                        {
-                                            .name = "Email/query",
-                                            .arguments =
-                                                R"({"accountId":"account-1","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["eml-1","eml-4"],"total":2,"limit":100})",
-                                            .callId = "mailbox-query",
-                                        },
-                                        {
-                                            .name = "Email/get",
-                                            .arguments = emailGetArguments(
-                                                "email-state-1",
-                                                {firstRepresentative, secondRepresentative}),
-                                            .callId = "thread-ids-get",
-                                        },
-                                        {
-                                            .name = "Thread/get",
-                                            .arguments =
-                                                R"({"accountId":"account-1","state":"thread-state-1","list":[{"id":"thr-1","emailIds":["eml-1","eml-2","eml-3"]},{"id":"thr-2","emailIds":["eml-4","eml-5"]}],"notFound":[]})",
-                                            .callId = "threads-get",
-                                        },
-                                        {
-                                            .name = "error",
-                                            .arguments =
-                                                R"({"type":"tooManyObjects","description":"The resolved Email/get contains 5 ids but maxObjectsInGet is 2."})",
-                                            .callId = "mailbox-emails-get",
-                                        },
-                                    },
-                                .createdIds = std::nullopt,
-                                .sessionState = "session-state-1",
-                            })),
-            });
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(serializeResponseEnvelope({
+            .methodResponses =
+                {
+                    {
+                        .name = "Email/query",
+                        .arguments =
+                            R"({"accountId":"account-1","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["eml-1","eml-4"],"total":2,"limit":2})",
+                        .callId = "mailbox-query",
+                    },
+                    {
+                        .name = "Email/get",
+                        .arguments = emailGetArguments("email-state-1",
+                                                       {firstRepresentative, secondRepresentative}),
+                        .callId = "thread-ids-get",
+                    },
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "session-state-1",
+        })),
+    });
 
     const javelin::jmap::api::CoreRequestLimits tinyLimits{
         .maxSizeRequest = 1'000'000,
@@ -474,23 +456,39 @@ TEST_CASE("mailbox refresh baseline exposes collapsed thread fan-out beyond get 
     const auto result =
         QCoro::waitFor(executor.refreshCollapsedMailbox("account-1", "mbx-inbox", {}));
 
-    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
-    CHECK(std::get<javelin::jmap::OperationError>(result).message.contains(
-        QStringLiteral("maxObjectsInGet is 2")));
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailboxRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::sync::MailboxRefreshSummary>(result);
+    CHECK(summary.representativeCount == 2);
+    CHECK(summary.canonicalWindowMaterialized);
     REQUIRE(transport.requests.size() == 1);
 
     const auto requestEnvelope =
         javelin::jmap::api::parseRequestEnvelope(transport.requests.front().body.toStdString());
     REQUIRE(requestEnvelope.ok());
     REQUIRE(requestEnvelope.value.has_value());
-    REQUIRE(requestEnvelope.value->methodCalls.size() == 4);
-    CHECK(requestEnvelope.value->methodCalls[0].arguments.find(R"("limit":100)") !=
+    REQUIRE(requestEnvelope.value->methodCalls.size() == 2);
+    CHECK(requestEnvelope.value->methodCalls[0].arguments.find(R"("limit":2)") !=
           std::string::npos);
-    CHECK(requestEnvelope.value->methodCalls[3].name == "Email/get");
-    CHECK(
-        requestEnvelope.value->methodCalls[3].arguments.find(
-            R"("#ids":{"resultOf":"threads-get","name":"Thread/get","path":"/list/*/emailIds"})") !=
-        std::string::npos);
+    CHECK(requestEnvelope.value->methodCalls[1].name == "Email/get");
+    CHECK(requestEnvelope.value->methodCalls[1].arguments.find(
+              R"("#ids":{"resultOf":"mailbox-query","name":"Email/query","path":"/ids"})") !=
+          std::string::npos);
+
+    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
+    const auto windowResult = windows.find("account-1", mailboxQueryKey(), 0, 100);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(
+        windowResult));
+    const auto& window =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(windowResult);
+    REQUIRE(window.has_value());
+    CHECK(window->returnedLimit == 2);
+    CHECK(window->materialization == javelin::jmap::cache::QueryWindowMaterialization::Complete);
+    CHECK(window->emailIds == std::vector<std::string>{"eml-1", "eml-4"});
+
+    javelin::jmap::cache::ThreadRepository threads{databaseContext.connection};
+    const auto threadResult = threads.find("account-1", "thr-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Thread>>(threadResult));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Thread>>(threadResult).has_value());
 }
 
 TEST_CASE("mailbox refresh executor discards a response superseded by an accepted mutation",
@@ -1576,7 +1574,7 @@ TEST_CASE("mailbox refresh executor full fallback preserves unrelated account ca
     const auto& summary = std::get<javelin::jmap::sync::MailboxRefreshSummary>(result);
     CHECK_FALSE(summary.usedIncrementalRefresh);
     CHECK(summary.insertedEmailIds == std::vector<std::string>{"eml-2"});
-    CHECK(summary.removedEmailIds == std::vector<std::string>{"eml-1"});
+    CHECK(summary.removedEmailIds.empty());
     CHECK(summary.requiresNotificationScan);
 
     const auto archiveWindowResult = windows.find("account-1", archiveQueryKey, 0, 100);
@@ -1585,7 +1583,15 @@ TEST_CASE("mailbox refresh executor full fallback preserves unrelated account ca
     const auto& archiveWindow =
         std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(archiveWindowResult);
     REQUIRE(archiveWindow.has_value());
-    CHECK(archiveWindow->coverage == javelin::jmap::cache::QueryWindowCoverage::Stale);
+    CHECK(archiveWindow->coverage == javelin::jmap::cache::QueryWindowCoverage::Server);
+
+    const auto inboxWindowResult = windows.find("account-1", mailboxQueryKey(), 0, 100);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(
+        inboxWindowResult));
+    const auto& inboxWindow =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(inboxWindowResult);
+    REQUIRE(inboxWindow.has_value());
+    CHECK(inboxWindow->emailIds == std::vector<std::string>{"eml-2"});
 
     javelin::jmap::cache::QueryService queryService{databaseContext.connection};
     const auto inboxListResult = queryService.listMailboxMessages("account-1", "mbx-inbox", 100);
@@ -1593,8 +1599,7 @@ TEST_CASE("mailbox refresh executor full fallback preserves unrelated account ca
         inboxListResult));
     const auto& inboxItems =
         std::get<std::vector<javelin::jmap::cache::MessageListItem>>(inboxListResult);
-    REQUIRE(inboxItems.size() == 1);
-    CHECK(inboxItems.front().emailId == "eml-2");
+    REQUIRE(inboxItems.size() == 2);
 
     const auto archivedEmailResult = emailRepository.find("account-1", "eml-archive");
     REQUIRE(
