@@ -282,3 +282,36 @@ TEST_CASE("thread membership replacement rolls back atomically on invalid member
     CHECK(membership->state == std::optional<std::string>{"thread-state-1"});
     CHECK(membership->freshness == javelin::jmap::cache::ThreadMembershipFreshness::Current);
 }
+
+TEST_CASE("thread repository commits large memberships with one set-based insert",
+          "[jmap][cache][repository][thread-coverage][large]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application)
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    std::vector<std::string> emailIds;
+    emailIds.reserve(20'000);
+    for (std::size_t index = 0; index < 20'000; ++index)
+        emailIds.push_back("sms-" + std::to_string(index));
+
+    javelin::jmap::cache::ThreadRepository repository{databaseContext.connection};
+    REQUIRE_FALSE(repository
+                      .upsertMany("account-1",
+                                  {javelin::jmap::domain::Thread{
+                                      .id = "large-sms-thread",
+                                      .emailIds = emailIds,
+                                  }},
+                                  "thread-state-large")
+                      .has_value());
+
+    const auto result = repository.findMembership("account-1", "large-sms-thread");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(
+        result));
+    const auto& membership =
+        std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(result);
+    REQUIRE(membership.has_value());
+    CHECK(membership->globalMemberCount == emailIds.size());
+    CHECK(membership->thread.emailIds == emailIds);
+}

@@ -1,5 +1,7 @@
 #include "jmap/cache/ThreadRepository.h"
 
+#include <glaze/glaze.hpp>
+
 #include <QSqlError>
 #include <QSqlQuery>
 
@@ -110,7 +112,8 @@ namespace javelin::jmap::cache
         QSqlQuery insertMember{m_connection.database()};
         insertMember.prepare(QStringLiteral(
             "INSERT INTO thread_email_members(account_id,thread_id,position,email_id) "
-            "VALUES(:account_id,:thread_id,:position,:email_id)"));
+            "SELECT :account_id,:thread_id,CAST(member.key AS INTEGER),member.value "
+            "FROM json_each(:email_ids_json) member"));
 
         const auto account = QString::fromStdString(std::string{accountId});
         for (const auto& thread : threads)
@@ -133,18 +136,22 @@ namespace javelin::jmap::cache
                                       deleteMembers);
             deleteMembers.finish();
 
-            for (std::size_t position = 0; position < thread.emailIds.size(); ++position)
+            std::string emailIdsJson;
+            if (const auto writeError = glz::write_json(thread.emailIds, emailIdsJson))
             {
-                insertMember.bindValue(QStringLiteral(":account_id"), account);
-                insertMember.bindValue(QStringLiteral(":thread_id"), threadId);
-                insertMember.bindValue(QStringLiteral(":position"),
-                                       static_cast<qulonglong>(position));
-                insertMember.bindValue(QStringLiteral(":email_id"),
-                                       QString::fromStdString(thread.emailIds[position]));
-                if (!insertMember.exec())
-                    return makeQueryError(QStringLiteral("Insert thread member"), insertMember);
-                insertMember.finish();
+                Q_UNUSED(writeError)
+                return DatabaseError{
+                    .code = DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Serialize Thread membership failed."),
+                };
             }
+            insertMember.bindValue(QStringLiteral(":account_id"), account);
+            insertMember.bindValue(QStringLiteral(":thread_id"), threadId);
+            insertMember.bindValue(QStringLiteral(":email_ids_json"),
+                                   QString::fromStdString(emailIdsJson));
+            if (!insertMember.exec())
+                return makeQueryError(QStringLiteral("Insert thread membership"), insertMember);
+            insertMember.finish();
         }
         return std::nullopt;
     }
