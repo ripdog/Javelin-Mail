@@ -65,6 +65,22 @@ namespace
         REQUIRE(serialized.has_value());
         return *serialized;
     }
+
+    [[nodiscard]] std::string emailFixtureWithIdentity(std::string_view emailId,
+                                                       std::string_view threadId)
+    {
+        auto email = javelin::tests::loadFixture("jmap/entities/email.json");
+        const auto idPosition = email.find(R"("id": "eml-1")");
+        REQUIRE(idPosition != std::string::npos);
+        email.replace(idPosition, std::string{R"("id": "eml-1")"}.size(),
+                      R"("id": ")" + std::string{emailId} + '"');
+
+        const auto threadPosition = email.find(R"("threadId": "thr-123")");
+        REQUIRE(threadPosition != std::string::npos);
+        email.replace(threadPosition, std::string{R"("threadId": "thr-123")"}.size(),
+                      R"("threadId": ")" + std::string{threadId} + '"');
+        return email;
+    }
 } // namespace
 
 TEST_CASE("JmapCore startup session refresh discovers and caches websocket capability",
@@ -251,4 +267,106 @@ TEST_CASE("JmapCore mailbox pages use one requested-page envelope", "[jmap][core
     REQUIRE(transport.requests.size() == 2);
     CHECK(transport.requests.back().url ==
           QUrl{QStringLiteral("https://mail.example.com/jmap/api")});
+}
+
+TEST_CASE("JmapCore collapsed page baseline exposes thread fan-out beyond get limits",
+          "[jmap][core][pagination][thread-materialization]")
+{
+    ensureApplication();
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto database = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+
+    auto tinySession = javelin::tests::loadFixture("jmap/session/websocket_session.json");
+    const auto getLimitPosition = tinySession.find(R"("maxObjectsInGet": 500)");
+    REQUIRE(getLimitPosition != std::string::npos);
+    tinySession.replace(getLimitPosition, std::string{R"("maxObjectsInGet": 500)"}.size(),
+                        R"("maxObjectsInGet": 2)");
+    const auto setLimitPosition = tinySession.find(R"("maxObjectsInSet": 500)");
+    REQUIRE(setLimitPosition != std::string::npos);
+    tinySession.replace(setLimitPosition, std::string{R"("maxObjectsInSet": 500)"}.size(),
+                        R"("maxObjectsInSet": 2)");
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(tinySession),
+    });
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::JmapCore core{database, transport, methodTransport};
+    const javelin::jmap::LiveConnectionSettings settings{
+        .sessionUrl = "https://mail.example.com/.well-known/jmap",
+        .loginEmail = "alice@example.com",
+        .apiKey = "access-token",
+    };
+    REQUIRE(std::holds_alternative<javelin::jmap::SessionRefreshSummary>(
+        QCoro::waitFor(core.refreshSession(settings, "u1"))));
+
+    const auto firstRepresentative = emailFixtureWithIdentity("eml-1", "thr-1");
+    const auto secondRepresentative = emailFixtureWithIdentity("eml-4", "thr-2");
+    transport.queuedResults
+        .push_back(
+            javelin::jmap::api::HttpResponse{
+                .statusCode = 200,
+                .body =
+                    QByteArray::fromStdString(
+                        serializeResponseEnvelope(
+                            {
+                                .methodResponses =
+                                    {
+                                        {
+                                            .name = "Email/query",
+                                            .arguments =
+                                                R"({"accountId":"u1","queryState":"query-state-1","canCalculateChanges":true,"position":100,"ids":["eml-1","eml-4"],"total":102,"limit":100})",
+                                            .callId = "page-query",
+                                        },
+                                        {
+                                            .name = "Email/get",
+                                            .arguments = std::string{R"({"accountId":"u1","state":"email-state-1","list":[)"} +
+                                                         firstRepresentative +
+                                                         ',' + secondRepresentative + R"(],"notFound":[]})",
+                                            .callId = "page-representatives-get",
+                                        },
+                                        {
+                                            .name = "Thread/get",
+                                            .arguments =
+                                                R"({"accountId":"u1","state":"thread-state-1","list":[{"id":"thr-1","emailIds":["eml-1","eml-2","eml-3"]},{"id":"thr-2","emailIds":["eml-4","eml-5"]}],"notFound":[]})",
+                                            .callId = "page-threads-get",
+                                        },
+                                        {
+                                            .name = "error",
+                                            .arguments =
+                                                R"({"type":"tooManyObjects","description":"The resolved Email/get contains 5 ids but maxObjectsInGet is 2."})",
+                                            .callId = "page-emails-get",
+                                        },
+                                    },
+                                .createdIds = std::nullopt,
+                                .sessionState = "session-state-2",
+                            })),
+            });
+
+    const auto result = QCoro::waitFor(core.queryMailboxPage(settings, "u1", "mbx-inbox", 100));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+    CHECK(std::get<javelin::jmap::OperationError>(result).message.contains(
+        QStringLiteral("maxObjectsInGet is 2")));
+    REQUIRE(transport.requests.size() == 2);
+
+    const auto requestEnvelope =
+        javelin::jmap::api::parseRequestEnvelope(transport.requests.back().body.toStdString());
+    REQUIRE(requestEnvelope.ok());
+    REQUIRE(requestEnvelope.value.has_value());
+    REQUIRE(requestEnvelope.value->methodCalls.size() == 4);
+    CHECK(requestEnvelope.value->methodCalls[0].arguments.find(R"("limit":100)") !=
+          std::string::npos);
+    CHECK(requestEnvelope.value->methodCalls[3].name == "Email/get");
+    CHECK(
+        requestEnvelope.value->methodCalls[3].arguments.find(
+            R"("#ids":{"resultOf":"page-threads-get","name":"Thread/get","path":"/list/*/emailIds"})") !=
+        std::string::npos);
 }

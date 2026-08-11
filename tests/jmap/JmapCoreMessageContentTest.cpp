@@ -753,6 +753,15 @@ TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thre
     const auto& cachedThread = std::get<std::optional<javelin::jmap::domain::Thread>>(threadResult);
     REQUIRE(cachedThread.has_value());
     CHECK(cachedThread->emailIds == std::vector<std::string>{"eml-1", "eml-2"});
+
+    const auto expandedThread = queryService.listThreadMessages("u1", "thr-1");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(expandedThread));
+    const auto& expandedMessages =
+        std::get<std::vector<javelin::jmap::cache::MessageListItem>>(expandedThread);
+    REQUIRE(expandedMessages.size() == 2);
+    CHECK(expandedMessages[0].emailId == "eml-1");
+    CHECK(expandedMessages[1].emailId == "eml-2");
 }
 
 TEST_CASE("JmapCore queues archive and delete mailbox moves as mutations",
