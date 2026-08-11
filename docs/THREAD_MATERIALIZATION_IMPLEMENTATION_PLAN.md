@@ -6,6 +6,12 @@ This document is the accepted implementation plan for replacing unbounded collap
 with a split foreground/background materialization model. Implementation has not landed yet. It
 records the product decisions agreed before implementation and should be updated as phases land.
 
+Phase 0 is in progress. The canonical collapsed-mailbox refresh path now has a deterministic
+`maxObjectsInGet = 2` regression fixture covering two representatives whose Threads contain five
+Emails. The fixture records the current oversized nested-result-reference failure so the later
+foreground/background split can replace it with bounded explicit child requests. Coverage for the
+collapsed continuation/search path remains to be added.
+
 The target architecture is:
 
 ```text
