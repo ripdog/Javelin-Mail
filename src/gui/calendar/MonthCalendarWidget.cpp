@@ -1156,7 +1156,8 @@ namespace javelin::gui::calendar
     }
     void MonthCalendarWidget::createEvent()
     {
-        Q_EMIT emptyTimeActivated(m_selectedDate);
+        const QDateTime start{m_selectedDate, QTime{9, 0}};
+        Q_EMIT emptyTimeActivated(start, start.addSecs(60 * 60));
     }
     void MonthCalendarWidget::showNextMonth()
     {

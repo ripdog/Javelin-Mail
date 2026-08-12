@@ -11,6 +11,7 @@
 #include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPointer>
 #include <QPushButton>
@@ -215,10 +216,14 @@ namespace javelin::gui::calendar
 
             void setEvents(const QDate& date, const std::vector<DayAgendaEvent>& events,
                            QWidget* detailsTarget,
-                           std::function<void(const DayAgendaEventKey&)> selected)
+                           std::function<void(const DayAgendaEventKey&)> selected,
+                           std::function<void(const QDateTime&, const QDateTime&)> create)
             {
                 m_date = date;
                 m_selected = std::move(selected);
+                m_create = std::move(create);
+                delete std::exchange(m_newEventPreview, nullptr);
+                m_pressedBlock.reset();
                 for (auto* button : std::exchange(m_buttons, {}))
                     delete button;
 
@@ -297,9 +302,102 @@ namespace javelin::gui::calendar
             {
                 QWidget::resizeEvent(event);
                 layoutButtons();
+                layoutNewEventPreview();
+            }
+
+            void mousePressEvent(QMouseEvent* event) override
+            {
+                if (event->button() != Qt::LeftButton ||
+                    event->position().x() < timeGutterWidth(fontMetrics()))
+                {
+                    QWidget::mousePressEvent(event);
+                    return;
+                }
+
+                m_pressedBlock = blockAt(event->position().y());
+                m_dragged = false;
+                showNewEventPreview(*m_pressedBlock, *m_pressedBlock + 3);
+                event->accept();
+            }
+
+            void mouseMoveEvent(QMouseEvent* event) override
+            {
+                if (!m_pressedBlock || !event->buttons().testFlag(Qt::LeftButton))
+                {
+                    QWidget::mouseMoveEvent(event);
+                    return;
+                }
+
+                m_dragged = true;
+                const auto currentBlock = blockAt(event->position().y());
+                showNewEventPreview(std::min(*m_pressedBlock, currentBlock),
+                                    std::max(*m_pressedBlock, currentBlock));
+                event->accept();
+            }
+
+            void mouseReleaseEvent(QMouseEvent* event) override
+            {
+                if (event->button() != Qt::LeftButton || !m_pressedBlock)
+                {
+                    QWidget::mouseReleaseEvent(event);
+                    return;
+                }
+
+                const auto releasedBlock = blockAt(event->position().y());
+                const auto firstBlock =
+                    m_dragged ? std::min(*m_pressedBlock, releasedBlock) : *m_pressedBlock;
+                const auto lastBlock =
+                    m_dragged ? std::max(*m_pressedBlock, releasedBlock) : *m_pressedBlock + 3;
+                const auto start = QDateTime{m_date, QTime{0, 0}}.addSecs(firstBlock * 15 * 60);
+                const auto end = QDateTime{m_date, QTime{0, 0}}.addSecs((lastBlock + 1) * 15 * 60);
+                delete std::exchange(m_newEventPreview, nullptr);
+                m_pressedBlock.reset();
+                if (m_create)
+                    m_create(start, end);
+                event->accept();
             }
 
           private:
+            [[nodiscard]] static int blockAt(const qreal y)
+            {
+                return std::clamp(static_cast<int>(y) / QuarterHourPixels, 0, 24 * 4 - 1);
+            }
+
+            void showNewEventPreview(const int firstBlock, const int lastBlock)
+            {
+                if (m_newEventPreview == nullptr)
+                {
+                    m_newEventPreview = new CalendarEventButton(this);
+                    m_newEventPreview->setObjectName(QStringLiteral("dayAgendaNewEventButton"));
+                    m_newEventPreview->setFocusPolicy(Qt::NoFocus);
+                    m_newEventPreview->setAttribute(Qt::WA_TransparentForMouseEvents);
+                    m_newEventPreview->setEventPresentation(i18n("New Event"), i18n("New Event"),
+                                                            palette().color(QPalette::Highlight));
+                    m_newEventPreview->show();
+                    m_newEventPreview->raise();
+                }
+                m_newEventPreview->setProperty("agendaStartMinute", firstBlock * 15);
+                m_newEventPreview->setProperty("agendaEndMinute", (lastBlock + 1) * 15);
+                layoutNewEventPreview();
+            }
+
+            void layoutNewEventPreview()
+            {
+                if (m_newEventPreview == nullptr)
+                    return;
+                const auto gutterWidth = timeGutterWidth(fontMetrics());
+                const auto startMinute = std::clamp(
+                    m_newEventPreview->property("agendaStartMinute").toInt(), 0, 24 * 60);
+                const auto endMinute =
+                    std::clamp(m_newEventPreview->property("agendaEndMinute").toInt(), 0, 24 * 60);
+                const auto y = startMinute * PixelsPerHour / 60 + 1;
+                const auto height =
+                    std::max(22, (endMinute - startMinute) * PixelsPerHour / 60 - 2);
+                m_newEventPreview->setGeometry(gutterWidth + EventGap, y,
+                                               std::max(24, width() - gutterWidth - 2 * EventGap),
+                                               height);
+            }
+
             void layoutButtons()
             {
                 const auto gutterWidth = timeGutterWidth(fontMetrics());
@@ -325,7 +423,11 @@ namespace javelin::gui::calendar
 
             QDate m_date;
             std::function<void(const DayAgendaEventKey&)> m_selected;
+            std::function<void(const QDateTime&, const QDateTime&)> m_create;
             std::vector<CalendarEventButton*> m_buttons;
+            CalendarEventButton* m_newEventPreview = nullptr;
+            std::optional<int> m_pressedBlock;
+            bool m_dragged = false;
         };
 
         class AccessibleDayTimeline final : public QAccessibleWidget
@@ -519,7 +621,11 @@ namespace javelin::gui::calendar
                 [this] { requestDay(m_date.addDays(-1)); });
         connect(m_nextDay, &QToolButton::clicked, this, [this] { requestDay(m_date.addDays(1)); });
         connect(m_newEvent, &QPushButton::clicked, this,
-                [this] { Q_EMIT newEventRequested(m_date); });
+                [this]
+                {
+                    const QDateTime start{m_date, QTime{9, 0}};
+                    Q_EMIT newEventRequested(start, start.addSecs(60 * 60));
+                });
         connect(m_edit, &QPushButton::clicked, this,
                 [this]
                 {
@@ -624,8 +730,10 @@ namespace javelin::gui::calendar
         m_allDayPanel->setVisible(hasAllDay);
 
         auto* timeline = static_cast<DayTimelineWidget*>(m_timeline);
-        timeline->setEvents(m_date, m_events, m_detailsScroll,
-                            [this](const DayAgendaEventKey& key) { selectEvent(key); });
+        timeline->setEvents(
+            m_date, m_events, m_detailsScroll, [this](const DayAgendaEventKey& key)
+            { selectEvent(key); }, [this](const QDateTime& start, const QDateTime& end)
+            { Q_EMIT newEventRequested(start, end); });
         for (auto* button : timeline->buttons())
             m_eventButtons.push_back(button);
 

@@ -426,8 +426,8 @@ namespace javelin::gui::shell
                             dialog->setDay(selectedDate, agendaEvents(selectedDate));
                         });
                 connect(dialog, &javelin::gui::calendar::DayAgendaDialog::newEventRequested, widget,
-                        [widget](const QDate& selectedDate)
-                        { Q_EMIT widget->emptyTimeActivated(selectedDate); });
+                        [widget](const QDateTime& start, const QDateTime& end)
+                        { Q_EMIT widget->emptyTimeActivated(start, end); });
                 connect(dialog, &javelin::gui::calendar::DayAgendaDialog::editRequested, widget,
                         [widget](const QString& selectedAccountId, const QString& selectedEventId,
                                  const QString& selectedRecurrenceId)
@@ -598,7 +598,8 @@ namespace javelin::gui::shell
                 widget, refreshVisible);
         connect(
             widget, &javelin::gui::calendar::MonthCalendarWidget::emptyTimeActivated, widget,
-            [this, widget, accounts = *accounts, refreshVisible](const QDate& date)
+            [this, widget, accounts = *accounts, refreshVisible](const QDateTime& start,
+                                                                 const QDateTime& end)
             {
                 std::vector<javelin::jmap::calendar::Calendar> choices;
                 std::optional<std::size_t> destinationIndex;
@@ -644,9 +645,9 @@ namespace javelin::gui::shell
                     .title = {},
                     .description = std::nullopt,
                     .location = std::nullopt,
-                    .start = {.value =
-                                  QDateTime{date, QTime{9, 0}}.toString(Qt::ISODate).toStdString()},
-                    .duration = {.value = "PT1H"},
+                    .start = {.value = start.toString(Qt::ISODate).toStdString()},
+                    .duration = {.value =
+                                     QStringLiteral("PT%1S").arg(start.secsTo(end)).toStdString()},
                     .timeZone =
                         javelin::jmap::calendar::TimeZoneId{
                             .value = QTimeZone::systemTimeZoneId().toStdString()},

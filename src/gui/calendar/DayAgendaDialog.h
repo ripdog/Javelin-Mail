@@ -63,7 +63,7 @@ namespace javelin::gui::calendar
 
       Q_SIGNALS:
         void dayChanged(QDate date);
-        void newEventRequested(QDate date);
+        void newEventRequested(QDateTime start, QDateTime end);
         void editRequested(QString accountId, QString eventId, QString recurrenceId);
 
       protected:
