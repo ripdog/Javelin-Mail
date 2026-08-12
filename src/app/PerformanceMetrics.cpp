@@ -1,5 +1,7 @@
 #include "app/PerformanceMetrics.h"
 
+#include "protocol/ActionNames.h"
+
 #include <QFile>
 #include <QFileInfo>
 #include <QLoggingCategory>
@@ -170,191 +172,22 @@ namespace javelin::app
         return result;
     }
 
-    QString PerformanceMetrics::remoteActionName(const protocol::RemoteActionKind kind)
+    QString PerformanceMetrics::remoteActionName(const protocol::ActionId action)
     {
-        using Kind = protocol::RemoteActionKind;
-        switch (kind)
+        const auto source = protocol::actionDisplayName(action);
+        if (source.isEmpty())
+            return QStringLiteral("unknown");
+        QString result;
+        result.reserve(source.size() + 8);
+        for (qsizetype index = 0; index < source.size(); ++index)
         {
-        case Kind::RemoveConfiguredAccount:
-            return QStringLiteral("remove_configured_account");
-        case Kind::CalendarReadCached:
-            return QStringLiteral("calendar_read_cached");
-        case Kind::CalendarReadAccounts:
-            return QStringLiteral("calendar_read_accounts");
-        case Kind::CalendarReadCalendars:
-            return QStringLiteral("calendar_read_calendars");
-        case Kind::CalendarRequestRange:
-            return QStringLiteral("calendar_request_range");
-        case Kind::CalendarCreateEvent:
-            return QStringLiteral("calendar_create_event");
-        case Kind::CalendarUpdateEvent:
-            return QStringLiteral("calendar_update_event");
-        case Kind::CalendarDeleteEvent:
-            return QStringLiteral("calendar_delete_event");
-        case Kind::CalendarRespondEvent:
-            return QStringLiteral("calendar_respond_event");
-        case Kind::CalendarSetSubscribed:
-            return QStringLiteral("calendar_set_subscribed");
-        case Kind::CalendarSetDefault:
-            return QStringLiteral("calendar_set_default");
-        case Kind::CalendarCreate:
-            return QStringLiteral("calendar_create");
-        case Kind::CalendarDelete:
-            return QStringLiteral("calendar_delete");
-        case Kind::CalendarSetVisible:
-            return QStringLiteral("calendar_set_visible");
-        case Kind::ComposeOpen:
-            return QStringLiteral("compose_open");
-        case Kind::ComposeLoadSenderIdentities:
-            return QStringLiteral("compose_load_sender_identities");
-        case Kind::ComposeSaveDraft:
-            return QStringLiteral("compose_save_draft");
-        case Kind::ComposeSend:
-            return QStringLiteral("compose_send");
-        case Kind::ComposeScheduleSend:
-            return QStringLiteral("compose_schedule_send");
-        case Kind::ComposeLoadWorkingCopy:
-            return QStringLiteral("compose_load_working_copy");
-        case Kind::ComposeStoreWorkingCopy:
-            return QStringLiteral("compose_store_working_copy");
-        case Kind::ComposeDiscard:
-            return QStringLiteral("compose_discard");
-        case Kind::ContactRequestRefresh:
-            return QStringLiteral("contact_request_refresh");
-        case Kind::ContactMutateAddressBook:
-            return QStringLiteral("contact_mutate_address_book");
-        case Kind::ContactSave:
-            return QStringLiteral("contact_save");
-        case Kind::ContactSetStarred:
-            return QStringLiteral("contact_set_starred");
-        case Kind::ContactDelete:
-            return QStringLiteral("contact_delete");
-        case Kind::ContactCreateGroup:
-            return QStringLiteral("contact_create_group");
-        case Kind::ContactDeleteGroup:
-            return QStringLiteral("contact_delete_group");
-        case Kind::ContactSetGroupMembership:
-            return QStringLiteral("contact_set_group_membership");
-        case Kind::ContactCopy:
-            return QStringLiteral("contact_copy");
-        case Kind::ContactImport:
-            return QStringLiteral("contact_import");
-        case Kind::ContactMerge:
-            return QStringLiteral("contact_merge");
-        case Kind::ContactUploadMedia:
-            return QStringLiteral("contact_upload_media");
-        case Kind::ContactDownloadMedia:
-            return QStringLiteral("contact_download_media");
-        case Kind::MailQueueMailboxMutation:
-            return QStringLiteral("mail_queue_mailbox_mutation");
-        case Kind::MailQueueDestroy:
-            return QStringLiteral("mail_queue_destroy");
-        case Kind::MailQueueMarkUnread:
-            return QStringLiteral("mail_queue_mark_unread");
-        case Kind::MailQueueMarkRead:
-            return QStringLiteral("mail_queue_mark_read");
-        case Kind::MailQueueSetFlagged:
-            return QStringLiteral("mail_queue_set_flagged");
-        case Kind::MailQueueSetSelectionFlagged:
-            return QStringLiteral("mail_queue_set_selection_flagged");
-        case Kind::MailQueueSetTag:
-            return QStringLiteral("mail_queue_set_tag");
-        case Kind::MailSaveTagDefinition:
-            return QStringLiteral("mail_save_tag_definition");
-        case Kind::MailDeleteTag:
-            return QStringLiteral("mail_delete_tag");
-        case Kind::MailSetMailboxSubscribed:
-            return QStringLiteral("mail_set_mailbox_subscribed");
-        case Kind::MailCreateMailbox:
-            return QStringLiteral("mail_create_mailbox");
-        case Kind::MailDestroyMailbox:
-            return QStringLiteral("mail_destroy_mailbox");
-        case Kind::MailSubmitPending:
-            return QStringLiteral("mail_submit_pending");
-        case Kind::SieveList:
-            return QStringLiteral("sieve_list");
-        case Kind::SieveGet:
-            return QStringLiteral("sieve_get");
-        case Kind::SieveValidate:
-            return QStringLiteral("sieve_validate");
-        case Kind::SieveSave:
-            return QStringLiteral("sieve_save");
-        case Kind::SieveDelete:
-            return QStringLiteral("sieve_delete");
-        case Kind::SieveActivate:
-            return QStringLiteral("sieve_activate");
-        case Kind::IdentityList:
-            return QStringLiteral("identity_list");
-        case Kind::IdentitySave:
-            return QStringLiteral("identity_save");
-        case Kind::IdentityDelete:
-            return QStringLiteral("identity_delete");
-        case Kind::AccountBootstrap:
-            return QStringLiteral("account_bootstrap");
-        case Kind::MessageContent:
-            return QStringLiteral("message_content");
-        case Kind::AttachmentDownload:
-            return QStringLiteral("attachment_download");
-        case Kind::MessageSource:
-            return QStringLiteral("message_source");
-        case Kind::MailboxObserve:
-            return QStringLiteral("mailbox_observe");
-        case Kind::MailboxUnobserve:
-            return QStringLiteral("mailbox_unobserve");
-        case Kind::MailboxWindow:
-            return QStringLiteral("mailbox_window");
-        case Kind::SearchWindow:
-            return QStringLiteral("search_window");
-        case Kind::SearchRetire:
-            return QStringLiteral("search_retire");
-        case Kind::ThreadEnsure:
-            return QStringLiteral("thread_ensure");
-        case Kind::Undo:
-            return QStringLiteral("undo");
-        case Kind::Redo:
-            return QStringLiteral("redo");
-        case Kind::UndoAcknowledgeRemove:
-            return QStringLiteral("undo_acknowledge_remove");
-        case Kind::UndoForget:
-            return QStringLiteral("undo_forget");
-        case Kind::UndoSnapshot:
-            return QStringLiteral("undo_snapshot");
-        case Kind::ReloadSettings:
-            return QStringLiteral("reload_settings");
-        case Kind::WorkPause:
-            return QStringLiteral("work_pause");
-        case Kind::WorkResume:
-            return QStringLiteral("work_resume");
-        case Kind::WorkRetry:
-            return QStringLiteral("work_retry");
-        case Kind::WorkList:
-            return QStringLiteral("work_list");
-        case Kind::WorkSummary:
-            return QStringLiteral("work_summary");
-        case Kind::OnboardingDiscover:
-            return QStringLiteral("onboarding_discover");
-        case Kind::OnboardingStartOAuth:
-            return QStringLiteral("onboarding_start_oauth");
-        case Kind::OnboardingFinishOAuth:
-            return QStringLiteral("onboarding_finish_oauth");
-        case Kind::OnboardingAuthenticateManually:
-            return QStringLiteral("onboarding_authenticate_manually");
-        case Kind::OnboardingRevokeOAuth:
-            return QStringLiteral("onboarding_revoke_oauth");
-        case Kind::OnboardingCancelOAuth:
-            return QStringLiteral("onboarding_cancel_oauth");
-        case Kind::DeveloperDiagnosticsSnapshot:
-            return QStringLiteral("developer_diagnostics_snapshot");
-        case Kind::DeveloperMailboxClear:
-            return QStringLiteral("developer_mailbox_clear");
-        case Kind::AcknowledgeRemoteActionResult:
-            return QStringLiteral("acknowledge_remote_action_result");
-        case Kind::DeveloperLogSetSubscribed:
-            return QStringLiteral("developer_log_set_subscribed");
-        case Kind::DeveloperLogClear:
-            return QStringLiteral("developer_log_clear");
+            const auto character = source[index];
+            if (character.isUpper() && index > 0 && source[index - 1].isLower())
+                result += QLatin1Char('_');
+            result += character.toLower();
         }
-        return QStringLiteral("unknown");
+        result.replace(QStringLiteral("_o_auth"), QStringLiteral("_oauth"));
+        return result;
     }
 
     PerformanceSpan::PerformanceSpan(QString process, QString operation, QString details)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "protocol/ProcessBoundary.h"
+#include "protocol/ActivationContract.h"
 
 #include <QObject>
 #include <QSet>

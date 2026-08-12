@@ -1,13 +1,11 @@
-#include "protocol/ProcessBoundary.h"
+#include "protocol/ProtocolValidation.h"
 
 #include <type_traits>
 
 namespace javelin::protocol
 {
-
     namespace
     {
-
         [[nodiscard]] bool isEmpty(const QString& value)
         {
             return value.isEmpty();
@@ -88,13 +86,6 @@ namespace javelin::protocol
                         return validateRefreshAccount(command, limits);
                     else
                     {
-                        if (command.kind > RemoteActionKind::Last)
-                        {
-                            return BoundaryError{
-                                .code = BoundaryErrorCode::InvalidRequest,
-                                .field = QStringLiteral("command.remote.kind"),
-                                .detail = QStringLiteral("remote action kind is invalid")};
-                        }
                         if (static_cast<std::size_t>(command.payload.size()) >
                             limits.maximumFrameBytes)
                         {
@@ -412,7 +403,7 @@ namespace javelin::protocol
                                 if constexpr (std::is_same_v<Command, RefreshAccountCommand>)
                                     return stringSize(command.accountId) + 1;
                                 else
-                                    return sizeof(command.kind) +
+                                    return sizeof(command.action.value) +
                                            static_cast<std::size_t>(command.payload.size());
                             },
                             request.command);
@@ -430,7 +421,6 @@ namespace javelin::protocol
                             },
                             request.request);
         }
-
     } // namespace
 
     std::optional<BoundaryError> validate(const ClientRequest& request,
@@ -528,10 +518,8 @@ namespace javelin::protocol
                                     value.update.workspace->mainWindowState.size());
                         for (const auto& overrideValue :
                              value.update.workspace->calendarColorOverrides)
-                        {
                             size += stringSize(overrideValue.calendarId) +
                                     stringSize(overrideValue.color);
-                        }
                     }
                     return size;
                 }
@@ -600,5 +588,4 @@ namespace javelin::protocol
             },
             event);
     }
-
 } // namespace javelin::protocol

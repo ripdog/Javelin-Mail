@@ -81,21 +81,19 @@ namespace javelin::app
             return failureResult<Result>(std::get<RemoteCallError>(result));
         }
 
-        template <typename Result, typename... Arguments>
-        [[nodiscard]] QCoro::Task<Result> call(RemoteActionClient& client,
-                                               const javelin::protocol::RemoteActionKind kind,
-                                               Arguments&&... arguments)
+        template <typename Action, typename... Arguments>
+        [[nodiscard]] QCoro::Task<typename Action::Result> call(RemoteActionClient& client,
+                                                                Arguments&&... arguments)
         {
-            auto result = co_await client.call<Result>(kind, arguments...);
+            auto result = co_await client.call<Action>(arguments...);
             co_return unwrap(std::move(result));
         }
 
-        template <typename Result, typename... Arguments>
-        [[nodiscard]] Result callImmediate(RemoteActionClient& client,
-                                           const javelin::protocol::RemoteActionKind kind,
-                                           Arguments&&... arguments)
+        template <typename Action, typename... Arguments>
+        [[nodiscard]] typename Action::Result callImmediate(RemoteActionClient& client,
+                                                            Arguments&&... arguments)
         {
-            return unwrap(client.callImmediate<Result>(kind, arguments...));
+            return unwrap(client.callImmediate<Action>(arguments...));
         }
 
     } // namespace
@@ -110,9 +108,8 @@ namespace javelin::app
                                                       const QString& sessionUrl,
                                                       const QStringList& knownAccountIds)
     {
-        return callImmediate<std::optional<javelin::jmap::cache::DatabaseError>>(
-            m_client, javelin::protocol::RemoteActionKind::RemoveConfiguredAccount, loginEmail,
-            sessionUrl, knownAccountIds);
+        return callImmediate<javelin::protocol::actions::RemoveConfiguredAccount>(
+            m_client, loginEmail, sessionUrl, knownAccountIds);
     }
 
     RemoteCalendarReader::RemoteCalendarReader(RemoteActionClient& client) : m_client(client)
@@ -123,23 +120,20 @@ namespace javelin::app
         const std::string_view accountId, const javelin::jmap::calendar::VisibleInterval& interval,
         const javelin::jmap::calendar::TimeZoneId& displayTimeZone) const
     {
-        return callImmediate<javelin::jmap::calendar::CalendarLoadResult>(
-            m_client, javelin::protocol::RemoteActionKind::CalendarReadCached,
-            std::string{accountId}, interval, displayTimeZone);
+        return callImmediate<javelin::protocol::actions::CalendarReadCached>(
+            m_client, std::string{accountId}, interval, displayTimeZone);
     }
 
     javelin::jmap::calendar::CalendarAccountsResult RemoteCalendarReader::accounts() const
     {
-        return callImmediate<javelin::jmap::calendar::CalendarAccountsResult>(
-            m_client, javelin::protocol::RemoteActionKind::CalendarReadAccounts);
+        return callImmediate<javelin::protocol::actions::CalendarReadAccounts>(m_client);
     }
 
     javelin::jmap::calendar::CalendarListResult
     RemoteCalendarReader::calendars(const std::string_view accountId) const
     {
-        return callImmediate<javelin::jmap::calendar::CalendarListResult>(
-            m_client, javelin::protocol::RemoteActionKind::CalendarReadCalendars,
-            std::string{accountId});
+        return callImmediate<javelin::protocol::actions::CalendarReadCalendars>(
+            m_client, std::string{accountId});
     }
 
     RemoteCalendarCommandPort::RemoteCalendarCommandPort(RemoteActionClient& client,
@@ -153,9 +147,8 @@ namespace javelin::app
         std::string ownerAccountId, javelin::jmap::calendar::VisibleInterval interval,
         javelin::jmap::calendar::TimeZoneId displayTimeZone)
     {
-        auto result = co_await call<javelin::jmap::calendar::CalendarRefreshResult>(
-            m_client, javelin::protocol::RemoteActionKind::CalendarRequestRange, ownerAccountId,
-            interval, displayTimeZone);
+        auto result = co_await call<javelin::protocol::actions::CalendarRequestRange>(
+            m_client, ownerAccountId, interval, displayTimeZone);
         if (const auto* refreshed = std::get_if<javelin::jmap::calendar::RefreshedRange>(&result))
         {
             Q_EMIT calendarCacheCommitted({
@@ -174,9 +167,8 @@ namespace javelin::app
         std::string ownerAccountId, javelin::jmap::calendar::CreateEventCommand command,
         const undo::CommandOrigin origin)
     {
-        auto result = co_await call<javelin::jmap::calendar::CalendarMutationResult>(
-            m_client, javelin::protocol::RemoteActionKind::CalendarCreateEvent, ownerAccountId,
-            command, origin);
+        auto result = co_await call<javelin::protocol::actions::CalendarCreateEvent>(
+            m_client, ownerAccountId, command, origin);
         noteCalendarChanged(ownerAccountId);
         co_return result;
     }
@@ -186,9 +178,8 @@ namespace javelin::app
         std::string ownerAccountId, javelin::jmap::calendar::UpdateEventCommand command,
         const undo::CommandOrigin origin)
     {
-        auto result = co_await call<javelin::jmap::calendar::CalendarMutationResult>(
-            m_client, javelin::protocol::RemoteActionKind::CalendarUpdateEvent, ownerAccountId,
-            command, origin);
+        auto result = co_await call<javelin::protocol::actions::CalendarUpdateEvent>(
+            m_client, ownerAccountId, command, origin);
         noteCalendarChanged(ownerAccountId);
         co_return result;
     }
@@ -198,9 +189,8 @@ namespace javelin::app
         std::string ownerAccountId, javelin::jmap::calendar::DeleteEventCommand command,
         const undo::CommandOrigin origin)
     {
-        auto result = co_await call<javelin::jmap::calendar::CalendarMutationResult>(
-            m_client, javelin::protocol::RemoteActionKind::CalendarDeleteEvent, ownerAccountId,
-            command, origin);
+        auto result = co_await call<javelin::protocol::actions::CalendarDeleteEvent>(
+            m_client, ownerAccountId, command, origin);
         noteCalendarChanged(ownerAccountId);
         co_return result;
     }
@@ -209,9 +199,8 @@ namespace javelin::app
     RemoteCalendarCommandPort::respondToCalendarEvent(
         std::string ownerAccountId, javelin::jmap::calendar::RespondToEventCommand command)
     {
-        auto result = co_await call<javelin::jmap::calendar::CalendarMutationResult>(
-            m_client, javelin::protocol::RemoteActionKind::CalendarRespondEvent, ownerAccountId,
-            command);
+        auto result = co_await call<javelin::protocol::actions::CalendarRespondEvent>(
+            m_client, ownerAccountId, command);
         noteCalendarChanged(ownerAccountId);
         co_return result;
     }
@@ -221,9 +210,8 @@ namespace javelin::app
                                                      std::string accountId, std::string calendarId,
                                                      const bool subscribed)
     {
-        auto result = co_await call<javelin::jmap::calendar::CalendarMutationResult>(
-            m_client, javelin::protocol::RemoteActionKind::CalendarSetSubscribed, ownerAccountId,
-            accountId, calendarId, subscribed);
+        auto result = co_await call<javelin::protocol::actions::CalendarSetSubscribed>(
+            m_client, ownerAccountId, accountId, calendarId, subscribed);
         noteCalendarChanged(ownerAccountId);
         co_return result;
     }
@@ -233,9 +221,8 @@ namespace javelin::app
                                                   std::string calendarId,
                                                   const undo::CommandOrigin origin)
     {
-        auto result = co_await call<javelin::jmap::calendar::CalendarMutationResult>(
-            m_client, javelin::protocol::RemoteActionKind::CalendarSetDefault, ownerAccountId,
-            accountId, calendarId, origin);
+        auto result = co_await call<javelin::protocol::actions::CalendarSetDefault>(
+            m_client, ownerAccountId, accountId, calendarId, origin);
         noteCalendarChanged(ownerAccountId);
         co_return result;
     }
@@ -244,8 +231,8 @@ namespace javelin::app
     RemoteCalendarCommandPort::createCalendar(
         std::string ownerAccountId, javelin::jmap::calendar::CreateCalendarCommand command)
     {
-        auto result = co_await call<javelin::jmap::calendar::CalendarMutationResult>(
-            m_client, javelin::protocol::RemoteActionKind::CalendarCreate, ownerAccountId, command);
+        auto result = co_await call<javelin::protocol::actions::CalendarCreate>(
+            m_client, ownerAccountId, command);
         noteCalendarChanged(ownerAccountId);
         co_return result;
     }
@@ -254,8 +241,8 @@ namespace javelin::app
     RemoteCalendarCommandPort::deleteCalendar(
         std::string ownerAccountId, javelin::jmap::calendar::DeleteCalendarCommand command)
     {
-        auto result = co_await call<javelin::jmap::calendar::CalendarMutationResult>(
-            m_client, javelin::protocol::RemoteActionKind::CalendarDelete, ownerAccountId, command);
+        auto result = co_await call<javelin::protocol::actions::CalendarDelete>(
+            m_client, ownerAccountId, command);
         noteCalendarChanged(ownerAccountId);
         co_return result;
     }
@@ -265,9 +252,8 @@ namespace javelin::app
                                                   const bool visible,
                                                   const undo::CommandOrigin origin)
     {
-        auto result = callImmediate<javelin::jmap::calendar::CalendarPreferenceResult>(
-            m_client, javelin::protocol::RemoteActionKind::CalendarSetVisible, accountId,
-            calendarId, visible, origin);
+        auto result = callImmediate<javelin::protocol::actions::CalendarSetVisible>(
+            m_client, accountId, calendarId, visible, origin);
         noteCalendarChanged(accountId);
         return result;
     }
@@ -293,10 +279,8 @@ namespace javelin::app
     RemoteComposeCommandPort::open(AccountConnectionSettings settings,
                                    javelin::jmap::submission::OpenComposeRequest request)
     {
-        return call<
-            std::variant<javelin::jmap::submission::DraftSnapshot, javelin::jmap::OperationError>>(
-            m_client, javelin::protocol::RemoteActionKind::ComposeOpen, std::move(settings),
-            std::move(request));
+        return call<javelin::protocol::actions::ComposeOpen>(m_client, std::move(settings),
+                                                             std::move(request));
     }
 
     QCoro::Task<
@@ -304,10 +288,8 @@ namespace javelin::app
     RemoteComposeCommandPort::loadSenderIdentities(AccountConnectionSettings settings,
                                                    std::string accountId)
     {
-        return call<std::variant<std::vector<javelin::jmap::domain::Identity>,
-                                 javelin::jmap::OperationError>>(
-            m_client, javelin::protocol::RemoteActionKind::ComposeLoadSenderIdentities,
-            std::move(settings), std::move(accountId));
+        return call<javelin::protocol::actions::ComposeLoadSenderIdentities>(
+            m_client, std::move(settings), std::move(accountId));
     }
 
     QCoro::Task<
@@ -315,55 +297,46 @@ namespace javelin::app
     RemoteComposeCommandPort::saveDraft(AccountConnectionSettings settings,
                                         javelin::jmap::submission::DraftSnapshot snapshot)
     {
-        return call<std::variant<javelin::jmap::submission::DraftSaveSummary,
-                                 javelin::jmap::OperationError>>(
-            m_client, javelin::protocol::RemoteActionKind::ComposeSaveDraft, std::move(settings),
-            std::move(snapshot));
+        return call<javelin::protocol::actions::ComposeSaveDraft>(m_client, std::move(settings),
+                                                                  std::move(snapshot));
     }
 
     QCoro::Task<std::variant<javelin::jmap::submission::SendSummary, javelin::jmap::OperationError>>
     RemoteComposeCommandPort::send(AccountConnectionSettings settings,
                                    javelin::jmap::submission::DraftSnapshot snapshot)
     {
-        return call<
-            std::variant<javelin::jmap::submission::SendSummary, javelin::jmap::OperationError>>(
-            m_client, javelin::protocol::RemoteActionKind::ComposeSend, std::move(settings),
-            std::move(snapshot));
+        return call<javelin::protocol::actions::ComposeSend>(m_client, std::move(settings),
+                                                             std::move(snapshot));
     }
 
     QCoro::Task<std::variant<javelin::jmap::submission::SendSummary, javelin::jmap::OperationError>>
     RemoteComposeCommandPort::scheduleSend(AccountConnectionSettings settings,
                                            javelin::jmap::submission::ScheduledSendRequest request)
     {
-        return call<
-            std::variant<javelin::jmap::submission::SendSummary, javelin::jmap::OperationError>>(
-            m_client, javelin::protocol::RemoteActionKind::ComposeScheduleSend, std::move(settings),
-            std::move(request));
+        return call<javelin::protocol::actions::ComposeScheduleSend>(m_client, std::move(settings),
+                                                                     std::move(request));
     }
 
     std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
                  javelin::jmap::OperationError>
     RemoteComposeCommandPort::loadWorkingCopy(const std::string_view composeSessionId) const
     {
-        return callImmediate<std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
-                                          javelin::jmap::OperationError>>(
-            m_client, javelin::protocol::RemoteActionKind::ComposeLoadWorkingCopy,
-            std::string{composeSessionId});
+        return callImmediate<javelin::protocol::actions::ComposeLoadWorkingCopy>(
+            m_client, std::string{composeSessionId});
     }
 
     std::optional<javelin::jmap::OperationError> RemoteComposeCommandPort::storeWorkingCopy(
         const javelin::jmap::submission::DraftSnapshot& snapshot)
     {
-        return callImmediate<std::optional<javelin::jmap::OperationError>>(
-            m_client, javelin::protocol::RemoteActionKind::ComposeStoreWorkingCopy, snapshot);
+        return callImmediate<javelin::protocol::actions::ComposeStoreWorkingCopy>(m_client,
+                                                                                  snapshot);
     }
 
     std::optional<javelin::jmap::OperationError>
     RemoteComposeCommandPort::discard(const std::string_view composeSessionId)
     {
-        return callImmediate<std::optional<javelin::jmap::OperationError>>(
-            m_client, javelin::protocol::RemoteActionKind::ComposeDiscard,
-            std::string{composeSessionId});
+        return callImmediate<javelin::protocol::actions::ComposeDiscard>(
+            m_client, std::string{composeSessionId});
     }
 
     RemoteContactCommandPort::RemoteContactCommandPort(RemoteActionClient& client)
@@ -371,13 +344,12 @@ namespace javelin::app
     {
     }
 
-#define JAVELIN_REMOTE_CONTACT_METHOD(methodName, commandType, actionKind)                         \
+#define JAVELIN_REMOTE_CONTACT_METHOD(methodName, commandType, actionType)                         \
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>                                    \
     RemoteContactCommandPort::methodName(std::string ownerAccountId, commandType command)          \
     {                                                                                              \
-        return call<javelin::jmap::contacts::ContactMutationResult>(                               \
-            m_client, javelin::protocol::RemoteActionKind::actionKind, std::move(ownerAccountId),  \
-            std::move(command));                                                                   \
+        return call<javelin::protocol::actions::actionType>(m_client, std::move(ownerAccountId),   \
+                                                            std::move(command));                   \
     }
 
     JAVELIN_REMOTE_CONTACT_METHOD(mutateAddressBook, AddressBookCommand, ContactMutateAddressBook)
@@ -398,9 +370,8 @@ namespace javelin::app
     RemoteContactCommandPort::uploadContactMedia(std::string ownerAccountId, std::string accountId,
                                                  QByteArray payload, std::string mediaType)
     {
-        return call<javelin::jmap::contacts::ContactUploadResult>(
-            m_client, javelin::protocol::RemoteActionKind::ContactUploadMedia,
-            std::move(ownerAccountId), std::move(accountId), std::move(payload),
+        return call<javelin::protocol::actions::ContactUploadMedia>(
+            m_client, std::move(ownerAccountId), std::move(accountId), std::move(payload),
             std::move(mediaType));
     }
 
@@ -409,9 +380,8 @@ namespace javelin::app
                                                    std::string accountId, std::string blobId,
                                                    std::string mediaType)
     {
-        return call<javelin::jmap::contacts::ContactDownloadResult>(
-            m_client, javelin::protocol::RemoteActionKind::ContactDownloadMedia,
-            std::move(ownerAccountId), std::move(accountId), std::move(blobId),
+        return call<javelin::protocol::actions::ContactDownloadMedia>(
+            m_client, std::move(ownerAccountId), std::move(accountId), std::move(blobId),
             std::move(mediaType));
     }
 
@@ -422,9 +392,8 @@ namespace javelin::app
     QCoro::Task<QueuedMailboxSelectionMutationResult>
     RemoteMailCommandPort::queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent)
     {
-        return call<QueuedMailboxSelectionMutationResult>(
-            m_client, javelin::protocol::RemoteActionKind::MailQueueMailboxMutation,
-            std::move(intent));
+        return call<javelin::protocol::actions::MailQueueMailboxMutation>(m_client,
+                                                                          std::move(intent));
     }
 
     QCoro::Task<QueuedMessageSelectionMutationResult>
@@ -432,9 +401,8 @@ namespace javelin::app
                                                 std::optional<std::string> sourceMailboxId,
                                                 MessageSelection selection)
     {
-        return call<QueuedMessageSelectionMutationResult>(
-            m_client, javelin::protocol::RemoteActionKind::MailQueueDestroy, std::move(accountId),
-            std::move(sourceMailboxId), std::move(selection));
+        return call<javelin::protocol::actions::MailQueueDestroy>(
+            m_client, std::move(accountId), std::move(sourceMailboxId), std::move(selection));
     }
 
     QCoro::Task<QueuedMessageSelectionMutationResult>
@@ -442,17 +410,15 @@ namespace javelin::app
                                                    std::optional<std::string> sourceMailboxId,
                                                    MessageSelection selection)
     {
-        return call<QueuedMessageSelectionMutationResult>(
-            m_client, javelin::protocol::RemoteActionKind::MailQueueMarkUnread,
-            std::move(accountId), std::move(sourceMailboxId), std::move(selection));
+        return call<javelin::protocol::actions::MailQueueMarkUnread>(
+            m_client, std::move(accountId), std::move(sourceMailboxId), std::move(selection));
     }
 
     QCoro::Task<QueuedMessageSelectionMutationResult>
     RemoteMailCommandPort::queueMarkEmailRead(std::string accountId, std::string emailId)
     {
-        return call<QueuedMessageSelectionMutationResult>(
-            m_client, javelin::protocol::RemoteActionKind::MailQueueMarkRead, std::move(accountId),
-            std::move(emailId));
+        return call<javelin::protocol::actions::MailQueueMarkRead>(m_client, std::move(accountId),
+                                                                   std::move(emailId));
     }
 
     QCoro::Task<QueuedMessageSelectionMutationResult>
@@ -460,68 +426,62 @@ namespace javelin::app
                                                    std::optional<std::string> sourceMailboxId,
                                                    MessageSelection selection, const bool flagged)
     {
-        return call<QueuedMessageSelectionMutationResult>(
-            m_client, javelin::protocol::RemoteActionKind::MailQueueSetSelectionFlagged,
-            std::move(accountId), std::move(sourceMailboxId), std::move(selection), flagged);
+        return call<javelin::protocol::actions::MailQueueSetSelectionFlagged>(
+            m_client, std::move(accountId), std::move(sourceMailboxId), std::move(selection),
+            flagged);
     }
 
     QCoro::Task<QueuedMessageSelectionMutationResult> RemoteMailCommandPort::queueSetMessagesTag(
         std::string accountId, std::optional<std::string> sourceMailboxId,
         MessageSelection selection, std::string keyword, const bool enabled)
     {
-        return call<QueuedMessageSelectionMutationResult>(
-            m_client, javelin::protocol::RemoteActionKind::MailQueueSetTag, std::move(accountId),
-            std::move(sourceMailboxId), std::move(selection), std::move(keyword), enabled);
+        return call<javelin::protocol::actions::MailQueueSetTag>(
+            m_client, std::move(accountId), std::move(sourceMailboxId), std::move(selection),
+            std::move(keyword), enabled);
     }
 
     QCoro::Task<SaveMailTagDefinitionResult>
     RemoteMailCommandPort::saveTagDefinition(SaveMailTagDefinition definition)
     {
-        return call<SaveMailTagDefinitionResult>(
-            m_client, javelin::protocol::RemoteActionKind::MailSaveTagDefinition,
-            std::move(definition));
+        return call<javelin::protocol::actions::MailSaveTagDefinition>(m_client,
+                                                                       std::move(definition));
     }
 
     QCoro::Task<QueuedMailTagDeletionResult> RemoteMailCommandPort::deleteTag(std::string accountId,
                                                                               std::string keyword)
     {
-        return call<QueuedMailTagDeletionResult>(m_client,
-                                                 javelin::protocol::RemoteActionKind::MailDeleteTag,
-                                                 std::move(accountId), std::move(keyword));
+        return call<javelin::protocol::actions::MailDeleteTag>(m_client, std::move(accountId),
+                                                               std::move(keyword));
     }
 
     QCoro::Task<javelin::jmap::MailboxSubscriptionChangeResult>
     RemoteMailCommandPort::setMailboxSubscribed(std::string accountId, std::string mailboxId,
                                                 const bool subscribed)
     {
-        return call<javelin::jmap::MailboxSubscriptionChangeResult>(
-            m_client, javelin::protocol::RemoteActionKind::MailSetMailboxSubscribed,
-            std::move(accountId), std::move(mailboxId), subscribed);
+        return call<javelin::protocol::actions::MailSetMailboxSubscribed>(
+            m_client, std::move(accountId), std::move(mailboxId), subscribed);
     }
 
     QCoro::Task<javelin::jmap::MailboxCreateResult>
     RemoteMailCommandPort::createMailbox(std::string accountId, std::string name)
     {
-        return call<javelin::jmap::MailboxCreateResult>(
-            m_client, javelin::protocol::RemoteActionKind::MailCreateMailbox, std::move(accountId),
-            std::move(name));
+        return call<javelin::protocol::actions::MailCreateMailbox>(m_client, std::move(accountId),
+                                                                   std::move(name));
     }
 
     QCoro::Task<javelin::jmap::MailboxDestroyResult>
     RemoteMailCommandPort::destroyMailbox(std::string accountId, std::string mailboxId)
     {
-        return call<javelin::jmap::MailboxDestroyResult>(
-            m_client, javelin::protocol::RemoteActionKind::MailDestroyMailbox, std::move(accountId),
-            std::move(mailboxId));
+        return call<javelin::protocol::actions::MailDestroyMailbox>(m_client, std::move(accountId),
+                                                                    std::move(mailboxId));
     }
 
     QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
     RemoteMailCommandPort::submitPendingEmailMutations(std::string accountId,
                                                        std::optional<std::string> operationGroupId)
     {
-        return call<javelin::jmap::SubmittedEmailMutationsResult>(
-            m_client, javelin::protocol::RemoteActionKind::MailSubmitPending, std::move(accountId),
-            std::move(operationGroupId));
+        return call<javelin::protocol::actions::MailSubmitPending>(m_client, std::move(accountId),
+                                                                   std::move(operationGroupId));
     }
 
     RemoteSieveCommandPort::RemoteSieveCommandPort(RemoteActionClient& client) : m_client(client)
@@ -531,25 +491,22 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::sieve::SieveListResult>
     RemoteSieveCommandPort::requestSieveScripts(std::string ownerAccountId)
     {
-        return call<javelin::jmap::sieve::SieveListResult>(
-            m_client, javelin::protocol::RemoteActionKind::SieveList, std::move(ownerAccountId));
+        return call<javelin::protocol::actions::SieveList>(m_client, std::move(ownerAccountId));
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveContentResult>
     RemoteSieveCommandPort::requestSieveScript(std::string ownerAccountId,
                                                javelin::jmap::sieve::SieveScript script)
     {
-        return call<javelin::jmap::sieve::SieveContentResult>(
-            m_client, javelin::protocol::RemoteActionKind::SieveGet, std::move(ownerAccountId),
-            std::move(script));
+        return call<javelin::protocol::actions::SieveGet>(m_client, std::move(ownerAccountId),
+                                                          std::move(script));
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveValidationResult>
     RemoteSieveCommandPort::validateSieveScript(std::string ownerAccountId, QByteArray content)
     {
-        return call<javelin::jmap::sieve::SieveValidationResult>(
-            m_client, javelin::protocol::RemoteActionKind::SieveValidate, std::move(ownerAccountId),
-            std::move(content));
+        return call<javelin::protocol::actions::SieveValidate>(m_client, std::move(ownerAccountId),
+                                                               std::move(content));
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveSaveResult>
@@ -557,9 +514,8 @@ namespace javelin::app
                                             javelin::jmap::sieve::SieveScript script,
                                             QByteArray content, const undo::CommandOrigin origin)
     {
-        return call<javelin::jmap::sieve::SieveSaveResult>(
-            m_client, javelin::protocol::RemoteActionKind::SieveSave, std::move(ownerAccountId),
-            std::move(script), std::move(content), origin);
+        return call<javelin::protocol::actions::SieveSave>(
+            m_client, std::move(ownerAccountId), std::move(script), std::move(content), origin);
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveDeleteResult>
@@ -567,9 +523,8 @@ namespace javelin::app
                                               javelin::jmap::sieve::SieveScript script,
                                               const undo::CommandOrigin origin)
     {
-        return call<javelin::jmap::sieve::SieveDeleteResult>(
-            m_client, javelin::protocol::RemoteActionKind::SieveDelete, std::move(ownerAccountId),
-            std::move(script), origin);
+        return call<javelin::protocol::actions::SieveDelete>(m_client, std::move(ownerAccountId),
+                                                             std::move(script), origin);
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveActivationResult>
@@ -578,9 +533,8 @@ namespace javelin::app
                                                  const bool active,
                                                  const undo::CommandOrigin origin)
     {
-        return call<javelin::jmap::sieve::SieveActivationResult>(
-            m_client, javelin::protocol::RemoteActionKind::SieveActivate, std::move(ownerAccountId),
-            std::move(script), active, origin);
+        return call<javelin::protocol::actions::SieveActivate>(m_client, std::move(ownerAccountId),
+                                                               std::move(script), active, origin);
     }
 
     RemoteIdentityCommandPort::RemoteIdentityCommandPort(RemoteActionClient& client)
@@ -591,25 +545,22 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::identity::IdentityListResult>
     RemoteIdentityCommandPort::requestSenderIdentities(std::string accountId)
     {
-        return call<javelin::jmap::identity::IdentityListResult>(
-            m_client, javelin::protocol::RemoteActionKind::IdentityList, std::move(accountId));
+        return call<javelin::protocol::actions::IdentityList>(m_client, std::move(accountId));
     }
 
     QCoro::Task<javelin::jmap::identity::IdentitySaveResult>
     RemoteIdentityCommandPort::saveSenderIdentity(std::string accountId,
                                                   javelin::jmap::domain::Identity identity)
     {
-        return call<javelin::jmap::identity::IdentitySaveResult>(
-            m_client, javelin::protocol::RemoteActionKind::IdentitySave, std::move(accountId),
-            std::move(identity));
+        return call<javelin::protocol::actions::IdentitySave>(m_client, std::move(accountId),
+                                                              std::move(identity));
     }
 
     QCoro::Task<javelin::jmap::identity::IdentityDeleteResult>
     RemoteIdentityCommandPort::deleteSenderIdentity(std::string accountId, std::string identityId)
     {
-        return call<javelin::jmap::identity::IdentityDeleteResult>(
-            m_client, javelin::protocol::RemoteActionKind::IdentityDelete, std::move(accountId),
-            std::move(identityId));
+        return call<javelin::protocol::actions::IdentityDelete>(m_client, std::move(accountId),
+                                                                std::move(identityId));
     }
 
     RemoteAccountRefreshPort::RemoteAccountRefreshPort(GuiDaemonSession& session,
@@ -626,16 +577,14 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::LiveRefreshResult>
     RemoteAccountRefreshPort::bootstrapAccount(AccountBootstrapIntent intent)
     {
-        return call<javelin::jmap::LiveRefreshResult>(
-            m_client, javelin::protocol::RemoteActionKind::AccountBootstrap, std::move(intent));
+        return call<javelin::protocol::actions::AccountBootstrap>(m_client, std::move(intent));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactRefreshResult>
     RemoteAccountRefreshPort::requestContacts(std::string ownerAccountId)
     {
-        return call<javelin::jmap::contacts::ContactRefreshResult>(
-            m_client, javelin::protocol::RemoteActionKind::ContactRequestRefresh,
-            std::move(ownerAccountId));
+        return call<javelin::protocol::actions::ContactRequestRefresh>(m_client,
+                                                                       std::move(ownerAccountId));
     }
 
     RemoteMessageListMaterializationPort::RemoteMessageListMaterializationPort(
@@ -649,15 +598,15 @@ namespace javelin::app
                                                                   std::string mailboxId)
     {
         const auto observationId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        auto observe = m_client.callDiscardingResult(
-            javelin::protocol::RemoteActionKind::MailboxObserve, observationId,
-            std::move(accountId), std::move(mailboxId));
+        auto observe = m_client.callDiscardingResult<javelin::protocol::actions::MailboxObserve>(
+            observationId, std::move(accountId), std::move(mailboxId));
         QCoro::connect(std::move(observe), &m_client, [](bool) {});
         return MailboxObservationLease{
             [this, observationId]
             {
-                auto unobserve = m_client.callDiscardingResult(
-                    javelin::protocol::RemoteActionKind::MailboxUnobserve, observationId);
+                auto unobserve =
+                    m_client.callDiscardingResult<javelin::protocol::actions::MailboxUnobserve>(
+                        observationId);
                 QCoro::connect(std::move(unobserve), &m_client, [](bool) {});
             }};
     }
@@ -665,29 +614,27 @@ namespace javelin::app
     QCoro::Task<MailboxWindowResult>
     RemoteMessageListMaterializationPort::requestMailboxWindow(MailboxWindowIntent intent)
     {
-        return call<MailboxWindowResult>(
-            m_client, javelin::protocol::RemoteActionKind::MailboxWindow, std::move(intent));
+        return call<javelin::protocol::actions::MailboxWindow>(m_client, std::move(intent));
     }
 
     QCoro::Task<SearchWindowResult>
     RemoteMessageListMaterializationPort::requestSearchWindow(SearchWindowIntent intent)
     {
-        return call<SearchWindowResult>(m_client, javelin::protocol::RemoteActionKind::SearchWindow,
-                                        std::move(intent));
+        return call<javelin::protocol::actions::SearchWindow>(m_client, std::move(intent));
     }
 
     void RemoteMessageListMaterializationPort::ensureThread(ThreadMaterializationIntent intent)
     {
-        auto task = m_client.callDiscardingResult(javelin::protocol::RemoteActionKind::ThreadEnsure,
-                                                  std::move(intent));
+        auto task = m_client.callDiscardingResult<javelin::protocol::actions::ThreadEnsure>(
+            std::move(intent));
         QCoro::connect(std::move(task), &m_client, [](bool) {});
     }
 
     void RemoteMessageListMaterializationPort::retireSearchWindow(std::string accountId,
                                                                   std::string windowKey)
     {
-        auto task = m_client.callDiscardingResult(javelin::protocol::RemoteActionKind::SearchRetire,
-                                                  std::move(accountId), std::move(windowKey));
+        auto task = m_client.callDiscardingResult<javelin::protocol::actions::SearchRetire>(
+            std::move(accountId), std::move(windowKey));
         QCoro::connect(std::move(task), &m_client, [](bool) {});
     }
 
@@ -699,26 +646,23 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::MessageContentRefreshResult>
     RemoteMessageContentPort::requestMessageContent(std::string accountId, std::string emailId)
     {
-        return call<javelin::jmap::MessageContentRefreshResult>(
-            m_client, javelin::protocol::RemoteActionKind::MessageContent, std::move(accountId),
-            std::move(emailId));
+        return call<javelin::protocol::actions::MessageContent>(m_client, std::move(accountId),
+                                                                std::move(emailId));
     }
 
     QCoro::Task<javelin::jmap::AttachmentDownloadResult>
     RemoteMessageContentPort::requestAttachment(std::string accountId, std::string emailId,
                                                 std::string partId)
     {
-        return call<javelin::jmap::AttachmentDownloadResult>(
-            m_client, javelin::protocol::RemoteActionKind::AttachmentDownload, std::move(accountId),
-            std::move(emailId), std::move(partId));
+        return call<javelin::protocol::actions::AttachmentDownload>(
+            m_client, std::move(accountId), std::move(emailId), std::move(partId));
     }
 
     QCoro::Task<javelin::jmap::MessageSourceDownloadResult>
     RemoteMessageContentPort::requestMessageSource(std::string accountId, std::string emailId)
     {
-        return call<javelin::jmap::MessageSourceDownloadResult>(
-            m_client, javelin::protocol::RemoteActionKind::MessageSource, std::move(accountId),
-            std::move(emailId));
+        return call<javelin::protocol::actions::MessageSource>(m_client, std::move(accountId),
+                                                               std::move(emailId));
     }
 
     RemoteUndoCommandPort::RemoteUndoCommandPort(GuiDaemonSession& session,
@@ -737,8 +681,7 @@ namespace javelin::app
 
     QCoro::Task<bool> RemoteUndoCommandPort::undo()
     {
-        auto result = co_await call<RemoteUndoExecutionResult>(
-            m_client, javelin::protocol::RemoteActionKind::Undo);
+        auto result = co_await call<javelin::protocol::actions::Undo>(m_client);
         refreshSnapshot();
         if (result.failure.has_value())
             Q_EMIT executionFailed(*result.failure);
@@ -749,8 +692,7 @@ namespace javelin::app
 
     QCoro::Task<bool> RemoteUndoCommandPort::redo()
     {
-        auto result = co_await call<RemoteUndoExecutionResult>(
-            m_client, javelin::protocol::RemoteActionKind::Redo);
+        auto result = co_await call<javelin::protocol::actions::Redo>(m_client);
         refreshSnapshot();
         if (result.failure.has_value())
             Q_EMIT executionFailed(*result.failure);
@@ -762,8 +704,8 @@ namespace javelin::app
     std::optional<javelin::jmap::cache::DatabaseError>
     RemoteUndoCommandPort::acknowledgeAndRemove(const QString& entryId)
     {
-        auto result = callImmediate<std::optional<javelin::jmap::cache::DatabaseError>>(
-            m_client, javelin::protocol::RemoteActionKind::UndoAcknowledgeRemove, entryId);
+        auto result =
+            callImmediate<javelin::protocol::actions::UndoAcknowledgeRemove>(m_client, entryId);
         refreshSnapshot();
         return result;
     }
@@ -771,8 +713,7 @@ namespace javelin::app
     std::optional<javelin::jmap::cache::DatabaseError>
     RemoteUndoCommandPort::forget(const QString& entryId)
     {
-        auto result = callImmediate<std::optional<javelin::jmap::cache::DatabaseError>>(
-            m_client, javelin::protocol::RemoteActionKind::UndoForget, entryId);
+        auto result = callImmediate<javelin::protocol::actions::UndoForget>(m_client, entryId);
         refreshSnapshot();
         return result;
     }
@@ -790,8 +731,7 @@ namespace javelin::app
     void RemoteUndoCommandPort::refreshSnapshot()
     {
         using Snapshot = std::tuple<undo::HistoryState, std::vector<undo::HistoryEntry>>;
-        auto result =
-            m_client.callImmediate<Snapshot>(javelin::protocol::RemoteActionKind::UndoSnapshot);
+        auto result = m_client.callImmediate<javelin::protocol::actions::UndoSnapshot>();
         if (const auto* error = std::get_if<RemoteCallError>(&result))
         {
             Q_EMIT executionFailed({.entryId = {},
@@ -815,8 +755,7 @@ namespace javelin::app
 
     QCoro::Task<DeveloperDiagnosticsResult> RemoteDeveloperDiagnosticsPort::snapshot()
     {
-        co_return co_await call<DeveloperDiagnosticsResult>(
-            m_client, javelin::protocol::RemoteActionKind::DeveloperDiagnosticsSnapshot);
+        co_return co_await call<javelin::protocol::actions::DeveloperDiagnosticsSnapshot>(m_client);
     }
 
     RemoteDeveloperMaintenancePort::RemoteDeveloperMaintenancePort(RemoteActionClient& client)
@@ -827,9 +766,8 @@ namespace javelin::app
     QCoro::Task<DeveloperMailboxClearResult>
     RemoteDeveloperMaintenancePort::clearMailboxCache(DeveloperMailboxClearCommand command)
     {
-        co_return co_await call<DeveloperMailboxClearResult>(
-            m_client, javelin::protocol::RemoteActionKind::DeveloperMailboxClear,
-            std::move(command));
+        co_return co_await call<javelin::protocol::actions::DeveloperMailboxClear>(
+            m_client, std::move(command));
     }
 
     RemoteDaemonLogPort::RemoteDaemonLogPort(GuiDaemonSession& session, RemoteActionClient& client,
@@ -890,8 +828,7 @@ namespace javelin::app
 
     void RemoteDaemonLogPort::clear()
     {
-        const auto result = m_client.callImmediate<std::monostate>(
-            javelin::protocol::RemoteActionKind::DeveloperLogClear);
+        const auto result = m_client.callImmediate<javelin::protocol::actions::DeveloperLogClear>();
         if (const auto* error = std::get_if<RemoteCallError>(&result))
             qWarning().noquote() << "Clear daemon log failed" << error->detail;
         m_entries.clear();
@@ -900,8 +837,9 @@ namespace javelin::app
 
     void RemoteDaemonLogPort::setRemoteSubscribed(const bool subscribed)
     {
-        const auto result = m_client.callImmediate<std::monostate>(
-            javelin::protocol::RemoteActionKind::DeveloperLogSetSubscribed, subscribed);
+        const auto result =
+            m_client.callImmediate<javelin::protocol::actions::DeveloperLogSetSubscribed>(
+                subscribed);
         if (const auto* error = std::get_if<RemoteCallError>(&result))
             qWarning().noquote() << "Daemon log subscription failed" << error->detail;
     }
@@ -914,35 +852,30 @@ namespace javelin::app
     std::optional<javelin::jmap::cache::DatabaseError>
     RemoteWorkTaskPort::pause(const std::string_view jobId)
     {
-        return callImmediate<std::optional<javelin::jmap::cache::DatabaseError>>(
-            m_client, javelin::protocol::RemoteActionKind::WorkPause, std::string{jobId});
+        return callImmediate<javelin::protocol::actions::WorkPause>(m_client, std::string{jobId});
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
     RemoteWorkTaskPort::resume(const std::string_view jobId)
     {
-        return callImmediate<std::optional<javelin::jmap::cache::DatabaseError>>(
-            m_client, javelin::protocol::RemoteActionKind::WorkResume, std::string{jobId});
+        return callImmediate<javelin::protocol::actions::WorkResume>(m_client, std::string{jobId});
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
     RemoteWorkTaskPort::retry(const std::string_view jobId)
     {
-        return callImmediate<std::optional<javelin::jmap::cache::DatabaseError>>(
-            m_client, javelin::protocol::RemoteActionKind::WorkRetry, std::string{jobId});
+        return callImmediate<javelin::protocol::actions::WorkRetry>(m_client, std::string{jobId});
     }
 
     std::variant<std::vector<WorkRecord>, javelin::jmap::cache::DatabaseError>
     RemoteWorkTaskPort::list() const
     {
-        return callImmediate<
-            std::variant<std::vector<WorkRecord>, javelin::jmap::cache::DatabaseError>>(
-            m_client, javelin::protocol::RemoteActionKind::WorkList);
+        return callImmediate<javelin::protocol::actions::WorkList>(m_client);
     }
 
     QString RemoteWorkTaskPort::summary() const
     {
-        return callImmediate<QString>(m_client, javelin::protocol::RemoteActionKind::WorkSummary);
+        return callImmediate<javelin::protocol::actions::WorkSummary>(m_client);
     }
 
     QMetaObject::Connection RemoteWorkTaskPort::connectChanged(QObject* context,

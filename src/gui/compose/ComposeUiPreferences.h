@@ -1,6 +1,7 @@
 #pragma once
 
-#include "protocol/ProcessBoundary.h"
+#include "protocol/ProtocolTypes.h"
+#include "protocol/SettingsContract.h"
 
 #include <optional>
 

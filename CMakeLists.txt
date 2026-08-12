@@ -98,7 +98,58 @@ set(JAVELIN_FORMAT_FILES
     tests/gui/DeveloperOptionsDialogTest.cpp
     tests/gui/IndeterminateProgressBarTest.cpp
     tests/app/RemoteCodecTest.cpp
-    src/protocol/SocketTransport.cpp
+    src/app/DaemonRemoteActionAccountHandler.cpp
+    src/app/DaemonRemoteActionCalendarHandler.cpp
+    src/app/DaemonRemoteActionComposeHandler.cpp
+    src/app/DaemonRemoteActionContactHandler.cpp
+    src/app/DaemonRemoteActionDeveloperHandler.cpp
+    src/app/DaemonRemoteActionDispatcher.cpp
+    src/app/DaemonRemoteActionDispatcher.h
+    src/app/DaemonRemoteActionHistoryHandler.cpp
+    src/app/DaemonRemoteActionIdentityHandler.cpp
+    src/app/DaemonRemoteActionMailHandler.cpp
+    src/app/DaemonRemoteActionSieveHandler.cpp
+    src/app/DaemonRemoteActionWorkHandler.cpp
+    src/app/RemoteActionClient.cpp
+    src/app/RemoteActionClient.h
+    src/app/RemoteCodec.h
+    src/protocol/ActionContract.h
+    src/protocol/ActionNames.h
+    src/protocol/ActivationContract.h
+    src/protocol/BoundaryEventContract.h
+    src/protocol/CacheContract.h
+    src/protocol/DaemonRequestHandler.h
+    src/protocol/HandshakeContract.h
+    src/protocol/ProtocolTypes.h
+    src/protocol/ProtocolValidation.cpp
+    src/protocol/ProtocolValidation.h
+    src/protocol/SettingsContract.h
+    src/protocol/actions/AccountActions.h
+    src/protocol/actions/ActionCatalog.h
+    src/protocol/actions/ActionDescriptor.h
+    src/protocol/actions/CalendarActions.h
+    src/protocol/actions/ComposeActions.h
+    src/protocol/actions/ContactActions.h
+    src/protocol/actions/DeveloperActions.h
+    src/protocol/actions/HistoryActions.h
+    src/protocol/actions/IdentityActions.h
+    src/protocol/actions/MailActions.h
+    src/protocol/actions/SieveActions.h
+    src/protocol/actions/WorkActions.h
+    src/protocol/SocketFrameCodec.cpp
+    src/protocol/SocketFrameCodec.h
+    src/protocol/SocketSecurity.cpp
+    src/protocol/SocketSecurity.h
+    src/protocol/SocketWireCodec.cpp
+    src/protocol/SocketWireCodecInternal.h
+    src/protocol/LocalDaemonServer.cpp
+    src/protocol/LocalDaemonServer.h
+    src/protocol/LocalDaemonClient.cpp
+    src/protocol/LocalDaemonClient.h
+    src/protocol/LocalActivationServer.cpp
+    src/protocol/LocalActivationServer.h
+    src/protocol/LocalActivationClient.cpp
+    src/protocol/LocalActivationClient.h
     src/jmap/render/HtmlBodyEmbedding.cpp
     src/jmap/submission/DraftInlineImageStorage.cpp
     src/jmap/submission/DraftInlineImageStorage.h
@@ -107,7 +158,6 @@ set(JAVELIN_FORMAT_FILES
     tests/gui/JavelinComposerEditTest.cpp
     tests/jmap/DraftInlineImageStorageTest.cpp
     tests/jmap/HtmlBodyEmbeddingTest.cpp
-    src/protocol/SocketTransport.h
     tests/protocol/ProcessBoundaryTest.cpp
     src/jmap/sync/PreferredStateChangeSource.cpp
     src/jmap/sync/PreferredStateChangeSource.h
@@ -1490,6 +1540,16 @@ add_library(javelin_daemon_core STATIC
     src/app/DaemonProcess.h
     src/app/DaemonRemoteActionDispatcher.cpp
     src/app/DaemonRemoteActionDispatcher.h
+    src/app/DaemonRemoteActionAccountHandler.cpp
+    src/app/DaemonRemoteActionCalendarHandler.cpp
+    src/app/DaemonRemoteActionComposeHandler.cpp
+    src/app/DaemonRemoteActionContactHandler.cpp
+    src/app/DaemonRemoteActionDeveloperHandler.cpp
+    src/app/DaemonRemoteActionHistoryHandler.cpp
+    src/app/DaemonRemoteActionIdentityHandler.cpp
+    src/app/DaemonRemoteActionMailHandler.cpp
+    src/app/DaemonRemoteActionSieveHandler.cpp
+    src/app/DaemonRemoteActionWorkHandler.cpp
     src/app/RemoteActionTypes.h
     src/app/OnboardingTypes.h
     src/app/RemoteCodec.h

@@ -1,7 +1,9 @@
 #pragma once
 
 #include "app/RemoteCodec.h"
-#include "protocol/ProcessBoundary.h"
+#include "protocol/ActionContract.h"
+#include "protocol/HandshakeContract.h"
+#include "protocol/actions/ActionCatalog.h"
 
 #include <QFuture>
 #include <QObject>
@@ -11,8 +13,11 @@
 #include <QCoroTask>
 
 #include <chrono>
+#include <concepts>
 #include <memory>
 #include <optional>
+#include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <variant>
@@ -40,22 +45,27 @@ namespace javelin::app
         explicit RemoteActionClient(GuiDaemonSession& session, QObject* parent = nullptr);
         ~RemoteActionClient() override;
 
-        [[nodiscard]] RawResult invokeImmediate(javelin::protocol::RemoteActionKind kind,
+        [[nodiscard]] RawResult invokeImmediate(javelin::protocol::ActionId action,
                                                 QByteArray payload);
-        [[nodiscard]] QFuture<RawResult> invoke(javelin::protocol::RemoteActionKind kind,
+        [[nodiscard]] QFuture<RawResult> invoke(javelin::protocol::ActionId action,
                                                 QByteArray payload);
 
-        template <typename Result, typename... Arguments>
-        [[nodiscard]] DecodedRemoteResult<Result>
-        callImmediate(const javelin::protocol::RemoteActionKind kind, const Arguments&... arguments)
+        template <typename Action, typename... Arguments>
+        [[nodiscard]] DecodedRemoteResult<typename Action::Result>
+        callImmediate(const Arguments&... arguments)
         {
-            auto encoded = remote::encode(arguments...);
+            static_assert(std::same_as<typename Action::Request,
+                                       std::tuple<std::remove_cvref_t<Arguments>...>>,
+                          "Remote action arguments do not match the descriptor request type");
+            auto encoded = remote::encodeVersioned<Action::requestSchemaVersion>(arguments...);
             if (const auto* error = std::get_if<remote::CodecError>(&encoded))
                 return RemoteCallError{.detail = error->message};
-            auto raw = invokeImmediate(kind, std::get<QByteArray>(std::move(encoded)));
+            auto raw = invokeImmediate(Action::id, std::get<QByteArray>(std::move(encoded)));
             if (const auto* error = std::get_if<RemoteCallError>(&raw))
                 return *error;
-            auto decoded = remote::decodeValue<Result>(std::get<QByteArray>(raw));
+            using Result = typename Action::Result;
+            auto decoded = remote::decodeVersionedValue<Action::resultSchemaVersion, Result>(
+                std::get<QByteArray>(raw));
             if (const auto* error = std::get_if<remote::CodecError>(&decoded))
                 return RemoteCallError{.code =
                                            javelin::protocol::BoundaryErrorCode::ProtocolViolation,
@@ -63,18 +73,23 @@ namespace javelin::app
             return std::get<Result>(std::move(decoded));
         }
 
-        template <typename Result, typename... Arguments>
-        [[nodiscard]] QCoro::Task<DecodedRemoteResult<Result>>
-        call(const javelin::protocol::RemoteActionKind kind, const Arguments&... arguments)
+        template <typename Action, typename... Arguments>
+        [[nodiscard]] QCoro::Task<DecodedRemoteResult<typename Action::Result>>
+        call(const Arguments&... arguments)
         {
-            auto encoded = remote::encode(arguments...);
+            static_assert(std::same_as<typename Action::Request,
+                                       std::tuple<std::remove_cvref_t<Arguments>...>>,
+                          "Remote action arguments do not match the descriptor request type");
+            auto encoded = remote::encodeVersioned<Action::requestSchemaVersion>(arguments...);
             if (const auto* error = std::get_if<remote::CodecError>(&encoded))
                 co_return RemoteCallError{.detail = error->message};
-            auto future = invoke(kind, std::get<QByteArray>(std::move(encoded)));
+            auto future = invoke(Action::id, std::get<QByteArray>(std::move(encoded)));
             auto raw = co_await qCoro(future).takeResult();
             if (const auto* error = std::get_if<RemoteCallError>(&raw))
                 co_return *error;
-            auto decoded = remote::decodeValue<Result>(std::get<QByteArray>(raw));
+            using Result = typename Action::Result;
+            auto decoded = remote::decodeVersionedValue<Action::resultSchemaVersion, Result>(
+                std::get<QByteArray>(raw));
             if (const auto* error = std::get_if<remote::CodecError>(&decoded))
                 co_return RemoteCallError{
                     .code = javelin::protocol::BoundaryErrorCode::ProtocolViolation,
@@ -82,15 +97,16 @@ namespace javelin::app
             co_return std::get<Result>(std::move(decoded));
         }
 
-        template <typename... Arguments>
-        [[nodiscard]] QCoro::Task<bool>
-        callDiscardingResult(const javelin::protocol::RemoteActionKind kind,
-                             const Arguments&... arguments)
+        template <typename Action, typename... Arguments>
+        [[nodiscard]] QCoro::Task<bool> callDiscardingResult(const Arguments&... arguments)
         {
-            auto encoded = remote::encode(arguments...);
+            static_assert(std::same_as<typename Action::Request,
+                                       std::tuple<std::remove_cvref_t<Arguments>...>>,
+                          "Remote action arguments do not match the descriptor request type");
+            auto encoded = remote::encodeVersioned<Action::requestSchemaVersion>(arguments...);
             if (std::holds_alternative<remote::CodecError>(encoded))
                 co_return false;
-            auto future = invoke(kind, std::get<QByteArray>(std::move(encoded)));
+            auto future = invoke(Action::id, std::get<QByteArray>(std::move(encoded)));
             auto raw = co_await qCoro(future).takeResult();
             co_return std::holds_alternative<QByteArray>(raw);
         }
@@ -100,7 +116,7 @@ namespace javelin::app
         {
             QPromise<RawResult> promise;
             javelin::protocol::CommandId commandId;
-            javelin::protocol::RemoteActionKind kind;
+            javelin::protocol::ActionId action;
             QByteArray payload;
             std::optional<javelin::protocol::DaemonInstanceId> daemon;
             std::chrono::steady_clock::time_point startedAt;

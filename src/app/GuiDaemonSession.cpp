@@ -439,23 +439,25 @@ namespace javelin::app
         return std::nullopt;
     }
 
-    protocol::CommandReply
-    GuiDaemonSession::submitRemoteAction(const protocol::RemoteActionKind kind, QByteArray payload,
-                                         const protocol::CommandId id)
+    protocol::CommandReply GuiDaemonSession::submitRemoteAction(const protocol::ActionId action,
+                                                                QByteArray payload,
+                                                                const protocol::CommandId id)
     {
         return m_client->submitCommand({
             .id = id,
-            .command = protocol::RemoteActionCommand{.kind = kind, .payload = std::move(payload)},
+            .command =
+                protocol::RemoteActionCommand{.action = action, .payload = std::move(payload)},
         });
     }
 
     QFuture<protocol::CommandReply>
-    GuiDaemonSession::submitRemoteActionAsync(const protocol::RemoteActionKind kind,
-                                              QByteArray payload, const protocol::CommandId id)
+    GuiDaemonSession::submitRemoteActionAsync(const protocol::ActionId action, QByteArray payload,
+                                              const protocol::CommandId id)
     {
         return m_client->submitCommandAsync({
             .id = id,
-            .command = protocol::RemoteActionCommand{.kind = kind, .payload = std::move(payload)},
+            .command =
+                protocol::RemoteActionCommand{.action = action, .payload = std::move(payload)},
         });
     }
 

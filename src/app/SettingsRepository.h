@@ -1,7 +1,7 @@
 #pragma once
 
 #include "app/AccountCredentialStore.h"
-#include "protocol/ProcessBoundary.h"
+#include "protocol/SettingsContract.h"
 
 #include <QSettings>
 

@@ -1,8 +1,28 @@
 add_library(javelin_protocol STATIC
-    ProcessBoundary.cpp
-    ProcessBoundary.h
-    SocketTransport.cpp
-    SocketTransport.h
+    ProtocolValidation.cpp
+    ProtocolValidation.h
+    ProtocolTypes.h
+    ActionContract.h
+    ActivationContract.h
+    BoundaryEventContract.h
+    CacheContract.h
+    DaemonRequestHandler.h
+    HandshakeContract.h
+    SettingsContract.h
+    LocalActivationClient.cpp
+    LocalActivationClient.h
+    LocalActivationServer.cpp
+    LocalActivationServer.h
+    LocalDaemonClient.cpp
+    LocalDaemonClient.h
+    LocalDaemonServer.cpp
+    LocalDaemonServer.h
+    SocketFrameCodec.cpp
+    SocketFrameCodec.h
+    SocketSecurity.cpp
+    SocketSecurity.h
+    SocketWireCodec.cpp
+    SocketWireCodecInternal.h
 )
 target_include_directories(javelin_protocol PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>

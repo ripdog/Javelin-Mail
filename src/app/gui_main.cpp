@@ -7,6 +7,9 @@
 #include "app/ProcessInstanceLock.h"
 #include "app/WorkTaskPort.h"
 
+#include "protocol/LocalActivationClient.h"
+#include "protocol/LocalActivationServer.h"
+
 #include "gui/onboarding/FirstRunWizard.h"
 #include "gui/settings/GuiSettings.h"
 #include "gui/shell/MainWindow.h"

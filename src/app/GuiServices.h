@@ -1,7 +1,7 @@
 #pragma once
 
 #include "app/CacheAccessBarrier.h"
-#include "protocol/ProcessBoundary.h"
+#include "protocol/CacheContract.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
 #include <QMetaObject>

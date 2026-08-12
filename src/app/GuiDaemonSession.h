@@ -3,7 +3,7 @@
 #include "app/CacheAccessBarrier.h"
 #include "app/LogStore.h"
 #include "app/SettingsApplicationPorts.h"
-#include "protocol/SocketTransport.h"
+#include "protocol/LocalDaemonClient.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
 #include <QObject>
@@ -84,10 +84,10 @@ namespace javelin::app
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
         requestAccountRefresh(const QString& accountId);
         [[nodiscard]] javelin::protocol::CommandReply
-        submitRemoteAction(javelin::protocol::RemoteActionKind kind, QByteArray payload,
+        submitRemoteAction(javelin::protocol::ActionId action, QByteArray payload,
                            javelin::protocol::CommandId id = {.value = QUuid::createUuid()});
         [[nodiscard]] QFuture<javelin::protocol::CommandReply>
-        submitRemoteActionAsync(javelin::protocol::RemoteActionKind kind, QByteArray payload,
+        submitRemoteActionAsync(javelin::protocol::ActionId action, QByteArray payload,
                                 javelin::protocol::CommandId id = {.value = QUuid::createUuid()});
         [[nodiscard]] CacheAccessBarrier::ParticipantId
         registerCacheParticipant(CacheAccessBarrier::Participant participant);

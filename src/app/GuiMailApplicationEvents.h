@@ -1,6 +1,8 @@
 #pragma once
 
 #include "app/MailApplicationEventsPorts.h"
+#include "protocol/CacheContract.h"
+#include "protocol/HandshakeContract.h"
 
 namespace javelin::app
 {

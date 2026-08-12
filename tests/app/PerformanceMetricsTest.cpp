@@ -1,4 +1,6 @@
 #include "app/PerformanceMetrics.h"
+#include "protocol/actions/MailActions.h"
+#include "protocol/actions/WorkActions.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -18,8 +20,7 @@ TEST_CASE("performance metrics use stable machine-readable fields")
 TEST_CASE("performance metrics identify every remote action through its protocol name")
 {
     CHECK(javelin::app::PerformanceMetrics::remoteActionName(
-              javelin::protocol::RemoteActionKind::MailboxWindow) ==
-          QStringLiteral("mailbox_window"));
+              javelin::protocol::actions::MailboxWindow::id) == QStringLiteral("mailbox_window"));
     CHECK(javelin::app::PerformanceMetrics::remoteActionName(
-              javelin::protocol::RemoteActionKind::WorkSummary) == QStringLiteral("work_summary"));
+              javelin::protocol::actions::WorkSummary::id) == QStringLiteral("work_summary"));
 }

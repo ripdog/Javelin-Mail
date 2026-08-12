@@ -28,22 +28,22 @@ namespace javelin::app
     QCoro::Task<OnboardingCallResult<AccountDiscoveryResult>>
     RemoteOnboardingPort::discover(AccountDiscoveryRequest request)
     {
-        co_return friendlyResult(co_await m_client.call<AccountDiscoveryResult>(
-            javelin::protocol::RemoteActionKind::OnboardingDiscover, request));
+        co_return friendlyResult(
+            co_await m_client.call<javelin::protocol::actions::OnboardingDiscover>(request));
     }
 
     QCoro::Task<OnboardingCallResult<OAuthStartResult>>
     RemoteOnboardingPort::startOAuth(OAuthStartRequest request)
     {
-        co_return friendlyResult(co_await m_client.call<OAuthStartResult>(
-            javelin::protocol::RemoteActionKind::OnboardingStartOAuth, request));
+        co_return friendlyResult(
+            co_await m_client.call<javelin::protocol::actions::OnboardingStartOAuth>(request));
     }
 
     QCoro::Task<OnboardingCallResult<AccountAuthenticationResult>>
     RemoteOnboardingPort::finishOAuth(OAuthFinishRequest request)
     {
-        auto result = friendlyResult(co_await m_client.call<AccountAuthenticationResult>(
-            javelin::protocol::RemoteActionKind::OnboardingFinishOAuth, request));
+        auto result = friendlyResult(
+            co_await m_client.call<javelin::protocol::actions::OnboardingFinishOAuth>(request));
         if (const auto* authentication = std::get_if<AccountAuthenticationResult>(&result))
         {
             qCInfo(remoteOAuthLog).noquote()
@@ -64,21 +64,22 @@ namespace javelin::app
     QCoro::Task<OnboardingCallResult<AccountAuthenticationResult>>
     RemoteOnboardingPort::authenticateManually(ManualAuthenticationRequest request)
     {
-        co_return friendlyResult(co_await m_client.call<AccountAuthenticationResult>(
-            javelin::protocol::RemoteActionKind::OnboardingAuthenticateManually, request));
+        co_return friendlyResult(
+            co_await m_client.call<javelin::protocol::actions::OnboardingAuthenticateManually>(
+                request));
     }
 
     QCoro::Task<OnboardingCallResult<OAuthRevocationResult>>
     RemoteOnboardingPort::revokeOAuth(OAuthRevocationRequest request)
     {
-        co_return friendlyResult(co_await m_client.call<OAuthRevocationResult>(
-            javelin::protocol::RemoteActionKind::OnboardingRevokeOAuth, request));
+        co_return friendlyResult(
+            co_await m_client.call<javelin::protocol::actions::OnboardingRevokeOAuth>(request));
     }
 
     QCoro::Task<OnboardingCallResult<OAuthCancelResult>>
     RemoteOnboardingPort::cancelOAuth(OAuthCancelRequest request)
     {
-        co_return friendlyResult(co_await m_client.call<OAuthCancelResult>(
-            javelin::protocol::RemoteActionKind::OnboardingCancelOAuth, request));
+        co_return friendlyResult(
+            co_await m_client.call<javelin::protocol::actions::OnboardingCancelOAuth>(request));
     }
 } // namespace javelin::app

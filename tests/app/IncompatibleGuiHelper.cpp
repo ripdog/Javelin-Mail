@@ -1,4 +1,4 @@
-#include "protocol/SocketTransport.h"
+#include "protocol/LocalDaemonClient.h"
 
 #include <QCommandLineOption>
 #include <QCommandLineParser>

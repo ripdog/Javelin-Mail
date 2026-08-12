@@ -1,5 +1,7 @@
 #include "app/SettingsRepository.h"
 
+#include "protocol/ProtocolValidation.h"
+
 #include <QDataStream>
 #include <QIODevice>
 #include <QVariantMap>

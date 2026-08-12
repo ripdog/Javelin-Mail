@@ -28,6 +28,18 @@ namespace
         std::variant<int, QString> status;
         std::chrono::milliseconds delay{};
     };
+
+    struct OrderedFixture
+    {
+        int sequence = 0;
+        QString label;
+    };
+
+    struct ReorderedFixture
+    {
+        QString label;
+        int sequence = 0;
+    };
 } // namespace
 
 TEST_CASE("remote codec round-trips nested typed values", "[app][remote-codec]")
@@ -54,6 +66,72 @@ TEST_CASE("remote codec round-trips nested typed values", "[app][remote-codec]")
     CHECK(value->totals == fixture.totals);
     CHECK(value->status == fixture.status);
     CHECK(value->delay == fixture.delay);
+}
+
+TEST_CASE("remote codec aggregate fields are keyed by name rather than source order",
+          "[app][remote-codec][schema]")
+{
+    const auto encoded = javelin::app::remote::encode(
+        OrderedFixture{.sequence = 7, .label = QStringLiteral("named")});
+    const auto* payload = std::get_if<QByteArray>(&encoded);
+    REQUIRE(payload != nullptr);
+
+    const auto decoded = javelin::app::remote::decodeValue<ReorderedFixture>(*payload);
+    const auto* value = std::get_if<ReorderedFixture>(&decoded);
+    REQUIRE(value != nullptr);
+    CHECK(value->sequence == 7);
+    CHECK(value->label == QStringLiteral("named"));
+}
+
+TEST_CASE("remote codec rejects unsupported action schema versions", "[app][remote-codec][schema]")
+{
+    const auto encoded = javelin::app::remote::encodeVersioned<2>(42);
+    const auto* payload = std::get_if<QByteArray>(&encoded);
+    REQUIRE(payload != nullptr);
+
+    const auto decoded = javelin::app::remote::decodeVersionedValue<1, int>(*payload);
+    REQUIRE(std::holds_alternative<javelin::app::remote::CodecError>(decoded));
+}
+
+TEST_CASE("remote codec rejects truncated named aggregates", "[app][remote-codec][schema]")
+{
+    const auto encoded = javelin::app::remote::encode(
+        OrderedFixture{.sequence = 7, .label = QStringLiteral("named")});
+    const auto* payload = std::get_if<QByteArray>(&encoded);
+    REQUIRE(payload != nullptr);
+    auto truncated = *payload;
+    truncated.chop(1);
+
+    const auto decoded = javelin::app::remote::decodeValue<OrderedFixture>(truncated);
+    REQUIRE(std::holds_alternative<javelin::app::remote::CodecError>(decoded));
+}
+
+TEST_CASE("remote codec named aggregates reject every truncated prefix",
+          "[app][remote-codec][schema][property]")
+{
+    for (int iteration = 0; iteration < 32; ++iteration)
+    {
+        const OrderedFixture fixture{
+            .sequence = iteration * 7919 - 17,
+            .label = QStringLiteral("fixture-%1-%2").arg(iteration).arg(iteration * iteration),
+        };
+        const auto encoded = javelin::app::remote::encode(fixture);
+        const auto* payload = std::get_if<QByteArray>(&encoded);
+        REQUIRE(payload != nullptr);
+
+        const auto roundTrip = javelin::app::remote::decodeValue<OrderedFixture>(*payload);
+        const auto* decoded = std::get_if<OrderedFixture>(&roundTrip);
+        REQUIRE(decoded != nullptr);
+        CHECK(decoded->sequence == fixture.sequence);
+        CHECK(decoded->label == fixture.label);
+
+        for (qsizetype length = 0; length < payload->size(); ++length)
+        {
+            const auto truncated =
+                javelin::app::remote::decodeValue<OrderedFixture>(payload->left(length));
+            CHECK(std::holds_alternative<javelin::app::remote::CodecError>(truncated));
+        }
+    }
 }
 
 TEST_CASE("remote codec preserves mailbox visibility changes", "[app][remote-codec][mailbox]")

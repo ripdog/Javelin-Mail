@@ -1,7 +1,10 @@
 #pragma once
 
 #include "app/AccountRefreshApplicationPorts.h"
-#include "protocol/ProcessBoundary.h"
+#include "protocol/ActionContract.h"
+#include "protocol/BoundaryEventContract.h"
+#include "protocol/ProtocolTypes.h"
+#include "protocol/ProtocolValidation.h"
 
 #include <deque>
 #include <map>

@@ -15,6 +15,7 @@
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
+#include "protocol/actions/ActionCatalog.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroTask>
@@ -50,6 +51,15 @@ namespace
       private:
         std::unique_ptr<QCoreApplication> m_application;
     };
+
+    template <typename Action, typename... Arguments>
+    [[nodiscard]] QByteArray actionPayload(const Arguments&... arguments)
+    {
+        auto encoded =
+            javelin::app::remote::encodeVersioned<Action::requestSchemaVersion>(arguments...);
+        REQUIRE(std::holds_alternative<QByteArray>(encoded));
+        return std::get<QByteArray>(std::move(encoded));
+    }
 
     [[nodiscard]] std::shared_ptr<javelin::app::MemoryAccountCredentialStore> testCredentialStore()
     {
@@ -145,14 +155,14 @@ TEST_CASE("daemon log subscription publishes history and live entries", "[app][d
                   .subsystem = QStringLiteral("daemon.test"),
                   .message = QStringLiteral("historical")});
 
-    const auto subscribePayload = javelin::app::remote::encode(true);
-    REQUIRE(std::holds_alternative<QByteArray>(subscribePayload));
+    const auto subscribePayload =
+        actionPayload<javelin::protocol::actions::DeveloperLogSetSubscribed>(true);
     const auto subscribe = dispatcher.dispatch({
         .id = {.value = QUuid::createUuid()},
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::DeveloperLogSetSubscribed,
-                .payload = std::get<QByteArray>(subscribePayload),
+                .action = javelin::protocol::actions::DeveloperLogSetSubscribed::id,
+                .payload = subscribePayload,
             },
     });
     REQUIRE(std::holds_alternative<javelin::protocol::CommandAccepted>(subscribe));
@@ -168,14 +178,14 @@ TEST_CASE("daemon log subscription publishes history and live entries", "[app][d
     REQUIRE(eventSink.events.back().entries.size() == 1);
     CHECK(eventSink.events.back().entries.front().message == QStringLiteral("live"));
 
-    const auto unsubscribePayload = javelin::app::remote::encode(false);
-    REQUIRE(std::holds_alternative<QByteArray>(unsubscribePayload));
+    const auto unsubscribePayload =
+        actionPayload<javelin::protocol::actions::DeveloperLogSetSubscribed>(false);
     const auto unsubscribe = dispatcher.dispatch({
         .id = {.value = QUuid::createUuid()},
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::DeveloperLogSetSubscribed,
-                .payload = std::get<QByteArray>(unsubscribePayload),
+                .action = javelin::protocol::actions::DeveloperLogSetSubscribed::id,
+                .payload = unsubscribePayload,
             },
     });
     REQUIRE(std::holds_alternative<javelin::protocol::CommandAccepted>(unsubscribe));
@@ -233,15 +243,14 @@ TEST_CASE("account bootstrap hydrates credentials before reaching the JMAP servi
                      .oauthClientId = {}},
         .mailboxIds = {},
     };
-    const auto payload = javelin::app::remote::encode(intent);
-    REQUIRE(std::holds_alternative<QByteArray>(payload));
+    const auto payload = actionPayload<javelin::protocol::actions::AccountBootstrap>(intent);
 
     const auto reply = dispatcher.dispatch({
         .id = {.value = QUuid::createUuid()},
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::AccountBootstrap,
-                .payload = std::get<QByteArray>(payload),
+                .action = javelin::protocol::actions::AccountBootstrap::id,
+                .payload = payload,
             },
     });
     const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reply);
@@ -1052,14 +1061,14 @@ TEST_CASE("daemon replays completed remote action results", "[app][daemon][ipc][
         runtimeDirectory, cacheRoot, temporaryDirectory.filePath(QStringLiteral("settings.ini")))};
     REQUIRE_FALSE(process.start().has_value());
 
-    const auto encoded = javelin::app::remote::encode(std::string{"missing-owner"});
-    REQUIRE(std::holds_alternative<QByteArray>(encoded));
+    const auto encoded = actionPayload<javelin::protocol::actions::ContactRequestRefresh>(
+        std::string{"missing-owner"});
     const javelin::protocol::CommandRequest request{
         .id = {.value = QUuid::createUuid()},
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::ContactRequestRefresh,
-                .payload = std::get<QByteArray>(encoded),
+                .action = javelin::protocol::actions::ContactRequestRefresh::id,
+                .payload = encoded,
             },
     };
     const auto admitted = process.handleCommand(request);
@@ -1126,8 +1135,8 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
         .id = commandId,
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::WorkSummary,
-                .payload = {},
+                .action = javelin::protocol::actions::WorkSummary::id,
+                .payload = actionPayload<javelin::protocol::actions::WorkSummary>(),
             },
     });
     const auto* summaryAccepted = std::get_if<javelin::protocol::CommandAccepted>(&first);
@@ -1135,14 +1144,14 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
     CHECK(summaryAccepted->epoch == epoch);
     CHECK(summaryAccepted->changedDomains.empty());
 
-    const auto jobId = javelin::app::remote::encode(std::string{"missing-job"});
-    REQUIRE(std::holds_alternative<QByteArray>(jobId));
+    const auto jobId =
+        actionPayload<javelin::protocol::actions::WorkRetry>(std::string{"missing-job"});
     const auto workMutation = dispatcher.dispatch({
         .id = {.value = QUuid::createUuid()},
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::WorkRetry,
-                .payload = std::get<QByteArray>(jobId),
+                .action = javelin::protocol::actions::WorkRetry::id,
+                .payload = jobId,
             },
     });
     const auto* workAccepted = std::get_if<javelin::protocol::CommandAccepted>(&workMutation);
@@ -1151,14 +1160,14 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
     CHECK(workAccepted->changedDomains ==
           std::vector{javelin::protocol::ChangedDomain::BackgroundJobs});
 
-    const auto differentJobId = javelin::app::remote::encode(std::string{"different-job"});
-    REQUIRE(std::holds_alternative<QByteArray>(differentJobId));
+    const auto differentJobId =
+        actionPayload<javelin::protocol::actions::WorkRetry>(std::string{"different-job"});
     const auto changedPayloadReplay = dispatcher.dispatch({
         .id = workAccepted->id,
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::WorkRetry,
-                .payload = std::get<QByteArray>(differentJobId),
+                .action = javelin::protocol::actions::WorkRetry::id,
+                .payload = differentJobId,
             },
     });
     const auto* changedPayloadRejected =
@@ -1172,8 +1181,8 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
         .id = commandId,
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::WorkList,
-                .payload = {},
+                .action = javelin::protocol::actions::WorkList::id,
+                .payload = actionPayload<javelin::protocol::actions::WorkList>(),
             },
     });
     const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reused);
@@ -1181,14 +1190,14 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
     CHECK(rejected->error.code == javelin::protocol::BoundaryErrorCode::InvalidRequest);
 
     const auto acknowledgementPayload =
-        javelin::app::remote::encode(commandId.value.toString(QUuid::WithoutBraces));
-    REQUIRE(std::holds_alternative<QByteArray>(acknowledgementPayload));
+        actionPayload<javelin::protocol::actions::AcknowledgeRemoteActionResult>(
+            commandId.value.toString(QUuid::WithoutBraces));
     const auto acknowledgement = dispatcher.dispatch({
         .id = {.value = QUuid::createUuid()},
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::AcknowledgeRemoteActionResult,
-                .payload = std::get<QByteArray>(acknowledgementPayload),
+                .action = javelin::protocol::actions::AcknowledgeRemoteActionResult::id,
+                .payload = acknowledgementPayload,
             },
     });
     REQUIRE(std::holds_alternative<javelin::protocol::CommandAccepted>(acknowledgement));
@@ -1197,11 +1206,73 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
         .id = commandId,
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::WorkList,
-                .payload = {},
+                .action = javelin::protocol::actions::WorkList::id,
+                .payload = actionPayload<javelin::protocol::actions::WorkList>(),
             },
     });
     CHECK(std::holds_alternative<javelin::protocol::CommandAccepted>(reusedAfterAcknowledgement));
+}
+
+TEST_CASE("daemon action boundary rejects unknown actions and oversized payloads",
+          "[app][daemon][ipc][protocol]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+
+    auto locationResult = javelin::app::CacheLocationProvider{cacheRoot}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(locationResult));
+    javelin::app::DaemonServices services{
+        std::get<javelin::app::CacheLocation>(std::move(locationResult))};
+
+    struct EventSink final : javelin::protocol::BoundaryEventSink
+    {
+        void onBoundaryEvent(const javelin::protocol::BoundaryEvent&) override
+        {
+        }
+    } eventSink;
+
+    javelin::app::DaemonRemoteActionDispatcher dispatcher{
+        services,
+        eventSink,
+        [] { return javelin::protocol::InvalidationEpoch{.value = 1}; },
+        []() -> std::optional<javelin::protocol::BoundaryError> { return std::nullopt; },
+        [](javelin::app::AccountAuthenticationResult result) { return result; },
+        [](javelin::app::AccountConnectionSettings settings)
+            -> std::variant<javelin::app::AccountConnectionSettings, QString> { return settings; },
+        [](javelin::app::OAuthRevocationRequest request)
+            -> std::variant<javelin::app::OAuthRevocationRequest, QString> { return request; }};
+
+    const auto unknown = dispatcher.dispatch({
+        .id = {.value = QUuid::createUuid()},
+        .command =
+            javelin::protocol::RemoteActionCommand{
+                .action = {.value = 65000},
+                .payload = {},
+            },
+    });
+    const auto* unknownRejected = std::get_if<javelin::protocol::CommandRejected>(&unknown);
+    REQUIRE(unknownRejected != nullptr);
+    CHECK(unknownRejected->error.code ==
+          javelin::protocol::BoundaryErrorCode::UnsupportedOperation);
+
+    const auto oversized = dispatcher.dispatch({
+        .id = {.value = QUuid::createUuid()},
+        .command =
+            javelin::protocol::RemoteActionCommand{
+                .action = javelin::protocol::actions::WorkSummary::id,
+                .payload = QByteArray(
+                    static_cast<qsizetype>(
+                        javelin::protocol::actions::WorkSummary::maximumPayloadBytes + 1),
+                    'x'),
+            },
+    });
+    const auto* oversizedRejected = std::get_if<javelin::protocol::CommandRejected>(&oversized);
+    REQUIRE(oversizedRejected != nullptr);
+    CHECK(oversizedRejected->error.code == javelin::protocol::BoundaryErrorCode::ValueTooLarge);
 }
 
 TEST_CASE("daemon configures only cached JMAP accounts with the Mail capability",

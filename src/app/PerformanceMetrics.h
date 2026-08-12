@@ -1,6 +1,6 @@
 #pragma once
 
-#include "protocol/ProcessBoundary.h"
+#include "protocol/ActionContract.h"
 
 #include <QString>
 
@@ -24,7 +24,7 @@ namespace javelin::app
         [[nodiscard]] static QString formatMetric(QString process, QString operation,
                                                   std::optional<std::chrono::microseconds> duration,
                                                   QString outcome, QString details);
-        [[nodiscard]] static QString remoteActionName(javelin::protocol::RemoteActionKind kind);
+        [[nodiscard]] static QString remoteActionName(javelin::protocol::ActionId action);
     };
 
     class PerformanceSpan final

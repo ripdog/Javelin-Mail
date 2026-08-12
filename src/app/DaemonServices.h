@@ -2,7 +2,7 @@
 
 #include "app/CacheLocationProvider.h"
 #include "jmap/auth/Auth.h"
-#include "protocol/ProcessBoundary.h"
+#include "protocol/CacheContract.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
 #include <memory>

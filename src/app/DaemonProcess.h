@@ -4,7 +4,8 @@
 #include "app/AccountCredentialStore.h"
 #include "app/OAuthRefreshSingleFlight.h"
 #include "app/OnboardingTypes.h"
-#include "protocol/SocketTransport.h"
+#include "protocol/LocalActivationServer.h"
+#include "protocol/LocalDaemonServer.h"
 
 #include <QCoroTask>
 
