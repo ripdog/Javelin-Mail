@@ -17,6 +17,8 @@ in the focused documents for [optimistic consistency](OPTIMISTIC_CONSISTENCY.md)
 [email signatures](EMAIL_SIGNATURES_DESIGN.md), and [message rendering](RENDERING.md). The planned
 split between foreground collapsed-query materialization and bounded background thread hydration is
 specified in [THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md).
+The long-term, behavior-preserving module and ownership cleanup is tracked in
+[STRUCTURAL_REFACTOR_IMPLEMENTATION_PLAN.md](STRUCTURAL_REFACTOR_IMPLEMENTATION_PLAN.md).
 
 Javelin targets Qt 6.6 or newer, KDE Frameworks 6, and C++23. Glaze provides typed JSON parsing at
 the JMAP boundary; QCoro provides coroutine-based Qt networking. KDE Plasma is the primary desktop

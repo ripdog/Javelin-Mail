@@ -2,7 +2,9 @@
 
 This document covers build-environment setup, compilation, testing, local execution, and packaging.
 See [ARCHITECTURE.md](ARCHITECTURE.md) for component ownership and runtime interactions, and
-[DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for the current engineering roadmap.
+[DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for the current engineering roadmap. The staged programme
+for making those boundaries explicit in the source and build graphs is tracked in
+[STRUCTURAL_REFACTOR_IMPLEMENTATION_PLAN.md](STRUCTURAL_REFACTOR_IMPLEMENTATION_PLAN.md).
 
 ## Supported development environment
 

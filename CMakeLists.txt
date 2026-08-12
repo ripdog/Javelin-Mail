@@ -74,19 +74,8 @@ endif()
 set(JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH
     "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/javelinmail/models/fasttext/lid.176.ftz")
 
-add_library(javelin_protocol STATIC
-    src/protocol/ProcessBoundary.cpp
-    src/protocol/ProcessBoundary.h
-    src/protocol/SocketTransport.cpp
-    src/protocol/SocketTransport.h
-)
-target_include_directories(javelin_protocol PUBLIC
-    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
-)
-target_link_libraries(javelin_protocol PUBLIC Qt::Core Qt::Network)
-javelin_set_project_warnings(javelin_protocol)
-javelin_enable_static_analysis(javelin_protocol)
-javelin_enable_sanitizers(javelin_protocol)
+add_subdirectory(src/protocol)
+add_subdirectory(src/storage)
 
 add_library(javelin_observability STATIC
     src/app/PerformanceMetrics.cpp
@@ -99,48 +88,6 @@ target_link_libraries(javelin_observability PUBLIC Qt::Core)
 javelin_set_project_warnings(javelin_observability)
 javelin_enable_static_analysis(javelin_observability)
 javelin_enable_sanitizers(javelin_observability)
-
-add_library(javelin_cache_read STATIC
-    src/app/CacheAccessBarrier.cpp
-    src/app/CacheAccessBarrier.h
-    src/app/CacheLocationProvider.cpp
-    src/app/CacheLocationProvider.h
-    src/jmap/cache/Database.cpp
-    src/jmap/cache/Database.h
-    src/jmap/cache/EmailReadRepository.cpp
-    src/jmap/cache/EmailReadRepository.h
-    src/jmap/cache/MessageContentTypes.h
-    src/jmap/cache/MessageViewService.cpp
-    src/jmap/cache/MessageViewService.h
-    src/jmap/cache/MessageViewReader.h
-    src/jmap/cache/MimeMessageParser.cpp
-    src/jmap/cache/MimeMessageParser.h
-    src/jmap/cache/MailVault.cpp
-    src/jmap/cache/MailVault.h
-    src/jmap/cache/RawMessageSourceReadRepository.cpp
-    src/jmap/cache/RawMessageSourceReadRepository.h
-    src/jmap/render/HtmlMessageDocumentBuilder.cpp
-    src/jmap/render/HtmlMessageDocumentBuilder.h
-    src/jmap/render/HtmlTextExtractor.cpp
-    src/jmap/render/HtmlTextExtractor.h
-    src/jmap/render/InlineMessageUrl.cpp
-    src/jmap/render/InlineMessageUrl.h
-)
-target_include_directories(javelin_cache_read PUBLIC
-    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
-)
-target_link_libraries(javelin_cache_read
-    PUBLIC
-        KPim6::Mime
-        Qt::Concurrent
-        Qt::Core
-        Qt::Sql
-    PRIVATE
-        KF6::Codecs
-)
-javelin_set_project_warnings(javelin_cache_read)
-javelin_enable_static_analysis(javelin_cache_read)
-javelin_enable_sanitizers(javelin_cache_read)
 
 set(JAVELIN_FORMAT_FILES
     src/gui/widgets/IndeterminateProgressBar.h
@@ -815,10 +762,8 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/MailboxRepository.cpp
     src/jmap/cache/MailboxRepository.h
     src/jmap/cache/MessageContentTypes.h
-    src/jmap/cache/MessageViewService.cpp
     src/jmap/cache/MessageViewService.h
     src/jmap/cache/MessageViewReader.h
-    src/jmap/cache/MimeMessageParser.cpp
     src/jmap/cache/MimeMessageParser.h
     src/jmap/cache/QueryService.cpp
     src/jmap/cache/QueryService.h
@@ -845,9 +790,7 @@ add_library(javelin_jmap STATIC
     src/jmap/query/EmailListSort.h
     src/jmap/query/QueryDiff.cpp
     src/jmap/query/QueryDiff.h
-    src/jmap/render/HtmlMessageDocumentBuilder.cpp
     src/jmap/render/HtmlMessageDocumentBuilder.h
-    src/jmap/render/InlineMessageUrl.cpp
     src/jmap/render/InlineMessageUrl.h
     src/jmap/search/EmailSearch.cpp
     src/jmap/search/EmailSearch.h
@@ -1344,41 +1287,6 @@ javelin_enable_static_analysis(javelin_gui)
 javelin_enable_sanitizers(javelin_gui)
 # QCoro uses exceptions internally
 target_compile_options(javelin_gui PRIVATE -fexceptions)
-
-add_library(javelin_calendar_gui STATIC
-    src/gui/accessibility/AccessibleFactory.h
-    src/gui/calendar/MonthCalendarLayout.cpp
-    src/gui/calendar/MonthCalendarLayout.h
-    src/gui/calendar/MonthCalendarWidget.cpp
-    src/gui/calendar/MonthCalendarWidget.h
-    src/gui/settings/WorkspaceSettingsPort.h
-    src/gui/calendar/DayAgendaDialog.cpp
-    src/gui/calendar/DayAgendaDialog.h
-    src/gui/calendar/EventDialog.cpp
-    src/gui/calendar/EventDialog.h
-    src/gui/calendar/RecurrenceDialog.cpp
-    src/gui/calendar/RecurrenceDialog.h
-    src/gui/calendar/RecurrencePattern.cpp
-    src/gui/calendar/RecurrencePattern.h
-)
-target_sources(javelin_calendar_gui PRIVATE
-    src/gui/calendar/CalendarEventButton.cpp
-    src/gui/calendar/CalendarEventButton.h
-)
-target_include_directories(javelin_calendar_gui PUBLIC
-    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
-)
-target_link_libraries(javelin_calendar_gui
-    PUBLIC
-        Qt::Widgets
-    PRIVATE
-        KF6::I18n
-        javelin_cache_read
-)
-javelin_set_project_warnings(javelin_calendar_gui)
-javelin_enable_static_analysis(javelin_calendar_gui)
-javelin_enable_sanitizers(javelin_calendar_gui)
-target_compile_options(javelin_calendar_gui PRIVATE -fexceptions)
 
 add_library(javelin_daemon_core STATIC
     src/app/AccountApplicationPorts.h
