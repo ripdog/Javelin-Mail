@@ -110,18 +110,26 @@ namespace javelin::gui::messages
             {
                 return {};
             }
-            const auto threadCount = index.data(MessageListModel::ThreadMessageCountRole);
-            if (!threadCount.isValid())
+            const auto mailboxThreadCount = index.data(MessageListModel::ThreadMessageCountRole);
+            const auto globalThreadCount =
+                index.data(MessageListModel::GlobalThreadMessageCountRole);
+            if (!mailboxThreadCount.isValid() && !globalThreadCount.isValid())
             {
                 return i18nc("@action:button open conversation", "Replies");
             }
-            // threadCount includes the parent summary row itself; replies are the rest.
-            const auto count = threadCount.toULongLong();
+            // Counts include the parent summary row itself; replies are the rest. Conversation
+            // expansion is global, so prefer the larger known count when some members live in
+            // another mailbox.
+            const auto mailboxCount =
+                mailboxThreadCount.isValid() ? mailboxThreadCount.toULongLong() : qulonglong{0};
+            const auto globalCount =
+                globalThreadCount.isValid() ? globalThreadCount.toULongLong() : qulonglong{0};
+            const auto count = std::max(mailboxCount, globalCount);
             if (count <= 1)
             {
                 return i18nc("@action:button open conversation", "Replies");
             }
-            const auto replyCount = count > 0 ? static_cast<qulonglong>(count - 1) : qulonglong{0};
+            const auto replyCount = static_cast<qulonglong>(count - 1);
             return i18np("%1 reply", "%1 replies", replyCount);
         }
 
