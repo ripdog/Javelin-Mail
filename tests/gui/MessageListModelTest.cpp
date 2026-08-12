@@ -210,7 +210,7 @@ TEST_CASE("collapsing a pending Thread clears only the presentation intent",
     CHECK(materializationRequests == 0);
 }
 
-TEST_CASE("search Thread expansion includes children outside the represented mailbox",
+TEST_CASE("Thread expansion includes children outside the represented mailbox",
           "[gui][messages][model][thread-coverage][search]")
 {
     ApplicationGuard application;
@@ -223,13 +223,11 @@ TEST_CASE("search Thread expansion includes children outside the represented mai
 
     javelin::gui::messages::MessageListModel mailboxModel{database.queries};
     mailboxModel.setItems("account-1", "mailbox-1", {summary});
-    int mailboxChanges = 0;
-    QObject::connect(&mailboxModel, &QAbstractItemModel::dataChanged, &mailboxModel,
-                     [&](const QModelIndex&, const QModelIndex&, const QList<int>&)
-                     { ++mailboxChanges; });
     REQUIRE(mailboxModel.setThreadExpanded("thread-1", true));
-    REQUIRE(waitUntil([&] { return mailboxChanges >= 2; }));
-    CHECK(mailboxModel.rowCount() == 1);
+    REQUIRE(waitUntil([&] { return mailboxModel.rowCount() == 2; }));
+    CHECK(mailboxModel
+              .data(mailboxModel.index(1), javelin::gui::messages::MessageListModel::EmailIdRole)
+              .toString() == QStringLiteral("email-2"));
 
     javelin::gui::messages::MessageListModel searchModel{database.queries};
     searchModel.setItems("account-1", std::nullopt, {summary});

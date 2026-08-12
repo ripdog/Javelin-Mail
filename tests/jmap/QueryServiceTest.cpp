@@ -853,6 +853,60 @@ TEST_CASE("complete offline mailbox threads resolve and expand without normalize
     CHECK(members.items[1].emailId == "offline-newer");
 }
 
+TEST_CASE("thread expansion prefers complete global membership across mailboxes",
+          "[jmap][cache][query][offline][thread-materialization]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    auto inbox = loadMailboxFixture();
+    auto sent = inbox;
+    sent.id = "mbx-sent";
+    sent.name = "Sent";
+    sent.role = "sent";
+    javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
+    REQUIRE_FALSE(mailboxes.replaceAll("account-1", {inbox, sent}).has_value());
+
+    auto sentEmail = loadEmailFixture();
+    sentEmail.id = "sent-email";
+    sentEmail.threadId = "cross-mailbox-thread";
+    sentEmail.mailboxIds = {sent.id};
+    sentEmail.receivedAt = "2026-08-04T20:57:24Z";
+    sentEmail.subject = "Javelin Mail client in development";
+    auto inboxReply = sentEmail;
+    inboxReply.id = "inbox-reply";
+    inboxReply.mailboxIds = {inbox.id};
+    inboxReply.receivedAt = "2026-08-05T05:24:20Z";
+    inboxReply.subject = "Re: Javelin Mail client in development";
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(emails.replaceAll("account-1", {sentEmail, inboxReply}).has_value());
+
+    javelin::jmap::cache::ThreadRepository threads{databaseContext.connection};
+    REQUIRE_FALSE(
+        threads
+            .upsertMany("account-1",
+                        {{.id = "cross-mailbox-thread", .emailIds = {"sent-email", "inbox-reply"}}},
+                        "thread-state")
+            .has_value());
+
+    QSqlQuery scope{databaseContext.connection.database()};
+    REQUIRE(scope.exec(QStringLiteral(
+        "INSERT INTO offline_mailbox_scopes(account_id,mailbox_id,desired,status,generation,"
+        "completed_generation) VALUES('account-1','mbx-inbox',1,'complete',4,4)")));
+
+    const auto snapshot = javelin::app::loadMessageListThreadMembers(
+        databaseContext.connection.database().databaseName(), "account-1", inbox.id,
+        "cross-mailbox-thread");
+    REQUIRE(std::holds_alternative<javelin::app::MessageListThreadMembersSnapshot>(snapshot));
+    const auto& members = std::get<javelin::app::MessageListThreadMembersSnapshot>(snapshot);
+    REQUIRE(members.complete);
+    REQUIRE(members.items.size() == 2);
+    CHECK(members.items[0].emailId == "sent-email");
+    CHECK(members.items[1].emailId == "inbox-reply");
+}
+
 TEST_CASE("mailbox window summaries stay representative-only as thread coverage completes",
           "[jmap][cache][query][pagination][thread-coverage]")
 {

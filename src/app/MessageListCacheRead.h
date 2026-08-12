@@ -45,6 +45,7 @@ namespace javelin::app
                 QStringLiteral("Begin message-list Thread snapshot"), database.lastError());
         }
         javelin::jmap::cache::QueryService queryService{connection};
+        bool completeOfflineMailbox = false;
         if (mailboxId.has_value())
         {
             const auto offlineState = queryService.offlineMailboxComplete(accountId, *mailboxId);
@@ -53,30 +54,7 @@ namespace javelin::app
                 static_cast<void>(database.rollback());
                 return *error;
             }
-            if (std::get<bool>(offlineState))
-            {
-                auto itemsResult = queryService.listMailboxThreadMessages(
-                    accountId, *mailboxId, threadId,
-                    javelin::jmap::cache::MailboxThreadMembershipSource::CompleteOfflineMailbox);
-                if (const auto* error =
-                        std::get_if<javelin::jmap::cache::DatabaseError>(&itemsResult))
-                {
-                    static_cast<void>(database.rollback());
-                    return *error;
-                }
-                auto snapshot = MessageListThreadMembersSnapshot{
-                    .items = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(
-                        std::move(itemsResult)),
-                    .complete = true,
-                };
-                if (!database.commit())
-                {
-                    return javelin::jmap::cache::databaseError(
-                        QStringLiteral("Finish complete offline message-list Thread snapshot"),
-                        database.lastError());
-                }
-                return snapshot;
-            }
+            completeOfflineMailbox = std::get<bool>(offlineState);
         }
         QSqlQuery coverage{database};
         coverage.prepare(QStringLiteral(
@@ -97,9 +75,11 @@ namespace javelin::app
             return javelin::jmap::cache::databaseError(
                 QStringLiteral("Read message-list Thread coverage"), coverage.lastError());
         }
-        if (!coverage.next() || coverage.value(0).toString() != QStringLiteral("current") ||
-            coverage.value(1).toULongLong() != coverage.value(2).toULongLong() ||
-            coverage.value(1).toULongLong() != coverage.value(3).toULongLong())
+        const bool normalizedThreadComplete =
+            coverage.next() && coverage.value(0).toString() == QStringLiteral("current") &&
+            coverage.value(1).toULongLong() == coverage.value(2).toULongLong() &&
+            coverage.value(1).toULongLong() == coverage.value(3).toULongLong();
+        if (!normalizedThreadComplete && !completeOfflineMailbox)
         {
             if (!database.commit())
             {
@@ -111,9 +91,11 @@ namespace javelin::app
         }
 
         auto itemsResult =
-            mailboxId.has_value()
-                ? queryService.listMailboxThreadMessages(accountId, *mailboxId, threadId)
-                : queryService.listThreadMessages(accountId, threadId);
+            normalizedThreadComplete
+                ? queryService.listThreadMessages(accountId, threadId)
+                : queryService.listMailboxThreadMessages(
+                      accountId, *mailboxId, threadId,
+                      javelin::jmap::cache::MailboxThreadMembershipSource::CompleteOfflineMailbox);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&itemsResult))
         {
             static_cast<void>(database.rollback());
