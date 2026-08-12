@@ -48,9 +48,13 @@
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/IdentityRepository.h"
+#include "jmap/cache/MailTagReadRepository.h"
 #include "jmap/cache/MailVault.h"
+#include "jmap/cache/MailboxFilterReadRepository.h"
+#include "jmap/cache/MailboxMessageReadRepository.h"
+#include "jmap/cache/MailboxReadRepository.h"
+#include "jmap/cache/MailboxStatisticsReadRepository.h"
 #include "jmap/cache/MessageViewService.h"
-#include "jmap/cache/QueryService.h"
 #include "jmap/cache/SubmissionRepository.h"
 #include "jmap/calendar/CalendarService.h"
 #include "jmap/contacts/ContactService.h"
@@ -168,9 +172,21 @@ namespace javelin::app
             m_databaseConnection, *m_methodTransport);
         m_identityRepository =
             std::make_unique<javelin::jmap::cache::IdentityRepository>(m_databaseConnection);
+        m_mailboxRepository =
+            std::make_unique<javelin::jmap::cache::MailboxReadRepository>(m_databaseConnection);
+        m_mailTagRepository =
+            std::make_unique<javelin::jmap::cache::MailTagReadRepository>(m_databaseConnection);
+        m_mailboxStatisticsRepository =
+            std::make_unique<javelin::jmap::cache::MailboxStatisticsReadRepository>(
+                m_databaseConnection);
         m_messageViewService =
             std::make_unique<javelin::jmap::cache::MessageViewService>(m_databaseConnection);
-        m_queryService = std::make_unique<javelin::jmap::cache::QueryService>(m_databaseConnection);
+        m_mailboxMessageRepository =
+            std::make_unique<javelin::jmap::cache::MailboxMessageReadRepository>(
+                m_databaseConnection);
+        m_mailboxFilterRepository =
+            std::make_unique<javelin::jmap::cache::MailboxFilterReadRepository>(
+                m_databaseConnection);
         m_submissionRepository =
             std::make_unique<javelin::jmap::cache::SubmissionRepository>(m_databaseConnection);
         m_jmapComposeService = std::make_unique<javelin::jmap::submission::ComposeService>(
@@ -181,9 +197,10 @@ namespace javelin::app
         m_mailService = std::make_unique<MailApplicationService>(
             m_databaseConnection, *m_jmapCore, *m_methodTransport,
             *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns, *m_accountRepository,
-            *m_queryService, *m_contactRepository, *m_contactService, *m_calendarService,
-            *m_sieveService, *m_errorCoordinator, *m_workScheduler, *m_mailboxMaintenanceRegistry,
-            *m_undoManager);
+            *m_mailboxRepository, *m_mailTagRepository, *m_mailboxStatisticsRepository,
+            *m_mailboxMessageRepository, *m_mailboxFilterRepository, *m_contactRepository,
+            *m_contactService, *m_calendarService, *m_sieveService, *m_errorCoordinator,
+            *m_workScheduler, *m_mailboxMaintenanceRegistry, *m_undoManager);
         m_mailService->setThreadMaterializationCoordinator(
             m_threadMaterializationCoordinator.get());
         m_threadMembershipMaterializationWorker =
@@ -259,7 +276,7 @@ namespace javelin::app
         m_mailApplicationEventsService =
             std::make_unique<MailApplicationEventsService>(*m_mailService);
         m_messageListSessionFactoryService = std::make_unique<MessageListSessionFactoryService>(
-            *m_mailService, *m_mailApplicationEventsService);
+            *m_mailService, *m_mailApplicationEventsService, m_databasePath);
         m_commandDispatcher = std::make_unique<CommandDispatcher>(*m_accountRefreshCommandService);
         m_calendarCommandService = std::make_unique<CalendarCommandService>(*m_mailService);
         m_deferredSendService = std::make_unique<DeferredSendService>(
@@ -412,9 +429,9 @@ namespace javelin::app
         return *m_messageViewService;
     }
 
-    javelin::jmap::cache::QueryService& DaemonServices::queryService()
+    javelin::jmap::cache::MailboxReader& DaemonServices::mailboxReader()
     {
-        return *m_queryService;
+        return *m_mailboxRepository;
     }
 
     ComposeService& DaemonServices::composeService()

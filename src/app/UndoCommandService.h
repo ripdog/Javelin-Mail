@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storage/DatabaseError.h"
+
 #include "app/UndoApplicationPorts.h"
 
 namespace javelin::app::undo

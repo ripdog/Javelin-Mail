@@ -13,8 +13,8 @@
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/IdentityRepository.h"
 #include "jmap/cache/MailVault.h"
+#include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/cache/MessageViewService.h"
-#include "jmap/cache/QueryService.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SubmissionRepository.h"
 #include "jmap/render/HtmlBodyEmbedding.h"
@@ -165,8 +165,8 @@ namespace javelin::jmap::submission
         findMailboxByRole(javelin::jmap::cache::DatabaseConnection& connection,
                           const std::string_view accountId, const std::string_view role)
         {
-            javelin::jmap::cache::QueryService queryService{connection};
-            const auto result = queryService.listMailboxTree(accountId);
+            javelin::jmap::cache::MailboxReadRepository mailboxReader{connection};
+            const auto result = mailboxReader.listMailboxTree(accountId);
             const auto* mailboxes =
                 std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&result);
             if (mailboxes == nullptr)

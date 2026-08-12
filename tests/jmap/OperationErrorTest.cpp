@@ -2,7 +2,7 @@
 
 #include "jmap/api/Error.h"
 #include "jmap/api/ResponseReader.h"
-#include "jmap/cache/Database.h"
+#include "storage/DatabaseError.h"
 
 #include <catch2/catch_test_macros.hpp>
 

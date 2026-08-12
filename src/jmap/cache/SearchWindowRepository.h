@@ -1,7 +1,7 @@
 #pragma once
 
-#include "jmap/cache/Database.h"
 #include "jmap/cache/QueryWindowCoverage.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <cstddef>
 #include <optional>

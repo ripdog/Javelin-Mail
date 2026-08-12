@@ -1,5 +1,7 @@
 #include "jmap/cache/MailboxWindowRepository.h"
 
+#include "jmap/cache/MailboxWindowReadRepository.h"
+
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QVariant>
@@ -45,21 +47,6 @@ namespace javelin::jmap::cache
                 return QStringLiteral("stale");
             }
             Q_UNREACHABLE();
-        }
-
-        [[nodiscard]] QueryWindowCoverage coverageFromValue(const QString& value)
-        {
-            if (value == QStringLiteral("server"))
-                return QueryWindowCoverage::Server;
-            if (value == QStringLiteral("locally_projected"))
-                return QueryWindowCoverage::LocallyProjected;
-            return QueryWindowCoverage::Stale;
-        }
-
-        [[nodiscard]] QueryWindowMaterialization materializationFromValue(const QString& value)
-        {
-            return value == QStringLiteral("complete") ? QueryWindowMaterialization::Complete
-                                                       : QueryWindowMaterialization::Partial;
         }
     } // namespace
 
@@ -265,50 +252,8 @@ namespace javelin::jmap::cache
                                                       const std::size_t requestedOffset,
                                                       const std::size_t requestedLimit) const
     {
-        if (const auto error = m_connection.validate())
-            return *error;
-
-        QSqlQuery windowQuery{m_connection.database()};
-        windowQuery.prepare(QStringLiteral(
-            "SELECT mailbox_id,position,returned_limit,total,query_state,coverage,"
-            "materialization FROM "
-            "mailbox_query_windows WHERE account_id=:account_id AND query_key=:query_key AND "
-            "requested_offset=:requested_offset AND requested_limit=:requested_limit"));
-        bindKey(windowQuery, accountId, queryKey, requestedOffset, requestedLimit);
-        if (!windowQuery.exec())
-            return queryError(QStringLiteral("Read mailbox window"), windowQuery);
-        if (!windowQuery.next())
-            return std::optional<MailboxWindowRecord>{std::nullopt};
-
-        MailboxWindowRecord record{
-            .accountId = std::string{accountId},
-            .mailboxId = windowQuery.value(0).toString().toStdString(),
-            .queryKey = std::string{queryKey},
-            .requestedOffset = requestedOffset,
-            .requestedLimit = requestedLimit,
-            .position = static_cast<std::size_t>(windowQuery.value(1).toULongLong()),
-            .returnedLimit = static_cast<std::size_t>(windowQuery.value(2).toULongLong()),
-            .total = windowQuery.value(3).isNull()
-                         ? std::nullopt
-                         : std::optional<std::size_t>{static_cast<std::size_t>(
-                               windowQuery.value(3).toULongLong())},
-            .queryState = windowQuery.value(4).toString().toStdString(),
-            .coverage = coverageFromValue(windowQuery.value(5).toString()),
-            .materialization = materializationFromValue(windowQuery.value(6).toString()),
-            .emailIds = {},
-        };
-
-        QSqlQuery itemsQuery{m_connection.database()};
-        itemsQuery.prepare(QStringLiteral(
-            "SELECT email_id FROM mailbox_query_window_items WHERE account_id=:account_id AND "
-            "query_key=:query_key AND requested_offset=:requested_offset AND "
-            "requested_limit=:requested_limit ORDER BY position"));
-        bindKey(itemsQuery, accountId, queryKey, requestedOffset, requestedLimit);
-        if (!itemsQuery.exec())
-            return queryError(QStringLiteral("Read mailbox-window items"), itemsQuery);
-        while (itemsQuery.next())
-            record.emailIds.push_back(itemsQuery.value(0).toString().toStdString());
-        return std::optional<MailboxWindowRecord>{std::move(record)};
+        return MailboxWindowReadRepository{m_connection}.find(accountId, queryKey, requestedOffset,
+                                                              requestedLimit);
     }
 
     std::variant<std::vector<std::string>, DatabaseError>

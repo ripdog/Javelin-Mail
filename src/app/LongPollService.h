@@ -5,12 +5,12 @@
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Session.h"
 #include "jmap/cache/AccountRepository.h"
-#include "jmap/cache/Database.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/sync/EventSourceLongPoll.h"
 #include "jmap/sync/LongPollWorker.h"
 #include "jmap/sync/RefreshNotificationTypes.h"
 #include "jmap/sync/WebSocketPushChannel.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroTask>
 
@@ -55,7 +55,7 @@ namespace javelin::app
             QNetworkAccessManager& networkAccessManager,
             javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
             javelin::jmap::cache::AccountRepository& accountRepository,
-            javelin::jmap::cache::QueryService& queryService, WorkScheduler& workScheduler,
+            javelin::jmap::cache::MailboxReader& mailboxReader, WorkScheduler& workScheduler,
             javelin::jmap::auth::AccessTokenRefreshHandler authenticationRefreshHandler = {},
             QObject* parent = nullptr);
         ~AccountSyncCoordinator() override;
@@ -195,7 +195,7 @@ namespace javelin::app
         QNetworkAccessManager& m_networkAccessManager;
         javelin::jmap::api::WebSocketFailureCooldowns& m_transportCooldowns;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
-        javelin::jmap::cache::QueryService& m_queryService;
+        javelin::jmap::cache::MailboxReader& m_mailboxReader;
         WorkScheduler& m_workScheduler;
         javelin::jmap::auth::AccessTokenRefreshHandler m_authenticationRefreshHandler;
         std::optional<AccountConnectionSettings> m_settings;

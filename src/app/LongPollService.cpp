@@ -73,13 +73,13 @@ namespace javelin::app
         QNetworkAccessManager& networkAccessManager,
         javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
         javelin::jmap::cache::AccountRepository& accountRepository,
-        javelin::jmap::cache::QueryService& queryService, WorkScheduler& workScheduler,
+        javelin::jmap::cache::MailboxReader& mailboxReader, WorkScheduler& workScheduler,
         javelin::jmap::auth::AccessTokenRefreshHandler authenticationRefreshHandler,
         QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
           m_transportCooldowns(cooldowns), m_accountRepository(accountRepository),
-          m_queryService(queryService), m_workScheduler(workScheduler),
+          m_mailboxReader(mailboxReader), m_workScheduler(workScheduler),
           m_authenticationRefreshHandler(std::move(authenticationRefreshHandler))
     {
         m_refreshDebounceTimer.setSingleShot(true);
@@ -280,7 +280,7 @@ namespace javelin::app
             return std::nullopt;
         }
 
-        const auto mailboxTreeResult = m_queryService.listMailboxTree(m_accountId);
+        const auto mailboxTreeResult = m_mailboxReader.listMailboxTree(m_accountId);
         const auto* mailboxTree =
             std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxTreeResult);
         if (mailboxTree == nullptr || mailboxTree->empty())

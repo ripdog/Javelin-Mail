@@ -2,7 +2,7 @@
 
 #include "app/WorkScheduler.h"
 #include "jmap/OperationError.h"
-#include "jmap/cache/Database.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroTask>
 

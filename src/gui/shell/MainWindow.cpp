@@ -64,9 +64,9 @@
 #include "jmap/cache/AccountReadRepository.h"
 #include "jmap/cache/ContactReader.h"
 #include "jmap/cache/IdentityReader.h"
+#include "jmap/cache/MailTagReader.h"
 #include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/cache/MessageViewReader.h"
-#include "jmap/cache/QueryReader.h"
 #include "jmap/calendar/CalendarReader.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/contacts/ContactResults.h"
@@ -316,13 +316,14 @@ namespace javelin::gui::shell
                            javelin::app::AccountCommandPort& accountCommandPort,
                            javelin::jmap::cache::AccountReader& accountReader,
                            javelin::jmap::cache::MailboxReader& mailboxReader,
+                           javelin::jmap::cache::MailTagReader& mailTagReader,
                            javelin::jmap::cache::ContactReader& contactReader,
                            javelin::jmap::calendar::CalendarReader& calendarReader,
                            javelin::app::CalendarCommandPort& calendarCommandPort,
                            javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
                            javelin::jmap::cache::IdentityReader& identityReader,
                            javelin::jmap::cache::MessageViewReader& messageViewReader,
-                           javelin::jmap::cache::QueryReader& queryReader,
+                           QString databasePath,
                            javelin::gui::translation::TranslationService& translationService,
                            javelin::app::ComposeCommandPort& composeCommandPort,
                            javelin::app::ContactCommandPort& contactCommandPort,
@@ -341,10 +342,10 @@ namespace javelin::gui::shell
                            javelin::app::UndoCommandPort& undoCommandPort, QWidget* parent)
         : KXmlGuiWindow(parent), m_settings(settings), m_accountCommandPort(accountCommandPort),
           m_accountReader(accountReader), m_mailboxReader(mailboxReader),
-          m_contactReader(contactReader), m_calendarReader(calendarReader),
-          m_calendarCommandPort(calendarCommandPort),
+          m_mailTagReader(mailTagReader), m_contactReader(contactReader),
+          m_calendarReader(calendarReader), m_calendarCommandPort(calendarCommandPort),
           m_contactIdentityLookup(contactIdentityLookup), m_identityReader(identityReader),
-          m_messageViewReader(messageViewReader), m_queryReader(queryReader),
+          m_messageViewReader(messageViewReader), m_databasePath(std::move(databasePath)),
           m_translationService(translationService), m_composeCommandPort(composeCommandPort),
           m_contactCommandPort(contactCommandPort),
           m_developerDiagnosticsPort(developerDiagnosticsPort),
@@ -532,8 +533,8 @@ namespace javelin::gui::shell
             *m_mailboxModel, *m_mailboxView, *m_mailboxSearchEdit, *m_messageModel, *m_mailboxPane);
         m_messageSelectionController = std::make_unique<MessageSelectionController>(
             *m_mailboxModel, *m_mailboxView, *m_messageModel, *m_messageView);
-        m_messageListTabController = new MessageListTabController(
-            m_queryReader, m_messageListSessionFactory, messageWindowSize, this, this);
+        m_messageListTabController = new MessageListTabController(m_messageListSessionFactory,
+                                                                  messageWindowSize, this, this);
         m_messageNavigationController = std::make_unique<MessageNavigationController>(
             m_messageNavigationPort, *m_messageListTabController);
         m_messageContentController = new MessageContentController(m_messageContentPort, this);
@@ -1266,7 +1267,7 @@ namespace javelin::gui::shell
         setWindowTitle(i18n("Javelin Mail"));
 
         m_mailboxModel = new javelin::gui::mailboxes::MailboxTreeModel(
-            m_accountReader, m_mailboxReader, m_queryReader.databasePath(),
+            m_accountReader, m_mailboxReader, m_databasePath,
             {.accountId = std::nullopt,
              .showAccount = true,
              .checkable = false,
@@ -1274,7 +1275,7 @@ namespace javelin::gui::shell
              .accountDisplayName = [this](const QStringView accountId)
              { return m_settings.accountForCachedId(accountId).displayName; }},
             this);
-        m_messageModel = new javelin::gui::messages::MessageListModel(m_queryReader, this);
+        m_messageModel = new javelin::gui::messages::MessageListModel(m_databasePath, this);
         connect(m_messageModel,
                 &javelin::gui::messages::MessageListModel::threadMaterializationRequired, this,
                 [this](const QString& threadId)
@@ -3099,7 +3100,7 @@ namespace javelin::gui::shell
         const auto accountId = activeAccountId();
         if (!accountId.has_value())
             return;
-        const auto result = m_queryReader.listTagDefinitions(*accountId);
+        const auto result = m_mailTagReader.listTagDefinitions(*accountId);
         const auto* tags = std::get_if<std::vector<javelin::jmap::cache::TagDefinition>>(&result);
         if (tags == nullptr)
         {
@@ -3166,7 +3167,7 @@ namespace javelin::gui::shell
         if (!selectedEmailIds.empty())
         {
             const auto memberships =
-                m_queryReader.listEmailKeywordMemberships(*accountId, selectedEmailIds);
+                m_mailTagReader.listEmailKeywordMemberships(*accountId, selectedEmailIds);
             if (const auto* values =
                     std::get_if<std::vector<javelin::jmap::cache::EmailKeywordMembership>>(
                         &memberships))
@@ -3179,7 +3180,7 @@ namespace javelin::gui::shell
             }
         }
 
-        const auto definitions = m_queryReader.listTagDefinitions(*accountId);
+        const auto definitions = m_mailTagReader.listTagDefinitions(*accountId);
         const auto* tags =
             std::get_if<std::vector<javelin::jmap::cache::TagDefinition>>(&definitions);
         if (tags == nullptr)
@@ -3313,7 +3314,7 @@ namespace javelin::gui::shell
                                       ? guardedList->currentItem()->data(Qt::UserRole).toString()
                                       : QString{};
             guardedList->clear();
-            const auto definitions = m_queryReader.listTagDefinitions(accountId);
+            const auto definitions = m_mailTagReader.listTagDefinitions(accountId);
             const auto* tags =
                 std::get_if<std::vector<javelin::jmap::cache::TagDefinition>>(&definitions);
             if (tags == nullptr)
@@ -3377,8 +3378,8 @@ namespace javelin::gui::shell
         connect(importButton, &QPushButton::clicked, &dialog,
                 [this, save, accountId = *accountId]
                 {
-                    const auto rawKeywords = m_queryReader.listUserKeywords(accountId);
-                    const auto definedKeywords = m_queryReader.listTagKeywords(accountId);
+                    const auto rawKeywords = m_mailTagReader.listUserKeywords(accountId);
+                    const auto definedKeywords = m_mailTagReader.listTagKeywords(accountId);
                     const auto* raw = std::get_if<std::vector<std::string>>(&rawKeywords);
                     const auto* defined = std::get_if<std::vector<std::string>>(&definedKeywords);
                     if (raw == nullptr || defined == nullptr)

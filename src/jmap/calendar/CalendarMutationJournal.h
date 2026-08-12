@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storage/sqlite/DatabaseConnection.h"
+
 #include "jmap/cache/CalendarRepository.h"
 #include "jmap/sync/MutationJournal.h"
 

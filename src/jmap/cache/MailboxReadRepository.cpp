@@ -21,6 +21,11 @@ namespace javelin::jmap::cache
 
     } // namespace
 
+    MailboxReadRepository::MailboxReadRepository(DatabaseConnection& connection)
+        : m_connection(connection)
+    {
+    }
+
     MailboxReadRepository::MailboxReadRepository(ReadOnlyDatabaseConnection& connection)
         : m_connection(connection)
     {

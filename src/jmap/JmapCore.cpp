@@ -17,6 +17,7 @@
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/MessageContentTypes.h"
+#include "jmap/cache/MessageSummaryReadRepository.h"
 #include "jmap/cache/MimeMessageParser.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
@@ -3380,8 +3381,9 @@ namespace javelin::jmap
         if (const auto error = transaction.commit())
             co_return javelin::jmap::operationError(*error);
 
-        javelin::jmap::cache::QueryService queryService{*m_impl->databaseConnection};
-        const auto cachedResults = queryService.listMessagesByEmailIds(accountId, emailIds);
+        javelin::jmap::cache::MessageSummaryReadRepository messageSummaries{
+            *m_impl->databaseConnection};
+        const auto cachedResults = messageSummaries.listMessagesByEmailIds(accountId, emailIds);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedResults))
         {
             co_return javelin::jmap::operationError(*error);
@@ -3484,9 +3486,10 @@ namespace javelin::jmap
         if (const auto error = transaction.commit())
             co_return javelin::jmap::operationError(*error);
 
-        javelin::jmap::cache::QueryService queryService{*m_impl->databaseConnection};
+        javelin::jmap::cache::MessageSummaryReadRepository messageSummaries{
+            *m_impl->databaseConnection};
         const auto cachedResults =
-            queryService.listMessagesByEmailIds(accountId, page.representativeIds);
+            messageSummaries.listMessagesByEmailIds(accountId, page.representativeIds);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedResults))
             co_return javelin::jmap::operationError(*error);
         auto results = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(cachedResults);

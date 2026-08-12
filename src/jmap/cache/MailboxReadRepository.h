@@ -1,7 +1,7 @@
 #pragma once
 
-#include "jmap/cache/Database.h"
 #include "jmap/domain/MailEntities.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <cstdint>
 #include <optional>
@@ -42,13 +42,14 @@ namespace javelin::jmap::cache
     class MailboxReadRepository final : public MailboxReader
     {
       public:
+        explicit MailboxReadRepository(DatabaseConnection& connection);
         explicit MailboxReadRepository(ReadOnlyDatabaseConnection& connection);
 
         [[nodiscard]] std::variant<std::vector<MailboxTreeItem>, DatabaseError>
         listMailboxTree(std::string_view accountId) const override;
 
       private:
-        ReadOnlyDatabaseConnection& m_connection;
+        DatabaseReadView m_connection;
     };
 
 } // namespace javelin::jmap::cache

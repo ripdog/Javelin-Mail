@@ -1,6 +1,9 @@
 #pragma once
 
-#include "jmap/cache/QueryService.h"
+#include "storage/sqlite/DatabaseConnection.h"
+
+#include "jmap/cache/MailboxMessageReadRepository.h"
+#include "jmap/cache/ThreadReadRepository.h"
 
 #include <QSqlError>
 #include <QSqlQuery>
@@ -44,11 +47,12 @@ namespace javelin::app
             return javelin::jmap::cache::databaseError(
                 QStringLiteral("Begin message-list Thread snapshot"), database.lastError());
         }
-        javelin::jmap::cache::QueryService queryService{connection};
+        javelin::jmap::cache::MailboxMessageReadRepository mailboxMessages{connection};
+        javelin::jmap::cache::ThreadReadRepository threadReader{connection};
         bool completeOfflineMailbox = false;
         if (mailboxId.has_value())
         {
-            const auto offlineState = queryService.offlineMailboxComplete(accountId, *mailboxId);
+            const auto offlineState = mailboxMessages.offlineMailboxComplete(accountId, *mailboxId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&offlineState))
             {
                 static_cast<void>(database.rollback());
@@ -92,8 +96,8 @@ namespace javelin::app
 
         auto itemsResult =
             normalizedThreadComplete
-                ? queryService.listThreadMessages(accountId, threadId)
-                : queryService.listMailboxThreadMessages(
+                ? threadReader.listThreadMessages(accountId, threadId)
+                : threadReader.listMailboxThreadMessages(
                       accountId, *mailboxId, threadId,
                       javelin::jmap::cache::MailboxThreadMembershipSource::CompleteOfflineMailbox);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&itemsResult))

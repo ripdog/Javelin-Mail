@@ -1,7 +1,9 @@
 #include "app/MailboxSession.h"
 
 #include "app/MailApplicationEventsPorts.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/MailboxMessageReadRepository.h"
+#include "jmap/cache/MessageSummaryReadRepository.h"
+#include "jmap/cache/QueryWindowReadRepository.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include <QCoroTask>
@@ -55,14 +57,17 @@ namespace javelin::app
 
             auto connection = std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(
                 std::move(connectionResult));
-            javelin::jmap::cache::QueryService queryService{connection};
+            javelin::jmap::cache::MailboxMessageReadRepository mailboxMessages{connection};
+            javelin::jmap::cache::QueryWindowReadRepository queryWindows{connection,
+                                                                         mailboxMessages};
+            javelin::jmap::cache::MessageSummaryReadRepository messageSummaries{connection};
             ProjectedMailboxSnapshot snapshot;
             snapshot.windows.reserve(requests.size());
             for (const auto& request : requests)
             {
                 if (searchWindows)
                 {
-                    auto result = queryService.loadSearchWindow(accountId, queryKey, request.offset,
+                    auto result = queryWindows.loadSearchWindow(accountId, queryKey, request.offset,
                                                                 request.limit);
                     if (const auto* error =
                             std::get_if<javelin::jmap::cache::DatabaseError>(&result))
@@ -90,7 +95,7 @@ namespace javelin::app
                     continue;
                 }
 
-                auto result = queryService.loadMailboxWindow(accountId, queryKey, request.offset,
+                auto result = queryWindows.loadMailboxWindow(accountId, queryKey, request.offset,
                                                              request.limit, sort);
                 if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
                 {
@@ -114,8 +119,8 @@ namespace javelin::app
                     });
                 if (!selectedEmailStillDisplayed)
                 {
-                    auto result =
-                        queryService.findMailboxMessage(accountId, mailboxId, *continuityEmailId);
+                    auto result = messageSummaries.findMailboxMessage(accountId, mailboxId,
+                                                                      *continuityEmailId);
                     if (const auto* error =
                             std::get_if<javelin::jmap::cache::DatabaseError>(&result))
                     {
@@ -138,8 +143,7 @@ namespace javelin::app
 
     MailboxSession::MailboxSession(std::string accountId, std::string mailboxId, QString title,
                                    std::optional<std::string> role,
-                                   javelin::jmap::query::EmailListSort sort,
-                                   javelin::jmap::cache::QueryReader& queryReader,
+                                   javelin::jmap::query::EmailListSort sort, QString databasePath,
                                    MessageListMaterializationPort& materializationPort,
                                    const std::size_t windowSize, MailApplicationEventsPort& events,
                                    std::optional<RestoredMailboxState> restored, QObject* parent)
@@ -147,8 +151,8 @@ namespace javelin::app
           m_mailboxId(std::move(mailboxId)), m_title(std::move(title)), m_role(std::move(role)),
           m_sort(sort),
           m_quickFilterSessionId(QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString()),
-          m_queryReader(queryReader), m_materializationPort(materializationPort), m_events(events),
-          m_windowSize(windowSize),
+          m_databasePath(std::move(databasePath)), m_materializationPort(materializationPort),
+          m_events(events), m_windowSize(windowSize),
           m_observation(m_materializationPort.beginMailboxObservation(m_accountId, m_mailboxId))
     {
         if (restored.has_value() && !restored->windows.empty())
@@ -539,10 +543,10 @@ namespace javelin::app
                 if (std::exchange(m_projectedReloadPending, false))
                     reloadProjectedWindows();
             });
-        watcher->setFuture(
-            QtConcurrent::run(loadProjectedMailboxWindows, m_queryReader.databasePath(),
-                              m_accountId, m_mailboxId, queryKey(), std::move(requests), m_sort,
-                              quickFilterActive(), continuityEmailId, continuityThreadId));
+        watcher->setFuture(QtConcurrent::run(loadProjectedMailboxWindows, m_databasePath,
+                                             m_accountId, m_mailboxId, queryKey(),
+                                             std::move(requests), m_sort, quickFilterActive(),
+                                             continuityEmailId, continuityThreadId));
     }
 
     void MailboxSession::rebuildFromProjectedWindows(

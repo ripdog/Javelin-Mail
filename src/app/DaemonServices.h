@@ -2,8 +2,8 @@
 
 #include "app/CacheLocationProvider.h"
 #include "jmap/auth/Auth.h"
-#include "jmap/cache/Database.h"
 #include "protocol/ProcessBoundary.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <memory>
 
@@ -102,8 +102,13 @@ namespace javelin::jmap::cache
     class AccountRepository;
     class ContactRepository;
     class IdentityRepository;
+    class MailboxFilterReadRepository;
+    class MailboxMessageReadRepository;
+    class MailboxReadRepository;
+    class MailboxReader;
+    class MailTagReadRepository;
+    class MailboxStatisticsReadRepository;
     class MessageViewService;
-    class QueryService;
     class SubmissionRepository;
 } // namespace javelin::jmap::cache
 
@@ -151,7 +156,7 @@ namespace javelin::app
         [[nodiscard]] CalendarCommandPort& calendarCommandPort();
         [[nodiscard]] javelin::jmap::cache::IdentityRepository& identityRepository();
         [[nodiscard]] javelin::jmap::cache::MessageViewService& messageViewService();
-        [[nodiscard]] javelin::jmap::cache::QueryService& queryService();
+        [[nodiscard]] javelin::jmap::cache::MailboxReader& mailboxReader();
         [[nodiscard]] ComposeService& composeService();
         [[nodiscard]] ComposeCommandPort& composeCommandPort();
         [[nodiscard]] MailCommandPort& mailCommandPort();
@@ -211,8 +216,15 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::sieve::SieveService> m_sieveService;
         std::unique_ptr<javelin::jmap::identity::IdentityService> m_identityService;
         std::unique_ptr<javelin::jmap::cache::IdentityRepository> m_identityRepository;
+        std::unique_ptr<javelin::jmap::cache::MailboxReadRepository> m_mailboxRepository;
+        std::unique_ptr<javelin::jmap::cache::MailTagReadRepository> m_mailTagRepository;
+        std::unique_ptr<javelin::jmap::cache::MailboxStatisticsReadRepository>
+            m_mailboxStatisticsRepository;
         std::unique_ptr<javelin::jmap::cache::MessageViewService> m_messageViewService;
-        std::unique_ptr<javelin::jmap::cache::QueryService> m_queryService;
+        std::unique_ptr<javelin::jmap::cache::MailboxMessageReadRepository>
+            m_mailboxMessageRepository;
+        std::unique_ptr<javelin::jmap::cache::MailboxFilterReadRepository>
+            m_mailboxFilterRepository;
         std::unique_ptr<javelin::jmap::cache::SubmissionRepository> m_submissionRepository;
         std::unique_ptr<javelin::jmap::submission::ComposeService> m_jmapComposeService;
         std::unique_ptr<DeferredSendSubmitter> m_deferredSendSubmitter;

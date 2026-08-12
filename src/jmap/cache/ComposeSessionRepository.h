@@ -1,7 +1,7 @@
 #pragma once
 
-#include "jmap/cache/Database.h"
 #include "jmap/submission/ComposeTypes.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <optional>
 #include <string_view>

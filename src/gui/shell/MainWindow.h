@@ -1,7 +1,6 @@
 #pragma once
 
 #include "gui/shell/TabWorkspace.h"
-#include "jmap/cache/QueryReader.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
 #include "jmap/submission/ComposeTypes.h"
@@ -83,8 +82,8 @@ namespace javelin::jmap::cache
     class ContactReader;
     class IdentityReader;
     class MailboxReader;
+    class MailTagReader;
     class MessageViewReader;
-    class QueryReader;
 } // namespace javelin::jmap::cache
 
 namespace javelin::gui::developer
@@ -153,13 +152,14 @@ namespace javelin::gui::shell
                             javelin::app::AccountCommandPort& accountCommandPort,
                             javelin::jmap::cache::AccountReader& accountReader,
                             javelin::jmap::cache::MailboxReader& mailboxReader,
+                            javelin::jmap::cache::MailTagReader& mailTagReader,
                             javelin::jmap::cache::ContactReader& contactReader,
                             javelin::jmap::calendar::CalendarReader& calendarReader,
                             javelin::app::CalendarCommandPort& calendarCommandPort,
                             javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
                             javelin::jmap::cache::IdentityReader& identityReader,
                             javelin::jmap::cache::MessageViewReader& messageViewReader,
-                            javelin::jmap::cache::QueryReader& queryReader,
+                            QString databasePath,
                             javelin::gui::translation::TranslationService& translationService,
                             javelin::app::ComposeCommandPort& composeCommandPort,
                             javelin::app::ContactCommandPort& contactCommandPort,
@@ -315,13 +315,14 @@ namespace javelin::gui::shell
         javelin::app::AccountCommandPort& m_accountCommandPort;
         javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::MailboxReader& m_mailboxReader;
+        javelin::jmap::cache::MailTagReader& m_mailTagReader;
         javelin::jmap::cache::ContactReader& m_contactReader;
         javelin::jmap::calendar::CalendarReader& m_calendarReader;
         javelin::app::CalendarCommandPort& m_calendarCommandPort;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         javelin::jmap::cache::IdentityReader& m_identityReader;
         javelin::jmap::cache::MessageViewReader& m_messageViewReader;
-        javelin::jmap::cache::QueryReader& m_queryReader;
+        QString m_databasePath;
         javelin::gui::translation::TranslationService& m_translationService;
         javelin::app::ComposeCommandPort& m_composeCommandPort;
         javelin::app::ContactCommandPort& m_contactCommandPort;

@@ -4,7 +4,7 @@
 #include "app/RemoteActionTypes.h"
 
 #include "jmap/OperationError.h"
-#include "jmap/cache/Database.h"
+#include "storage/DatabaseError.h"
 
 #include <QDebug>
 #include <QTimer>

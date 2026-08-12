@@ -1,8 +1,8 @@
 #pragma once
 
-#include "jmap/cache/Database.h"
 #include "jmap/domain/MailEntities.h"
 #include "jmap/render/HtmlMessageDocumentBuilder.h"
+#include "storage/DatabaseError.h"
 
 #include <QFuture>
 

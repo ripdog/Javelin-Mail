@@ -1,8 +1,8 @@
 #pragma once
 
-#include "jmap/cache/Database.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 #include "jmap/sync/RefreshNotificationTypes.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <optional>
 #include <string>

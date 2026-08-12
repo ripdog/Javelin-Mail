@@ -7,14 +7,15 @@
 #include "app/MailboxTreeCacheRead.h"
 #include "app/MessageListMaterializationPort.h"
 #include "app/RemoteCodec.h"
-#include "jmap/cache/Database.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/QueryWindowReadRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroTask>
 #include <catch2/catch_test_macros.hpp>
@@ -816,8 +817,10 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     CHECK(cacheChanges.front().mailboxIds.contains(QStringLiteral("inbox")));
     CHECK(cacheChanges.front().mailboxIds.contains(QStringLiteral("archive")));
 
-    javelin::jmap::cache::QueryService queries{connection};
-    const auto inboxPageResult = queries.loadMailboxWindow("account-1", inboxQueryKey, 0, 100, {});
+    javelin::jmap::cache::MailboxMessageReadRepository mailboxMessages{connection};
+    javelin::jmap::cache::QueryWindowReadRepository queryWindows{connection, mailboxMessages};
+    const auto inboxPageResult =
+        queryWindows.loadMailboxWindow("account-1", inboxQueryKey, 0, 100, {});
     const auto* inboxPage =
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&inboxPageResult);
     REQUIRE(inboxPage != nullptr);
@@ -826,7 +829,7 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     CHECK((*inboxPage)->items.empty());
 
     const auto archivePageResult =
-        queries.loadMailboxWindow("account-1", archiveQueryKey, 0, 100, {});
+        queryWindows.loadMailboxWindow("account-1", archiveQueryKey, 0, 100, {});
     const auto* archivePage =
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&archivePageResult);
     REQUIRE(archivePage != nullptr);

@@ -1,8 +1,8 @@
 #pragma once
 
 #include "jmap/api/ContactsMethods.h"
-#include "jmap/cache/Database.h"
 #include "jmap/contacts/ContactTypes.h"
+#include "storage/DatabaseError.h"
 
 #include <QObject>
 
@@ -54,6 +54,8 @@ namespace javelin::jmap::cache
                                            DatabaseError>
         findByEmail(std::string_view normalizedEmail,
                     std::optional<std::string_view> accountId = std::nullopt) const = 0;
+        [[nodiscard]] virtual std::variant<std::vector<std::string>, DatabaseError>
+        listEmailAddresses() const = 0;
     };
 
 } // namespace javelin::jmap::cache

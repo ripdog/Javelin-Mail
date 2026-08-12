@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storage/sqlite/DatabaseConnection.h"
+
 #include "app/AccountConnectionProvider.h"
 #include "app/AccountConnectionSettings.h"
 #include "app/AccountRefreshApplicationPorts.h"
@@ -39,8 +41,14 @@ namespace javelin::jmap::contacts
 
 namespace javelin::jmap::cache
 {
+    class ContactReader;
     class ContactRepository;
-}
+    class MailboxFilterReader;
+    class MailboxMessageReader;
+    class MailboxReader;
+    class MailTagReader;
+    class MailboxStatisticsReader;
+} // namespace javelin::jmap::cache
 
 namespace javelin::app::undo
 {
@@ -81,22 +89,25 @@ namespace javelin::app
         Q_OBJECT
 
       public:
-        MailApplicationService(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                               javelin::jmap::JmapCore& jmapCore,
-                               javelin::jmap::api::JmapMethodTransport& methodTransport,
-                               QNetworkAccessManager& networkAccessManager,
-                               javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
-                               javelin::jmap::cache::AccountRepository& accountRepository,
-                               javelin::jmap::cache::QueryService& queryService,
-                               javelin::jmap::cache::ContactRepository& contactRepository,
-                               javelin::jmap::contacts::ContactService& contactService,
-                               javelin::jmap::calendar::CalendarService& calendarService,
-                               javelin::jmap::sieve::SieveService& sieveService,
-                               ApplicationErrorCoordinator& errorCoordinator,
-                               WorkScheduler& workScheduler,
-                               MailboxMaintenanceRegistry& mailboxMaintenanceRegistry,
-                               javelin::app::undo::UndoManager& undoManager,
-                               QObject* parent = nullptr);
+        MailApplicationService(
+            javelin::jmap::cache::DatabaseConnection& databaseConnection,
+            javelin::jmap::JmapCore& jmapCore,
+            javelin::jmap::api::JmapMethodTransport& methodTransport,
+            QNetworkAccessManager& networkAccessManager,
+            javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
+            javelin::jmap::cache::AccountRepository& accountRepository,
+            javelin::jmap::cache::MailboxReader& mailboxReader,
+            javelin::jmap::cache::MailTagReader& mailTagReader,
+            javelin::jmap::cache::MailboxStatisticsReader& mailboxStatisticsReader,
+            javelin::jmap::cache::MailboxMessageReader& mailboxMessageReader,
+            javelin::jmap::cache::MailboxFilterReader& mailboxFilterReader,
+            javelin::jmap::cache::ContactRepository& contactRepository,
+            javelin::jmap::contacts::ContactService& contactService,
+            javelin::jmap::calendar::CalendarService& calendarService,
+            javelin::jmap::sieve::SieveService& sieveService,
+            ApplicationErrorCoordinator& errorCoordinator, WorkScheduler& workScheduler,
+            MailboxMaintenanceRegistry& mailboxMaintenanceRegistry,
+            javelin::app::undo::UndoManager& undoManager, QObject* parent = nullptr);
 
         void applySettings(std::vector<AccountSyncConfiguration> configurations);
         void setThreadMaterializationCoordinator(ThreadMaterializationCoordinator* coordinator);
@@ -325,7 +336,12 @@ namespace javelin::app
         QNetworkAccessManager& m_networkAccessManager;
         javelin::jmap::api::WebSocketFailureCooldowns& m_transportCooldowns;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
-        javelin::jmap::cache::QueryService& m_queryService;
+        javelin::jmap::cache::MailboxReader& m_mailboxReader;
+        javelin::jmap::cache::MailTagReader& m_mailTagReader;
+        javelin::jmap::cache::MailboxStatisticsReader& m_mailboxStatisticsReader;
+        javelin::jmap::cache::MailboxMessageReader& m_mailboxMessageReader;
+        javelin::jmap::cache::MailboxFilterReader& m_mailboxFilterReader;
+        javelin::jmap::cache::ContactReader& m_contactReader;
         javelin::jmap::contacts::ContactService& m_contactService;
         javelin::jmap::calendar::CalendarService& m_calendarService;
         javelin::jmap::sieve::SieveService& m_sieveService;

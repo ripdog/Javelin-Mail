@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storage/sqlite/DatabaseConnection.h"
+
 #include "jmap/api/Cancellation.h"
 #include "jmap/api/Error.h"
 #include "jmap/api/MethodEnvelope.h"

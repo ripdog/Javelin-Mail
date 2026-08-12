@@ -5,12 +5,12 @@
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Session.h"
 #include "jmap/api/Transport.h"
-#include "jmap/cache/Database.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailSearchIndex.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/domain/MailEntities.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/cache/MessageViewReader.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 namespace javelin::jmap::cache
 {

@@ -1,8 +1,10 @@
 #pragma once
 
+#include "storage/sqlite/DatabaseConnection.h"
+
 #include "jmap/EmailMutation.h"
 #include "jmap/OperationError.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/MessageListReadTypes.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
 #include "jmap/sync/MutationCommitReceipt.h"

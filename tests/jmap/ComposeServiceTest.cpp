@@ -6,9 +6,10 @@
 #include "jmap/api/Transport.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/IdentityRepository.h"
+#include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/QueryWindowReadRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/sync/MutationJournal.h"
 
@@ -441,8 +442,10 @@ TEST_CASE("plain text compose creates no HTML body alternative", "[jmap][submiss
     REQUIRE(std::holds_alternative<javelin::jmap::submission::DraftSaveSummary>(result));
     const auto& summary = std::get<javelin::jmap::submission::DraftSaveSummary>(result);
     CHECK(summary.affectedMailboxIds == std::vector<std::string>{"account-2-drafts"});
-    javelin::jmap::cache::QueryService queries{connection};
-    const auto projectedResult = queries.loadMailboxWindow("account-2", draftsQueryKey, 0, 100, {});
+    javelin::jmap::cache::MailboxMessageReadRepository mailboxMessages{connection};
+    javelin::jmap::cache::QueryWindowReadRepository queryWindows{connection, mailboxMessages};
+    const auto projectedResult =
+        queryWindows.loadMailboxWindow("account-2", draftsQueryKey, 0, 100, {});
     const auto* projected =
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&projectedResult);
     REQUIRE(projected != nullptr);

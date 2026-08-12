@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storage/sqlite/DatabaseConnection.h"
+
 #include "jmap/JmapCore.h"
 #include "jmap/api/CalendarMethods.h"
 #include "jmap/calendar/CalendarCommandTypes.h"

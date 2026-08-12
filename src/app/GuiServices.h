@@ -1,8 +1,8 @@
 #pragma once
 
 #include "app/CacheAccessBarrier.h"
-#include "jmap/cache/Database.h"
 #include "protocol/ProcessBoundary.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QMetaObject>
 
@@ -31,14 +31,14 @@ namespace javelin::jmap::cache
     class AccountReadRepository;
     class MailboxReader;
     class MailboxReadRepository;
+    class MailTagReader;
+    class MailTagReadRepository;
     class ContactReader;
     class ContactRepository;
     class IdentityReader;
     class IdentityRepository;
     class MessageViewReader;
     class MessageViewService;
-    class QueryReader;
-    class QueryService;
 } // namespace javelin::jmap::cache
 
 namespace javelin::jmap::calendar
@@ -109,12 +109,12 @@ namespace javelin::app
 
         [[nodiscard]] javelin::jmap::cache::AccountReader& accountReader();
         [[nodiscard]] javelin::jmap::cache::MailboxReader& mailboxReader();
+        [[nodiscard]] javelin::jmap::cache::MailTagReader& mailTagReader();
         [[nodiscard]] javelin::jmap::cache::ContactReader& contactReader();
         [[nodiscard]] javelin::jmap::calendar::CalendarReader& calendarReader();
         [[nodiscard]] javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup();
         [[nodiscard]] javelin::jmap::cache::IdentityReader& identityReader();
         [[nodiscard]] javelin::jmap::cache::MessageViewReader& messageViewReader();
-        [[nodiscard]] javelin::jmap::cache::QueryReader& queryReader();
 
         [[nodiscard]] AccountCommandPort& accountCommandPort();
         [[nodiscard]] CalendarCommandPort& calendarCommandPort();
@@ -148,12 +148,12 @@ namespace javelin::app
 
         std::unique_ptr<javelin::jmap::cache::AccountReadRepository> m_accountRepository;
         std::unique_ptr<javelin::jmap::cache::MailboxReadRepository> m_mailboxRepository;
+        std::unique_ptr<javelin::jmap::cache::MailTagReadRepository> m_mailTagRepository;
         std::unique_ptr<javelin::jmap::cache::ContactRepository> m_contactRepository;
         std::unique_ptr<RemoteCalendarReader> m_calendarReader;
         std::unique_ptr<javelin::jmap::contacts::ContactIdentityLookup> m_contactIdentityLookup;
         std::unique_ptr<javelin::jmap::cache::IdentityRepository> m_identityRepository;
         std::unique_ptr<javelin::jmap::cache::MessageViewService> m_messageViewService;
-        std::unique_ptr<javelin::jmap::cache::QueryService> m_queryService;
         std::unique_ptr<InlineMessageSchemeHandler> m_inlineMessageSchemeHandler;
 
         std::unique_ptr<javelin::gui::settings::GuiSettings> m_settings;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storage/DatabaseError.h"
+
 #include "app/AccountApplicationPorts.h"
 #include "app/AccountRefreshApplicationPorts.h"
 #include "app/CalendarApplicationPorts.h"

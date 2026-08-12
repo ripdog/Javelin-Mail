@@ -1,8 +1,8 @@
 #pragma once
 
-#include "jmap/cache/Database.h"
 #include "jmap/domain/MailEntities.h"
 #include "jmap/sync/MutationJournal.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <cstdint>
 #include <optional>

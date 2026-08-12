@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storage/DatabaseError.h"
+
 #include <QMetaType>
 #include <QString>
 

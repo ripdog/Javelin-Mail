@@ -266,7 +266,7 @@ namespace javelin::app
         for (const auto& [accountId, status] : m_services.mailService().accountStatuses())
         {
             static_cast<void>(status);
-            const auto mailboxes = m_services.queryService().listMailboxTree(accountId);
+            const auto mailboxes = m_services.mailboxReader().listMailboxTree(accountId);
             const auto* items =
                 std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxes);
             if (items == nullptr)

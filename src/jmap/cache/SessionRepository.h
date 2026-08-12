@@ -1,7 +1,7 @@
 #pragma once
 
 #include "jmap/api/Session.h"
-#include "jmap/cache/Database.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <optional>
 #include <string_view>

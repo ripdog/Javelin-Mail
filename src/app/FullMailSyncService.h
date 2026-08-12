@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storage/sqlite/DatabaseConnection.h"
+
 #include "app/AccountConnectionSettings.h"
 
 #include <QCoroTask>

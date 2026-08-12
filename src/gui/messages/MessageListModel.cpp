@@ -73,9 +73,8 @@ namespace javelin::gui::messages
 
     } // namespace
 
-    MessageListModel::MessageListModel(javelin::jmap::cache::QueryReader& queryReader,
-                                       QObject* parent)
-        : QAbstractListModel(parent), m_queryReader(queryReader)
+    MessageListModel::MessageListModel(QString databasePath, QObject* parent)
+        : QAbstractListModel(parent), m_databasePath(std::move(databasePath))
     {
     }
 
@@ -803,8 +802,7 @@ namespace javelin::gui::messages
                 }
             });
         watcher->setFuture(QtConcurrent::run(javelin::app::loadMessageListThreadMembers,
-                                             m_queryReader.databasePath(), accountId, mailboxId,
-                                             threadId));
+                                             m_databasePath, accountId, mailboxId, threadId));
     }
 
     void MessageListModel::retryPendingThreadMembersLoads()

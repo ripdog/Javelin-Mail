@@ -6,7 +6,8 @@ namespace javelin::app
 {
 
     ResolvedMessageSelection
-    resolveMessageSelection(const javelin::jmap::cache::QueryReader& queryReader,
+    resolveMessageSelection(const javelin::jmap::cache::MailboxMessageReader& mailboxMessageReader,
+                            const javelin::jmap::cache::ThreadReader& threadReader,
                             const javelin::jmap::cache::ThreadRepository& threadRepository,
                             const std::string_view accountId,
                             const std::optional<std::string_view> mailboxId,
@@ -34,7 +35,8 @@ namespace javelin::app
             const auto& thread = std::get<SelectedCollapsedThread>(item);
             if (mailboxId.has_value() && !completeOfflineMailbox.has_value())
             {
-                const auto stateResult = queryReader.offlineMailboxComplete(accountId, *mailboxId);
+                const auto stateResult =
+                    mailboxMessageReader.offlineMailboxComplete(accountId, *mailboxId);
                 if (const auto* error =
                         std::get_if<javelin::jmap::cache::DatabaseError>(&stateResult))
                     return error->message;
@@ -42,7 +44,7 @@ namespace javelin::app
             }
             if (completeOfflineMailbox.value_or(false))
             {
-                const auto messagesResult = queryReader.listMailboxThreadMessages(
+                const auto messagesResult = threadReader.listMailboxThreadMessages(
                     accountId, *mailboxId, thread.threadId,
                     javelin::jmap::cache::MailboxThreadMembershipSource::CompleteOfflineMailbox);
                 if (const auto* error =
@@ -69,8 +71,8 @@ namespace javelin::app
             }
             const auto messagesResult =
                 mailboxId.has_value()
-                    ? queryReader.listMailboxThreadMessages(accountId, *mailboxId, thread.threadId)
-                    : queryReader.listThreadMessages(accountId, thread.threadId);
+                    ? threadReader.listMailboxThreadMessages(accountId, *mailboxId, thread.threadId)
+                    : threadReader.listThreadMessages(accountId, thread.threadId);
             if (const auto* error =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&messagesResult))
             {

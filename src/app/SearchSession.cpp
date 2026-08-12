@@ -1,7 +1,9 @@
 #include "app/SearchSession.h"
 
 #include "app/MailApplicationEventsPorts.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/MailSearchReadRepository.h"
+#include "jmap/cache/MailboxMessageReadRepository.h"
+#include "jmap/cache/QueryWindowReadRepository.h"
 
 #include <QCoroTask>
 
@@ -50,8 +52,8 @@ namespace javelin::app
 
             auto connection = std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(
                 std::move(connectionResult));
-            javelin::jmap::cache::QueryService queryService{connection};
-            return queryService.searchAllCachedMessageText(accountId, text, sort);
+            javelin::jmap::cache::MailSearchReadRepository mailSearch{connection};
+            return mailSearch.searchAllCachedMessageText(accountId, text, sort);
         }
 
         [[nodiscard]] ProjectedSearchWindowsResult
@@ -71,12 +73,14 @@ namespace javelin::app
 
             auto connection = std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(
                 std::move(connectionResult));
-            javelin::jmap::cache::QueryService queryService{connection};
+            javelin::jmap::cache::MailboxMessageReadRepository mailboxMessages{connection};
+            javelin::jmap::cache::QueryWindowReadRepository queryWindows{connection,
+                                                                         mailboxMessages};
             ProjectedSearchWindows windows;
             windows.reserve(requests.size());
             for (const auto& request : requests)
             {
-                auto result = queryService.loadSearchWindow(accountId, queryKey, request.offset,
+                auto result = queryWindows.loadSearchWindow(accountId, queryKey, request.offset,
                                                             request.limit);
                 if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
                 {
@@ -96,15 +100,14 @@ namespace javelin::app
 
     SearchSession::SearchSession(std::string accountId,
                                  javelin::jmap::search::EmailSearchCriteria criteria,
-                                 javelin::jmap::query::EmailListSort sort,
-                                 javelin::jmap::cache::QueryReader& queryReader,
+                                 javelin::jmap::query::EmailListSort sort, QString databasePath,
                                  MessageListMaterializationPort& materializationPort,
                                  MailApplicationEventsPort& events, const std::size_t windowSize,
                                  std::optional<RestoredSearchState> restored, QObject* parent)
         : MessageListSession(parent), m_accountId(std::move(accountId)),
           m_query(javelin::jmap::search::displayString(criteria)), m_criteria(std::move(criteria)),
-          m_sort(sort), m_queryReader(queryReader), m_materializationPort(materializationPort),
-          m_events(events), m_windowSize(windowSize),
+          m_sort(sort), m_databasePath(std::move(databasePath)),
+          m_materializationPort(materializationPort), m_events(events), m_windowSize(windowSize),
           m_mode(javelin::jmap::search::isBasicTextSearch(m_criteria) ? SearchMode::Local
                                                                       : SearchMode::Online),
           m_sessionId(QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString())
@@ -766,9 +769,8 @@ namespace javelin::app
                 if (std::exchange(m_projectedReloadPending, false))
                     reloadProjectedWindows();
             });
-        watcher->setFuture(QtConcurrent::run(loadProjectedSearchWindows,
-                                             m_queryReader.databasePath(), m_accountId,
-                                             onlineWindowKey(), std::move(requests)));
+        watcher->setFuture(QtConcurrent::run(loadProjectedSearchWindows, m_databasePath,
+                                             m_accountId, onlineWindowKey(), std::move(requests)));
     }
 
     void SearchSession::rebuildFromProjectedWindows(
@@ -1064,8 +1066,8 @@ namespace javelin::app
                 applyLocalVisibleRange();
                 Q_EMIT stateChanged();
             });
-        watcher->setFuture(QtConcurrent::run(runLocalSearch, m_queryReader.databasePath(),
-                                             m_accountId, *m_criteria.text, m_sort));
+        watcher->setFuture(QtConcurrent::run(runLocalSearch, m_databasePath, m_accountId,
+                                             *m_criteria.text, m_sort));
     }
 
     void SearchSession::applyLocalVisibleRange()

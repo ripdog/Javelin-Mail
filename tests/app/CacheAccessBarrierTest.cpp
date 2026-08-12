@@ -1,6 +1,7 @@
 #include "app/CacheAccessBarrier.h"
 
-#include "jmap/cache/Database.h"
+#include "storage/migrations/MigrationRunner.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoreApplication>
 #include <QFile>

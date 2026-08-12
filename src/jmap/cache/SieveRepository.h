@@ -1,7 +1,7 @@
 #pragma once
 
-#include "jmap/cache/Database.h"
 #include "jmap/sieve/SieveTypes.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <optional>
 #include <span>

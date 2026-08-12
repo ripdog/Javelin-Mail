@@ -2,9 +2,9 @@
 
 #include "jmap/OperationError.h"
 #include "jmap/api/MethodCaller.h"
-#include "jmap/cache/Database.h"
 #include "jmap/sync/MutationJournal.h"
 #include "jmap/sync/RefreshNotificationTypes.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroTask>
 

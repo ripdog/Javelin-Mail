@@ -1,5 +1,6 @@
-#include "jmap/cache/Database.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "storage/migrations/MigrationRunner.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoreApplication>
 #include <QSqlDatabase>

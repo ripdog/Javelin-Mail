@@ -2,7 +2,7 @@
 
 #include "app/WorkTaskPort.h"
 
-#include "jmap/cache/Database.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QObject>
 #include <QTimer>

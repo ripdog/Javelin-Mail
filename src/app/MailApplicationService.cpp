@@ -14,11 +14,18 @@
 #include "jmap/cache/CalendarRepository.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailTagReader.h"
+#include "jmap/cache/MailboxFilterReader.h"
+#include "jmap/cache/MailboxMessageReader.h"
+#include "jmap/cache/MailboxReadRepository.h"
+#include "jmap/cache/MailboxStatisticsReader.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/NotificationRepository.h"
+#include "jmap/cache/QueryWindowReadRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "jmap/cache/ThreadReadRepository.h"
 #include "jmap/contacts/ContactService.h"
 #include "jmap/domain/MailKeywords.h"
 #include "jmap/sync/EmailMutationJournal.h"
@@ -369,7 +376,11 @@ namespace javelin::app
         QNetworkAccessManager& networkAccessManager,
         javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
         javelin::jmap::cache::AccountRepository& accountRepository,
-        javelin::jmap::cache::QueryService& queryService,
+        javelin::jmap::cache::MailboxReader& mailboxReader,
+        javelin::jmap::cache::MailTagReader& mailTagReader,
+        javelin::jmap::cache::MailboxStatisticsReader& mailboxStatisticsReader,
+        javelin::jmap::cache::MailboxMessageReader& mailboxMessageReader,
+        javelin::jmap::cache::MailboxFilterReader& mailboxFilterReader,
         javelin::jmap::cache::ContactRepository& contactRepository,
         javelin::jmap::contacts::ContactService& contactService,
         javelin::jmap::calendar::CalendarService& calendarService,
@@ -380,7 +391,10 @@ namespace javelin::app
         : QObject(parent), m_databaseConnection(databaseConnection), m_jmapCore(jmapCore),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
           m_transportCooldowns(cooldowns), m_accountRepository(accountRepository),
-          m_queryService(queryService), m_contactService(contactService),
+          m_mailboxReader(mailboxReader), m_mailTagReader(mailTagReader),
+          m_mailboxStatisticsReader(mailboxStatisticsReader),
+          m_mailboxMessageReader(mailboxMessageReader), m_mailboxFilterReader(mailboxFilterReader),
+          m_contactReader(contactRepository), m_contactService(contactService),
           m_calendarService(calendarService), m_sieveService(sieveService),
           m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler),
           m_mailboxMaintenanceRegistry(mailboxMaintenanceRegistry), m_undoManager(undoManager)
@@ -838,7 +852,7 @@ namespace javelin::app
         {
             coordinatorIt->second = std::make_unique<AccountSyncCoordinator>(
                 m_databaseConnection, m_methodTransport, m_networkAccessManager,
-                m_transportCooldowns, m_accountRepository, m_queryService, m_workScheduler,
+                m_transportCooldowns, m_accountRepository, m_mailboxReader, m_workScheduler,
                 m_authenticationRefreshHandler, this);
             connectCoordinator(coordinatorIt->first, *coordinatorIt->second);
         }
@@ -1112,7 +1126,7 @@ namespace javelin::app
             .isAscending = false,
             .collapseThreads = true,
         });
-        const auto offlineStateResult = m_queryService.completeOfflineMailboxQueryState(
+        const auto offlineStateResult = m_mailboxMessageReader.completeOfflineMailboxQueryState(
             intent.accountId, intent.mailboxId, canonicalQueryKey);
         if (const auto* error =
                 std::get_if<javelin::jmap::cache::DatabaseError>(&offlineStateResult))
@@ -1122,7 +1136,9 @@ namespace javelin::app
         const auto& offlineState = std::get<std::optional<std::string>>(offlineStateResult);
         if (!intent.forceRefresh)
         {
-            const auto cachedResult = m_queryService.loadMailboxWindow(
+            javelin::jmap::cache::QueryWindowReadRepository queryWindows{m_databaseConnection,
+                                                                         m_mailboxMessageReader};
+            const auto cachedResult = queryWindows.loadMailboxWindow(
                 intent.accountId, queryKey, intent.offset, intent.limit, intent.sort);
             if (const auto* cached =
                     std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
@@ -1196,10 +1212,10 @@ namespace javelin::app
                     };
                 }
             }
-            const auto itemsResult = m_queryService.listMailboxMessages(
+            const auto itemsResult = m_mailboxMessageReader.listMailboxMessages(
                 intent.accountId, intent.mailboxId, intent.limit, intent.offset, intent.sort);
             const auto totalResult =
-                m_queryService.countMailboxMessages(intent.accountId, intent.mailboxId);
+                m_mailboxStatisticsReader.countMailboxMessages(intent.accountId, intent.mailboxId);
             const auto* items =
                 std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&itemsResult);
             const auto* total = std::get_if<std::size_t>(&totalResult);
@@ -1334,7 +1350,7 @@ namespace javelin::app
                 .isAscending = false,
                 .collapseThreads = true,
             });
-            const auto offlineStateResult = m_queryService.completeOfflineMailboxQueryState(
+            const auto offlineStateResult = m_mailboxMessageReader.completeOfflineMailboxQueryState(
                 intent.accountId, mailboxId, canonicalQueryKey);
             if (const auto* error =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&offlineStateResult))
@@ -1344,10 +1360,10 @@ namespace javelin::app
             const auto& offlineState = std::get<std::optional<std::string>>(offlineStateResult);
             if (offlineState.has_value())
             {
-                const auto itemsResult = m_queryService.listFilteredMailboxMessages(
+                const auto itemsResult = m_mailboxFilterReader.listFilteredMailboxMessages(
                     intent.accountId, mailboxId, intent.criteria, intent.limit, intent.offset,
                     intent.sort);
-                const auto totalResult = m_queryService.countFilteredMailboxMessages(
+                const auto totalResult = m_mailboxFilterReader.countFilteredMailboxMessages(
                     intent.accountId, mailboxId, intent.criteria);
                 const auto* items =
                     std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&itemsResult);
@@ -1408,14 +1424,14 @@ namespace javelin::app
         javelin::jmap::search::EmailSearchResolution resolution;
         if (intent.criteria.fromContactsOnly)
         {
-            const auto contacts = m_queryService.listContactEmailAddresses();
+            const auto contacts = m_contactReader.listEmailAddresses();
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&contacts))
                 co_return javelin::jmap::operationError(*error);
             resolution.contactAddresses = std::get<std::vector<std::string>>(contacts);
         }
         if (intent.criteria.taggedOnly && intent.criteria.tags.empty())
         {
-            const auto keywords = m_queryService.listTagKeywords(intent.accountId);
+            const auto keywords = m_mailTagReader.listTagKeywords(intent.accountId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&keywords))
                 co_return javelin::jmap::operationError(*error);
             resolution.userKeywords = std::get<std::vector<std::string>>(keywords);
@@ -1438,7 +1454,9 @@ namespace javelin::app
         const auto& page = std::get<javelin::jmap::MessageSearchSummary>(result);
         if (searchWindowRetired(leaseKey))
         {
-            static_cast<void>(m_queryService.eraseSearchWindows(intent.accountId, queryKey));
+            static_cast<void>(
+                javelin::jmap::cache::SearchWindowRepository{m_databaseConnection}.eraseQuery(
+                    intent.accountId, queryKey));
             co_return javelin::jmap::OperationError{
                 .message = i18n("The search tab has been closed."),
             };
@@ -1482,7 +1500,9 @@ namespace javelin::app
         const auto leaseKey = searchWindowLeaseKey(accountId, windowKey);
         auto& state = m_searchWindowRequests[leaseKey];
         state.retired = true;
-        static_cast<void>(m_queryService.eraseSearchWindows(accountId, windowKey));
+        static_cast<void>(
+            javelin::jmap::cache::SearchWindowRepository{m_databaseConnection}.eraseQuery(
+                accountId, windowKey));
         if (state.activeRequests == 0)
             m_searchWindowRequests.erase(leaseKey);
     }
@@ -1508,7 +1528,7 @@ namespace javelin::app
         if (sourceMailboxId.has_value())
         {
             const auto offlineState =
-                m_queryService.offlineMailboxComplete(accountId, *sourceMailboxId);
+                m_mailboxMessageReader.offlineMailboxComplete(accountId, *sourceMailboxId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&offlineState))
                 co_return javelin::jmap::operationError(*error);
             if (std::get<bool>(offlineState))
@@ -1559,15 +1579,17 @@ namespace javelin::app
         MailboxSelectionMutationIntent intent)
     {
         javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
-        auto emailIdsResult = resolveMessageSelection(m_queryService, threads, intent.accountId,
-                                                      intent.sourceMailboxId, intent.selection);
+        javelin::jmap::cache::ThreadReadRepository threadReader{m_databaseConnection};
+        auto emailIdsResult =
+            resolveMessageSelection(m_mailboxMessageReader, threadReader, threads, intent.accountId,
+                                    intent.sourceMailboxId, intent.selection);
         if (const auto* error = std::get_if<QString>(&emailIdsResult))
         {
             return javelin::jmap::OperationError{.message = *error};
         }
         auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
 
-        const auto mailboxesResult = m_queryService.listMailboxTree(intent.accountId);
+        const auto mailboxesResult = m_mailboxReader.listMailboxTree(intent.accountId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxesResult))
         {
             return javelin::jmap::OperationError{.message = error->message};
@@ -1758,8 +1780,9 @@ namespace javelin::app
         MessageSelection selection, const SelectedMessageMutation mutation)
     {
         javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
-        auto emailIdsResult =
-            resolveMessageSelection(m_queryService, threads, accountId, sourceMailboxId, selection);
+        javelin::jmap::cache::ThreadReadRepository threadReader{m_databaseConnection};
+        auto emailIdsResult = resolveMessageSelection(m_mailboxMessageReader, threadReader, threads,
+                                                      accountId, sourceMailboxId, selection);
         if (const auto* error = std::get_if<QString>(&emailIdsResult))
         {
             return javelin::jmap::OperationError{.message = *error};
@@ -2007,13 +2030,14 @@ namespace javelin::app
         const bool appendKeywordToHistoryLabel)
     {
         javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
-        auto emailIdsResult =
-            resolveMessageSelection(m_queryService, threads, accountId, sourceMailboxId, selection);
+        javelin::jmap::cache::ThreadReadRepository threadReader{m_databaseConnection};
+        auto emailIdsResult = resolveMessageSelection(m_mailboxMessageReader, threadReader, threads,
+                                                      accountId, sourceMailboxId, selection);
         if (const auto* error = std::get_if<QString>(&emailIdsResult))
             return javelin::jmap::OperationError{.message = *error};
         const auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
 
-        const auto mailboxesResult = m_queryService.listMailboxTree(accountId);
+        const auto mailboxesResult = m_mailboxReader.listMailboxTree(accountId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxesResult))
             return javelin::jmap::operationError(*error);
         const auto& mailboxes =
@@ -2227,7 +2251,7 @@ namespace javelin::app
         }
 
         QString displayName = QString::fromStdString(keyword);
-        const auto definitions = m_queryService.listTagDefinitions(accountId);
+        const auto definitions = m_mailTagReader.listTagDefinitions(accountId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&definitions))
             return javelin::jmap::operationError(*error);
         const auto& tags = std::get<std::vector<javelin::jmap::cache::TagDefinition>>(definitions);
@@ -3101,7 +3125,7 @@ namespace javelin::app
             }
             const auto& authoritative =
                 std::get<javelin::jmap::AuthoritativeEmails>(authoritativeResult);
-            const auto mailboxesResult = m_queryService.listMailboxTree(accountId);
+            const auto mailboxesResult = m_mailboxReader.listMailboxTree(accountId);
             if (const auto* error =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxesResult))
             {

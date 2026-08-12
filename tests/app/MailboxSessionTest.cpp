@@ -1,13 +1,12 @@
 #include "app/MailboxSession.h"
 #include "app/MailApplicationEventsPorts.h"
 #include "app/MessageListMaterializationPort.h"
-#include "jmap/cache/Database.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
-#include "jmap/cache/QueryService.h"
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroFuture>
 
@@ -142,12 +141,12 @@ namespace
     {
         QTemporaryDir directory;
         javelin::jmap::cache::DatabaseConnection connection;
-        javelin::jmap::cache::QueryService queries;
+        QString queries;
 
         SessionContext(QTemporaryDir temporaryDirectory,
                        javelin::jmap::cache::DatabaseConnection databaseConnection)
             : directory(std::move(temporaryDirectory)), connection(std::move(databaseConnection)),
-              queries(connection)
+              queries(connection.database().databaseName())
         {
         }
     };

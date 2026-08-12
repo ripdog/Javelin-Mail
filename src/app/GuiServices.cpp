@@ -13,9 +13,9 @@
 #include "jmap/cache/AccountReadRepository.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/IdentityRepository.h"
+#include "jmap/cache/MailTagReadRepository.h"
 #include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/cache/MessageViewService.h"
-#include "jmap/cache/QueryService.h"
 #include "jmap/calendar/CalendarReader.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/render/InlineMessageUrl.h"
@@ -84,6 +84,8 @@ namespace javelin::app
             std::make_unique<javelin::jmap::cache::AccountReadRepository>(m_databaseConnection);
         m_mailboxRepository =
             std::make_unique<javelin::jmap::cache::MailboxReadRepository>(m_databaseConnection);
+        m_mailTagRepository =
+            std::make_unique<javelin::jmap::cache::MailTagReadRepository>(m_databaseConnection);
         m_contactRepository =
             std::make_unique<javelin::jmap::cache::ContactRepository>(m_databaseConnection);
         m_contactIdentityLookup =
@@ -92,7 +94,6 @@ namespace javelin::app
             std::make_unique<javelin::jmap::cache::IdentityRepository>(m_databaseConnection);
         m_messageViewService =
             std::make_unique<javelin::jmap::cache::MessageViewService>(m_databaseConnection);
-        m_queryService = std::make_unique<javelin::jmap::cache::QueryService>(m_databaseConnection);
 
         AddressSuggestionStore::instance().initialize(m_session.databasePath());
         m_cacheInvalidationConnection =
@@ -160,8 +161,8 @@ namespace javelin::app
         m_messageContent = std::make_unique<RemoteMessageContentPort>(*m_remoteClient);
         m_materialization = std::make_unique<RemoteMessageListMaterializationPort>(*m_remoteClient);
         m_mailEvents = std::make_unique<GuiMailApplicationEvents>(m_session);
-        m_messageListSessions =
-            std::make_unique<MessageListSessionFactoryService>(*m_materialization, *m_mailEvents);
+        m_messageListSessions = std::make_unique<MessageListSessionFactoryService>(
+            *m_materialization, *m_mailEvents, m_session.databasePath());
         m_messageNavigation = std::make_unique<MessageNavigationCoordinator>();
         m_undoCommands = std::make_unique<RemoteUndoCommandPort>(m_session, *m_remoteClient);
         m_workTasks = std::make_unique<RemoteWorkTaskPort>(m_session, *m_remoteClient);
@@ -215,6 +216,10 @@ namespace javelin::app
     {
         return *m_mailboxRepository;
     }
+    javelin::jmap::cache::MailTagReader& GuiServices::mailTagReader()
+    {
+        return *m_mailTagRepository;
+    }
     javelin::jmap::cache::ContactReader& GuiServices::contactReader()
     {
         return *m_contactRepository;
@@ -234,10 +239,6 @@ namespace javelin::app
     javelin::jmap::cache::MessageViewReader& GuiServices::messageViewReader()
     {
         return *m_messageViewService;
-    }
-    javelin::jmap::cache::QueryReader& GuiServices::queryReader()
-    {
-        return *m_queryService;
     }
     AccountCommandPort& GuiServices::accountCommandPort()
     {

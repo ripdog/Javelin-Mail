@@ -3,11 +3,11 @@
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/SessionParser.h"
 #include "jmap/api/Transport.h"
-#include "jmap/cache/Database.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 #include "jmap/sync/EmailMutationJournal.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroTask>
 

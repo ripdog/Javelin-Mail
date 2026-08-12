@@ -2,8 +2,8 @@
 
 #include "gui/translation/LanguageDetection.h"
 #include "gui/translation/TranslationTypes.h"
+#include "jmap/cache/MessageListReadTypes.h"
 #include "jmap/cache/MessageViewReader.h"
-#include "jmap/cache/QueryReader.h"
 
 #include <QString>
 #include <QWidget>

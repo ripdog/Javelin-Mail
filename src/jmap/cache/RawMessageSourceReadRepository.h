@@ -1,7 +1,7 @@
 #pragma once
 
-#include "jmap/cache/Database.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 namespace javelin::jmap::cache
 {

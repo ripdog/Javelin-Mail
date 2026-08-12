@@ -128,7 +128,6 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/EmailReadRepository.cpp
     src/jmap/cache/EmailReadRepository.h
     src/jmap/cache/IdentityReader.h
-    src/jmap/cache/QueryReader.h
     src/jmap/cache/MessageContentTypes.h
     src/jmap/cache/MessageViewService.cpp
     src/jmap/cache/MessageViewService.h
@@ -480,6 +479,18 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/AccountRepository.h
     src/jmap/cache/AccountReadRepository.cpp
     src/jmap/cache/AccountReadRepository.h
+    src/jmap/cache/MailTagReadRepository.cpp
+    src/jmap/cache/MailTagReadRepository.h
+    src/jmap/cache/MailTagReader.h
+    src/jmap/cache/MailboxStatisticsReadRepository.cpp
+    src/jmap/cache/MailboxStatisticsReadRepository.h
+    src/jmap/cache/MailboxStatisticsReader.h
+    src/jmap/cache/MailboxMessageReadRepository.cpp
+    src/jmap/cache/MailboxMessageReadRepository.h
+    src/jmap/cache/MailboxMessageReader.h
+    src/jmap/cache/MailboxFilterReadRepository.cpp
+    src/jmap/cache/MailboxFilterReadRepository.h
+    src/jmap/cache/MailboxFilterReader.h
     src/jmap/cache/MailboxReadRepository.cpp
     src/jmap/cache/MailboxReadRepository.h
     src/jmap/cache/ComposeSessionRepository.cpp
@@ -489,12 +500,31 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/ContactReader.h
     src/jmap/cache/CalendarRepository.cpp
     src/jmap/cache/CalendarRepository.h
-    src/jmap/cache/Database.h
+    src/jmap/cache/MessageListReadSupport.cpp
+    src/jmap/cache/MessageListReadSupport.h
+    src/jmap/cache/MessageListReadTypes.h
+    src/jmap/cache/MessageSummaryReadRepository.cpp
+    src/jmap/cache/MessageSummaryReadRepository.h
+    src/jmap/cache/MessageSummaryReader.h
+    src/jmap/cache/SearchWindowReadRepository.cpp
+    src/jmap/cache/SearchWindowReadRepository.h
+    src/jmap/cache/MailboxWindowReadRepository.cpp
+    src/jmap/cache/MailboxWindowReadRepository.h
+    src/jmap/cache/QueryWindowReadRepository.cpp
+    src/jmap/cache/QueryWindowReadRepository.h
+    src/jmap/cache/QueryWindowReader.h
+    src/jmap/cache/ThreadReadRepository.cpp
+    src/jmap/cache/ThreadReadRepository.h
+    src/jmap/cache/ThreadReader.h
     src/jmap/cache/EmailRepository.cpp
     src/jmap/cache/EmailRepository.h
     src/jmap/cache/MailVault.h
+    src/jmap/cache/EmailListSortSql.h
     src/jmap/cache/MailSearchIndex.cpp
     src/jmap/cache/MailSearchIndex.h
+    src/jmap/cache/MailSearchReadRepository.cpp
+    src/jmap/cache/MailSearchReadRepository.h
+    src/jmap/cache/MailSearchReader.h
     src/jmap/cache/IdentityRepository.cpp
     src/jmap/cache/IdentityRepository.h
     src/jmap/cache/IdentityReader.h
@@ -506,8 +536,6 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/MessageViewReader.h
     src/jmap/cache/MimeMessageParser.cpp
     src/jmap/cache/MimeMessageParser.h
-    src/jmap/cache/QueryService.cpp
-    src/jmap/cache/QueryService.h
     src/jmap/cache/RawMessageSourceRepository.cpp
     src/jmap/cache/RawMessageSourceRepository.h
     src/jmap/cache/SessionRepository.cpp
@@ -743,6 +771,18 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/AccountRepository.h
     src/jmap/cache/AccountReadRepository.cpp
     src/jmap/cache/AccountReadRepository.h
+    src/jmap/cache/MailTagReadRepository.cpp
+    src/jmap/cache/MailTagReadRepository.h
+    src/jmap/cache/MailTagReader.h
+    src/jmap/cache/MailboxStatisticsReadRepository.cpp
+    src/jmap/cache/MailboxStatisticsReadRepository.h
+    src/jmap/cache/MailboxStatisticsReader.h
+    src/jmap/cache/MailboxMessageReadRepository.cpp
+    src/jmap/cache/MailboxMessageReadRepository.h
+    src/jmap/cache/MailboxMessageReader.h
+    src/jmap/cache/MailboxFilterReadRepository.cpp
+    src/jmap/cache/MailboxFilterReadRepository.h
+    src/jmap/cache/MailboxFilterReader.h
     src/jmap/cache/MailboxReadRepository.cpp
     src/jmap/cache/MailboxReadRepository.h
     src/jmap/cache/ComposeSessionRepository.cpp
@@ -750,12 +790,31 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/ContactRepository.cpp
     src/jmap/cache/ContactRepository.h
     src/jmap/cache/ContactReader.h
-    src/jmap/cache/Database.h
+    src/jmap/cache/MessageListReadSupport.cpp
+    src/jmap/cache/MessageListReadSupport.h
+    src/jmap/cache/MessageListReadTypes.h
+    src/jmap/cache/MessageSummaryReadRepository.cpp
+    src/jmap/cache/MessageSummaryReadRepository.h
+    src/jmap/cache/MessageSummaryReader.h
+    src/jmap/cache/SearchWindowReadRepository.cpp
+    src/jmap/cache/SearchWindowReadRepository.h
+    src/jmap/cache/MailboxWindowReadRepository.cpp
+    src/jmap/cache/MailboxWindowReadRepository.h
+    src/jmap/cache/QueryWindowReadRepository.cpp
+    src/jmap/cache/QueryWindowReadRepository.h
+    src/jmap/cache/QueryWindowReader.h
+    src/jmap/cache/ThreadReadRepository.cpp
+    src/jmap/cache/ThreadReadRepository.h
+    src/jmap/cache/ThreadReader.h
     src/jmap/cache/EmailRepository.cpp
     src/jmap/cache/EmailRepository.h
     src/jmap/cache/MailVault.h
+    src/jmap/cache/EmailListSortSql.h
     src/jmap/cache/MailSearchIndex.cpp
     src/jmap/cache/MailSearchIndex.h
+    src/jmap/cache/MailSearchReadRepository.cpp
+    src/jmap/cache/MailSearchReadRepository.h
+    src/jmap/cache/MailSearchReader.h
     src/jmap/cache/IdentityRepository.cpp
     src/jmap/cache/IdentityRepository.h
     src/jmap/cache/IdentityReader.h
@@ -765,9 +824,6 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/MessageViewService.h
     src/jmap/cache/MessageViewReader.h
     src/jmap/cache/MimeMessageParser.h
-    src/jmap/cache/QueryService.cpp
-    src/jmap/cache/QueryService.h
-    src/jmap/cache/QueryReader.h
     src/jmap/cache/RawMessageSourceRepository.h
     src/jmap/cache/RawMessageSourceRepository.cpp
     src/jmap/cache/SessionRepository.cpp
@@ -1560,16 +1616,46 @@ qt_add_executable(javelin
     src/jmap/cache/ContactRepository.h
     src/jmap/cache/IdentityRepository.cpp
     src/jmap/cache/IdentityRepository.h
+    src/jmap/cache/EmailListSortSql.h
     src/jmap/cache/MailSearchIndex.cpp
     src/jmap/cache/MailSearchIndex.h
+    src/jmap/cache/MailSearchReadRepository.cpp
+    src/jmap/cache/MailSearchReadRepository.h
+    src/jmap/cache/MailSearchReader.h
+    src/jmap/cache/MailTagReadRepository.cpp
+    src/jmap/cache/MailTagReadRepository.h
+    src/jmap/cache/MailTagReader.h
+    src/jmap/cache/MailboxStatisticsReadRepository.cpp
+    src/jmap/cache/MailboxStatisticsReadRepository.h
+    src/jmap/cache/MailboxStatisticsReader.h
+    src/jmap/cache/MailboxMessageReadRepository.cpp
+    src/jmap/cache/MailboxMessageReadRepository.h
+    src/jmap/cache/MailboxMessageReader.h
+    src/jmap/cache/MailboxFilterReadRepository.cpp
+    src/jmap/cache/MailboxFilterReadRepository.h
+    src/jmap/cache/MailboxFilterReader.h
     src/jmap/cache/MailboxReadRepository.cpp
     src/jmap/cache/MailboxReadRepository.h
     src/jmap/cache/MailboxRepository.cpp
     src/jmap/cache/MailboxRepository.h
     src/jmap/cache/MailboxWindowRepository.cpp
     src/jmap/cache/MailboxWindowRepository.h
-    src/jmap/cache/QueryService.cpp
-    src/jmap/cache/QueryService.h
+    src/jmap/cache/MessageListReadSupport.cpp
+    src/jmap/cache/MessageListReadSupport.h
+    src/jmap/cache/MessageListReadTypes.h
+    src/jmap/cache/MessageSummaryReadRepository.cpp
+    src/jmap/cache/MessageSummaryReadRepository.h
+    src/jmap/cache/MessageSummaryReader.h
+    src/jmap/cache/SearchWindowReadRepository.cpp
+    src/jmap/cache/SearchWindowReadRepository.h
+    src/jmap/cache/MailboxWindowReadRepository.cpp
+    src/jmap/cache/MailboxWindowReadRepository.h
+    src/jmap/cache/QueryWindowReadRepository.cpp
+    src/jmap/cache/QueryWindowReadRepository.h
+    src/jmap/cache/QueryWindowReader.h
+    src/jmap/cache/ThreadReadRepository.cpp
+    src/jmap/cache/ThreadReadRepository.h
+    src/jmap/cache/ThreadReader.h
     src/jmap/cache/SearchWindowRepository.cpp
     src/jmap/cache/SearchWindowRepository.h
     src/jmap/cache/SyncStateRepository.cpp

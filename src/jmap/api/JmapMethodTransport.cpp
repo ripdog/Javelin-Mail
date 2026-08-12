@@ -1,8 +1,8 @@
 #include "jmap/api/JmapMethodTransport.h"
 
 #include "jmap/api/Transport.h"
-#include "jmap/cache/Database.h"
 #include "jmap/cache/JmapTransportPreferenceRepository.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroSignal>
 

@@ -3,15 +3,15 @@
 #include "app/MailIndexService.h"
 #include "app/WorkScheduler.h"
 #include "jmap/JmapCore.h"
-#include "jmap/cache/Database.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailVault.h"
+#include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
-#include "jmap/cache/QueryService.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroFuture>
 #include <QCoroTask>
@@ -251,7 +251,7 @@ namespace javelin::app
                     return FullMailboxPageCommit{error->message};
             }
 
-            javelin::jmap::cache::QueryService queries{connection};
+            javelin::jmap::cache::MailboxMessageReadRepository queries{connection};
             const auto coverageResult = queries.offlineMailboxCoverage(accountId, mailboxId);
             const auto* coverage =
                 std::get_if<std::optional<javelin::jmap::cache::OfflineMailboxCoverage>>(
@@ -1257,8 +1257,8 @@ namespace javelin::app
                     break;
             }
             const auto coverageResult =
-                javelin::jmap::cache::QueryService{m_connection}.offlineMailboxCoverage(
-                    scope.accountId, scope.mailboxId);
+                javelin::jmap::cache::MailboxMessageReadRepository{m_connection}
+                    .offlineMailboxCoverage(scope.accountId, scope.mailboxId);
             const auto* coverage =
                 std::get_if<std::optional<javelin::jmap::cache::OfflineMailboxCoverage>>(
                     &coverageResult);

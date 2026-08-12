@@ -1,7 +1,7 @@
 #pragma once
 
-#include "jmap/cache/Database.h"
 #include "jmap/calendar/CalendarTypes.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QDateTime>
 

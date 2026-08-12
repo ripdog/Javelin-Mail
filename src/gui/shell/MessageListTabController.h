@@ -3,7 +3,6 @@
 #include "app/MessageListSessionFactory.h"
 #include "gui/shell/MessageListTabPolicy.h"
 #include "gui/shell/TabWorkspace.h"
-#include "jmap/cache/QueryReader.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
 
@@ -57,8 +56,7 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        MessageListTabController(javelin::jmap::cache::QueryReader& queryReader,
-                                 javelin::app::MessageListSessionFactoryPort& sessionFactory,
+        MessageListTabController(javelin::app::MessageListSessionFactoryPort& sessionFactory,
                                  std::size_t windowSize, QObject* sessionParent,
                                  QObject* parent = nullptr);
 
@@ -100,7 +98,6 @@ namespace javelin::gui::shell
         identities(const std::vector<TabState>& tabs) const;
         void bind(javelin::app::MessageListSession& session);
 
-        javelin::jmap::cache::QueryReader& m_queryReader;
         javelin::app::MessageListSessionFactoryPort& m_sessionFactory;
         std::size_t m_windowSize;
         QObject* m_sessionParent = nullptr;

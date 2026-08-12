@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storage/sqlite/DatabaseConnection.h"
+
 #include "jmap/JmapCore.h"
 #include "jmap/api/ContactsMethods.h"
 #include "jmap/contacts/ContactResults.h"

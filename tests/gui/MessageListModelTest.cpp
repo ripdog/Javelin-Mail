@@ -1,7 +1,6 @@
 #include "gui/messages/MessageListModel.h"
-#include "jmap/cache/Database.h"
-#include "jmap/cache/QueryService.h"
 #include "jmap/cache/ThreadRepository.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -41,12 +40,12 @@ namespace
     {
         QTemporaryDir directory;
         javelin::jmap::cache::DatabaseConnection connection;
-        javelin::jmap::cache::QueryService queries;
+        QString queries;
 
         TestDatabase(QTemporaryDir temporaryDirectory,
                      javelin::jmap::cache::DatabaseConnection databaseConnection)
             : directory(std::move(temporaryDirectory)), connection(std::move(databaseConnection)),
-              queries(connection)
+              queries(connection.database().databaseName())
         {
         }
     };
@@ -241,9 +240,7 @@ TEST_CASE("Thread expansion includes children outside the represented mailbox",
 TEST_CASE("message list model displays a placeholder for missing subjects",
           "[gui][messages][model]")
 {
-    javelin::jmap::cache::DatabaseConnection connection;
-    javelin::jmap::cache::QueryService queryService{connection};
-    javelin::gui::messages::MessageListModel model{queryService};
+    javelin::gui::messages::MessageListModel model{QString{}};
 
     auto first = item("email-1", "thread-1");
     auto second = item("email-2", "thread-2");
@@ -261,9 +258,7 @@ TEST_CASE("message list model displays a placeholder for missing subjects",
 TEST_CASE("message list model exposes tags already carried by message rows",
           "[gui][messages][model][tags]")
 {
-    javelin::jmap::cache::DatabaseConnection connection;
-    javelin::jmap::cache::QueryService queryService{connection};
-    javelin::gui::messages::MessageListModel model{queryService};
+    javelin::gui::messages::MessageListModel model{QString{}};
 
     auto tagged = item("email-1", "thread-1");
     tagged.tags.push_back(javelin::jmap::cache::MessageListTag{
@@ -284,9 +279,7 @@ TEST_CASE("message list model exposes tags already carried by message rows",
 TEST_CASE("message list model normalizes tooltips and prefers cached body previews",
           "[gui][messages][model][tooltip]")
 {
-    javelin::jmap::cache::DatabaseConnection connection;
-    javelin::jmap::cache::QueryService queryService{connection};
-    javelin::gui::messages::MessageListModel model{queryService};
+    javelin::gui::messages::MessageListModel model{QString{}};
 
     auto serverPreview = item("email-1", "thread-1");
     serverPreview.preview = "\n\n      Server   preview\n   text   ";
@@ -306,9 +299,7 @@ TEST_CASE("message list model normalizes tooltips and prefers cached body previe
 TEST_CASE("message list model exposes painted message state to accessibility",
           "[gui][messages][model][accessibility]")
 {
-    javelin::jmap::cache::DatabaseConnection connection;
-    javelin::jmap::cache::QueryService queryService{connection};
-    javelin::gui::messages::MessageListModel model{queryService};
+    javelin::gui::messages::MessageListModel model{QString{}};
 
     auto accessible = item("email-1", "thread-1", true);
     accessible.subject = "Quarterly update";
@@ -345,9 +336,7 @@ TEST_CASE("message list model exposes painted message state to accessibility",
 TEST_CASE("message list model expands a known conversation without an exact mailbox count",
           "[gui][messages][model][accessibility][thread-coverage]")
 {
-    javelin::jmap::cache::DatabaseConnection connection;
-    javelin::jmap::cache::QueryService queryService{connection};
-    javelin::gui::messages::MessageListModel model{queryService};
+    javelin::gui::messages::MessageListModel model{QString{}};
 
     auto conversation = item("email-1", "thread-1");
     conversation.mailboxThreadMessageCount.reset();
@@ -369,9 +358,7 @@ TEST_CASE("message list model expands a known conversation without an exact mail
 TEST_CASE("message list model marks one cached row read without resetting its list",
           "[gui][messages][model]")
 {
-    javelin::jmap::cache::DatabaseConnection connection;
-    javelin::jmap::cache::QueryService queryService{connection};
-    javelin::gui::messages::MessageListModel model{queryService};
+    javelin::gui::messages::MessageListModel model{QString{}};
 
     model.setItems(std::optional<std::string>{"account-1"}, std::optional<std::string>{"mailbox-1"},
                    {item("email-1", "thread-1", true), item("email-2", "thread-2", true)});
@@ -388,9 +375,7 @@ TEST_CASE("message list model marks one cached row read without resetting its li
 TEST_CASE("message list model appends an infinite-scroll tail without resetting existing rows",
           "[gui][messages][model][infinite-scroll]")
 {
-    javelin::jmap::cache::DatabaseConnection connection;
-    javelin::jmap::cache::QueryService queryService{connection};
-    javelin::gui::messages::MessageListModel model{queryService};
+    javelin::gui::messages::MessageListModel model{QString{}};
 
     model.setItems(std::optional<std::string>{"account-1"}, std::optional<std::string>{"mailbox-1"},
                    {item("email-1", "thread-1"), item("email-2", "thread-2")});

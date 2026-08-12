@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storage/DatabaseError.h"
+
 #include "app/undo/HistoryCommandExecutor.h"
 #include "app/undo/HistoryRepository.h"
 

@@ -4,8 +4,8 @@
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/Transport.h"
+#include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
-#include "jmap/cache/QueryService.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 
@@ -208,8 +208,8 @@ TEST_CASE("mailbox state refresh executor bootstraps mailbox metadata",
     CHECK_FALSE(summary.usedIncrementalRefresh);
     CHECK(summary.changed);
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto mailboxTreeResult = queryService.listMailboxTree("account-1");
+    javelin::jmap::cache::MailboxReadRepository mailboxReader{databaseContext.connection};
+    const auto mailboxTreeResult = mailboxReader.listMailboxTree("account-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailboxTreeItem>>(
         mailboxTreeResult));
     const auto& mailboxTree =
@@ -309,8 +309,8 @@ TEST_CASE("mailbox state refresh executor applies mailbox changes", "[jmap][sync
     CHECK(requestEnvelope.value->methodCalls[2].arguments.find(R"("/updated")") !=
           std::string::npos);
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto mailboxTreeResult = queryService.listMailboxTree("account-1");
+    javelin::jmap::cache::MailboxReadRepository mailboxReader{databaseContext.connection};
+    const auto mailboxTreeResult = mailboxReader.listMailboxTree("account-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailboxTreeItem>>(
         mailboxTreeResult));
     const auto& mailboxTree =

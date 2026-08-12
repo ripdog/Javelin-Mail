@@ -656,6 +656,24 @@ namespace javelin::jmap::cache
         return readContact(query);
     }
 
+    std::variant<std::vector<std::string>, DatabaseError>
+    ContactRepository::listEmailAddresses() const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT DISTINCT address FROM contact_emails ORDER BY normalized_address"));
+        if (!query.exec())
+            return queryError(QStringLiteral("List contact email addresses"), query);
+
+        std::vector<std::string> addresses;
+        while (query.next())
+            addresses.push_back(query.value(0).toString().toStdString());
+        return addresses;
+    }
+
     std::variant<std::optional<javelin::jmap::contacts::ContactSummary>, DatabaseError>
     ContactRepository::findByEmail(const std::string_view normalizedEmail,
                                    const std::optional<std::string_view> accountId) const

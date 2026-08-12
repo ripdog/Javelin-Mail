@@ -4,9 +4,10 @@
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/QueryWindowReadRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/EmailMutationJournal.h"
@@ -440,8 +441,11 @@ TEST_CASE("account mail delta targets only old and new mailboxes for an external
         CHECK(window->materialization == javelin::jmap::cache::QueryWindowMaterialization::Partial);
     }
 
-    javelin::jmap::cache::QueryService queries{database.connection};
-    const auto inboxPageResult = queries.loadMailboxWindow("account-1", inboxQueryKey, 0, 100, {});
+    javelin::jmap::cache::MailboxMessageReadRepository mailboxMessages{database.connection};
+    javelin::jmap::cache::QueryWindowReadRepository queryWindows{database.connection,
+                                                                 mailboxMessages};
+    const auto inboxPageResult =
+        queryWindows.loadMailboxWindow("account-1", inboxQueryKey, 0, 100, {});
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
         inboxPageResult));
     const auto& inboxPage =
@@ -451,7 +455,7 @@ TEST_CASE("account mail delta targets only old and new mailboxes for an external
     CHECK(inboxPage->items.front().emailId == "email-1");
 
     const auto archivePageResult =
-        queries.loadMailboxWindow("account-1", archiveQueryKey, 0, 100, {});
+        queryWindows.loadMailboxWindow("account-1", archiveQueryKey, 0, 100, {});
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
         archivePageResult));
     const auto& archivePage =

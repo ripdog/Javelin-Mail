@@ -1,8 +1,8 @@
 #include "app/LocalMaintenanceService.h"
 
 #include "app/WorkScheduler.h"
-#include "jmap/cache/Database.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroFuture>
 #include <QCoroTask>

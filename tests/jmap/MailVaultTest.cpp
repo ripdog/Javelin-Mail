@@ -1,7 +1,7 @@
 #include "jmap/cache/MailVault.h"
-#include "jmap/cache/Database.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoreApplication>
 #include <QDir>

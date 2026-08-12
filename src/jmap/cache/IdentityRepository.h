@@ -1,8 +1,8 @@
 #pragma once
 
-#include "jmap/cache/Database.h"
 #include "jmap/cache/IdentityReader.h"
 #include "jmap/domain/MailEntities.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <optional>
 #include <string>

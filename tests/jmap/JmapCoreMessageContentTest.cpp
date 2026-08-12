@@ -5,9 +5,10 @@
 #include "jmap/api/SessionParser.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/QueryWindowReadRepository.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
@@ -724,8 +725,10 @@ TEST_CASE("JmapCore searchMessages caches representatives before thread results"
     REQUIRE(summary.results.front().from.has_value());
     CHECK(summary.results.front().from->email == "alice@example.com");
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto cachedWindowResult = queryService.loadSearchWindow("u1", "session-query", 0, 100);
+    javelin::jmap::cache::MailboxMessageReadRepository mailboxMessages{databaseContext.connection};
+    javelin::jmap::cache::QueryWindowReadRepository queryWindows{databaseContext.connection,
+                                                                 mailboxMessages};
+    const auto cachedWindowResult = queryWindows.loadSearchWindow("u1", "session-query", 0, 100);
     const auto* cachedWindow =
         std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&cachedWindowResult);
     REQUIRE(cachedWindow != nullptr);
@@ -803,8 +806,10 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as mutations",
     REQUIRE(archivedEmail.has_value());
     CHECK(archivedEmail->mailboxIds == std::vector<std::string>{"mbx-archive"});
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto optimisticInbox = queryService.loadMailboxWindow("account-1", inboxQueryKey, 0, 100);
+    javelin::jmap::cache::MailboxMessageReadRepository mailboxMessages{databaseContext.connection};
+    javelin::jmap::cache::QueryWindowReadRepository queryWindows{databaseContext.connection,
+                                                                 mailboxMessages};
+    const auto optimisticInbox = queryWindows.loadMailboxWindow("account-1", inboxQueryKey, 0, 100);
     const auto* inboxPage =
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&optimisticInbox);
     REQUIRE(inboxPage != nullptr);
@@ -812,7 +817,7 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as mutations",
     CHECK((*inboxPage)->coverage == javelin::jmap::cache::QueryWindowCoverage::LocallyProjected);
     CHECK((*inboxPage)->items.empty());
     const auto optimisticArchive =
-        queryService.listMailboxMessages("account-1", "mbx-archive", 100);
+        mailboxMessages.listMailboxMessages("account-1", "mbx-archive", 100);
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(
         optimisticArchive));
     const auto& archiveItems =
@@ -1174,8 +1179,10 @@ TEST_CASE("JmapCore queues read keyword mutations as mutations", "[jmap][core][m
     REQUIRE(readEmail.has_value());
     CHECK(readEmail->keywords == std::vector<std::string>{"$seen"});
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto readPageResult = queryService.loadMailboxWindow("account-1", queryKey, 0, 100);
+    javelin::jmap::cache::MailboxMessageReadRepository mailboxMessages{databaseContext.connection};
+    javelin::jmap::cache::QueryWindowReadRepository queryWindows{databaseContext.connection,
+                                                                 mailboxMessages};
+    const auto readPageResult = queryWindows.loadMailboxWindow("account-1", queryKey, 0, 100);
     const auto* readPage =
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&readPageResult);
     REQUIRE(readPage != nullptr);
@@ -1183,7 +1190,7 @@ TEST_CASE("JmapCore queues read keyword mutations as mutations", "[jmap][core][m
     REQUIRE((*readPage)->items.size() == 1);
     CHECK_FALSE((*readPage)->items.front().isUnread);
 
-    const auto searchPageResult = queryService.loadSearchWindow("account-1", searchKey, 0, 100);
+    const auto searchPageResult = queryWindows.loadSearchWindow("account-1", searchKey, 0, 100);
     const auto* searchPage =
         std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&searchPageResult);
     REQUIRE(searchPage != nullptr);

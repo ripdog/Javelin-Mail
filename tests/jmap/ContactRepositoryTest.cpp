@@ -94,6 +94,11 @@ TEST_CASE("contact repository greedily caches, filters, and resolves email addre
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactSummary>>(filtered));
     REQUIRE(std::get<std::vector<javelin::jmap::contacts::ContactSummary>>(filtered).size() == 1);
 
+    const auto addresses = repository.listEmailAddresses();
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(addresses));
+    CHECK(std::get<std::vector<std::string>>(addresses) ==
+          std::vector<std::string>{"alex@example.test", "Joe@Example.test"});
+
     const auto found = repository.findByEmail("joe@example.test");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(found));
     REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(found).has_value());

@@ -3,8 +3,8 @@
 #include "app/CacheAccessBarrier.h"
 #include "app/LogStore.h"
 #include "app/SettingsApplicationPorts.h"
-#include "jmap/cache/Database.h"
 #include "protocol/SocketTransport.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QObject>
 

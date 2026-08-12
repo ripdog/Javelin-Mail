@@ -1,8 +1,9 @@
 #pragma once
 
-#include "jmap/cache/QueryReader.h"
+#include "jmap/cache/MessageListReadTypes.h"
 
 #include <QAbstractListModel>
+#include <QString>
 
 #include <cstddef>
 #include <cstdint>
@@ -49,8 +50,7 @@ namespace javelin::gui::messages
             IsSearchResultRole,
         };
 
-        explicit MessageListModel(javelin::jmap::cache::QueryReader& queryReader,
-                                  QObject* parent = nullptr);
+        explicit MessageListModel(QString databasePath, QObject* parent = nullptr);
         ~MessageListModel() override;
 
         [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex{}) const override;
@@ -101,7 +101,7 @@ namespace javelin::gui::messages
         void reindexVisibleRows();
         void rebuildVisibleRows();
 
-        javelin::jmap::cache::QueryReader& m_queryReader;
+        QString m_databasePath;
         std::optional<std::string> m_accountId;
         std::optional<std::string> m_mailboxId;
         std::vector<ThreadEntry> m_threads;
