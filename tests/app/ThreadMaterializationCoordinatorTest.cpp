@@ -5,8 +5,11 @@
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 
+#include <QCoroFuture>
+
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QPromise>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QThread>
@@ -195,6 +198,36 @@ namespace
             };
         }
     };
+
+    class DeferredWorker final : public javelin::app::ThreadMaterializationWorker
+    {
+      public:
+        QCoro::Task<javelin::app::ThreadMaterializationResult>
+        materialize(javelin::app::ThreadMaterializationTarget target) override
+        {
+            targets.push_back(target);
+            if (targets.size() == 1)
+            {
+                first.start();
+                co_return co_await first.future();
+            }
+            co_return javelin::app::ThreadMaterializationSummary{
+                .threadIds = std::move(target.threadIds),
+                .missingEmailIds = {},
+                .completedThreadCount = 0,
+                .completedEmailCount = 0,
+            };
+        }
+
+        void finishFirst(javelin::app::ThreadMaterializationResult result)
+        {
+            first.addResult(std::move(result));
+            first.finish();
+        }
+
+        std::vector<javelin::app::ThreadMaterializationTarget> targets;
+        QPromise<javelin::app::ThreadMaterializationResult> first;
+    };
 } // namespace
 
 TEST_CASE("authoritative Thread wait resumes only after complete cache coverage",
@@ -284,6 +317,26 @@ TEST_CASE("thread materialization coordinator coalesces mailbox and search targe
     CHECK(jobs.value(0).toInt() == 0);
 }
 
+TEST_CASE("observed mailbox retained windows start visible Thread materialization promptly",
+          "[app][thread-materialization][priority][retained]")
+{
+    ensureApplication();
+    Fixture fixture;
+    javelin::app::WorkScheduler scheduler{fixture.database, nullptr, std::chrono::seconds{5}};
+    RecordingWorker worker;
+    javelin::app::ThreadMaterializationCoordinator coordinator{fixture.database, scheduler,
+                                                               &worker};
+
+    CHECK_FALSE(scheduler.mayStartBackgroundNetwork());
+    REQUIRE_FALSE(coordinator
+                      .enqueueRetainedMailbox("account-1", "inbox",
+                                              javelin::app::WorkPriority::VisibleMaterialization)
+                      .has_value());
+    waitFor([&] { return worker.targets.size() == 1; });
+    CHECK(worker.targets.front().priority == javelin::app::WorkPriority::VisibleMaterialization);
+    CHECK(worker.targets.front().threadIds == std::vector<std::string>{"thread-1", "thread-2"});
+}
+
 TEST_CASE("thread materialization coordinator restores incomplete durable windows",
           "[app][thread-materialization][restart]")
 {
@@ -332,4 +385,126 @@ TEST_CASE("interactive Thread demand raises queued prefetch through foreground w
     CHECK(worker.targets.front().priority == javelin::app::WorkPriority::Interactive);
     CHECK(worker.targets.front().threadIds == std::vector<std::string>{"thread-1"});
     scheduler.endForegroundWork();
+}
+
+TEST_CASE("interactive Thread demand does not elevate unrelated queued prefetch",
+          "[app][thread-materialization][priority]")
+{
+    ensureApplication();
+    Fixture fixture;
+    javelin::app::WorkScheduler scheduler{fixture.database, nullptr, std::chrono::milliseconds{0}};
+    RecordingWorker worker;
+    javelin::app::ThreadMaterializationCoordinator coordinator{fixture.database, scheduler,
+                                                               &worker};
+
+    scheduler.beginForegroundWork();
+    REQUIRE_FALSE(coordinator
+                      .enqueueRepresentativeEmails("account-1", {"email-1", "email-3"},
+                                                   javelin::app::WorkPriority::Freshness)
+                      .has_value());
+    QCoreApplication::processEvents();
+    CHECK(worker.targets.empty());
+
+    REQUIRE_FALSE(coordinator.ensureThreads("account-1", {"thread-2"}).has_value());
+    waitFor([&] { return worker.targets.size() == 1; });
+    CHECK(worker.targets[0].priority == javelin::app::WorkPriority::Interactive);
+    CHECK(worker.targets[0].threadIds == std::vector<std::string>{"thread-2"});
+    CHECK(coordinator.pendingThreadCount("account-1") == 1);
+
+    scheduler.endForegroundWork();
+    waitFor([&] { return worker.targets.size() == 2; });
+    CHECK(worker.targets[1].priority == javelin::app::WorkPriority::Freshness);
+    CHECK(worker.targets[1].threadIds == std::vector<std::string>{"thread-1"});
+}
+
+TEST_CASE("interactive demand on active prefetch is retained for retry after failure",
+          "[app][thread-materialization][priority][recovery]")
+{
+    ensureApplication();
+    Fixture fixture;
+    javelin::app::WorkScheduler scheduler{fixture.database, nullptr, std::chrono::milliseconds{0}};
+    DeferredWorker worker;
+    javelin::app::ThreadMaterializationCoordinator coordinator{fixture.database, scheduler,
+                                                               &worker};
+
+    REQUIRE_FALSE(coordinator
+                      .enqueueRepresentativeEmails("account-1", {"email-1"},
+                                                   javelin::app::WorkPriority::Freshness)
+                      .has_value());
+    waitFor([&] { return worker.targets.size() == 1; });
+    CHECK(worker.targets[0].priority == javelin::app::WorkPriority::Freshness);
+
+    REQUIRE_FALSE(coordinator.ensureThreads("account-1", {"thread-1"}).has_value());
+    CHECK(coordinator.pendingThreadCount("account-1") == 1);
+    worker.finishFirst(javelin::jmap::OperationError{
+        .code = javelin::jmap::OperationErrorCode::NetworkUnavailable,
+        .message = QStringLiteral("Network unavailable."),
+    });
+
+    waitFor([&] { return worker.targets.size() == 2; });
+    CHECK(worker.targets[1].priority == javelin::app::WorkPriority::Interactive);
+    CHECK(worker.targets[1].threadIds == std::vector<std::string>{"thread-1"});
+}
+
+TEST_CASE("completed waiter is not poisoned by unrelated batch failure",
+          "[app][thread-materialization][selection][recovery]")
+{
+    ensureApplication();
+    Fixture fixture;
+    javelin::app::WorkScheduler scheduler{fixture.database, nullptr, std::chrono::milliseconds{0}};
+    DeferredWorker worker;
+    javelin::app::ThreadMaterializationCoordinator coordinator{fixture.database, scheduler,
+                                                               &worker};
+
+    REQUIRE_FALSE(coordinator
+                      .enqueueRepresentativeEmails("account-1", {"email-1", "email-3"},
+                                                   javelin::app::WorkPriority::Freshness)
+                      .has_value());
+    waitFor([&] { return worker.targets.size() == 1; });
+    CHECK(worker.targets[0].threadIds == std::vector<std::string>{"thread-1", "thread-2"});
+
+    std::optional<javelin::app::ThreadMaterializationResult> waiterResult;
+    auto waitTask = coordinator.waitForThreads("account-1", {"thread-1"});
+    QCoro::connect(std::move(waitTask), &coordinator,
+                   [&waiterResult](javelin::app::ThreadMaterializationResult result)
+                   { waiterResult = std::move(result); });
+    QCoreApplication::processEvents();
+
+    javelin::jmap::cache::ThreadRepository threads{fixture.database};
+    REQUIRE_FALSE(
+        threads.upsertMany("account-1", {{.id = "thread-1", .emailIds = {"email-1", "email-2"}}})
+            .has_value());
+    worker.finishFirst(javelin::jmap::OperationError{
+        .code = javelin::jmap::OperationErrorCode::NetworkUnavailable,
+        .message = QStringLiteral("Thread 2 failed."),
+    });
+
+    waitFor([&] { return waiterResult.has_value(); });
+    REQUIRE(std::holds_alternative<javelin::app::ThreadMaterializationSummary>(*waiterResult));
+    CHECK(std::get<javelin::app::ThreadMaterializationSummary>(*waiterResult).threadIds ==
+          std::vector<std::string>{"thread-1"});
+    CHECK(worker.targets.size() == 1);
+}
+
+TEST_CASE("representative prefetch notices pending child summary refresh",
+          "[app][thread-materialization][recovery]")
+{
+    ensureApplication();
+    Fixture fixture;
+    javelin::jmap::cache::ThreadRepository threads{fixture.database};
+    REQUIRE_FALSE(
+        threads.upsertMany("account-1", {{.id = "thread-1", .emailIds = {"email-1", "email-2"}}})
+            .has_value());
+    QSqlQuery refresh{fixture.database.database()};
+    REQUIRE(refresh.exec(
+        QStringLiteral("INSERT INTO email_summary_refresh_requests(account_id,email_id) "
+                       "VALUES('account-1','email-2')")));
+    javelin::app::WorkScheduler scheduler{fixture.database, nullptr, std::chrono::milliseconds{0}};
+    RecordingWorker worker;
+    javelin::app::ThreadMaterializationCoordinator coordinator{fixture.database, scheduler,
+                                                               &worker};
+
+    REQUIRE_FALSE(coordinator.enqueueRepresentativeEmails("account-1", {"email-1"}).has_value());
+    waitFor([&] { return worker.targets.size() == 1; });
+    CHECK(worker.targets.front().threadIds == std::vector<std::string>{"thread-1"});
 }

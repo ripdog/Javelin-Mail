@@ -113,6 +113,7 @@ namespace javelin::app
       private:
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         setControlStatus(std::string_view jobId, WorkStatus status, bool pauseRequested);
+        [[nodiscard]] bool mayStartNetwork(WorkPriority priority) const;
 
         javelin::jmap::cache::DatabaseConnection& m_connection;
         int m_foregroundDepth = 0;

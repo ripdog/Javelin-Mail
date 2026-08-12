@@ -78,6 +78,7 @@ namespace javelin::gui::messages
         {
             javelin::jmap::cache::MessageListItem summary;
             std::vector<javelin::jmap::cache::MessageListItem> members;
+            std::uint8_t memberReadFailureCount = 0;
             bool membersLoaded = false;
             bool membersLoading = false;
         };

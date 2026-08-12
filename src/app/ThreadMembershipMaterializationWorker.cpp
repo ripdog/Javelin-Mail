@@ -124,9 +124,9 @@ namespace javelin::app
     QCoro::Task<ThreadMaterializationResult>
     ThreadMembershipMaterializationWorker::materialize(ThreadMaterializationTarget target)
     {
-        std::ranges::sort(target.threadIds);
-        target.threadIds.erase(std::unique(target.threadIds.begin(), target.threadIds.end()),
-                               target.threadIds.end());
+        std::unordered_set<std::string> seenThreadIds;
+        std::erase_if(target.threadIds, [&seenThreadIds](const std::string& threadId)
+                      { return threadId.empty() || !seenThreadIds.insert(threadId).second; });
         if (target.accountId.empty() || target.threadIds.empty())
         {
             co_return ThreadMaterializationSummary{
@@ -212,6 +212,33 @@ namespace javelin::app
                 co_return javelin::jmap::operationError(*readError);
             co_return std::get<javelin::jmap::api::ThreadGetResponse>(read);
         };
+        const auto threadBatchFitsRequestLimit = [&target,
+                                                  &limits](const std::vector<std::string>& ids)
+            -> std::variant<bool, javelin::jmap::OperationError>
+        {
+            const auto request = javelin::jmap::api::threadGet({
+                .accountId = target.accountId,
+                .ids = ids,
+                .idsReference = std::nullopt,
+                .properties = std::nullopt,
+            });
+            if (!request.has_value())
+            {
+                return error(javelin::jmap::OperationErrorCode::InvalidRequest,
+                             QStringLiteral("Unable to serialize the Thread/get request."));
+            }
+            javelin::jmap::api::RequestBuilder builder;
+            builder.useCore().useMail();
+            static_cast<void>(builder.call(*request, "thread-membership"));
+            const auto encoded = javelin::jmap::api::serializeRequestEnvelope(builder.build());
+            if (!encoded.has_value())
+            {
+                return error(
+                    javelin::jmap::OperationErrorCode::InvalidRequest,
+                    QStringLiteral("Unable to serialize the Thread/get request envelope."));
+            }
+            return encoded->size() <= limits->maxSizeRequest;
+        };
         const auto commitThreads = [this, &threads,
                                     &target](const javelin::jmap::api::ThreadGetResponse& response)
             -> std::optional<javelin::jmap::OperationError>
@@ -245,16 +272,34 @@ namespace javelin::app
             const auto& record =
                 std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(membership);
             if (!record.has_value() ||
-                record->freshness != javelin::jmap::cache::ThreadMembershipFreshness::Current)
+                record->freshness != javelin::jmap::cache::ThreadMembershipFreshness::Current ||
+                record->thread.emailIds.size() != record->globalMemberCount)
                 membershipTargets.push_back(threadId);
         }
 
-        for (std::size_t offset = 0; offset < membershipTargets.size(); offset += batchSize)
+        for (std::size_t offset = 0; offset < membershipTargets.size();)
         {
             const auto count = std::min(batchSize, membershipTargets.size() - offset);
             std::vector<std::string> batch{
                 membershipTargets.begin() + static_cast<std::ptrdiff_t>(offset),
                 membershipTargets.begin() + static_cast<std::ptrdiff_t>(offset + count)};
+            while (true)
+            {
+                const auto fits = threadBatchFitsRequestLimit(batch);
+                if (const auto* fitError = std::get_if<javelin::jmap::OperationError>(&fits))
+                    co_return *fitError;
+                if (std::get<bool>(fits))
+                    break;
+                if (batch.size() == 1)
+                {
+                    co_return error(
+                        javelin::jmap::OperationErrorCode::InvalidRequest,
+                        QStringLiteral("One Thread id exceeds the negotiated JMAP request size "
+                                       "limit."));
+                }
+                batch.pop_back();
+            }
+            offset += batch.size();
             auto fetched = co_await fetchThreads(batch);
             if (const auto* fetchError = std::get_if<javelin::jmap::OperationError>(&fetched))
                 co_return *fetchError;
@@ -266,12 +311,14 @@ namespace javelin::app
                 co_return *commitError;
 
             std::vector<std::string> committedIds;
-            committedIds.reserve(response.list.size());
+            committedIds.reserve(response.list.size() + response.notFound.size());
             for (const auto& thread : response.list)
             {
                 committedIds.push_back(thread.id);
                 summary.threadIds.push_back(thread.id);
             }
+            committedIds.insert(committedIds.end(), response.notFound.begin(),
+                                response.notFound.end());
             summary.completedThreadCount += response.list.size() + response.notFound.size();
             if (!committedIds.empty())
                 Q_EMIT membershipCommitted(QString::fromStdString(target.accountId),

@@ -3,6 +3,8 @@
 #include <QCoroFuture>
 #include <QCoroTask>
 
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QTimer>
@@ -32,6 +34,14 @@ namespace javelin::app
                 result.push_back(QString::fromStdString(id));
             return result;
         }
+
+        [[nodiscard]] QString jsonIds(const std::vector<std::string>& ids)
+        {
+            QJsonArray values;
+            for (const auto& id : ids)
+                values.push_back(QString::fromStdString(id));
+            return QString::fromUtf8(QJsonDocument{values}.toJson(QJsonDocument::Compact));
+        }
     } // namespace
 
     ThreadMaterializationCoordinator::ThreadMaterializationCoordinator(
@@ -55,29 +65,25 @@ namespace javelin::app
         std::string accountId, const std::vector<std::string>& emailIds,
         const WorkPriority priority)
     {
+        if (emailIds.empty())
+            return std::nullopt;
+
         QSqlQuery query{m_databaseConnection.database()};
         query.prepare(QStringLiteral(
-            "SELECT e.thread_id FROM emails e LEFT JOIN threads t ON t.account_id=e.account_id "
-            "AND t.thread_id=e.thread_id WHERE e.account_id=:account_id AND e.email_id=:email_id "
-            "AND (t.thread_id IS NULL OR t.membership_freshness<>'current' OR EXISTS(SELECT 1 FROM "
-            "thread_email_members tm LEFT JOIN emails child ON child.account_id=tm.account_id AND "
-            "child.email_id=tm.email_id AND child.thread_id=tm.thread_id WHERE "
-            "tm.account_id=e.account_id AND "
-            "tm.thread_id=e.thread_id AND child.email_id IS NULL))"));
+            "WITH requested AS MATERIALIZED (SELECT value AS email_id,CAST(key AS INTEGER) AS "
+            "position FROM json_each(:email_ids_json)) SELECT e.thread_id FROM requested r INNER "
+            "JOIN emails e ON e.account_id=:account_id AND e.email_id=r.email_id GROUP BY "
+            "e.thread_id ORDER BY MIN(r.position)"));
+        query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(accountId));
+        query.bindValue(QStringLiteral(":email_ids_json"), jsonIds(emailIds));
+        if (!query.exec())
+            return queryError(QStringLiteral("Resolve representative Threads"), query);
+
         std::vector<std::string> threadIds;
         threadIds.reserve(emailIds.size());
-        for (const auto& emailId : emailIds)
-        {
-            query.bindValue(QStringLiteral(":account_id"),
-                            QString::fromStdString(std::string{accountId}));
-            query.bindValue(QStringLiteral(":email_id"), QString::fromStdString(emailId));
-            if (!query.exec())
-                return queryError(QStringLiteral("Resolve representative Thread"), query);
-            if (query.next())
-                threadIds.push_back(query.value(0).toString().toStdString());
-            query.finish();
-        }
-        return queueThreadIds(std::move(accountId), std::move(threadIds), priority);
+        while (query.next())
+            threadIds.push_back(query.value(0).toString().toStdString());
+        return ensureThreads(std::move(accountId), threadIds, priority);
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
@@ -108,6 +114,32 @@ namespace javelin::app
         while (query.next())
             emailIds.push_back(query.value(0).toString().toStdString());
         query.finish();
+        return enqueueRepresentativeEmails(std::string{accountId}, emailIds, priority);
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    ThreadMaterializationCoordinator::enqueueRetainedMailbox(const std::string_view accountId,
+                                                             const std::string_view mailboxId,
+                                                             const WorkPriority priority)
+    {
+        QSqlQuery query{m_databaseConnection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT i.email_id FROM mailbox_query_windows w INNER JOIN mailbox_query_window_items "
+            "i "
+            "ON i.account_id=w.account_id AND i.query_key=w.query_key AND "
+            "i.requested_offset=w.requested_offset AND i.requested_limit=w.requested_limit WHERE "
+            "w.account_id=:account_id AND w.mailbox_id=:mailbox_id AND w.coverage<>'stale' AND "
+            "w.materialization='complete' ORDER BY w.requested_offset,i.position"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":mailbox_id"),
+                        QString::fromStdString(std::string{mailboxId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Read retained mailbox materialization windows"),
+                              query);
+        std::vector<std::string> emailIds;
+        while (query.next())
+            emailIds.push_back(query.value(0).toString().toStdString());
         return enqueueRepresentativeEmails(std::string{accountId}, emailIds, priority);
     }
 
@@ -155,16 +187,8 @@ namespace javelin::app
             "JOIN search_window_items i ON i.account_id=w.account_id AND i.query_key=w.query_key "
             "AND i.window_offset=w.window_offset AND i.window_limit=w.window_limit WHERE "
             "w.account_id=:search_account AND w.coverage<>'stale' AND "
-            "w.materialization='complete') represented ON represented.email_id=e.email_id LEFT "
-            "JOIN threads t ON t.account_id=e.account_id AND t.thread_id=e.thread_id WHERE "
-            "e.account_id=:email_account AND (t.thread_id IS NULL OR "
-            "t.membership_freshness<>'current' OR EXISTS(SELECT 1 FROM thread_email_members tm "
-            "LEFT JOIN emails child ON child.account_id=tm.account_id AND "
-            "child.email_id=tm.email_id AND child.thread_id=tm.thread_id WHERE "
-            "tm.account_id=e.account_id AND "
-            "tm.thread_id=e.thread_id AND (child.email_id IS NULL OR EXISTS(SELECT 1 FROM "
-            "email_summary_refresh_requests refresh WHERE refresh.account_id=tm.account_id AND "
-            "refresh.email_id=tm.email_id))))"));
+            "w.materialization='complete') represented ON represented.email_id=e.email_id WHERE "
+            "e.account_id=:email_account"));
         const auto account = QString::fromStdString(std::string{accountId});
         query.bindValue(QStringLiteral(":mailbox_account"), account);
         query.bindValue(QStringLiteral(":search_account"), account);
@@ -174,8 +198,7 @@ namespace javelin::app
         std::vector<std::string> threadIds;
         while (query.next())
             threadIds.push_back(query.value(0).toString().toStdString());
-        return queueThreadIds(std::string{accountId}, std::move(threadIds),
-                              WorkPriority::Freshness);
+        return ensureThreads(std::string{accountId}, threadIds, WorkPriority::Freshness);
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
@@ -195,31 +218,37 @@ namespace javelin::app
     ThreadMaterializationCoordinator::incompleteThreadIds(
         const std::string_view accountId, const std::vector<std::string>& threadIds) const
     {
+        if (threadIds.empty())
+            return std::vector<std::string>{};
+
         QSqlQuery query{m_databaseConnection.database()};
         query.prepare(QStringLiteral(
-            "SELECT t.membership_freshness,t.member_count,COUNT(tm.email_id),COUNT(e.email_id) "
-            "FROM threads t LEFT JOIN thread_email_members tm ON tm.account_id=t.account_id AND "
-            "tm.thread_id=t.thread_id LEFT JOIN emails e ON e.account_id=tm.account_id AND "
+            "WITH requested AS MATERIALIZED (SELECT value AS thread_id,CAST(key AS INTEGER) AS "
+            "position FROM json_each(:thread_ids_json)), coverage AS (SELECT "
+            "r.thread_id,r.position,"
+            "t.membership_freshness,t.member_count,COUNT(tm.email_id) AS "
+            "member_rows,COUNT(e.email_id) "
+            "AS email_rows FROM requested r LEFT JOIN threads t ON t.account_id=:account_id AND "
+            "t.thread_id=r.thread_id LEFT JOIN thread_email_members tm ON "
+            "tm.account_id=t.account_id "
+            "AND tm.thread_id=t.thread_id LEFT JOIN emails e ON e.account_id=tm.account_id AND "
             "e.email_id=tm.email_id AND e.thread_id=tm.thread_id AND NOT EXISTS(SELECT 1 FROM "
             "email_summary_refresh_requests refresh WHERE refresh.account_id=tm.account_id AND "
-            "refresh.email_id=tm.email_id) WHERE t.account_id=:account_id "
-            "AND t.thread_id=:thread_id GROUP BY t.account_id,t.thread_id,"
-            "t.membership_freshness,t.member_count"));
+            "refresh.email_id=tm.email_id) GROUP BY r.thread_id,r.position,t.membership_freshness,"
+            "t.member_count) SELECT thread_id FROM coverage WHERE membership_freshness IS NULL OR "
+            "membership_freshness<>'current' OR member_count<>member_rows OR "
+            "member_count<>email_rows "
+            "ORDER BY position"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":thread_ids_json"), jsonIds(threadIds));
+        if (!query.exec())
+            return queryError(QStringLiteral("Inspect Thread materialization state"), query);
+
         std::vector<std::string> incomplete;
         incomplete.reserve(threadIds.size());
-        for (const auto& threadId : threadIds)
-        {
-            query.bindValue(QStringLiteral(":account_id"),
-                            QString::fromStdString(std::string{accountId}));
-            query.bindValue(QStringLiteral(":thread_id"), QString::fromStdString(threadId));
-            if (!query.exec())
-                return queryError(QStringLiteral("Inspect Thread materialization state"), query);
-            if (!query.next() || query.value(0).toString() != QStringLiteral("current") ||
-                query.value(1).toULongLong() != query.value(2).toULongLong() ||
-                query.value(1).toULongLong() != query.value(3).toULongLong())
-                incomplete.push_back(threadId);
-            query.finish();
-        }
+        while (query.next())
+            incomplete.push_back(query.value(0).toString().toStdString());
         return incomplete;
     }
 
@@ -288,13 +317,22 @@ namespace javelin::app
                                                      const WorkPriority priority)
     {
         auto& queue = m_accounts[accountId];
-        queue.priority = static_cast<int>(priority) > static_cast<int>(queue.priority)
-                             ? priority
-                             : queue.priority;
         for (auto& threadId : threadIds)
         {
-            if (!threadId.empty() && !queue.active.contains(threadId))
-                queue.pending.insert(std::move(threadId));
+            if (threadId.empty())
+                continue;
+
+            if (const auto active = queue.active.find(threadId); active != queue.active.end())
+            {
+                if (static_cast<int>(priority) <= static_cast<int>(active->second))
+                    continue;
+            }
+
+            const auto [pending, inserted] = queue.pending.try_emplace(
+                threadId, PendingThread{.priority = priority, .sequence = m_nextPendingSequence++});
+            if (!inserted &&
+                static_cast<int>(priority) > static_cast<int>(pending->second.priority))
+                pending->second.priority = priority;
         }
         if (queue.pending.empty() && queue.active.empty())
             m_accounts.erase(accountId);
@@ -323,17 +361,35 @@ namespace javelin::app
         {
             if (queue.pending.empty() || !queue.active.empty())
                 continue;
+
+            const auto highest = std::ranges::max_element(queue.pending, {}, [](const auto& entry)
+                                                          { return entry.second.priority; });
+            const auto priority = highest->second.priority;
             const auto admissionId = std::string{"thread-materialization:"} + accountId;
-            auto admission = m_workScheduler.admitTransient(admissionId, accountId, queue.priority);
+            auto admission = m_workScheduler.admitTransient(admissionId, accountId, priority);
             if (!admission.has_value())
                 continue;
 
-            std::vector<std::string> threadIds(queue.pending.begin(), queue.pending.end());
-            std::ranges::sort(threadIds);
-            queue.pending.clear();
-            queue.active.insert(threadIds.begin(), threadIds.end());
-            const auto priority = queue.priority;
-            queue.priority = WorkPriority::Freshness;
+            std::vector<std::pair<std::uint64_t, std::string>> ordered;
+            ordered.reserve(queue.pending.size());
+            for (const auto& [threadId, pending] : queue.pending)
+            {
+                if (pending.priority == priority)
+                    ordered.emplace_back(pending.sequence, threadId);
+            }
+            std::ranges::sort(ordered, {}, &std::pair<std::uint64_t, std::string>::first);
+            std::vector<std::string> threadIds;
+            threadIds.reserve(ordered.size());
+            for (auto& [sequence, threadId] : ordered)
+            {
+                Q_UNUSED(sequence);
+                threadIds.push_back(std::move(threadId));
+            }
+            for (const auto& threadId : threadIds)
+            {
+                queue.pending.erase(threadId);
+                queue.active.emplace(threadId, priority);
+            }
             Q_EMIT materializationStarted(QString::fromStdString(accountId), qStringIds(threadIds));
             auto task = m_worker->materialize({
                 .accountId = accountId,
@@ -358,6 +414,25 @@ namespace javelin::app
         {
             for (const auto& threadId : requestedThreadIds)
                 found->second.active.erase(threadId);
+
+            if (!found->second.pending.empty())
+            {
+                std::vector<std::string> followUpIds;
+                followUpIds.reserve(found->second.pending.size());
+                for (const auto& [threadId, pending] : found->second.pending)
+                {
+                    Q_UNUSED(pending);
+                    followUpIds.push_back(threadId);
+                }
+                const auto incomplete = incompleteThreadIds(accountId, followUpIds);
+                if (const auto* remaining = std::get_if<std::vector<std::string>>(&incomplete))
+                {
+                    const std::unordered_set<std::string> incompleteIds(remaining->begin(),
+                                                                        remaining->end());
+                    std::erase_if(found->second.pending, [&incompleteIds](const auto& entry)
+                                  { return !incompleteIds.contains(entry.first); });
+                }
+            }
             if (found->second.active.empty() && found->second.pending.empty())
                 m_accounts.erase(found);
         }
@@ -382,14 +457,6 @@ namespace javelin::app
             const bool affected = std::ranges::any_of(
                 requestedThreadIds, [&waiter = *iterator](const std::string& threadId)
                 { return std::ranges::contains(waiter.threadIds, threadId); });
-            if (error != nullptr && affected)
-            {
-                iterator->promise->addResult(*error);
-                iterator->promise->finish();
-                iterator = waiters.erase(iterator);
-                continue;
-            }
-
             auto incompleteResult = incompleteThreadIds(accountId, iterator->threadIds);
             if (const auto* databaseError =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&incompleteResult))
@@ -401,6 +468,13 @@ namespace javelin::app
             }
             if (!std::get<std::vector<std::string>>(incompleteResult).empty())
             {
+                if (error != nullptr && affected)
+                {
+                    iterator->promise->addResult(*error);
+                    iterator->promise->finish();
+                    iterator = waiters.erase(iterator);
+                    continue;
+                }
                 ++iterator;
                 continue;
             }

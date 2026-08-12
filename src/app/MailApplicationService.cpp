@@ -569,6 +569,15 @@ namespace javelin::app
             coordinator->networkBecameReachable();
             schedulePendingEmailMutationReplay(accountId);
             scheduleMailboxMutationReconciliation(accountId);
+            if (m_threadMaterializationCoordinator != nullptr)
+            {
+                if (const auto error =
+                        m_threadMaterializationCoordinator->restoreAccount(accountId))
+                    qWarning().noquote()
+                        << "Could not restore Thread materialization after network "
+                           "recovery"
+                        << QString::fromStdString(accountId) << error->message;
+            }
         }
         const auto listed = m_workScheduler.list();
         if (const auto* jobs = std::get_if<std::vector<WorkRecord>>(&listed))
@@ -850,9 +859,19 @@ namespace javelin::app
                                                               std::string mailboxId)
     {
         const auto configuredAccountId = accountId;
+        const auto observedMailboxId = mailboxId;
         const auto observationId =
             m_mailboxInterests.observe(std::move(accountId), std::move(mailboxId));
         applyAccountConfiguration(configuredAccountId);
+        if (m_threadMaterializationCoordinator != nullptr)
+        {
+            if (const auto error = m_threadMaterializationCoordinator->enqueueRetainedMailbox(
+                    configuredAccountId, observedMailboxId, WorkPriority::VisibleMaterialization))
+            {
+                qWarning().noquote() << "Could not enqueue retained mailbox Thread materialization"
+                                     << error->message;
+            }
+        }
         return MailboxObservation{*this, observationId};
     }
 
@@ -1125,7 +1144,8 @@ namespace javelin::app
                     {
                         if (const auto error =
                                 m_threadMaterializationCoordinator->enqueueMailboxWindow(
-                                    intent.accountId, queryKey, intent.offset, intent.limit))
+                                    intent.accountId, queryKey, intent.offset, intent.limit,
+                                    WorkPriority::VisibleMaterialization))
                             qWarning().noquote()
                                 << "Could not enqueue cached mailbox Thread materialization"
                                 << error->message;
@@ -1236,7 +1256,8 @@ namespace javelin::app
         if (m_threadMaterializationCoordinator != nullptr)
         {
             if (const auto error = m_threadMaterializationCoordinator->enqueueMailboxWindow(
-                    page.accountId, queryKey, page.offset, page.limit))
+                    page.accountId, queryKey, page.offset, page.limit,
+                    WorkPriority::VisibleMaterialization))
                 qWarning().noquote()
                     << "Could not enqueue mailbox Thread materialization" << error->message;
         }
@@ -1425,7 +1446,8 @@ namespace javelin::app
         if (m_threadMaterializationCoordinator != nullptr)
         {
             if (const auto error = m_threadMaterializationCoordinator->enqueueSearchWindow(
-                    page.accountId, queryKey, page.offset, page.limit))
+                    page.accountId, queryKey, page.offset, page.limit,
+                    WorkPriority::VisibleMaterialization))
                 qWarning().noquote()
                     << "Could not enqueue search Thread materialization" << error->message;
         }

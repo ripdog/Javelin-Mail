@@ -768,6 +768,38 @@ TEST_CASE("mailbox thread queries exclude members moved to another mailbox", "[j
     CHECK(std::holds_alternative<QString>(incomplete));
 }
 
+TEST_CASE("thread expansion snapshot rejects incomplete normalized membership cardinality",
+          "[jmap][cache][query][thread-materialization][recovery]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    auto representative = loadEmailFixture();
+    representative.id = "representative";
+    representative.threadId = "thread-1";
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(emails.replaceAll("account-1", {representative}).has_value());
+    javelin::jmap::cache::ThreadRepository threads{databaseContext.connection};
+    REQUIRE_FALSE(threads
+                      .upsertMany("account-1", {{.id = "thread-1",
+                                                 .emailIds = {"representative", "missing-child"}}})
+                      .has_value());
+    QSqlQuery corrupt{databaseContext.connection.database()};
+    REQUIRE(corrupt.exec(
+        QStringLiteral("DELETE FROM thread_email_members WHERE account_id='account-1' AND "
+                       "thread_id='thread-1' AND email_id='missing-child'")));
+
+    const auto snapshot = javelin::app::loadMessageListThreadMembers(
+        databaseContext.connection.database().databaseName(), "account-1", std::nullopt,
+        "thread-1");
+    REQUIRE(std::holds_alternative<javelin::app::MessageListThreadMembersSnapshot>(snapshot));
+    const auto& members = std::get<javelin::app::MessageListThreadMembersSnapshot>(snapshot);
+    CHECK_FALSE(members.complete);
+    CHECK(members.items.empty());
+}
+
 TEST_CASE("complete offline mailbox threads resolve and expand without normalized membership",
           "[jmap][cache][query][offline][thread-materialization]")
 {

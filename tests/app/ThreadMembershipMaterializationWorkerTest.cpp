@@ -342,9 +342,9 @@ TEST_CASE("Thread materialization hydrates explicit bounded child Email batches"
     CHECK(summary.completedEmailCount == 5);
     CHECK(summary.missingEmailIds.empty());
     REQUIRE(transport.batches.size() == 3);
-    CHECK(transport.batches[0] == std::vector<std::string>{"thread-1", "thread-2"});
-    CHECK(transport.batches[1] == std::vector<std::string>{"thread-3", "thread-4"});
-    CHECK(transport.batches[2] == std::vector<std::string>{"thread-5"});
+    CHECK(transport.batches[0] == std::vector<std::string>{"thread-3", "thread-5"});
+    CHECK(transport.batches[1] == std::vector<std::string>{"thread-1", "thread-4"});
+    CHECK(transport.batches[2] == std::vector<std::string>{"thread-2"});
     REQUIRE(transport.emailBatches.size() == 5);
     CHECK(std::ranges::all_of(transport.emailBatches,
                               [](const auto& batch) { return batch.size() == 1; }));
@@ -365,6 +365,42 @@ TEST_CASE("Thread materialization hydrates explicit bounded child Email batches"
     const auto& covered = std::get<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverage);
     REQUIRE(covered.has_value());
     CHECK(covered->childEmailsComplete);
+}
+
+TEST_CASE("current Thread membership cardinality mismatch is repaired from the server",
+          "[app][thread-materialization][recovery]")
+{
+    ensureApplication();
+    Fixture fixture;
+    fixture.seedRepresentative("thread-1");
+    javelin::jmap::cache::ThreadRepository threads{fixture.database};
+    REQUIRE_FALSE(threads
+                      .upsertMany("account-1",
+                                  {{.id = "thread-1",
+                                    .emailIds = {"representative-thread-1", "child-thread-1"}}},
+                                  "thread-state")
+                      .has_value());
+    QSqlQuery corrupt{fixture.database.database()};
+    REQUIRE(corrupt.exec(
+        QStringLiteral("DELETE FROM thread_email_members WHERE account_id='account-1' AND "
+                       "thread_id='thread-1' AND email_id='child-thread-1'")));
+
+    RecordingTransport transport;
+    ConnectionProvider connections;
+    javelin::app::ThreadMembershipMaterializationWorker worker{fixture.database, transport,
+                                                               connections};
+    const auto result = QCoro::waitFor(worker.materialize({
+        .accountId = "account-1",
+        .threadIds = {"thread-1"},
+    }));
+
+    REQUIRE(std::holds_alternative<javelin::app::ThreadMaterializationSummary>(result));
+    REQUIRE(transport.batches.size() == 1);
+    CHECK(transport.batches.front() == std::vector<std::string>{"thread-1"});
+    const auto coverage = threads.coverage("account-1", "thread-1");
+    const auto& repaired = std::get<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverage);
+    REQUIRE(repaired.has_value());
+    CHECK(repaired->childEmailsComplete);
 }
 
 TEST_CASE("represented Thread notFound remains a reconciliation failure",
@@ -498,6 +534,47 @@ TEST_CASE("Thread membership materialization rejects incomplete response account
         membership));
     CHECK_FALSE(std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(membership)
                     .has_value());
+}
+
+TEST_CASE("Thread batches shrink to the negotiated request byte limit",
+          "[app][thread-materialization]")
+{
+    ensureApplication();
+    Fixture fixture;
+    fixture.seedRepresentative("thread-1");
+    fixture.seedRepresentative("thread-2");
+    const auto oneRequest = javelin::jmap::api::threadGet({
+        .accountId = "account-1",
+        .ids = std::vector<std::string>{"thread-1"},
+        .idsReference = std::nullopt,
+        .properties = std::nullopt,
+    });
+    REQUIRE(oneRequest.has_value());
+    javelin::jmap::api::RequestBuilder builder;
+    builder.useCore().useMail();
+    static_cast<void>(builder.call(*oneRequest, "thread-membership"));
+    const auto encoded = javelin::jmap::api::serializeRequestEnvelope(builder.build());
+    REQUIRE(encoded.has_value());
+    auto session = Fixture::session();
+    session.capabilities.coreDetails->maxSizeRequest = encoded->size();
+    javelin::jmap::cache::SessionRepository sessions{fixture.database};
+    REQUIRE_FALSE(sessions.replace("account-1", session).has_value());
+
+    RecordingTransport transport;
+    transport.childCount = 0;
+    ConnectionProvider connections;
+    javelin::app::ThreadMembershipMaterializationWorker worker{fixture.database, transport,
+                                                               connections};
+    const auto result = QCoro::waitFor(worker.materialize({
+        .accountId = "account-1",
+        .threadIds = {"thread-1", "thread-2"},
+    }));
+
+    REQUIRE(std::holds_alternative<javelin::app::ThreadMaterializationSummary>(result));
+    REQUIRE(transport.batches.size() == 2);
+    CHECK(transport.batches[0].size() == 1);
+    CHECK(transport.batches[1].size() == 1);
+    CHECK(transport.emailBatches.empty());
 }
 
 TEST_CASE("child Email batches shrink to the negotiated request byte limit",

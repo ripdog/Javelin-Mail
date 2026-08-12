@@ -43,15 +43,21 @@ authoritative mailbox membership.
 Phase 4 is complete. A daemon-owned `ThreadMaterializationCoordinator` now derives targets from
 committed mailbox and search windows, coalesces duplicate Thread ids per account, exposes exact
 interactive ensure/priority escalation, and restores incomplete targets from durable window and
-Thread freshness state after restart. Its queue uses a scheduler-owned transient admission path, so
-prefetch obeys foreground quiet periods and account serialization without creating Task Center
-jobs. Start and terminal signals provide the narrow materialization lifecycle event; Phase 5 plugs
-the bounded `Thread/get` worker into the coordinator's execution seam.
+Thread freshness state after restart or network recovery. Pending priorities are tracked per Thread,
+so opening one conversation does not accidentally promote unrelated account prefetch. Visible-page
+prefetch uses the scheduler's visible-materialization lane: it waits for actual foreground network
+work to finish but does not inherit the generic post-foreground quiet delay. Observing a retained
+mailbox promotes its incomplete cached Thread coverage into the same lane, so cached tab activation
+does not depend on a new remote window request. Lower-priority restored and background prefetch still
+obey that quiet period and account serialization. Start and terminal
+signals provide the narrow materialization lifecycle event; Phase 5 plugs the bounded `Thread/get`
+worker into the coordinator's execution seam.
 
-Phase 5 is complete. The coordinator now owns a production membership worker that sorts and
-deduplicates explicit Thread targets, bounds every `Thread/get` by the cached session's negotiated
-`maxObjectsInGet`, and rejects any response whose `list` plus `notFound` does not exactly account for
-the requested ids. Each valid batch atomically replaces returned membership and marks represented
+Phase 5 is complete. The coordinator now owns a production membership worker that preserves target
+order while deduplicating explicit Thread targets, bounds every `Thread/get` by both the cached
+session's negotiated `maxObjectsInGet` and `maxSizeRequest`, and rejects any response whose `list`
+plus `notFound` does not exactly account for the requested ids. Each valid batch atomically replaces
+returned membership and marks represented
 `notFound` snapshots stale, then derives missing child Email ids from SQLite as the Phase 6
 checkpoint. Batch progress and post-commit signals are emitted without persistent Task Center jobs,
 and invalidation is limited to committed mailbox/search windows containing affected
@@ -615,8 +621,10 @@ interactive command / explicit foreground materialization
 ```
 
 A pending expansion or whole-thread command raises/ensures the same coordinator target rather than
-creating a second fetch path. Automatic prefetch pauses/yields according to the existing foreground
-network policy.
+creating a second fetch path. Visible-page automatic prefetch waits behind active foreground network
+work but starts immediately when that work finishes; it does not wait through the scheduler's
+generic background quiet period. Retained windows for an observed mailbox receive the same visible
+priority, while unobserved restored/background prefetch remains subject to that quiet period.
 
 The existing message-list-wide progress bar is the user-facing loading state. Do not overload
 `MessageListState::refreshInFlight` to mean child coverage: today query-window cache invalidation can
@@ -660,6 +668,8 @@ The implementation should make partial progress ordinary and recoverable:
   missing and the visible prefetch indicator stops for that failed attempt;
 - daemon restart: no per-page persistent job recovery is required. Active/watched/restored windows
   enqueue prefetch again, and the coordinator derives only missing membership/children from SQLite;
+- network recovery: represented Threads with incomplete coverage are re-derived from durable windows
+  so an offline failure cannot leave a visible expansion permanently stranded;
 - authentication/network unavailability: the page remains usable; interactive expansion/commands
   surface the normal actionable failure if their required coverage cannot be obtained;
 - membership race/notFound: mark Thread stale and reconcile rather than publishing false

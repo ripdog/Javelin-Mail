@@ -11,6 +11,7 @@
 #include <QStringList>
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -67,6 +68,9 @@ namespace javelin::app
                              std::size_t offset, std::size_t limit,
                              WorkPriority priority = WorkPriority::Freshness);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        enqueueRetainedMailbox(std::string_view accountId, std::string_view mailboxId,
+                               WorkPriority priority = WorkPriority::Freshness);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         enqueueSearchWindow(std::string_view accountId, std::string_view queryKey,
                             std::size_t offset, std::size_t limit,
                             WorkPriority priority = WorkPriority::Freshness);
@@ -88,11 +92,16 @@ namespace javelin::app
                                      QString errorText);
 
       private:
+        struct PendingThread
+        {
+            WorkPriority priority = WorkPriority::Freshness;
+            std::uint64_t sequence = 0;
+        };
+
         struct AccountQueue
         {
-            std::unordered_set<std::string> pending;
-            std::unordered_set<std::string> active;
-            WorkPriority priority = WorkPriority::Freshness;
+            std::unordered_map<std::string, PendingThread> pending;
+            std::unordered_map<std::string, WorkPriority> active;
         };
 
         struct Waiter
@@ -121,6 +130,7 @@ namespace javelin::app
         ThreadMaterializationWorker* m_worker = nullptr;
         std::unordered_map<std::string, AccountQueue> m_accounts;
         std::unordered_map<std::string, std::vector<Waiter>> m_waiters;
+        std::uint64_t m_nextPendingSequence = 1;
         bool m_pumpScheduled = false;
     };
 

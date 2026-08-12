@@ -12,6 +12,7 @@
 #include <QMimeData>
 #include <QString>
 #include <QStringList>
+#include <QTimer>
 #include <QtConcurrentRun>
 
 #include <algorithm>
@@ -739,7 +740,25 @@ namespace javelin::gui::messages
                 const auto* snapshot =
                     std::get_if<javelin::app::MessageListThreadMembersSnapshot>(&result);
                 if (snapshot == nullptr)
+                {
+                    constexpr std::uint8_t maximumLocalReadRetries = 2;
+                    if (loadedThread.memberReadFailureCount < maximumLocalReadRetries)
+                    {
+                        ++loadedThread.memberReadFailureCount;
+                        QTimer::singleShot(
+                            50, this,
+                            [this, generation, threadId]
+                            {
+                                if (generation != m_generation || !isThreadExpanded(threadId))
+                                    return;
+                                const auto retryThreadIndex = findThreadIndex(threadId);
+                                if (retryThreadIndex.has_value())
+                                    startThreadMembersLoad(*retryThreadIndex);
+                            });
+                    }
                     return;
+                }
+                loadedThread.memberReadFailureCount = 0;
                 if (!snapshot->complete)
                 {
                     if (isThreadExpanded(threadId))

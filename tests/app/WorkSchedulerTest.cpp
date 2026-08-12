@@ -218,6 +218,54 @@ TEST_CASE("work scheduler observes a quiet period after startup and foreground w
     CHECK_FALSE(scheduler.mayStartBackgroundNetwork());
 }
 
+TEST_CASE("visible materialization skips quiet delay but not foreground work",
+          "[app][work-scheduler][admission]")
+{
+    if (QCoreApplication::instance() == nullptr)
+    {
+        static int argc = 1;
+        static char name[] = "work-scheduler-visible-materialization-test";
+        static char* argv[]{name, nullptr};
+        static const auto application = std::make_unique<QCoreApplication>(argc, argv);
+        Q_UNUSED(application);
+    }
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("work-scheduler-visible-materialization-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+
+    javelin::app::WorkScheduler scheduler{connection, nullptr, std::chrono::seconds{5}};
+    CHECK_FALSE(
+        scheduler.admitTransient("freshness", "account-1", javelin::app::WorkPriority::Freshness)
+            .has_value());
+    const auto initialVisible = scheduler.admitTransient(
+        "visible-initial", "account-1", javelin::app::WorkPriority::VisibleMaterialization);
+    REQUIRE(initialVisible.has_value());
+    scheduler.release("visible-initial");
+
+    scheduler.beginForegroundWork();
+    CHECK_FALSE(scheduler
+                    .admitTransient("visible-during-foreground", "account-1",
+                                    javelin::app::WorkPriority::VisibleMaterialization)
+                    .has_value());
+    const auto interactive = scheduler.admitTransient("interactive", "account-1",
+                                                      javelin::app::WorkPriority::Interactive);
+    REQUIRE(interactive.has_value());
+    scheduler.release("interactive");
+    scheduler.endForegroundWork();
+
+    const auto visibleAfterForeground =
+        scheduler.admitTransient("visible-after-foreground", "account-1",
+                                 javelin::app::WorkPriority::VisibleMaterialization);
+    REQUIRE(visibleAfterForeground.has_value());
+    scheduler.release("visible-after-foreground");
+    CHECK_FALSE(scheduler.mayStartBackgroundNetwork());
+}
+
 TEST_CASE("work scheduler atomically restarts completed refresh work", "[app][work-scheduler]")
 {
     if (QCoreApplication::instance() == nullptr)

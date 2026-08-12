@@ -284,8 +284,7 @@ namespace javelin::app
             ++m_admissionMetrics.rejected;
             return std::nullopt;
         }
-        if (static_cast<int>(job.priority) < static_cast<int>(WorkPriority::Foreground) &&
-            !mayStartBackgroundNetwork())
+        if (!mayStartNetwork(job.priority))
         {
             ++m_admissionMetrics.rejected;
             return std::nullopt;
@@ -312,8 +311,7 @@ namespace javelin::app
         {
             if (candidate.status != WorkStatus::Queued || candidate.pauseRequested)
                 continue;
-            if (static_cast<int>(candidate.priority) < static_cast<int>(WorkPriority::Foreground) &&
-                !mayStartBackgroundNetwork())
+            if (!mayStartNetwork(candidate.priority))
                 continue;
             if (candidate.accountId.has_value() && m_activeAccounts.contains(*candidate.accountId))
                 continue;
@@ -356,8 +354,7 @@ namespace javelin::app
     {
         if (m_admissions.contains(jobId) || m_admissions.size() >= m_maxConcurrentAdmissions ||
             (accountId.has_value() && m_activeAccounts.contains(*accountId)) ||
-            (static_cast<int>(priority) < static_cast<int>(WorkPriority::Foreground) &&
-             !mayStartBackgroundNetwork()))
+            !mayStartNetwork(priority))
         {
             ++m_admissionMetrics.rejected;
             return std::nullopt;
@@ -376,9 +373,7 @@ namespace javelin::app
             {
                 if (candidate.status != WorkStatus::Queued || candidate.pauseRequested)
                     return false;
-                if (static_cast<int>(candidate.priority) <
-                        static_cast<int>(WorkPriority::Foreground) &&
-                    !mayStartBackgroundNetwork())
+                if (!mayStartNetwork(candidate.priority))
                     return false;
                 if (candidate.accountId.has_value() &&
                     m_activeAccounts.contains(*candidate.accountId))
@@ -485,6 +480,14 @@ namespace javelin::app
     bool WorkScheduler::mayStartBackgroundNetwork() const
     {
         return m_foregroundDepth == 0 && !m_quietTimer.isActive();
+    }
+
+    bool WorkScheduler::mayStartNetwork(const WorkPriority priority) const
+    {
+        if (priority == WorkPriority::VisibleMaterialization)
+            return m_foregroundDepth == 0;
+        return static_cast<int>(priority) >= static_cast<int>(WorkPriority::Foreground) ||
+               mayStartBackgroundNetwork();
     }
 
     QString WorkScheduler::summary() const

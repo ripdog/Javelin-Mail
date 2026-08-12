@@ -80,7 +80,8 @@ namespace javelin::app
         }
         QSqlQuery coverage{database};
         coverage.prepare(QStringLiteral(
-            "SELECT t.membership_freshness,t.member_count,COUNT(e.email_id) FROM threads t LEFT "
+            "SELECT t.membership_freshness,t.member_count,COUNT(m.email_id),COUNT(e.email_id) FROM "
+            "threads t LEFT "
             "JOIN thread_email_members m ON m.account_id=t.account_id AND "
             "m.thread_id=t.thread_id LEFT JOIN emails e ON e.account_id=m.account_id AND "
             "e.email_id=m.email_id AND e.thread_id=m.thread_id AND NOT EXISTS(SELECT 1 FROM "
@@ -97,7 +98,8 @@ namespace javelin::app
                 QStringLiteral("Read message-list Thread coverage"), coverage.lastError());
         }
         if (!coverage.next() || coverage.value(0).toString() != QStringLiteral("current") ||
-            coverage.value(1).toULongLong() != coverage.value(2).toULongLong())
+            coverage.value(1).toULongLong() != coverage.value(2).toULongLong() ||
+            coverage.value(1).toULongLong() != coverage.value(3).toULongLong())
         {
             if (!database.commit())
             {
