@@ -362,6 +362,25 @@ TEST_CASE("thread materialization coordinator restores incomplete durable window
     CHECK(coordinator.isMaterializing("account-1", "thread-1"));
 }
 
+TEST_CASE("retained Thread recovery after cache maintenance runs as visible work",
+          "[app][thread-materialization][restart][priority]")
+{
+    ensureApplication();
+    Fixture fixture;
+    javelin::app::WorkScheduler scheduler{fixture.database, nullptr, std::chrono::seconds{5}};
+    RecordingWorker worker;
+    javelin::app::ThreadMaterializationCoordinator coordinator{fixture.database, scheduler,
+                                                               &worker};
+
+    CHECK_FALSE(scheduler.mayStartBackgroundNetwork());
+    REQUIRE_FALSE(
+        coordinator.restoreAccount("account-1", javelin::app::WorkPriority::VisibleMaterialization)
+            .has_value());
+    waitFor([&] { return worker.targets.size() == 1; });
+    CHECK(worker.targets.front().priority == javelin::app::WorkPriority::VisibleMaterialization);
+    CHECK(worker.targets.front().threadIds == std::vector<std::string>{"thread-1", "thread-2"});
+}
+
 TEST_CASE("interactive Thread demand raises queued prefetch through foreground work",
           "[app][thread-materialization][priority]")
 {

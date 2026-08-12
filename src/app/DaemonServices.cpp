@@ -211,7 +211,16 @@ namespace javelin::app
             location.databasePath, location.vaultRootPath, *m_mailboxMaintenanceRegistry,
             *m_mailService, *m_workScheduler,
             [this](const std::string_view accountId, const std::string_view mailboxId)
-            { m_fullMailSyncService->requestMailboxResync(accountId, mailboxId); });
+            { m_fullMailSyncService->requestMailboxResync(accountId, mailboxId); },
+            [this](const std::string_view accountId)
+            {
+                if (const auto error = m_threadMaterializationCoordinator->restoreAccount(
+                        accountId, WorkPriority::VisibleMaterialization))
+                    qWarning().noquote()
+                        << "Could not recover Thread materialization after mailbox "
+                           "cache clear"
+                        << QString::fromStdString(std::string{accountId}) << error->message;
+            });
         m_mailCommandService = std::make_unique<MailCommandService>(*m_mailService);
         m_sieveCommandService = std::make_unique<SieveCommandService>(*m_mailService);
         m_identityCommandService = std::make_unique<IdentityCommandService>(

@@ -394,14 +394,23 @@ namespace javelin::app
                                  command.accountId, command.mailboxId);
             if (const auto* error = std::get_if<DatabaseError>(&windows))
                 return *error;
-            auto memberships = count(
-                database,
-                QStringLiteral("SELECT COUNT(*) FROM email_mailboxes em WHERE "
-                               "em.account_id=:account AND em.mailbox_id=:mailbox AND NOT EXISTS("
-                               "SELECT 1 FROM mutation_journal j WHERE j.account_id=em.account_id "
-                               "AND j.data_type='Email' AND j.object_id=em.email_id AND j.status "
-                               "IN ('pending','in_flight','accepted','unknown'))"),
-                command.accountId, command.mailboxId);
+            auto memberships =
+                count(database,
+                      QStringLiteral(
+                          "SELECT COUNT(*) FROM email_mailboxes em WHERE "
+                          "em.account_id=:account AND em.mailbox_id=:mailbox AND NOT EXISTS("
+                          "SELECT 1 FROM mutation_journal j WHERE j.account_id=em.account_id "
+                          "AND j.data_type='Email' AND j.object_id=em.email_id AND j.status "
+                          "IN ('pending','in_flight','accepted','unknown')) AND (NOT EXISTS("
+                          "SELECT 1 FROM emails target_email WHERE "
+                          "target_email.account_id=em.account_id AND "
+                          "target_email.email_id=em.email_id AND target_email.thread_id IS NOT "
+                          "NULL) OR EXISTS(SELECT 1 FROM emails target_email JOIN "
+                          "mailbox_cache_clear_threads target ON "
+                          "target.thread_id=target_email.thread_id WHERE "
+                          "target_email.account_id=em.account_id AND "
+                          "target_email.email_id=em.email_id))"),
+                      command.accountId, command.mailboxId);
             if (const auto* error = std::get_if<DatabaseError>(&memberships))
                 return *error;
             auto offlineMemberships =
@@ -447,7 +456,15 @@ namespace javelin::app
                         "em.mailbox_id=:mailbox AND NOT EXISTS(SELECT 1 FROM mutation_journal j "
                         "WHERE j.account_id=em.account_id AND j.data_type='Email' AND "
                         "j.object_id=em.email_id AND j.status IN "
-                        "('pending','in_flight','accepted','unknown'))"),
+                        "('pending','in_flight','accepted','unknown')) AND (NOT EXISTS(SELECT 1 "
+                        "FROM "
+                        "emails target_email WHERE target_email.account_id=em.account_id AND "
+                        "target_email.email_id=em.email_id AND target_email.thread_id IS NOT NULL) "
+                        "OR EXISTS(SELECT 1 FROM emails target_email JOIN "
+                        "mailbox_cache_clear_threads target ON "
+                        "target.thread_id=target_email.thread_id "
+                        "WHERE target_email.account_id=em.account_id AND "
+                        "target_email.email_id=em.email_id))"),
                     command.accountId, command.mailboxId))
                 return *error;
             if (resetOffline)
@@ -788,11 +805,12 @@ namespace javelin::app
         QString databasePath, QString vaultPath, MailboxMaintenanceRegistry& registry,
         MailCacheChangePublisher& cacheChangePublisher, WorkScheduler& workScheduler,
         std::function<void(std::string_view, std::string_view)> requestOfflineResync,
-        QObject* parent)
+        std::function<void(std::string_view)> requestThreadRecovery, QObject* parent)
         : QObject(parent), m_databasePath(std::move(databasePath)),
           m_vaultPath(std::move(vaultPath)), m_registry(registry),
           m_cacheChangePublisher(cacheChangePublisher), m_workScheduler(workScheduler),
-          m_requestOfflineResync(std::move(requestOfflineResync))
+          m_requestOfflineResync(std::move(requestOfflineResync)),
+          m_requestThreadRecovery(std::move(requestThreadRecovery))
     {
         m_workerPool.setMaxThreadCount(1);
         m_workerPool.setExpiryTimeout(-1);
@@ -941,6 +959,8 @@ namespace javelin::app
             .optimisticProjection = false,
             .contactsChanged = false,
         });
+        if (summary.kind != DeveloperMailboxCacheKind::Bodies && m_requestThreadRecovery)
+            m_requestThreadRecovery(command.accountId.toStdString());
         if (command.offlinePolicy == DeveloperOfflineClearPolicy::Preserve &&
             m_requestOfflineResync)
         {

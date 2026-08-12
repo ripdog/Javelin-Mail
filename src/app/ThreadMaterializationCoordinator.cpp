@@ -174,7 +174,8 @@ namespace javelin::app
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
-    ThreadMaterializationCoordinator::restoreAccount(const std::string_view accountId)
+    ThreadMaterializationCoordinator::restoreAccount(const std::string_view accountId,
+                                                     const WorkPriority priority)
     {
         QSqlQuery query{m_databaseConnection.database()};
         query.prepare(QStringLiteral(
@@ -198,7 +199,7 @@ namespace javelin::app
         std::vector<std::string> threadIds;
         while (query.next())
             threadIds.push_back(query.value(0).toString().toStdString());
-        return ensureThreads(std::string{accountId}, threadIds, WorkPriority::Freshness);
+        return ensureThreads(std::string{accountId}, threadIds, priority);
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>

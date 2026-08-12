@@ -75,7 +75,7 @@ namespace javelin::app
                             std::size_t offset, std::size_t limit,
                             WorkPriority priority = WorkPriority::Freshness);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        restoreAccount(std::string_view accountId);
+        restoreAccount(std::string_view accountId, WorkPriority priority = WorkPriority::Freshness);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         ensureThreads(std::string accountId, const std::vector<std::string>& threadIds,
                       WorkPriority priority = WorkPriority::Interactive);

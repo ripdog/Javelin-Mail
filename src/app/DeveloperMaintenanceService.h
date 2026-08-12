@@ -24,6 +24,7 @@ namespace javelin::app
             QString databasePath, QString vaultPath, MailboxMaintenanceRegistry& registry,
             MailCacheChangePublisher& cacheChangePublisher, WorkScheduler& workScheduler,
             std::function<void(std::string_view, std::string_view)> requestOfflineResync = {},
+            std::function<void(std::string_view)> requestThreadRecovery = {},
             QObject* parent = nullptr);
         ~DeveloperMaintenanceService() override;
 
@@ -42,6 +43,7 @@ namespace javelin::app
         MailCacheChangePublisher& m_cacheChangePublisher;
         WorkScheduler& m_workScheduler;
         std::function<void(std::string_view, std::string_view)> m_requestOfflineResync;
+        std::function<void(std::string_view)> m_requestThreadRecovery;
         QThreadPool m_workerPool;
         bool m_pumpScheduled = false;
         bool m_running = false;

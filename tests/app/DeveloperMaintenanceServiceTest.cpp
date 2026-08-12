@@ -4,6 +4,7 @@
 #include "app/WorkScheduler.h"
 #include "jmap/cache/Database.h"
 #include "jmap/cache/MailVault.h"
+#include "jmap/cache/QueryService.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 
 #include <QCoroTask>
@@ -274,6 +275,7 @@ TEST_CASE("developer SQLite clear invalidates Thread cache and preserves optimis
     javelin::app::MailboxMaintenanceRegistry registry;
     WorkScheduler scheduler{context.connection, nullptr, std::chrono::milliseconds{0}};
     std::optional<std::pair<std::string, std::string>> resync;
+    std::optional<std::string> threadRecovery;
     DeveloperMaintenanceService maintenance{
         context.directory.filePath(QStringLiteral("cache.sqlite3")),
         javelin::jmap::cache::MailVault::forDatabase(context.connection).rootPath(),
@@ -281,7 +283,9 @@ TEST_CASE("developer SQLite clear invalidates Thread cache and preserves optimis
         publisher,
         scheduler,
         [&resync](const std::string_view accountId, const std::string_view mailboxId)
-        { resync = std::pair{std::string{accountId}, std::string{mailboxId}}; }};
+        { resync = std::pair{std::string{accountId}, std::string{mailboxId}}; },
+        [&threadRecovery](const std::string_view accountId)
+        { threadRecovery = std::string{accountId}; }};
 
     const auto result = QCoro::waitFor(maintenance.clearMailboxCache({
         .accountId = QStringLiteral("account-1"),
@@ -381,6 +385,90 @@ TEST_CASE("developer SQLite clear invalidates Thread cache and preserves optimis
     REQUIRE(resync.has_value());
     CHECK(resync->first == "account-1");
     CHECK(resync->second == "inbox");
+    CHECK(threadRecovery == std::optional<std::string>{"account-1"});
+}
+
+TEST_CASE("mailbox clear preserves complete optimistic Thread membership",
+          "[app][developer-maintenance][sqlite][thread-materialization]")
+{
+    ensureApplication();
+    auto context = database();
+    seedBase(context.connection);
+    auto& db = context.connection.database();
+
+    seedEmail(db, QStringLiteral("optimistic-parent"), QStringLiteral("blob-parent"),
+              QStringLiteral("inbox"));
+    seedEmail(db, QStringLiteral("optimistic-child"), QStringLiteral("blob-child"),
+              QStringLiteral("inbox"));
+    execute(db, QStringLiteral("UPDATE emails SET thread_id='optimistic-thread' WHERE "
+                               "account_id='account-1' AND email_id IN "
+                               "('optimistic-parent','optimistic-child')"));
+    execute(db, QStringLiteral("INSERT INTO threads(account_id,thread_id,state,"
+                               "membership_freshness,member_count) VALUES"
+                               "('account-1','optimistic-thread','thread-state','current',2)"));
+    execute(db,
+            QStringLiteral(
+                "INSERT INTO thread_email_members(account_id,thread_id,position,email_id) VALUES"
+                "('account-1','optimistic-thread',0,'optimistic-parent'),"
+                "('account-1','optimistic-thread',1,'optimistic-child')"));
+    execute(db,
+            QStringLiteral("INSERT INTO mailbox_query_windows(account_id,mailbox_id,query_key,"
+                           "requested_offset,requested_limit,position,returned_limit,total,"
+                           "query_state) VALUES('account-1','inbox','inbox-query',0,100,0,100,1,"
+                           "'q1')"));
+    execute(db, QStringLiteral("INSERT INTO mailbox_query_window_items(account_id,query_key,"
+                               "requested_offset,requested_limit,position,email_id) VALUES"
+                               "('account-1','inbox-query',0,100,0,'optimistic-parent')"));
+    execute(db,
+            QStringLiteral("INSERT INTO mutation_journal(mutation_id,account_id,data_type,"
+                           "object_id,mutation_kind,status,payload_json,sequence) VALUES"
+                           "('mutation-1','account-1','Email','optimistic-parent','email_patch',"
+                           "'pending','{}',1)"));
+
+    RecordingPublisher publisher;
+    javelin::app::MailboxMaintenanceRegistry registry;
+    WorkScheduler scheduler{context.connection, nullptr, std::chrono::milliseconds{0}};
+    DeveloperMaintenanceService maintenance{
+        context.directory.filePath(QStringLiteral("cache.sqlite3")),
+        javelin::jmap::cache::MailVault::forDatabase(context.connection).rootPath(),
+        registry,
+        publisher,
+        scheduler,
+        {}};
+
+    const auto result = QCoro::waitFor(maintenance.clearMailboxCache({
+        .accountId = QStringLiteral("account-1"),
+        .mailboxId = QStringLiteral("inbox"),
+        .kind = DeveloperMailboxCacheKind::Sqlite,
+        .offlinePolicy = DeveloperOfflineClearPolicy::Disable,
+    }));
+    const auto completed = waitForTerminalJob(scheduler, queuedJobId(result));
+    REQUIRE(completed.status == WorkStatus::Complete);
+
+    CHECK(scalar(db, QStringLiteral("SELECT COUNT(*) FROM email_mailboxes WHERE "
+                                    "account_id='account-1' AND mailbox_id='inbox' AND email_id IN "
+                                    "('optimistic-parent','optimistic-child')")) == 2);
+    CHECK(textScalar(db, QStringLiteral("SELECT membership_freshness FROM threads WHERE "
+                                        "account_id='account-1' AND "
+                                        "thread_id='optimistic-thread'")) ==
+          QStringLiteral("current"));
+    CHECK(scalar(db, QStringLiteral("SELECT member_count FROM threads WHERE account_id='account-1' "
+                                    "AND thread_id='optimistic-thread'")) == 2);
+    CHECK(scalar(db, QStringLiteral("SELECT COUNT(*) FROM thread_email_members WHERE "
+                                    "account_id='account-1' AND thread_id='optimistic-thread'")) ==
+          2);
+    CHECK(scalar(db, QStringLiteral("SELECT COUNT(*) FROM email_summary_refresh_requests WHERE "
+                                    "account_id='account-1' AND email_id IN "
+                                    "('optimistic-parent','optimistic-child')")) == 0);
+
+    javelin::jmap::cache::QueryService queries{context.connection};
+    const auto members =
+        queries.listMailboxThreadMessages("account-1", "inbox", "optimistic-thread");
+    const auto* items = std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&members);
+    REQUIRE(items != nullptr);
+    REQUIRE(items->size() == 2);
+    CHECK((*items)[0].emailId == "optimistic-parent");
+    CHECK((*items)[1].emailId == "optimistic-child");
 }
 
 TEST_CASE("combined mailbox clear removes bodies before cached mailbox state",
