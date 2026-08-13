@@ -1,4 +1,5 @@
 #include "gui/settings/PreferencesDialog.h"
+#include "gui/settings/PreferencesPages.h"
 
 #include "app/AccountApplicationPorts.h"
 #include "app/DeveloperDiagnostics.h"
@@ -276,290 +277,64 @@ namespace javelin::gui::settings
         setWindowTitle(i18n("Preferences"));
         resize(760, 420);
 
-        auto* accountsPage = new QWidget(this);
-        auto* accountsPageLayout = new QVBoxLayout(accountsPage);
-        auto* splitter = new QSplitter(accountsPage);
-        auto* accountPanel = new QWidget(splitter);
-        auto* accountLayout = new QVBoxLayout(accountPanel);
-        accountLayout->addWidget(new QLabel(i18n("Accounts"), accountPanel));
-        m_accountList = new QListWidget(accountPanel);
-        accountLayout->addWidget(m_accountList, 1);
-
-        auto* accountButtons = new QHBoxLayout();
-        auto* addButton = new QPushButton(i18nc("@action:button", "Add"), accountPanel);
-        m_removeButton = new QPushButton(i18nc("@action:button", "Remove"), accountPanel);
-        accountButtons->addWidget(addButton);
-        accountButtons->addWidget(m_removeButton);
-        accountLayout->addLayout(accountButtons);
-
-        auto* detailsPanel = new QWidget(splitter);
-        auto* detailsLayout = new QVBoxLayout(detailsPanel);
-        auto* formLayout = new QFormLayout();
-        m_displayNameEdit = new QLineEdit(detailsPanel);
-        m_displayNameEdit->setPlaceholderText(i18nc("@info:placeholder account name", "Personal"));
-        m_loginEmailLabel = new QLabel(detailsPanel);
-        m_loginEmailLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        m_sessionUrlLabel = new QLabel(detailsPanel);
-        m_sessionUrlLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        m_sessionUrlLabel->setWordWrap(true);
-        formLayout->addRow(i18n("Display Name"), m_displayNameEdit);
-        formLayout->addRow(i18n("Email"), m_loginEmailLabel);
-        formLayout->addRow(i18n("Mail Server"), m_sessionUrlLabel);
-        detailsLayout->addLayout(formLayout);
-        auto* managedDetails =
-            new QLabel(i18n("Sign-in and server details are managed automatically."), detailsPanel);
-        managedDetails->setWordWrap(true);
-        managedDetails->setForegroundRole(QPalette::PlaceholderText);
-        detailsLayout->addWidget(managedDetails);
-        m_reauthenticateButton = new QPushButton(i18n("Sign In Again"), detailsPanel);
-        detailsLayout->addWidget(m_reauthenticateButton);
-        detailsLayout->addStretch();
-
-        splitter->addWidget(accountPanel);
-        splitter->addWidget(detailsPanel);
-        splitter->setStretchFactor(1, 1);
-        accountsPageLayout->addWidget(splitter, 1);
+        auto* accountsPage = new AccountsPage(this);
+        m_accountList = accountsPage->accountList();
+        auto* addButton = accountsPage->addButton();
+        m_removeButton = accountsPage->removeButton();
+        m_reauthenticateButton = accountsPage->reauthenticateButton();
+        m_displayNameEdit = accountsPage->displayNameEdit();
+        m_loginEmailLabel = accountsPage->loginEmailLabel();
+        m_sessionUrlLabel = accountsPage->sessionUrlLabel();
         addPage(accountsPage, i18n("Accounts"), QStringLiteral("user-identity"), QString{}, false);
 
-        auto* mailboxSyncPage = new QWidget(this);
-        auto* mailboxSyncLayout = new QVBoxLayout(mailboxSyncPage);
-        auto* mailboxSyncDescription = new QLabel(
-            i18n("Choose which mailboxes are kept completely offline, show new-mail "
-                 "notifications, or are hidden from the normal mailbox list. Hidden mailboxes "
-                 "cannot be kept offline or show notifications; enabling either option shows "
-                 "the mailbox again."),
-            mailboxSyncPage);
-        mailboxSyncDescription->setWordWrap(true);
-        mailboxSyncDescription->setSizePolicy(
-            QSizePolicy{QSizePolicy::Preferred, QSizePolicy::Minimum});
-        mailboxSyncLayout->addWidget(mailboxSyncDescription);
-        m_mailboxSyncAccount = new QComboBox(mailboxSyncPage);
-        mailboxSyncLayout->addWidget(m_mailboxSyncAccount);
-        m_mailboxSyncList = new javelin::gui::mailboxes::MailboxTreeView(mailboxSyncPage);
-        m_mailboxSyncModel = new javelin::gui::mailboxes::MailboxTreeModel(
-            m_accountReader, m_mailboxReader,
-            {.accountId = std::string{},
-             .showAccount = false,
-             .checkable = false,
-             .checkedMailboxIds = {},
-             .preferenceColumns = true,
-             .includeHidden = true,
-             .accountDisplayName = [this](const QStringView accountId)
-             { return m_settings.accountForCachedId(accountId).displayName; }},
-            m_mailboxSyncList);
-        m_mailboxSyncList->setModel(m_mailboxSyncModel);
-        m_mailboxSyncList->setHeaderHidden(false);
-        m_mailboxSyncList->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-        for (int column = 1; column < m_mailboxSyncModel->columnCount(); ++column)
-            m_mailboxSyncList->header()->setSectionResizeMode(column,
-                                                              QHeaderView::ResizeToContents);
-        m_mailboxSyncList->setSizePolicy(QSizePolicy{QSizePolicy::Ignored, QSizePolicy::Expanding});
-        mailboxSyncLayout->addWidget(m_mailboxSyncList, 1);
+        auto* mailboxSyncPage =
+            new MailboxSyncPage(m_settings, m_accountReader, m_mailboxReader, this);
+        m_mailboxSyncAccount = mailboxSyncPage->accountCombo();
+        m_mailboxSyncList = mailboxSyncPage->treeView();
+        m_mailboxSyncModel = mailboxSyncPage->model();
         addPage(mailboxSyncPage, i18n("Mailboxes"), QStringLiteral("view-refresh"), QString{},
                 false);
 
-        auto* remoteContentPage = new QWidget(this);
-        auto* remoteContentLayout = new QVBoxLayout(remoteContentPage);
-        remoteContentLayout->addWidget(
-            new QLabel(i18n("Allowed Remote Content"), remoteContentPage));
-        m_remoteContentList = new QListWidget(remoteContentPage);
-        m_remoteContentList->setSelectionMode(QAbstractItemView::ExtendedSelection);
-        remoteContentLayout->addWidget(m_remoteContentList, 1);
-        auto* remoteContentButtons = new QHBoxLayout();
-        remoteContentButtons->addStretch(1);
-        m_removeRemoteContentButton =
-            new QPushButton(i18nc("@action:button", "Remove"), remoteContentPage);
-        remoteContentButtons->addWidget(m_removeRemoteContentButton);
-        remoteContentLayout->addLayout(remoteContentButtons);
+        auto* remoteContentPage = new RemoteContentPage(this);
+        m_remoteContentList = remoteContentPage->permitList();
+        m_removeRemoteContentButton = remoteContentPage->removeButton();
         addPage(remoteContentPage, i18n("Remote Content"), QStringLiteral("network-wireless-on"),
                 QString{}, false);
 
-        auto* appearancePage = new QWidget(this);
-        auto* appearanceLayout = new QFormLayout(appearancePage);
-        m_messageColorMode = new QComboBox(appearancePage);
-        m_messageColorMode->addItem(
-            i18n("Follow application"),
-            static_cast<int>(javelin::gui::messageview::MessageColorMode::FollowApplication));
-        m_messageColorMode->addItem(
-            i18n("Always use original colours"),
-            static_cast<int>(javelin::gui::messageview::MessageColorMode::Light));
-        m_messageColorMode->addItem(
-            i18n("Always use dark colours"),
-            static_cast<int>(javelin::gui::messageview::MessageColorMode::Dark));
-        const int messageColorModeIndex =
-            m_messageColorMode->findData(static_cast<int>(m_messageAppearanceSettings.colorMode));
-        m_messageColorMode->setCurrentIndex(messageColorModeIndex);
-        appearanceLayout->addRow(i18n("HTML message colours"), m_messageColorMode);
+        auto* appearancePage = new AppearancePage(m_messageAppearanceSettings, this);
+        m_messageColorMode = appearancePage->messageColorMode();
         addPage(appearancePage, i18n("Appearance"), QStringLiteral("preferences-desktop-theme"),
                 QString{}, false);
 
-        auto* translationPage = new QWidget(this);
-        auto* translationLayout = new QVBoxLayout(translationPage);
-        auto* providerForm = new QFormLayout();
-        m_translationProvider = new QComboBox(translationPage);
-        m_translationProvider->addItem(
-            i18nc("@item translation provider", "Disabled"),
-            static_cast<int>(javelin::gui::translation::TranslationProvider::Disabled));
-        m_translationProvider->addItem(
-            i18nc("@item translation provider", "Google Translate"),
-            static_cast<int>(javelin::gui::translation::TranslationProvider::Google));
-        if (m_translationService.localProviderAvailable())
-        {
-            m_translationProvider->addItem(
-                i18nc("@item translation provider", "Local (Firefox models)"),
-                static_cast<int>(javelin::gui::translation::TranslationProvider::Local));
-        }
-        const auto providerIndex =
-            m_translationProvider->findData(static_cast<int>(m_translationSettings.provider));
-        m_translationProvider->setCurrentIndex(providerIndex >= 0 ? providerIndex : 1);
-        providerForm->addRow(i18n("Translation provider"), m_translationProvider);
-        translationLayout->addLayout(providerForm);
-
-        m_translationControls = new QWidget(translationPage);
-        auto* translationControlsLayout = new QVBoxLayout(m_translationControls);
-        translationControlsLayout->setContentsMargins(0, 0, 0, 0);
-        auto* translationForm = new QFormLayout();
-        m_translationTargetLanguage = new QComboBox(m_translationControls);
-        m_translationTargetLanguage->setEditable(true);
-        m_translationTargetLanguage->addItem(i18n("English"), QStringLiteral("en"));
-        m_translationTargetLanguage->addItem(i18n("Chinese (Simplified)"),
-                                             QStringLiteral("zh-Hans"));
-        m_translationTargetLanguage->addItem(i18n("Chinese (Traditional)"),
-                                             QStringLiteral("zh-Hant"));
-        m_translationTargetLanguage->addItem(i18n("French"), QStringLiteral("fr"));
-        m_translationTargetLanguage->addItem(i18n("German"), QStringLiteral("de"));
-        m_translationTargetLanguage->addItem(i18n("Italian"), QStringLiteral("it"));
-        m_translationTargetLanguage->addItem(i18n("Japanese"), QStringLiteral("ja"));
-        m_translationTargetLanguage->addItem(i18n("Korean"), QStringLiteral("ko"));
-        m_translationTargetLanguage->addItem(i18n("Portuguese"), QStringLiteral("pt"));
-        m_translationTargetLanguage->addItem(i18n("Russian"), QStringLiteral("ru"));
-        m_translationTargetLanguage->addItem(i18n("Spanish"), QStringLiteral("es"));
-        const int targetLanguageIndex =
-            m_translationTargetLanguage->findData(m_translationSettings.targetLanguage);
-        if (targetLanguageIndex >= 0)
-        {
-            m_translationTargetLanguage->setCurrentIndex(targetLanguageIndex);
-        }
-        else
-        {
-            m_translationTargetLanguage->setEditText(m_translationSettings.targetLanguage);
-        }
-        translationForm->addRow(i18n("Target language"), m_translationTargetLanguage);
-
-        translationControlsLayout->addLayout(translationForm);
-
-        m_googleTranslationControls = new QWidget(m_translationControls);
-        auto* googleLayout = new QVBoxLayout(m_googleTranslationControls);
-        googleLayout->setContentsMargins(0, 0, 0, 0);
-        auto* googleDescription = new QLabel(
-            i18n("Translated message text is sent to Google Translate. Leave the API key empty "
-                 "to use Javelin's built-in default key."),
-            m_googleTranslationControls);
-        googleDescription->setWordWrap(true);
-        googleLayout->addWidget(googleDescription);
-        auto* googleForm = new QFormLayout();
-        m_translationApiKeyEdit = new QLineEdit(m_googleTranslationControls);
-        m_translationApiKeyEdit->setEchoMode(QLineEdit::Password);
-        m_translationApiKeyEdit->setPlaceholderText(i18n("Use built-in default key"));
-        m_translationApiKeyEdit->setText(m_translationSettings.apiKeyOverride);
-        googleForm->addRow(i18n("API key override"), m_translationApiKeyEdit);
-        googleLayout->addLayout(googleForm);
-        translationControlsLayout->addWidget(m_googleTranslationControls);
-
-        m_localTranslationControls = new QWidget(m_translationControls);
-        auto* localLayout = new QVBoxLayout(m_localTranslationControls);
-        localLayout->setContentsMargins(0, 0, 0, 0);
-        auto* localDescription = new QLabel(
-            i18n("Local translation runs only in the Javelin GUI. Firefox-compatible models are "
-                 "downloaded on demand and remain on this computer."),
-            m_localTranslationControls);
-        localDescription->setWordWrap(true);
-        localLayout->addWidget(localDescription);
-        auto* localRouteLayout = new QHBoxLayout();
-        m_localTranslationSource = new QComboBox(m_localTranslationControls);
-        m_localTranslationTarget = new QComboBox(m_localTranslationControls);
-        for (const auto& language : m_translationService.localSourceLanguages())
-        {
-            m_localTranslationSource->addItem(language, language);
-        }
-        auto* localSourceLabel = new QLabel(i18nc("@label translation source language", "From"),
-                                            m_localTranslationControls);
-        localSourceLabel->setBuddy(m_localTranslationSource);
-        localRouteLayout->addWidget(localSourceLabel);
-        localRouteLayout->addWidget(m_localTranslationSource, 1);
-        auto* localTargetLabel = new QLabel(i18nc("@label translation target language", "to"),
-                                            m_localTranslationControls);
-        localTargetLabel->setBuddy(m_localTranslationTarget);
-        localRouteLayout->addWidget(localTargetLabel);
-        localRouteLayout->addWidget(m_localTranslationTarget, 1);
-        m_downloadLocalModelsButton =
-            new QPushButton(i18n("Download models"), m_localTranslationControls);
-        localRouteLayout->addWidget(m_downloadLocalModelsButton);
-        localLayout->addLayout(localRouteLayout);
-        m_localModelStatus = new QLabel(m_localTranslationControls);
-        m_localModelStatus->setWordWrap(true);
-        localLayout->addWidget(m_localModelStatus);
-        auto* installedModelsLabel =
-            new QLabel(i18n("Downloaded model directions"), m_localTranslationControls);
-        m_installedLocalModels = new QListWidget(m_localTranslationControls);
-        installedModelsLabel->setBuddy(m_installedLocalModels);
-        m_installedLocalModels->setSelectionMode(QAbstractItemView::ExtendedSelection);
-        localLayout->addWidget(installedModelsLabel);
-        localLayout->addWidget(m_installedLocalModels);
-        auto* localButtons = new QHBoxLayout();
-        localButtons->addStretch(1);
-        m_removeLocalModelsButton =
-            new QPushButton(i18nc("@action:button", "Remove"), m_localTranslationControls);
-        localButtons->addWidget(m_removeLocalModelsButton);
-        localLayout->addLayout(localButtons);
-        translationControlsLayout->addWidget(m_localTranslationControls);
-
-        auto* autoTranslateLabel =
-            new QLabel(i18n("Auto-Translate Entries"), m_translationControls);
-        m_autoTranslateList = new QListWidget(m_translationControls);
-        autoTranslateLabel->setBuddy(m_autoTranslateList);
-        m_autoTranslateList->setSelectionMode(QAbstractItemView::ExtendedSelection);
-        translationControlsLayout->addWidget(autoTranslateLabel);
-        translationControlsLayout->addWidget(m_autoTranslateList, 1);
-        auto* translationButtons = new QHBoxLayout();
-        translationButtons->addStretch(1);
-        m_removeAutoTranslateButton =
-            new QPushButton(i18nc("@action:button", "Remove"), m_translationControls);
-        translationButtons->addWidget(m_removeAutoTranslateButton);
-        translationControlsLayout->addLayout(translationButtons);
-        translationLayout->addWidget(m_translationControls, 1);
+        auto* translationPage =
+            new TranslationPage(m_translationService, m_translationSettings, this);
+        m_translationProvider = translationPage->provider();
+        m_translationControls = translationPage->translationControls();
+        m_translationTargetLanguage = translationPage->targetLanguage();
+        m_googleTranslationControls = translationPage->googleControls();
+        m_translationApiKeyEdit = translationPage->apiKeyEdit();
+        m_localTranslationControls = translationPage->localControls();
+        m_localTranslationSource = translationPage->localSource();
+        m_localTranslationTarget = translationPage->localTarget();
+        m_downloadLocalModelsButton = translationPage->downloadLocalModelsButton();
+        m_installedLocalModels = translationPage->installedLocalModels();
+        m_removeLocalModelsButton = translationPage->removeLocalModelsButton();
+        m_localModelStatus = translationPage->localModelStatus();
+        m_autoTranslateList = translationPage->autoTranslateList();
+        m_removeAutoTranslateButton = translationPage->removeAutoTranslateButton();
         addPage(translationPage, i18n("Translation"), QStringLiteral("preferences-desktop-locale"),
                 QString{}, false);
 
-        auto* attachmentsPage = new QWidget(this);
-        auto* attachmentsLayout = new QVBoxLayout(attachmentsPage);
-        m_askAttachmentDirectoryRadio =
-            new QRadioButton(i18n("Always ask where to save attachments"), attachmentsPage);
-        m_saveAttachmentDirectoryRadio =
-            new QRadioButton(i18n("Always save attachments to:"), attachmentsPage);
-        attachmentsLayout->addWidget(m_askAttachmentDirectoryRadio);
-        attachmentsLayout->addWidget(m_saveAttachmentDirectoryRadio);
-        auto* attachmentDirectoryLayout = new QHBoxLayout();
-        m_attachmentDirectoryEdit = new QLineEdit(attachmentsPage);
-        m_attachmentDirectoryEdit->setReadOnly(true);
-        m_attachmentDirectoryButton = new QPushButton(i18n("Choose..."), attachmentsPage);
-        attachmentDirectoryLayout->addWidget(m_attachmentDirectoryEdit, 1);
-        attachmentDirectoryLayout->addWidget(m_attachmentDirectoryButton);
-        attachmentsLayout->addLayout(attachmentDirectoryLayout);
-        attachmentsLayout->addStretch(1);
-        m_askAttachmentDirectoryRadio->setChecked(m_attachmentSaveSettings.alwaysAsk);
-        m_saveAttachmentDirectoryRadio->setChecked(!m_attachmentSaveSettings.alwaysAsk);
-        m_attachmentDirectoryEdit->setText(m_attachmentSaveSettings.directory);
+        auto* attachmentsPage = new AttachmentsPage(m_attachmentSaveSettings, this);
+        m_askAttachmentDirectoryRadio = attachmentsPage->askDirectoryRadio();
+        m_saveAttachmentDirectoryRadio = attachmentsPage->saveDirectoryRadio();
+        m_attachmentDirectoryEdit = attachmentsPage->directoryEdit();
+        m_attachmentDirectoryButton = attachmentsPage->directoryButton();
         addPage(attachmentsPage, i18n("Attachments"), QStringLiteral("mail-attachment"), QString{},
                 false);
 
-        auto* composingPage = new QWidget(this);
-        auto* composingLayout = new QFormLayout(composingPage);
-        m_undoSendDelaySpinBox = new QSpinBox(composingPage);
-        m_undoSendDelaySpinBox->setRange(1, 120);
-        m_undoSendDelaySpinBox->setSuffix(i18nc("@item time suffix", " seconds"));
-        m_undoSendDelaySpinBox->setValue(m_undoSendDelaySeconds);
-        composingLayout->addRow(i18n("Undo send window:"), m_undoSendDelaySpinBox);
+        auto* composingPage = new ComposingPage(m_undoSendDelaySeconds, this);
+        m_undoSendDelaySpinBox = composingPage->undoSendDelaySpinBox();
         addPage(composingPage, i18n("Composing"), QStringLiteral("mail-send"), QString{}, false);
 
         connect(addButton, &QPushButton::clicked, this, &PreferencesDialog::addAccount);

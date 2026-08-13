@@ -360,8 +360,20 @@ set(JAVELIN_FORMAT_FILES
     src/gui/mailboxes/MailboxTreeView.h
     src/gui/compose/ComposeTabWidget.cpp
     src/gui/compose/ComposeTabWidget.h
+    src/gui/compose/AttachmentController.cpp
+    src/gui/compose/AttachmentController.h
+    src/gui/compose/ComposeAutosaveController.cpp
+    src/gui/compose/ComposeAutosaveController.h
+    src/gui/compose/ComposeIdentityController.cpp
+    src/gui/compose/ComposeIdentityController.h
+    src/gui/compose/InlineImageController.cpp
+    src/gui/compose/InlineImageController.h
+    src/gui/compose/ComposeRecipientController.cpp
+    src/gui/compose/ComposeRecipientController.h
     src/gui/compose/IdentityPresentation.cpp
     src/gui/compose/IdentityPresentation.h
+    src/gui/compose/SignatureController.cpp
+    src/gui/compose/SignatureController.h
     src/gui/compose/SignatureTrackingPolicy.cpp
     src/gui/compose/SignatureTrackingPolicy.h
     src/gui/compose/SendingIdentitiesDialog.cpp
@@ -376,6 +388,18 @@ set(JAVELIN_FORMAT_FILES
     src/gui/compose/JavelinComposerEdit.h
     src/gui/compose/ComposeBodyConverter.cpp
     src/gui/compose/ComposeBodyConverter.h
+    src/gui/contacts/AddressBookController.cpp
+    src/gui/contacts/AddressBookController.h
+    src/gui/contacts/ContactDetailsView.cpp
+    src/gui/contacts/ContactDetailsView.h
+    src/gui/contacts/ContactEditor.cpp
+    src/gui/contacts/ContactEditor.h
+    src/gui/contacts/ContactGroupController.cpp
+    src/gui/contacts/ContactGroupController.h
+    src/gui/contacts/ContactPhotoController.cpp
+    src/gui/contacts/ContactPhotoController.h
+    src/gui/contacts/ContactsBrowser.cpp
+    src/gui/contacts/ContactsBrowser.h
     src/gui/contacts/ContactsManagerWidget.cpp
     src/gui/contacts/ContactsManagerWidget.h
     src/gui/contacts/ContactsViewState.h
@@ -415,6 +439,16 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messageview/MessageAppearance.h
     src/gui/messageview/MessageBannerWidget.cpp
     src/gui/messageview/MessageBannerWidget.h
+    src/gui/messageview/MessageAttachmentPanel.cpp
+    src/gui/messageview/MessageAttachmentPanel.h
+    src/gui/messageview/MessageBannerCoordinator.cpp
+    src/gui/messageview/MessageBannerCoordinator.h
+    src/gui/messageview/MessageBodyPresenter.cpp
+    src/gui/messageview/MessageBodyPresenter.h
+    src/gui/messageview/MessageTranslationController.cpp
+    src/gui/messageview/MessageTranslationController.h
+    src/gui/messageview/RemoteContentController.cpp
+    src/gui/messageview/RemoteContentController.h
     src/gui/messageview/MessageViewContainer.cpp
     src/gui/messageview/MessageViewContainer.h
     src/gui/messageview/MessageViewPresentation.h
@@ -431,6 +465,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/search/SearchSessionPersistence.h
     src/gui/settings/PreferencesDialog.cpp
     src/gui/settings/PreferencesDialog.h
+    src/gui/settings/PreferencesPages.cpp
+    src/gui/settings/PreferencesPages.h
     src/gui/onboarding/FirstRunWizard.cpp
     src/gui/onboarding/FirstRunWizard.h
     src/gui/shell/ElidingLabel.cpp
@@ -1134,8 +1170,20 @@ add_library(javelin_gui STATIC
     src/gui/mailboxes/MailboxSort.h
     src/gui/compose/ComposeTabWidget.cpp
     src/gui/compose/ComposeTabWidget.h
+    src/gui/compose/AttachmentController.cpp
+    src/gui/compose/AttachmentController.h
+    src/gui/compose/ComposeAutosaveController.cpp
+    src/gui/compose/ComposeAutosaveController.h
+    src/gui/compose/ComposeIdentityController.cpp
+    src/gui/compose/ComposeIdentityController.h
+    src/gui/compose/InlineImageController.cpp
+    src/gui/compose/InlineImageController.h
+    src/gui/compose/ComposeRecipientController.cpp
+    src/gui/compose/ComposeRecipientController.h
     src/gui/compose/IdentityPresentation.cpp
     src/gui/compose/IdentityPresentation.h
+    src/gui/compose/SignatureController.cpp
+    src/gui/compose/SignatureController.h
     src/gui/compose/SignatureTrackingPolicy.cpp
     src/gui/compose/SignatureTrackingPolicy.h
     src/gui/compose/SendingIdentitiesDialog.cpp
@@ -1150,6 +1198,18 @@ add_library(javelin_gui STATIC
     src/gui/compose/JavelinComposerEdit.h
     src/gui/compose/ComposeBodyConverter.cpp
     src/gui/compose/ComposeBodyConverter.h
+    src/gui/contacts/AddressBookController.cpp
+    src/gui/contacts/AddressBookController.h
+    src/gui/contacts/ContactDetailsView.cpp
+    src/gui/contacts/ContactDetailsView.h
+    src/gui/contacts/ContactEditor.cpp
+    src/gui/contacts/ContactEditor.h
+    src/gui/contacts/ContactGroupController.cpp
+    src/gui/contacts/ContactGroupController.h
+    src/gui/contacts/ContactPhotoController.cpp
+    src/gui/contacts/ContactPhotoController.h
+    src/gui/contacts/ContactsBrowser.cpp
+    src/gui/contacts/ContactsBrowser.h
     src/gui/contacts/ContactsManagerWidget.cpp
     src/gui/contacts/ContactsManagerWidget.h
     src/gui/contacts/ContactsViewState.h
@@ -1193,6 +1253,16 @@ add_library(javelin_gui STATIC
     src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageBannerWidget.cpp
     src/gui/messageview/MessageBannerWidget.h
+    src/gui/messageview/MessageAttachmentPanel.cpp
+    src/gui/messageview/MessageAttachmentPanel.h
+    src/gui/messageview/MessageBannerCoordinator.cpp
+    src/gui/messageview/MessageBannerCoordinator.h
+    src/gui/messageview/MessageBodyPresenter.cpp
+    src/gui/messageview/MessageBodyPresenter.h
+    src/gui/messageview/MessageTranslationController.cpp
+    src/gui/messageview/MessageTranslationController.h
+    src/gui/messageview/RemoteContentController.cpp
+    src/gui/messageview/RemoteContentController.h
     src/gui/messageview/MessageViewContainer.cpp
     src/gui/messageview/MessageViewContainer.h
     src/gui/messageview/MessageViewPresentation.h
@@ -1204,6 +1274,8 @@ add_library(javelin_gui STATIC
     src/gui/search/SearchSessionPersistence.h
     src/gui/settings/PreferencesDialog.cpp
     src/gui/settings/PreferencesDialog.h
+    src/gui/settings/PreferencesPages.cpp
+    src/gui/settings/PreferencesPages.h
     src/gui/onboarding/FirstRunWizard.cpp
     src/gui/onboarding/FirstRunWizard.h
     src/gui/shell/ElidingLabel.cpp
@@ -1374,6 +1446,18 @@ endforeach()
 set(javelin_compose_command_gui_sources
     src/gui/compose/ComposeTabWidget.cpp
     src/gui/compose/ComposeTabWidget.h
+    src/gui/compose/AttachmentController.cpp
+    src/gui/compose/AttachmentController.h
+    src/gui/compose/ComposeAutosaveController.cpp
+    src/gui/compose/ComposeAutosaveController.h
+    src/gui/compose/ComposeIdentityController.cpp
+    src/gui/compose/ComposeIdentityController.h
+    src/gui/compose/InlineImageController.cpp
+    src/gui/compose/InlineImageController.h
+    src/gui/compose/ComposeRecipientController.cpp
+    src/gui/compose/ComposeRecipientController.h
+    src/gui/compose/SignatureController.cpp
+    src/gui/compose/SignatureController.h
     src/gui/shell/ComposeTabController.cpp
     src/gui/shell/ComposeTabController.h
 )

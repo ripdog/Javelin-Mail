@@ -8,6 +8,7 @@
 
 #include <QWidget>
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -32,8 +33,14 @@ namespace javelin::gui::settings
 
 namespace javelin::gui::contacts
 {
+    class AddressBookController;
     class BirthdayEditor;
+    class ContactDetailsView;
+    class ContactEditor;
     class ContactFieldEditor;
+    class ContactGroupController;
+    class ContactPhotoController;
+    class ContactsBrowser;
 
     class ContactsManagerWidget final : public QWidget
     {
@@ -45,6 +52,7 @@ namespace javelin::gui::contacts
                               javelin::app::ContactRefreshPort& refreshPort,
                               javelin::app::ContactCommandPort& commandPort,
                               QWidget* parent = nullptr);
+        ~ContactsManagerWidget() override;
 
         [[nodiscard]] bool operationInFlight() const;
         [[nodiscard]] bool hasSelectedContact() const;
@@ -134,7 +142,6 @@ namespace javelin::gui::contacts
         [[nodiscard]] const javelin::jmap::contacts::ContactSummary* currentGroup() const;
         [[nodiscard]] bool
         groupIsWritable(const javelin::jmap::contacts::ContactSummary& group) const;
-        void populateContactCards(const javelin::jmap::contacts::ContactSummary& contact);
         [[nodiscard]] QString
         contactLocationLabel(const javelin::jmap::contacts::ContactSummary& contact) const;
 
@@ -142,6 +149,12 @@ namespace javelin::gui::contacts
         javelin::jmap::cache::ContactReader& m_repository;
         javelin::app::ContactRefreshPort& m_refreshPort;
         javelin::app::ContactCommandPort& m_commandPort;
+        std::unique_ptr<ContactsBrowser> m_browser;
+        std::unique_ptr<ContactDetailsView> m_detailsView;
+        std::unique_ptr<ContactEditor> m_contactEditor;
+        std::unique_ptr<ContactGroupController> m_groupController;
+        std::unique_ptr<AddressBookController> m_addressBookController;
+        std::unique_ptr<ContactPhotoController> m_photoController;
         std::vector<javelin::jmap::cache::ContactAccount> m_accounts;
         std::vector<javelin::jmap::api::AddressBook> m_addressBooks;
         std::vector<javelin::jmap::contacts::ContactSummary> m_contacts;
