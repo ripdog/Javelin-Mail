@@ -684,6 +684,7 @@ namespace javelin::gui::contacts
             *m_contactForm, *m_kindEdit, *m_organizationEdit, *m_titleEdit, *m_membersEdit,
             *m_groupContactDetailsToggle, *m_emailsEdit, *m_phonesEdit, *m_addressesEdit,
             *m_birthdayEdit);
+        updateEditorKindFields();
         const auto ownerResolver = [this](const std::string_view accountId)
         { return ownerAccountId(accountId); };
         const auto busySetter = [this](const bool busy) { setBusy(busy); };
@@ -1204,7 +1205,6 @@ namespace javelin::gui::contacts
                                                                        : Qt::RightArrow);
                     updateEditorKindFields();
                 });
-        updateEditorKindFields();
 
         m_advancedToggle = new QToolButton(formWidget);
         m_advancedToggle->setObjectName(QStringLiteral("contactsAdvancedToggle"));

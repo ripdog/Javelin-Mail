@@ -97,20 +97,29 @@ cache connection, or treats an invalidation payload as object state.
 
 The CMake graph enforces the architectural split:
 
-- `javelin_protocol` owns bounded process-boundary values, framing, socket transport, and the test-only
-  in-process endpoint.
-- `javelin_cache_read` owns database-location discovery and reusable read-only cache, MIME, vault, and
-  rendering primitives.
-- `javelin_jmap` owns typed JMAP protocol, capability negotiation, transport, cache repositories,
-  synchronization primitives, contacts, calendars, submission, Sieve, and optimistic journals. It
-  has no Widgets or WebEngine dependency.
-- `javelin_daemon_core` owns application coordination, writable repositories, settings, background
-  work, notifications, tray integration, deferred send, history, and synchronization lifecycle.
-- `javelin_gui` and the `javelin` bootstrap own presentation, read-only repositories, remote port
-  adapters, WebEngine, editing state, selection, and navigation.
+- `javelin_protocol` owns bounded process-boundary values, framing, and local socket transport. The
+  in-process endpoint is test-only support and is not part of the production protocol target.
+- `javelin_cache_read` owns database-location discovery and reusable read-only database, MIME, vault,
+  and rendering infrastructure.
+- `javelin_app_contracts` owns shared QObject application contracts and their generated metaobjects.
+- `javelin_mail_model` owns transport-independent mail/cache repositories, search/query values, and
+  contact/calendar domain helpers shared by the daemon and GUI compositions.
+- `javelin_app_shared` owns list sessions, session construction, message navigation coordination, and
+  process-instance locking shared by both process compositions.
+- `javelin_jmap` owns typed JMAP protocol, capability negotiation, transport, synchronization,
+  protocol-specific repositories, contacts, calendars, submission, Sieve, and optimistic journals.
+  It has no Widgets or WebEngine dependency and consumes `javelin_mail_model` rather than recompiling
+  shared implementations.
+- `javelin_daemon_core` owns daemon application coordination, settings, background work,
+  notifications, tray integration, deferred send, history, and synchronization lifecycle.
+- `javelin_gui` owns presentation, WebEngine, editing state, selection, and GUI controllers;
+  `javelin_gui_session` owns the GUI-side daemon session/event bridge; the `javelin` executable is
+  composition/bootstrap only.
 
-Configuration fails when production GUI sources access canonical `QSettings`, when GUI targets link
-`javelin_jmap` or `javelin_daemon_core`, or when daemon sources acquire Widgets/WebEngine dependencies.
+Configuration fails when a production `.cpp` has more than one target owner, production GUI sources
+access canonical `QSettings`, GUI targets link `javelin_jmap` or `javelin_daemon_core`, shared
+mail/application targets gain transport or Widgets/WebEngine dependencies, or daemon sources acquire
+Widgets/WebEngine dependencies. Test targets additionally reject direct production `.cpp` sources.
 
 ### First-run account onboarding
 

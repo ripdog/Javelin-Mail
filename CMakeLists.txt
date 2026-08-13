@@ -78,6 +78,8 @@ add_subdirectory(src/protocol)
 add_subdirectory(src/storage)
 
 add_library(javelin_observability STATIC
+    src/app/LogStore.cpp
+    src/app/LogStore.h
     src/app/PerformanceMetrics.cpp
     src/app/PerformanceMetrics.h
 )
@@ -88,6 +90,149 @@ target_link_libraries(javelin_observability PUBLIC Qt::Core)
 javelin_set_project_warnings(javelin_observability)
 javelin_enable_static_analysis(javelin_observability)
 javelin_enable_sanitizers(javelin_observability)
+
+# QObject application contracts are shared by the daemon and GUI process. Keeping their
+# metaobjects in one target avoids each executable/test graph regenerating the same contract code.
+add_library(javelin_app_contracts STATIC
+    src/app/CalendarApplicationPorts.h
+    src/app/MailApplicationEventsPorts.h
+    src/app/MessageListSession.h
+    src/app/MessageNavigationPort.h
+    src/app/UndoApplicationPorts.h
+)
+target_include_directories(javelin_app_contracts PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+)
+target_link_libraries(javelin_app_contracts
+    PUBLIC
+        QCoro6::Core
+        Qt::Core
+        Qt::Sql
+)
+javelin_set_project_warnings(javelin_app_contracts)
+javelin_enable_static_analysis(javelin_app_contracts)
+javelin_enable_sanitizers(javelin_app_contracts)
+
+# Server-independent mail/cache model shared by the protocol stack and the GUI process. It may
+# touch SQLite, but it has no transport or Widgets/WebEngine dependency.
+add_library(javelin_mail_model STATIC
+    src/jmap/api/PatchObject.cpp
+    src/jmap/api/PatchObject.h
+    src/jmap/cache/AccountReadRepository.cpp
+    src/jmap/cache/AccountReadRepository.h
+    src/jmap/cache/ContactRepository.cpp
+    src/jmap/cache/ContactRepository.h
+    src/jmap/cache/IdentityRepository.cpp
+    src/jmap/cache/IdentityRepository.h
+    src/jmap/cache/EmailListSortSql.h
+    src/jmap/cache/MailSearchIndex.cpp
+    src/jmap/cache/MailSearchIndex.h
+    src/jmap/cache/MailSearchReadRepository.cpp
+    src/jmap/cache/MailSearchReadRepository.h
+    src/jmap/cache/MailSearchReader.h
+    src/jmap/cache/MailTagReadRepository.cpp
+    src/jmap/cache/MailTagReadRepository.h
+    src/jmap/cache/MailTagReader.h
+    src/jmap/cache/MailboxStatisticsReadRepository.cpp
+    src/jmap/cache/MailboxStatisticsReadRepository.h
+    src/jmap/cache/MailboxStatisticsReader.h
+    src/jmap/cache/MailboxMessageReadRepository.cpp
+    src/jmap/cache/MailboxMessageReadRepository.h
+    src/jmap/cache/MailboxMessageReader.h
+    src/jmap/cache/MailboxFilterReadRepository.cpp
+    src/jmap/cache/MailboxFilterReadRepository.h
+    src/jmap/cache/MailboxFilterReader.h
+    src/jmap/cache/MailboxReadRepository.cpp
+    src/jmap/cache/MailboxReadRepository.h
+    src/jmap/cache/MailboxRepository.cpp
+    src/jmap/cache/MailboxRepository.h
+    src/jmap/cache/MailboxWindowRepository.cpp
+    src/jmap/cache/MailboxWindowRepository.h
+    src/jmap/cache/MessageListReadSupport.cpp
+    src/jmap/cache/MessageListReadSupport.h
+    src/jmap/cache/MessageListReadTypes.h
+    src/jmap/cache/MessageSummaryReadRepository.cpp
+    src/jmap/cache/MessageSummaryReadRepository.h
+    src/jmap/cache/MessageSummaryReader.h
+    src/jmap/cache/SearchWindowReadRepository.cpp
+    src/jmap/cache/SearchWindowReadRepository.h
+    src/jmap/cache/MailboxWindowReadRepository.cpp
+    src/jmap/cache/MailboxWindowReadRepository.h
+    src/jmap/cache/QueryWindowReadRepository.cpp
+    src/jmap/cache/QueryWindowReadRepository.h
+    src/jmap/cache/QueryWindowReader.h
+    src/jmap/cache/ThreadReadRepository.cpp
+    src/jmap/cache/ThreadReadRepository.h
+    src/jmap/cache/ThreadReader.h
+    src/jmap/cache/SearchWindowRepository.cpp
+    src/jmap/cache/SearchWindowRepository.h
+    src/jmap/cache/SyncStateRepository.cpp
+    src/jmap/cache/SyncStateRepository.h
+    src/jmap/calendar/CalendarEventEditing.cpp
+    src/jmap/calendar/CalendarEventEditing.h
+    src/jmap/contacts/ContactIdentityLookup.cpp
+    src/jmap/contacts/ContactIdentityLookup.h
+    src/jmap/contacts/ContactInterchange.cpp
+    src/jmap/contacts/ContactInterchange.h
+    src/jmap/contacts/ContactTypes.cpp
+    src/jmap/contacts/ContactTypes.h
+    src/jmap/domain/MailEntityParsers.cpp
+    src/jmap/domain/MailEntityParsers.h
+    src/jmap/domain/MailEntities.h
+    src/jmap/search/EmailSearch.cpp
+    src/jmap/search/EmailSearch.h
+    src/jmap/sync/MailboxQueryDescriptor.cpp
+    src/jmap/sync/MailboxQueryDescriptor.h
+)
+target_include_directories(javelin_mail_model PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+)
+target_link_libraries(javelin_mail_model
+    PUBLIC
+        javelin_cache_read
+        Qt::Core
+    PRIVATE
+        glaze::glaze
+        Qt::Concurrent
+        Qt::Sql
+)
+target_compile_options(javelin_mail_model PRIVATE -fexceptions)
+javelin_set_project_warnings(javelin_mail_model)
+javelin_enable_static_analysis(javelin_mail_model)
+javelin_enable_sanitizers(javelin_mail_model)
+
+# Application-side list/navigation services are used by both process compositions. They depend on
+# the local mail model and typed application contracts, but not on daemon transports or GUI widgets.
+add_library(javelin_app_shared STATIC
+    src/app/MailboxSession.cpp
+    src/app/MailboxSession.h
+    src/app/MessageListSessionFactoryService.cpp
+    src/app/MessageListSessionFactoryService.h
+    src/app/MessageNavigationCoordinator.cpp
+    src/app/MessageNavigationCoordinator.h
+    src/app/ProcessInstanceLock.cpp
+    src/app/ProcessInstanceLock.h
+    src/app/SearchSession.cpp
+    src/app/SearchSession.h
+)
+target_include_directories(javelin_app_shared PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+)
+target_link_libraries(javelin_app_shared
+    PUBLIC
+        javelin_app_contracts
+        javelin_cache_read
+        javelin_mail_model
+        Qt::Core
+    PRIVATE
+        KF6::I18n
+        QCoro6::Core
+        Qt::Concurrent
+)
+target_compile_options(javelin_app_shared PRIVATE -fexceptions)
+javelin_set_project_warnings(javelin_app_shared)
+javelin_enable_static_analysis(javelin_app_shared)
+javelin_enable_sanitizers(javelin_app_shared)
 
 set(JAVELIN_FORMAT_FILES
     src/gui/widgets/IndeterminateProgressBar.h
@@ -829,8 +974,6 @@ add_library(javelin_jmap STATIC
     src/jmap/calendar/CalendarProtocolClient.h
     src/jmap/calendar/CalendarReader.h
     src/jmap/calendar/CalendarSyncEngine.h
-    src/jmap/calendar/CalendarEventEditing.cpp
-    src/jmap/calendar/CalendarEventEditing.h
     src/jmap/cache/CalendarRepository.cpp
     src/jmap/cache/CalendarRepository.h
     src/jmap/sync/PreferredStateChangeSource.cpp
@@ -1050,12 +1193,19 @@ add_library(javelin_jmap STATIC
     src/jmap/sieve/SieveMutationJournal.h
     src/jmap/sieve/SieveTypes.h
 )
+# The mail model is listed above for source discoverability, but it has one production owner.
+# Remove those entries from the protocol target and consume the model through its target instead.
+get_target_property(javelin_jmap_sources javelin_jmap SOURCES)
+get_target_property(javelin_mail_model_sources javelin_mail_model SOURCES)
+list(REMOVE_ITEM javelin_jmap_sources ${javelin_mail_model_sources})
+set_property(TARGET javelin_jmap PROPERTY SOURCES ${javelin_jmap_sources})
 target_include_directories(javelin_jmap PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
 )
 target_link_libraries(javelin_jmap
     PUBLIC
         javelin_cache_read
+        javelin_mail_model
         QCoro6::Coro
         Qt::Core
         Qt::Network
@@ -1546,6 +1696,7 @@ target_link_libraries(javelin_gui
     PRIVATE
         Qt::Concurrent
         javelin_cache_read
+        javelin_app_shared
         javelin_observability
 )
 javelin_set_project_warnings(javelin_gui)
@@ -1577,7 +1728,6 @@ add_library(javelin_daemon_core STATIC
     src/app/CacheInvalidationPublisher.cpp
     src/app/CacheInvalidationPublisher.h
     src/app/RefreshGeneration.h
-    src/app/MailApplicationEventsPorts.h
     src/app/MailApplicationEventsService.cpp
     src/app/MailApplicationEventsService.h
     src/app/AccountConnectionProvider.h
@@ -1586,7 +1736,6 @@ add_library(javelin_daemon_core STATIC
     src/app/ApplicationErrorCoordinator.h
     src/app/CalendarNotificationService.cpp
     src/app/CalendarNotificationService.h
-    src/app/CalendarApplicationPorts.h
     src/app/CalendarCommandService.cpp
     src/app/CalendarCommandService.h
     src/app/ContactApplicationPorts.h
@@ -1601,15 +1750,12 @@ add_library(javelin_daemon_core STATIC
     src/app/MessageSubject.h
     src/app/MailboxTreeCacheRead.h
     src/app/MessageListSessionFactory.h
-    src/app/MessageListSessionFactoryService.cpp
-    src/app/MessageListSessionFactoryService.h
     src/app/SieveApplicationPorts.h
     src/app/SieveCommandService.cpp
     src/app/SieveCommandService.h
     src/app/IdentityApplicationPorts.h
     src/app/IdentityCommandService.cpp
     src/app/IdentityCommandService.h
-    src/app/UndoApplicationPorts.h
     src/app/UndoCommandService.cpp
     src/app/UndoCommandService.h
     src/app/ComposeService.cpp
@@ -1664,8 +1810,6 @@ add_library(javelin_daemon_core STATIC
     src/app/undo/UndoManager.h
     src/app/LocalMaintenanceService.cpp
     src/app/LocalMaintenanceService.h
-    src/app/LogStore.cpp
-    src/app/LogStore.h
     src/app/LongPollService.cpp
     src/app/account/AccountSyncCoordinator.h
     src/app/OAuthRefreshSingleFlight.cpp
@@ -1687,20 +1831,12 @@ add_library(javelin_daemon_core STATIC
     src/app/ThreadMembershipMaterializationWorker.h
     src/app/MailboxSelectionMutation.cpp
     src/app/MailboxSelectionMutation.h
-    src/app/MailboxSession.cpp
-    src/app/MailboxSession.h
     src/app/MailboxSyncCoverage.cpp
     src/app/MailboxSyncCoverage.h
     src/app/MailIndexService.cpp
     src/app/MailIndexService.h
-    src/app/MessageListSession.h
-    src/app/MessageNavigationCoordinator.cpp
-    src/app/MessageNavigationCoordinator.h
-    src/app/MessageNavigationPort.h
     src/app/MessageSelection.cpp
     src/app/MessageSelection.h
-    src/app/ProcessInstanceLock.cpp
-    src/app/ProcessInstanceLock.h
     src/app/DaemonBackgroundController.cpp
     src/app/DaemonBackgroundController.h
     src/app/DaemonProcess.cpp
@@ -1724,8 +1860,6 @@ add_library(javelin_daemon_core STATIC
     src/app/DaemonServices.h
     src/app/DaemonTrayController.cpp
     src/app/DaemonTrayController.h
-    src/app/SearchSession.cpp
-    src/app/SearchSession.h
     src/app/SettingsRepository.cpp
     src/app/SettingsRepository.h
     src/app/WorkScheduler.cpp
@@ -1738,6 +1872,8 @@ target_include_directories(javelin_daemon_core PUBLIC
 target_link_libraries(javelin_daemon_core
     PUBLIC
         Qt::Core
+        javelin_app_contracts
+        javelin_app_shared
         javelin_protocol
         javelin_jmap
     PRIVATE
@@ -1800,29 +1936,35 @@ javelin_set_project_warnings(javelind)
 javelin_enable_static_analysis(javelind)
 javelin_enable_sanitizers(javelind)
 
-qt_add_executable(javelin
-    src/app/CalendarApplicationPorts.h
-    src/app/DeveloperDiagnostics.h
-    src/app/DeveloperMaintenance.h
-    src/app/LogStore.cpp
-    src/app/LogStore.h
-    src/app/MailApplicationEventsPorts.h
-    src/app/UndoApplicationPorts.h
+add_library(javelin_gui_session STATIC
     src/app/GuiDaemonSession.cpp
     src/app/GuiDaemonSession.h
     src/app/GuiMailApplicationEvents.cpp
     src/app/GuiMailApplicationEvents.h
+)
+target_include_directories(javelin_gui_session PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+)
+target_link_libraries(javelin_gui_session
+    PUBLIC
+        javelin_app_contracts
+        javelin_protocol
+        Qt::Core
+    PRIVATE
+        javelin_cache_read
+        javelin_observability
+)
+javelin_set_project_warnings(javelin_gui_session)
+javelin_enable_static_analysis(javelin_gui_session)
+javelin_enable_sanitizers(javelin_gui_session)
+target_compile_options(javelin_gui_session PRIVATE -fexceptions)
+
+qt_add_executable(javelin
+    src/app/DeveloperDiagnostics.h
+    src/app/DeveloperMaintenance.h
     src/app/GuiServices.cpp
     src/app/GuiServices.h
-    src/app/MailboxSession.cpp
-    src/app/MailboxSession.h
     src/app/MessageListMaterializationPort.h
-    src/app/MessageListSession.h
-    src/app/MessageListSessionFactoryService.cpp
-    src/app/MessageListSessionFactoryService.h
-    src/app/MessageNavigationCoordinator.cpp
-    src/app/MessageNavigationCoordinator.h
-    src/app/MessageNavigationPort.h
     src/app/RemoteActionClient.cpp
     src/app/RemoteActionClient.h
     src/app/RemoteActionTypes.h
@@ -1833,77 +1975,6 @@ qt_add_executable(javelin
     src/app/RemoteApplicationPorts.cpp
     src/app/RemoteApplicationPorts.h
     src/app/RemoteCodec.h
-    src/app/ProcessInstanceLock.cpp
-    src/app/ProcessInstanceLock.h
-    src/app/SearchSession.cpp
-    src/app/SearchSession.h
-    src/jmap/cache/AccountReadRepository.cpp
-    src/jmap/cache/AccountReadRepository.h
-    src/jmap/cache/ContactRepository.cpp
-    src/jmap/cache/ContactRepository.h
-    src/jmap/cache/IdentityRepository.cpp
-    src/jmap/cache/IdentityRepository.h
-    src/jmap/cache/EmailListSortSql.h
-    src/jmap/cache/MailSearchIndex.cpp
-    src/jmap/cache/MailSearchIndex.h
-    src/jmap/cache/MailSearchReadRepository.cpp
-    src/jmap/cache/MailSearchReadRepository.h
-    src/jmap/cache/MailSearchReader.h
-    src/jmap/cache/MailTagReadRepository.cpp
-    src/jmap/cache/MailTagReadRepository.h
-    src/jmap/cache/MailTagReader.h
-    src/jmap/cache/MailboxStatisticsReadRepository.cpp
-    src/jmap/cache/MailboxStatisticsReadRepository.h
-    src/jmap/cache/MailboxStatisticsReader.h
-    src/jmap/cache/MailboxMessageReadRepository.cpp
-    src/jmap/cache/MailboxMessageReadRepository.h
-    src/jmap/cache/MailboxMessageReader.h
-    src/jmap/cache/MailboxFilterReadRepository.cpp
-    src/jmap/cache/MailboxFilterReadRepository.h
-    src/jmap/cache/MailboxFilterReader.h
-    src/jmap/cache/MailboxReadRepository.cpp
-    src/jmap/cache/MailboxReadRepository.h
-    src/jmap/cache/MailboxRepository.cpp
-    src/jmap/cache/MailboxRepository.h
-    src/jmap/cache/MailboxWindowRepository.cpp
-    src/jmap/cache/MailboxWindowRepository.h
-    src/jmap/cache/MessageListReadSupport.cpp
-    src/jmap/cache/MessageListReadSupport.h
-    src/jmap/cache/MessageListReadTypes.h
-    src/jmap/cache/MessageSummaryReadRepository.cpp
-    src/jmap/cache/MessageSummaryReadRepository.h
-    src/jmap/cache/MessageSummaryReader.h
-    src/jmap/cache/SearchWindowReadRepository.cpp
-    src/jmap/cache/SearchWindowReadRepository.h
-    src/jmap/cache/MailboxWindowReadRepository.cpp
-    src/jmap/cache/MailboxWindowReadRepository.h
-    src/jmap/cache/QueryWindowReadRepository.cpp
-    src/jmap/cache/QueryWindowReadRepository.h
-    src/jmap/cache/QueryWindowReader.h
-    src/jmap/cache/ThreadReadRepository.cpp
-    src/jmap/cache/ThreadReadRepository.h
-    src/jmap/cache/ThreadReader.h
-    src/jmap/cache/SearchWindowRepository.cpp
-    src/jmap/cache/SearchWindowRepository.h
-    src/jmap/cache/SyncStateRepository.cpp
-    src/jmap/cache/SyncStateRepository.h
-    src/jmap/api/PatchObject.cpp
-    src/jmap/api/PatchObject.h
-    src/jmap/calendar/CalendarEventEditing.cpp
-    src/jmap/calendar/CalendarEventEditing.h
-    src/jmap/contacts/ContactIdentityLookup.cpp
-    src/jmap/contacts/ContactIdentityLookup.h
-    src/jmap/contacts/ContactInterchange.cpp
-    src/jmap/contacts/ContactInterchange.h
-    src/jmap/contacts/ContactTypes.cpp
-    src/jmap/contacts/ContactTypes.h
-    src/jmap/domain/MailEntityParsers.cpp
-    src/jmap/domain/MailEntityParsers.h
-    src/jmap/domain/MailEntities.h
-    src/jmap/search/EmailSearch.cpp
-    src/jmap/search/EmailSearch.h
-    src/jmap/sync/MailboxQueryDescriptor.cpp
-    src/jmap/sync/MailboxQueryDescriptor.h
     src/app/gui_main.cpp
 )
 target_link_libraries(javelin
@@ -1911,6 +1982,8 @@ target_link_libraries(javelin
         javelin_protocol
         javelin_cache_read
         javelin_gui
+        javelin_app_shared
+        javelin_gui_session
         javelin_observability
         glaze::glaze
         QCoro6::Core
@@ -1977,6 +2050,68 @@ get_target_property(javelind_links javelind LINK_LIBRARIES)
 if(javelind_links MATCHES "javelin_gui|Qt::(Widgets|WebEngine)")
     message(FATAL_ERROR "javelind must not link GUI or WebEngine targets")
 endif()
+get_target_property(javelin_mail_model_links javelin_mail_model LINK_LIBRARIES)
+if(javelin_mail_model_links MATCHES "javelin_(jmap|daemon_core)|Qt::(Network|Widgets)|Qt::WebEngine")
+    message(FATAL_ERROR "javelin_mail_model must remain transport- and GUI-independent")
+endif()
+get_target_property(javelin_app_shared_links javelin_app_shared LINK_LIBRARIES)
+if(javelin_app_shared_links MATCHES "javelin_(jmap|daemon_core)|Qt::(Network|Widgets)|Qt::WebEngine")
+    message(FATAL_ERROR "javelin_app_shared must remain usable by both process compositions")
+endif()
+
+# Phase 9 source-ownership guard. A production implementation belongs to exactly one target;
+# other layers consume it through target links rather than recompiling the same .cpp file.
+set(javelin_production_source_targets
+    javelin_protocol
+    javelin_cache_read
+    javelin_observability
+    javelin_app_contracts
+    javelin_mail_model
+    javelin_app_shared
+    javelin_jmap
+    javelin_translation
+    javelin_gui
+    javelin_daemon_core
+    javelin_gui_session
+    javelin
+    javelind
+)
+set(javelin_owned_production_sources)
+set(javelin_owned_production_source_targets)
+foreach(production_target IN LISTS javelin_production_source_targets)
+    get_target_property(production_sources ${production_target} SOURCES)
+    get_target_property(production_source_dir ${production_target} SOURCE_DIR)
+    foreach(production_source IN LISTS production_sources)
+        if(IS_ABSOLUTE "${production_source}")
+            set(production_source_path "${production_source}")
+        else()
+            get_filename_component(production_source_path
+                "${production_source_dir}/${production_source}" ABSOLUTE)
+        endif()
+        get_filename_component(production_source_extension "${production_source_path}" EXT)
+        string(FIND "${production_source_path}" "${PROJECT_SOURCE_DIR}/src/"
+            production_source_prefix)
+        if(NOT production_source_extension STREQUAL ".cpp" OR
+           NOT production_source_prefix EQUAL 0)
+            continue()
+        endif()
+
+        list(FIND javelin_owned_production_sources "${production_source_path}"
+            production_source_index)
+        if(production_source_index GREATER_EQUAL 0)
+            list(GET javelin_owned_production_source_targets ${production_source_index}
+                production_source_owner)
+            if(NOT production_source_owner STREQUAL production_target)
+                message(FATAL_ERROR
+                    "Production source has multiple owners: ${production_source_path} "
+                    "(${production_source_owner}, ${production_target})")
+            endif()
+        else()
+            list(APPEND javelin_owned_production_sources "${production_source_path}")
+            list(APPEND javelin_owned_production_source_targets "${production_target}")
+        endif()
+    endforeach()
+endforeach()
 
 function(javelin_assert_gui_settings_boundary target)
     get_target_property(target_sources ${target} SOURCES)

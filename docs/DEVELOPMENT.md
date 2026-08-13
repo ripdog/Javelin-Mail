@@ -104,8 +104,10 @@ cmake --build --preset debug
 For a focused build and test run in the shared workspace, use:
 
 ```sh
-scripts/check-debug.sh --target javelin_jmap_tests --tests 'SessionClient'
+scripts/check-debug.sh --target javelin_jmap_protocol_tests --tests 'SessionClient'
 ```
+
+The test graph is split by production boundary: protocol, storage/cache, JMAP protocol, JMAP sync, JMAP domain, daemon application, GUI policy, GUI widgets, and explicit integration targets. Pick the narrowest target that owns the behavior under test; test executables link production libraries instead of compiling production `.cpp` files directly.
 
 Repeat `--target` to build more than one target. Run the complete configure, build, test, and format
 workflow only for final verification:
