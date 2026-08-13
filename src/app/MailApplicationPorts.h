@@ -3,7 +3,8 @@
 #include "app/MailApplicationTypes.h"
 #include "app/MailboxSelectionMutation.h"
 #include "app/MessageSelection.h"
-#include "jmap/JmapCore.h"
+#include "jmap/sync/EmailMutationEngine.h"
+#include "jmap/sync/MailboxMutationEngine.h"
 
 #include <QCoroTask>
 

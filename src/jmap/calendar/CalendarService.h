@@ -2,8 +2,8 @@
 
 #include "storage/sqlite/DatabaseConnection.h"
 
-#include "jmap/JmapCore.h"
 #include "jmap/api/CalendarMethods.h"
+#include "jmap/api/LiveConnectionSettings.h"
 #include "jmap/calendar/CalendarCommandTypes.h"
 #include "jmap/calendar/CalendarReader.h"
 #include "jmap/sync/MutationCommitReceipt.h"

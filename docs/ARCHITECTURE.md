@@ -151,6 +151,11 @@ The principal runtime objects are:
 | --- | --- | --- |
 | `DaemonProcess` | daemon | Starts settings, cache recovery, service composition, sockets, and daemon lifecycle |
 | `DaemonServices` | daemon | Owns writable repositories, JMAP transports, coordinators, command services, and background work |
+| `SessionRefreshClient` / `AccountBootstrapClient` | daemon | Refresh JMAP session metadata and perform initial account/mailbox bootstrap without exposing query or mutation APIs |
+| `MailQueryClient` / `MailQueryMaterializer` | daemon | Execute bounded JMAP mail queries and commit authoritative mailbox/search windows to the cache |
+| `MessageContentClient` | daemon | Refresh MIME source/content and read cached source or attachment payloads |
+| `EmailMutationEngine` | daemon | Queue exact Email mutations, submit bounded mutation-journal work, and preserve optimistic/ambiguous outcomes |
+| `MailboxMutationEngine` | daemon | Execute and reconcile mailbox subscription, create, and destroy mutations through the mailbox mutation journal |
 | `DaemonRemoteActionDispatcher` | daemon | Decodes typed remote actions and routes them to application services |
 | `CommandDispatcher` | daemon | Admits stateful commands, preserves command identity, and separates rejection from later failure |
 | `SettingsRepository` | daemon | Owns the canonical revisioned settings snapshot and migration |
@@ -168,8 +173,10 @@ The principal runtime objects are:
 
 `DaemonServices` is the operational composition root. It is the only place where writable cache
 repositories, JMAP transports, synchronization services, history executors, settings, and background
-controllers are assembled together. `GuiServices` is deliberately smaller: it exposes read-only
-cache readers and remote ports matching the interfaces expected by GUI controllers.
+controllers are assembled together. Mail protocol work is intentionally injected as narrow
+capabilities: there is no aggregate JMAP object combining session discovery, queries, content
+retrieval, Email mutation, and mailbox lifecycle. `GuiServices` is deliberately smaller: it exposes
+read-only cache readers and remote ports matching the interfaces expected by GUI controllers.
 
 ## Representative runtime flows
 

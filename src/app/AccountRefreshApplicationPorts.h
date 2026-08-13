@@ -2,7 +2,7 @@
 
 #include "app/AccountConnectionSettings.h"
 #include "app/ContactApplicationPorts.h"
-#include "jmap/JmapCore.h"
+#include "jmap/AccountBootstrapClient.h"
 
 #include <QCoroTask>
 

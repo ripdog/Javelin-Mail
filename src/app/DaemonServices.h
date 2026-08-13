@@ -11,8 +11,14 @@ class QNetworkAccessManager;
 
 namespace javelin::jmap
 {
-    class JmapCore;
-}
+    class AccountBootstrapClient;
+    class EmailMutationEngine;
+    class MailboxMutationEngine;
+    class MailQueryClient;
+    class MailQueryMaterializer;
+    class MessageContentClient;
+    class SessionRefreshClient;
+} // namespace javelin::jmap
 
 namespace javelin::jmap::auth
 {
@@ -188,7 +194,6 @@ namespace javelin::app
         setAuthenticationRefreshHandler(javelin::jmap::auth::AccessTokenRefreshHandler handler);
 
       private:
-        std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
         javelin::jmap::cache::DatabaseConnection m_databaseConnection;
         QString m_databasePath;
         QUuid m_cacheInstanceId;
@@ -207,6 +212,13 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::api::PreferredJmapMethodTransport>
             m_preferredMethodTransport;
         std::unique_ptr<javelin::jmap::api::RefreshingJmapMethodTransport> m_methodTransport;
+        std::unique_ptr<javelin::jmap::SessionRefreshClient> m_sessionRefreshClient;
+        std::unique_ptr<javelin::jmap::AccountBootstrapClient> m_accountBootstrapClient;
+        std::unique_ptr<javelin::jmap::MailQueryClient> m_mailQueryClient;
+        std::unique_ptr<javelin::jmap::MailQueryMaterializer> m_mailQueryMaterializer;
+        std::unique_ptr<javelin::jmap::MessageContentClient> m_messageContentClient;
+        std::unique_ptr<javelin::jmap::EmailMutationEngine> m_emailMutationEngine;
+        std::unique_ptr<javelin::jmap::MailboxMutationEngine> m_mailboxMutationEngine;
         std::unique_ptr<javelin::jmap::cache::AccountRepository> m_accountRepository;
         std::unique_ptr<AccountCommandService> m_accountCommandService;
         std::unique_ptr<javelin::jmap::cache::ContactRepository> m_contactRepository;

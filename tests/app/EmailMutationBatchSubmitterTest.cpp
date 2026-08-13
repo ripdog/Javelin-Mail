@@ -68,7 +68,7 @@ namespace
         QTemporaryDir directory;
         javelin::jmap::cache::DatabaseConnection database;
         FakeTransport transport;
-        std::unique_ptr<javelin::jmap::JmapCore> core;
+        std::unique_ptr<javelin::jmap::EmailMutationEngine> mutationEngine;
     };
 
     [[nodiscard]] std::unique_ptr<Fixture> makeFixture()
@@ -110,8 +110,8 @@ namespace
         javelin::jmap::cache::EmailRepository emailRepository{fixture->database};
         REQUIRE_FALSE(emailRepository.replaceAll("u1", emails).has_value());
 
-        fixture->core = std::make_unique<javelin::jmap::JmapCore>(
-            fixture->database, fixture->transport, fixture->transport.methodTransport);
+        fixture->mutationEngine = std::make_unique<javelin::jmap::EmailMutationEngine>(
+            fixture->database, fixture->transport.methodTransport);
         std::vector<javelin::jmap::EmailMailboxMutation> mutations;
         for (const auto& email : emails)
             mutations.push_back({.emailId = email.id,
@@ -119,7 +119,7 @@ namespace
                                  .operationGroupId = "thread-command",
                                  .ifInState = "email-state-1"});
         REQUIRE(std::holds_alternative<std::vector<javelin::jmap::QueuedEmailMutation>>(
-            fixture->core->queueEmailMailboxMutations("u1", std::move(mutations))));
+            fixture->mutationEngine->queueBatch("u1", std::move(mutations))));
         return fixture;
     }
 
@@ -152,7 +152,7 @@ TEST_CASE("Email mutation operation groups settle sequential bounded batches",
         },
     };
 
-    javelin::app::EmailMutationBatchSubmitter submitter{*fixture->core};
+    javelin::app::EmailMutationBatchSubmitter submitter{*fixture->mutationEngine};
     const auto outcome = QCoro::waitFor(submitter.submit(settings(), "u1", "thread-command", 2));
 
     CHECK_FALSE(outcome.error.has_value());
@@ -194,7 +194,7 @@ TEST_CASE("Email mutation batching preserves accepted work across an ambiguous l
         },
     };
 
-    javelin::app::EmailMutationBatchSubmitter submitter{*fixture->core};
+    javelin::app::EmailMutationBatchSubmitter submitter{*fixture->mutationEngine};
     const auto outcome = QCoro::waitFor(submitter.submit(settings(), "u1", "thread-command", 2));
 
     REQUIRE(outcome.error.has_value());

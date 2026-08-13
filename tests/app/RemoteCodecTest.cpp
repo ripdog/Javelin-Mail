@@ -2,10 +2,10 @@
 #include "app/DeveloperDiagnostics.h"
 #include "app/DeveloperMaintenance.h"
 #include "app/RemoteActionTypes.h"
-#include "jmap/JmapCore.h"
 #include "jmap/calendar/CalendarTypes.h"
 #include "jmap/identity/IdentityCommandTypes.h"
 #include "jmap/submission/ComposeTypes.h"
+#include "jmap/sync/MailboxMutationEngine.h"
 
 #include <catch2/catch_test_macros.hpp>
 

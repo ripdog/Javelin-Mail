@@ -3,8 +3,8 @@
 #include "app/AccountConnectionProvider.h"
 #include "app/DeferredSendRepository.h"
 #include "app/undo/HistoryCommandExecutor.h"
-#include "jmap/JmapCore.h"
 #include "jmap/OperationError.h"
+#include "jmap/api/LiveConnectionSettings.h"
 #include "jmap/submission/ComposeTypes.h"
 
 #include <QCoroTask>

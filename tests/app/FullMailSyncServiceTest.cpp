@@ -1,7 +1,7 @@
 #include "app/FullMailSyncService.h"
 #include "app/MailIndexService.h"
 #include "app/WorkScheduler.h"
-#include "jmap/JmapCore.h"
+#include "jmap/MessageContentClient.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Session.h"
 #include "jmap/api/Transport.h"
@@ -10,6 +10,7 @@
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/domain/MailEntities.h"
+#include "jmap/query/MailQueryClient.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoreApplication>
@@ -346,11 +347,13 @@ TEST_CASE("offline sync does not run for a hidden mailbox", "[app][offline][hidd
 
     RecordingResourceTransport resources;
     RejectingMethodTransport methods;
-    javelin::jmap::JmapCore core{database.connection, resources, methods};
+    javelin::jmap::MailQueryClient queryClient{database.connection, methods};
+    javelin::jmap::MessageContentClient contentClient{database.connection, resources};
     javelin::app::WorkScheduler scheduler{database.connection, nullptr,
                                           std::chrono::milliseconds{0}};
     javelin::app::MailIndexService indexer{database.connection, scheduler};
-    javelin::app::FullMailSyncService service{database.connection, core, scheduler, indexer};
+    javelin::app::FullMailSyncService service{database.connection, queryClient, contentClient,
+                                              scheduler, indexer};
     service.applySettings({configuration()});
 
     CHECK(scalar(database.connection,
@@ -377,11 +380,13 @@ TEST_CASE("offline sync does not run for a deleted mailbox", "[app][offline][del
 
     RecordingResourceTransport resources;
     RejectingMethodTransport methods;
-    javelin::jmap::JmapCore core{database.connection, resources, methods};
+    javelin::jmap::MailQueryClient queryClient{database.connection, methods};
+    javelin::jmap::MessageContentClient contentClient{database.connection, resources};
     javelin::app::WorkScheduler scheduler{database.connection, nullptr,
                                           std::chrono::milliseconds{0}};
     javelin::app::MailIndexService indexer{database.connection, scheduler};
-    javelin::app::FullMailSyncService service{database.connection, core, scheduler, indexer};
+    javelin::app::FullMailSyncService service{database.connection, queryClient, contentClient,
+                                              scheduler, indexer};
     service.applySettings({configuration()});
 
     CHECK(scalar(database.connection,
@@ -413,11 +418,13 @@ TEST_CASE("offline body hydration resumes after restart without re-enumerating m
 
     RecordingResourceTransport resources;
     RejectingMethodTransport methods;
-    javelin::jmap::JmapCore core{database.connection, resources, methods};
+    javelin::jmap::MailQueryClient queryClient{database.connection, methods};
+    javelin::jmap::MessageContentClient contentClient{database.connection, resources};
     javelin::app::WorkScheduler scheduler{database.connection, nullptr,
                                           std::chrono::milliseconds{0}};
     javelin::app::MailIndexService indexer{database.connection, scheduler};
-    javelin::app::FullMailSyncService service{database.connection, core, scheduler, indexer};
+    javelin::app::FullMailSyncService service{database.connection, queryClient, contentClient,
+                                              scheduler, indexer};
     service.applySettings({configuration()});
 
     REQUIRE(waitUntil(
@@ -465,11 +472,13 @@ TEST_CASE("offline body hydration fails instead of retrying an unavailable messa
     RecordingResourceTransport resources;
     resources.statusCode = 404;
     RejectingMethodTransport methods;
-    javelin::jmap::JmapCore core{database.connection, resources, methods};
+    javelin::jmap::MailQueryClient queryClient{database.connection, methods};
+    javelin::jmap::MessageContentClient contentClient{database.connection, resources};
     javelin::app::WorkScheduler scheduler{database.connection, nullptr,
                                           std::chrono::milliseconds{0}};
     javelin::app::MailIndexService indexer{database.connection, scheduler};
-    javelin::app::FullMailSyncService service{database.connection, core, scheduler, indexer};
+    javelin::app::FullMailSyncService service{database.connection, queryClient, contentClient,
+                                              scheduler, indexer};
     service.applySettings({configuration()});
 
     REQUIRE(waitUntil(
@@ -513,11 +522,13 @@ TEST_CASE("offline hydration absorbs mail added while body downloads are running
                     email("email-middle", "blob-middle", "2026-08-07T09:00:00Z", 150));
     };
     RejectingMethodTransport methods;
-    javelin::jmap::JmapCore core{database.connection, resources, methods};
+    javelin::jmap::MailQueryClient queryClient{database.connection, methods};
+    javelin::jmap::MessageContentClient contentClient{database.connection, resources};
     javelin::app::WorkScheduler scheduler{database.connection, nullptr,
                                           std::chrono::milliseconds{0}};
     javelin::app::MailIndexService indexer{database.connection, scheduler};
-    javelin::app::FullMailSyncService service{database.connection, core, scheduler, indexer};
+    javelin::app::FullMailSyncService service{database.connection, queryClient, contentClient,
+                                              scheduler, indexer};
     QStringList hydratedEmailIds;
     QObject::connect(&service, &javelin::app::FullMailSyncService::messageContentCommitted,
                      [&hydratedEmailIds](const QString&, const QString& emailId)

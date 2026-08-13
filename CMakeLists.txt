@@ -670,7 +670,14 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/auth/Auth.cpp
     src/jmap/auth/Auth.h
     src/jmap/JmapCore.cpp
-    src/jmap/JmapCore.h
+    src/jmap/AccountBootstrapClient.h
+    src/jmap/MessageContentClient.h
+    src/jmap/api/LiveConnectionSettings.h
+    src/jmap/api/SessionRefreshClient.h
+    src/jmap/query/MailQueryClient.h
+    src/jmap/query/MailQueryMaterializer.h
+    src/jmap/sync/EmailMutationEngine.h
+    src/jmap/sync/MailboxMutationEngine.h
     src/jmap/OperationError.cpp
     src/jmap/OperationError.h
     src/jmap/EmailMutation.h
@@ -953,7 +960,14 @@ add_library(javelin_jmap STATIC
     src/jmap/auth/AccountOnboardingService.h
     src/app/OnboardingTypes.h
     src/jmap/JmapCore.cpp
-    src/jmap/JmapCore.h
+    src/jmap/AccountBootstrapClient.h
+    src/jmap/MessageContentClient.h
+    src/jmap/api/LiveConnectionSettings.h
+    src/jmap/api/SessionRefreshClient.h
+    src/jmap/query/MailQueryClient.h
+    src/jmap/query/MailQueryMaterializer.h
+    src/jmap/sync/EmailMutationEngine.h
+    src/jmap/sync/MailboxMutationEngine.h
     src/jmap/OperationError.cpp
     src/jmap/OperationError.h
     src/jmap/submission/ComposeService.cpp

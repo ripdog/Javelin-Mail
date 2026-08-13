@@ -1,5 +1,5 @@
 #include "FixtureReader.h"
-#include "jmap/JmapCore.h"
+#include "jmap/MessageContentClient.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/SessionParser.h"
@@ -15,9 +15,13 @@
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
+#include "jmap/query/MailQueryClient.h"
+#include "jmap/query/MailQueryMaterializer.h"
 #include "jmap/search/EmailSearch.h"
 #include "jmap/sync/ConsistencyDomain.h"
+#include "jmap/sync/EmailMutationEngine.h"
 #include "jmap/sync/EmailMutationJournal.h"
+#include "jmap/sync/MailboxMutationEngine.h"
 #include "jmap/sync/MailboxMutationJournal.h"
 
 #include <QCoroFuture>
@@ -94,6 +98,24 @@ namespace
             queuedResults.erase(queuedResults.begin());
             co_return result;
         }
+    };
+
+    struct MailCapabilities
+    {
+        MailCapabilities(javelin::jmap::cache::DatabaseConnection& connection,
+                         javelin::jmap::api::AbstractTransport& resourceTransport,
+                         javelin::jmap::api::JmapMethodTransport& methodTransport)
+            : content(connection, resourceTransport), query(connection, methodTransport),
+              materializer(connection, query), emailMutations(connection, methodTransport),
+              mailboxMutations(connection, methodTransport)
+        {
+        }
+
+        javelin::jmap::MessageContentClient content;
+        javelin::jmap::MailQueryClient query;
+        javelin::jmap::MailQueryMaterializer materializer;
+        javelin::jmap::EmailMutationEngine emailMutations;
+        javelin::jmap::MailboxMutationEngine mailboxMutations;
     };
 
     class PendingTransport final : public javelin::jmap::api::AbstractTransport
@@ -302,8 +324,7 @@ namespace
 
 } // namespace
 
-TEST_CASE("JmapCore refreshMessageContent caches raw message sources",
-          "[jmap][core][message-content]")
+TEST_CASE("MessageContentClient caches raw message sources", "[jmap][core][message-content]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -332,8 +353,8 @@ TEST_CASE("JmapCore refreshMessageContent caches raw message sources",
                                   "--b--\r\n"),
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto result = QCoro::waitFor(core.refreshMessageContent(
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(capabilities.content.refresh(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -371,7 +392,7 @@ TEST_CASE("JmapCore refreshMessageContent caches raw message sources",
     CHECK(source->payload.contains(QByteArrayLiteral("<img src=\"cid:chart@cid\">")));
 }
 
-TEST_CASE("JmapCore message downloads survive concurrent Email mutations",
+TEST_CASE("MessageContentClient downloads survive concurrent Email mutations",
           "[jmap][core][message-content][consistency]")
 {
     ApplicationGuard application;
@@ -383,10 +404,10 @@ TEST_CASE("JmapCore message downloads survive concurrent Email mutations",
     seedEmail(databaseContext.connection);
 
     PendingTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
     std::optional<javelin::jmap::MessageContentRefreshResult> completed;
     QEventLoop completionLoop;
-    auto task = core.refreshMessageContent(
+    auto task = capabilities.content.refresh(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -423,7 +444,7 @@ TEST_CASE("JmapCore message downloads survive concurrent Email mutations",
     CHECK(std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(source).has_value());
 }
 
-TEST_CASE("JmapCore rejects a download when the message blob changes",
+TEST_CASE("MessageContentClient rejects a download when the message blob changes",
           "[jmap][core][message-content][consistency]")
 {
     ApplicationGuard application;
@@ -435,10 +456,10 @@ TEST_CASE("JmapCore rejects a download when the message blob changes",
     seedEmail(databaseContext.connection);
 
     PendingTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
     std::optional<javelin::jmap::MessageContentRefreshResult> completed;
     QEventLoop completionLoop;
-    auto task = core.refreshMessageContent(
+    auto task = capabilities.content.refresh(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -478,7 +499,7 @@ TEST_CASE("JmapCore rejects a download when the message blob changes",
     CHECK(std::get<std::size_t>(evicted) == 1);
 }
 
-TEST_CASE("JmapCore reports missing message source downloads distinctly",
+TEST_CASE("MessageContentClient reports missing message source downloads distinctly",
           "[jmap][core][message-content]")
 {
     ApplicationGuard application;
@@ -497,8 +518,8 @@ TEST_CASE("JmapCore reports missing message source downloads distinctly",
         .httpStatus = 404,
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto result = QCoro::waitFor(core.refreshMessageContent(
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(capabilities.content.refresh(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -513,7 +534,7 @@ TEST_CASE("JmapCore reports missing message source downloads distinctly",
     CHECK(unavailable.message.contains(QStringLiteral("HTTP 404")));
 }
 
-TEST_CASE("JmapCore full mailbox pages stay uncollapsed and within negotiated get limits",
+TEST_CASE("MailQueryClient full mailbox pages stay uncollapsed and within negotiated get limits",
           "[jmap][core][offline]")
 {
     ApplicationGuard application;
@@ -571,8 +592,8 @@ TEST_CASE("JmapCore full mailbox pages stay uncollapsed and within negotiated ge
         }};
     };
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto result = QCoro::waitFor(core.materializeFullMailboxPage(
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(capabilities.query.fetchFullMailboxPage(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -587,7 +608,7 @@ TEST_CASE("JmapCore full mailbox pages stay uncollapsed and within negotiated ge
     CHECK_FALSE(page.emails.front().preview.has_value());
 }
 
-TEST_CASE("JmapCore caches message content from junk and trash mailboxes",
+TEST_CASE("MessageContentClient caches content from junk and trash mailboxes",
           "[jmap][core][message-content]")
 {
     ApplicationGuard application;
@@ -632,8 +653,8 @@ TEST_CASE("JmapCore caches message content from junk and trash mailboxes",
                                   "Readable junk body\r\n"),
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto result = QCoro::waitFor(core.refreshMessageContent(
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(capabilities.content.refresh(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -650,7 +671,7 @@ TEST_CASE("JmapCore caches message content from junk and trash mailboxes",
         std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(sourceResult).has_value());
 }
 
-TEST_CASE("JmapCore searchMessages caches representatives before thread results",
+TEST_CASE("MailQueryMaterializer caches search representatives before thread results",
           "[jmap][core][search]")
 {
     ApplicationGuard application;
@@ -696,8 +717,8 @@ TEST_CASE("JmapCore searchMessages caches representatives before thread results"
         }};
     };
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto result = QCoro::waitFor(core.searchMessages(
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(capabilities.materializer.searchMessages(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -758,7 +779,7 @@ TEST_CASE("JmapCore searchMessages caches representatives before thread results"
     CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(childResult).has_value());
 }
 
-TEST_CASE("JmapCore queues archive and delete mailbox moves as mutations",
+TEST_CASE("EmailMutationEngine queues archive and delete mailbox moves as mutations",
           "[jmap][core][mutation-journal]")
 {
     ApplicationGuard application;
@@ -792,10 +813,14 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as mutations",
                       .has_value());
 
     FakeTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
 
     const auto archiveResult =
-        core.queueArchiveEmail("account-1", "eml-1", "mbx-inbox", "mbx-archive");
+        capabilities.emailMutations.queue("account-1", javelin::jmap::EmailMailboxMutation{
+                                                           .emailId = "eml-1",
+                                                           .addMailboxIds = {"mbx-archive"},
+                                                           .removeMailboxIds = {"mbx-inbox"},
+                                                       });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(archiveResult));
 
     const auto archivedEmailResult = emailRepository.find("account-1", "eml-1");
@@ -826,7 +851,11 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as mutations",
     CHECK(archiveItems.front().emailId == "eml-1");
 
     const auto deleteResult =
-        core.queueDeleteEmail("account-1", "eml-1", "mbx-archive", "mbx-trash");
+        capabilities.emailMutations.queue("account-1", javelin::jmap::EmailMailboxMutation{
+                                                           .emailId = "eml-1",
+                                                           .addMailboxIds = {"mbx-trash"},
+                                                           .removeMailboxIds = {"mbx-archive"},
+                                                       });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(deleteResult));
 
     const auto deletedEmailResult = emailRepository.find("account-1", "eml-1");
@@ -862,7 +891,7 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as mutations",
                       }));
 }
 
-TEST_CASE("JmapCore permanently destroys queued emails through Email/set",
+TEST_CASE("EmailMutationEngine permanently destroys queued emails through Email/set",
           "[jmap][core][mutation-journal]")
 {
     ApplicationGuard application;
@@ -888,8 +917,12 @@ TEST_CASE("JmapCore permanently destroys queued emails through Email/set",
             R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{},"destroyed":["eml-1"],"notUpdated":{},"notDestroyed":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto queuedResult = core.queueDestroyEmail("u1", "eml-1");
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto queuedResult =
+        capabilities.emailMutations.queue("u1", javelin::jmap::EmailMailboxMutation{
+                                                    .emailId = "eml-1",
+                                                    .destroy = true,
+                                                });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queuedResult));
 
     const auto optimisticEmailResult = emailRepository.find("u1", "eml-1");
@@ -900,7 +933,7 @@ TEST_CASE("JmapCore permanently destroys queued emails through Email/set",
     REQUIRE(optimisticEmail.has_value());
     CHECK(optimisticEmail->mailboxIds.empty());
 
-    const auto submitResult = QCoro::waitFor(core.submitPendingEmailMutations(
+    const auto submitResult = QCoro::waitFor(capabilities.emailMutations.submitPending(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -928,7 +961,8 @@ TEST_CASE("JmapCore permanently destroys queued emails through Email/set",
         std::get<std::optional<javelin::jmap::domain::Email>>(deletedEmailResult).has_value());
 }
 
-TEST_CASE("JmapCore queues mailbox copies as mutations", "[jmap][core][mutation-journal]")
+TEST_CASE("EmailMutationEngine queues mailbox copies as mutations",
+          "[jmap][email-mutation][mutation-journal]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -945,9 +979,13 @@ TEST_CASE("JmapCore queues mailbox copies as mutations", "[jmap][core][mutation-
     REQUIRE_FALSE(emailRepository.replaceAll("account-1", {email}).has_value());
 
     FakeTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
 
-    const auto copyResult = core.queueCopyEmail("account-1", "eml-1", "mbx-inbox", "mbx-projects");
+    const auto copyResult =
+        capabilities.emailMutations.queue("account-1", javelin::jmap::EmailMailboxMutation{
+                                                           .emailId = "eml-1",
+                                                           .addMailboxIds = {"mbx-projects"},
+                                                       });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(copyResult));
 
     const auto copiedEmailResult = emailRepository.find("account-1", "eml-1");
@@ -968,7 +1006,7 @@ TEST_CASE("JmapCore queues mailbox copies as mutations", "[jmap][core][mutation-
     CHECK(records.front().patch.removeMailboxIds.empty());
 }
 
-TEST_CASE("JmapCore rejects an invalid email mutation group atomically",
+TEST_CASE("EmailMutationEngine rejects an invalid mutation group atomically",
           "[jmap][core][mutation-journal]")
 {
     ApplicationGuard application;
@@ -985,22 +1023,22 @@ TEST_CASE("JmapCore rejects an invalid email mutation group atomically",
     javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
     REQUIRE_FALSE(emails.replaceAll("account-1", {email}).has_value());
     FakeTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
 
-    const auto result =
-        core.queueEmailMailboxMutations("account-1", {
-                                                         {
-                                                             .emailId = "eml-1",
-                                                             .addMailboxIds = {"mbx-archive"},
-                                                             .removeMailboxIds = {"mbx-inbox"},
-                                                             .operationGroupId = "atomic-group",
-                                                         },
-                                                         {
-                                                             .emailId = "missing",
-                                                             .addKeywords = {"$flagged"},
-                                                             .operationGroupId = "atomic-group",
-                                                         },
-                                                     });
+    const auto result = capabilities.emailMutations.queueBatch(
+        "account-1", {
+                         {
+                             .emailId = "eml-1",
+                             .addMailboxIds = {"mbx-archive"},
+                             .removeMailboxIds = {"mbx-inbox"},
+                             .operationGroupId = "atomic-group",
+                         },
+                         {
+                             .emailId = "missing",
+                             .addKeywords = {"$flagged"},
+                             .operationGroupId = "atomic-group",
+                         },
+                     });
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
 
     const auto unchanged = emails.find("account-1", "eml-1");
@@ -1015,7 +1053,8 @@ TEST_CASE("JmapCore rejects an invalid email mutation group atomically",
     CHECK(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(grouped).empty());
 }
 
-TEST_CASE("JmapCore queues exact mailbox patches as mutations", "[jmap][core][mutation-journal]")
+TEST_CASE("EmailMutationEngine queues exact mailbox patches",
+          "[jmap][email-mutation][mutation-journal]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -1066,9 +1105,9 @@ TEST_CASE("JmapCore queues exact mailbox patches as mutations", "[jmap][core][mu
                       .has_value());
 
     FakeTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
 
-    const auto moveResult = core.queueEmailMailboxMutation(
+    const auto moveResult = capabilities.emailMutations.queue(
         "account-1", javelin::jmap::EmailMailboxMutation{
                          .emailId = "eml-1",
                          .addMailboxIds = {"mbx-archive"},
@@ -1120,7 +1159,8 @@ TEST_CASE("JmapCore queues exact mailbox patches as mutations", "[jmap][core][mu
     CHECK((*cachedSearch)->coverage == javelin::jmap::cache::QueryWindowCoverage::LocallyProjected);
 }
 
-TEST_CASE("JmapCore queues read keyword mutations as mutations", "[jmap][core][mutation-journal]")
+TEST_CASE("EmailMutationEngine queues read keyword mutations",
+          "[jmap][email-mutation][mutation-journal]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -1168,9 +1208,13 @@ TEST_CASE("JmapCore queues read keyword mutations as mutations", "[jmap][core][m
                       .has_value());
 
     FakeTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
 
-    const auto markReadResult = core.queueMarkEmailRead("account-1", "eml-1");
+    const auto markReadResult =
+        capabilities.emailMutations.queue("account-1", javelin::jmap::EmailMailboxMutation{
+                                                           .emailId = "eml-1",
+                                                           .addKeywords = {"$seen"},
+                                                       });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(markReadResult));
 
     const auto readEmailResult = emailRepository.find("account-1", "eml-1");
@@ -1199,7 +1243,11 @@ TEST_CASE("JmapCore queues read keyword mutations as mutations", "[jmap][core][m
     REQUIRE((*searchPage)->items.size() == 1);
     CHECK_FALSE((*searchPage)->items.front().isUnread);
 
-    const auto markUnreadResult = core.queueMarkEmailUnread("account-1", "eml-1");
+    const auto markUnreadResult =
+        capabilities.emailMutations.queue("account-1", javelin::jmap::EmailMailboxMutation{
+                                                           .emailId = "eml-1",
+                                                           .removeKeywords = {"$seen"},
+                                                       });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(markUnreadResult));
 
     const auto unreadEmailResult = emailRepository.find("account-1", "eml-1");
@@ -1210,7 +1258,7 @@ TEST_CASE("JmapCore queues read keyword mutations as mutations", "[jmap][core][m
     CHECK(unreadEmail->keywords.empty());
 }
 
-TEST_CASE("JmapCore downloadAttachment reads attachment payloads from cached raw source",
+TEST_CASE("MessageContentClient reads attachment payloads from cached raw source",
           "[jmap][core][message-content]")
 {
     ApplicationGuard application;
@@ -1246,14 +1294,8 @@ TEST_CASE("JmapCore downloadAttachment reads attachment payloads from cached raw
                       .has_value());
 
     FakeTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto result = QCoro::waitFor(core.downloadAttachment(
-        {
-            .sessionUrl = "https://mail.example.com/.well-known/jmap",
-            .loginEmail = "alice@example.com",
-            .apiKey = "access-token",
-        },
-        "u1", "eml-1", "2"));
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(capabilities.content.loadAttachment("u1", "eml-1", "2"));
 
     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
     {
@@ -1270,7 +1312,7 @@ TEST_CASE("JmapCore downloadAttachment reads attachment payloads from cached raw
     CHECK(transport.requests.empty());
 }
 
-TEST_CASE("JmapCore loads message source from the cached raw payload",
+TEST_CASE("MessageContentClient loads message source from the cached raw payload",
           "[jmap][core][message-content]")
 {
     ApplicationGuard application;
@@ -1293,8 +1335,8 @@ TEST_CASE("JmapCore loads message source from the cached raw payload",
                       .has_value());
 
     FakeTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto result = QCoro::waitFor(core.loadCachedMessageSource("u1", "eml-1"));
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(capabilities.content.loadCachedSource("u1", "eml-1"));
 
     REQUIRE(std::holds_alternative<javelin::jmap::MessageSourceDownload>(result));
     const auto& source = std::get<javelin::jmap::MessageSourceDownload>(result);
@@ -1305,7 +1347,7 @@ TEST_CASE("JmapCore loads message source from the cached raw payload",
     CHECK(transport.requests.empty());
 }
 
-TEST_CASE("JmapCore rejects a missing or stale cached message source",
+TEST_CASE("MessageContentClient rejects a missing or stale cached message source",
           "[jmap][core][message-content]")
 {
     ApplicationGuard application;
@@ -1327,8 +1369,8 @@ TEST_CASE("JmapCore rejects a missing or stale cached message source",
                       .has_value());
 
     FakeTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto result = QCoro::waitFor(core.loadCachedMessageSource("u1", "eml-1"));
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(capabilities.content.loadCachedSource("u1", "eml-1"));
 
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
     CHECK(std::get<javelin::jmap::OperationError>(result).message.contains(
@@ -1336,7 +1378,7 @@ TEST_CASE("JmapCore rejects a missing or stale cached message source",
     CHECK(transport.requests.empty());
 }
 
-TEST_CASE("JmapCore downloadAttachment reads inline payloads from cached raw source",
+TEST_CASE("MessageContentClient reads inline payloads from cached raw source",
           "[jmap][core][message-content]")
 {
     ApplicationGuard application;
@@ -1373,14 +1415,8 @@ TEST_CASE("JmapCore downloadAttachment reads inline payloads from cached raw sou
                       .has_value());
 
     FakeTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto result = QCoro::waitFor(core.downloadAttachment(
-        {
-            .sessionUrl = "https://mail.example.com/.well-known/jmap",
-            .loginEmail = "alice@example.com",
-            .apiKey = "access-token",
-        },
-        "u1", "eml-1", "2"));
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(capabilities.content.loadAttachment("u1", "eml-1", "2"));
 
     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
     {
@@ -1397,7 +1433,7 @@ TEST_CASE("JmapCore downloadAttachment reads inline payloads from cached raw sou
     CHECK(transport.requests.empty());
 }
 
-TEST_CASE("JmapCore submits queued mailbox mutations through Email/set",
+TEST_CASE("EmailMutationEngine submits queued mailbox mutations through Email/set",
           "[jmap][core][mutation-journal]")
 {
     ApplicationGuard application;
@@ -1429,11 +1465,16 @@ TEST_CASE("JmapCore submits queued mailbox mutations through Email/set",
             R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"eml-1":null},"notUpdated":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto queuedResult = core.queueArchiveEmail("u1", "eml-1", "mbx-inbox", "mbx-archive");
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto queuedResult =
+        capabilities.emailMutations.queue("u1", javelin::jmap::EmailMailboxMutation{
+                                                    .emailId = "eml-1",
+                                                    .addMailboxIds = {"mbx-archive"},
+                                                    .removeMailboxIds = {"mbx-inbox"},
+                                                });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queuedResult));
 
-    const auto submitResult = QCoro::waitFor(core.submitPendingEmailMutations(
+    const auto submitResult = QCoro::waitFor(capabilities.emailMutations.submitPending(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -1483,8 +1524,9 @@ TEST_CASE("JmapCore submits queued mailbox mutations through Email/set",
     CHECK(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(pendingResult).empty());
 }
 
-TEST_CASE("JmapCore submits authoritative keyword mutations for uncached server messages",
-          "[jmap][core][mutation-journal][tags]")
+TEST_CASE(
+    "EmailMutationEngine submits authoritative keyword mutations for uncached server messages",
+    "[jmap][core][mutation-journal][tags]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -1500,8 +1542,8 @@ TEST_CASE("JmapCore submits authoritative keyword mutations for uncached server 
             R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"server-only":null},"notUpdated":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto queued = core.queueEmailMailboxMutation(
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto queued = capabilities.emailMutations.queue(
         "u1", {
                   .emailId = "server-only",
                   .removeKeywords = {"project-x"},
@@ -1511,7 +1553,7 @@ TEST_CASE("JmapCore submits authoritative keyword mutations for uncached server 
               });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queued));
 
-    const auto submitted = QCoro::waitFor(core.submitPendingEmailMutations(
+    const auto submitted = QCoro::waitFor(capabilities.emailMutations.submitPending(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -1539,7 +1581,8 @@ TEST_CASE("JmapCore submits authoritative keyword mutations for uncached server 
     CHECK(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records).empty());
 }
 
-TEST_CASE("JmapCore rejects authoritative keyword mutations without fabricating uncached messages",
+TEST_CASE("EmailMutationEngine rejects authoritative keyword mutations without fabricating "
+          "uncached messages",
           "[jmap][core][mutation-journal][tags]")
 {
     ApplicationGuard application;
@@ -1556,8 +1599,8 @@ TEST_CASE("JmapCore rejects authoritative keyword mutations without fabricating 
             R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-1","updated":{},"notUpdated":{"server-only":{"type":"forbidden"}}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto queued = core.queueEmailMailboxMutation(
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto queued = capabilities.emailMutations.queue(
         "u1", {
                   .emailId = "server-only",
                   .removeKeywords = {"project-x"},
@@ -1567,7 +1610,7 @@ TEST_CASE("JmapCore rejects authoritative keyword mutations without fabricating 
               });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queued));
 
-    const auto submitted = QCoro::waitFor(core.submitPendingEmailMutations(
+    const auto submitted = QCoro::waitFor(capabilities.emailMutations.submitPending(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -1591,8 +1634,9 @@ TEST_CASE("JmapCore rejects authoritative keyword mutations without fabricating 
     CHECK(mutations.front().status == javelin::jmap::sync::MutationStatus::Rejected);
 }
 
-TEST_CASE("JmapCore preserves ambiguous authoritative keyword mutations without caching messages",
-          "[jmap][core][mutation-journal][tags]")
+TEST_CASE(
+    "EmailMutationEngine preserves ambiguous authoritative mutations without caching messages",
+    "[jmap][core][mutation-journal][tags]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -1607,8 +1651,8 @@ TEST_CASE("JmapCore preserves ambiguous authoritative keyword mutations without 
         .message = "Connection closed after request dispatch",
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto queued = core.queueEmailMailboxMutation(
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto queued = capabilities.emailMutations.queue(
         "u1", {
                   .emailId = "server-only",
                   .removeKeywords = {"project-x"},
@@ -1618,7 +1662,7 @@ TEST_CASE("JmapCore preserves ambiguous authoritative keyword mutations without 
               });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queued));
 
-    const auto submitted = QCoro::waitFor(core.submitPendingEmailMutations(
+    const auto submitted = QCoro::waitFor(capabilities.emailMutations.submitPending(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -1643,8 +1687,9 @@ TEST_CASE("JmapCore preserves ambiguous authoritative keyword mutations without 
     CHECK(mutations.front().baseKeywords == std::vector<std::string>{"$seen", "project-x"});
 }
 
-TEST_CASE("JmapCore keeps newer optimistic mutations projected while an older submit completes",
-          "[jmap][core][mutation-journal][consistency]")
+TEST_CASE("EmailMutationEngine keeps newer optimistic mutations projected while an older submit "
+          "completes",
+          "[jmap][email-mutation][mutation-journal][consistency]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -1667,19 +1712,19 @@ TEST_CASE("JmapCore keeps newer optimistic mutations projected while an older su
             .has_value());
 
     PendingTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
     const auto firstQueued =
-        core.queueEmailMailboxMutation("u1", {
-                                                 .emailId = "eml-1",
-                                                 .addMailboxIds = {"mbx-archive"},
-                                                 .removeMailboxIds = {"mbx-inbox"},
-                                                 .operationGroupId = "group-1",
-                                             });
+        capabilities.emailMutations.queue("u1", {
+                                                    .emailId = "eml-1",
+                                                    .addMailboxIds = {"mbx-archive"},
+                                                    .removeMailboxIds = {"mbx-inbox"},
+                                                    .operationGroupId = "group-1",
+                                                });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(firstQueued));
 
     std::optional<javelin::jmap::SubmittedEmailMutationsResult> submitted;
     QEventLoop completionLoop;
-    auto submission = core.submitPendingEmailMutations(
+    auto submission = capabilities.emailMutations.submitPending(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -1695,12 +1740,12 @@ TEST_CASE("JmapCore keeps newer optimistic mutations projected while an older su
     REQUIRE(transport.started);
 
     const auto secondQueued =
-        core.queueEmailMailboxMutation("u1", {
-                                                 .emailId = "eml-1",
-                                                 .addMailboxIds = {"mbx-inbox"},
-                                                 .removeMailboxIds = {"mbx-archive"},
-                                                 .operationGroupId = "group-2",
-                                             });
+        capabilities.emailMutations.queue("u1", {
+                                                    .emailId = "eml-1",
+                                                    .addMailboxIds = {"mbx-inbox"},
+                                                    .removeMailboxIds = {"mbx-archive"},
+                                                    .operationGroupId = "group-2",
+                                                });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(secondQueued));
 
     const auto optimistic = emailRepository.find("u1", "eml-1");
@@ -1745,9 +1790,9 @@ TEST_CASE("JmapCore keeps newer optimistic mutations projected while an older su
         .body =
             R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-2","newState":"email-state-2","updated":{},"notUpdated":{"eml-1":{"type":"forbidden"}}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-3"})",
     });
-    javelin::jmap::JmapCore rejectionCore{databaseContext.connection, rejectionTransport,
-                                          rejectionTransport.methodTransport};
-    const auto rejected = QCoro::waitFor(rejectionCore.submitPendingEmailMutations(
+    javelin::jmap::EmailMutationEngine rejectionMutations{databaseContext.connection,
+                                                          rejectionTransport.methodTransport};
+    const auto rejected = QCoro::waitFor(rejectionMutations.submitPending(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -1772,8 +1817,9 @@ TEST_CASE("JmapCore keeps newer optimistic mutations projected while an older su
     CHECK(settledRecords.front().status == javelin::jmap::sync::MutationStatus::Rejected);
 }
 
-TEST_CASE("JmapCore keeps newer optimistic mutations projected when an older submit is rejected",
-          "[jmap][core][mutation-journal][consistency]")
+TEST_CASE("EmailMutationEngine keeps newer optimistic mutations projected when an older submit is "
+          "rejected",
+          "[jmap][email-mutation][mutation-journal][consistency]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -1796,19 +1842,19 @@ TEST_CASE("JmapCore keeps newer optimistic mutations projected when an older sub
             .has_value());
 
     PendingTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
     const auto firstQueued =
-        core.queueEmailMailboxMutation("u1", {
-                                                 .emailId = "eml-1",
-                                                 .addMailboxIds = {"mbx-archive"},
-                                                 .removeMailboxIds = {"mbx-inbox"},
-                                                 .operationGroupId = "group-1",
-                                             });
+        capabilities.emailMutations.queue("u1", {
+                                                    .emailId = "eml-1",
+                                                    .addMailboxIds = {"mbx-archive"},
+                                                    .removeMailboxIds = {"mbx-inbox"},
+                                                    .operationGroupId = "group-1",
+                                                });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(firstQueued));
 
     std::optional<javelin::jmap::SubmittedEmailMutationsResult> submitted;
     QEventLoop completionLoop;
-    auto submission = core.submitPendingEmailMutations(
+    auto submission = capabilities.emailMutations.submitPending(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -1824,11 +1870,11 @@ TEST_CASE("JmapCore keeps newer optimistic mutations projected when an older sub
     REQUIRE(transport.started);
 
     const auto secondQueued =
-        core.queueEmailMailboxMutation("u1", {
-                                                 .emailId = "eml-1",
-                                                 .addKeywords = {"$flagged"},
-                                                 .operationGroupId = "group-2",
-                                             });
+        capabilities.emailMutations.queue("u1", {
+                                                    .emailId = "eml-1",
+                                                    .addKeywords = {"$flagged"},
+                                                    .operationGroupId = "group-2",
+                                                });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(secondQueued));
 
     transport.complete(javelin::jmap::api::HttpResponse{
@@ -1864,7 +1910,7 @@ TEST_CASE("JmapCore keeps newer optimistic mutations projected when an older sub
     CHECK(records[1].status == javelin::jmap::sync::MutationStatus::Pending);
 }
 
-TEST_CASE("JmapCore atomically rolls back accepted Email mutation projection failures",
+TEST_CASE("EmailMutationEngine atomically rolls back accepted projection failures",
           "[jmap][core][mutation-journal][consistency]")
 {
     ApplicationGuard application;
@@ -1888,8 +1934,13 @@ TEST_CASE("JmapCore atomically rolls back accepted Email mutation projection fai
             R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"eml-1":null},"notUpdated":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto queuedResult = core.queueArchiveEmail("u1", "eml-1", "mbx-inbox", "mbx-archive");
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto queuedResult =
+        capabilities.emailMutations.queue("u1", javelin::jmap::EmailMailboxMutation{
+                                                    .emailId = "eml-1",
+                                                    .addMailboxIds = {"mbx-archive"},
+                                                    .removeMailboxIds = {"mbx-inbox"},
+                                                });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queuedResult));
     const auto mutationId = std::get<javelin::jmap::QueuedEmailMutation>(queuedResult).mutationId;
 
@@ -1898,7 +1949,7 @@ TEST_CASE("JmapCore atomically rolls back accepted Email mutation projection fai
         QStringLiteral("CREATE TRIGGER reject_email_acceptance BEFORE DELETE ON mutation_journal "
                        "BEGIN SELECT RAISE(ABORT,'acceptance rejected'); END")));
 
-    const auto submitResult = QCoro::waitFor(core.submitPendingEmailMutations(
+    const auto submitResult = QCoro::waitFor(capabilities.emailMutations.submitPending(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -1931,7 +1982,7 @@ TEST_CASE("JmapCore atomically rolls back accepted Email mutation projection fai
     CHECK(cached->mailboxIds == std::vector<std::string>{"mbx-archive"});
 }
 
-TEST_CASE("JmapCore restores rejected Email mutations immediately",
+TEST_CASE("EmailMutationEngine restores rejected mutations immediately",
           "[jmap][core][mutation-journal][consistency]")
 {
     ApplicationGuard application;
@@ -1956,11 +2007,20 @@ TEST_CASE("JmapCore restores rejected Email mutations immediately",
             R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-1","updated":{},"notUpdated":{"eml-1":{"type":"forbidden"}}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto queued = core.queueArchiveEmail("u1", "eml-1", "mbx-inbox", "mbx-archive");
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto queued =
+        capabilities.emailMutations.queue("u1", javelin::jmap::EmailMailboxMutation{
+                                                    .emailId = "eml-1",
+                                                    .addMailboxIds = {"mbx-archive"},
+                                                    .removeMailboxIds = {"mbx-inbox"},
+                                                });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queued));
     const auto mutationId = std::get<javelin::jmap::QueuedEmailMutation>(queued).mutationId;
-    const auto queuedUnread = core.queueMarkEmailUnread("u1", "eml-1");
+    const auto queuedUnread =
+        capabilities.emailMutations.queue("u1", javelin::jmap::EmailMailboxMutation{
+                                                    .emailId = "eml-1",
+                                                    .removeKeywords = {"$seen"},
+                                                });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queuedUnread));
 
     const auto optimistic = emailRepository.find("u1", "eml-1");
@@ -1970,7 +2030,7 @@ TEST_CASE("JmapCore restores rejected Email mutations immediately",
           std::vector<std::string>{"mbx-archive"});
     CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(optimistic)->keywords.empty());
 
-    const auto submitted = QCoro::waitFor(core.submitPendingEmailMutations(
+    const auto submitted = QCoro::waitFor(capabilities.emailMutations.submitPending(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -1996,7 +2056,7 @@ TEST_CASE("JmapCore restores rejected Email mutations immediately",
           javelin::jmap::sync::MutationStatus::Rejected);
 }
 
-TEST_CASE("JmapCore submits queued read keyword mutations through Email/set",
+TEST_CASE("EmailMutationEngine submits queued read keyword mutations through Email/set",
           "[jmap][core][mutation-journal]")
 {
     ApplicationGuard application;
@@ -2028,11 +2088,15 @@ TEST_CASE("JmapCore submits queued read keyword mutations through Email/set",
             R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"eml-1":null},"notUpdated":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto queuedResult = core.queueMarkEmailRead("u1", "eml-1");
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto queuedResult =
+        capabilities.emailMutations.queue("u1", javelin::jmap::EmailMailboxMutation{
+                                                    .emailId = "eml-1",
+                                                    .addKeywords = {"$seen"},
+                                                });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queuedResult));
 
-    const auto submitResult = QCoro::waitFor(core.submitPendingEmailMutations(
+    const auto submitResult = QCoro::waitFor(capabilities.emailMutations.submitPending(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -2074,7 +2138,7 @@ TEST_CASE("JmapCore submits queued read keyword mutations through Email/set",
         "email-state-2");
 }
 
-TEST_CASE("JmapCore hides a mailbox with optimistic Mailbox set semantics",
+TEST_CASE("MailboxMutationEngine hides a mailbox with optimistic set semantics",
           "[jmap][core][mailbox][mutation-journal]")
 {
     ApplicationGuard application;
@@ -2090,13 +2154,14 @@ TEST_CASE("JmapCore hides a mailbox with optimistic Mailbox set semantics",
         .body = QByteArrayLiteral(
             R"({"methodResponses":[["Mailbox/set",{"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-2","updated":{"mbx-inbox":null},"notUpdated":{}},"mailbox-subscription-set"]],"createdIds":{},"sessionState":"session-state-2"})"),
     });
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                          transport.methodTransport};
     bool projected = false;
-    const auto result = QCoro::waitFor(
-        core.setMailboxSubscribed({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                                   .loginEmail = "alice@example.com",
-                                   .apiKey = "access-token"},
-                                  "u1", "mbx-inbox", false, [&projected] { projected = true; }));
+    const auto result = QCoro::waitFor(mailboxMutations.setSubscribed(
+        {.sessionUrl = "https://mail.example.com/.well-known/jmap",
+         .loginEmail = "alice@example.com",
+         .apiKey = "access-token"},
+        "u1", "mbx-inbox", false, [&projected] { projected = true; }));
 
     REQUIRE(std::holds_alternative<javelin::jmap::MailboxSubscriptionChange>(result));
     CHECK(projected);
@@ -2111,7 +2176,7 @@ TEST_CASE("JmapCore hides a mailbox with optimistic Mailbox set semantics",
     CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailbox)->isSubscribed);
 }
 
-TEST_CASE("JmapCore restores mailbox visibility when the server rejects Hide",
+TEST_CASE("MailboxMutationEngine restores visibility when the server rejects Hide",
           "[jmap][core][mailbox][mutation-journal]")
 {
     ApplicationGuard application;
@@ -2127,12 +2192,13 @@ TEST_CASE("JmapCore restores mailbox visibility when the server rejects Hide",
         .body = QByteArrayLiteral(
             R"({"methodResponses":[["Mailbox/set",{"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-1","updated":{},"notUpdated":{"mbx-inbox":{"type":"forbidden"}}},"mailbox-subscription-set"]],"createdIds":{},"sessionState":"session-state-2"})"),
     });
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                          transport.methodTransport};
     const auto result = QCoro::waitFor(
-        core.setMailboxSubscribed({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                                   .loginEmail = "alice@example.com",
-                                   .apiKey = "access-token"},
-                                  "u1", "mbx-inbox", false));
+        mailboxMutations.setSubscribed({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                        .loginEmail = "alice@example.com",
+                                        .apiKey = "access-token"},
+                                       "u1", "mbx-inbox", false));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
     CHECK(std::get<javelin::jmap::OperationError>(result).code ==
           javelin::jmap::OperationErrorCode::PermissionDenied);
@@ -2144,7 +2210,7 @@ TEST_CASE("JmapCore restores mailbox visibility when the server rejects Hide",
     CHECK(std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailbox)->isSubscribed);
 }
 
-TEST_CASE("JmapCore reconciles an ambiguous Hide before retrying Mailbox set",
+TEST_CASE("MailboxMutationEngine reconciles an ambiguous Hide before retrying",
           "[jmap][core][mailbox][mutation-journal][recovery]")
 {
     ApplicationGuard application;
@@ -2160,12 +2226,13 @@ TEST_CASE("JmapCore reconciles an ambiguous Hide before retrying Mailbox set",
         .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
         .message = "Connection closed after request dispatch",
     });
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                          transport.methodTransport};
     const auto ambiguous = QCoro::waitFor(
-        core.setMailboxSubscribed({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                                   .loginEmail = "alice@example.com",
-                                   .apiKey = "access-token"},
-                                  "u1", "mbx-inbox", false));
+        mailboxMutations.setSubscribed({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                        .loginEmail = "alice@example.com",
+                                        .apiKey = "access-token"},
+                                       "u1", "mbx-inbox", false));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(ambiguous));
 
     javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
@@ -2189,7 +2256,7 @@ TEST_CASE("JmapCore reconciles an ambiguous Hide before retrying Mailbox set",
         .body = QByteArrayLiteral(
             R"({"methodResponses":[["Mailbox/set",{"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-2","updated":{"mbx-inbox":null},"notUpdated":{}},"mailbox-subscription-set"]],"createdIds":{},"sessionState":"session-state-3"})"),
     });
-    const auto recovered = QCoro::waitFor(core.reconcileMailboxSubscription(
+    const auto recovered = QCoro::waitFor(mailboxMutations.reconcileSubscription(
         {.sessionUrl = "https://mail.example.com/.well-known/jmap",
          .loginEmail = "alice@example.com",
          .apiKey = "access-token"},
@@ -2206,7 +2273,7 @@ TEST_CASE("JmapCore reconciles an ambiguous Hide before retrying Mailbox set",
               .empty());
 }
 
-TEST_CASE("JmapCore refuses unsafe mailbox deletion before issuing Mailbox set",
+TEST_CASE("MailboxMutationEngine refuses unsafe deletion before issuing Mailbox set",
           "[jmap][core][mailbox][destroy][safety]")
 {
     ApplicationGuard application;
@@ -2219,13 +2286,13 @@ TEST_CASE("JmapCore refuses unsafe mailbox deletion before issuing Mailbox set",
         REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
         seedDeletableMailbox(databaseContext.connection, 0, false);
         FakeTransport transport;
-        javelin::jmap::JmapCore core{databaseContext.connection, transport,
-                                     transport.methodTransport};
+        javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                              transport.methodTransport};
         const auto result = QCoro::waitFor(
-            core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                                 .loginEmail = "alice@example.com",
-                                 .apiKey = "access-token"},
-                                "u1", "mbx-inbox"));
+            mailboxMutations.destroy({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                      .loginEmail = "alice@example.com",
+                                      .apiKey = "access-token"},
+                                     "u1", "mbx-inbox"));
         REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
         CHECK(std::get<javelin::jmap::OperationError>(result).code ==
               javelin::jmap::OperationErrorCode::PermissionDenied);
@@ -2239,13 +2306,13 @@ TEST_CASE("JmapCore refuses unsafe mailbox deletion before issuing Mailbox set",
         REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
         seedDeletableMailbox(databaseContext.connection, 1, true);
         FakeTransport transport;
-        javelin::jmap::JmapCore core{databaseContext.connection, transport,
-                                     transport.methodTransport};
+        javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                              transport.methodTransport};
         const auto result = QCoro::waitFor(
-            core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                                 .loginEmail = "alice@example.com",
-                                 .apiKey = "access-token"},
-                                "u1", "mbx-inbox"));
+            mailboxMutations.destroy({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                      .loginEmail = "alice@example.com",
+                                      .apiKey = "access-token"},
+                                     "u1", "mbx-inbox"));
         REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
         CHECK(std::get<javelin::jmap::OperationError>(result).code ==
               javelin::jmap::OperationErrorCode::PreconditionFailed);
@@ -2275,13 +2342,13 @@ TEST_CASE("JmapCore refuses unsafe mailbox deletion before issuing Mailbox set",
         REQUIRE_FALSE(mailboxes.upsertMany("u1", {child}).has_value());
 
         FakeTransport transport;
-        javelin::jmap::JmapCore core{databaseContext.connection, transport,
-                                     transport.methodTransport};
+        javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                              transport.methodTransport};
         const auto result = QCoro::waitFor(
-            core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                                 .loginEmail = "alice@example.com",
-                                 .apiKey = "access-token"},
-                                "u1", "mbx-inbox"));
+            mailboxMutations.destroy({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                      .loginEmail = "alice@example.com",
+                                      .apiKey = "access-token"},
+                                     "u1", "mbx-inbox"));
         REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
         CHECK(std::get<javelin::jmap::OperationError>(result).code ==
               javelin::jmap::OperationErrorCode::PreconditionFailed);
@@ -2289,7 +2356,7 @@ TEST_CASE("JmapCore refuses unsafe mailbox deletion before issuing Mailbox set",
     }
 }
 
-TEST_CASE("JmapCore creates a top-level mailbox with an optimistic pending projection",
+TEST_CASE("MailboxMutationEngine creates a mailbox with an optimistic pending projection",
           "[jmap][core][mailbox][create][mutation-journal]")
 {
     ApplicationGuard application;
@@ -2308,9 +2375,10 @@ TEST_CASE("JmapCore creates a top-level mailbox with an optimistic pending proje
             .body = mailboxCreateSuccessEnvelope(creationId, "mailbox-state-1", "mailbox-state-2"),
         }};
     };
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                          transport.methodTransport};
     bool projected = false;
-    const auto result = QCoro::waitFor(core.createMailbox(
+    const auto result = QCoro::waitFor(mailboxMutations.create(
         {.sessionUrl = "https://mail.example.com/.well-known/jmap",
          .loginEmail = "alice@example.com",
          .apiKey = "access-token"},
@@ -2352,7 +2420,7 @@ TEST_CASE("JmapCore creates a top-level mailbox with an optimistic pending proje
     CHECK(projection.value(0).toInt() == 0);
 }
 
-TEST_CASE("JmapCore validates top-level mailbox creation before projection",
+TEST_CASE("MailboxMutationEngine validates mailbox creation before projection",
           "[jmap][core][mailbox][create][permission]")
 {
     ApplicationGuard application;
@@ -2365,13 +2433,13 @@ TEST_CASE("JmapCore validates top-level mailbox creation before projection",
         REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
         seedMailbox(databaseContext.connection);
         FakeTransport transport;
-        javelin::jmap::JmapCore core{databaseContext.connection, transport,
-                                     transport.methodTransport};
+        javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                              transport.methodTransport};
         const auto result = QCoro::waitFor(
-            core.createMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                                .loginEmail = "alice@example.com",
-                                .apiKey = "access-token"},
-                               "u1", "Projects"));
+            mailboxMutations.create({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                     .loginEmail = "alice@example.com",
+                                     .apiKey = "access-token"},
+                                    "u1", "Projects"));
         REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
         CHECK(std::get<javelin::jmap::OperationError>(result).code ==
               javelin::jmap::OperationErrorCode::PermissionDenied);
@@ -2385,13 +2453,13 @@ TEST_CASE("JmapCore validates top-level mailbox creation before projection",
         REQUIRE_FALSE(sessions.replace("u1", mailboxCreateSession()).has_value());
         seedMailbox(databaseContext.connection);
         FakeTransport transport;
-        javelin::jmap::JmapCore core{databaseContext.connection, transport,
-                                     transport.methodTransport};
+        javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                              transport.methodTransport};
         const auto result = QCoro::waitFor(
-            core.createMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                                .loginEmail = "alice@example.com",
-                                .apiKey = "access-token"},
-                               "u1", "Inbox"));
+            mailboxMutations.create({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                     .loginEmail = "alice@example.com",
+                                     .apiKey = "access-token"},
+                                    "u1", "Inbox"));
         REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
         CHECK(std::get<javelin::jmap::OperationError>(result).code ==
               javelin::jmap::OperationErrorCode::InvalidUserInput);
@@ -2399,7 +2467,7 @@ TEST_CASE("JmapCore validates top-level mailbox creation before projection",
     }
 }
 
-TEST_CASE("JmapCore removes a mailbox create projection after server rejection",
+TEST_CASE("MailboxMutationEngine removes a create projection after server rejection",
           "[jmap][core][mailbox][create][mutation-journal]")
 {
     ApplicationGuard application;
@@ -2422,12 +2490,13 @@ TEST_CASE("JmapCore removes a mailbox create projection after server rejection",
                     .toUtf8(),
         }};
     };
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                          transport.methodTransport};
     const auto result = QCoro::waitFor(
-        core.createMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                            .loginEmail = "alice@example.com",
-                            .apiKey = "access-token"},
-                           "u1", "Projects"));
+        mailboxMutations.create({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                 .loginEmail = "alice@example.com",
+                                 .apiKey = "access-token"},
+                                "u1", "Projects"));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
     CHECK(std::get<javelin::jmap::OperationError>(result).code ==
           javelin::jmap::OperationErrorCode::InvalidUserInput);
@@ -2438,8 +2507,9 @@ TEST_CASE("JmapCore removes a mailbox create projection after server rejection",
     CHECK(projection.value(0).toInt() == 0);
 }
 
-TEST_CASE("JmapCore adopts an ambiguous mailbox creation already accepted by the server",
-          "[jmap][core][mailbox][create][mutation-journal][recovery]")
+TEST_CASE(
+    "MailboxMutationEngine adopts an ambiguous mailbox creation already accepted by the server",
+    "[jmap][mailbox-mutation][create][mutation-journal][recovery]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -2454,12 +2524,13 @@ TEST_CASE("JmapCore adopts an ambiguous mailbox creation already accepted by the
         .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
         .message = "Connection closed after request dispatch",
     });
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                          transport.methodTransport};
     const auto ambiguous = QCoro::waitFor(
-        core.createMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                            .loginEmail = "alice@example.com",
-                            .apiKey = "access-token"},
-                           "u1", "Projects"));
+        mailboxMutations.create({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                 .loginEmail = "alice@example.com",
+                                 .apiKey = "access-token"},
+                                "u1", "Projects"));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(ambiguous));
 
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
@@ -2468,10 +2539,10 @@ TEST_CASE("JmapCore adopts an ambiguous mailbox creation already accepted by the
             R"({"methodResponses":[["Mailbox/get",{"accountId":"u1","state":"mailbox-state-2","list":[{"id":"mbx-projects","name":"Projects","parentId":null,"role":null,"sortOrder":0,"totalEmails":0,"unreadEmails":0,"totalThreads":0,"unreadThreads":0,"isSubscribed":true,"myRights":{"mayReadItems":true,"mayAddItems":true,"mayRemoveItems":true,"maySetSeen":true,"maySetKeywords":true,"mayCreateChild":true,"mayRename":true,"mayDelete":true,"maySubmit":true}}],"notFound":[]},"mailbox-create-reconcile"]],"createdIds":{},"sessionState":"session-state-2"})"),
     });
     const auto recovered = QCoro::waitFor(
-        core.reconcileMailboxCreate({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                                     .loginEmail = "alice@example.com",
-                                     .apiKey = "access-token"},
-                                    "u1"));
+        mailboxMutations.reconcileCreate({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                          .loginEmail = "alice@example.com",
+                                          .apiKey = "access-token"},
+                                         "u1"));
     REQUIRE(std::holds_alternative<javelin::jmap::MailboxCreateChange>(recovered));
     CHECK(std::get<javelin::jmap::MailboxCreateChange>(recovered).mailboxId == "mbx-projects");
     CHECK(transport.requests.size() == 2);
@@ -2482,8 +2553,8 @@ TEST_CASE("JmapCore adopts an ambiguous mailbox creation already accepted by the
     REQUIRE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(stored).has_value());
 }
 
-TEST_CASE("JmapCore safely retries an ambiguous mailbox creation proven absent",
-          "[jmap][core][mailbox][create][mutation-journal][recovery]")
+TEST_CASE("MailboxMutationEngine safely retries an ambiguous mailbox creation proven absent",
+          "[jmap][mailbox-mutation][create][mutation-journal][recovery]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -2498,12 +2569,13 @@ TEST_CASE("JmapCore safely retries an ambiguous mailbox creation proven absent",
         .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
         .message = "Connection closed after request dispatch",
     });
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                          transport.methodTransport};
     const auto ambiguous = QCoro::waitFor(
-        core.createMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                            .loginEmail = "alice@example.com",
-                            .apiKey = "access-token"},
-                           "u1", "Projects"));
+        mailboxMutations.create({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                 .loginEmail = "alice@example.com",
+                                 .apiKey = "access-token"},
+                                "u1", "Projects"));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(ambiguous));
 
     QSqlQuery pending{databaseContext.connection.database()};
@@ -2521,10 +2593,10 @@ TEST_CASE("JmapCore safely retries an ambiguous mailbox creation proven absent",
         .body = mailboxCreateSuccessEnvelope(creationId, "mailbox-state-2", "mailbox-state-3"),
     });
     const auto recovered = QCoro::waitFor(
-        core.reconcileMailboxCreate({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                                     .loginEmail = "alice@example.com",
-                                     .apiKey = "access-token"},
-                                    "u1"));
+        mailboxMutations.reconcileCreate({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                          .loginEmail = "alice@example.com",
+                                          .apiKey = "access-token"},
+                                         "u1"));
     REQUIRE(std::holds_alternative<javelin::jmap::MailboxCreateChange>(recovered));
     CHECK(std::get<javelin::jmap::MailboxCreateChange>(recovered).mailboxId == "mbx-projects");
     REQUIRE(transport.requests.size() == 3);
@@ -2532,7 +2604,7 @@ TEST_CASE("JmapCore safely retries an ambiguous mailbox creation proven absent",
         QByteArrayLiteral("\"ifInState\":\"mailbox-state-2\"")));
 }
 
-TEST_CASE("JmapCore deletes an empty mailbox with optimistic Mailbox set semantics",
+TEST_CASE("MailboxMutationEngine deletes an empty mailbox with optimistic set semantics",
           "[jmap][core][mailbox][destroy][mutation-journal]")
 {
     ApplicationGuard application;
@@ -2548,13 +2620,14 @@ TEST_CASE("JmapCore deletes an empty mailbox with optimistic Mailbox set semanti
         .body = QByteArrayLiteral(
             R"({"methodResponses":[["Mailbox/set",{"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-2","destroyed":["mbx-inbox"],"notDestroyed":{}},"mailbox-destroy-set"]],"createdIds":{},"sessionState":"session-state-2"})"),
     });
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                          transport.methodTransport};
     bool projected = false;
     const auto result = QCoro::waitFor(
-        core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                             .loginEmail = "alice@example.com",
-                             .apiKey = "access-token"},
-                            "u1", "mbx-inbox", [&projected] { projected = true; }));
+        mailboxMutations.destroy({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                  .loginEmail = "alice@example.com",
+                                  .apiKey = "access-token"},
+                                 "u1", "mbx-inbox", [&projected] { projected = true; }));
 
     REQUIRE(std::holds_alternative<javelin::jmap::MailboxDestroyChange>(result));
     CHECK(projected);
@@ -2571,7 +2644,7 @@ TEST_CASE("JmapCore deletes an empty mailbox with optimistic Mailbox set semanti
     CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailbox).has_value());
 }
 
-TEST_CASE("JmapCore restores a mailbox when the server rejects deletion",
+TEST_CASE("MailboxMutationEngine restores a mailbox when the server rejects deletion",
           "[jmap][core][mailbox][destroy][mutation-journal]")
 {
     ApplicationGuard application;
@@ -2587,12 +2660,13 @@ TEST_CASE("JmapCore restores a mailbox when the server rejects deletion",
         .body = QByteArrayLiteral(
             R"({"methodResponses":[["Mailbox/set",{"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-1","destroyed":[],"notDestroyed":{"mbx-inbox":{"type":"mailboxHasEmail"}}},"mailbox-destroy-set"]],"createdIds":{},"sessionState":"session-state-2"})"),
     });
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                          transport.methodTransport};
     const auto result = QCoro::waitFor(
-        core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                             .loginEmail = "alice@example.com",
-                             .apiKey = "access-token"},
-                            "u1", "mbx-inbox"));
+        mailboxMutations.destroy({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                  .loginEmail = "alice@example.com",
+                                  .apiKey = "access-token"},
+                                 "u1", "mbx-inbox"));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
     CHECK(std::get<javelin::jmap::OperationError>(result).code ==
           javelin::jmap::OperationErrorCode::PreconditionFailed);
@@ -2604,7 +2678,7 @@ TEST_CASE("JmapCore restores a mailbox when the server rejects deletion",
     CHECK(std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailbox)->myRights.mayDelete);
 }
 
-TEST_CASE("JmapCore reconciles an ambiguous mailbox deletion before retrying",
+TEST_CASE("MailboxMutationEngine reconciles an ambiguous deletion before retrying",
           "[jmap][core][mailbox][destroy][mutation-journal][recovery]")
 {
     ApplicationGuard application;
@@ -2620,12 +2694,13 @@ TEST_CASE("JmapCore reconciles an ambiguous mailbox deletion before retrying",
         .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
         .message = "Connection closed after request dispatch",
     });
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                          transport.methodTransport};
     const auto ambiguous = QCoro::waitFor(
-        core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                             .loginEmail = "alice@example.com",
-                             .apiKey = "access-token"},
-                            "u1", "mbx-inbox"));
+        mailboxMutations.destroy({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                  .loginEmail = "alice@example.com",
+                                  .apiKey = "access-token"},
+                                 "u1", "mbx-inbox"));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(ambiguous));
 
     javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
@@ -2651,11 +2726,11 @@ TEST_CASE("JmapCore reconciles an ambiguous mailbox deletion before retrying",
         .body = QByteArrayLiteral(
             R"({"methodResponses":[["Mailbox/set",{"accountId":"u1","oldState":"mailbox-state-1","newState":"mailbox-state-2","destroyed":["mbx-inbox"],"notDestroyed":{}},"mailbox-destroy-set"]],"createdIds":{},"sessionState":"session-state-3"})"),
     });
-    const auto recovered = QCoro::waitFor(
-        core.reconcileMailboxDestroy({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                                      .loginEmail = "alice@example.com",
-                                      .apiKey = "access-token"},
-                                     "u1"));
+    const auto recovered = QCoro::waitFor(mailboxMutations.reconcileDestroy(
+        {.sessionUrl = "https://mail.example.com/.well-known/jmap",
+         .loginEmail = "alice@example.com",
+         .apiKey = "access-token"},
+        "u1"));
     REQUIRE(std::holds_alternative<javelin::jmap::MailboxDestroyChange>(recovered));
     CHECK(transport.requests.size() == 3);
     CHECK(transport.requests[1].body.contains(QByteArrayLiteral("Mailbox/get")));
@@ -2667,7 +2742,7 @@ TEST_CASE("JmapCore reconciles an ambiguous mailbox deletion before retrying",
         std::get<std::vector<javelin::jmap::sync::MailboxDestroyMutationRecord>>(settled).empty());
 }
 
-TEST_CASE("JmapCore does not repeat an ambiguous deletion already accepted by the server",
+TEST_CASE("MailboxMutationEngine does not repeat an accepted ambiguous deletion",
           "[jmap][core][mailbox][destroy][mutation-journal][recovery]")
 {
     ApplicationGuard application;
@@ -2683,12 +2758,13 @@ TEST_CASE("JmapCore does not repeat an ambiguous deletion already accepted by th
         .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
         .message = "Connection closed after request dispatch",
     });
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                          transport.methodTransport};
     const auto ambiguous = QCoro::waitFor(
-        core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                             .loginEmail = "alice@example.com",
-                             .apiKey = "access-token"},
-                            "u1", "mbx-inbox"));
+        mailboxMutations.destroy({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                  .loginEmail = "alice@example.com",
+                                  .apiKey = "access-token"},
+                                 "u1", "mbx-inbox"));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(ambiguous));
 
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
@@ -2696,11 +2772,11 @@ TEST_CASE("JmapCore does not repeat an ambiguous deletion already accepted by th
         .body = QByteArrayLiteral(
             R"({"methodResponses":[["Mailbox/get",{"accountId":"u1","state":"mailbox-state-2","list":[],"notFound":["mbx-inbox"]},"mailbox-mutation-reconcile"]],"createdIds":{},"sessionState":"session-state-2"})"),
     });
-    const auto recovered = QCoro::waitFor(
-        core.reconcileMailboxDestroy({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                                      .loginEmail = "alice@example.com",
-                                      .apiKey = "access-token"},
-                                     "u1"));
+    const auto recovered = QCoro::waitFor(mailboxMutations.reconcileDestroy(
+        {.sessionUrl = "https://mail.example.com/.well-known/jmap",
+         .loginEmail = "alice@example.com",
+         .apiKey = "access-token"},
+        "u1"));
     REQUIRE(std::holds_alternative<javelin::jmap::MailboxDestroyChange>(recovered));
     CHECK(transport.requests.size() == 2);
     CHECK(transport.requests[1].body.contains(QByteArrayLiteral("Mailbox/get")));
@@ -2714,7 +2790,7 @@ TEST_CASE("JmapCore does not repeat an ambiguous deletion already accepted by th
         std::get<std::vector<javelin::jmap::sync::MailboxDestroyMutationRecord>>(settled).empty());
 }
 
-TEST_CASE("JmapCore restores an ambiguous deletion when the authoritative mailbox advanced",
+TEST_CASE("MailboxMutationEngine restores an ambiguous deletion after authoritative advance",
           "[jmap][core][mailbox][destroy][mutation-journal][recovery]")
 {
     ApplicationGuard application;
@@ -2730,12 +2806,13 @@ TEST_CASE("JmapCore restores an ambiguous deletion when the authoritative mailbo
         .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
         .message = "Connection closed after request dispatch",
     });
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                          transport.methodTransport};
     const auto ambiguous = QCoro::waitFor(
-        core.destroyMailbox({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                             .loginEmail = "alice@example.com",
-                             .apiKey = "access-token"},
-                            "u1", "mbx-inbox"));
+        mailboxMutations.destroy({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                  .loginEmail = "alice@example.com",
+                                  .apiKey = "access-token"},
+                                 "u1", "mbx-inbox"));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(ambiguous));
 
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
@@ -2743,11 +2820,11 @@ TEST_CASE("JmapCore restores an ambiguous deletion when the authoritative mailbo
         .body = QByteArrayLiteral(
             R"({"methodResponses":[["Mailbox/get",{"accountId":"u1","state":"mailbox-state-2","list":[{"id":"mbx-inbox","name":"Inbox","parentId":null,"role":"inbox","sortOrder":10,"totalEmails":1,"unreadEmails":1,"totalThreads":1,"unreadThreads":1,"isSubscribed":true,"myRights":{"mayReadItems":true,"mayAddItems":true,"mayRemoveItems":true,"maySetSeen":true,"maySetKeywords":true,"mayCreateChild":false,"mayRename":false,"mayDelete":true,"maySubmit":true}}],"notFound":[]},"mailbox-mutation-reconcile"]],"createdIds":{},"sessionState":"session-state-2"})"),
     });
-    const auto recovered = QCoro::waitFor(
-        core.reconcileMailboxDestroy({.sessionUrl = "https://mail.example.com/.well-known/jmap",
-                                      .loginEmail = "alice@example.com",
-                                      .apiKey = "access-token"},
-                                     "u1"));
+    const auto recovered = QCoro::waitFor(mailboxMutations.reconcileDestroy(
+        {.sessionUrl = "https://mail.example.com/.well-known/jmap",
+         .loginEmail = "alice@example.com",
+         .apiKey = "access-token"},
+        "u1"));
     REQUIRE(std::holds_alternative<javelin::jmap::MailboxDestroyChange>(recovered));
     CHECK(transport.requests.size() == 2);
 
@@ -2764,7 +2841,7 @@ TEST_CASE("JmapCore restores an ambiguous deletion when the authoritative mailbo
         std::get<std::vector<javelin::jmap::sync::MailboxDestroyMutationRecord>>(settled).empty());
 }
 
-TEST_CASE("JmapCore preserves ambiguous Email mutation outcomes for reconciliation",
+TEST_CASE("EmailMutationEngine preserves ambiguous outcomes for reconciliation",
           "[jmap][core][mutation-journal]")
 {
     ApplicationGuard application;
@@ -2787,11 +2864,16 @@ TEST_CASE("JmapCore preserves ambiguous Email mutation outcomes for reconciliati
         .message = "Connection closed after request dispatch",
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
-    const auto queued = core.queueArchiveEmail("u1", "eml-1", "mbx-inbox", "mbx-archive");
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto queued =
+        capabilities.emailMutations.queue("u1", javelin::jmap::EmailMailboxMutation{
+                                                    .emailId = "eml-1",
+                                                    .addMailboxIds = {"mbx-archive"},
+                                                    .removeMailboxIds = {"mbx-inbox"},
+                                                });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queued));
 
-    const auto submitted = QCoro::waitFor(core.submitPendingEmailMutations(
+    const auto submitted = QCoro::waitFor(capabilities.emailMutations.submitPending(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",

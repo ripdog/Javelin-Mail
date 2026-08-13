@@ -2,13 +2,14 @@
 
 #include "app/MailIndexService.h"
 #include "app/WorkScheduler.h"
-#include "jmap/JmapCore.h"
+#include "jmap/MessageContentClient.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailVault.h"
 #include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SessionRepository.h"
+#include "jmap/query/MailQueryClient.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 #include "storage/sqlite/DatabaseConnection.h"
@@ -656,11 +657,12 @@ namespace javelin::app
     } // namespace
 
     FullMailSyncService::FullMailSyncService(javelin::jmap::cache::DatabaseConnection& connection,
-                                             javelin::jmap::JmapCore& core,
+                                             javelin::jmap::MailQueryClient& queryClient,
+                                             javelin::jmap::MessageContentClient& contentClient,
                                              WorkScheduler& scheduler,
                                              MailIndexService& indexService, QObject* parent)
-        : QObject(parent), m_connection(connection), m_core(core), m_scheduler(scheduler),
-          m_indexService(indexService)
+        : QObject(parent), m_connection(connection), m_queryClient(queryClient),
+          m_contentClient(contentClient), m_scheduler(scheduler), m_indexService(indexService)
     {
         connect(&m_scheduler, &WorkScheduler::jobsChanged, this, [this]() { schedulePump(); });
         connect(&m_scheduler, &WorkScheduler::foregroundAvailabilityChanged, this,
@@ -1161,7 +1163,7 @@ namespace javelin::app
                     << static_cast<qulonglong>(position) << "limit"
                     << static_cast<qulonglong>(pageSize) << "expected"
                     << (total.has_value() ? QString::number(*total) : QStringLiteral("unknown"));
-                auto pageResult = co_await m_core.materializeFullMailboxPage(
+                auto pageResult = co_await m_queryClient.fetchFullMailboxPage(
                     liveSettings(*accountSettings), scope.accountId, scope.mailboxId, position,
                     pageSize, anchor);
                 if (!self)
@@ -1487,8 +1489,8 @@ namespace javelin::app
                     static_cast<void>(m_scheduler.pause(scope.jobId));
                     co_return;
                 }
-                const auto result = co_await m_core.refreshMessageContent(
-                    liveSettings(*accountSettings), scope.accountId, emailId);
+                const auto result = co_await m_contentClient.refresh(liveSettings(*accountSettings),
+                                                                     scope.accountId, emailId);
                 if (!self)
                     co_return;
                 if (const auto* unavailable =

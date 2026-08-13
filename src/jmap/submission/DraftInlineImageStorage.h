@@ -1,6 +1,6 @@
 #pragma once
 
-#include "jmap/JmapCore.h"
+#include "jmap/MessageContentClient.h"
 #include "jmap/submission/ComposeTypes.h"
 
 #include <variant>

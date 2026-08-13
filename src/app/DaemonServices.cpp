@@ -41,8 +41,10 @@
 #include "app/undo/SieveHistoryExecutor.h"
 #include "app/undo/UndoManager.h"
 
-#include "jmap/JmapCore.h"
+#include "jmap/AccountBootstrapClient.h"
+#include "jmap/MessageContentClient.h"
 #include "jmap/api/JmapMethodTransport.h"
+#include "jmap/api/SessionRefreshClient.h"
 #include "jmap/api/Transport.h"
 #include "jmap/auth/AccountOnboardingService.h"
 #include "jmap/cache/AccountRepository.h"
@@ -59,8 +61,12 @@
 #include "jmap/calendar/CalendarService.h"
 #include "jmap/contacts/ContactService.h"
 #include "jmap/identity/IdentityService.h"
+#include "jmap/query/MailQueryClient.h"
+#include "jmap/query/MailQueryMaterializer.h"
 #include "jmap/sieve/SieveService.h"
 #include "jmap/submission/ComposeService.h"
+#include "jmap/sync/EmailMutationEngine.h"
+#include "jmap/sync/MailboxMutationEngine.h"
 #include "jmap/sync/MutationJournal.h"
 
 #include <QCoroTask>
@@ -151,12 +157,25 @@ namespace javelin::app
                 m_databaseConnection, *m_httpMethodTransport, *m_webSocketFailureCooldowns);
         m_methodTransport = std::make_unique<javelin::jmap::api::RefreshingJmapMethodTransport>(
             *m_preferredMethodTransport);
-        m_jmapCore = std::make_unique<javelin::jmap::JmapCore>(m_databaseConnection, *m_transport,
-                                                               *m_methodTransport);
+        m_sessionRefreshClient = std::make_unique<javelin::jmap::SessionRefreshClient>(
+            m_databaseConnection, *m_transport);
+        m_accountBootstrapClient = std::make_unique<javelin::jmap::AccountBootstrapClient>(
+            m_databaseConnection, *m_transport, *m_methodTransport);
+        m_mailQueryClient = std::make_unique<javelin::jmap::MailQueryClient>(m_databaseConnection,
+                                                                             *m_methodTransport);
+        m_mailQueryMaterializer = std::make_unique<javelin::jmap::MailQueryMaterializer>(
+            m_databaseConnection, *m_mailQueryClient);
+        m_messageContentClient = std::make_unique<javelin::jmap::MessageContentClient>(
+            m_databaseConnection, *m_transport);
+        m_emailMutationEngine = std::make_unique<javelin::jmap::EmailMutationEngine>(
+            m_databaseConnection, *m_methodTransport);
+        m_mailboxMutationEngine = std::make_unique<javelin::jmap::MailboxMutationEngine>(
+            m_databaseConnection, *m_methodTransport);
         m_mailIndexService =
             std::make_unique<MailIndexService>(m_databaseConnection, *m_workScheduler);
         m_fullMailSyncService = std::make_unique<FullMailSyncService>(
-            m_databaseConnection, *m_jmapCore, *m_workScheduler, *m_mailIndexService);
+            m_databaseConnection, *m_mailQueryClient, *m_messageContentClient, *m_workScheduler,
+            *m_mailIndexService);
         m_accountRepository =
             std::make_unique<javelin::jmap::cache::AccountRepository>(m_databaseConnection);
         m_accountCommandService = std::make_unique<AccountCommandService>(*m_accountRepository);
@@ -190,12 +209,15 @@ namespace javelin::app
         m_submissionRepository =
             std::make_unique<javelin::jmap::cache::SubmissionRepository>(m_databaseConnection);
         m_jmapComposeService = std::make_unique<javelin::jmap::submission::ComposeService>(
-            m_databaseConnection, *m_transport, *m_methodTransport, *m_jmapCore);
+            m_databaseConnection, *m_transport, *m_methodTransport, *m_messageContentClient,
+            *m_emailMutationEngine);
         m_deferredSendSubmitter =
             std::make_unique<ComposeDeferredSendSubmitter>(*m_jmapComposeService);
         m_errorCoordinator = std::make_unique<ApplicationErrorCoordinator>(*m_accountRepository);
         m_mailService = std::make_unique<MailApplicationService>(
-            m_databaseConnection, *m_jmapCore, *m_methodTransport,
+            m_databaseConnection, *m_sessionRefreshClient, *m_accountBootstrapClient,
+            *m_mailQueryClient, *m_mailQueryMaterializer, *m_messageContentClient,
+            *m_emailMutationEngine, *m_mailboxMutationEngine, *m_methodTransport,
             *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns, *m_accountRepository,
             *m_mailboxRepository, *m_mailTagRepository, *m_mailboxStatisticsRepository,
             *m_mailboxMessageRepository, *m_mailboxFilterRepository, *m_contactRepository,

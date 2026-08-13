@@ -9,8 +9,11 @@
 #include "app/undo/HistoryTypes.h"
 #include "app/undo/UndoManager.h"
 
+#include "jmap/AccountBootstrapClient.h"
+#include "jmap/MessageContentClient.h"
 #include "jmap/OperationError.h"
 #include "jmap/api/CalendarMethods.h"
+#include "jmap/api/SessionRefreshClient.h"
 #include "jmap/cache/CalendarRepository.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/EmailRepository.h"
@@ -28,7 +31,11 @@
 #include "jmap/cache/ThreadReadRepository.h"
 #include "jmap/contacts/ContactService.h"
 #include "jmap/domain/MailKeywords.h"
+#include "jmap/query/MailQueryClient.h"
+#include "jmap/query/MailQueryMaterializer.h"
+#include "jmap/sync/EmailMutationEngine.h"
 #include "jmap/sync/EmailMutationJournal.h"
+#include "jmap/sync/MailboxMutationEngine.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 #include "jmap/sync/MutationJournal.h"
 
@@ -372,7 +379,14 @@ namespace javelin::app
 
     MailApplicationService::MailApplicationService(
         javelin::jmap::cache::DatabaseConnection& databaseConnection,
-        javelin::jmap::JmapCore& jmapCore, javelin::jmap::api::JmapMethodTransport& methodTransport,
+        javelin::jmap::SessionRefreshClient& sessionRefreshClient,
+        javelin::jmap::AccountBootstrapClient& accountBootstrapClient,
+        javelin::jmap::MailQueryClient& queryClient,
+        javelin::jmap::MailQueryMaterializer& queryMaterializer,
+        javelin::jmap::MessageContentClient& messageContentClient,
+        javelin::jmap::EmailMutationEngine& emailMutationEngine,
+        javelin::jmap::MailboxMutationEngine& mailboxMutationEngine,
+        javelin::jmap::api::JmapMethodTransport& methodTransport,
         QNetworkAccessManager& networkAccessManager,
         javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
         javelin::jmap::cache::AccountRepository& accountRepository,
@@ -388,11 +402,15 @@ namespace javelin::app
         ApplicationErrorCoordinator& errorCoordinator, WorkScheduler& workScheduler,
         MailboxMaintenanceRegistry& mailboxMaintenanceRegistry,
         javelin::app::undo::UndoManager& undoManager, QObject* parent)
-        : QObject(parent), m_databaseConnection(databaseConnection), m_jmapCore(jmapCore),
-          m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
-          m_transportCooldowns(cooldowns), m_accountRepository(accountRepository),
-          m_mailboxReader(mailboxReader), m_mailTagReader(mailTagReader),
-          m_mailboxStatisticsReader(mailboxStatisticsReader),
+        : QObject(parent), m_databaseConnection(databaseConnection),
+          m_sessionRefreshClient(sessionRefreshClient),
+          m_accountBootstrapClient(accountBootstrapClient), m_queryClient(queryClient),
+          m_queryMaterializer(queryMaterializer), m_messageContentClient(messageContentClient),
+          m_emailMutationEngine(emailMutationEngine),
+          m_mailboxMutationEngine(mailboxMutationEngine), m_methodTransport(methodTransport),
+          m_networkAccessManager(networkAccessManager), m_transportCooldowns(cooldowns),
+          m_accountRepository(accountRepository), m_mailboxReader(mailboxReader),
+          m_mailTagReader(mailTagReader), m_mailboxStatisticsReader(mailboxStatisticsReader),
           m_mailboxMessageReader(mailboxMessageReader), m_mailboxFilterReader(mailboxFilterReader),
           m_contactReader(contactRepository), m_contactService(contactService),
           m_calendarService(calendarService), m_sieveService(sieveService),
@@ -663,7 +681,8 @@ namespace javelin::app
 
         m_workScheduler.beginForegroundWork();
         const auto appliedSettings = settings;
-        auto task = m_jmapCore.refreshSession(toLiveConnectionSettings(settings), ownerAccountId);
+        auto task =
+            m_sessionRefreshClient.refresh(toLiveConnectionSettings(settings), ownerAccountId);
         QCoro::connect(
             std::move(task), this,
             [this, ownerAccountId, appliedSettings](javelin::jmap::SessionRefreshResult result)
@@ -723,7 +742,8 @@ namespace javelin::app
         bool changed = false;
         bool reconciliationFailed = false;
 
-        auto subscription = co_await m_jmapCore.reconcileMailboxSubscription(settings, accountId);
+        auto subscription =
+            co_await m_mailboxMutationEngine.reconcileSubscription(settings, accountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&subscription))
         {
             if (error->code != javelin::jmap::OperationErrorCode::Conflict)
@@ -739,7 +759,7 @@ namespace javelin::app
             changed = true;
         }
 
-        auto creation = co_await m_jmapCore.reconcileMailboxCreate(settings, accountId);
+        auto creation = co_await m_mailboxMutationEngine.reconcileCreate(settings, accountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&creation))
         {
             if (error->code != javelin::jmap::OperationErrorCode::Conflict)
@@ -754,7 +774,7 @@ namespace javelin::app
             changed = true;
         }
 
-        auto destruction = co_await m_jmapCore.reconcileMailboxDestroy(settings, accountId);
+        auto destruction = co_await m_mailboxMutationEngine.reconcileDestroy(settings, accountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&destruction))
         {
             if (error->code != javelin::jmap::OperationErrorCode::Conflict)
@@ -1256,7 +1276,7 @@ namespace javelin::app
         }
 
         const ForegroundWorkScope foreground{m_workScheduler};
-        auto result = co_await m_jmapCore.queryMailboxPage(
+        auto result = co_await m_queryMaterializer.queryMailboxPage(
             toLiveConnectionSettings(configuration->second.settings), intent.accountId,
             intent.mailboxId, intent.offset, intent.limit, intent.sort, std::move(intent.anchor),
             intent.anchorOffset);
@@ -1439,7 +1459,7 @@ namespace javelin::app
 
         const auto settings = configuration->second.settings;
         const ForegroundWorkScope foreground{m_workScheduler};
-        auto result = co_await m_jmapCore.searchMessages(
+        auto result = co_await m_queryMaterializer.searchMessages(
             toLiveConnectionSettings(settings), intent.accountId, intent.criteria, intent.offset,
             intent.limit, intent.sort, std::move(intent.anchor), queryKey, {},
             std::move(resolution));
@@ -2307,7 +2327,7 @@ namespace javelin::app
                 .optimisticProjection = optimisticProjection,
             });
         };
-        auto result = co_await m_jmapCore.setMailboxSubscribed(
+        auto result = co_await m_mailboxMutationEngine.setSubscribed(
             toLiveConnectionSettings(configuration->second.settings), accountId,
             std::move(mailboxId), subscribed, [publishMailboxTree] { publishMailboxTree(true); });
         javelin::jmap::sync::MutationJournalRepository mutations{m_databaseConnection};
@@ -2346,7 +2366,7 @@ namespace javelin::app
                 .optimisticProjection = optimisticProjection,
             });
         };
-        auto result = co_await m_jmapCore.createMailbox(
+        auto result = co_await m_mailboxMutationEngine.create(
             toLiveConnectionSettings(configuration->second.settings), accountId, std::move(name),
             [publishMailboxTree] { publishMailboxTree(true); });
         javelin::jmap::sync::MutationJournalRepository mutations{m_databaseConnection};
@@ -2385,7 +2405,7 @@ namespace javelin::app
                 .optimisticProjection = optimisticProjection,
             });
         };
-        auto result = co_await m_jmapCore.destroyMailbox(
+        auto result = co_await m_mailboxMutationEngine.destroy(
             toLiveConnectionSettings(configuration->second.settings), accountId,
             std::move(mailboxId), [publishMailboxTree] { publishMailboxTree(true); });
         javelin::jmap::sync::MutationJournalRepository mutations{m_databaseConnection};
@@ -2414,7 +2434,7 @@ namespace javelin::app
     javelin::jmap::QueuedEmailMutationsResult MailApplicationService::queueExactEmailMutations(
         std::string accountId, std::vector<javelin::jmap::EmailMailboxMutation> mutations)
     {
-        auto result = m_jmapCore.queueEmailMailboxMutations(accountId, std::move(mutations));
+        auto result = m_emailMutationEngine.queueBatch(accountId, std::move(mutations));
         const auto* queued = std::get_if<std::vector<javelin::jmap::QueuedEmailMutation>>(&result);
         if (queued == nullptr)
             return result;
@@ -2481,7 +2501,7 @@ namespace javelin::app
         EmailMutationBatchSubmission groupedSubmission;
         if (operationGroupId.has_value())
         {
-            EmailMutationBatchSubmitter submitter{m_jmapCore};
+            EmailMutationBatchSubmitter submitter{m_emailMutationEngine};
             groupedSubmission = co_await submitter.submit(
                 toLiveConnectionSettings(configuration->second.settings), accountId,
                 *operationGroupId, batchLimit,
@@ -2498,7 +2518,7 @@ namespace javelin::app
         {
             affectedMailboxIds = affectedMailboxIdsForPendingMutations(
                 m_databaseConnection, accountId, operationGroupId, batchLimit);
-            auto single = co_await m_jmapCore.submitPendingEmailMutations(
+            auto single = co_await m_emailMutationEngine.submitPending(
                 toLiveConnectionSettings(configuration->second.settings), accountId,
                 operationGroupId, batchLimit);
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&single))
@@ -2597,7 +2617,7 @@ namespace javelin::app
                 .code = javelin::jmap::OperationErrorCode::InvalidRequest,
                 .message = accountSynchronizationNotConfigured(),
             };
-        co_return co_await m_jmapCore.getAuthoritativeEmails(
+        co_return co_await m_emailMutationEngine.getAuthoritative(
             toLiveConnectionSettings(configuration->second.settings), std::move(accountId),
             std::move(emailIds));
     }
@@ -2659,7 +2679,7 @@ namespace javelin::app
         const ForegroundWorkScope foreground{m_workScheduler};
         auto result = observeResult(m_errorCoordinator, configuration->second.settings, accountId,
                                     QStringLiteral("Load message content"),
-                                    co_await m_jmapCore.refreshMessageContent(
+                                    co_await m_messageContentClient.refresh(
                                         toLiveConnectionSettings(configuration->second.settings),
                                         accountId, std::move(emailId)));
         if (std::holds_alternative<javelin::jmap::MessageContentUnavailable>(result))
@@ -2693,8 +2713,7 @@ namespace javelin::app
             };
         co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
                                 QStringLiteral("Download attachment"),
-                                co_await m_jmapCore.downloadAttachment(
-                                    toLiveConnectionSettings(configuration->second.settings),
+                                co_await m_messageContentClient.loadAttachment(
                                     accountId, std::move(emailId), std::move(partId)));
     }
 
@@ -2710,16 +2729,28 @@ namespace javelin::app
                 .message = i18n("The mailbox cache is being cleared."),
             };
         const ForegroundWorkScope foreground{m_workScheduler};
-        co_return co_await m_jmapCore.loadCachedMessageSource(std::move(accountId),
-                                                              std::move(emailId));
+        co_return co_await m_messageContentClient.loadCachedSource(std::move(accountId),
+                                                                   std::move(emailId));
     }
 
     QCoro::Task<javelin::jmap::LiveRefreshResult>
     MailApplicationService::bootstrapAccount(AccountBootstrapIntent intent)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        auto result = co_await m_jmapCore.refreshFromServer(
-            toLiveConnectionSettings(intent.settings), {}, std::move(intent.mailboxIds));
+        const auto liveSettings = toLiveConnectionSettings(intent.settings);
+        auto result = co_await m_accountBootstrapClient.bootstrap(liveSettings, {},
+                                                                  std::move(intent.mailboxIds));
+        if (const auto* summary = std::get_if<javelin::jmap::LiveRefreshSummary>(&result))
+        {
+            const auto pending =
+                co_await m_emailMutationEngine.submitPending(liveSettings, summary->accountId);
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&pending))
+            {
+                qWarning().noquote()
+                    << "Queued Email mutation submission after account bootstrap failed"
+                    << QString::fromStdString(summary->accountId) << error->message;
+            }
+        }
         co_return observeResult(m_errorCoordinator, intent.settings, {},
                                 QStringLiteral("Synchronize account"), std::move(result));
     }
@@ -3031,7 +3062,7 @@ namespace javelin::app
             }
 
             progress.detail = i18n("Finding messages with tag %1", QString::fromStdString(keyword));
-            auto queryResult = co_await m_jmapCore.queryEmailIdsByKeyword(
+            auto queryResult = co_await m_queryClient.queryEmailIdsByKeyword(
                 toLiveConnectionSettings(settings), accountId, keyword, batchSize);
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queryResult))
             {

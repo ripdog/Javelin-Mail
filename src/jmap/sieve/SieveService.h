@@ -2,7 +2,7 @@
 
 #include "storage/sqlite/DatabaseConnection.h"
 
-#include "jmap/JmapCore.h"
+#include "jmap/api/LiveConnectionSettings.h"
 #include "jmap/sieve/SieveCommandTypes.h"
 
 #include <QCoroTask>

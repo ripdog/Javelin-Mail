@@ -1,7 +1,6 @@
 #pragma once
 
 #include "app/MessageContentApplicationPorts.h"
-#include "jmap/JmapCore.h"
 #include "jmap/OperationError.h"
 
 #include <QObject>

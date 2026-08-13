@@ -10,6 +10,7 @@
 #include "app/MailApplicationPorts.h"
 #include "app/MailApplicationTypes.h"
 #include "app/MailboxSelectionMutation.h"
+#include "app/MessageContentApplicationPorts.h"
 #include "app/MessageListMaterializationPort.h"
 #include "app/undo/CalendarHistoryPort.h"
 #include "app/undo/CalendarPreferencePort.h"
@@ -33,6 +34,17 @@
 #include <unordered_set>
 #include <variant>
 #include <vector>
+
+namespace javelin::jmap
+{
+    class AccountBootstrapClient;
+    class EmailMutationEngine;
+    class MailboxMutationEngine;
+    class MailQueryClient;
+    class MailQueryMaterializer;
+    class MessageContentClient;
+    class SessionRefreshClient;
+} // namespace javelin::jmap
 
 namespace javelin::jmap::contacts
 {
@@ -91,7 +103,13 @@ namespace javelin::app
       public:
         MailApplicationService(
             javelin::jmap::cache::DatabaseConnection& databaseConnection,
-            javelin::jmap::JmapCore& jmapCore,
+            javelin::jmap::SessionRefreshClient& sessionRefreshClient,
+            javelin::jmap::AccountBootstrapClient& accountBootstrapClient,
+            javelin::jmap::MailQueryClient& queryClient,
+            javelin::jmap::MailQueryMaterializer& queryMaterializer,
+            javelin::jmap::MessageContentClient& messageContentClient,
+            javelin::jmap::EmailMutationEngine& emailMutationEngine,
+            javelin::jmap::MailboxMutationEngine& mailboxMutationEngine,
             javelin::jmap::api::JmapMethodTransport& methodTransport,
             QNetworkAccessManager& networkAccessManager,
             javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
@@ -331,7 +349,13 @@ namespace javelin::app
         [[nodiscard]] bool searchWindowRetired(const std::string& leaseKey) const;
 
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
-        javelin::jmap::JmapCore& m_jmapCore;
+        javelin::jmap::SessionRefreshClient& m_sessionRefreshClient;
+        javelin::jmap::AccountBootstrapClient& m_accountBootstrapClient;
+        javelin::jmap::MailQueryClient& m_queryClient;
+        javelin::jmap::MailQueryMaterializer& m_queryMaterializer;
+        javelin::jmap::MessageContentClient& m_messageContentClient;
+        javelin::jmap::EmailMutationEngine& m_emailMutationEngine;
+        javelin::jmap::MailboxMutationEngine& m_mailboxMutationEngine;
         javelin::jmap::api::JmapMethodTransport& m_methodTransport;
         QNetworkAccessManager& m_networkAccessManager;
         javelin::jmap::api::WebSocketFailureCooldowns& m_transportCooldowns;

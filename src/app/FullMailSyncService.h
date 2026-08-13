@@ -19,8 +19,9 @@ namespace javelin::app
 } // namespace javelin::app
 namespace javelin::jmap
 {
-    class JmapCore;
-}
+    class MailQueryClient;
+    class MessageContentClient;
+} // namespace javelin::jmap
 namespace javelin::jmap::cache
 {
     class DatabaseConnection;
@@ -41,8 +42,10 @@ namespace javelin::app
 
       public:
         FullMailSyncService(javelin::jmap::cache::DatabaseConnection& connection,
-                            javelin::jmap::JmapCore& core, WorkScheduler& scheduler,
-                            MailIndexService& indexService, QObject* parent = nullptr);
+                            javelin::jmap::MailQueryClient& queryClient,
+                            javelin::jmap::MessageContentClient& contentClient,
+                            WorkScheduler& scheduler, MailIndexService& indexService,
+                            QObject* parent = nullptr);
 
         void applySettings(std::vector<FullSyncAccountConfiguration> configurations);
         void refreshMailboxVisibility(std::string_view accountId);
@@ -74,7 +77,8 @@ namespace javelin::app
         settingsFor(std::string_view accountId) const;
 
         javelin::jmap::cache::DatabaseConnection& m_connection;
-        javelin::jmap::JmapCore& m_core;
+        javelin::jmap::MailQueryClient& m_queryClient;
+        javelin::jmap::MessageContentClient& m_contentClient;
         WorkScheduler& m_scheduler;
         MailIndexService& m_indexService;
         std::unordered_map<std::string, AccountConnectionSettings> m_settings;

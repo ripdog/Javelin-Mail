@@ -1,4 +1,7 @@
-#include "jmap/JmapCore.h"
+#include "jmap/AccountBootstrapClient.h"
+#include "jmap/api/SessionRefreshClient.h"
+#include "jmap/query/MailQueryClient.h"
+#include "jmap/query/MailQueryMaterializer.h"
 
 #include "FixtureReader.h"
 #include "jmap/api/JmapMethodTransport.h"
@@ -83,7 +86,7 @@ namespace
     }
 } // namespace
 
-TEST_CASE("JmapCore startup session refresh discovers and caches websocket capability",
+TEST_CASE("SessionRefreshClient discovers and caches websocket capability",
           "[jmap][core][session][websocket]")
 {
     ensureApplication();
@@ -107,9 +110,9 @@ TEST_CASE("JmapCore startup session refresh discovers and caches websocket capab
             javelin::tests::loadFixture("jmap/session/websocket_session.json")),
     });
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::JmapCore core{database, transport, methodTransport};
+    javelin::jmap::SessionRefreshClient sessionRefresh{database, transport};
 
-    const auto result = QCoro::waitFor(core.refreshSession(
+    const auto result = QCoro::waitFor(sessionRefresh.refresh(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
             .loginEmail = "alice@example.com",
@@ -137,7 +140,7 @@ TEST_CASE("JmapCore startup session refresh discovers and caches websocket capab
     CHECK(session.capabilities.websocket->supportsPush);
 }
 
-TEST_CASE("JmapCore does not invent an initial mailbox when none is configured",
+TEST_CASE("AccountBootstrapClient does not invent an initial mailbox when none is configured",
           "[jmap][core][settings]")
 {
     ensureApplication();
@@ -174,9 +177,9 @@ TEST_CASE("JmapCore does not invent an initial mailbox when none is configured",
         })),
     });
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::JmapCore core{database, transport, methodTransport};
+    javelin::jmap::AccountBootstrapClient bootstrap{database, transport, methodTransport};
 
-    const auto result = QCoro::waitFor(core.refreshFromServer({
+    const auto result = QCoro::waitFor(bootstrap.bootstrap({
         .sessionUrl = "https://mail.example.com/.well-known/jmap",
         .loginEmail = "alice@example.com",
         .apiKey = "access-token",
@@ -189,7 +192,8 @@ TEST_CASE("JmapCore does not invent an initial mailbox when none is configured",
     CHECK(transport.requests.size() == 2);
 }
 
-TEST_CASE("JmapCore mailbox pages use one requested-page envelope", "[jmap][core][pagination]")
+TEST_CASE("MailQueryMaterializer mailbox pages use one requested-page envelope",
+          "[jmap][query][pagination]")
 {
     ensureApplication();
     QTemporaryDir temporaryDir;
@@ -209,14 +213,16 @@ TEST_CASE("JmapCore mailbox pages use one requested-page envelope", "[jmap][core
             javelin::tests::loadFixture("jmap/session/websocket_session.json")),
     });
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::JmapCore core{database, transport, methodTransport};
+    javelin::jmap::SessionRefreshClient sessionRefresh{database, transport};
+    javelin::jmap::MailQueryClient queryClient{database, methodTransport};
+    javelin::jmap::MailQueryMaterializer queryMaterializer{database, queryClient};
     const javelin::jmap::LiveConnectionSettings settings{
         .sessionUrl = "https://mail.example.com/.well-known/jmap",
         .loginEmail = "alice@example.com",
         .apiKey = "access-token",
     };
     REQUIRE(std::holds_alternative<javelin::jmap::SessionRefreshSummary>(
-        QCoro::waitFor(core.refreshSession(settings, "u1"))));
+        QCoro::waitFor(sessionRefresh.refresh(settings, "u1"))));
 
     const auto email = javelin::tests::loadFixture("jmap/entities/email.json");
     const auto emailGetArguments =
@@ -255,7 +261,8 @@ TEST_CASE("JmapCore mailbox pages use one requested-page envelope", "[jmap][core
         })),
     });
 
-    const auto result = QCoro::waitFor(core.queryMailboxPage(settings, "u1", "mbx-inbox", 100));
+    const auto result =
+        QCoro::waitFor(queryMaterializer.queryMailboxPage(settings, "u1", "mbx-inbox", 100));
     REQUIRE(std::holds_alternative<javelin::jmap::MailboxPageSummary>(result));
     const auto& page = std::get<javelin::jmap::MailboxPageSummary>(result);
     CHECK(page.offset == 100);
@@ -269,7 +276,7 @@ TEST_CASE("JmapCore mailbox pages use one requested-page envelope", "[jmap][core
           QUrl{QStringLiteral("https://mail.example.com/jmap/api")});
 }
 
-TEST_CASE("JmapCore collapsed page materializes representatives within get limits",
+TEST_CASE("MailQueryMaterializer collapsed page materializes representatives within get limits",
           "[jmap][core][pagination][thread-materialization]")
 {
     ensureApplication();
@@ -299,14 +306,16 @@ TEST_CASE("JmapCore collapsed page materializes representatives within get limit
         .body = QByteArray::fromStdString(tinySession),
     });
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::JmapCore core{database, transport, methodTransport};
+    javelin::jmap::SessionRefreshClient sessionRefresh{database, transport};
+    javelin::jmap::MailQueryClient queryClient{database, methodTransport};
+    javelin::jmap::MailQueryMaterializer queryMaterializer{database, queryClient};
     const javelin::jmap::LiveConnectionSettings settings{
         .sessionUrl = "https://mail.example.com/.well-known/jmap",
         .loginEmail = "alice@example.com",
         .apiKey = "access-token",
     };
     REQUIRE(std::holds_alternative<javelin::jmap::SessionRefreshSummary>(
-        QCoro::waitFor(core.refreshSession(settings, "u1"))));
+        QCoro::waitFor(sessionRefresh.refresh(settings, "u1"))));
 
     const auto firstRepresentative = emailFixtureWithIdentity("eml-1", "thr-1");
     const auto secondRepresentative = emailFixtureWithIdentity("eml-4", "thr-2");
@@ -335,7 +344,8 @@ TEST_CASE("JmapCore collapsed page materializes representatives within get limit
         })),
     });
 
-    const auto result = QCoro::waitFor(core.queryMailboxPage(settings, "u1", "mbx-inbox", 100));
+    const auto result =
+        QCoro::waitFor(queryMaterializer.queryMailboxPage(settings, "u1", "mbx-inbox", 100));
     REQUIRE(std::holds_alternative<javelin::jmap::MailboxPageSummary>(result));
     const auto& page = std::get<javelin::jmap::MailboxPageSummary>(result);
     CHECK(page.position == 100);

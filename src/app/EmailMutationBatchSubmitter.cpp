@@ -6,8 +6,9 @@
 namespace javelin::app
 {
 
-    EmailMutationBatchSubmitter::EmailMutationBatchSubmitter(javelin::jmap::JmapCore& core)
-        : m_core(core)
+    EmailMutationBatchSubmitter::EmailMutationBatchSubmitter(
+        javelin::jmap::EmailMutationEngine& mutationEngine)
+        : m_mutationEngine(mutationEngine)
     {
     }
 
@@ -35,7 +36,7 @@ namespace javelin::app
         {
             if (batchPrepared)
                 batchPrepared();
-            auto batchResult = co_await m_core.submitPendingEmailMutations(
+            auto batchResult = co_await m_mutationEngine.submitPending(
                 settings, accountId, operationGroupId, batchLimit, nextEmailState);
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&batchResult))
             {
