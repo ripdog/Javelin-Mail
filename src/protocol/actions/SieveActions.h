@@ -42,5 +42,9 @@ namespace javelin::protocol::actions
                                      javelin::jmap::sieve::SieveActivationResult>;
 
     using SieveActionTypes =
-        std::tuple<SieveList, SieveGet, SieveValidate, SieveSave, SieveDelete, SieveActivate>;
+        std::tuple<RegisteredAction<SieveList, "SieveList">, RegisteredAction<SieveGet, "SieveGet">,
+                   RegisteredAction<SieveValidate, "SieveValidate">,
+                   RegisteredAction<SieveSave, "SieveSave">,
+                   RegisteredAction<SieveDelete, "SieveDelete">,
+                   RegisteredAction<SieveActivate, "SieveActivate">>;
 } // namespace javelin::protocol::actions

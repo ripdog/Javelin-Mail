@@ -15,7 +15,13 @@ namespace javelin::app
     namespace
     {
         constexpr auto messageListWindowTerminalTimeout = std::chrono::seconds{90};
-    }
+
+        [[nodiscard]] QString remoteActionMetricName(const javelin::protocol::ActionId action)
+        {
+            return PerformanceMetrics::remoteActionName(
+                javelin::protocol::actions::actionName(action));
+        }
+    } // namespace
 
     RemoteActionClient::RemoteActionClient(GuiDaemonSession& session, QObject* parent)
         : QObject(parent), m_session(session)
@@ -40,7 +46,7 @@ namespace javelin::app
     {
         PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("remote_action_e2e"),
                                 QStringLiteral("kind=%1 payload_bytes=%2")
-                                    .arg(PerformanceMetrics::remoteActionName(action))
+                                    .arg(remoteActionMetricName(action))
                                     .arg(payload.size())};
         const auto commandId = javelin::protocol::CommandId{.value = QUuid::createUuid()};
         const auto originalDaemon = m_session.daemonInstance();
@@ -161,7 +167,7 @@ namespace javelin::app
                             *pendingCall->second->submissionStartedAt),
                         outcome,
                         QStringLiteral("kind=%1 payload_bytes=%2")
-                            .arg(PerformanceMetrics::remoteActionName(pendingCall->second->action))
+                            .arg(remoteActionMetricName(pendingCall->second->action))
                             .arg(pendingCall->second->payload.size()));
                     pendingCall->second->submissionStartedAt.reset();
                 };
@@ -306,7 +312,7 @@ namespace javelin::app
                                                                   found->second->startedAt),
             QStringLiteral("completed"),
             QStringLiteral("kind=%1 payload_bytes=%2")
-                .arg(PerformanceMetrics::remoteActionName(found->second->action))
+                .arg(remoteActionMetricName(found->second->action))
                 .arg(found->second->payload.size()));
         found->second->promise.addResult(RawResult{std::move(result)});
         found->second->promise.finish();
@@ -326,7 +332,7 @@ namespace javelin::app
                                                                   found->second->startedAt),
             QStringLiteral("failed"),
             QStringLiteral("kind=%1 payload_bytes=%2 code=%3")
-                .arg(PerformanceMetrics::remoteActionName(found->second->action))
+                .arg(remoteActionMetricName(found->second->action))
                 .arg(found->second->payload.size())
                 .arg(static_cast<int>(boundaryError.code)));
         found->second->promise.addResult(RawResult{error(boundaryError)});
@@ -349,7 +355,7 @@ namespace javelin::app
                     std::chrono::steady_clock::now() - call->startedAt),
                 QStringLiteral("abandoned"),
                 QStringLiteral("kind=%1 payload_bytes=%2")
-                    .arg(PerformanceMetrics::remoteActionName(call->action))
+                    .arg(remoteActionMetricName(call->action))
                     .arg(call->payload.size()));
             call->promise.addResult(RawResult{RemoteCallError{.detail = detail}});
             call->promise.finish();

@@ -37,6 +37,9 @@ namespace javelin::protocol::actions
                                          ReplayPolicy::Never, 0, std::tuple<>, std::monostate>;
 
     using DeveloperActionTypes =
-        std::tuple<DeveloperDiagnosticsSnapshot, DeveloperMailboxClear,
-                   AcknowledgeRemoteActionResult, DeveloperLogSetSubscribed, DeveloperLogClear>;
+        std::tuple<RegisteredAction<DeveloperDiagnosticsSnapshot, "DeveloperDiagnosticsSnapshot">,
+                   RegisteredAction<DeveloperMailboxClear, "DeveloperMailboxClear">,
+                   RegisteredAction<AcknowledgeRemoteActionResult, "AcknowledgeRemoteActionResult">,
+                   RegisteredAction<DeveloperLogSetSubscribed, "DeveloperLogSetSubscribed">,
+                   RegisteredAction<DeveloperLogClear, "DeveloperLogClear">>;
 } // namespace javelin::protocol::actions

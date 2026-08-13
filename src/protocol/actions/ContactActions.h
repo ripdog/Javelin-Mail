@@ -75,8 +75,17 @@ namespace javelin::protocol::actions
                    javelin::jmap::contacts::ContactDownloadResult>;
 
     using ContactActionTypes =
-        std::tuple<ContactRequestRefresh, ContactMutateAddressBook, ContactSave, ContactSetStarred,
-                   ContactDelete, ContactCreateGroup, ContactDeleteGroup, ContactSetGroupMembership,
-                   ContactCopy, ContactImport, ContactMerge, ContactUploadMedia,
-                   ContactDownloadMedia>;
+        std::tuple<RegisteredAction<ContactRequestRefresh, "ContactRequestRefresh">,
+                   RegisteredAction<ContactMutateAddressBook, "ContactMutateAddressBook">,
+                   RegisteredAction<ContactSave, "ContactSave">,
+                   RegisteredAction<ContactSetStarred, "ContactSetStarred">,
+                   RegisteredAction<ContactDelete, "ContactDelete">,
+                   RegisteredAction<ContactCreateGroup, "ContactCreateGroup">,
+                   RegisteredAction<ContactDeleteGroup, "ContactDeleteGroup">,
+                   RegisteredAction<ContactSetGroupMembership, "ContactSetGroupMembership">,
+                   RegisteredAction<ContactCopy, "ContactCopy">,
+                   RegisteredAction<ContactImport, "ContactImport">,
+                   RegisteredAction<ContactMerge, "ContactMerge">,
+                   RegisteredAction<ContactUploadMedia, "ContactUploadMedia">,
+                   RegisteredAction<ContactDownloadMedia, "ContactDownloadMedia">>;
 } // namespace javelin::protocol::actions

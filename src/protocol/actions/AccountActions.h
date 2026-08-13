@@ -66,8 +66,14 @@ namespace javelin::protocol::actions
                    0, std::tuple<javelin::app::OAuthCancelRequest>,
                    javelin::app::OAuthCancelResult>;
 
-    using AccountActionTypes =
-        std::tuple<RemoveConfiguredAccount, AccountBootstrap, ReloadSettings, OnboardingDiscover,
-                   OnboardingStartOAuth, OnboardingFinishOAuth, OnboardingAuthenticateManually,
-                   OnboardingRevokeOAuth, OnboardingCancelOAuth>;
+    using AccountActionTypes = std::tuple<
+        RegisteredAction<RemoveConfiguredAccount, "RemoveConfiguredAccount">,
+        RegisteredAction<AccountBootstrap, "AccountBootstrap">,
+        RegisteredAction<ReloadSettings, "ReloadSettings">,
+        RegisteredAction<OnboardingDiscover, "OnboardingDiscover">,
+        RegisteredAction<OnboardingStartOAuth, "OnboardingStartOAuth">,
+        RegisteredAction<OnboardingFinishOAuth, "OnboardingFinishOAuth">,
+        RegisteredAction<OnboardingAuthenticateManually, "OnboardingAuthenticateManually">,
+        RegisteredAction<OnboardingRevokeOAuth, "OnboardingRevokeOAuth">,
+        RegisteredAction<OnboardingCancelOAuth, "OnboardingCancelOAuth">>;
 } // namespace javelin::protocol::actions

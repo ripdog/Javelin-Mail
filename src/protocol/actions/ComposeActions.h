@@ -64,7 +64,12 @@ namespace javelin::protocol::actions
         std::variant<javelin::jmap::submission::SendSummary, javelin::jmap::OperationError>>;
 
     using ComposeActionTypes =
-        std::tuple<ComposeOpen, ComposeLoadSenderIdentities, ComposeSaveDraft, ComposeSend,
-                   ComposeLoadWorkingCopy, ComposeStoreWorkingCopy, ComposeDiscard,
-                   ComposeScheduleSend>;
+        std::tuple<RegisteredAction<ComposeOpen, "ComposeOpen">,
+                   RegisteredAction<ComposeLoadSenderIdentities, "ComposeLoadSenderIdentities">,
+                   RegisteredAction<ComposeSaveDraft, "ComposeSaveDraft">,
+                   RegisteredAction<ComposeSend, "ComposeSend">,
+                   RegisteredAction<ComposeLoadWorkingCopy, "ComposeLoadWorkingCopy">,
+                   RegisteredAction<ComposeStoreWorkingCopy, "ComposeStoreWorkingCopy">,
+                   RegisteredAction<ComposeDiscard, "ComposeDiscard">,
+                   RegisteredAction<ComposeScheduleSend, "ComposeScheduleSend">>;
 } // namespace javelin::protocol::actions

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -84,6 +85,29 @@ namespace javelin::protocol::actions
         using Result = ResultType;
     };
 
+    template <std::size_t Size> struct FixedActionName
+    {
+        char value[Size]{};
+
+        consteval FixedActionName(const char (&source)[Size])
+        {
+            for (std::size_t index = 0; index < Size; ++index)
+                value[index] = source[index];
+        }
+
+        [[nodiscard]] constexpr std::string_view view() const
+        {
+            return {value, Size - 1};
+        }
+    };
+
+    template <std::size_t Size> FixedActionName(const char (&)[Size]) -> FixedActionName<Size>;
+
+    template <typename Action, FixedActionName Name> struct RegisteredAction : Action
+    {
+        static constexpr auto registeredName = Name;
+    };
+
     struct ActionMetadata
     {
         ActionId id;
@@ -91,20 +115,20 @@ namespace javelin::protocol::actions
         AdmissionSemantics admission;
         ReplayPolicy replay;
         ChangedDomainMask changedDomains;
-        QStringView name;
+        std::string_view name;
         std::uint16_t requestSchemaVersion;
         std::uint16_t resultSchemaVersion;
         std::size_t maximumPayloadBytes;
     };
 
-    template <typename Action> [[nodiscard]] constexpr ActionMetadata metadata(QStringView name)
+    template <typename Action> [[nodiscard]] constexpr ActionMetadata metadata()
     {
         return {.id = Action::id,
                 .domain = Action::domain,
                 .admission = Action::admission,
                 .replay = Action::replay,
                 .changedDomains = Action::changedDomains,
-                .name = name,
+                .name = Action::registeredName.view(),
                 .requestSchemaVersion = Action::requestSchemaVersion,
                 .resultSchemaVersion = Action::resultSchemaVersion,
                 .maximumPayloadBytes = Action::maximumPayloadBytes};

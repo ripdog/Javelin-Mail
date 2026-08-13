@@ -39,5 +39,9 @@ namespace javelin::protocol::actions
     using WorkSummary = Descriptor<66, ActionDomain::Work, AdmissionSemantics::Immediate,
                                    ReplayPolicy::Reexecute, 0, std::tuple<>, QString>;
 
-    using WorkActionTypes = std::tuple<WorkPause, WorkResume, WorkRetry, WorkList, WorkSummary>;
+    using WorkActionTypes =
+        std::tuple<RegisteredAction<WorkPause, "WorkPause">,
+                   RegisteredAction<WorkResume, "WorkResume">,
+                   RegisteredAction<WorkRetry, "WorkRetry">, RegisteredAction<WorkList, "WorkList">,
+                   RegisteredAction<WorkSummary, "WorkSummary">>;
 } // namespace javelin::protocol::actions

@@ -87,8 +87,17 @@ namespace javelin::protocol::actions
                    javelin::jmap::calendar::CalendarMutationResult>;
 
     using CalendarActionTypes =
-        std::tuple<CalendarReadCached, CalendarReadAccounts, CalendarReadCalendars,
-                   CalendarRequestRange, CalendarCreateEvent, CalendarUpdateEvent,
-                   CalendarDeleteEvent, CalendarSetDefault, CalendarCreate, CalendarDelete,
-                   CalendarSetVisible, CalendarSetSubscribed, CalendarRespondEvent>;
+        std::tuple<RegisteredAction<CalendarReadCached, "CalendarReadCached">,
+                   RegisteredAction<CalendarReadAccounts, "CalendarReadAccounts">,
+                   RegisteredAction<CalendarReadCalendars, "CalendarReadCalendars">,
+                   RegisteredAction<CalendarRequestRange, "CalendarRequestRange">,
+                   RegisteredAction<CalendarCreateEvent, "CalendarCreateEvent">,
+                   RegisteredAction<CalendarUpdateEvent, "CalendarUpdateEvent">,
+                   RegisteredAction<CalendarDeleteEvent, "CalendarDeleteEvent">,
+                   RegisteredAction<CalendarSetDefault, "CalendarSetDefault">,
+                   RegisteredAction<CalendarCreate, "CalendarCreate">,
+                   RegisteredAction<CalendarDelete, "CalendarDelete">,
+                   RegisteredAction<CalendarSetVisible, "CalendarSetVisible">,
+                   RegisteredAction<CalendarSetSubscribed, "CalendarSetSubscribed">,
+                   RegisteredAction<CalendarRespondEvent, "CalendarRespondEvent">>;
 } // namespace javelin::protocol::actions

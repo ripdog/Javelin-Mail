@@ -1,7 +1,5 @@
 #pragma once
 
-#include "protocol/ActionContract.h"
-
 #include <QString>
 
 #include <chrono>
@@ -24,7 +22,7 @@ namespace javelin::app
         [[nodiscard]] static QString formatMetric(QString process, QString operation,
                                                   std::optional<std::chrono::microseconds> duration,
                                                   QString outcome, QString details);
-        [[nodiscard]] static QString remoteActionName(javelin::protocol::ActionId action);
+        [[nodiscard]] static QString remoteActionName(QString actionName);
     };
 
     class PerformanceSpan final

@@ -42,5 +42,8 @@ namespace javelin::protocol::actions
                                                std::vector<javelin::app::undo::HistoryEntry>>>;
 
     using HistoryActionTypes =
-        std::tuple<Undo, Redo, UndoAcknowledgeRemove, UndoForget, UndoSnapshot>;
+        std::tuple<RegisteredAction<Undo, "Undo">, RegisteredAction<Redo, "Redo">,
+                   RegisteredAction<UndoAcknowledgeRemove, "UndoAcknowledgeRemove">,
+                   RegisteredAction<UndoForget, "UndoForget">,
+                   RegisteredAction<UndoSnapshot, "UndoSnapshot">>;
 } // namespace javelin::protocol::actions

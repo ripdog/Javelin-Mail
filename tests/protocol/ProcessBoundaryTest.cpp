@@ -702,6 +702,16 @@ TEST_CASE("socket frame codec handles partial, oversized, and unknown frames", "
     CHECK(std::get<SocketFrameError>(unknownResult).code ==
           SocketFrameErrorCode::UnknownMessageKind);
 
+    QByteArray unsupportedVersion = bytes;
+    unsupportedVersion[4] = static_cast<char>(0x7f);
+    unsupportedVersion[5] = static_cast<char>(0xff);
+    SocketFrameDecoder unsupportedVersionDecoder;
+    REQUIRE_FALSE(unsupportedVersionDecoder.append(unsupportedVersion).has_value());
+    const auto unsupportedVersionResult = unsupportedVersionDecoder.takeFrame();
+    REQUIRE(std::holds_alternative<SocketFrameError>(unsupportedVersionResult));
+    CHECK(std::get<SocketFrameError>(unsupportedVersionResult).code ==
+          SocketFrameErrorCode::UnsupportedVersion);
+
     BoundaryLimits smallLimits{.maximumFrameBytes = 32};
     const auto oversized = encodeSocketFrame(SocketFrameKind::PingRequest, 1, QByteArray(16, 'x'),
                                              smallLimits.maximumFrameBytes);

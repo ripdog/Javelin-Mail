@@ -120,10 +120,27 @@ namespace javelin::protocol::actions
                    detail::messageWindow, std::tuple<javelin::app::ThreadMaterializationIntent>,
                    std::monostate>;
 
-    using MailActionTypes = std::tuple<
-        MailQueueMailboxMutation, MailQueueDestroy, MailQueueMarkUnread, MailQueueMarkRead,
-        MailQueueSetFlagged, MailSubmitPending, MessageContent, AttachmentDownload, MessageSource,
-        MailboxObserve, MailboxUnobserve, MailboxWindow, SearchWindow, SearchRetire,
-        MailQueueSetTag, MailSaveTagDefinition, MailDeleteTag, MailSetMailboxSubscribed,
-        MailCreateMailbox, MailDestroyMailbox, MailQueueSetSelectionFlagged, ThreadEnsure>;
+    using MailActionTypes =
+        std::tuple<RegisteredAction<MailQueueMailboxMutation, "MailQueueMailboxMutation">,
+                   RegisteredAction<MailQueueDestroy, "MailQueueDestroy">,
+                   RegisteredAction<MailQueueMarkUnread, "MailQueueMarkUnread">,
+                   RegisteredAction<MailQueueMarkRead, "MailQueueMarkRead">,
+                   RegisteredAction<MailQueueSetFlagged, "MailQueueSetFlagged">,
+                   RegisteredAction<MailSubmitPending, "MailSubmitPending">,
+                   RegisteredAction<MessageContent, "MessageContent">,
+                   RegisteredAction<AttachmentDownload, "AttachmentDownload">,
+                   RegisteredAction<MessageSource, "MessageSource">,
+                   RegisteredAction<MailboxObserve, "MailboxObserve">,
+                   RegisteredAction<MailboxUnobserve, "MailboxUnobserve">,
+                   RegisteredAction<MailboxWindow, "MailboxWindow">,
+                   RegisteredAction<SearchWindow, "SearchWindow">,
+                   RegisteredAction<SearchRetire, "SearchRetire">,
+                   RegisteredAction<MailQueueSetTag, "MailQueueSetTag">,
+                   RegisteredAction<MailSaveTagDefinition, "MailSaveTagDefinition">,
+                   RegisteredAction<MailDeleteTag, "MailDeleteTag">,
+                   RegisteredAction<MailSetMailboxSubscribed, "MailSetMailboxSubscribed">,
+                   RegisteredAction<MailCreateMailbox, "MailCreateMailbox">,
+                   RegisteredAction<MailDestroyMailbox, "MailDestroyMailbox">,
+                   RegisteredAction<MailQueueSetSelectionFlagged, "MailQueueSetSelectionFlagged">,
+                   RegisteredAction<ThreadEnsure, "ThreadEnsure">>;
 } // namespace javelin::protocol::actions

@@ -25,5 +25,7 @@ namespace javelin::protocol::actions
                                       std::tuple<std::string, std::string>,
                                       javelin::jmap::identity::IdentityDeleteResult>;
 
-    using IdentityActionTypes = std::tuple<IdentityList, IdentitySave, IdentityDelete>;
+    using IdentityActionTypes = std::tuple<RegisteredAction<IdentityList, "IdentityList">,
+                                           RegisteredAction<IdentitySave, "IdentitySave">,
+                                           RegisteredAction<IdentityDelete, "IdentityDelete">>;
 } // namespace javelin::protocol::actions

@@ -1,7 +1,5 @@
 #include "app/PerformanceMetrics.h"
 
-#include "protocol/ActionNames.h"
-
 #include <QFile>
 #include <QFileInfo>
 #include <QLoggingCategory>
@@ -172,9 +170,8 @@ namespace javelin::app
         return result;
     }
 
-    QString PerformanceMetrics::remoteActionName(const protocol::ActionId action)
+    QString PerformanceMetrics::remoteActionName(QString source)
     {
-        const auto source = protocol::actionDisplayName(action);
         if (source.isEmpty())
             return QStringLiteral("unknown");
         QString result;

@@ -67,6 +67,12 @@ namespace javelin::app
                 return {};
             return javelin::protocol::actions::expandChangedDomains(metadata->changedDomains);
         }
+
+        [[nodiscard]] QString remoteActionMetricName(const javelin::protocol::ActionId action)
+        {
+            return PerformanceMetrics::remoteActionName(
+                javelin::protocol::actions::actionName(action));
+        }
     } // namespace
 
     DaemonRemoteActionDispatcher::DaemonRemoteActionDispatcher(
@@ -155,8 +161,7 @@ namespace javelin::app
                 PerformanceMetrics::recordEvent(
                     QStringLiteral("daemon"), QStringLiteral("remote_action_admission"),
                     QStringLiteral("replay"),
-                    QStringLiteral("kind=%1").arg(
-                        PerformanceMetrics::remoteActionName(remoteCommand->action)));
+                    QStringLiteral("kind=%1").arg(remoteActionMetricName(remoteCommand->action)));
                 return *replay->second.reply;
             }
 
@@ -179,8 +184,7 @@ namespace javelin::app
             PerformanceMetrics::recordEvent(
                 QStringLiteral("daemon"), QStringLiteral("remote_action_admission"),
                 QStringLiteral("replay_reexecuted"),
-                QStringLiteral("kind=%1").arg(
-                    PerformanceMetrics::remoteActionName(remoteCommand->action)));
+                QStringLiteral("kind=%1").arg(remoteActionMetricName(remoteCommand->action)));
             trimReplays();
             return reply;
         }
@@ -206,7 +210,7 @@ namespace javelin::app
                 ? QStringLiteral("accepted")
                 : QStringLiteral("rejected"),
             QStringLiteral("kind=%1 pending=%2 payload_bytes=%3")
-                .arg(PerformanceMetrics::remoteActionName(remoteCommand->action))
+                .arg(remoteActionMetricName(remoteCommand->action))
                 .arg(pending)
                 .arg(remoteCommand->payload.size()));
         auto [inserted, wasInserted] = m_replays.emplace(
@@ -356,7 +360,7 @@ namespace javelin::app
                     std::chrono::steady_clock::now() - replay->second.startedAt),
                 QStringLiteral("completed"),
                 QStringLiteral("kind=%1 result_bytes=%2")
-                    .arg(PerformanceMetrics::remoteActionName(replay->second.action))
+                    .arg(remoteActionMetricName(replay->second.action))
                     .arg(result.size()));
             if (replay->second.reply.has_value())
             {
@@ -397,7 +401,7 @@ namespace javelin::app
                     std::chrono::steady_clock::now() - replay->second.startedAt),
                 QStringLiteral("failed"),
                 QStringLiteral("kind=%1 code=%2")
-                    .arg(PerformanceMetrics::remoteActionName(replay->second.action))
+                    .arg(remoteActionMetricName(replay->second.action))
                     .arg(static_cast<int>(error.code)));
             setReplayReply(replay->second, javelin::protocol::CommandRejected{
                                                .id = {.value = operation.value},
