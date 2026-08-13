@@ -7,6 +7,7 @@
 #include <QImage>
 #include <QLabel>
 #include <QLocale>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -45,6 +46,14 @@ namespace
     {
         QApplication::processEvents();
         QApplication::processEvents();
+    }
+
+    void sendMouseEvent(QWidget* widget, const QEvent::Type type, const QPointF& position,
+                        const Qt::MouseButton button, const Qt::MouseButtons buttons)
+    {
+        QMouseEvent event{type,   position, widget->mapToGlobal(position.toPoint()),
+                          button, buttons,  Qt::NoModifier};
+        QApplication::sendEvent(widget, &event);
     }
 } // namespace
 
@@ -184,6 +193,57 @@ TEST_CASE("day agenda event selection fills details and exposes edit explicitly"
     dialog.close();
 }
 
+TEST_CASE("day agenda creates inclusive quarter-hour ranges by click and drag",
+          "[gui][calendar][agenda]")
+{
+    javelin::gui::calendar::DayAgendaDialog dialog;
+    dialog.setDay(QDate{2026, 8, 10}, {});
+    dialog.show();
+    settleGui();
+
+    auto* timeline = dialog.findChild<QWidget*>(QStringLiteral("dayAgendaTimeline"));
+    REQUIRE(timeline != nullptr);
+    std::vector<std::pair<QDateTime, QDateTime>> ranges;
+    QObject::connect(&dialog, &javelin::gui::calendar::DayAgendaDialog::newEventRequested, &dialog,
+                     [&ranges](const QDateTime& start, const QDateTime& end)
+                     { ranges.emplace_back(start, end); });
+    const auto positionForBlock = [timeline](const int block)
+    { return QPointF{timeline->width() - 10.0, block * 16.0 + 2.0}; };
+
+    sendMouseEvent(timeline, QEvent::MouseButtonPress, positionForBlock(37), Qt::LeftButton,
+                   Qt::LeftButton);
+    sendMouseEvent(timeline, QEvent::MouseMove, positionForBlock(42), Qt::NoButton, Qt::LeftButton);
+    auto* preview = dialog.findChild<javelin::gui::calendar::CalendarEventButton*>(
+        QStringLiteral("dayAgendaNewEventButton"));
+    REQUIRE(preview != nullptr);
+    CHECK(preview->text() == QStringLiteral("New Event"));
+    CHECK(preview->property("agendaStartMinute").toInt() == 9 * 60 + 15);
+    CHECK(preview->property("agendaEndMinute").toInt() == 10 * 60 + 45);
+    sendMouseEvent(timeline, QEvent::MouseButtonRelease, positionForBlock(42), Qt::LeftButton,
+                   Qt::NoButton);
+
+    sendMouseEvent(timeline, QEvent::MouseButtonPress, positionForBlock(48), Qt::LeftButton,
+                   Qt::LeftButton);
+    sendMouseEvent(timeline, QEvent::MouseMove, positionForBlock(39), Qt::NoButton, Qt::LeftButton);
+    sendMouseEvent(timeline, QEvent::MouseButtonRelease, positionForBlock(39), Qt::LeftButton,
+                   Qt::NoButton);
+
+    sendMouseEvent(timeline, QEvent::MouseButtonPress, positionForBlock(58), Qt::LeftButton,
+                   Qt::LeftButton);
+    sendMouseEvent(timeline, QEvent::MouseButtonRelease, positionForBlock(58), Qt::LeftButton,
+                   Qt::NoButton);
+
+    REQUIRE(ranges.size() == 3);
+    CHECK(ranges[0] == std::pair{QDateTime{QDate{2026, 8, 10}, QTime{9, 15}},
+                                 QDateTime{QDate{2026, 8, 10}, QTime{10, 45}}});
+    CHECK(ranges[1] == std::pair{QDateTime{QDate{2026, 8, 10}, QTime{9, 45}},
+                                 QDateTime{QDate{2026, 8, 10}, QTime{12, 15}}});
+    CHECK(ranges[2] == std::pair{QDateTime{QDate{2026, 8, 10}, QTime{14, 30}},
+                                 QDateTime{QDate{2026, 8, 10}, QTime{15, 30}}});
+    CHECK(dialog.findChild<QWidget*>(QStringLiteral("dayAgendaNewEventButton")) == nullptr);
+    dialog.close();
+}
+
 TEST_CASE("day agenda accessibility exposes schedule events and selected details relations",
           "[gui][calendar][agenda][accessibility]")
 {
@@ -265,11 +325,16 @@ TEST_CASE("day agenda navigation changes its day and leaves creation explicit",
     settleGui();
 
     QDate requestedDay;
-    QDate createDay;
+    QDateTime createStart;
+    QDateTime createEnd;
     QObject::connect(&dialog, &javelin::gui::calendar::DayAgendaDialog::dayChanged, &dialog,
                      [&requestedDay](const QDate& date) { requestedDay = date; });
     QObject::connect(&dialog, &javelin::gui::calendar::DayAgendaDialog::newEventRequested, &dialog,
-                     [&createDay](const QDate& date) { createDay = date; });
+                     [&createStart, &createEnd](const QDateTime& start, const QDateTime& end)
+                     {
+                         createStart = start;
+                         createEnd = end;
+                     });
 
     QToolButton* next = nullptr;
     for (auto* candidate : dialog.findChildren<QToolButton*>())
@@ -297,6 +362,7 @@ TEST_CASE("day agenda navigation changes its day and leaves creation explicit",
     }
     REQUIRE(create != nullptr);
     create->click();
-    CHECK(createDay == QDate{2026, 8, 11});
+    CHECK(createStart == QDateTime{QDate{2026, 8, 11}, QTime{9, 0}});
+    CHECK(createEnd == QDateTime{QDate{2026, 8, 11}, QTime{10, 0}});
     dialog.close();
 }

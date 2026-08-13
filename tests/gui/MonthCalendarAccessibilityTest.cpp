@@ -270,7 +270,8 @@ TEST_CASE("month calendar Enter opens the selected day instead of creating immed
         [&agendaDate](const QDate& date, const QString&, const QString&, const QString&)
         { agendaDate = date; });
     QObject::connect(&widget, &javelin::gui::calendar::MonthCalendarWidget::emptyTimeActivated,
-                     &widget, [&createRequests](const QDate&) { ++createRequests; });
+                     &widget,
+                     [&createRequests](const QDateTime&, const QDateTime&) { ++createRequests; });
 
     QKeyEvent enter{QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier};
     QApplication::sendEvent(&widget, &enter);
