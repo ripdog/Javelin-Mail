@@ -144,7 +144,9 @@ These transitions are single SQLite transactions:
 - commit a refresh snapshot, its state tokens, and reapplied projections.
 
 Repositories expose transaction-compatible primitives. Service code does not compose several
-independent repository transactions for one consistency transition.
+independent repository transactions for one consistency transition. Persistence implementations
+are physically owned by `src/storage/`; JMAP mutation journals and protocol/synchronization logic
+remain under `src/jmap/`, so storage ownership does not imply protocol ownership.
 
 ## Service Adapters
 

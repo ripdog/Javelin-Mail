@@ -102,8 +102,10 @@ The CMake graph enforces the architectural split:
 - `javelin_cache_read` owns database-location discovery and reusable read-only database, MIME, vault,
   and rendering infrastructure.
 - `javelin_app_contracts` owns shared QObject application contracts and their generated metaobjects.
-- `javelin_mail_model` owns transport-independent mail/cache repositories, search/query values, and
-  contact/calendar domain helpers shared by the daemon and GUI compositions.
+- `javelin_mail_model` owns transport-independent cache/storage implementations, search/query values,
+  and contact/calendar domain helpers shared by the daemon and GUI compositions. Persistence
+  implementations live under `src/storage/`; their established public cache interfaces remain under
+  `src/jmap/cache/`.
 - `javelin_app_shared` owns list sessions, session construction, message navigation coordination, and
   process-instance locking shared by both process compositions.
 - `javelin_jmap` owns typed JMAP protocol, capability negotiation, transport, synchronization,
@@ -113,7 +115,8 @@ The CMake graph enforces the architectural split:
 - `javelin_daemon_core` owns daemon application coordination, settings, background work,
   notifications, tray integration, deferred send, history, and synchronization lifecycle.
 - `javelin_gui` owns presentation, WebEngine, editing state, selection, and GUI controllers;
-  `javelin_gui_session` owns the GUI-side daemon session/event bridge; the `javelin` executable is
+  `javelin_gui_session` owns the client-side daemon session/event bridge. GUI-process composition and
+  remote application-port adapters live under `src/client/`; the `javelin` executable remains
   composition/bootstrap only.
 
 Configuration fails when a production `.cpp` has more than one target owner, production GUI sources
@@ -145,16 +148,23 @@ The source tree is organized by responsibility rather than by feature alone:
 | Area | Responsibility |
 | --- | --- |
 | `src/protocol/` | Process-boundary value types, framing, socket transport, correlation, limits, and transport conformance |
-| `src/app/` | Composition roots, focused application services, commands, settings, background scheduling, notifications, history, and GUI remote adapters |
-| `src/app/account/` | Per-account synchronization coordinator declarations and account-runtime ownership |
+| `src/app/` | Stable application contracts and public service interfaces; implementations are grouped below by responsibility rather than accumulated at the root |
+| `src/app/account/`, `calendar/`, `compose/`, `contacts/`, `messages/`, `sieve/`, `identity/`, `work/` | Focused application workflow implementations for their domains |
+| `src/app/runtime/` | Cross-domain application runtime coordination such as cache barriers, invalidation publication, command dispatch, and process locking |
+| `src/app/undo/` | History storage, typed history executors, and Undo/Redo application coordination |
+| `src/client/` | GUI-process composition, daemon session/reconnect handling, and typed remote application-port adapters |
+| `src/daemon/` | Daemon process/bootstrap composition and lifecycle; `src/daemon/actions/` contains the remote-action dispatcher handlers |
+| `src/desktop/` | Desktop integration owned by the daemon, currently notifications and tray/StatusNotifierItem support |
+| `src/storage/` | SQLite infrastructure, migrations, and persistence implementations grouped by account/messages/contacts/calendar/compose/identity/sieve/sync |
 | `src/jmap/api/` | Session discovery, capabilities, typed JMAP envelopes, HTTP/WebSocket transport, and resource transfer |
-| `src/jmap/cache/` | SQLite schema and repositories, read models, query windows, MIME source storage, and search indexes |
+| `src/jmap/cache/` | Stable cache/read/repository interfaces and cache value types; persistence `.cpp` implementations live under `src/storage/` |
 | `src/jmap/sync/` | State-change sources, refresh planning, reconciliation, mutation projection, and consistency fences |
 | `src/jmap/submission/` | Draft snapshots, attachment manifests, compose revisions, and EmailSubmission workflows |
 | `src/jmap/contacts/` | JSContact values plus focused protocol, synchronization, mutation/group, media-transfer, and mutation-journal components |
 | `src/jmap/calendar/` | JSCalendar values plus focused cache-reader, protocol, synchronization, mutation, recurrence, and occurrence-materialization components |
 | `src/jmap/sieve/` | Sieve domain values plus separate protocol/read-validation and mutation mechanics with optimistic mutation support |
-| `src/gui/` | KDE/Qt main window, KXMLGUI actions, tabs, controllers, models, delegates, message rendering, KTextEditor integration, and KConfig preferences |
+| `src/gui/` | KDE/Qt presentation only: shell, feature controllers/widgets, models, delegates, WebEngine rendering, KTextEditor integration, and KConfig preferences |
+| `src/observability/` | Shared logging and performance instrumentation implementations |
 
 The principal runtime objects are:
 
@@ -190,7 +200,7 @@ The principal runtime objects are:
 | `MailWorkspaceController` | GUI | Owns workspace tabs, active-tab identity, mailbox/search list sessions, sort state, restoration, refresh routing, and mail-tab lifecycle |
 | `QuickFilterController` / `MailActionController` | GUI | Own quick-filter state/pinning/continuity and mail action availability, trigger routing, tags, and message context-menu policy |
 | `AuthenticationPromptCoordinator` / `ThemeController` | GUI | Own authentication prompt deduplication/reauth sequencing and dark-mode/palette/icon refresh state |
-| `ComposeTabController` / `ContactsTabController` / `CalendarTabController` | GUI | Own feature-tab workflows and toolbar state; `gui_main` constructs them through typed factories against the shell's workspace surfaces |
+| `ComposeTabController` / `ContactsTabController` / `CalendarTabController` | GUI | Own feature-tab workflows and toolbar state; `src/client/main.cpp` constructs them through typed factories against the shell's workspace surfaces |
 | `DaemonTrayController` | daemon | Publishes the KDE StatusNotifierItem and D-Bus menu without a Widgets dependency |
 | `DesktopNotificationController` | daemon | Publishes desktop notifications and stable GUI activation routes |
 | cache repositories | both, split by API | Daemon repositories write; GUI repositories use read-only/query-only connections |

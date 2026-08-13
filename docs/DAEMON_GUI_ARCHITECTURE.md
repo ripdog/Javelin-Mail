@@ -51,6 +51,12 @@ accepted trade-off in favour of a simpler and faster application.
                      └─────────────────────┘
 ```
 
+The source tree mirrors the process boundary. `src/daemon/` owns daemon composition and action
+routing, `src/desktop/` owns daemon-hosted desktop integration, and `src/client/` owns GUI-process
+session/reconnect and remote application-port adapters. `src/gui/` is reserved for presentation and
+GUI feature code rather than IPC or daemon composition. Shared application contracts remain under
+`src/app/`, whose implementation files are grouped into focused feature/runtime subdirectories.
+
 The central rules are:
 
 > The daemon is the sole operational authority and the sole SQLite writer.

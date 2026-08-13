@@ -1,9 +1,9 @@
-# Transitional storage module ownership. Sources remain in their current
-# locations until the corresponding storage boundaries are extracted.
+# Read-only cache/storage surface shared by the daemon and GUI process. Public compatibility
+# headers remain at their established include paths, while implementations live under storage.
 add_library(javelin_cache_read STATIC
-    ${PROJECT_SOURCE_DIR}/src/app/CacheAccessBarrier.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/runtime/CacheAccessBarrier.cpp
     ${PROJECT_SOURCE_DIR}/src/app/CacheAccessBarrier.h
-    ${PROJECT_SOURCE_DIR}/src/app/CacheLocationProvider.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/runtime/CacheLocationProvider.cpp
     ${PROJECT_SOURCE_DIR}/src/app/CacheLocationProvider.h
     ${PROJECT_SOURCE_DIR}/src/storage/DatabaseError.h
     ${PROJECT_SOURCE_DIR}/src/storage/migrations/DefaultMigrationSteps.h
@@ -16,17 +16,17 @@ add_library(javelin_cache_read STATIC
     ${PROJECT_SOURCE_DIR}/src/storage/migrations/MigrationRunner.h
     ${PROJECT_SOURCE_DIR}/src/storage/sqlite/DatabaseConnection.h
     ${PROJECT_SOURCE_DIR}/src/storage/sqlite/DatabaseInfrastructure.cpp
-    ${PROJECT_SOURCE_DIR}/src/jmap/cache/EmailReadRepository.cpp
+    ${PROJECT_SOURCE_DIR}/src/storage/messages/EmailReadRepository.cpp
     ${PROJECT_SOURCE_DIR}/src/jmap/cache/EmailReadRepository.h
     ${PROJECT_SOURCE_DIR}/src/jmap/cache/MessageContentTypes.h
-    ${PROJECT_SOURCE_DIR}/src/jmap/cache/MessageViewService.cpp
+    ${PROJECT_SOURCE_DIR}/src/storage/messages/MessageViewService.cpp
     ${PROJECT_SOURCE_DIR}/src/jmap/cache/MessageViewService.h
     ${PROJECT_SOURCE_DIR}/src/jmap/cache/MessageViewReader.h
-    ${PROJECT_SOURCE_DIR}/src/jmap/cache/MimeMessageParser.cpp
+    ${PROJECT_SOURCE_DIR}/src/storage/messages/MimeMessageParser.cpp
     ${PROJECT_SOURCE_DIR}/src/jmap/cache/MimeMessageParser.h
-    ${PROJECT_SOURCE_DIR}/src/jmap/cache/MailVault.cpp
+    ${PROJECT_SOURCE_DIR}/src/storage/messages/MailVault.cpp
     ${PROJECT_SOURCE_DIR}/src/jmap/cache/MailVault.h
-    ${PROJECT_SOURCE_DIR}/src/jmap/cache/RawMessageSourceReadRepository.cpp
+    ${PROJECT_SOURCE_DIR}/src/storage/messages/RawMessageSourceReadRepository.cpp
     ${PROJECT_SOURCE_DIR}/src/jmap/cache/RawMessageSourceReadRepository.h
     ${PROJECT_SOURCE_DIR}/src/jmap/render/HtmlMessageDocumentBuilder.cpp
     ${PROJECT_SOURCE_DIR}/src/jmap/render/HtmlMessageDocumentBuilder.h

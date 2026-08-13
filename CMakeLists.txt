@@ -78,9 +78,9 @@ add_subdirectory(src/protocol)
 add_subdirectory(src/storage)
 
 add_library(javelin_observability STATIC
-    src/app/LogStore.cpp
+    src/observability/LogStore.cpp
     src/app/LogStore.h
-    src/app/PerformanceMetrics.cpp
+    src/observability/PerformanceMetrics.cpp
     src/app/PerformanceMetrics.h
 )
 target_include_directories(javelin_observability PUBLIC
@@ -118,55 +118,55 @@ javelin_enable_sanitizers(javelin_app_contracts)
 add_library(javelin_mail_model STATIC
     src/jmap/api/PatchObject.cpp
     src/jmap/api/PatchObject.h
-    src/jmap/cache/AccountReadRepository.cpp
+    src/storage/account/AccountReadRepository.cpp
     src/jmap/cache/AccountReadRepository.h
-    src/jmap/cache/ContactRepository.cpp
+    src/storage/contacts/ContactRepository.cpp
     src/jmap/cache/ContactRepository.h
-    src/jmap/cache/IdentityRepository.cpp
+    src/storage/identity/IdentityRepository.cpp
     src/jmap/cache/IdentityRepository.h
     src/jmap/cache/EmailListSortSql.h
-    src/jmap/cache/MailSearchIndex.cpp
+    src/storage/messages/MailSearchIndex.cpp
     src/jmap/cache/MailSearchIndex.h
-    src/jmap/cache/MailSearchReadRepository.cpp
+    src/storage/messages/MailSearchReadRepository.cpp
     src/jmap/cache/MailSearchReadRepository.h
     src/jmap/cache/MailSearchReader.h
-    src/jmap/cache/MailTagReadRepository.cpp
+    src/storage/messages/MailTagReadRepository.cpp
     src/jmap/cache/MailTagReadRepository.h
     src/jmap/cache/MailTagReader.h
-    src/jmap/cache/MailboxStatisticsReadRepository.cpp
+    src/storage/messages/MailboxStatisticsReadRepository.cpp
     src/jmap/cache/MailboxStatisticsReadRepository.h
     src/jmap/cache/MailboxStatisticsReader.h
-    src/jmap/cache/MailboxMessageReadRepository.cpp
+    src/storage/messages/MailboxMessageReadRepository.cpp
     src/jmap/cache/MailboxMessageReadRepository.h
     src/jmap/cache/MailboxMessageReader.h
-    src/jmap/cache/MailboxFilterReadRepository.cpp
+    src/storage/messages/MailboxFilterReadRepository.cpp
     src/jmap/cache/MailboxFilterReadRepository.h
     src/jmap/cache/MailboxFilterReader.h
-    src/jmap/cache/MailboxReadRepository.cpp
+    src/storage/messages/MailboxReadRepository.cpp
     src/jmap/cache/MailboxReadRepository.h
-    src/jmap/cache/MailboxRepository.cpp
+    src/storage/messages/MailboxRepository.cpp
     src/jmap/cache/MailboxRepository.h
-    src/jmap/cache/MailboxWindowRepository.cpp
+    src/storage/messages/MailboxWindowRepository.cpp
     src/jmap/cache/MailboxWindowRepository.h
-    src/jmap/cache/MessageListReadSupport.cpp
+    src/storage/messages/MessageListReadSupport.cpp
     src/jmap/cache/MessageListReadSupport.h
     src/jmap/cache/MessageListReadTypes.h
-    src/jmap/cache/MessageSummaryReadRepository.cpp
+    src/storage/messages/MessageSummaryReadRepository.cpp
     src/jmap/cache/MessageSummaryReadRepository.h
     src/jmap/cache/MessageSummaryReader.h
-    src/jmap/cache/SearchWindowReadRepository.cpp
+    src/storage/messages/SearchWindowReadRepository.cpp
     src/jmap/cache/SearchWindowReadRepository.h
-    src/jmap/cache/MailboxWindowReadRepository.cpp
+    src/storage/messages/MailboxWindowReadRepository.cpp
     src/jmap/cache/MailboxWindowReadRepository.h
-    src/jmap/cache/QueryWindowReadRepository.cpp
+    src/storage/messages/QueryWindowReadRepository.cpp
     src/jmap/cache/QueryWindowReadRepository.h
     src/jmap/cache/QueryWindowReader.h
-    src/jmap/cache/ThreadReadRepository.cpp
+    src/storage/messages/ThreadReadRepository.cpp
     src/jmap/cache/ThreadReadRepository.h
     src/jmap/cache/ThreadReader.h
-    src/jmap/cache/SearchWindowRepository.cpp
+    src/storage/messages/SearchWindowRepository.cpp
     src/jmap/cache/SearchWindowRepository.h
-    src/jmap/cache/SyncStateRepository.cpp
+    src/storage/sync/SyncStateRepository.cpp
     src/jmap/cache/SyncStateRepository.h
     src/jmap/calendar/CalendarEventEditing.cpp
     src/jmap/calendar/CalendarEventEditing.h
@@ -204,15 +204,15 @@ javelin_enable_sanitizers(javelin_mail_model)
 # Application-side list/navigation services are used by both process compositions. They depend on
 # the local mail model and typed application contracts, but not on daemon transports or GUI widgets.
 add_library(javelin_app_shared STATIC
-    src/app/MailboxSession.cpp
+    src/app/messages/MailboxSession.cpp
     src/app/MailboxSession.h
-    src/app/MessageListSessionFactoryService.cpp
+    src/app/messages/MessageListSessionFactoryService.cpp
     src/app/MessageListSessionFactoryService.h
-    src/app/MessageNavigationCoordinator.cpp
+    src/app/messages/MessageNavigationCoordinator.cpp
     src/app/MessageNavigationCoordinator.h
-    src/app/ProcessInstanceLock.cpp
+    src/app/runtime/ProcessInstanceLock.cpp
     src/app/ProcessInstanceLock.h
-    src/app/SearchSession.cpp
+    src/app/messages/SearchSession.cpp
     src/app/SearchSession.h
 )
 target_include_directories(javelin_app_shared PUBLIC
@@ -243,20 +243,20 @@ set(JAVELIN_FORMAT_FILES
     tests/gui/DeveloperOptionsDialogTest.cpp
     tests/gui/IndeterminateProgressBarTest.cpp
     tests/app/RemoteCodecTest.cpp
-    src/app/DaemonRemoteActionAccountHandler.cpp
-    src/app/DaemonRemoteActionCalendarHandler.cpp
-    src/app/DaemonRemoteActionComposeHandler.cpp
-    src/app/DaemonRemoteActionContactHandler.cpp
-    src/app/DaemonRemoteActionDeveloperHandler.cpp
-    src/app/DaemonRemoteActionDispatcher.cpp
-    src/app/DaemonRemoteActionDispatcher.h
-    src/app/DaemonRemoteActionHistoryHandler.cpp
-    src/app/DaemonRemoteActionIdentityHandler.cpp
-    src/app/DaemonRemoteActionMailHandler.cpp
-    src/app/DaemonRemoteActionSieveHandler.cpp
-    src/app/DaemonRemoteActionWorkHandler.cpp
-    src/app/RemoteActionClient.cpp
-    src/app/RemoteActionClient.h
+    src/daemon/actions/DaemonRemoteActionAccountHandler.cpp
+    src/daemon/actions/DaemonRemoteActionCalendarHandler.cpp
+    src/daemon/actions/DaemonRemoteActionComposeHandler.cpp
+    src/daemon/actions/DaemonRemoteActionContactHandler.cpp
+    src/daemon/actions/DaemonRemoteActionDeveloperHandler.cpp
+    src/daemon/actions/DaemonRemoteActionDispatcher.cpp
+    src/daemon/actions/DaemonRemoteActionDispatcher.h
+    src/daemon/actions/DaemonRemoteActionHistoryHandler.cpp
+    src/daemon/actions/DaemonRemoteActionIdentityHandler.cpp
+    src/daemon/actions/DaemonRemoteActionMailHandler.cpp
+    src/daemon/actions/DaemonRemoteActionSieveHandler.cpp
+    src/daemon/actions/DaemonRemoteActionWorkHandler.cpp
+    src/client/RemoteActionClient.cpp
+    src/client/RemoteActionClient.h
     src/app/RemoteCodec.h
     src/protocol/ActionContract.h
     src/protocol/ActionNames.h
@@ -311,28 +311,28 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/PreferredStateChangeSourceTest.cpp
     src/jmap/api/Cancellation.cpp
     src/jmap/api/Cancellation.h
-    src/jmap/cache/SearchWindowRepository.cpp
+    src/storage/messages/SearchWindowRepository.cpp
     src/jmap/cache/SearchWindowRepository.h
-    src/jmap/cache/MailboxWindowRepository.cpp
+    src/storage/messages/MailboxWindowRepository.cpp
     src/jmap/cache/MailboxWindowRepository.h
-    src/jmap/cache/NotificationRepository.cpp
+    src/storage/sync/NotificationRepository.cpp
     src/jmap/cache/NotificationRepository.h
-    src/jmap/cache/NotificationDispatchRepository.cpp
+    src/storage/sync/NotificationDispatchRepository.cpp
     src/jmap/cache/NotificationDispatchRepository.h
     src/jmap/cache/ContactReader.h
-    src/jmap/cache/EmailReadRepository.cpp
+    src/storage/messages/EmailReadRepository.cpp
     src/jmap/cache/EmailReadRepository.h
     src/jmap/cache/IdentityReader.h
     src/jmap/cache/MessageContentTypes.h
-    src/jmap/cache/MessageViewService.cpp
+    src/storage/messages/MessageViewService.cpp
     src/jmap/cache/MessageViewService.h
     src/jmap/cache/MessageViewReader.h
-    src/jmap/cache/MimeMessageParser.cpp
+    src/storage/messages/MimeMessageParser.cpp
     src/jmap/cache/MimeMessageParser.h
-    src/jmap/cache/RawMessageSourceReadRepository.cpp
+    src/storage/messages/RawMessageSourceReadRepository.cpp
     src/jmap/cache/RawMessageSourceReadRepository.h
     src/jmap/calendar/CalendarReader.h
-    src/jmap/cache/CalendarNotificationRepository.cpp
+    src/storage/calendar/CalendarNotificationRepository.cpp
     src/jmap/cache/CalendarNotificationRepository.h
     src/jmap/sync/StateChangeSource.h
     src/jmap/sync/MailboxInterestRegistry.cpp
@@ -340,80 +340,80 @@ set(JAVELIN_FORMAT_FILES
     src/app/AccountConnectionProvider.h
     src/app/AccountConnectionSettings.h
     src/app/AccountApplicationPorts.h
-    src/app/AccountCommandService.cpp
+    src/app/account/AccountCommandService.cpp
     src/app/AccountCommandService.h
     src/app/AccountRefreshApplicationPorts.h
-    src/app/AccountRefreshCommandService.cpp
+    src/app/account/AccountRefreshCommandService.cpp
     src/app/AccountRefreshCommandService.h
-    src/app/CommandDispatcher.cpp
+    src/app/runtime/CommandDispatcher.cpp
     src/app/CommandDispatcher.h
-    src/app/CacheInvalidationPublisher.cpp
+    src/app/runtime/CacheInvalidationPublisher.cpp
     src/app/CacheInvalidationPublisher.h
     src/app/RefreshGeneration.h
     src/app/MailApplicationEventsPorts.h
-    src/app/MailApplicationEventsService.cpp
+    src/app/messages/MailApplicationEventsService.cpp
     src/app/MailApplicationEventsService.h
-    src/app/CacheAccessBarrier.cpp
+    src/app/runtime/CacheAccessBarrier.cpp
     src/app/CacheAccessBarrier.h
-    src/app/ApplicationErrorCoordinator.cpp
+    src/app/runtime/ApplicationErrorCoordinator.cpp
     src/app/ApplicationErrorCoordinator.h
-    src/app/CalendarNotificationService.cpp
+    src/app/calendar/CalendarNotificationService.cpp
     src/app/CalendarNotificationService.h
     src/app/CalendarApplicationPorts.h
-    src/app/CalendarCommandService.cpp
+    src/app/calendar/CalendarCommandService.cpp
     src/app/CalendarCommandService.h
     src/app/ContactApplicationPorts.h
     src/app/MailApplicationTypes.h
     src/app/MailApplicationPorts.h
-    src/app/MailCommandService.cpp
+    src/app/messages/MailCommandService.cpp
     src/app/MailCommandService.h
     src/app/MessageContentApplicationPorts.h
-    src/app/MessageContentCommandService.cpp
+    src/app/messages/MessageContentCommandService.cpp
     src/app/MessageContentCommandService.h
     src/app/MessageListCacheRead.h
     src/app/MessageSubject.h
     src/app/MailboxTreeCacheRead.h
     src/app/MessageListSessionFactory.h
-    src/app/MessageListSessionFactoryService.cpp
+    src/app/messages/MessageListSessionFactoryService.cpp
     src/app/MessageListSessionFactoryService.h
     src/app/SieveApplicationPorts.h
-    src/app/SieveCommandService.cpp
+    src/app/sieve/SieveCommandService.cpp
     src/app/SieveCommandService.h
     src/app/IdentityApplicationPorts.h
-    src/app/IdentityCommandService.cpp
+    src/app/identity/IdentityCommandService.cpp
     src/app/IdentityCommandService.h
     src/app/UndoApplicationPorts.h
-    src/app/UndoCommandService.cpp
+    src/app/undo/UndoCommandService.cpp
     src/app/UndoCommandService.h
-    src/app/ContactCommandPreparation.cpp
+    src/app/contacts/ContactCommandPreparation.cpp
     src/app/ContactCommandPreparation.h
     src/app/ContactCommands.h
-    src/app/ContactCommandService.cpp
+    src/app/contacts/ContactCommandService.cpp
     src/app/ContactCommandService.h
-    src/app/AddressSuggestionStore.cpp
-    src/app/AddressSuggestionStore.h
-    src/app/ComposeService.cpp
+    src/gui/compose/AddressSuggestionStore.cpp
+    src/gui/compose/AddressSuggestionStore.h
+    src/app/compose/ComposeService.cpp
     src/app/ComposeService.h
     src/app/ComposeApplicationPorts.h
-    src/app/ComposeCommandService.cpp
+    src/app/compose/ComposeCommandService.cpp
     src/app/ComposeCommandService.h
-    src/app/ComposePreferences.cpp
+    src/app/compose/ComposePreferences.cpp
     src/app/ComposePreferences.h
-    src/app/DeferredSendRepository.cpp
+    src/app/compose/DeferredSendRepository.cpp
     src/app/DeferredSendRepository.h
-    src/app/DeferredSendService.cpp
+    src/app/compose/DeferredSendService.cpp
     src/app/DeferredSendService.h
     src/app/DeveloperDiagnostics.h
-    src/app/DeveloperDiagnosticsService.cpp
+    src/app/developer/DeveloperDiagnosticsService.cpp
     src/app/DeveloperDiagnosticsService.h
     src/app/DeveloperMaintenance.h
-    src/app/DeveloperMaintenanceService.cpp
+    src/app/developer/DeveloperMaintenanceService.cpp
     src/app/DeveloperMaintenanceService.h
-    src/app/MailboxMaintenanceRegistry.cpp
+    src/app/messages/MailboxMaintenanceRegistry.cpp
     src/app/MailboxMaintenanceRegistry.h
-    src/app/DesktopNotificationController.cpp
-    src/app/DesktopNotificationController.h
-    src/app/FullMailSyncService.cpp
+    src/desktop/notifications/DesktopNotificationController.cpp
+    src/desktop/notifications/DesktopNotificationController.h
+    src/app/messages/FullMailSyncService.cpp
     src/app/FullMailSyncService.h
     src/app/undo/HistoryRepository.cpp
     src/app/undo/HistoryRepository.h
@@ -445,19 +445,19 @@ set(JAVELIN_FORMAT_FILES
     src/app/undo/SieveHistoryPort.h
     src/app/undo/UndoManager.cpp
     src/app/undo/UndoManager.h
-    src/app/MailIndexService.cpp
+    src/app/messages/MailIndexService.cpp
     src/app/MailIndexService.h
-    src/app/LocalMaintenanceService.cpp
+    src/app/runtime/LocalMaintenanceService.cpp
     src/app/LocalMaintenanceService.h
-    src/app/InlineMessageSchemeHandler.cpp
-    src/app/InlineMessageSchemeHandler.h
-    src/app/LogStore.cpp
+    src/gui/messageview/InlineMessageSchemeHandler.cpp
+    src/gui/messageview/InlineMessageSchemeHandler.h
+    src/observability/LogStore.cpp
     src/app/LogStore.h
-    src/app/LongPollService.cpp
+    src/app/account/AccountSyncCoordinator.cpp
     src/app/account/AccountSyncCoordinator.h
-    src/app/OAuthRefreshSingleFlight.cpp
+    src/app/account/OAuthRefreshSingleFlight.cpp
     src/app/OAuthRefreshSingleFlight.h
-    src/app/MailApplicationService.cpp
+    src/app/messages/MailApplicationService.cpp
     src/app/AccountRuntimeManager.h
     src/app/CalendarApplicationService.h
     src/app/ContactApplicationService.h
@@ -466,25 +466,25 @@ set(JAVELIN_FORMAT_FILES
     src/app/MailQueryApplicationService.h
     src/app/MessageContentApplicationService.h
     src/app/SieveApplicationService.h
-    src/app/EmailMutationBatchSubmitter.cpp
+    src/app/messages/EmailMutationBatchSubmitter.cpp
     src/app/EmailMutationBatchSubmitter.h
-    src/app/ThreadMaterializationCoordinator.cpp
+    src/app/messages/ThreadMaterializationCoordinator.cpp
     src/app/ThreadMaterializationCoordinator.h
-    src/app/ThreadMembershipMaterializationWorker.cpp
+    src/app/messages/ThreadMembershipMaterializationWorker.cpp
     src/app/ThreadMembershipMaterializationWorker.h
-    src/app/MailboxSelectionMutation.cpp
+    src/app/messages/MailboxSelectionMutation.cpp
     src/app/MailboxSelectionMutation.h
-    src/app/MessageSelection.cpp
+    src/app/messages/MessageSelection.cpp
     src/app/MessageSelection.h
-    src/app/MailboxSyncCoverage.cpp
+    src/app/messages/MailboxSyncCoverage.cpp
     src/app/MailboxSyncCoverage.h
-    src/app/MessageNavigationCoordinator.cpp
+    src/app/messages/MessageNavigationCoordinator.cpp
     src/app/MessageNavigationCoordinator.h
-    src/app/DaemonServices.cpp
-    src/app/DaemonServices.h
+    src/daemon/DaemonServices.cpp
+    src/daemon/DaemonServices.h
     src/app/MessageNavigationPort.h
-    src/app/WorkTaskModel.cpp
-    src/app/WorkTaskModel.h
+    src/gui/tasks/WorkTaskModel.cpp
+    src/gui/tasks/WorkTaskModel.h
     src/app/WorkTaskPort.h
     src/gui/IconUtils.cpp
     src/gui/IconUtils.h
@@ -601,10 +601,10 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messageview/PlainTextLinkifier.h
     src/gui/search/AdvancedSearchDialog.cpp
     src/gui/search/AdvancedSearchDialog.h
-    src/app/SearchSession.cpp
+    src/app/messages/SearchSession.cpp
     src/app/SearchSession.h
     src/app/MessageListSession.h
-    src/app/MailboxSession.cpp
+    src/app/messages/MailboxSession.cpp
     src/app/MailboxSession.h
     src/gui/search/SearchSessionPersistence.cpp
     src/gui/search/SearchSessionPersistence.h
@@ -726,80 +726,80 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/SessionParser.h
     src/jmap/api/Transport.cpp
     src/jmap/api/Transport.h
-    src/jmap/cache/AccountRepository.cpp
+    src/storage/account/AccountRepository.cpp
     src/jmap/cache/AccountRepository.h
-    src/jmap/cache/AccountReadRepository.cpp
+    src/storage/account/AccountReadRepository.cpp
     src/jmap/cache/AccountReadRepository.h
-    src/jmap/cache/MailTagReadRepository.cpp
+    src/storage/messages/MailTagReadRepository.cpp
     src/jmap/cache/MailTagReadRepository.h
     src/jmap/cache/MailTagReader.h
-    src/jmap/cache/MailboxStatisticsReadRepository.cpp
+    src/storage/messages/MailboxStatisticsReadRepository.cpp
     src/jmap/cache/MailboxStatisticsReadRepository.h
     src/jmap/cache/MailboxStatisticsReader.h
-    src/jmap/cache/MailboxMessageReadRepository.cpp
+    src/storage/messages/MailboxMessageReadRepository.cpp
     src/jmap/cache/MailboxMessageReadRepository.h
     src/jmap/cache/MailboxMessageReader.h
-    src/jmap/cache/MailboxFilterReadRepository.cpp
+    src/storage/messages/MailboxFilterReadRepository.cpp
     src/jmap/cache/MailboxFilterReadRepository.h
     src/jmap/cache/MailboxFilterReader.h
-    src/jmap/cache/MailboxReadRepository.cpp
+    src/storage/messages/MailboxReadRepository.cpp
     src/jmap/cache/MailboxReadRepository.h
-    src/jmap/cache/ComposeSessionRepository.cpp
+    src/storage/compose/ComposeSessionRepository.cpp
     src/jmap/cache/ComposeSessionRepository.h
-    src/jmap/cache/ContactRepository.cpp
+    src/storage/contacts/ContactRepository.cpp
     src/jmap/cache/ContactRepository.h
     src/jmap/cache/ContactReader.h
-    src/jmap/cache/CalendarRepository.cpp
+    src/storage/calendar/CalendarRepository.cpp
     src/jmap/cache/CalendarRepository.h
-    src/jmap/cache/MessageListReadSupport.cpp
+    src/storage/messages/MessageListReadSupport.cpp
     src/jmap/cache/MessageListReadSupport.h
     src/jmap/cache/MessageListReadTypes.h
-    src/jmap/cache/MessageSummaryReadRepository.cpp
+    src/storage/messages/MessageSummaryReadRepository.cpp
     src/jmap/cache/MessageSummaryReadRepository.h
     src/jmap/cache/MessageSummaryReader.h
-    src/jmap/cache/SearchWindowReadRepository.cpp
+    src/storage/messages/SearchWindowReadRepository.cpp
     src/jmap/cache/SearchWindowReadRepository.h
-    src/jmap/cache/MailboxWindowReadRepository.cpp
+    src/storage/messages/MailboxWindowReadRepository.cpp
     src/jmap/cache/MailboxWindowReadRepository.h
-    src/jmap/cache/QueryWindowReadRepository.cpp
+    src/storage/messages/QueryWindowReadRepository.cpp
     src/jmap/cache/QueryWindowReadRepository.h
     src/jmap/cache/QueryWindowReader.h
-    src/jmap/cache/ThreadReadRepository.cpp
+    src/storage/messages/ThreadReadRepository.cpp
     src/jmap/cache/ThreadReadRepository.h
     src/jmap/cache/ThreadReader.h
-    src/jmap/cache/EmailRepository.cpp
+    src/storage/messages/EmailRepository.cpp
     src/jmap/cache/EmailRepository.h
     src/jmap/cache/MailVault.h
     src/jmap/cache/EmailListSortSql.h
-    src/jmap/cache/MailSearchIndex.cpp
+    src/storage/messages/MailSearchIndex.cpp
     src/jmap/cache/MailSearchIndex.h
-    src/jmap/cache/MailSearchReadRepository.cpp
+    src/storage/messages/MailSearchReadRepository.cpp
     src/jmap/cache/MailSearchReadRepository.h
     src/jmap/cache/MailSearchReader.h
-    src/jmap/cache/IdentityRepository.cpp
+    src/storage/identity/IdentityRepository.cpp
     src/jmap/cache/IdentityRepository.h
     src/jmap/cache/IdentityReader.h
-    src/jmap/cache/MailboxRepository.cpp
+    src/storage/messages/MailboxRepository.cpp
     src/jmap/cache/MailboxRepository.h
     src/jmap/cache/MessageContentTypes.h
-    src/jmap/cache/MessageViewService.cpp
+    src/storage/messages/MessageViewService.cpp
     src/jmap/cache/MessageViewService.h
     src/jmap/cache/MessageViewReader.h
-    src/jmap/cache/MimeMessageParser.cpp
+    src/storage/messages/MimeMessageParser.cpp
     src/jmap/cache/MimeMessageParser.h
-    src/jmap/cache/RawMessageSourceRepository.cpp
+    src/storage/messages/RawMessageSourceRepository.cpp
     src/jmap/cache/RawMessageSourceRepository.h
-    src/jmap/cache/SessionRepository.cpp
+    src/storage/account/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
-    src/jmap/cache/SieveRepository.cpp
+    src/storage/sieve/SieveRepository.cpp
     src/jmap/cache/SieveRepository.h
-    src/jmap/cache/JmapTransportPreferenceRepository.cpp
+    src/storage/sync/JmapTransportPreferenceRepository.cpp
     src/jmap/cache/JmapTransportPreferenceRepository.h
-    src/jmap/cache/SubmissionRepository.cpp
+    src/storage/compose/SubmissionRepository.cpp
     src/jmap/cache/SubmissionRepository.h
-    src/jmap/cache/SyncStateRepository.cpp
+    src/storage/sync/SyncStateRepository.cpp
     src/jmap/cache/SyncStateRepository.h
-    src/jmap/cache/ThreadRepository.cpp
+    src/storage/messages/ThreadRepository.cpp
     src/jmap/cache/ThreadRepository.h
     src/jmap/domain/MailEntities.h
     src/jmap/contacts/ContactTypes.cpp
@@ -974,7 +974,7 @@ add_library(javelin_jmap STATIC
     src/jmap/calendar/CalendarProtocolClient.h
     src/jmap/calendar/CalendarReader.h
     src/jmap/calendar/CalendarSyncEngine.h
-    src/jmap/cache/CalendarRepository.cpp
+    src/storage/calendar/CalendarRepository.cpp
     src/jmap/cache/CalendarRepository.h
     src/jmap/sync/PreferredStateChangeSource.cpp
     src/jmap/sync/PreferredStateChangeSource.h
@@ -982,15 +982,15 @@ add_library(javelin_jmap STATIC
     src/jmap/sync/EmailMutationQueue.h
     src/jmap/api/Cancellation.cpp
     src/jmap/api/Cancellation.h
-    src/jmap/cache/SearchWindowRepository.cpp
+    src/storage/messages/SearchWindowRepository.cpp
     src/jmap/cache/SearchWindowRepository.h
-    src/jmap/cache/MailboxWindowRepository.cpp
+    src/storage/messages/MailboxWindowRepository.cpp
     src/jmap/cache/MailboxWindowRepository.h
-    src/jmap/cache/NotificationRepository.cpp
+    src/storage/sync/NotificationRepository.cpp
     src/jmap/cache/NotificationRepository.h
-    src/jmap/cache/NotificationDispatchRepository.cpp
+    src/storage/sync/NotificationDispatchRepository.cpp
     src/jmap/cache/NotificationDispatchRepository.h
-    src/jmap/cache/CalendarNotificationRepository.cpp
+    src/storage/calendar/CalendarNotificationRepository.cpp
     src/jmap/cache/CalendarNotificationRepository.h
     src/jmap/sync/StateChangeSource.h
     src/jmap/sync/MailboxInterestRegistry.cpp
@@ -1033,76 +1033,76 @@ add_library(javelin_jmap STATIC
     src/jmap/contacts/ContactIdentityLookup.h
     src/jmap/api/Transport.cpp
     src/jmap/api/Transport.h
-    src/jmap/cache/AccountRepository.cpp
+    src/storage/account/AccountRepository.cpp
     src/jmap/cache/AccountRepository.h
-    src/jmap/cache/AccountReadRepository.cpp
+    src/storage/account/AccountReadRepository.cpp
     src/jmap/cache/AccountReadRepository.h
-    src/jmap/cache/MailTagReadRepository.cpp
+    src/storage/messages/MailTagReadRepository.cpp
     src/jmap/cache/MailTagReadRepository.h
     src/jmap/cache/MailTagReader.h
-    src/jmap/cache/MailboxStatisticsReadRepository.cpp
+    src/storage/messages/MailboxStatisticsReadRepository.cpp
     src/jmap/cache/MailboxStatisticsReadRepository.h
     src/jmap/cache/MailboxStatisticsReader.h
-    src/jmap/cache/MailboxMessageReadRepository.cpp
+    src/storage/messages/MailboxMessageReadRepository.cpp
     src/jmap/cache/MailboxMessageReadRepository.h
     src/jmap/cache/MailboxMessageReader.h
-    src/jmap/cache/MailboxFilterReadRepository.cpp
+    src/storage/messages/MailboxFilterReadRepository.cpp
     src/jmap/cache/MailboxFilterReadRepository.h
     src/jmap/cache/MailboxFilterReader.h
-    src/jmap/cache/MailboxReadRepository.cpp
+    src/storage/messages/MailboxReadRepository.cpp
     src/jmap/cache/MailboxReadRepository.h
-    src/jmap/cache/ComposeSessionRepository.cpp
+    src/storage/compose/ComposeSessionRepository.cpp
     src/jmap/cache/ComposeSessionRepository.h
-    src/jmap/cache/ContactRepository.cpp
+    src/storage/contacts/ContactRepository.cpp
     src/jmap/cache/ContactRepository.h
     src/jmap/cache/ContactReader.h
-    src/jmap/cache/MessageListReadSupport.cpp
+    src/storage/messages/MessageListReadSupport.cpp
     src/jmap/cache/MessageListReadSupport.h
     src/jmap/cache/MessageListReadTypes.h
-    src/jmap/cache/MessageSummaryReadRepository.cpp
+    src/storage/messages/MessageSummaryReadRepository.cpp
     src/jmap/cache/MessageSummaryReadRepository.h
     src/jmap/cache/MessageSummaryReader.h
-    src/jmap/cache/SearchWindowReadRepository.cpp
+    src/storage/messages/SearchWindowReadRepository.cpp
     src/jmap/cache/SearchWindowReadRepository.h
-    src/jmap/cache/MailboxWindowReadRepository.cpp
+    src/storage/messages/MailboxWindowReadRepository.cpp
     src/jmap/cache/MailboxWindowReadRepository.h
-    src/jmap/cache/QueryWindowReadRepository.cpp
+    src/storage/messages/QueryWindowReadRepository.cpp
     src/jmap/cache/QueryWindowReadRepository.h
     src/jmap/cache/QueryWindowReader.h
-    src/jmap/cache/ThreadReadRepository.cpp
+    src/storage/messages/ThreadReadRepository.cpp
     src/jmap/cache/ThreadReadRepository.h
     src/jmap/cache/ThreadReader.h
-    src/jmap/cache/EmailRepository.cpp
+    src/storage/messages/EmailRepository.cpp
     src/jmap/cache/EmailRepository.h
     src/jmap/cache/MailVault.h
     src/jmap/cache/EmailListSortSql.h
-    src/jmap/cache/MailSearchIndex.cpp
+    src/storage/messages/MailSearchIndex.cpp
     src/jmap/cache/MailSearchIndex.h
-    src/jmap/cache/MailSearchReadRepository.cpp
+    src/storage/messages/MailSearchReadRepository.cpp
     src/jmap/cache/MailSearchReadRepository.h
     src/jmap/cache/MailSearchReader.h
-    src/jmap/cache/IdentityRepository.cpp
+    src/storage/identity/IdentityRepository.cpp
     src/jmap/cache/IdentityRepository.h
     src/jmap/cache/IdentityReader.h
-    src/jmap/cache/MailboxRepository.cpp
+    src/storage/messages/MailboxRepository.cpp
     src/jmap/cache/MailboxRepository.h
     src/jmap/cache/MessageContentTypes.h
     src/jmap/cache/MessageViewService.h
     src/jmap/cache/MessageViewReader.h
     src/jmap/cache/MimeMessageParser.h
     src/jmap/cache/RawMessageSourceRepository.h
-    src/jmap/cache/RawMessageSourceRepository.cpp
-    src/jmap/cache/SessionRepository.cpp
+    src/storage/messages/RawMessageSourceRepository.cpp
+    src/storage/account/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
-    src/jmap/cache/SieveRepository.cpp
+    src/storage/sieve/SieveRepository.cpp
     src/jmap/cache/SieveRepository.h
-    src/jmap/cache/JmapTransportPreferenceRepository.cpp
+    src/storage/sync/JmapTransportPreferenceRepository.cpp
     src/jmap/cache/JmapTransportPreferenceRepository.h
-    src/jmap/cache/SubmissionRepository.cpp
+    src/storage/compose/SubmissionRepository.cpp
     src/jmap/cache/SubmissionRepository.h
-    src/jmap/cache/SyncStateRepository.cpp
+    src/storage/sync/SyncStateRepository.cpp
     src/jmap/cache/SyncStateRepository.h
-    src/jmap/cache/ThreadRepository.cpp
+    src/storage/messages/ThreadRepository.cpp
     src/jmap/cache/ThreadRepository.h
     src/jmap/domain/MailEntities.h
     src/jmap/domain/MailEntityParsers.cpp
@@ -1297,13 +1297,13 @@ javelin_enable_static_analysis(javelin_translation)
 javelin_enable_sanitizers(javelin_translation)
 
 add_library(javelin_gui STATIC
-    src/app/AddressSuggestionStore.cpp
-    src/app/AddressSuggestionStore.h
-    src/app/InlineMessageSchemeHandler.cpp
-    src/app/InlineMessageSchemeHandler.h
+    src/gui/compose/AddressSuggestionStore.cpp
+    src/gui/compose/AddressSuggestionStore.h
+    src/gui/messageview/InlineMessageSchemeHandler.cpp
+    src/gui/messageview/InlineMessageSchemeHandler.h
     src/app/MessageSubject.h
-    src/app/WorkTaskModel.cpp
-    src/app/WorkTaskModel.h
+    src/gui/tasks/WorkTaskModel.cpp
+    src/gui/tasks/WorkTaskModel.h
     src/app/WorkTaskPort.h
     src/gui/IconUtils.cpp
     src/gui/IconUtils.h
@@ -1708,75 +1708,75 @@ target_compile_options(javelin_gui PRIVATE -fexceptions)
 add_library(javelin_daemon_core STATIC
     src/app/AccountApplicationPorts.h
     src/app/DeveloperDiagnostics.h
-    src/app/DeveloperDiagnosticsService.cpp
+    src/app/developer/DeveloperDiagnosticsService.cpp
     src/app/DeveloperDiagnosticsService.h
     src/app/DeveloperMaintenance.h
-    src/app/DeveloperMaintenanceService.cpp
+    src/app/developer/DeveloperMaintenanceService.cpp
     src/app/DeveloperMaintenanceService.h
-    src/app/MailboxMaintenanceRegistry.cpp
+    src/app/messages/MailboxMaintenanceRegistry.cpp
     src/app/MailboxMaintenanceRegistry.h
-    src/app/AccountCredentialStore.cpp
+    src/app/account/AccountCredentialStore.cpp
     src/app/AccountCredentialStore.h
-    src/app/KWalletAccountCredentialStore.cpp
-    src/app/AccountCommandService.cpp
+    src/app/account/KWalletAccountCredentialStore.cpp
+    src/app/account/AccountCommandService.cpp
     src/app/AccountCommandService.h
     src/app/AccountRefreshApplicationPorts.h
-    src/app/AccountRefreshCommandService.cpp
+    src/app/account/AccountRefreshCommandService.cpp
     src/app/AccountRefreshCommandService.h
-    src/app/CommandDispatcher.cpp
+    src/app/runtime/CommandDispatcher.cpp
     src/app/CommandDispatcher.h
-    src/app/CacheInvalidationPublisher.cpp
+    src/app/runtime/CacheInvalidationPublisher.cpp
     src/app/CacheInvalidationPublisher.h
     src/app/RefreshGeneration.h
-    src/app/MailApplicationEventsService.cpp
+    src/app/messages/MailApplicationEventsService.cpp
     src/app/MailApplicationEventsService.h
     src/app/AccountConnectionProvider.h
     src/app/AccountConnectionSettings.h
-    src/app/ApplicationErrorCoordinator.cpp
+    src/app/runtime/ApplicationErrorCoordinator.cpp
     src/app/ApplicationErrorCoordinator.h
-    src/app/CalendarNotificationService.cpp
+    src/app/calendar/CalendarNotificationService.cpp
     src/app/CalendarNotificationService.h
-    src/app/CalendarCommandService.cpp
+    src/app/calendar/CalendarCommandService.cpp
     src/app/CalendarCommandService.h
     src/app/ContactApplicationPorts.h
     src/app/MailApplicationTypes.h
     src/app/MailApplicationPorts.h
-    src/app/MailCommandService.cpp
+    src/app/messages/MailCommandService.cpp
     src/app/MailCommandService.h
     src/app/MessageContentApplicationPorts.h
-    src/app/MessageContentCommandService.cpp
+    src/app/messages/MessageContentCommandService.cpp
     src/app/MessageContentCommandService.h
     src/app/MessageListCacheRead.h
     src/app/MessageSubject.h
     src/app/MailboxTreeCacheRead.h
     src/app/MessageListSessionFactory.h
     src/app/SieveApplicationPorts.h
-    src/app/SieveCommandService.cpp
+    src/app/sieve/SieveCommandService.cpp
     src/app/SieveCommandService.h
     src/app/IdentityApplicationPorts.h
-    src/app/IdentityCommandService.cpp
+    src/app/identity/IdentityCommandService.cpp
     src/app/IdentityCommandService.h
-    src/app/UndoCommandService.cpp
+    src/app/undo/UndoCommandService.cpp
     src/app/UndoCommandService.h
-    src/app/ComposeService.cpp
+    src/app/compose/ComposeService.cpp
     src/app/ComposeService.h
     src/app/ComposeApplicationPorts.h
-    src/app/ComposeCommandService.cpp
+    src/app/compose/ComposeCommandService.cpp
     src/app/ComposeCommandService.h
-    src/app/ComposePreferences.cpp
+    src/app/compose/ComposePreferences.cpp
     src/app/ComposePreferences.h
-    src/app/DeferredSendRepository.cpp
+    src/app/compose/DeferredSendRepository.cpp
     src/app/DeferredSendRepository.h
-    src/app/DeferredSendService.cpp
+    src/app/compose/DeferredSendService.cpp
     src/app/DeferredSendService.h
-    src/app/ContactCommandPreparation.cpp
+    src/app/contacts/ContactCommandPreparation.cpp
     src/app/ContactCommandPreparation.h
     src/app/ContactCommands.h
-    src/app/ContactCommandService.cpp
+    src/app/contacts/ContactCommandService.cpp
     src/app/ContactCommandService.h
-    src/app/DesktopNotificationController.cpp
-    src/app/DesktopNotificationController.h
-    src/app/FullMailSyncService.cpp
+    src/desktop/notifications/DesktopNotificationController.cpp
+    src/desktop/notifications/DesktopNotificationController.h
+    src/app/messages/FullMailSyncService.cpp
     src/app/FullMailSyncService.h
     src/app/undo/HistoryRepository.cpp
     src/app/undo/HistoryRepository.h
@@ -1808,13 +1808,13 @@ add_library(javelin_daemon_core STATIC
     src/app/undo/SieveHistoryPort.h
     src/app/undo/UndoManager.cpp
     src/app/undo/UndoManager.h
-    src/app/LocalMaintenanceService.cpp
+    src/app/runtime/LocalMaintenanceService.cpp
     src/app/LocalMaintenanceService.h
-    src/app/LongPollService.cpp
+    src/app/account/AccountSyncCoordinator.cpp
     src/app/account/AccountSyncCoordinator.h
-    src/app/OAuthRefreshSingleFlight.cpp
+    src/app/account/OAuthRefreshSingleFlight.cpp
     src/app/OAuthRefreshSingleFlight.h
-    src/app/MailApplicationService.cpp
+    src/app/messages/MailApplicationService.cpp
     src/app/AccountRuntimeManager.h
     src/app/CalendarApplicationService.h
     src/app/ContactApplicationService.h
@@ -1823,46 +1823,46 @@ add_library(javelin_daemon_core STATIC
     src/app/MailQueryApplicationService.h
     src/app/MessageContentApplicationService.h
     src/app/SieveApplicationService.h
-    src/app/EmailMutationBatchSubmitter.cpp
+    src/app/messages/EmailMutationBatchSubmitter.cpp
     src/app/EmailMutationBatchSubmitter.h
-    src/app/ThreadMaterializationCoordinator.cpp
+    src/app/messages/ThreadMaterializationCoordinator.cpp
     src/app/ThreadMaterializationCoordinator.h
-    src/app/ThreadMembershipMaterializationWorker.cpp
+    src/app/messages/ThreadMembershipMaterializationWorker.cpp
     src/app/ThreadMembershipMaterializationWorker.h
-    src/app/MailboxSelectionMutation.cpp
+    src/app/messages/MailboxSelectionMutation.cpp
     src/app/MailboxSelectionMutation.h
-    src/app/MailboxSyncCoverage.cpp
+    src/app/messages/MailboxSyncCoverage.cpp
     src/app/MailboxSyncCoverage.h
-    src/app/MailIndexService.cpp
+    src/app/messages/MailIndexService.cpp
     src/app/MailIndexService.h
-    src/app/MessageSelection.cpp
+    src/app/messages/MessageSelection.cpp
     src/app/MessageSelection.h
-    src/app/DaemonBackgroundController.cpp
-    src/app/DaemonBackgroundController.h
-    src/app/DaemonProcess.cpp
-    src/app/DaemonProcess.h
-    src/app/DaemonRemoteActionDispatcher.cpp
-    src/app/DaemonRemoteActionDispatcher.h
-    src/app/DaemonRemoteActionAccountHandler.cpp
-    src/app/DaemonRemoteActionCalendarHandler.cpp
-    src/app/DaemonRemoteActionComposeHandler.cpp
-    src/app/DaemonRemoteActionContactHandler.cpp
-    src/app/DaemonRemoteActionDeveloperHandler.cpp
-    src/app/DaemonRemoteActionHistoryHandler.cpp
-    src/app/DaemonRemoteActionIdentityHandler.cpp
-    src/app/DaemonRemoteActionMailHandler.cpp
-    src/app/DaemonRemoteActionSieveHandler.cpp
-    src/app/DaemonRemoteActionWorkHandler.cpp
+    src/daemon/DaemonBackgroundController.cpp
+    src/daemon/DaemonBackgroundController.h
+    src/daemon/DaemonProcess.cpp
+    src/daemon/DaemonProcess.h
+    src/daemon/actions/DaemonRemoteActionDispatcher.cpp
+    src/daemon/actions/DaemonRemoteActionDispatcher.h
+    src/daemon/actions/DaemonRemoteActionAccountHandler.cpp
+    src/daemon/actions/DaemonRemoteActionCalendarHandler.cpp
+    src/daemon/actions/DaemonRemoteActionComposeHandler.cpp
+    src/daemon/actions/DaemonRemoteActionContactHandler.cpp
+    src/daemon/actions/DaemonRemoteActionDeveloperHandler.cpp
+    src/daemon/actions/DaemonRemoteActionHistoryHandler.cpp
+    src/daemon/actions/DaemonRemoteActionIdentityHandler.cpp
+    src/daemon/actions/DaemonRemoteActionMailHandler.cpp
+    src/daemon/actions/DaemonRemoteActionSieveHandler.cpp
+    src/daemon/actions/DaemonRemoteActionWorkHandler.cpp
     src/app/RemoteActionTypes.h
     src/app/OnboardingTypes.h
     src/app/RemoteCodec.h
-    src/app/DaemonServices.cpp
-    src/app/DaemonServices.h
-    src/app/DaemonTrayController.cpp
-    src/app/DaemonTrayController.h
-    src/app/SettingsRepository.cpp
+    src/daemon/DaemonServices.cpp
+    src/daemon/DaemonServices.h
+    src/desktop/tray/DaemonTrayController.cpp
+    src/desktop/tray/DaemonTrayController.h
+    src/app/settings/SettingsRepository.cpp
     src/app/SettingsRepository.h
-    src/app/WorkScheduler.cpp
+    src/app/work/WorkScheduler.cpp
     src/app/WorkScheduler.h
     src/app/WorkTaskPort.h
 )
@@ -1922,7 +1922,7 @@ foreach(daemon_source IN LISTS javelin_daemon_core_sources)
 endforeach()
 
 qt_add_executable(javelind
-    src/app/daemon_main.cpp
+    src/daemon/main.cpp
 )
 target_link_libraries(javelind
     PRIVATE
@@ -1937,10 +1937,10 @@ javelin_enable_static_analysis(javelind)
 javelin_enable_sanitizers(javelind)
 
 add_library(javelin_gui_session STATIC
-    src/app/GuiDaemonSession.cpp
-    src/app/GuiDaemonSession.h
-    src/app/GuiMailApplicationEvents.cpp
-    src/app/GuiMailApplicationEvents.h
+    src/client/GuiDaemonSession.cpp
+    src/client/GuiDaemonSession.h
+    src/client/GuiMailApplicationEvents.cpp
+    src/client/GuiMailApplicationEvents.h
 )
 target_include_directories(javelin_gui_session PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
@@ -1962,20 +1962,20 @@ target_compile_options(javelin_gui_session PRIVATE -fexceptions)
 qt_add_executable(javelin
     src/app/DeveloperDiagnostics.h
     src/app/DeveloperMaintenance.h
-    src/app/GuiServices.cpp
-    src/app/GuiServices.h
+    src/client/GuiServices.cpp
+    src/client/GuiServices.h
     src/app/MessageListMaterializationPort.h
-    src/app/RemoteActionClient.cpp
-    src/app/RemoteActionClient.h
+    src/client/RemoteActionClient.cpp
+    src/client/RemoteActionClient.h
     src/app/RemoteActionTypes.h
     src/app/OnboardingApplicationPorts.h
     src/app/OnboardingTypes.h
-    src/app/RemoteOnboardingPort.cpp
-    src/app/RemoteOnboardingPort.h
-    src/app/RemoteApplicationPorts.cpp
-    src/app/RemoteApplicationPorts.h
+    src/client/RemoteOnboardingPort.cpp
+    src/client/RemoteOnboardingPort.h
+    src/client/RemoteApplicationPorts.cpp
+    src/client/RemoteApplicationPorts.h
     src/app/RemoteCodec.h
-    src/app/gui_main.cpp
+    src/client/main.cpp
 )
 target_link_libraries(javelin
     PRIVATE
@@ -2112,6 +2112,21 @@ foreach(production_target IN LISTS javelin_production_source_targets)
         endif()
     endforeach()
 endforeach()
+
+# Phase 10 physical ownership guard. Application implementations live in focused feature/runtime
+# directories, while cache persistence implementations live under storage rather than jmap/cache.
+file(GLOB javelin_app_root_implementations CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/app/*.cpp")
+if(javelin_app_root_implementations)
+    message(FATAL_ERROR
+        "Application implementations must not return to src/app: ${javelin_app_root_implementations}")
+endif()
+file(GLOB javelin_legacy_cache_implementations CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/jmap/cache/*.cpp")
+if(javelin_legacy_cache_implementations)
+    message(FATAL_ERROR
+        "Cache persistence implementations belong under src/storage: ${javelin_legacy_cache_implementations}")
+endif()
 
 function(javelin_assert_gui_settings_boundary target)
     get_target_property(target_sources ${target} SOURCES)

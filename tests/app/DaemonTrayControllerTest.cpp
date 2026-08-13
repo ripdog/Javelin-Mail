@@ -1,4 +1,4 @@
-#include "app/DaemonTrayController.h"
+#include "desktop/tray/DaemonTrayController.h"
 #include "app/WorkScheduler.h"
 #include "storage/sqlite/DatabaseConnection.h"
 

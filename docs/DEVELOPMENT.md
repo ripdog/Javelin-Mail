@@ -110,7 +110,11 @@ scripts/check-debug.sh --target javelin_jmap_protocol_tests --tests 'SessionClie
 The test graph is split by production boundary: protocol, storage/cache, JMAP protocol, JMAP sync, JMAP domain, daemon application, GUI policy, GUI widgets, and explicit integration targets. Pick the narrowest target that owns the behavior under test; test executables link production libraries instead of compiling production `.cpp` files directly.
 
 Repeat `--target` to build more than one target. Run the complete configure, build, test, and format
-workflow only for final verification:
+workflow only for final verification. Source placement follows target ownership: process-client
+adapters live in `src/client/`, daemon composition in `src/daemon/`, desktop integration in
+`src/desktop/`, persistence implementations in `src/storage/`, and application implementations in
+focused `src/app` subdirectories. CMake rejects implementation files added directly to `src/app` or
+`src/jmap/cache`.
 
 ```sh
 scripts/check-debug.sh --full

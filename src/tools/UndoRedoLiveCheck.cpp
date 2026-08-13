@@ -2,7 +2,6 @@
 #include "app/CalendarApplicationService.h"
 #include "app/ComposeService.h"
 #include "app/ContactApplicationPorts.h"
-#include "app/DaemonServices.h"
 #include "app/DeferredSendService.h"
 #include "app/MailMutationApplicationService.h"
 #include "app/SieveApplicationService.h"
@@ -16,6 +15,7 @@
 #include "app/undo/MailHistoryExecutor.h"
 #include "app/undo/SieveHistoryExecutor.h"
 #include "app/undo/UndoManager.h"
+#include "daemon/DaemonServices.h"
 #include "tools/UndoRedoAutonomousSuite.h"
 
 #include <QCoroSignal>

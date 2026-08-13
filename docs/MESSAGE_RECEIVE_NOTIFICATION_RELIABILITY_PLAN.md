@@ -45,7 +45,7 @@ stored query state can say the mailbox is current while the cache is stale.
 
 ### Long-poll refresh uses mutable run context across suspension
 
-`LongPollService::refreshWatchedMailbox()` reads `m_runContext`, awaits network
+`AccountSyncCoordinator::refreshWatchedMailbox()` reads `m_runContext`, awaits network
 and database work, then reads `m_runContext` again when emitting signals and
 notifications. A stop, restart, or settings change during the await can retarget
 or clear the context.
@@ -170,7 +170,7 @@ window must never use account-wide destructive replacement methods.
 
 ### Refresh coalescing
 
-`LongPollService` should allow at most one live mailbox refresh at a time.
+`AccountSyncCoordinator` should allow at most one live mailbox refresh at a time.
 
 Suggested state:
 
@@ -206,7 +206,7 @@ Suggested behavior:
 
 ### Phase 1: Guard live refresh lifetime - done
 
-- Snapshot `RunContext` in `LongPollService::refreshWatchedMailbox()`.
+- Snapshot `RunContext` in `AccountSyncCoordinator::refreshWatchedMailbox()`.
 - Gate post-await signal emission by generation.
 - Use captured context values for `mailboxRefreshed` and `notificationRaised`.
 - Add tests for restart/stop during in-flight refresh if practical with the
@@ -214,7 +214,7 @@ Suggested behavior:
 
 ### Phase 2: Coalesce live refreshes - done
 
-- Add single-flight state to `LongPollService`.
+- Add single-flight state to `AccountSyncCoordinator`.
 - Coalesce multiple `onUpdate()` calls into one active refresh plus one pending
   follow-up.
 - Ensure cancellation/restart clears in-flight bookkeeping safely.

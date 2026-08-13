@@ -1,7 +1,7 @@
 #include "gui/tasks/TaskCenterDialog.h"
 
-#include "app/WorkTaskModel.h"
 #include "app/WorkTaskPort.h"
+#include "gui/tasks/WorkTaskModel.h"
 
 #include <KLocalizedString>
 
