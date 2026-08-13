@@ -1,3 +1,4 @@
+#include "app/AccountRefreshApplicationPorts.h"
 #include "app/GuiDaemonSession.h"
 #include "app/GuiServices.h"
 #include "app/InlineMessageSchemeHandler.h"
@@ -12,6 +13,9 @@
 
 #include "gui/onboarding/FirstRunWizard.h"
 #include "gui/settings/GuiSettings.h"
+#include "gui/shell/CalendarTabController.h"
+#include "gui/shell/ComposeTabController.h"
+#include "gui/shell/ContactsTabController.h"
 #include "gui/shell/MainWindow.h"
 #include "gui/tasks/TaskCenterDialog.h"
 
@@ -446,19 +450,45 @@ int main(int argc, char* argv[])
         if (!services)
             services = std::make_unique<javelin::app::GuiServices>(session);
 
+        auto* guiServices = services.get();
         mainWindow = new javelin::gui::shell::MainWindow(
             services->settings(), services->accountCommandPort(), services->accountReader(),
-            services->mailboxReader(), services->mailTagReader(), services->contactReader(),
-            services->calendarReader(), services->calendarCommandPort(),
-            services->contactIdentityLookup(), services->identityReader(),
-            services->messageViewReader(), session.databasePath(), services->translationService(),
-            services->composeCommandPort(), services->contactCommandPort(),
-            services->developerDiagnosticsPort(), services->developerMaintenancePort(),
-            services->daemonLogPort(), services->mailCommandPort(), services->sieveCommandPort(),
+            services->mailboxReader(), services->mailTagReader(), services->contactIdentityLookup(),
+            services->identityReader(), services->messageViewReader(), session.databasePath(),
+            services->translationService(), services->developerDiagnosticsPort(),
+            services->developerMaintenancePort(), services->daemonLogPort(),
+            services->mailCommandPort(), services->sieveCommandPort(),
             services->identityCommandPort(), services->accountRefreshPort(),
             services->onboardingPort(), services->messageContentPort(),
             services->messageListSessionFactory(), services->mailEvents(),
-            services->messageNavigationPort(), services->undoCommandPort());
+            services->messageNavigationPort(), services->undoCommandPort(),
+            {.calendar =
+                 [guiServices](QStackedWidget& contentStack,
+                               std::vector<javelin::gui::shell::TabState>& tabs, QObject* parent)
+             {
+                 return new javelin::gui::shell::CalendarTabController(
+                     guiServices->settings(), guiServices->calendarReader(),
+                     guiServices->calendarCommandPort(), contentStack, tabs, parent);
+             },
+             .contacts =
+                 [guiServices](QStackedWidget& contentStack,
+                               std::vector<javelin::gui::shell::TabState>& tabs, QObject* parent)
+             {
+                 return new javelin::gui::shell::ContactsTabController(
+                     guiServices->settings(), guiServices->contactReader(),
+                     guiServices->accountRefreshPort(), guiServices->contactCommandPort(),
+                     contentStack, tabs, parent);
+             },
+             .compose =
+                 [guiServices](QStackedWidget& contentStack,
+                               std::vector<javelin::gui::shell::TabState>& tabs, QObject* parent)
+             {
+                 return new javelin::gui::shell::ComposeTabController(
+                     guiServices->settings(), guiServices->composeCommandPort(),
+                     guiServices->accountReader(), guiServices->identityReader(),
+                     guiServices->contactIdentityLookup(), guiServices->mailEvents(), contentStack,
+                     tabs, parent);
+             }});
         mainWindow->setAttribute(Qt::WA_DeleteOnClose);
 
         auto* taskButton = new QToolButton(mainWindow);

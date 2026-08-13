@@ -7,10 +7,9 @@
 
 #include <KXmlGuiWindow>
 #include <QModelIndex>
-#include <QSet>
-#include <QStringList>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -42,9 +41,6 @@ namespace javelin::app
 {
     enum class MailAccountStatus;
     class AccountCommandPort;
-    class CalendarCommandPort;
-    class ComposeCommandPort;
-    class ContactCommandPort;
     class DeveloperDiagnosticsPort;
     class DeveloperMaintenancePort;
     class DaemonLogPort;
@@ -71,15 +67,9 @@ namespace javelin::jmap::contacts
 {
     class ContactIdentityLookup;
 } // namespace javelin::jmap::contacts
-namespace javelin::jmap::calendar
-{
-    class CalendarReader;
-}
-
 namespace javelin::jmap::cache
 {
     class AccountReader;
-    class ContactReader;
     class IdentityReader;
     class MailboxReader;
     class MailTagReader;
@@ -109,6 +99,7 @@ namespace javelin::gui::translation
 namespace javelin::gui::shell
 {
     class AccountRefreshController;
+    class AuthenticationPromptCoordinator;
     class CalendarTabController;
     class ContactsTabController;
     class ComposeTabController;
@@ -117,11 +108,12 @@ namespace javelin::gui::shell
     class MessageContentController;
     class MessageFileController;
     class MessageListTabBindingPresenter;
-    class MessageListTabController;
     class MessageListTabPresenter;
     class MessageNavigationController;
     class MessageSelectionController;
+    class QuickFilterController;
     class TabBarPresenter;
+    class ThemeController;
     struct PersistedMailboxTab;
     struct PersistedSearchTab;
     struct PersistedComposeTab;
@@ -142,6 +134,22 @@ namespace javelin::gui::messageview
 namespace javelin::gui::shell
 {
     class LayeredStatusBar;
+    class MailActionController;
+    class MailWorkspaceController;
+
+    using CalendarTabControllerFactory =
+        std::function<CalendarTabController*(QStackedWidget&, std::vector<TabState>&, QObject*)>;
+    using ContactsTabControllerFactory =
+        std::function<ContactsTabController*(QStackedWidget&, std::vector<TabState>&, QObject*)>;
+    using ComposeTabControllerFactory =
+        std::function<ComposeTabController*(QStackedWidget&, std::vector<TabState>&, QObject*)>;
+
+    struct MainWindowFeatureFactories
+    {
+        CalendarTabControllerFactory calendar;
+        ContactsTabControllerFactory contacts;
+        ComposeTabControllerFactory compose;
+    };
 
     class MainWindow : public KXmlGuiWindow
     {
@@ -153,16 +161,11 @@ namespace javelin::gui::shell
                             javelin::jmap::cache::AccountReader& accountReader,
                             javelin::jmap::cache::MailboxReader& mailboxReader,
                             javelin::jmap::cache::MailTagReader& mailTagReader,
-                            javelin::jmap::cache::ContactReader& contactReader,
-                            javelin::jmap::calendar::CalendarReader& calendarReader,
-                            javelin::app::CalendarCommandPort& calendarCommandPort,
                             javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
                             javelin::jmap::cache::IdentityReader& identityReader,
                             javelin::jmap::cache::MessageViewReader& messageViewReader,
                             QString databasePath,
                             javelin::gui::translation::TranslationService& translationService,
-                            javelin::app::ComposeCommandPort& composeCommandPort,
-                            javelin::app::ContactCommandPort& contactCommandPort,
                             javelin::app::DeveloperDiagnosticsPort& developerDiagnosticsPort,
                             javelin::app::DeveloperMaintenancePort& developerMaintenancePort,
                             javelin::app::DaemonLogPort& daemonLogPort,
@@ -176,7 +179,7 @@ namespace javelin::gui::shell
                             javelin::app::MailApplicationEventsPort& mailEvents,
                             javelin::app::MessageNavigationPort& messageNavigationPort,
                             javelin::app::UndoCommandPort& undoCommandPort,
-                            QWidget* parent = nullptr);
+                            MainWindowFeatureFactories featureFactories, QWidget* parent = nullptr);
         ~MainWindow() override;
         void openPreferencesForConnection(const QString& connectionId);
         void openMailtoUri(const QString& uri);
@@ -265,14 +268,9 @@ namespace javelin::gui::shell
         void resolveOpenEmailRoute();
         void findConversationsWithSender(const QModelIndex& index);
         void showMailboxContextMenu(const QPoint& position);
-        void showMessageListContextMenu(const QPoint& position);
         void viewSelectedMessageSource();
         void openDeveloperOptions();
         void openPreferences();
-        void reauthenticateConnection(const QString& connectionId);
-        void updateAuthenticationPrompt(const QString& accountId,
-                                        javelin::app::MailAccountStatus status);
-        void showNextAuthenticationPrompt();
         void reloadAccounts();
         void refreshMessageListPreservingSelection();
         void refreshSelectionFromModels();
@@ -288,26 +286,7 @@ namespace javelin::gui::shell
         void savePersistentState() const;
         void updateEmptyStates();
         void updateMessageListHeader();
-        void updateQuickFilterUi();
-        void applyQuickFilter();
-        void syncQuickFilterContinuitySelection(std::optional<std::string> emailId,
-                                                std::optional<std::string> threadId);
-        void rebuildQuickFilterTagsMenu();
-        void rebuildMessageTagsMenu();
-        void populateMessageTagsMenu(QMenu& menu);
-        void createTag(bool applyToSelection);
-        void showTagManager();
-        [[nodiscard]] javelin::jmap::search::EmailSearchCriteria quickFilterCriteriaFromUi() const;
-        void updateMessageActions();
-        [[nodiscard]] bool selectedMessagesAreStarred() const;
-        [[nodiscard]] bool selectedMessagesAreJunk() const;
         void updateSortButton();
-        void setDarkModeEnabled(bool enabled);
-        void updateDarkModeAction();
-        void scheduleApplicationPaletteRefresh();
-        void applyApplicationPalette();
-        void updatePaletteDependentIcons();
-        void changeEvent(QEvent* event) override;
         void closeEvent(QCloseEvent* event) override;
         bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -316,16 +295,11 @@ namespace javelin::gui::shell
         javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::MailboxReader& m_mailboxReader;
         javelin::jmap::cache::MailTagReader& m_mailTagReader;
-        javelin::jmap::cache::ContactReader& m_contactReader;
-        javelin::jmap::calendar::CalendarReader& m_calendarReader;
-        javelin::app::CalendarCommandPort& m_calendarCommandPort;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         javelin::jmap::cache::IdentityReader& m_identityReader;
         javelin::jmap::cache::MessageViewReader& m_messageViewReader;
         QString m_databasePath;
         javelin::gui::translation::TranslationService& m_translationService;
-        javelin::app::ComposeCommandPort& m_composeCommandPort;
-        javelin::app::ContactCommandPort& m_contactCommandPort;
         javelin::app::DeveloperDiagnosticsPort& m_developerDiagnosticsPort;
         javelin::app::DeveloperMaintenancePort& m_developerMaintenancePort;
         javelin::app::DaemonLogPort& m_daemonLogPort;
@@ -335,22 +309,25 @@ namespace javelin::gui::shell
         javelin::app::AccountRefreshPort& m_accountRefreshPort;
         javelin::app::OnboardingPort& m_onboardingPort;
         javelin::app::MessageContentPort& m_messageContentPort;
-        javelin::app::MessageListSessionFactoryPort& m_messageListSessionFactory;
         javelin::app::MailApplicationEventsPort& m_mailEvents;
         javelin::app::MessageNavigationPort& m_messageNavigationPort;
         javelin::app::UndoCommandPort& m_undoCommandPort;
+        std::unique_ptr<MailWorkspaceController> m_mailWorkspaceController;
         AccountRefreshController* m_accountRefreshController = nullptr;
+        AuthenticationPromptCoordinator* m_authenticationPromptCoordinator = nullptr;
         CalendarTabController* m_calendarTabController = nullptr;
         ContactsTabController* m_contactsTabController = nullptr;
         ComposeTabController* m_composeTabController = nullptr;
+        MailActionController* m_mailActionController = nullptr;
         MessageCommandController* m_messageCommandController = nullptr;
         MessageContentController* m_messageContentController = nullptr;
         MessageFileController* m_messageFileController = nullptr;
         std::unique_ptr<MessageListTabBindingPresenter> m_messageListTabBindingPresenter;
-        MessageListTabController* m_messageListTabController = nullptr;
         std::unique_ptr<MessageNavigationController> m_messageNavigationController;
         std::unique_ptr<MessageSelectionController> m_messageSelectionController;
+        QuickFilterController* m_quickFilterController = nullptr;
         TabBarPresenter* m_tabBarPresenter = nullptr;
+        ThemeController* m_themeController = nullptr;
         std::unique_ptr<javelin::gui::messages::MessageListPanePresenter>
             m_messageListPanePresenter;
         std::unique_ptr<MessageListTabPresenter> m_messageListTabPresenter;
@@ -368,26 +345,6 @@ namespace javelin::gui::shell
         QLabel* m_messageListMetaLabel = nullptr;
         QProgressBar* m_messageLoadingIndicator = nullptr;
         QToolButton* m_searchServerButton = nullptr;
-        QToolButton* m_quickFilterButton = nullptr;
-        QWidget* m_quickFilterPanel = nullptr;
-        QToolButton* m_quickFilterPinButton = nullptr;
-        QToolButton* m_quickFilterUnreadButton = nullptr;
-        QToolButton* m_quickFilterStarredButton = nullptr;
-        QToolButton* m_quickFilterContactButton = nullptr;
-        QToolButton* m_quickFilterTagsButton = nullptr;
-        QToolButton* m_quickFilterAttachmentButton = nullptr;
-        QLineEdit* m_quickFilterTextEdit = nullptr;
-        QToolButton* m_quickFilterSenderButton = nullptr;
-        QToolButton* m_quickFilterRecipientsButton = nullptr;
-        QToolButton* m_quickFilterSubjectButton = nullptr;
-        QToolButton* m_quickFilterBodyButton = nullptr;
-        QMenu* m_quickFilterTagsMenu = nullptr;
-        QTimer* m_quickFilterTextTimer = nullptr;
-        std::vector<std::string> m_quickFilterTags;
-        bool m_quickFilterMatchAllTags = false;
-        bool m_quickFilterPinned = false;
-        javelin::jmap::search::EmailSearchCriteria m_pinnedQuickFilter;
-        std::optional<std::pair<std::string, std::string>> m_lastQuickFilterMailbox;
         QToolButton* m_messageSortButton = nullptr;
         QWidget* m_messageListFooter = nullptr;
         QLabel* m_messageListFooterLabel = nullptr;
@@ -399,7 +356,6 @@ namespace javelin::gui::shell
         QAction* m_refreshAction = nullptr;
         QAction* m_quitAction = nullptr;
         QAction* m_preferencesAction = nullptr;
-        QAction* m_darkModeAction = nullptr;
         QAction* m_developerOptionsAction = nullptr;
         QAction* m_newMessageAction = nullptr;
         QAction* m_contactsAction = nullptr;
@@ -445,17 +401,12 @@ namespace javelin::gui::shell
         QAction* m_calendarNextMonthAction = nullptr;
         QAction* m_calendarListAction = nullptr;
         QAction* m_calendarRefreshAction = nullptr;
-        javelin::jmap::query::EmailListSort m_emailListSort;
-        bool m_paletteRefreshPending = false;
+        javelin::jmap::query::EmailListSort& m_emailListSort;
+        std::optional<int>& m_activeTabIndex;
+        std::vector<TabState>& m_tabs;
         bool m_modelUpdateInProgress = false;
-        bool m_authenticationPromptOpen = false;
         javelin::gui::developer::DeveloperOptionsDialog* m_developerOptionsDialog = nullptr;
-        QSet<QString> m_authenticationRequiredAccountIds;
-        QSet<QString> m_authenticationPromptedConnections;
-        QStringList m_pendingAuthenticationPrompts;
         std::optional<std::string> m_pendingInitialMailboxAccountId;
-        std::optional<int> m_activeTabIndex;
-        std::vector<TabState> m_tabs;
     };
 
 } // namespace javelin::gui::shell

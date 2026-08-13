@@ -158,6 +158,14 @@ namespace javelin::gui::shell
         };
     }
 
+    bool ContactsTabController::available() const
+    {
+        const auto accounts = m_contactRepository.listAccounts();
+        const auto* values =
+            std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&accounts);
+        return values != nullptr && !values->empty();
+    }
+
     bool ContactsTabController::refresh(const TabState* tab)
     {
         auto* widget = widgetForTab(tab);

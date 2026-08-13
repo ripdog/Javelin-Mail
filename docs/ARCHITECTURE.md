@@ -30,7 +30,8 @@ The GUI is intentionally a KDE application built on Qt Widgets, not a generic Qt
 KDE theming:
 
 - `MainWindow` derives from `KXmlGuiWindow`; menus, toolbar composition, shortcut editing, and saved
-  toolbar state use KXMLGUI and KDE standard actions.
+  toolbar state use KXMLGUI and KDE standard actions. Feature policy and mutable workflow state live
+  in focused controllers rather than in the shell.
 - Preferences use `KConfigDialog`, keeping configuration presentation consistent with Plasma and
   other KDE applications while the daemon remains the canonical settings owner.
 - Compose source/plain-text modes and the Sieve editor use `KTextEditor`, including KDE syntax and
@@ -176,7 +177,11 @@ The principal runtime objects are:
 | `GuiDaemonSession` | GUI | Connects, negotiates protocol/build identity, handles reconnect, and coordinates cache barriers |
 | `GuiServices` | GUI | Constructs read-only repositories and typed remote application-port adapters |
 | `RemoteActionClient` | GUI | Correlates bounded request/reply actions over the daemon session |
-| `MainWindow` and controllers | GUI | Own KDE presentation, KXMLGUI actions, editing, selection, navigation, and user interaction |
+| `MainWindow` | GUI | Owns the top-level KDE shell, KXMLGUI registration, shared presentation surfaces, and shutdown/persistence coordination |
+| `MailWorkspaceController` | GUI | Owns workspace tabs, active-tab identity, mailbox/search list sessions, sort state, restoration, refresh routing, and mail-tab lifecycle |
+| `QuickFilterController` / `MailActionController` | GUI | Own quick-filter state/pinning/continuity and mail action availability, trigger routing, tags, and message context-menu policy |
+| `AuthenticationPromptCoordinator` / `ThemeController` | GUI | Own authentication prompt deduplication/reauth sequencing and dark-mode/palette/icon refresh state |
+| `ComposeTabController` / `ContactsTabController` / `CalendarTabController` | GUI | Own feature-tab workflows and toolbar state; `gui_main` constructs them through typed factories against the shell's workspace surfaces |
 | `DaemonTrayController` | daemon | Publishes the KDE StatusNotifierItem and D-Bus menu without a Widgets dependency |
 | `DesktopNotificationController` | daemon | Publishes desktop notifications and stable GUI activation routes |
 | cache repositories | both, split by API | Daemon repositories write; GUI repositories use read-only/query-only connections |
@@ -188,6 +193,10 @@ capabilities, and daemon application policy is likewise split by responsibility:
 object combines account runtime, queries, content, mutations, notifications, contacts, calendars,
 and Sieve. `GuiServices` is deliberately smaller: it exposes
 read-only cache readers and remote ports matching the interfaces expected by GUI controllers.
+`gui_main` is the GUI composition root: concrete calendar, contacts, and compose dependencies stay
+there and are captured by a typed `MainWindowFeatureFactories` set. `MainWindow` receives controller
+factories rather than those feature services, avoiding both constructor capability sprawl and a
+`GuiServices&` service-locator dependency.
 
 ## Representative runtime flows
 

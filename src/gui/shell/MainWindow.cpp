@@ -31,12 +31,12 @@
 #include "gui/messages/MessageListPanePresenter.h"
 #include "gui/messages/MessageSelectionRestoration.h"
 #include "gui/messageview/MessageViewContainer.h"
-#include "gui/onboarding/FirstRunWizard.h"
 #include "gui/search/AdvancedSearchDialog.h"
 #include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/GuiSettings.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/AccountRefreshController.h"
+#include "gui/shell/AuthenticationPromptCoordinator.h"
 #include "gui/shell/CalendarTabController.h"
 #include "gui/shell/ComposeTabController.h"
 #include "gui/shell/ComposeTabPolicy.h"
@@ -44,8 +44,9 @@
 #include "gui/shell/ElidingLabel.h"
 #include "gui/shell/FocusedCommandRouter.h"
 #include "gui/shell/LayeredStatusBar.h"
+#include "gui/shell/MailActionController.h"
+#include "gui/shell/MailWorkspaceController.h"
 #include "gui/shell/MainWindowStateStore.h"
-#include "gui/shell/MessageActionPolicy.h"
 #include "gui/shell/MessageCommandController.h"
 #include "gui/shell/MessageContentController.h"
 #include "gui/shell/MessageContentPolicy.h"
@@ -55,19 +56,19 @@
 #include "gui/shell/MessageListTabPresenter.h"
 #include "gui/shell/MessageNavigationController.h"
 #include "gui/shell/MessageSelectionController.h"
+#include "gui/shell/QuickFilterController.h"
 #include "gui/shell/TabActivationPolicy.h"
 #include "gui/shell/TabBarPresenter.h"
 #include "gui/shell/TabPersistence.h"
+#include "gui/shell/ThemeController.h"
 #include "gui/sieve/SieveEditorDialog.h"
 #include "gui/translation/TranslationService.h"
 #include "gui/widgets/IndeterminateProgressBar.h"
 #include "jmap/cache/AccountReadRepository.h"
-#include "jmap/cache/ContactReader.h"
 #include "jmap/cache/IdentityReader.h"
 #include "jmap/cache/MailTagReader.h"
 #include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/cache/MessageViewReader.h"
-#include "jmap/calendar/CalendarReader.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/contacts/ContactResults.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
@@ -79,20 +80,13 @@
 #include <KStandardAction>
 #include <KToolBar>
 
-#if QT_VERSION < QT_VERSION_CHECK(6, 8, 0)
-#include <KColorSchemeManager>
-#include <kconfigwidgets_version.h>
-#endif
-
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
-#include <QColorDialog>
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDialog>
-#include <QDialogButtonBox>
 #include <QElapsedTimer>
 #include <QEvent>
 #include <QFormLayout>
@@ -106,15 +100,12 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
-#include <QListWidget>
 #include <QLoggingCategory>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QMouseEvent>
-#include <QPixmap>
-#include <QPointer>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScrollBar>
@@ -124,7 +115,6 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStyle>
-#include <QStyleHints>
 #include <QTabBar>
 #include <QTimer>
 #include <QToolButton>
@@ -132,8 +122,6 @@
 #include <QVBoxLayout>
 
 #include <QWidget>
-#include <unordered_map>
-#include <unordered_set>
 
 #include <algorithm>
 #include <chrono>
@@ -141,7 +129,6 @@
 namespace javelin::gui::shell
 {
     Q_LOGGING_CATEGORY(logGuiMailbox, "gui.mailbox")
-    Q_LOGGING_CATEGORY(logGuiTheme, "gui.theme")
     Q_LOGGING_CATEGORY(logUserOperations, "user.operations")
     void MainWindow::presentError(const javelin::jmap::OperationError& error)
     {
@@ -278,38 +265,6 @@ namespace javelin::gui::shell
                        : i18nc("@item message sort direction", "descending");
         }
 
-        [[nodiscard]] QIcon tagColorIcon(const QStringView colorName)
-        {
-            const QColor color{colorName.toString()};
-            if (!color.isValid())
-                return {};
-            QPixmap swatch{14, 14};
-            swatch.fill(color);
-            return QIcon{swatch};
-        }
-
-        [[nodiscard]] std::optional<std::vector<std::string>>
-        explicitSelectionEmailIds(const javelin::app::MessageSelection& selection)
-        {
-            std::vector<std::string> emailIds;
-            std::unordered_set<std::string> seen;
-            const auto append = [&emailIds, &seen](const std::string_view emailId)
-            {
-                if (!emailId.empty() && seen.emplace(emailId).second)
-                    emailIds.emplace_back(emailId);
-            };
-            for (const auto& item : selection)
-            {
-                if (const auto* email = std::get_if<javelin::app::SelectedEmail>(&item))
-                {
-                    append(email->emailId);
-                    continue;
-                }
-                return std::nullopt;
-            }
-            return emailIds;
-        }
-
     } // namespace
 
     MainWindow::MainWindow(javelin::gui::settings::GuiSettings& settings,
@@ -317,16 +272,11 @@ namespace javelin::gui::shell
                            javelin::jmap::cache::AccountReader& accountReader,
                            javelin::jmap::cache::MailboxReader& mailboxReader,
                            javelin::jmap::cache::MailTagReader& mailTagReader,
-                           javelin::jmap::cache::ContactReader& contactReader,
-                           javelin::jmap::calendar::CalendarReader& calendarReader,
-                           javelin::app::CalendarCommandPort& calendarCommandPort,
                            javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
                            javelin::jmap::cache::IdentityReader& identityReader,
                            javelin::jmap::cache::MessageViewReader& messageViewReader,
                            QString databasePath,
                            javelin::gui::translation::TranslationService& translationService,
-                           javelin::app::ComposeCommandPort& composeCommandPort,
-                           javelin::app::ContactCommandPort& contactCommandPort,
                            javelin::app::DeveloperDiagnosticsPort& developerDiagnosticsPort,
                            javelin::app::DeveloperMaintenancePort& developerMaintenancePort,
                            javelin::app::DaemonLogPort& daemonLogPort,
@@ -339,22 +289,25 @@ namespace javelin::gui::shell
                            javelin::app::MessageListSessionFactoryPort& messageListSessionFactory,
                            javelin::app::MailApplicationEventsPort& mailEvents,
                            javelin::app::MessageNavigationPort& messageNavigationPort,
-                           javelin::app::UndoCommandPort& undoCommandPort, QWidget* parent)
+                           javelin::app::UndoCommandPort& undoCommandPort,
+                           MainWindowFeatureFactories featureFactories, QWidget* parent)
         : KXmlGuiWindow(parent), m_settings(settings), m_accountCommandPort(accountCommandPort),
           m_accountReader(accountReader), m_mailboxReader(mailboxReader),
-          m_mailTagReader(mailTagReader), m_contactReader(contactReader),
-          m_calendarReader(calendarReader), m_calendarCommandPort(calendarCommandPort),
-          m_contactIdentityLookup(contactIdentityLookup), m_identityReader(identityReader),
-          m_messageViewReader(messageViewReader), m_databasePath(std::move(databasePath)),
-          m_translationService(translationService), m_composeCommandPort(composeCommandPort),
-          m_contactCommandPort(contactCommandPort),
+          m_mailTagReader(mailTagReader), m_contactIdentityLookup(contactIdentityLookup),
+          m_identityReader(identityReader), m_messageViewReader(messageViewReader),
+          m_databasePath(std::move(databasePath)), m_translationService(translationService),
           m_developerDiagnosticsPort(developerDiagnosticsPort),
           m_developerMaintenancePort(developerMaintenancePort), m_daemonLogPort(daemonLogPort),
           m_mailCommandPort(mailCommandPort), m_sieveCommandPort(sieveCommandPort),
           m_identityCommandPort(identityCommandPort), m_accountRefreshPort(accountRefreshPort),
           m_onboardingPort(onboardingPort), m_messageContentPort(messageContentPort),
-          m_messageListSessionFactory(messageListSessionFactory), m_mailEvents(mailEvents),
-          m_messageNavigationPort(messageNavigationPort), m_undoCommandPort(undoCommandPort)
+          m_mailEvents(mailEvents), m_messageNavigationPort(messageNavigationPort),
+          m_undoCommandPort(undoCommandPort),
+          m_mailWorkspaceController(std::make_unique<MailWorkspaceController>(
+              messageListSessionFactory, messageWindowSize, this)),
+          m_emailListSort(m_mailWorkspaceController->sort()),
+          m_activeTabIndex(m_mailWorkspaceController->activeIndex()),
+          m_tabs(m_mailWorkspaceController->tabs())
     {
         m_statusBar = new LayeredStatusBar(this);
         setStatusBar(m_statusBar);
@@ -373,12 +326,6 @@ namespace javelin::gui::shell
         connect(m_messageFileController, &MessageFileController::userInterventionRequired, this,
                 &MainWindow::presentUserInterventionError);
         setupUi();
-        connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this,
-                [this]
-                {
-                    updateDarkModeAction();
-                    scheduleApplicationPaletteRefresh();
-                });
         connect(&m_undoCommandPort, &javelin::app::UndoCommandPort::historyStateChanged, this,
                 [this](const javelin::app::undo::HistoryState&) { updateUndoRedoActions(); });
         connect(
@@ -404,6 +351,8 @@ namespace javelin::gui::shell
         updateUndoRedoActions();
         m_accountRefreshController =
             new AccountRefreshController(m_settings, m_accountRefreshPort, m_accountReader, this);
+        m_authenticationPromptCoordinator = new AuthenticationPromptCoordinator(
+            m_settings, m_onboardingPort, *m_accountRefreshController, *this, this);
         connect(m_accountRefreshController, &AccountRefreshController::busyChanged, this,
                 [this](const bool busy)
                 {
@@ -447,12 +396,11 @@ namespace javelin::gui::shell
         connect(m_accountRefreshController, &AccountRefreshController::contactsRefreshed, this,
                 [this](const javelin::jmap::contacts::ContactRefreshSummary&)
                 { reloadAccounts(); });
-        m_calendarTabController = new CalendarTabController(
-            m_settings, m_calendarReader, m_calendarCommandPort, *m_contentStack, m_tabs, this);
+        m_calendarTabController = featureFactories.calendar(*m_contentStack, m_tabs, this);
         connect(m_calendarTabController, &CalendarTabController::tabReady, this,
                 [this](const int index)
                 {
-                    m_activeTabIndex = index;
+                    m_mailWorkspaceController->setActiveIndex(index);
                     updateTabBar();
                     activateTab(index, false);
                 });
@@ -461,13 +409,11 @@ namespace javelin::gui::shell
                 { m_statusBar->showMessage(message, durationMilliseconds); });
         connect(m_calendarTabController, &CalendarTabController::operationFailed, this,
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
-        m_contactsTabController =
-            new ContactsTabController(m_settings, m_contactReader, m_accountRefreshPort,
-                                      m_contactCommandPort, *m_contentStack, m_tabs, this);
+        m_contactsTabController = featureFactories.contacts(*m_contentStack, m_tabs, this);
         connect(m_contactsTabController, &ContactsTabController::tabReady, this,
                 [this](const int index)
                 {
-                    m_activeTabIndex = index;
+                    m_mailWorkspaceController->setActiveIndex(index);
                     updateTabBar();
                     activateTab(index, false);
                 });
@@ -504,13 +450,11 @@ namespace javelin::gui::shell
                                                 .from = normalizedEmail.toStdString()},
                                             true);
                 });
-        m_composeTabController = new ComposeTabController(
-            m_settings, m_composeCommandPort, m_accountReader, m_identityReader,
-            m_contactIdentityLookup, m_mailEvents, *m_contentStack, m_tabs, this);
+        m_composeTabController = featureFactories.compose(*m_contentStack, m_tabs, this);
         connect(m_composeTabController, &ComposeTabController::tabReady, this,
                 [this](const int index)
                 {
-                    m_activeTabIndex = index;
+                    m_mailWorkspaceController->setActiveIndex(index);
                     updateTabBar();
                     activateTab(index, false);
                 });
@@ -533,10 +477,8 @@ namespace javelin::gui::shell
             *m_mailboxModel, *m_mailboxView, *m_mailboxSearchEdit, *m_messageModel, *m_mailboxPane);
         m_messageSelectionController = std::make_unique<MessageSelectionController>(
             *m_mailboxModel, *m_mailboxView, *m_messageModel, *m_messageView);
-        m_messageListTabController = new MessageListTabController(m_messageListSessionFactory,
-                                                                  messageWindowSize, this, this);
         m_messageNavigationController = std::make_unique<MessageNavigationController>(
-            m_messageNavigationPort, *m_messageListTabController);
+            m_messageNavigationPort, m_mailWorkspaceController->messageListTabs());
         m_messageContentController = new MessageContentController(m_messageContentPort, this);
         connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::contentRequired,
@@ -591,26 +533,25 @@ namespace javelin::gui::shell
                     m_messageViewContainer->refresh(m_messageViewReader);
                     updateEmptyStates();
                     updateMessageListHeader();
-                    updateMessageActions();
+                    m_mailActionController->update();
                     if (!summary.usedCachedContent)
                         m_statusBar->showMessage(i18n("Message ready."), 5000);
                 });
-        connect(m_messageListTabController, &MessageListTabController::stateChanged, this,
+        connect(m_mailWorkspaceController.get(), &MailWorkspaceController::stateChanged, this,
                 [this](javelin::app::MessageListSession* session)
                 {
-                    const auto* tab = activeTab();
-                    if (tab == nullptr || !m_messageListTabController->ownsSession(*tab, session))
+                    if (!m_mailWorkspaceController->ownsActiveSession(session))
                         return;
 
                     applyActiveTabItemsPreservingSelection(
                         m_messageSelectionController->currentRow());
                     updateEmptyStates();
                     updateMessageListHeader();
-                    updateQuickFilterUi();
+                    m_quickFilterController->activate(activeTab());
                     resolveOpenEmailRoute();
                     QTimer::singleShot(0, this, &MainWindow::maybeLoadMoreMessages);
                 });
-        connect(m_messageListTabController, &MessageListTabController::operationFailed, this,
+        connect(m_mailWorkspaceController.get(), &MailWorkspaceController::operationFailed, this,
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
         connect(&m_mailEvents, &javelin::app::MailApplicationEventsPort::sessionCapabilitiesChanged,
                 this, [this](const QString&) { reloadAccounts(); });
@@ -646,7 +587,7 @@ namespace javelin::gui::shell
                 modelStatus = Model::ConnectionStatus::AuthenticationPaused;
             }
             m_mailboxModel->setConnectionStatus(accountId, modelStatus);
-            updateAuthenticationPrompt(accountId, status);
+            m_authenticationPromptCoordinator->updateAccountStatus(accountId, status);
         };
         connect(&m_mailEvents, &javelin::app::MailApplicationEventsPort::accountStatusChanged, this,
                 applyAccountStatus);
@@ -826,14 +767,19 @@ namespace javelin::gui::shell
         m_preferencesAction->setIcon(
             thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/settings.svg")));
 
-        m_darkModeAction = new QAction(QIcon::fromTheme(QStringLiteral("contrast")),
-                                       i18nc("@action:button", "Dark Mode"), this);
-        m_darkModeAction->setCheckable(true);
-        m_darkModeAction->setToolTip(i18nc("@info:tooltip", "Toggle dark mode"));
-        connect(m_darkModeAction, &QAction::toggled, this,
-                [this](const bool enabled) { setDarkModeEnabled(enabled); });
-        actionCollection()->addAction(QStringLiteral("toggle_dark_mode"), m_darkModeAction);
-        updateDarkModeAction();
+        m_themeController = new ThemeController(
+            *this, *m_quickFilterController, *m_messageSortButton,
+            [this]
+            {
+                updateTabBar();
+                m_calendarTabController->applicationPaletteChanged();
+                m_contactsTabController->applicationPaletteChanged();
+                m_mailboxView->viewport()->update();
+                m_messageView->viewport()->update();
+            },
+            this);
+        actionCollection()->addAction(QStringLiteral("toggle_dark_mode"),
+                                      &m_themeController->darkModeAction());
 
         m_developerOptionsAction =
             new QAction(QIcon::fromTheme(QStringLiteral("applications-development")),
@@ -905,55 +851,30 @@ namespace javelin::gui::shell
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/archive.svg")),
                         i18nc("@action", "&Archive"), this);
         m_archiveAction->setShortcut(QKeySequence{Qt::Key_A});
-        connect(m_archiveAction, &QAction::triggered, this,
-                [this]
-                {
-                    m_messageCommandController->archiveSelection(
-                        activeAccountId(), activeMailboxId(), activeTabIsSearch());
-                });
         actionCollection()->addAction(QStringLiteral("archive_email"), m_archiveAction);
         actionCollection()->setDefaultShortcut(m_archiveAction, QKeySequence{Qt::Key_A});
 
         m_markUnreadAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/unread.svg")),
                         i18nc("@action", "Mark &Unread"), this);
-        connect(m_markUnreadAction, &QAction::triggered, this,
-                [this]
-                {
-                    m_messageCommandController->markSelectionUnread(activeAccountId(),
-                                                                    activeMailboxId());
-                });
         actionCollection()->addAction(QStringLiteral("mark_email_unread"), m_markUnreadAction);
 
         m_starAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/star.svg")),
                         i18nc("@action", "&Star"), this);
         m_starAction->setShortcut(QKeySequence{Qt::Key_S});
-        connect(m_starAction, &QAction::triggered, this,
-                [this]
-                {
-                    m_messageCommandController->setSelectionFlagged(
-                        activeAccountId(), activeMailboxId(), !selectedMessagesAreStarred());
-                });
         actionCollection()->addAction(QStringLiteral("toggle_email_starred"), m_starAction);
         actionCollection()->setDefaultShortcut(m_starAction, QKeySequence{Qt::Key_S});
 
         m_junkAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/spam.svg")),
                         i18nc("@action", "&Junk"), this);
-        connect(m_junkAction, &QAction::triggered, this,
-                [this]
-                {
-                    m_messageCommandController->setSelectionJunk(
-                        activeAccountId(), activeMailboxId(), !selectedMessagesAreJunk());
-                });
         actionCollection()->addAction(QStringLiteral("toggle_email_junk"), m_junkAction);
 
         m_tagsAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/tag.svg")),
                         i18nc("@action", "&Tags"), this);
         m_tagsMenu = new QMenu(this);
-        connect(m_tagsMenu, &QMenu::aboutToShow, this, &MainWindow::rebuildMessageTagsMenu);
         m_tagsAction->setMenu(m_tagsMenu);
         actionCollection()->addAction(QStringLiteral("tag_email"), m_tagsAction);
 
@@ -961,19 +882,10 @@ namespace javelin::gui::shell
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/delete.svg")),
                         i18nc("@action", "&Delete"), this);
         m_deleteAction->setShortcut(QKeySequence::Delete);
-        connect(
-            m_deleteAction, &QAction::triggered, this, [this]
-            { m_messageCommandController->deleteSelection(activeAccountId(), activeMailboxId()); });
         actionCollection()->addAction(QStringLiteral("delete_email"), m_deleteAction);
         actionCollection()->setDefaultShortcut(m_deleteAction, QKeySequence::Delete);
 
         m_permanentDeleteAction = new QAction(i18n("Delete Permanently"), this);
-        connect(m_permanentDeleteAction, &QAction::triggered, this,
-                [this]
-                {
-                    m_messageCommandController->permanentlyDeleteSelection(activeAccountId(),
-                                                                           activeMailboxId());
-                });
         actionCollection()->addAction(QStringLiteral("permanently_delete_email"),
                                       m_permanentDeleteAction);
         actionCollection()->setDefaultShortcut(m_permanentDeleteAction,
@@ -981,24 +893,10 @@ namespace javelin::gui::shell
 
         m_moveAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-move")),
                                    i18nc("@action", "&Move to…"), this);
-        connect(m_moveAction, &QAction::triggered, this,
-                [this]
-                {
-                    m_messageCommandController->showTransferMenu(
-                        MessageTransferOperation::Move, activeAccountId(), activeMailboxId(),
-                        activeTabIsSearch());
-                });
         actionCollection()->addAction(QStringLiteral("move_email"), m_moveAction);
 
         m_copyAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
                                    i18nc("@action", "&Copy to…"), this);
-        connect(m_copyAction, &QAction::triggered, this,
-                [this]
-                {
-                    m_messageCommandController->showTransferMenu(
-                        MessageTransferOperation::Copy, activeAccountId(), activeMailboxId(),
-                        activeTabIsSearch());
-                });
         actionCollection()->addAction(QStringLiteral("copy_email"), m_copyAction);
 
         m_viewSourceAction = new QAction(QIcon::fromTheme(QStringLiteral("document-open")),
@@ -1189,6 +1087,48 @@ namespace javelin::gui::shell
                     dialog->show();
                 });
         actionCollection()->addAction(QStringLiteral("open_application_log"), logAction);
+
+        m_mailActionController = new MailActionController(
+            m_mailboxReader, m_mailTagReader, m_mailCommandPort, *m_messageSelectionController,
+            *m_messageCommandController, *m_quickFilterController, *m_messageView, *m_tagsMenu,
+            *this,
+            {.newMessage = *m_newMessageAction,
+             .reply = *m_replyAction,
+             .replyAll = *m_replyAllAction,
+             .forward = *m_forwardAction,
+             .editDraft = *m_editDraftAction,
+             .archive = *m_archiveAction,
+             .markUnread = *m_markUnreadAction,
+             .star = *m_starAction,
+             .junk = *m_junkAction,
+             .tags = *m_tagsAction,
+             .deleteFromMailbox = *m_deleteAction,
+             .permanentDelete = *m_permanentDeleteAction,
+             .move = *m_moveAction,
+             .copy = *m_copyAction,
+             .viewSource = *m_viewSourceAction},
+            [this](QString message, const int durationMilliseconds)
+            { m_statusBar->showMessage(message, durationMilliseconds); },
+            [this](const javelin::jmap::OperationError& error) { presentError(error); },
+            [this] { refreshMessageListPreservingSelection(); }, this);
+        m_mailActionController->activate(activeTab());
+
+        m_themeController->setThemedActions({
+            {m_refreshAction, QStringLiteral(":/icons/thunderbird-icons/cloud-download.svg")},
+            {m_preferencesAction, QStringLiteral(":/icons/thunderbird-icons/settings.svg")},
+            {m_newMessageAction, QStringLiteral(":/icons/thunderbird-icons/new-mail.svg")},
+            {m_replyAction, QStringLiteral(":/icons/thunderbird-icons/reply.svg")},
+            {m_replyAllAction, QStringLiteral(":/icons/thunderbird-icons/reply-all.svg")},
+            {m_forwardAction, QStringLiteral(":/icons/thunderbird-icons/forward.svg")},
+            {m_editDraftAction, QStringLiteral(":/icons/thunderbird-icons/draft.svg")},
+            {m_archiveAction, QStringLiteral(":/icons/thunderbird-icons/archive.svg")},
+            {m_markUnreadAction, QStringLiteral(":/icons/thunderbird-icons/unread.svg")},
+            {m_starAction, QStringLiteral(":/icons/thunderbird-icons/star.svg")},
+            {m_junkAction, QStringLiteral(":/icons/thunderbird-icons/spam.svg")},
+            {m_tagsAction, QStringLiteral(":/icons/thunderbird-icons/tag.svg")},
+            {m_deleteAction, QStringLiteral(":/icons/thunderbird-icons/delete.svg")},
+            {m_advancedSearchAction, QStringLiteral(":/icons/thunderbird-icons/search.svg")},
+        });
     }
 
     void MainWindow::routeUndo()
@@ -1369,14 +1309,14 @@ namespace javelin::gui::shell
                     m_messageViewContainer->refresh(m_messageViewReader);
                     updateEmptyStates();
                     updateMessageListHeader();
-                    updateMessageActions();
+                    m_mailActionController->update();
                 });
         connect(m_messageCommandController, &MessageCommandController::emailMarkedRead, this,
                 [this](const QString& accountId, const QString& emailId)
                 {
                     markSearchTabsStaleForAccount(accountId.toStdString());
                     static_cast<void>(m_messageModel->setEmailRead(emailId.toStdString()));
-                    updateMessageActions();
+                    m_mailActionController->update();
                 });
         connect(
             m_messageCommandController, &MessageCommandController::emailMutationsSubmitted, this,
@@ -1441,13 +1381,13 @@ namespace javelin::gui::shell
             return javelin::gui::themedSvgIcon(resourcePath,
                                                palette().color(QPalette::Active, QPalette::Text));
         };
-        m_quickFilterButton = new QToolButton(messageHeaderRow);
-        m_quickFilterButton->setText(i18n("Quick Filter"));
-        m_quickFilterButton->setIcon(
+        auto* quickFilterButton = new QToolButton(messageHeaderRow);
+        quickFilterButton->setText(i18n("Quick Filter"));
+        quickFilterButton->setIcon(
             quickFilterIcon(QStringLiteral(":/icons/thunderbird-icons/filter.svg")));
-        m_quickFilterButton->setCheckable(true);
-        m_quickFilterButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-        m_quickFilterButton->setToolTip(i18n("Show quick filter controls"));
+        quickFilterButton->setCheckable(true);
+        quickFilterButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        quickFilterButton->setToolTip(i18n("Show quick filter controls"));
         m_messageSortButton = new QToolButton(messageHeaderRow);
         m_messageSortButton->setIcon(javelin::gui::themedSvgIcon(
             QStringLiteral(":/icons/thunderbird-icons/display-options.svg"),
@@ -1460,15 +1400,15 @@ namespace javelin::gui::shell
         messageHeaderRowLayout->addWidget(m_messageListTitleLabel, 1);
         messageHeaderRowLayout->addWidget(m_messageListMetaLabel);
         messageHeaderRowLayout->addWidget(m_searchServerButton);
-        messageHeaderRowLayout->addWidget(m_quickFilterButton);
+        messageHeaderRowLayout->addWidget(quickFilterButton);
         messageHeaderRowLayout->addWidget(m_messageSortButton);
         messageHeaderLayout->addWidget(messageHeaderRow);
 
-        m_quickFilterPanel = new QWidget(messageHeader);
-        auto* quickFilterLayout = new QVBoxLayout(m_quickFilterPanel);
+        auto* quickFilterPanel = new QWidget(messageHeader);
+        auto* quickFilterLayout = new QVBoxLayout(quickFilterPanel);
         quickFilterLayout->setContentsMargins(8, 3, 8, 3);
         quickFilterLayout->setSpacing(3);
-        auto* quickFilterButtonsRow = new QWidget(m_quickFilterPanel);
+        auto* quickFilterButtonsRow = new QWidget(quickFilterPanel);
         auto* quickFilterButtonsLayout = new QHBoxLayout(quickFilterButtonsRow);
         quickFilterButtonsLayout->setContentsMargins(0, 0, 0, 0);
         quickFilterButtonsLayout->setSpacing(4);
@@ -1483,39 +1423,39 @@ namespace javelin::gui::shell
             button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
             return button;
         };
-        m_quickFilterPinButton =
+        auto* quickFilterPinButton =
             makeFilterButton(i18n("Pin"), QStringLiteral(":/icons/thunderbird-icons/pin.svg"));
-        m_quickFilterPinButton->setToolTip(i18n("Keep these filters when switching folders"));
-        m_quickFilterUnreadButton = makeFilterButton(
+        quickFilterPinButton->setToolTip(i18n("Keep these filters when switching folders"));
+        auto* quickFilterUnreadButton = makeFilterButton(
             i18n("Unread"), QStringLiteral(":/icons/thunderbird-icons/unread.svg"));
-        m_quickFilterStarredButton =
+        auto* quickFilterStarredButton =
             makeFilterButton(i18n("Starred"), QStringLiteral(":/icons/thunderbird-icons/star.svg"));
-        m_quickFilterContactButton = makeFilterButton(
+        auto* quickFilterContactButton = makeFilterButton(
             i18n("Contact"), QStringLiteral(":/icons/thunderbird-icons/address-book.svg"));
-        m_quickFilterTagsButton =
+        auto* quickFilterTagsButton =
             makeFilterButton(i18n("Tags"), QStringLiteral(":/icons/thunderbird-icons/tag.svg"));
-        m_quickFilterAttachmentButton = makeFilterButton(
+        auto* quickFilterAttachmentButton = makeFilterButton(
             i18n("Attachment"), QStringLiteral(":/icons/thunderbird-icons/attachment.svg"));
-        m_quickFilterTagsMenu = new QMenu(m_quickFilterTagsButton);
-        m_quickFilterTagsButton->setMenu(m_quickFilterTagsMenu);
-        m_quickFilterTagsButton->setPopupMode(QToolButton::MenuButtonPopup);
+        auto* quickFilterTagsMenu = new QMenu(quickFilterTagsButton);
+        quickFilterTagsButton->setMenu(quickFilterTagsMenu);
+        quickFilterTagsButton->setPopupMode(QToolButton::MenuButtonPopup);
 
-        quickFilterButtonsLayout->addWidget(m_quickFilterPinButton);
-        quickFilterButtonsLayout->addWidget(m_quickFilterUnreadButton);
-        quickFilterButtonsLayout->addWidget(m_quickFilterStarredButton);
-        quickFilterButtonsLayout->addWidget(m_quickFilterContactButton);
-        quickFilterButtonsLayout->addWidget(m_quickFilterTagsButton);
-        quickFilterButtonsLayout->addWidget(m_quickFilterAttachmentButton);
+        quickFilterButtonsLayout->addWidget(quickFilterPinButton);
+        quickFilterButtonsLayout->addWidget(quickFilterUnreadButton);
+        quickFilterButtonsLayout->addWidget(quickFilterStarredButton);
+        quickFilterButtonsLayout->addWidget(quickFilterContactButton);
+        quickFilterButtonsLayout->addWidget(quickFilterTagsButton);
+        quickFilterButtonsLayout->addWidget(quickFilterAttachmentButton);
         quickFilterButtonsLayout->addStretch(1);
         quickFilterLayout->addWidget(quickFilterButtonsRow);
 
-        auto* quickFilterTextRow = new QWidget(m_quickFilterPanel);
+        auto* quickFilterTextRow = new QWidget(quickFilterPanel);
         auto* quickFilterTextLayout = new QHBoxLayout(quickFilterTextRow);
         quickFilterTextLayout->setContentsMargins(0, 0, 0, 0);
         quickFilterTextLayout->setSpacing(4);
-        m_quickFilterTextEdit = new QLineEdit(quickFilterTextRow);
-        m_quickFilterTextEdit->setPlaceholderText(i18n("Filter messages"));
-        m_quickFilterTextEdit->setClearButtonEnabled(true);
+        auto* quickFilterTextEdit = new QLineEdit(quickFilterTextRow);
+        quickFilterTextEdit->setPlaceholderText(i18n("Filter messages"));
+        quickFilterTextEdit->setClearButtonEnabled(true);
         const auto makeScopeButton = [quickFilterTextRow](const QString& text, const bool checked)
         {
             auto* button = new QToolButton(quickFilterTextRow);
@@ -1525,18 +1465,35 @@ namespace javelin::gui::shell
             button->setToolButtonStyle(Qt::ToolButtonTextOnly);
             return button;
         };
-        m_quickFilterSenderButton = makeScopeButton(i18n("Sender"), true);
-        m_quickFilterRecipientsButton = makeScopeButton(i18n("Recipients"), true);
-        m_quickFilterSubjectButton = makeScopeButton(i18n("Subject"), true);
-        m_quickFilterBodyButton = makeScopeButton(i18n("Body"), false);
-        quickFilterTextLayout->addWidget(m_quickFilterTextEdit, 1);
-        quickFilterTextLayout->addWidget(m_quickFilterSenderButton);
-        quickFilterTextLayout->addWidget(m_quickFilterRecipientsButton);
-        quickFilterTextLayout->addWidget(m_quickFilterSubjectButton);
-        quickFilterTextLayout->addWidget(m_quickFilterBodyButton);
+        auto* quickFilterSenderButton = makeScopeButton(i18n("Sender"), true);
+        auto* quickFilterRecipientsButton = makeScopeButton(i18n("Recipients"), true);
+        auto* quickFilterSubjectButton = makeScopeButton(i18n("Subject"), true);
+        auto* quickFilterBodyButton = makeScopeButton(i18n("Body"), false);
+        quickFilterTextLayout->addWidget(quickFilterTextEdit, 1);
+        quickFilterTextLayout->addWidget(quickFilterSenderButton);
+        quickFilterTextLayout->addWidget(quickFilterRecipientsButton);
+        quickFilterTextLayout->addWidget(quickFilterSubjectButton);
+        quickFilterTextLayout->addWidget(quickFilterBodyButton);
         quickFilterLayout->addWidget(quickFilterTextRow);
-        m_quickFilterPanel->setVisible(false);
-        messageHeaderLayout->addWidget(m_quickFilterPanel);
+        quickFilterPanel->setVisible(false);
+        messageHeaderLayout->addWidget(quickFilterPanel);
+        m_quickFilterController =
+            new QuickFilterController(m_mailTagReader,
+                                      {.toggleButton = *quickFilterButton,
+                                       .panel = *quickFilterPanel,
+                                       .pinButton = *quickFilterPinButton,
+                                       .unreadButton = *quickFilterUnreadButton,
+                                       .starredButton = *quickFilterStarredButton,
+                                       .contactButton = *quickFilterContactButton,
+                                       .tagsButton = *quickFilterTagsButton,
+                                       .attachmentButton = *quickFilterAttachmentButton,
+                                       .textEdit = *quickFilterTextEdit,
+                                       .senderButton = *quickFilterSenderButton,
+                                       .recipientsButton = *quickFilterRecipientsButton,
+                                       .subjectButton = *quickFilterSubjectButton,
+                                       .bodyButton = *quickFilterBodyButton,
+                                       .tagsMenu = *quickFilterTagsMenu},
+                                      *this, this);
         m_messageLoadingIndicator =
             new javelin::gui::widgets::IndeterminateProgressBar(messageHeader);
         m_messageLoadingIndicator->setAccessibleName(i18n("Loading messages"));
@@ -1624,7 +1581,12 @@ namespace javelin::gui::shell
 
         m_messageView->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(m_messageView, &QListView::customContextMenuRequested, this,
-                &MainWindow::showMessageListContextMenu);
+                [this](const QPoint& position)
+                {
+                    m_mailActionController->showContextMenu(
+                        position,
+                        [this](QModelIndex index) { findConversationsWithSender(index); });
+                });
         connect(m_mailboxView, &QTreeView::customContextMenuRequested, this,
                 &MainWindow::showMailboxContextMenu);
         connect(
@@ -1698,7 +1660,7 @@ namespace javelin::gui::shell
             *m_messageListPanePresenter, *m_tabBarPresenter);
         updateEmptyStates();
         updateMessageListHeader();
-        updateQuickFilterUi();
+        m_quickFilterController->activate(activeTab());
     }
 
     void MainWindow::connectSelection()
@@ -1718,58 +1680,11 @@ namespace javelin::gui::shell
         connect(m_messageView->verticalScrollBar(), &QScrollBar::rangeChanged, this,
                 [this] { QTimer::singleShot(0, this, &MainWindow::maybeLoadMoreMessages); });
         connect(m_messageSortButton, &QToolButton::clicked, this, &MainWindow::showSortMenu);
-        connect(m_quickFilterButton, &QToolButton::toggled, this,
-                [this](const bool visible)
-                {
-                    m_quickFilterPanel->setVisible(visible && activeTabIsMailbox());
-                    if (visible)
-                        rebuildQuickFilterTagsMenu();
-                });
-        auto* quickFilterShortcut =
-            new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K), this);
-        connect(quickFilterShortcut, &QShortcut::activated, this,
-                [this]
-                {
-                    if (!activeTabIsMailbox())
-                        return;
-                    m_quickFilterButton->setChecked(true);
-                    m_quickFilterTextEdit->setFocus(Qt::ShortcutFocusReason);
-                    m_quickFilterTextEdit->selectAll();
-                });
-        auto* hideQuickFilterShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
-        connect(hideQuickFilterShortcut, &QShortcut::activated, this,
-                [this]
-                {
-                    if (m_quickFilterPanel->isVisible())
-                        m_quickFilterButton->setChecked(false);
-                });
-        m_quickFilterTextTimer = new QTimer(this);
-        m_quickFilterTextTimer->setSingleShot(true);
-        m_quickFilterTextTimer->setInterval(250);
-        connect(m_quickFilterTextTimer, &QTimer::timeout, this, &MainWindow::applyQuickFilter);
-        connect(m_quickFilterTextEdit, &QLineEdit::textChanged, this,
-                [this] { m_quickFilterTextTimer->start(); });
-        for (auto* button :
-             {m_quickFilterUnreadButton, m_quickFilterStarredButton, m_quickFilterContactButton,
-              m_quickFilterTagsButton, m_quickFilterAttachmentButton, m_quickFilterSenderButton,
-              m_quickFilterRecipientsButton, m_quickFilterSubjectButton, m_quickFilterBodyButton})
-        {
-            connect(button, &QToolButton::toggled, this, [this] { applyQuickFilter(); });
-        }
-        connect(m_quickFilterPinButton, &QToolButton::toggled, this,
-                [this](const bool pinned)
-                {
-                    m_quickFilterPinned = pinned;
-                    if (pinned)
-                        m_pinnedQuickFilter = quickFilterCriteriaFromUi();
-                });
-        connect(m_quickFilterTagsMenu, &QMenu::aboutToShow, this,
-                &MainWindow::rebuildQuickFilterTagsMenu);
         connect(m_searchServerButton, &QToolButton::clicked, this,
                 [this]
                 {
                     if (auto* tab = activeTab(); tab != nullptr)
-                        static_cast<void>(m_messageListTabController->promoteSearch(*tab));
+                        static_cast<void>(m_mailWorkspaceController->promoteSearch(*tab));
                 });
         connect(m_mailboxSearchEdit, &QLineEdit::returnPressed, this,
                 [this] { executeSearch(m_mailboxSearchEdit->text()); });
@@ -1818,15 +1733,15 @@ namespace javelin::gui::shell
         if (!accountId.has_value() || (!mailboxId.has_value() && !allowSearchSelection))
         {
             setMessageViewSelection(accountId, mailboxId, std::nullopt);
-            updateMessageActions();
+            m_mailActionController->update();
             return;
         }
 
         if (!current.isValid())
         {
-            syncQuickFilterContinuitySelection(std::nullopt, std::nullopt);
+            m_quickFilterController->syncContinuitySelection(std::nullopt, std::nullopt);
             setMessageViewSelection(accountId, mailboxId, std::nullopt);
-            updateMessageActions();
+            m_mailActionController->update();
             return;
         }
 
@@ -1836,7 +1751,7 @@ namespace javelin::gui::shell
             current.data(javelin::gui::messages::MessageListModel::ThreadIdRole).toString();
         const auto selectedEmailId = emailId.toStdString();
         const auto selectedThreadId = threadId.toStdString();
-        syncQuickFilterContinuitySelection(
+        m_quickFilterController->syncContinuitySelection(
             emailId.isEmpty() ? std::nullopt : std::optional<std::string>{selectedEmailId},
             threadId.isEmpty() ? std::nullopt : std::optional<std::string>{selectedThreadId});
         m_messageNavigationController->cancelIfSelectionChanged(
@@ -1861,7 +1776,7 @@ namespace javelin::gui::shell
                                     : std::optional<std::string>{emailId.toStdString()});
         updateEmptyStates();
         updateMessageListHeader();
-        updateMessageActions();
+        m_mailActionController->update();
         if (!emailId.isEmpty())
         {
             if (isUnread)
@@ -2076,12 +1991,12 @@ namespace javelin::gui::shell
 
     const TabState* MainWindow::activeTab() const
     {
-        return activeWorkspaceTab(m_tabs, m_activeTabIndex);
+        return m_mailWorkspaceController->activeTab();
     }
 
     TabState* MainWindow::activeTab()
     {
-        return activeWorkspaceTab(m_tabs, m_activeTabIndex);
+        return m_mailWorkspaceController->activeTab();
     }
 
     bool MainWindow::activeTabIsMailbox() const
@@ -2157,19 +2072,11 @@ namespace javelin::gui::shell
     void MainWindow::updateToolbarForActiveTab()
     {
         const auto context = toolbarContextForActiveTab();
-        const auto contactAccounts = m_contactReader.listAccounts();
-        const auto* contacts =
-            std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&contactAccounts);
-        m_contactsAction->setEnabled(contacts != nullptr && !contacts->empty());
+        m_contactsAction->setEnabled(m_contactsTabController->available());
         const auto selectedAccount = activeAccountId();
-        const auto calendarAccounts = m_calendarReader.accounts();
-        const auto* calendars =
-            std::get_if<std::vector<javelin::jmap::cache::CalendarAccount>>(&calendarAccounts);
-        m_calendarAction->setEnabled(
-            calendars != nullptr &&
-            (!selectedAccount.has_value() ||
-             std::ranges::any_of(*calendars, [&selectedAccount](const auto& account)
-                                 { return account.accountId == *selectedAccount; })));
+        m_calendarAction->setEnabled(m_calendarTabController->available(
+            selectedAccount.has_value() ? std::optional<std::string_view>{*selectedAccount}
+                                        : std::nullopt));
         setToolBarVisible(QStringLiteral("mainToolBar"), context == ToolbarContext::Mail);
         setToolBarVisible(QStringLiteral("composeToolBar"), context == ToolbarContext::Compose);
         setToolBarVisible(QStringLiteral("contactsToolBar"), context == ToolbarContext::Contacts);
@@ -2220,45 +2127,20 @@ namespace javelin::gui::shell
                                               const QString title, std::optional<std::string> role,
                                               const bool refreshRemote)
     {
-        const auto result = m_messageListTabController->openOrCreateMailbox(
-            m_tabs, {
-                        .accountId = std::move(accountId),
-                        .mailboxId = std::move(mailboxId),
-                        .title = title,
-                        .role = std::move(role),
-                        .sort = m_emailListSort,
-                        .restored = std::nullopt,
-                    });
-        m_activeTabIndex = static_cast<int>(result.index);
+        const auto index = m_mailWorkspaceController->openMailbox(
+            std::move(accountId), std::move(mailboxId), title, std::move(role));
         updateTabBar();
-        activateTab(*m_activeTabIndex, refreshRemote);
+        activateTab(index, refreshRemote);
     }
 
     void MainWindow::activateMailboxInHomeTab(std::string accountId, std::string mailboxId,
                                               QString title, std::optional<std::string> role,
                                               const bool refreshRemote)
     {
-        auto tab = m_messageListTabController->createMailboxTab({
-            .accountId = std::move(accountId),
-            .mailboxId = std::move(mailboxId),
-            .title = std::move(title),
-            .role = std::move(role),
-            .sort = m_emailListSort,
-            .restored = std::nullopt,
-        });
-        if (m_tabs.empty())
-        {
-            m_tabs.push_back(std::move(tab));
-        }
-        else
-        {
-            m_messageListTabController->releaseSession(m_tabs[0]);
-            m_tabs[0] = std::move(tab);
-        }
-
-        m_activeTabIndex = 0;
+        const auto index = m_mailWorkspaceController->activateHomeMailbox(
+            std::move(accountId), std::move(mailboxId), std::move(title), std::move(role));
         updateTabBar();
-        activateTab(0, refreshRemote);
+        activateTab(index, refreshRemote);
     }
 
     void MainWindow::openOrActivateSearchTab(std::string accountId, QString query,
@@ -2273,16 +2155,10 @@ namespace javelin::gui::shell
                                              javelin::jmap::search::EmailSearchCriteria criteria,
                                              const bool refreshRemote)
     {
-        const auto result = m_messageListTabController->openOrCreateSearch(
-            m_tabs, {
-                        .accountId = std::move(accountId),
-                        .criteria = std::move(criteria),
-                        .sort = m_emailListSort,
-                        .restored = std::nullopt,
-                    });
-        m_activeTabIndex = static_cast<int>(result.index);
+        const auto index =
+            m_mailWorkspaceController->openSearch(std::move(accountId), std::move(criteria));
         updateTabBar();
-        activateTab(*m_activeTabIndex, refreshRemote);
+        activateTab(index, refreshRemote);
     }
 
     void MainWindow::activateTab(const int index, const bool refreshRemote)
@@ -2295,7 +2171,7 @@ namespace javelin::gui::shell
         if (index < 0 || static_cast<std::size_t>(index) >= m_tabs.size())
         {
             const auto plan = planTabActivation({});
-            m_activeTabIndex.reset();
+            m_mailWorkspaceController->setActiveIndex(std::nullopt);
             m_messageModel->clear();
             setMessageViewSelection(std::nullopt, std::nullopt, std::nullopt);
             if (m_contentStack != nullptr)
@@ -2305,37 +2181,21 @@ namespace javelin::gui::shell
             updateTabBar();
             updateEmptyStates();
             updateMessageListHeader();
-            updateQuickFilterUi();
-            updateMessageActions();
+            m_quickFilterController->activate(nullptr);
+            m_mailActionController->activate(nullptr);
             updateToolbarForActiveTab();
             metrics.finish(QStringLiteral("empty"));
             return;
         }
 
-        m_activeTabIndex = index;
+        m_mailWorkspaceController->setActiveIndex(index);
         auto& tab = m_tabs[static_cast<std::size_t>(index)];
-        if (auto* mailbox = std::get_if<MailboxTabState>(&tab.content);
-            mailbox != nullptr && mailbox->session != nullptr)
-        {
-            const auto identity =
-                std::pair{mailbox->session->accountId(), mailbox->session->mailboxId()};
-            if (m_lastQuickFilterMailbox.has_value() && *m_lastQuickFilterMailbox != identity)
-            {
-                mailbox->session->setQuickFilter(
-                    m_quickFilterPinned ? m_pinnedQuickFilter
-                                        : javelin::jmap::search::EmailSearchCriteria{});
-            }
-            else if (m_quickFilterPinned)
-            {
-                mailbox->session->setQuickFilter(m_pinnedQuickFilter);
-            }
-            m_lastQuickFilterMailbox = identity;
-        }
-        updateQuickFilterUi();
+        m_quickFilterController->activate(&tab);
+        m_mailActionController->activate(&tab);
         const auto initialPlan = planTabActivation({
             .kind = tabKind(tab),
             .homeTab = index == 0,
-            .messageListStale = m_messageListTabController->stateStale(tab),
+            .messageListStale = m_mailWorkspaceController->stateStale(tab),
             .remoteRefreshRequested = refreshRemote,
         });
 
@@ -2370,7 +2230,7 @@ namespace javelin::gui::shell
         const auto loadedPlan = planTabActivation({
             .kind = tabKind(tab),
             .homeTab = index == 0,
-            .messageListStale = m_messageListTabController->stateStale(tab),
+            .messageListStale = m_mailWorkspaceController->stateStale(tab),
             .remoteRefreshRequested = refreshRemote,
         });
         if (loadedPlan.refreshRemote)
@@ -2386,7 +2246,7 @@ namespace javelin::gui::shell
                     const auto plan = planTabActivation({
                         .kind = tabKind(currentTab),
                         .homeTab = index == 0,
-                        .messageListStale = m_messageListTabController->stateStale(currentTab),
+                        .messageListStale = m_mailWorkspaceController->stateStale(currentTab),
                         .remoteRefreshRequested = refreshRemote,
                     });
                     if (plan.refreshRemote)
@@ -2426,9 +2286,7 @@ namespace javelin::gui::shell
             static_cast<void>(
                 m_calendarTabController->close(m_tabs[static_cast<std::size_t>(index)]));
 
-        m_messageListTabController->releaseSession(m_tabs[static_cast<std::size_t>(index)]);
-        m_activeTabIndex = activeTabIndexAfterClose(m_tabs.size(), m_activeTabIndex, index);
-        m_tabs.erase(m_tabs.begin() + index);
+        static_cast<void>(m_mailWorkspaceController->eraseTab(index));
         if (!m_activeTabIndex.has_value())
         {
             activateTab(-1, false);
@@ -2482,7 +2340,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        if (!m_messageListTabController->loadCachedState(*tab, forceReload))
+        if (!m_mailWorkspaceController->loadCachedState(*tab, forceReload))
         {
             const auto plan = planTabActivation({
                 .kind = tabKind(*tab),
@@ -2493,7 +2351,7 @@ namespace javelin::gui::shell
                 m_messageModel->clear();
                 setMessageViewSelection(std::nullopt, std::nullopt, std::nullopt);
             }
-            updateMessageActions();
+            m_mailActionController->update();
             metrics.finish(QStringLiteral("cache_miss"));
             return;
         }
@@ -2510,13 +2368,13 @@ namespace javelin::gui::shell
         metrics.finish(QStringLiteral("loaded"), QStringLiteral("cache_ms=%1 apply_ms=%2")
                                                      .arg(cacheMilliseconds)
                                                      .arg(applyMilliseconds));
-        if (m_messageListTabController->stateStale(*tab) ||
+        if (m_mailWorkspaceController->stateStale(*tab) ||
             (refreshRemote && tabKind(*tab) == TabKind::Mailbox))
         {
             const auto mode = refreshRemote && tabKind(*tab) == TabKind::Mailbox
                                   ? javelin::app::MessageListRefreshMode::RefreshFromServer
                                   : javelin::app::MessageListRefreshMode::Materialize;
-            static_cast<void>(m_messageListTabController->refresh(*tab, mode));
+            static_cast<void>(m_mailWorkspaceController->refresh(*tab, mode));
         }
     }
 
@@ -2539,7 +2397,7 @@ namespace javelin::gui::shell
         }
 
         auto& tab = m_tabs[tabIndex];
-        if (m_messageListTabController->refresh(
+        if (m_mailWorkspaceController->refresh(
                 tab, javelin::app::MessageListRefreshMode::RefreshFromServer))
             return;
 
@@ -2579,12 +2437,12 @@ namespace javelin::gui::shell
     MainWindow::markTabsStaleForAccount(const std::string_view accountId,
                                         const std::optional<std::string_view> refreshedMailboxId)
     {
-        m_messageListTabController->markTabsStaleForAccount(m_tabs, accountId, refreshedMailboxId);
+        m_mailWorkspaceController->markTabsStaleForAccount(accountId, refreshedMailboxId);
     }
 
     void MainWindow::markSearchTabsStaleForAccount(const std::string_view accountId)
     {
-        m_messageListTabController->markSearchTabsStaleForAccount(m_tabs, accountId);
+        m_mailWorkspaceController->markSearchTabsStaleForAccount(accountId);
     }
 
     void MainWindow::openMailboxSelectionInTab(const bool refreshRemote)
@@ -2601,20 +2459,10 @@ namespace javelin::gui::shell
             currentIndex.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxNameRole)
                 .toString();
         const auto role = currentMailboxRole(*m_mailboxView);
-        const auto result =
-            m_messageListTabController->openOrCreateMailbox(m_tabs,
-                                                            {
-                                                                .accountId = *accountId,
-                                                                .mailboxId = *mailboxId,
-                                                                .title = title,
-                                                                .role = role,
-                                                                .sort = m_emailListSort,
-                                                                .restored = std::nullopt,
-                                                            },
-                                                            1);
-        m_activeTabIndex = static_cast<int>(result.index);
+        const auto index =
+            m_mailWorkspaceController->openMailbox(*accountId, *mailboxId, title, role, 1);
         updateTabBar();
-        activateTab(*m_activeTabIndex, refreshRemote);
+        activateTab(index, refreshRemote);
     }
 
     void MainWindow::openComposeForRequest(javelin::jmap::submission::OpenComposeRequest request)
@@ -2815,8 +2663,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        m_emailListSort = std::move(sort);
-        m_messageListTabController->setSort(m_tabs, m_emailListSort);
+        m_mailWorkspaceController->setSort(std::move(sort));
         auto workspace = m_settings.workspaceSettings();
         auto persisted = deserializeMainWindowState(workspace.mainWindowState, m_emailListSort);
         persisted.emailListSort = m_emailListSort;
@@ -2844,7 +2691,7 @@ namespace javelin::gui::shell
             return;
         const auto* session = messageListSession(*tab);
         if (session == nullptr || !session->state().loadMoreError.isEmpty() ||
-            !m_messageListTabController->canLoadMore(*tab))
+            !m_mailWorkspaceController->canLoadMore(*tab))
         {
             return;
         }
@@ -2856,7 +2703,7 @@ namespace javelin::gui::shell
                                                            scrollBar->pageStep(),
                                                            m_messageModel->rowCount()))
         {
-            static_cast<void>(m_messageListTabController->loadMore(*tab));
+            static_cast<void>(m_mailWorkspaceController->loadMore(*tab));
         }
     }
 
@@ -2865,7 +2712,7 @@ namespace javelin::gui::shell
         auto* tab = activeTab();
         if (tab == nullptr)
             return;
-        static_cast<void>(m_messageListTabController->loadMore(*tab));
+        static_cast<void>(m_mailWorkspaceController->loadMore(*tab));
     }
 
     void MainWindow::reloadAccounts()
@@ -2910,14 +2757,15 @@ namespace javelin::gui::shell
     {
         if (activeTabIsCompose())
         {
-            updateMessageActions();
+            m_mailActionController->update();
             return;
         }
 
         const auto accountId = activeAccountId();
         const auto mailboxId = activeMailboxId();
-        syncQuickFilterContinuitySelection(m_messageSelectionController->currentEmailId(),
-                                           m_messageSelectionController->currentThreadId());
+        m_quickFilterController->syncContinuitySelection(
+            m_messageSelectionController->currentEmailId(),
+            m_messageSelectionController->currentThreadId());
         auto selectedSummaries = m_messageSelectionController->selectedMessageSummaries();
         if (selectedSummaries.size() > 1)
         {
@@ -2926,7 +2774,7 @@ namespace javelin::gui::shell
             m_messageSelectionController->syncTabSelection(activeTab());
             updateEmptyStates();
             updateMessageListHeader();
-            updateMessageActions();
+            m_mailActionController->update();
             return;
         }
 
@@ -2938,7 +2786,7 @@ namespace javelin::gui::shell
                 setMessageViewSelection(route->accountId, route->mailboxId, route->emailId);
                 updateEmptyStates();
                 updateMessageListHeader();
-                updateMessageActions();
+                m_mailActionController->update();
                 return;
             }
         }
@@ -2946,7 +2794,7 @@ namespace javelin::gui::shell
         m_messageSelectionController->syncTabSelection(activeTab());
         updateEmptyStates();
         updateMessageListHeader();
-        updateMessageActions();
+        m_mailActionController->update();
     }
 
     void MainWindow::selectPendingInitialMailbox()
@@ -2982,615 +2830,6 @@ namespace javelin::gui::shell
         m_messageListTabPresenter->showHeader(activeTab());
     }
 
-    javelin::jmap::search::EmailSearchCriteria MainWindow::quickFilterCriteriaFromUi() const
-    {
-        javelin::jmap::search::EmailSearchCriteria criteria;
-        criteria.unreadOnly = m_quickFilterUnreadButton->isChecked();
-        criteria.starredOnly = m_quickFilterStarredButton->isChecked();
-        criteria.fromContactsOnly = m_quickFilterContactButton->isChecked();
-        criteria.taggedOnly = m_quickFilterTagsButton->isChecked();
-        criteria.hasAttachmentOnly = m_quickFilterAttachmentButton->isChecked();
-        if (criteria.taggedOnly)
-            criteria.tags = m_quickFilterTags;
-        criteria.matchAllTags = m_quickFilterMatchAllTags;
-        const auto text = m_quickFilterTextEdit->text().trimmed();
-        if (!text.isEmpty())
-            criteria.quickText = text.toStdString();
-        criteria.quickTextSender = m_quickFilterSenderButton->isChecked();
-        criteria.quickTextRecipients = m_quickFilterRecipientsButton->isChecked();
-        criteria.quickTextSubject = m_quickFilterSubjectButton->isChecked();
-        criteria.quickTextBody = m_quickFilterBodyButton->isChecked();
-        return criteria;
-    }
-
-    void MainWindow::applyQuickFilter()
-    {
-        auto* tab = activeTab();
-        if (tab == nullptr)
-            return;
-        auto* mailbox = std::get_if<MailboxTabState>(&tab->content);
-        if (mailbox == nullptr || mailbox->session == nullptr)
-            return;
-
-        auto criteria = quickFilterCriteriaFromUi();
-        if (m_quickFilterPinned)
-            m_pinnedQuickFilter = criteria;
-        mailbox->session->setQuickFilter(std::move(criteria));
-    }
-
-    void MainWindow::syncQuickFilterContinuitySelection(std::optional<std::string> emailId,
-                                                        std::optional<std::string> threadId)
-    {
-        auto* tab = activeTab();
-        auto* mailbox = tab == nullptr ? nullptr : std::get_if<MailboxTabState>(&tab->content);
-        if (mailbox == nullptr || mailbox->session == nullptr)
-            return;
-        mailbox->session->setQuickFilterContinuitySelection(std::move(emailId),
-                                                            std::move(threadId));
-    }
-
-    void MainWindow::updateQuickFilterUi()
-    {
-        auto* tab = activeTab();
-        auto* mailbox = tab == nullptr ? nullptr : std::get_if<MailboxTabState>(&tab->content);
-        const bool available = mailbox != nullptr && mailbox->session != nullptr;
-        m_quickFilterButton->setVisible(available);
-        m_quickFilterPanel->setVisible(available && m_quickFilterButton->isChecked());
-        if (!available)
-            return;
-
-        const auto& criteria = mailbox->session->quickFilter();
-        QSignalBlocker unreadBlocker{m_quickFilterUnreadButton};
-        QSignalBlocker starredBlocker{m_quickFilterStarredButton};
-        QSignalBlocker contactBlocker{m_quickFilterContactButton};
-        QSignalBlocker tagsBlocker{m_quickFilterTagsButton};
-        QSignalBlocker attachmentBlocker{m_quickFilterAttachmentButton};
-        QSignalBlocker textBlocker{m_quickFilterTextEdit};
-        QSignalBlocker senderBlocker{m_quickFilterSenderButton};
-        QSignalBlocker recipientsBlocker{m_quickFilterRecipientsButton};
-        QSignalBlocker subjectBlocker{m_quickFilterSubjectButton};
-        QSignalBlocker bodyBlocker{m_quickFilterBodyButton};
-        QSignalBlocker pinBlocker{m_quickFilterPinButton};
-
-        m_quickFilterUnreadButton->setChecked(criteria.unreadOnly);
-        m_quickFilterStarredButton->setChecked(criteria.starredOnly);
-        m_quickFilterContactButton->setChecked(criteria.fromContactsOnly);
-        m_quickFilterTagsButton->setChecked(criteria.taggedOnly || !criteria.tags.empty());
-        m_quickFilterAttachmentButton->setChecked(criteria.hasAttachmentOnly);
-        m_quickFilterTextEdit->setText(criteria.quickText.has_value()
-                                           ? QString::fromStdString(*criteria.quickText)
-                                           : QString{});
-        m_quickFilterSenderButton->setChecked(criteria.quickTextSender);
-        m_quickFilterRecipientsButton->setChecked(criteria.quickTextRecipients);
-        m_quickFilterSubjectButton->setChecked(criteria.quickTextSubject);
-        m_quickFilterBodyButton->setChecked(criteria.quickTextBody);
-        m_quickFilterPinButton->setChecked(m_quickFilterPinned);
-        m_quickFilterTags = criteria.tags;
-        m_quickFilterMatchAllTags = criteria.matchAllTags;
-    }
-
-    void MainWindow::rebuildQuickFilterTagsMenu()
-    {
-        if (m_quickFilterTagsMenu == nullptr)
-            return;
-        m_quickFilterTagsMenu->clear();
-
-        auto* anyAction = m_quickFilterTagsMenu->addAction(i18n("Any selected tag"));
-        anyAction->setCheckable(true);
-        anyAction->setChecked(!m_quickFilterMatchAllTags);
-        connect(anyAction, &QAction::triggered, this,
-                [this]
-                {
-                    m_quickFilterMatchAllTags = false;
-                    applyQuickFilter();
-                    rebuildQuickFilterTagsMenu();
-                });
-        auto* allAction = m_quickFilterTagsMenu->addAction(i18n("All selected tags"));
-        allAction->setCheckable(true);
-        allAction->setChecked(m_quickFilterMatchAllTags);
-        connect(allAction, &QAction::triggered, this,
-                [this]
-                {
-                    m_quickFilterMatchAllTags = true;
-                    applyQuickFilter();
-                    rebuildQuickFilterTagsMenu();
-                });
-        m_quickFilterTagsMenu->addSeparator();
-
-        const auto accountId = activeAccountId();
-        if (!accountId.has_value())
-            return;
-        const auto result = m_mailTagReader.listTagDefinitions(*accountId);
-        const auto* tags = std::get_if<std::vector<javelin::jmap::cache::TagDefinition>>(&result);
-        if (tags == nullptr)
-        {
-            auto* errorAction = m_quickFilterTagsMenu->addAction(i18n("Unable to load tags"));
-            errorAction->setEnabled(false);
-            return;
-        }
-        if (tags->empty())
-        {
-            auto* emptyAction = m_quickFilterTagsMenu->addAction(i18n("No tags for this account"));
-            emptyAction->setEnabled(false);
-            return;
-        }
-
-        for (const auto& tag : *tags)
-        {
-            auto* action =
-                m_quickFilterTagsMenu->addAction(tagColorIcon(tag.color), tag.displayName);
-            action->setCheckable(true);
-            action->setChecked(std::ranges::find(m_quickFilterTags, tag.keyword) !=
-                               m_quickFilterTags.end());
-            connect(action, &QAction::toggled, this,
-                    [this, keyword = tag.keyword](const bool checked)
-                    {
-                        const auto found = std::ranges::find(m_quickFilterTags, keyword);
-                        if (checked && found == m_quickFilterTags.end())
-                            m_quickFilterTags.push_back(keyword);
-                        else if (!checked && found != m_quickFilterTags.end())
-                            m_quickFilterTags.erase(found);
-
-                        QSignalBlocker blocker{m_quickFilterTagsButton};
-                        m_quickFilterTagsButton->setChecked(true);
-                        applyQuickFilter();
-                    });
-        }
-    }
-
-    void MainWindow::rebuildMessageTagsMenu()
-    {
-        if (m_tagsMenu != nullptr)
-            populateMessageTagsMenu(*m_tagsMenu);
-    }
-
-    void MainWindow::populateMessageTagsMenu(QMenu& menu)
-    {
-        menu.clear();
-        const auto accountId = activeAccountId();
-        if (!accountId.has_value())
-        {
-            auto* unavailable = menu.addAction(i18n("No mail account selected"));
-            unavailable->setEnabled(false);
-            return;
-        }
-
-        std::vector<std::string> selectedEmailIds;
-        const auto selection = m_messageCommandController->selectedActionItems();
-        if (!selection.empty())
-        {
-            if (auto explicitIds = explicitSelectionEmailIds(selection))
-                selectedEmailIds = std::move(*explicitIds);
-        }
-
-        std::unordered_map<std::string, std::size_t> selectedKeywordCounts;
-        if (!selectedEmailIds.empty())
-        {
-            const auto memberships =
-                m_mailTagReader.listEmailKeywordMemberships(*accountId, selectedEmailIds);
-            if (const auto* values =
-                    std::get_if<std::vector<javelin::jmap::cache::EmailKeywordMembership>>(
-                        &memberships))
-            {
-                for (const auto& membership : *values)
-                {
-                    for (const auto& keyword : membership.keywords)
-                        ++selectedKeywordCounts[keyword];
-                }
-            }
-        }
-
-        const auto definitions = m_mailTagReader.listTagDefinitions(*accountId);
-        const auto* tags =
-            std::get_if<std::vector<javelin::jmap::cache::TagDefinition>>(&definitions);
-        if (tags == nullptr)
-        {
-            auto* errorAction = menu.addAction(i18n("Unable to load tags"));
-            errorAction->setEnabled(false);
-        }
-        else if (tags->empty())
-        {
-            auto* emptyAction = menu.addAction(i18n("No tags yet"));
-            emptyAction->setEnabled(false);
-        }
-        else
-        {
-            for (const auto& tag : *tags)
-            {
-                const auto count = selectedKeywordCounts[tag.keyword];
-                const bool allSelected =
-                    !selectedEmailIds.empty() && count == selectedEmailIds.size();
-                const bool someSelected = count > 0 && !allSelected;
-                auto label = tag.displayName;
-                if (someSelected)
-                    label += i18nc("tag is present on only part of a selection", " (some)");
-                auto* action = menu.addAction(tagColorIcon(tag.color), label);
-                action->setCheckable(true);
-                action->setChecked(allSelected);
-                action->setEnabled(!selectedEmailIds.empty());
-                connect(action, &QAction::triggered, this,
-                        [this, keyword = tag.keyword, allSelected]
-                        {
-                            m_messageCommandController->setSelectionTag(
-                                activeAccountId(), activeMailboxId(), keyword, !allSelected);
-                        });
-            }
-        }
-
-        menu.addSeparator();
-        auto* newTag =
-            menu.addAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("New Tag…"));
-        connect(newTag, &QAction::triggered, this, [this] { createTag(true); });
-        auto* manageTags =
-            menu.addAction(QIcon::fromTheme(QStringLiteral("configure")), i18n("Manage Tags…"));
-        connect(manageTags, &QAction::triggered, this, &MainWindow::showTagManager);
-    }
-
-    void MainWindow::createTag(const bool applyToSelection)
-    {
-        const auto accountId = activeAccountId();
-        if (!accountId.has_value())
-            return;
-        bool accepted = false;
-        const auto name = QInputDialog::getText(this, i18n("New Tag"), i18n("Tag name:"),
-                                                QLineEdit::Normal, {}, &accepted)
-                              .trimmed();
-        if (!accepted || name.isEmpty())
-            return;
-        const auto color = QColorDialog::getColor(
-            palette().color(QPalette::Active, QPalette::Highlight), this, i18n("Tag Colour"));
-        if (!color.isValid())
-            return;
-
-        auto task = m_mailCommandPort.saveTagDefinition(javelin::app::SaveMailTagDefinition{
-            .accountId = *accountId,
-            .keyword = std::nullopt,
-            .displayName = name.toStdString(),
-            .color = color.name(QColor::HexRgb).toStdString(),
-        });
-        QCoro::connect(
-            std::move(task), this,
-            [this, accountId = *accountId,
-             applyToSelection](javelin::app::SaveMailTagDefinitionResult result)
-            {
-                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                {
-                    presentError(*error);
-                    return;
-                }
-                const auto& tag = std::get<javelin::app::MailTagDefinition>(result);
-                m_statusBar->showMessage(
-                    i18n("Created tag %1", QString::fromStdString(tag.displayName)), 5000);
-                rebuildQuickFilterTagsMenu();
-                refreshMessageListPreservingSelection();
-                if (applyToSelection && activeAccountId() == std::optional<std::string>{accountId})
-                {
-                    m_messageCommandController->setSelectionTag(accountId, activeMailboxId(),
-                                                                tag.keyword, true);
-                }
-            });
-    }
-
-    void MainWindow::showTagManager()
-    {
-        const auto accountId = activeAccountId();
-        if (!accountId.has_value())
-            return;
-
-        QDialog dialog{this};
-        dialog.setWindowTitle(i18n("Manage Tags"));
-        dialog.resize(480, 360);
-        auto* layout = new QVBoxLayout(&dialog);
-        auto* list = new QListWidget(&dialog);
-        list->setSelectionMode(QAbstractItemView::SingleSelection);
-        layout->addWidget(list, 1);
-
-        auto* controls = new QHBoxLayout;
-        auto* addButton =
-            new QPushButton(QIcon::fromTheme(QStringLiteral("list-add")), i18n("New…"), &dialog);
-        auto* importButton = new QPushButton(QIcon::fromTheme(QStringLiteral("document-import")),
-                                             i18n("Import Keyword…"), &dialog);
-        auto* renameButton = new QPushButton(i18n("Rename…"), &dialog);
-        auto* colorButton = new QPushButton(i18n("Colour…"), &dialog);
-        auto* deleteButton = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-delete")),
-                                             i18n("Delete"), &dialog);
-        controls->addWidget(addButton);
-        controls->addWidget(importButton);
-        controls->addWidget(renameButton);
-        controls->addWidget(colorButton);
-        controls->addWidget(deleteButton);
-        controls->addStretch(1);
-        layout->addLayout(controls);
-        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
-        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-        layout->addWidget(buttons);
-
-        const QPointer<QListWidget> guardedList{list};
-        const auto reload = [this, guardedList, accountId = *accountId]()
-        {
-            if (guardedList == nullptr)
-                return;
-            const auto previous = guardedList->currentItem() != nullptr
-                                      ? guardedList->currentItem()->data(Qt::UserRole).toString()
-                                      : QString{};
-            guardedList->clear();
-            const auto definitions = m_mailTagReader.listTagDefinitions(accountId);
-            const auto* tags =
-                std::get_if<std::vector<javelin::jmap::cache::TagDefinition>>(&definitions);
-            if (tags == nullptr)
-                return;
-            for (const auto& tag : *tags)
-            {
-                auto* item =
-                    new QListWidgetItem(tagColorIcon(tag.color), tag.displayName, guardedList);
-                item->setData(Qt::UserRole, QString::fromStdString(tag.keyword));
-                item->setData(Qt::UserRole + 1, tag.color);
-                if (!previous.isEmpty() && item->data(Qt::UserRole).toString() == previous)
-                    guardedList->setCurrentItem(item);
-            }
-            if (guardedList->currentItem() == nullptr && guardedList->count() > 0)
-                guardedList->setCurrentRow(0);
-        };
-        reload();
-
-        const auto save = [this, guardedList, reload, accountId = *accountId](
-                              std::optional<std::string> keyword, QString name, QString color)
-        {
-            auto task = m_mailCommandPort.saveTagDefinition(javelin::app::SaveMailTagDefinition{
-                .accountId = accountId,
-                .keyword = std::move(keyword),
-                .displayName = name.toStdString(),
-                .color = color.toStdString(),
-            });
-            QCoro::connect(
-                std::move(task), this,
-                [this, guardedList, reload](javelin::app::SaveMailTagDefinitionResult result)
-                {
-                    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                    {
-                        presentError(*error);
-                        return;
-                    }
-                    if (guardedList != nullptr)
-                        reload();
-                    rebuildQuickFilterTagsMenu();
-                    refreshMessageListPreservingSelection();
-                });
-        };
-
-        connect(addButton, &QPushButton::clicked, &dialog,
-                [this, save]
-                {
-                    bool accepted = false;
-                    const auto name =
-                        QInputDialog::getText(this, i18n("New Tag"), i18n("Tag name:"),
-                                              QLineEdit::Normal, {}, &accepted)
-                            .trimmed();
-                    if (!accepted || name.isEmpty())
-                        return;
-                    const auto color = QColorDialog::getColor(
-                        palette().color(QPalette::Active, QPalette::Highlight), this,
-                        i18n("Tag Colour"));
-                    if (!color.isValid())
-                        return;
-                    save(std::nullopt, name, color.name(QColor::HexRgb));
-                });
-        connect(importButton, &QPushButton::clicked, &dialog,
-                [this, save, accountId = *accountId]
-                {
-                    const auto rawKeywords = m_mailTagReader.listUserKeywords(accountId);
-                    const auto definedKeywords = m_mailTagReader.listTagKeywords(accountId);
-                    const auto* raw = std::get_if<std::vector<std::string>>(&rawKeywords);
-                    const auto* defined = std::get_if<std::vector<std::string>>(&definedKeywords);
-                    if (raw == nullptr || defined == nullptr)
-                    {
-                        m_statusBar->showMessage(i18n("Could not load existing message keywords."),
-                                                 5000);
-                        return;
-                    }
-
-                    QStringList candidates;
-                    for (const auto& keyword : *raw)
-                    {
-                        if (!std::ranges::contains(*defined, keyword))
-                            candidates.push_back(QString::fromStdString(keyword));
-                    }
-                    if (candidates.empty())
-                    {
-                        QMessageBox::information(this, i18n("Import Keyword"),
-                                                 i18n("No unclaimed message keywords were found."));
-                        return;
-                    }
-
-                    bool accepted = false;
-                    const auto keyword = QInputDialog::getItem(this, i18n("Import Keyword"),
-                                                               i18n("Existing keyword:"),
-                                                               candidates, 0, false, &accepted);
-                    if (!accepted || keyword.isEmpty())
-                        return;
-                    const auto name =
-                        QInputDialog::getText(this, i18n("Import Keyword"), i18n("Tag name:"),
-                                              QLineEdit::Normal, keyword, &accepted)
-                            .trimmed();
-                    if (!accepted || name.isEmpty())
-                        return;
-                    const auto color = QColorDialog::getColor(
-                        palette().color(QPalette::Active, QPalette::Highlight), this,
-                        i18n("Tag Colour"));
-                    if (!color.isValid())
-                        return;
-                    save(keyword.toStdString(), name, color.name(QColor::HexRgb));
-                });
-        connect(renameButton, &QPushButton::clicked, &dialog,
-                [this, list, save]
-                {
-                    auto* item = list->currentItem();
-                    if (item == nullptr)
-                        return;
-                    bool accepted = false;
-                    const auto name =
-                        QInputDialog::getText(this, i18n("Rename Tag"), i18n("Tag name:"),
-                                              QLineEdit::Normal, item->text(), &accepted)
-                            .trimmed();
-                    if (!accepted || name.isEmpty())
-                        return;
-                    save(item->data(Qt::UserRole).toString().toStdString(), name,
-                         item->data(Qt::UserRole + 1).toString());
-                });
-        connect(colorButton, &QPushButton::clicked, &dialog,
-                [this, list, save]
-                {
-                    auto* item = list->currentItem();
-                    if (item == nullptr)
-                        return;
-                    QColor current{item->data(Qt::UserRole + 1).toString()};
-                    if (!current.isValid())
-                        current = palette().color(QPalette::Active, QPalette::Highlight);
-                    const auto color = QColorDialog::getColor(current, this, i18n("Tag Colour"));
-                    if (!color.isValid())
-                        return;
-                    save(item->data(Qt::UserRole).toString().toStdString(), item->text(),
-                         color.name(QColor::HexRgb));
-                });
-        connect(deleteButton, &QPushButton::clicked, &dialog,
-                [this, list, accountId = *accountId]
-                {
-                    auto* item = list->currentItem();
-                    if (item == nullptr)
-                        return;
-                    QMessageBox confirmation{QMessageBox::Question, i18n("Delete Tag"),
-                                             i18n("Delete “%1”?\n\nThis will remove the tag from "
-                                                  "all messages and delete it from your tag list.",
-                                                  item->text()),
-                                             QMessageBox::NoButton, this};
-                    auto* deleteTagButton =
-                        confirmation.addButton(i18n("Delete"), QMessageBox::DestructiveRole);
-                    confirmation.addButton(QMessageBox::Cancel);
-                    confirmation.exec();
-                    if (confirmation.clickedButton() != deleteTagButton)
-                        return;
-                    const auto keyword = item->data(Qt::UserRole).toString().toStdString();
-                    auto task = m_mailCommandPort.deleteTag(accountId, keyword);
-                    QCoro::connect(std::move(task), this,
-                                   [this, keyword](javelin::app::QueuedMailTagDeletionResult result)
-                                   {
-                                       if (const auto* error =
-                                               std::get_if<javelin::jmap::OperationError>(&result))
-                                       {
-                                           presentError(*error);
-                                           return;
-                                       }
-                                       if (const auto found =
-                                               std::ranges::find(m_quickFilterTags, keyword);
-                                           found != m_quickFilterTags.end())
-                                       {
-                                           m_quickFilterTags.erase(found);
-                                           applyQuickFilter();
-                                       }
-                                       rebuildQuickFilterTagsMenu();
-                                       refreshMessageListPreservingSelection();
-                                       m_statusBar->showMessage(
-                                           i18n("Tag deletion queued in Background Tasks."), 5000);
-                                   });
-                    delete list->takeItem(list->row(item));
-                });
-        dialog.exec();
-    }
-
-    void MainWindow::updateMessageActions()
-    {
-        const auto selectedIds = m_messageSelectionController->selectedEmailIds();
-        const auto accountId = activeAccountId();
-        const auto mailboxId = activeMailboxId();
-        const auto draftsMailbox =
-            accountId.has_value()
-                ? findMailboxByRole(m_mailboxReader, *accountId, "drafts")
-                : std::optional<javelin::jmap::cache::MailboxTreeItem>{std::nullopt};
-        const auto* selectionModel = m_messageView->selectionModel();
-        const bool hasReadSelection =
-            selectionModel != nullptr &&
-            std::ranges::any_of(selectionModel->selectedRows(),
-                                [](const QModelIndex& index) { return !indexIsUnread(index); });
-        const auto* tab = activeTab();
-        const auto actions = messageActionAvailability({
-            .tabKind = tab == nullptr ? std::optional<TabKind>{std::nullopt}
-                                      : std::optional<TabKind>{tabKind(*tab)},
-            .hasAccount = accountId.has_value(),
-            .hasMailbox = mailboxId.has_value(),
-            .selectedCount = selectedIds.size(),
-            .activeMailboxIsDrafts = mailboxId.has_value() && draftsMailbox.has_value() &&
-                                     *mailboxId == draftsMailbox->id,
-            .hasReadSelection = hasReadSelection,
-        });
-
-        m_newMessageAction->setEnabled(actions.newMessage);
-        m_replyAction->setEnabled(actions.reply);
-        m_replyAllAction->setEnabled(actions.replyAll);
-        m_forwardAction->setEnabled(actions.forward);
-        m_editDraftAction->setEnabled(actions.editDraft);
-        m_archiveAction->setEnabled(actions.archive);
-        m_markUnreadAction->setEnabled(actions.markUnread);
-        m_starAction->setEnabled(actions.star);
-        m_starAction->setText(selectedMessagesAreStarred() ? i18nc("@action", "&Unstar")
-                                                           : i18nc("@action", "&Star"));
-        m_junkAction->setEnabled(actions.junk);
-        m_junkAction->setText(selectedMessagesAreJunk() ? i18nc("@action", "Not &Junk")
-                                                        : i18nc("@action", "&Junk"));
-        m_tagsAction->setEnabled(accountId.has_value() &&
-                                 (activeTabIsMailbox() || activeTabIsSearch()));
-        m_deleteAction->setEnabled(actions.deleteFromMailbox);
-        m_permanentDeleteAction->setEnabled(actions.permanentDelete);
-        m_moveAction->setEnabled(actions.move);
-        m_copyAction->setEnabled(actions.copy);
-        m_viewSourceAction->setEnabled(actions.viewSource);
-    }
-
-    bool MainWindow::selectedMessagesAreStarred() const
-    {
-        const auto* selectionModel = m_messageView->selectionModel();
-        if (selectionModel == nullptr)
-        {
-            return false;
-        }
-
-        auto rows = selectionModel->selectedRows();
-        if (rows.empty() && m_messageView->currentIndex().isValid())
-        {
-            rows.push_back(m_messageView->currentIndex());
-        }
-        return !rows.empty() &&
-               std::ranges::all_of(
-                   rows,
-                   [](const QModelIndex& index)
-                   {
-                       return index.data(javelin::gui::messages::MessageListModel::IsFlaggedRole)
-                           .toBool();
-                   });
-    }
-
-    bool MainWindow::selectedMessagesAreJunk() const
-    {
-        const auto* selectionModel = m_messageView->selectionModel();
-        if (selectionModel == nullptr)
-        {
-            return false;
-        }
-
-        auto rows = selectionModel->selectedRows();
-        if (rows.empty() && m_messageView->currentIndex().isValid())
-        {
-            rows.push_back(m_messageView->currentIndex());
-        }
-        return !rows.empty() &&
-               std::ranges::all_of(
-                   rows,
-                   [](const QModelIndex& index)
-                   {
-                       return index.data(javelin::gui::messages::MessageListModel::IsJunkRole)
-                           .toBool();
-                   });
-    }
-
     void MainWindow::updateSortButton()
     {
         if (m_messageSortButton == nullptr)
@@ -3605,146 +2844,8 @@ namespace javelin::gui::shell
         m_messageSortButton->setToolTip(description);
     }
 
-    void MainWindow::setDarkModeEnabled(const bool enabled)
-    {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
-        QGuiApplication::styleHints()->setColorScheme(enabled ? Qt::ColorScheme::Dark
-                                                              : Qt::ColorScheme::Light);
-#else
-#if KCONFIGWIDGETS_VERSION >= QT_VERSION_CHECK(6, 6, 0)
-        auto* colorSchemeManager = KColorSchemeManager::instance();
-#else
-        KColorSchemeManager localColorSchemeManager;
-        auto* colorSchemeManager = &localColorSchemeManager;
-#endif
-        colorSchemeManager->setAutosaveChanges(false);
-        const auto scheme = colorSchemeManager->indexForScheme(
-            enabled ? QStringLiteral("Breeze Dark") : QStringLiteral("Breeze Light"));
-        if (scheme.isValid())
-        {
-            colorSchemeManager->activateScheme(scheme);
-        }
-        else
-        {
-            qCWarning(logGuiTheme) << "Unable to locate Breeze color scheme for dark mode toggle";
-        }
-#endif
-    }
-
-    void MainWindow::updateDarkModeAction()
-    {
-        if (m_darkModeAction == nullptr)
-        {
-            return;
-        }
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
-        const auto colorScheme = QGuiApplication::styleHints()->colorScheme();
-        const bool enabled =
-            colorScheme == Qt::ColorScheme::Dark ||
-            (colorScheme == Qt::ColorScheme::Unknown &&
-             palette().color(QPalette::Active, QPalette::Window).lightness() < 128);
-#else
-        const bool enabled = palette().color(QPalette::Active, QPalette::Window).lightness() < 128;
-#endif
-
-        const QSignalBlocker blocker{m_darkModeAction};
-        m_darkModeAction->setChecked(enabled);
-    }
-
-    void MainWindow::scheduleApplicationPaletteRefresh()
-    {
-        if (m_paletteRefreshPending)
-        {
-            return;
-        }
-
-        m_paletteRefreshPending = true;
-        QTimer::singleShot(0, this,
-                           [this]
-                           {
-                               m_paletteRefreshPending = false;
-                               applyApplicationPalette();
-                           });
-    }
-
-    void MainWindow::applyApplicationPalette()
-    {
-        // Widgets created while the window has a resolved application palette can retain those
-        // roles as explicit state, especially through QStyleSheetStyle. Clear every resolved
-        // widget palette so the hierarchy inherits the new application palette again.
-        const auto descendants = findChildren<QWidget*>();
-        for (auto widget = descendants.crbegin(); widget != descendants.crend(); ++widget)
-        {
-            (*widget)->setPalette(QPalette{});
-        }
-        setPalette(QPalette{});
-
-        updateDarkModeAction();
-        updatePaletteDependentIcons();
-        updateTabBar();
-        m_calendarTabController->applicationPaletteChanged();
-        m_contactsTabController->applicationPaletteChanged();
-        m_mailboxView->viewport()->update();
-        m_messageView->viewport()->update();
-        update();
-    }
-
-    void MainWindow::updatePaletteDependentIcons()
-    {
-        const auto iconColor = palette().color(QPalette::Active, QPalette::Text);
-        const auto icon = [iconColor](const QString& resourcePath)
-        { return javelin::gui::themedSvgIcon(resourcePath, iconColor); };
-
-        m_refreshAction->setIcon(
-            icon(QStringLiteral(":/icons/thunderbird-icons/cloud-download.svg")));
-        m_preferencesAction->setIcon(
-            icon(QStringLiteral(":/icons/thunderbird-icons/settings.svg")));
-        m_newMessageAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/new-mail.svg")));
-        m_replyAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/reply.svg")));
-        m_replyAllAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/reply-all.svg")));
-        m_forwardAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/forward.svg")));
-        m_editDraftAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/draft.svg")));
-        m_archiveAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/archive.svg")));
-        m_markUnreadAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/unread.svg")));
-        m_starAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/star.svg")));
-        m_junkAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/spam.svg")));
-        m_tagsAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/tag.svg")));
-        m_deleteAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/delete.svg")));
-        m_advancedSearchAction->setIcon(
-            icon(QStringLiteral(":/icons/thunderbird-icons/search.svg")));
-
-        m_quickFilterButton->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/filter.svg")));
-        m_quickFilterPinButton->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/pin.svg")));
-        m_quickFilterUnreadButton->setIcon(
-            icon(QStringLiteral(":/icons/thunderbird-icons/unread.svg")));
-        m_quickFilterStarredButton->setIcon(
-            icon(QStringLiteral(":/icons/thunderbird-icons/star.svg")));
-        m_quickFilterContactButton->setIcon(
-            icon(QStringLiteral(":/icons/thunderbird-icons/address-book.svg")));
-        m_quickFilterTagsButton->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/tag.svg")));
-        m_quickFilterAttachmentButton->setIcon(
-            icon(QStringLiteral(":/icons/thunderbird-icons/attachment.svg")));
-        m_messageSortButton->setIcon(
-            icon(QStringLiteral(":/icons/thunderbird-icons/display-options.svg")));
-    }
-
-    void MainWindow::changeEvent(QEvent* event)
-    {
-        KXmlGuiWindow::changeEvent(event);
-        if (event->type() == QEvent::ApplicationPaletteChange)
-        {
-            scheduleApplicationPaletteRefresh();
-        }
-    }
-
     bool MainWindow::eventFilter(QObject* watched, QEvent* event)
     {
-        if (watched == qApp && event->type() == QEvent::ApplicationPaletteChange)
-        {
-            scheduleApplicationPaletteRefresh();
-        }
-
         if (event->type() == QEvent::KeyRelease || event->type() == QEvent::InputMethod ||
             event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut ||
             event->type() == QEvent::MouseButtonRelease)
@@ -3852,89 +2953,6 @@ namespace javelin::gui::shell
         openPreferencesForConnection({});
     }
 
-    void MainWindow::reauthenticateConnection(const QString& connectionId)
-    {
-        javelin::gui::onboarding::FirstRunWizard wizard{m_onboardingPort, m_settings, connectionId,
-                                                        this};
-        if (wizard.exec() != QDialog::Accepted)
-            return;
-
-        const auto accounts = m_settings.accounts();
-        const auto account = std::ranges::find(accounts, connectionId,
-                                               &javelin::gui::settings::ConnectionSettings::id);
-        if (account != accounts.end())
-            m_accountRefreshController->refreshConnection(*account);
-    }
-
-    void MainWindow::updateAuthenticationPrompt(const QString& accountId,
-                                                const javelin::app::MailAccountStatus status)
-    {
-        const auto account = m_settings.accountForCachedId(accountId);
-        if (account.id.isEmpty())
-            return;
-
-        if (status == javelin::app::MailAccountStatus::AuthenticationPaused)
-            m_authenticationRequiredAccountIds.insert(accountId);
-        else
-            m_authenticationRequiredAccountIds.remove(accountId);
-
-        const bool connectionRequiresAuthentication = std::ranges::any_of(
-            account.cachedAccountIds, [this](const QString& cachedAccountId)
-            { return m_authenticationRequiredAccountIds.contains(cachedAccountId); });
-        if (!connectionRequiresAuthentication)
-        {
-            m_authenticationPromptedConnections.remove(account.id);
-            m_pendingAuthenticationPrompts.removeAll(account.id);
-            return;
-        }
-
-        if (m_authenticationPromptedConnections.contains(account.id))
-            return;
-        m_authenticationPromptedConnections.insert(account.id);
-        m_pendingAuthenticationPrompts.push_back(account.id);
-        QTimer::singleShot(0, this, &MainWindow::showNextAuthenticationPrompt);
-    }
-
-    void MainWindow::showNextAuthenticationPrompt()
-    {
-        if (m_authenticationPromptOpen)
-            return;
-        while (!m_pendingAuthenticationPrompts.isEmpty())
-        {
-            const auto connectionId = m_pendingAuthenticationPrompts.takeFirst();
-            const auto accounts = m_settings.accounts();
-            const auto account = std::ranges::find(accounts, connectionId,
-                                                   &javelin::gui::settings::ConnectionSettings::id);
-            if (account == accounts.end())
-                continue;
-            const bool connectionRequiresAuthentication = std::ranges::any_of(
-                account->cachedAccountIds, [this](const QString& accountId)
-                { return m_authenticationRequiredAccountIds.contains(accountId); });
-            if (!connectionRequiresAuthentication)
-                continue;
-
-            const auto accountName =
-                account->displayName.isEmpty() ? account->loginEmail : account->displayName;
-            QMessageBox prompt{
-                QMessageBox::Warning, i18n("Sign in required"),
-                i18n("%1 needs you to sign in again before Javelin can synchronize mail.",
-                     accountName),
-                QMessageBox::NoButton, this};
-            auto* signInButton = prompt.addButton(i18n("Sign In Again"), QMessageBox::AcceptRole);
-            prompt.setDefaultButton(signInButton);
-            prompt.addButton(i18nc("@action:button", "Later"), QMessageBox::RejectRole);
-            m_authenticationPromptOpen = true;
-            prompt.exec();
-            m_authenticationPromptOpen = false;
-            if (prompt.clickedButton() == signInButton)
-                reauthenticateConnection(connectionId);
-            break;
-        }
-
-        if (!m_pendingAuthenticationPrompts.isEmpty())
-            QTimer::singleShot(0, this, &MainWindow::showNextAuthenticationPrompt);
-    }
-
     void MainWindow::openPreferencesForConnection(const QString& connectionId)
     {
         javelin::gui::settings::PreferencesDialog dialog{m_settings,
@@ -4009,87 +3027,6 @@ namespace javelin::gui::shell
         openOrActivateSearchTab(
             *accountId,
             javelin::jmap::search::EmailSearchCriteria{.with = senderEmail.toStdString()}, true);
-    }
-
-    void MainWindow::showMessageListContextMenu(const QPoint& position)
-    {
-        const QModelIndex index = m_messageView->indexAt(position);
-        if (!index.isValid())
-        {
-            return;
-        }
-
-        const auto accountId = activeAccountId();
-        const auto sourceMailboxId = activeMailboxId();
-        const auto clickedEmailId =
-            index.data(javelin::gui::messages::MessageListModel::EmailIdRole)
-                .toString()
-                .toStdString();
-        if (!accountId.has_value() || clickedEmailId.empty())
-        {
-            return;
-        }
-
-        if (!m_messageView->selectionModel()->isSelected(index))
-        {
-            m_messageView->selectionModel()->select(index, QItemSelectionModel::ClearAndSelect |
-                                                               QItemSelectionModel::Rows);
-            m_messageView->setCurrentIndex(index);
-        }
-        updateMessageActions();
-        const auto selection = m_messageCommandController->selectedActionItems();
-        const auto draftsMailbox = findMailboxByRole(m_mailboxReader, *accountId, "drafts");
-        const bool activeMailboxIsDrafts = sourceMailboxId.has_value() &&
-                                           draftsMailbox.has_value() &&
-                                           *sourceMailboxId == draftsMailbox->id;
-
-        QMenu menu{this};
-        if (activeMailboxIsDrafts)
-        {
-            menu.addAction(m_editDraftAction);
-            menu.addSeparator();
-        }
-        menu.addAction(m_viewSourceAction);
-        menu.addAction(m_markUnreadAction);
-        menu.addAction(m_starAction);
-        const auto senderEmail =
-            index.data(javelin::gui::messages::MessageListModel::SenderEmailRole)
-                .toString()
-                .trimmed();
-        if (!senderEmail.isEmpty())
-        {
-            auto* findSenderAction =
-                menu.addAction(i18n("Find all conversations with %1", senderEmail));
-            connect(findSenderAction, &QAction::triggered, this,
-                    [this, index] { findConversationsWithSender(index); });
-        }
-        if (sourceMailboxId.has_value() || activeTabIsSearch())
-        {
-            menu.addSeparator();
-            menu.addAction(m_archiveAction);
-            if (sourceMailboxId.has_value())
-            {
-                menu.addAction(m_deleteAction);
-                menu.addAction(m_permanentDeleteAction);
-            }
-            menu.addAction(m_junkAction);
-            menu.addAction(m_tagsAction);
-            menu.addSeparator();
-            auto* moveMenu = menu.addMenu(i18n("Move to"));
-            auto* copyMenu = menu.addMenu(i18n("Copy to"));
-            m_messageCommandController->populateDestinationMenus(moveMenu, copyMenu, *accountId,
-                                                                 sourceMailboxId, selection);
-            if (moveMenu->actions().empty())
-            {
-                moveMenu->setEnabled(false);
-            }
-            if (copyMenu->actions().empty())
-            {
-                copyMenu->setEnabled(false);
-            }
-        }
-
-        menu.exec(m_messageView->viewport()->mapToGlobal(position));
     }
 
     void MainWindow::showMailboxContextMenu(const QPoint& position)
@@ -4350,11 +3287,10 @@ namespace javelin::gui::shell
         if (!state.splitterState.isEmpty())
             m_mainSplitter->restoreState(state.splitterState);
 
-        m_emailListSort = state.emailListSort;
+        m_mailWorkspaceController->setSort(state.emailListSort);
         updateSortButton();
 
-        m_tabs.clear();
-        m_tabs.reserve(state.tabs.size());
+        m_mailWorkspaceController->prepareRestore(state.tabs.size());
         std::vector<std::optional<int>> restoredTabIndices;
         restoredTabIndices.reserve(state.tabs.size());
         for (auto& tab : state.tabs)
@@ -4405,8 +3341,8 @@ namespace javelin::gui::shell
             return;
         }
 
-        m_activeTabIndex =
-            resolveRestoredActiveTabIndex(state.activeTabIndex, restoredTabIndices).value_or(0);
+        m_mailWorkspaceController->setActiveIndex(
+            resolveRestoredActiveTabIndex(state.activeTabIndex, restoredTabIndices).value_or(0));
         updateTabBar();
         activateTab(*m_activeTabIndex, false);
     }
@@ -4414,7 +3350,7 @@ namespace javelin::gui::shell
     void MainWindow::restoreMailboxTab(const PersistedMailboxTab& tab)
     {
         auto plan = planMailboxTabRestore(tab);
-        auto restoredTab = m_messageListTabController->createMailboxTab({
+        const auto index = m_mailWorkspaceController->restoreMailbox({
             .accountId = std::move(plan.accountId),
             .mailboxId = std::move(plan.mailboxId),
             .title = std::move(plan.title),
@@ -4422,21 +3358,19 @@ namespace javelin::gui::shell
             .sort = m_emailListSort,
             .restored = std::move(plan.restored),
         });
-        tabSelection(restoredTab) = std::move(plan.selection);
-        m_tabs.push_back(std::move(restoredTab));
+        tabSelection(m_tabs[static_cast<std::size_t>(index)]) = std::move(plan.selection);
     }
 
     void MainWindow::restoreSearchTab(PersistedSearchTab tab)
     {
         auto plan = planSearchTabRestore(std::move(tab));
-        auto restoredTab = m_messageListTabController->createSearchTab({
+        const auto index = m_mailWorkspaceController->restoreSearch({
             .accountId = std::move(plan.accountId),
             .criteria = std::move(plan.criteria),
             .sort = m_emailListSort,
             .restored = std::move(plan.restored),
         });
-        tabSelection(restoredTab) = std::move(plan.selection);
-        m_tabs.push_back(std::move(restoredTab));
+        tabSelection(m_tabs[static_cast<std::size_t>(index)]) = std::move(plan.selection);
     }
 
     void MainWindow::restoreComposeTab(const PersistedComposeTab& tab)

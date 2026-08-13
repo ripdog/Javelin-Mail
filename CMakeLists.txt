@@ -488,12 +488,22 @@ set(JAVELIN_FORMAT_FILES
     src/gui/settings/ConnectionSettingsAdapter.h
     src/gui/shell/AccountRefreshController.cpp
     src/gui/shell/AccountRefreshController.h
+    src/gui/shell/AuthenticationPromptCoordinator.cpp
+    src/gui/shell/AuthenticationPromptCoordinator.h
     src/gui/shell/MessageContentController.cpp
     src/gui/shell/MessageContentController.h
     src/gui/shell/MessageContentPolicy.cpp
     src/gui/shell/MessageContentPolicy.h
     src/gui/shell/MessageSelectionController.cpp
     src/gui/shell/MessageSelectionController.h
+    src/gui/shell/QuickFilterController.cpp
+    src/gui/shell/QuickFilterController.h
+    src/gui/shell/MailActionController.cpp
+    src/gui/shell/MailActionController.h
+    src/gui/shell/MailWorkspaceController.cpp
+    src/gui/shell/MailWorkspaceController.h
+    src/gui/shell/ThemeController.cpp
+    src/gui/shell/ThemeController.h
     src/jmap/api/Error.cpp
     src/jmap/api/Error.h
     src/jmap/api/ContactsMethods.cpp
@@ -1251,12 +1261,22 @@ add_library(javelin_gui STATIC
     src/gui/settings/ConnectionSettingsAdapter.h
     src/gui/shell/AccountRefreshController.cpp
     src/gui/shell/AccountRefreshController.h
+    src/gui/shell/AuthenticationPromptCoordinator.cpp
+    src/gui/shell/AuthenticationPromptCoordinator.h
     src/gui/shell/MessageContentController.cpp
     src/gui/shell/MessageContentController.h
     src/gui/shell/MessageContentPolicy.cpp
     src/gui/shell/MessageContentPolicy.h
     src/gui/shell/MessageSelectionController.cpp
     src/gui/shell/MessageSelectionController.h
+    src/gui/shell/QuickFilterController.cpp
+    src/gui/shell/QuickFilterController.h
+    src/gui/shell/MailActionController.cpp
+    src/gui/shell/MailActionController.h
+    src/gui/shell/MailWorkspaceController.cpp
+    src/gui/shell/MailWorkspaceController.h
+    src/gui/shell/ThemeController.cpp
+    src/gui/shell/ThemeController.h
     src/gui/sieve/SieveEditorDialog.cpp
     src/gui/sieve/SieveEditorDialog.h
     src/gui/tasks/TaskCenterDialog.cpp
@@ -1304,6 +1324,23 @@ foreach(gui_source IN LISTS javelin_gui_boundary_sources)
        gui_source_contents MATCHES "#include \"app/(DaemonServices|ProcessServices|WorkScheduler|MessageNavigationCoordinator)\\.h\"" OR
        gui_source_contents MATCHES "javelin::app::(DaemonServices|ProcessServices|WorkScheduler|MessageNavigationCoordinator|UndoManager)")
         message(FATAL_ERROR "GUI boundary violation in ${gui_source}")
+    endif()
+endforeach()
+
+set(javelin_main_window_shell_sources
+    src/gui/shell/MainWindow.cpp
+    src/gui/shell/MainWindow.h
+)
+foreach(main_window_source IN LISTS javelin_main_window_shell_sources)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${main_window_source}" main_window_source_contents)
+    if(main_window_source_contents MATCHES
+           "quickFilterPinned|pinnedQuickFilter|lastQuickFilter|authenticationRequiredAccount|authenticationPromptOpen|paletteRefreshPending" OR
+       main_window_source_contents MATCHES
+           "javelin::jmap::cache::ContactReader|javelin::jmap::calendar::CalendarReader|javelin::app::(CalendarCommandPort|ContactCommandPort|ComposeCommandPort)" OR
+       main_window_source_contents MATCHES
+           "setSelectionFlagged|setSelectionJunk|markSelectionUnread|archiveSelection|populateDestinationMenus|saveTagDefinition|listEmailKeywordMemberships")
+        message(FATAL_ERROR
+                "MainWindow must remain a shell; feature policy belongs in focused GUI controllers: ${main_window_source}")
     endif()
 endforeach()
 

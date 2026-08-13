@@ -87,6 +87,7 @@ namespace javelin::gui::shell
         void populateRemoveFromGroupMenu(const TabState* tab, QMenu& menu) const;
         void populateAddressBookMenu(const TabState* tab, QMenu& menu) const;
         [[nodiscard]] ContactsToolbarState toolbarState(const TabState* tab) const;
+        [[nodiscard]] bool available() const;
         [[nodiscard]] bool refresh(const TabState* tab);
         [[nodiscard]] bool close(TabState& tab);
         [[nodiscard]] QWidget* contentWidgetForTab(const TabState* tab) const;

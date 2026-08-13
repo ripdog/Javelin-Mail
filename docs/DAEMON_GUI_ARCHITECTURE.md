@@ -1013,6 +1013,12 @@ They consume:
 - cache invalidations; and
 - transient daemon status interfaces.
 
+Within the GUI process, `MainWindow` is a KXMLGUI shell rather than the owner of feature policy.
+Workspace/list-session state, quick filters, mail actions/tags, authentication prompting, and theme
+state are owned by focused controllers. The GUI bootstrap remains the composition root for concrete
+compose, contacts, and calendar dependencies and supplies those feature controllers through typed
+factories; the shell is not given `GuiServices&` or the feature command ports themselves.
+
 ## Implementation sequence
 
 ### 1. Define typed process-boundary interfaces in-process
