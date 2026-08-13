@@ -1,4 +1,7 @@
-#include "jmap/calendar/CalendarService.h"
+#include "jmap/calendar/CalendarCacheReader.h"
+#include "jmap/calendar/CalendarMutationEngine.h"
+#include "jmap/calendar/CalendarProtocolClient.h"
+#include "jmap/calendar/CalendarSyncEngine.h"
 
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/cache/SessionRepository.h"
@@ -140,7 +143,10 @@ TEST_CASE("calendar subscriptions project and reconcile server outcomes",
     };
     REQUIRE_FALSE(calendars.replaceCalendars("a1", "c1", {work}).has_value());
     FakeMethodTransport transport;
-    javelin::jmap::calendar::CalendarService service{connection, transport};
+    javelin::jmap::calendar::CalendarCacheReader reader{connection};
+    javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
+    javelin::jmap::calendar::CalendarSyncEngine sync{connection, protocol};
+    javelin::jmap::calendar::CalendarMutationEngine mutation{connection, protocol, sync, reader};
     const javelin::jmap::LiveConnectionSettings settings{
         .sessionUrl = "https://example.test/.well-known/jmap",
         .loginEmail = "alice@example.test",
@@ -168,7 +174,7 @@ TEST_CASE("calendar subscriptions project and reconcile server outcomes",
         transport.beforeReturn = [&subscribed] { CHECK_FALSE(subscribed()); };
 
         const auto result =
-            QCoro::waitFor(service.setCalendarSubscribed(settings, "a1", "a1", "work", false));
+            QCoro::waitFor(mutation.setCalendarSubscribed(settings, "a1", "a1", "work", false));
 
         REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
         CHECK_FALSE(subscribed());
@@ -190,7 +196,7 @@ TEST_CASE("calendar subscriptions project and reconcile server outcomes",
         transport.beforeReturn = [&subscribed] { CHECK_FALSE(subscribed()); };
 
         const auto result =
-            QCoro::waitFor(service.setCalendarSubscribed(settings, "a1", "a1", "work", false));
+            QCoro::waitFor(mutation.setCalendarSubscribed(settings, "a1", "a1", "work", false));
 
         REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
         CHECK(subscribed());
@@ -204,7 +210,7 @@ TEST_CASE("calendar subscriptions project and reconcile server outcomes",
         });
 
         const auto result =
-            QCoro::waitFor(service.setCalendarSubscribed(settings, "a1", "a1", "work", false));
+            QCoro::waitFor(mutation.setCalendarSubscribed(settings, "a1", "a1", "work", false));
 
         REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
         CHECK_FALSE(subscribed());
@@ -231,7 +237,7 @@ TEST_CASE("calendar subscriptions project and reconcile server outcomes",
                   .callId = "calendar-base-event-query"}},
             .createdIds = std::nullopt,
             .sessionState = "s3"});
-        const auto refreshed = QCoro::waitFor(service.refresh(
+        const auto refreshed = QCoro::waitFor(sync.refresh(
             settings, "a1",
             {.start = {.value = "2026-08-01T00:00:00"}, .end = {.value = "2026-09-01T00:00:00"}},
             {.value = "Pacific/Auckland"}));
@@ -281,7 +287,10 @@ TEST_CASE("calendar manager mutations project, reconcile, and preserve uncertain
     };
     REQUIRE_FALSE(calendars.replaceCalendars("a1", "c1", {work}).has_value());
     FakeMethodTransport transport;
-    javelin::jmap::calendar::CalendarService service{connection, transport};
+    javelin::jmap::calendar::CalendarCacheReader reader{connection};
+    javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
+    javelin::jmap::calendar::CalendarSyncEngine sync{connection, protocol};
+    javelin::jmap::calendar::CalendarMutationEngine mutation{connection, protocol, sync, reader};
     const javelin::jmap::LiveConnectionSettings settings{
         .sessionUrl = "https://example.test/.well-known/jmap",
         .loginEmail = "alice@example.test",
@@ -302,7 +311,7 @@ TEST_CASE("calendar manager mutations project, reconcile, and preserve uncertain
         CHECK(std::ranges::find(projected, "Projects", &javelin::jmap::calendar::Calendar::name) !=
               projected.end());
     };
-    auto created = QCoro::waitFor(service.createCalendar(
+    auto created = QCoro::waitFor(mutation.createCalendar(
         settings, "a1", {.accountId = "a1", .name = "Projects", .color = "#336699"}));
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(created));
     CHECK(std::get<javelin::jmap::calendar::CommittedMutation>(created).createdId ==
@@ -316,7 +325,7 @@ TEST_CASE("calendar manager mutations project, reconcile, and preserve uncertain
               .callId = "calendar-set-manager"}},
         .createdIds = std::nullopt,
         .sessionState = "s3"});
-    const auto rejectedCreate = QCoro::waitFor(service.createCalendar(
+    const auto rejectedCreate = QCoro::waitFor(mutation.createCalendar(
         settings, "a1", {.accountId = "a1", .name = "Rejected", .color = std::nullopt}));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(rejectedCreate));
     auto listed = calendars.listCalendars("a1");
@@ -339,7 +348,7 @@ TEST_CASE("calendar manager mutations project, reconcile, and preserve uncertain
                                 "work", &javelin::jmap::calendar::Calendar::id) ==
               std::get<std::vector<javelin::jmap::calendar::Calendar>>(projected).end());
     };
-    const auto rejectedDelete = QCoro::waitFor(service.deleteCalendar(
+    const auto rejectedDelete = QCoro::waitFor(mutation.deleteCalendar(
         settings, "a1", {.accountId = "a1", .calendarId = "work", .removeEvents = true}));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(rejectedDelete));
     listed = calendars.listCalendars("a1");
@@ -351,7 +360,7 @@ TEST_CASE("calendar manager mutations project, reconcile, and preserve uncertain
         .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
         .message = "Connection closed after Calendar/set dispatch",
     });
-    const auto uncertainDelete = QCoro::waitFor(service.deleteCalendar(
+    const auto uncertainDelete = QCoro::waitFor(mutation.deleteCalendar(
         settings, "a1", {.accountId = "a1", .calendarId = "work", .removeEvents = true}));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(uncertainDelete));
     listed = calendars.listCalendars("a1");
@@ -364,7 +373,7 @@ TEST_CASE("calendar manager mutations project, reconcile, and preserve uncertain
     REQUIRE(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(active).size() == 1);
     CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(active).front().status ==
           javelin::jmap::sync::MutationStatus::Unknown);
-    const auto duplicate = QCoro::waitFor(service.createCalendar(
+    const auto duplicate = QCoro::waitFor(mutation.createCalendar(
         settings, "a1", {.accountId = "a1", .name = "Duplicate", .color = std::nullopt}));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(duplicate));
     CHECK(std::get<javelin::jmap::OperationError>(duplicate).code ==
@@ -461,19 +470,22 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
                   .front()
                   .status == javelin::jmap::sync::MutationStatus::InFlight);
     };
-    javelin::jmap::calendar::CalendarService service{connection, transport};
+    javelin::jmap::calendar::CalendarCacheReader reader{connection};
+    javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
+    javelin::jmap::calendar::CalendarSyncEngine sync{connection, protocol};
+    javelin::jmap::calendar::CalendarMutationEngine mutation{connection, protocol, sync, reader};
     std::size_t projectionNotifications = 0;
     const auto result =
-        QCoro::waitFor(service.update({.sessionUrl = "https://example.test/.well-known/jmap",
-                                       .loginEmail = "alice@example.test",
-                                       .apiKey = "secret"},
-                                      "a1",
-                                      {.accountId = "a1",
-                                       .event = event(),
-                                       .operationGroupId = std::nullopt,
-                                       .ifInState = std::nullopt,
-                                       .materialization = std::nullopt},
-                                      [&projectionNotifications] { ++projectionNotifications; }));
+        QCoro::waitFor(mutation.update({.sessionUrl = "https://example.test/.well-known/jmap",
+                                        .loginEmail = "alice@example.test",
+                                        .apiKey = "secret"},
+                                       "a1",
+                                       {.accountId = "a1",
+                                        .event = event(),
+                                        .operationGroupId = std::nullopt,
+                                        .ifInState = std::nullopt,
+                                        .materialization = std::nullopt},
+                                       [&projectionNotifications] { ++projectionNotifications; }));
 
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
     CHECK(projectionNotifications == 2);
@@ -494,16 +506,16 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
 
     transport.request.reset();
     const auto noOpUpdate =
-        QCoro::waitFor(service.update({.sessionUrl = "https://example.test/.well-known/jmap",
-                                       .loginEmail = "alice@example.test",
-                                       .apiKey = "secret"},
-                                      "a1",
-                                      {.accountId = "a1",
-                                       .event = event(),
-                                       .operationGroupId = std::nullopt,
-                                       .ifInState = std::nullopt,
-                                       .materialization = std::nullopt},
-                                      [&projectionNotifications] { ++projectionNotifications; }));
+        QCoro::waitFor(mutation.update({.sessionUrl = "https://example.test/.well-known/jmap",
+                                        .loginEmail = "alice@example.test",
+                                        .apiKey = "secret"},
+                                       "a1",
+                                       {.accountId = "a1",
+                                        .event = event(),
+                                        .operationGroupId = std::nullopt,
+                                        .ifInState = std::nullopt,
+                                        .materialization = std::nullopt},
+                                       [&projectionNotifications] { ++projectionNotifications; }));
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(noOpUpdate));
     CHECK_FALSE(transport.request.has_value());
     CHECK(projectionNotifications == 2);
@@ -520,7 +532,7 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
               .callId = "calendar-event-changes"}},
         .createdIds = std::nullopt,
         .sessionState = "session-3"});
-    const auto unchanged = QCoro::waitFor(service.refreshChanged(
+    const auto unchanged = QCoro::waitFor(sync.refreshChanged(
         {.sessionUrl = "https://example.test/.well-known/jmap",
          .loginEmail = "alice@example.test",
          .apiKey = "secret"},
@@ -562,7 +574,7 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
               .callId = "changed-calendar-events"}},
         .createdIds = std::nullopt,
         .sessionState = "session-5"});
-    const auto changed = QCoro::waitFor(service.refreshChanged(
+    const auto changed = QCoro::waitFor(sync.refreshChanged(
         {.sessionUrl = "https://example.test/.well-known/jmap",
          .loginEmail = "alice@example.test",
          .apiKey = "secret"},
@@ -618,9 +630,9 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     const javelin::jmap::calendar::TimeZoneId zone{.value = "Pacific/Auckland"};
     std::optional<javelin::jmap::calendar::CalendarRefreshResult> newerRefresh;
     transport.beforeReturn = [&]
-    { newerRefresh = QCoro::waitFor(service.refreshChanged(settings, "a1", interval, zone)); };
+    { newerRefresh = QCoro::waitFor(sync.refreshChanged(settings, "a1", interval, zone)); };
 
-    const auto superseded = QCoro::waitFor(service.refreshChanged(settings, "a1", interval, zone));
+    const auto superseded = QCoro::waitFor(sync.refreshChanged(settings, "a1", interval, zone));
 
     REQUIRE(newerRefresh.has_value());
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(*newerRefresh));
@@ -677,7 +689,7 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     transport.results.push_back(
         getResponse("calendar-base-event-get", "base-2", "base-uid-2", "2026-07-21T09:00:00"));
 
-    const auto batched = QCoro::waitFor(service.refresh(settings, "a1", interval, zone));
+    const auto batched = QCoro::waitFor(sync.refresh(settings, "a1", interval, zone));
 
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(batched));
     CHECK(std::get<javelin::jmap::calendar::RefreshedRange>(batched).eventCount == 2);
@@ -721,12 +733,12 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
 
     auto forbiddenEvent = event();
     forbiddenEvent.title = "Forbidden update";
-    const auto forbidden = QCoro::waitFor(service.update(settings, "a1",
-                                                         {.accountId = "a1",
-                                                          .event = std::move(forbiddenEvent),
-                                                          .operationGroupId = std::nullopt,
-                                                          .ifInState = std::nullopt,
-                                                          .materialization = std::nullopt}));
+    const auto forbidden = QCoro::waitFor(mutation.update(settings, "a1",
+                                                          {.accountId = "a1",
+                                                           .event = std::move(forbiddenEvent),
+                                                           .operationGroupId = std::nullopt,
+                                                           .ifInState = std::nullopt,
+                                                           .materialization = std::nullopt}));
 
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(forbidden));
     CHECK(std::get<javelin::jmap::OperationError>(forbidden).code ==
@@ -743,12 +755,12 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     scheduledEvent.id.clear();
     scheduledEvent.uid.clear();
 
-    const auto scheduling = QCoro::waitFor(service.create(settings, "a1",
-                                                          {.accountId = "a1",
-                                                           .event = scheduledEvent,
-                                                           .operationGroupId = std::nullopt,
-                                                           .ifInState = std::nullopt,
-                                                           .materialization = std::nullopt}));
+    const auto scheduling = QCoro::waitFor(mutation.create(settings, "a1",
+                                                           {.accountId = "a1",
+                                                            .event = scheduledEvent,
+                                                            .operationGroupId = std::nullopt,
+                                                            .ifInState = std::nullopt,
+                                                            .materialization = std::nullopt}));
 
     REQUIRE_FALSE(transport.requests.empty());
     REQUIRE(transport.requests.back().envelope.methodCalls.size() == 1);
@@ -787,12 +799,12 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     uncertainEvent.title = "Uncertain";
     uncertainEvent.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
     uncertainEvent.recurrenceRule->count = 3;
-    const auto uncertain = QCoro::waitFor(service.update(settings, "a1",
-                                                         {.accountId = "a1",
-                                                          .event = uncertainEvent,
-                                                          .operationGroupId = std::nullopt,
-                                                          .ifInState = std::nullopt,
-                                                          .materialization = std::nullopt}));
+    const auto uncertain = QCoro::waitFor(mutation.update(settings, "a1",
+                                                          {.accountId = "a1",
+                                                           .event = uncertainEvent,
+                                                           .operationGroupId = std::nullopt,
+                                                           .ifInState = std::nullopt,
+                                                           .materialization = std::nullopt}));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(uncertain));
     const auto uncertainCached = calendars.findEvent("a1", "event-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(
@@ -844,7 +856,7 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
         .createdIds = std::nullopt,
         .sessionState = "session-stale-base"});
 
-    const auto staleRefresh = QCoro::waitFor(service.refresh(settings, "a1", interval, zone));
+    const auto staleRefresh = QCoro::waitFor(sync.refresh(settings, "a1", interval, zone));
 
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(staleRefresh));
     const auto rebasedWindow = calendars.loadWindow("a1", interval.start, interval.end, zone);
@@ -881,7 +893,7 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
         calendars.replaceCalendars("a1", "calendar-with-read-only", calendarDocuments).has_value());
 
     const auto readOnlyDefault =
-        QCoro::waitFor(service.setDefaultCalendar(settings, "a1", "a1", "read-only"));
+        QCoro::waitFor(mutation.setDefaultCalendar(settings, "a1", "a1", "read-only"));
 
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(readOnlyDefault));
     CHECK(std::get<javelin::jmap::OperationError>(readOnlyDefault).code ==
@@ -904,7 +916,7 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
         .createdIds = std::nullopt,
         .sessionState = "session-calendar-default-verified"});
     const auto changedDefault =
-        QCoro::waitFor(service.setDefaultCalendar(settings, "a1", "a1", "personal"));
+        QCoro::waitFor(mutation.setDefaultCalendar(settings, "a1", "a1", "personal"));
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(changedDefault));
     REQUIRE(transport.requests.size() >= 2);
     const auto& setDefaultRequest = transport.requests[transport.requests.size() - 2];
@@ -948,7 +960,7 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
         .createdIds = std::nullopt,
         .sessionState = "session-calendar-default-ignored-verification"});
     const auto ignoredDefault =
-        QCoro::waitFor(service.setDefaultCalendar(settings, "a1", "a1", "work"));
+        QCoro::waitFor(mutation.setDefaultCalendar(settings, "a1", "a1", "work"));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(ignoredDefault));
     CHECK(std::get<javelin::jmap::OperationError>(ignoredDefault).code ==
           javelin::jmap::OperationErrorCode::PermissionDenied);
@@ -958,7 +970,7 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
         .message = "Connection closed after Calendar/set dispatch",
     });
     const auto uncertainDefault =
-        QCoro::waitFor(service.setDefaultCalendar(settings, "a1", "a1", "work"));
+        QCoro::waitFor(mutation.setDefaultCalendar(settings, "a1", "a1", "work"));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(uncertainDefault));
     javelin::jmap::sync::MutationJournalRepository genericJournal{connection};
     const auto activeDefaults =
@@ -970,7 +982,7 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
         std::get<std::vector<javelin::jmap::sync::MutationRecord>>(activeDefaults).front().status ==
         javelin::jmap::sync::MutationStatus::Unknown);
     const auto duplicateDefault =
-        QCoro::waitFor(service.setDefaultCalendar(settings, "a1", "a1", "work"));
+        QCoro::waitFor(mutation.setDefaultCalendar(settings, "a1", "a1", "work"));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(duplicateDefault));
     CHECK(std::get<javelin::jmap::OperationError>(duplicateDefault).code ==
           javelin::jmap::OperationErrorCode::Conflict);
@@ -992,7 +1004,7 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
         .createdIds = std::nullopt,
         .sessionState = "session-calendar-default-resolved"});
 
-    const auto resolvedDefault = QCoro::waitFor(service.refresh(settings, "a1", interval, zone));
+    const auto resolvedDefault = QCoro::waitFor(sync.refresh(settings, "a1", interval, zone));
 
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(resolvedDefault));
     const auto activeAfterResolution =
@@ -1096,7 +1108,10 @@ TEST_CASE("calendar invitation responses use participant identities and RSVP rig
             .has_value());
 
     FakeMethodTransport transport;
-    javelin::jmap::calendar::CalendarService service{connection, transport};
+    javelin::jmap::calendar::CalendarCacheReader reader{connection};
+    javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
+    javelin::jmap::calendar::CalendarSyncEngine sync{connection, protocol};
+    javelin::jmap::calendar::CalendarMutationEngine mutation{connection, protocol, sync, reader};
     const javelin::jmap::LiveConnectionSettings settings{
         .sessionUrl = "https://example.test/.well-known/jmap",
         .loginEmail = "alice@example.test",
@@ -1132,14 +1147,14 @@ TEST_CASE("calendar invitation responses use participant identities and RSVP rig
         });
         std::size_t projectionNotifications = 0;
 
-        const auto result = QCoro::waitFor(service.respond(settings, "a1",
-                                                           {.accountId = "a1",
-                                                            .eventId = "event-1",
-                                                            .participationStatus = "accepted",
-                                                            .ifInState = std::nullopt,
-                                                            .materialization = std::nullopt},
-                                                           [&projectionNotifications]
-                                                           { ++projectionNotifications; }));
+        const auto result = QCoro::waitFor(mutation.respond(settings, "a1",
+                                                            {.accountId = "a1",
+                                                             .eventId = "event-1",
+                                                             .participationStatus = "accepted",
+                                                             .ifInState = std::nullopt,
+                                                             .materialization = std::nullopt},
+                                                            [&projectionNotifications]
+                                                            { ++projectionNotifications; }));
 
         REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
         CHECK(projectionNotifications == 2);
@@ -1172,12 +1187,12 @@ TEST_CASE("calendar invitation responses use participant identities and RSVP rig
             .sessionState = "session-rsvp-rejected",
         });
 
-        const auto result = QCoro::waitFor(service.respond(settings, "a1",
-                                                           {.accountId = "a1",
-                                                            .eventId = "event-1",
-                                                            .participationStatus = "declined",
-                                                            .ifInState = std::nullopt,
-                                                            .materialization = std::nullopt}));
+        const auto result = QCoro::waitFor(mutation.respond(settings, "a1",
+                                                            {.accountId = "a1",
+                                                             .eventId = "event-1",
+                                                             .participationStatus = "declined",
+                                                             .ifInState = std::nullopt,
+                                                             .materialization = std::nullopt}));
 
         REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
         CHECK(std::get<javelin::jmap::OperationError>(result).code ==
@@ -1200,12 +1215,12 @@ TEST_CASE("calendar invitation responses use participant identities and RSVP rig
             .message = "Connection closed after dispatch",
         });
 
-        const auto result = QCoro::waitFor(service.respond(settings, "a1",
-                                                           {.accountId = "a1",
-                                                            .eventId = "event-1",
-                                                            .participationStatus = "tentative",
-                                                            .ifInState = std::nullopt,
-                                                            .materialization = std::nullopt}));
+        const auto result = QCoro::waitFor(mutation.respond(settings, "a1",
+                                                            {.accountId = "a1",
+                                                             .eventId = "event-1",
+                                                             .participationStatus = "tentative",
+                                                             .ifInState = std::nullopt,
+                                                             .materialization = std::nullopt}));
 
         REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
         const auto cached = calendars.findEvent("a1", "event-1");
@@ -1261,12 +1276,12 @@ TEST_CASE("calendar invitation responses use participant identities and RSVP rig
             REQUIRE_FALSE(cacheError.has_value());
         };
 
-        const auto result = QCoro::waitFor(service.respond(settings, "a1",
-                                                           {.accountId = "a1",
-                                                            .eventId = "event-1",
-                                                            .participationStatus = "accepted",
-                                                            .ifInState = std::nullopt,
-                                                            .materialization = std::nullopt}));
+        const auto result = QCoro::waitFor(mutation.respond(settings, "a1",
+                                                            {.accountId = "a1",
+                                                             .eventId = "event-1",
+                                                             .participationStatus = "accepted",
+                                                             .ifInState = std::nullopt,
+                                                             .materialization = std::nullopt}));
 
         REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
         REQUIRE(transport.requests.size() == 2);
@@ -1288,12 +1303,12 @@ TEST_CASE("calendar invitation responses use participant identities and RSVP rig
     {
         transport.results.push_back(identityResponse("mailto:other@example.test"));
 
-        const auto result = QCoro::waitFor(service.respond(settings, "a1",
-                                                           {.accountId = "a1",
-                                                            .eventId = "event-1",
-                                                            .participationStatus = "accepted",
-                                                            .ifInState = std::nullopt,
-                                                            .materialization = std::nullopt}));
+        const auto result = QCoro::waitFor(mutation.respond(settings, "a1",
+                                                            {.accountId = "a1",
+                                                             .eventId = "event-1",
+                                                             .participationStatus = "accepted",
+                                                             .ifInState = std::nullopt,
+                                                             .materialization = std::nullopt}));
 
         REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
         CHECK(std::get<javelin::jmap::OperationError>(result).code ==
@@ -1307,12 +1322,12 @@ TEST_CASE("calendar invitation responses use participant identities and RSVP rig
         noRsvp.myRights.mayRSVP = false;
         REQUIRE_FALSE(calendars.replaceCalendars("a1", "calendar-state-2", {noRsvp}).has_value());
 
-        const auto result = QCoro::waitFor(service.respond(settings, "a1",
-                                                           {.accountId = "a1",
-                                                            .eventId = "event-1",
-                                                            .participationStatus = "accepted",
-                                                            .ifInState = std::nullopt,
-                                                            .materialization = std::nullopt}));
+        const auto result = QCoro::waitFor(mutation.respond(settings, "a1",
+                                                            {.accountId = "a1",
+                                                             .eventId = "event-1",
+                                                             .participationStatus = "accepted",
+                                                             .ifInState = std::nullopt,
+                                                             .materialization = std::nullopt}));
 
         REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
         CHECK(std::get<javelin::jmap::OperationError>(result).code ==
@@ -1324,12 +1339,12 @@ TEST_CASE("calendar invitation responses use participant identities and RSVP rig
     {
         auto renamed = invitation;
         renamed.title = "Not my meeting";
-        const auto forbidden = QCoro::waitFor(service.update(settings, "a1",
-                                                             {.accountId = "a1",
-                                                              .event = renamed,
-                                                              .operationGroupId = std::nullopt,
-                                                              .ifInState = std::nullopt,
-                                                              .materialization = std::nullopt}));
+        const auto forbidden = QCoro::waitFor(mutation.update(settings, "a1",
+                                                              {.accountId = "a1",
+                                                               .event = renamed,
+                                                               .operationGroupId = std::nullopt,
+                                                               .ifInState = std::nullopt,
+                                                               .materialization = std::nullopt}));
         REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(forbidden));
         CHECK(std::get<javelin::jmap::OperationError>(forbidden).code ==
               javelin::jmap::OperationErrorCode::PermissionDenied);
@@ -1346,12 +1361,12 @@ TEST_CASE("calendar invitation responses use participant identities and RSVP rig
         });
         auto privateUpdate = invitation;
         privateUpdate.useDefaultAlerts = true;
-        const auto allowed = QCoro::waitFor(service.update(settings, "a1",
-                                                           {.accountId = "a1",
-                                                            .event = std::move(privateUpdate),
-                                                            .operationGroupId = std::nullopt,
-                                                            .ifInState = std::nullopt,
-                                                            .materialization = std::nullopt}));
+        const auto allowed = QCoro::waitFor(mutation.update(settings, "a1",
+                                                            {.accountId = "a1",
+                                                             .event = std::move(privateUpdate),
+                                                             .operationGroupId = std::nullopt,
+                                                             .ifInState = std::nullopt,
+                                                             .materialization = std::nullopt}));
         REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(allowed));
         REQUIRE(transport.requests.size() == 1);
         CHECK(transport.requests.front().envelope.methodCalls.front().arguments.find(
@@ -1423,15 +1438,18 @@ TEST_CASE("calendar refresh recovers a recurring base omitted by the bounded bas
         .createdIds = std::nullopt,
         .sessionState = "session-water-recovery-get"});
 
-    javelin::jmap::calendar::CalendarService service{connection, transport};
+    javelin::jmap::calendar::CalendarCacheReader reader{connection};
+    javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
+    javelin::jmap::calendar::CalendarSyncEngine sync{connection, protocol};
+    javelin::jmap::calendar::CalendarMutationEngine mutation{connection, protocol, sync, reader};
     const javelin::jmap::calendar::VisibleInterval interval{
         .start = {.value = "2026-06-29T00:00:00"}, .end = {.value = "2026-08-10T00:00:00"}};
     const javelin::jmap::calendar::TimeZoneId zone{.value = "Pacific/Auckland"};
     const auto refreshed =
-        QCoro::waitFor(service.refresh({.sessionUrl = "https://example.test/.well-known/jmap",
-                                        .loginEmail = "alice@example.test",
-                                        .apiKey = "secret"},
-                                       "a1", interval, zone));
+        QCoro::waitFor(sync.refresh({.sessionUrl = "https://example.test/.well-known/jmap",
+                                     .loginEmail = "alice@example.test",
+                                     .apiKey = "secret"},
+                                    "a1", interval, zone));
 
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(refreshed));
     javelin::jmap::cache::CalendarRepository calendars{connection};

@@ -15,7 +15,7 @@ namespace javelin::jmap::cache
 
 namespace javelin::jmap::contacts
 {
-    class ContactService;
+    class ContactSyncEngine;
 }
 
 namespace javelin::app
@@ -30,7 +30,7 @@ namespace javelin::app
 
       public:
         ContactApplicationService(javelin::jmap::cache::ContactRepository& contactRepository,
-                                  javelin::jmap::contacts::ContactService& contactService,
+                                  javelin::jmap::contacts::ContactSyncEngine& syncEngine,
                                   AccountRuntimeManager& accountRuntime,
                                   ApplicationErrorCoordinator& errorCoordinator,
                                   WorkScheduler& workScheduler, QObject* parent = nullptr);
@@ -48,7 +48,7 @@ namespace javelin::app
         void pumpRefreshes();
         [[nodiscard]] QCoro::Task<void> runRefresh(std::string ownerAccountId, std::string jobId);
 
-        javelin::jmap::contacts::ContactService& m_contactService;
+        javelin::jmap::contacts::ContactSyncEngine& m_contactSyncEngine;
         AccountRuntimeManager& m_accountRuntime;
         ApplicationErrorCoordinator& m_errorCoordinator;
         WorkScheduler& m_workScheduler;

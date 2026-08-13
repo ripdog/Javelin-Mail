@@ -1,49 +1,38 @@
 #pragma once
 
-#include "storage/sqlite/DatabaseConnection.h"
-
 #include "jmap/api/CalendarMethods.h"
 #include "jmap/api/LiveConnectionSettings.h"
 #include "jmap/calendar/CalendarCommandTypes.h"
-#include "jmap/calendar/CalendarReader.h"
-#include "jmap/sync/MutationCommitReceipt.h"
 
 #include <QCoroTask>
 
-#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
-#include <string_view>
-#include <unordered_map>
-#include <variant>
 #include <vector>
 
 namespace javelin::jmap::api
 {
-    class JmapMethodTransport;
     struct Session;
-} // namespace javelin::jmap::api
+}
+namespace javelin::jmap::cache
+{
+    class DatabaseConnection;
+}
 
 namespace javelin::jmap::calendar
 {
-    class CalendarService final : public CalendarReader
+    class CalendarProtocolClient;
+    class CalendarReader;
+    class CalendarSyncEngine;
+
+    class CalendarMutationEngine
     {
       public:
-        CalendarService(cache::DatabaseConnection& connection,
-                        api::JmapMethodTransport& methodTransport);
+        CalendarMutationEngine(cache::DatabaseConnection& connection,
+                               CalendarProtocolClient& protocolClient,
+                               CalendarSyncEngine& syncEngine, CalendarReader& reader);
 
-        [[nodiscard]] CalendarLoadResult
-        loadCached(std::string_view accountId, const VisibleInterval& interval,
-                   const TimeZoneId& displayTimeZone) const override;
-        [[nodiscard]] CalendarAccountsResult accounts() const override;
-        [[nodiscard]] CalendarListResult calendars(std::string_view accountId) const override;
-        [[nodiscard]] CalendarPreferenceResult
-        setCalendarVisible(std::string_view accountId, std::string_view calendarId, bool visible);
-        [[nodiscard]] QCoro::Task<AuthoritativeCalendarEventResult>
-        getAuthoritativeEvent(LiveConnectionSettings settings, std::string ownerAccountId,
-                              std::string accountId, std::optional<std::string> eventId,
-                              std::string uid);
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
         setCalendarSubscribed(LiveConnectionSettings settings, std::string ownerAccountId,
                               std::string accountId, std::string calendarId, bool subscribed);
@@ -56,13 +45,6 @@ namespace javelin::jmap::calendar
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
         deleteCalendar(LiveConnectionSettings settings, std::string ownerAccountId,
                        DeleteCalendarCommand command);
-        [[nodiscard]] QCoro::Task<CalendarRefreshResult> refresh(LiveConnectionSettings settings,
-                                                                 std::string ownerAccountId,
-                                                                 VisibleInterval interval,
-                                                                 TimeZoneId displayTimeZone);
-        [[nodiscard]] QCoro::Task<CalendarRefreshResult>
-        refreshChanged(LiveConnectionSettings settings, std::string ownerAccountId,
-                       VisibleInterval interval, TimeZoneId displayTimeZone);
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
         create(LiveConnectionSettings settings, std::string ownerAccountId,
                CreateEventCommand command, std::function<void()> projectionCommitted = {});
@@ -84,9 +66,6 @@ namespace javelin::jmap::calendar
             Rsvp,
         };
 
-        [[nodiscard]] std::uint64_t beginRefresh(std::string_view ownerAccountId);
-        [[nodiscard]] bool isCurrentRefresh(std::string_view ownerAccountId,
-                                            std::uint64_t generation) const;
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
         mutate(LiveConnectionSettings settings, std::string ownerAccountId,
                api::CalendarEventSetRequest request, std::vector<std::string> calendarIds,
@@ -99,7 +78,8 @@ namespace javelin::jmap::calendar
                        std::optional<std::string> deletedCalendarId);
 
         cache::DatabaseConnection& m_connection;
-        api::JmapMethodTransport& m_methodTransport;
-        std::unordered_map<std::string, std::uint64_t> m_refreshGenerations;
+        CalendarProtocolClient& m_protocolClient;
+        CalendarSyncEngine& m_syncEngine;
+        CalendarReader& m_reader;
     };
 } // namespace javelin::jmap::calendar

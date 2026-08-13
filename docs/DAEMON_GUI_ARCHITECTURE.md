@@ -1004,7 +1004,8 @@ allows it to remain a `QCoreApplication`; using `QSystemTrayIcon` may require a 
 but still must not pull in the main GUI or WebEngine.
 
 GUI controllers must stop depending directly on concrete daemon services such as
-`MailApplicationService`, `ComposeService`, `CalendarService`, `UndoManager`, or `WorkScheduler`.
+`MailMutationApplicationService`, `ComposeService`, `CalendarMutationEngine`, `UndoManager`, or
+`WorkScheduler`.
 They consume:
 
 - read-only repositories;

@@ -1,7 +1,9 @@
 #pragma once
 
 #include "app/undo/HistoryTypes.h"
-#include "jmap/calendar/CalendarService.h"
+#include "jmap/calendar/CalendarCommandTypes.h"
+
+#include <QCoroTask>
 
 namespace javelin::app::undo
 {

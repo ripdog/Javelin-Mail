@@ -759,7 +759,7 @@ namespace javelin::tools
             std::optional<std::pair<std::string, std::string>> target;
             for (const auto& accountId : account.accountIds)
             {
-                auto calendars = services.calendarService().calendars(accountId);
+                auto calendars = services.calendarReader().calendars(accountId);
                 if (const auto* list =
                         std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(&calendars))
                 {

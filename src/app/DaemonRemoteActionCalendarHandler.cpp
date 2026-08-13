@@ -2,7 +2,7 @@
 
 #include "app/CalendarApplicationPorts.h"
 #include "app/DaemonServices.h"
-#include "jmap/calendar/CalendarService.h"
+#include "jmap/calendar/CalendarReader.h"
 
 namespace javelin::app
 {
@@ -21,18 +21,18 @@ namespace javelin::app
                             const javelin::jmap::calendar::TimeZoneId& timeZone)
                 {
                     return acceptValue<actions::CalendarReadCached>(
-                        id, m_services.calendarService().loadCached(accountId, interval, timeZone));
+                        id, m_services.calendarReader().loadCached(accountId, interval, timeZone));
                 });
         case actions::CalendarReadAccounts::id.value:
             return acceptValue<actions::CalendarReadAccounts>(
-                id, m_services.calendarService().accounts());
+                id, m_services.calendarReader().accounts());
         case actions::CalendarReadCalendars::id.value:
             return dispatchDecoded<actions::CalendarReadCalendars>(
                 id, command,
                 [this, &id](const std::string& accountId)
                 {
                     return acceptValue<actions::CalendarReadCalendars>(
-                        id, m_services.calendarService().calendars(accountId));
+                        id, m_services.calendarReader().calendars(accountId));
                 });
         case actions::CalendarRequestRange::id.value:
             return dispatchDecoded<actions::CalendarRequestRange>(

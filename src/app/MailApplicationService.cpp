@@ -37,10 +37,15 @@
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadReadRepository.h"
-#include "jmap/contacts/ContactService.h"
+#include "jmap/calendar/CalendarMutationEngine.h"
+#include "jmap/calendar/CalendarProtocolClient.h"
+#include "jmap/calendar/CalendarSyncEngine.h"
+#include "jmap/contacts/ContactSyncEngine.h"
 #include "jmap/domain/MailKeywords.h"
 #include "jmap/query/MailQueryClient.h"
 #include "jmap/query/MailQueryMaterializer.h"
+#include "jmap/sieve/SieveMutationEngine.h"
+#include "jmap/sieve/SieveProtocolClient.h"
 #include "jmap/sync/EmailMutationEngine.h"
 #include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/MailboxMutationEngine.h"
@@ -587,10 +592,10 @@ namespace javelin::app
 
     ContactApplicationService::ContactApplicationService(
         javelin::jmap::cache::ContactRepository& contactRepository,
-        javelin::jmap::contacts::ContactService& contactService,
+        javelin::jmap::contacts::ContactSyncEngine& syncEngine,
         AccountRuntimeManager& accountRuntime, ApplicationErrorCoordinator& errorCoordinator,
         WorkScheduler& workScheduler, QObject* parent)
-        : QObject(parent), m_contactService(contactService), m_accountRuntime(accountRuntime),
+        : QObject(parent), m_contactSyncEngine(syncEngine), m_accountRuntime(accountRuntime),
           m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler)
     {
         connect(&contactRepository, &javelin::jmap::cache::ContactRepository::contactsChanged, this,
@@ -645,13 +650,17 @@ namespace javelin::app
 
     CalendarApplicationService::CalendarApplicationService(
         javelin::jmap::cache::DatabaseConnection& databaseConnection,
-        javelin::jmap::calendar::CalendarService& calendarService,
+        javelin::jmap::calendar::CalendarReader& calendarReader,
+        javelin::jmap::calendar::CalendarProtocolClient& protocolClient,
+        javelin::jmap::calendar::CalendarSyncEngine& syncEngine,
+        javelin::jmap::calendar::CalendarMutationEngine& mutationEngine,
         AccountRuntimeManager& accountRuntime, ApplicationErrorCoordinator& errorCoordinator,
         WorkScheduler& workScheduler, javelin::app::undo::UndoManager& undoManager, QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection),
-          m_calendarService(calendarService), m_accountRuntime(accountRuntime),
-          m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler),
-          m_undoManager(undoManager)
+          m_calendarReader(calendarReader), m_calendarProtocolClient(protocolClient),
+          m_calendarSyncEngine(syncEngine), m_calendarMutationEngine(mutationEngine),
+          m_accountRuntime(accountRuntime), m_errorCoordinator(errorCoordinator),
+          m_workScheduler(workScheduler), m_undoManager(undoManager)
     {
         connect(&m_accountRuntime, &AccountRuntimeManager::calendarStateChanged, this,
                 [this](const QString& ownerAccountId)
@@ -659,10 +668,12 @@ namespace javelin::app
     }
 
     SieveApplicationService::SieveApplicationService(
-        javelin::jmap::sieve::SieveService& sieveService, AccountRuntimeManager& accountRuntime,
-        ApplicationErrorCoordinator& errorCoordinator, WorkScheduler& workScheduler,
-        javelin::app::undo::UndoManager& undoManager, QObject* parent)
-        : QObject(parent), m_sieveService(sieveService), m_accountRuntime(accountRuntime),
+        javelin::jmap::sieve::SieveProtocolClient& protocolClient,
+        javelin::jmap::sieve::SieveMutationEngine& mutationEngine,
+        AccountRuntimeManager& accountRuntime, ApplicationErrorCoordinator& errorCoordinator,
+        WorkScheduler& workScheduler, javelin::app::undo::UndoManager& undoManager, QObject* parent)
+        : QObject(parent), m_sieveProtocolClient(protocolClient),
+          m_sieveMutationEngine(mutationEngine), m_accountRuntime(accountRuntime),
           m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler),
           m_undoManager(undoManager)
     {
@@ -3160,7 +3171,7 @@ namespace javelin::app
         const auto settings = configuration->second.settings;
         auto result = observeResult(m_errorCoordinator, settings, ownerAccountId,
                                     QStringLiteral("Synchronize contacts after state change"),
-                                    co_await m_contactService.refreshAll(
+                                    co_await m_contactSyncEngine.refreshAll(
                                         toLiveConnectionSettings(settings), ownerAccountId));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
@@ -3469,7 +3480,7 @@ namespace javelin::app
         co_return observeResult(
             m_errorCoordinator, configuration->second.settings, accountId,
             i18n("Synchronize contacts"),
-            co_await m_contactService.refreshAll(
+            co_await m_contactSyncEngine.refreshAll(
                 toLiveConnectionSettings(configuration->second.settings), accountId));
     }
 
@@ -3488,7 +3499,7 @@ namespace javelin::app
         m_visibleCalendarRanges.insert_or_assign(
             ownerAccountId,
             VisibleCalendarRange{.interval = interval, .displayTimeZone = displayTimeZone});
-        auto result = co_await m_calendarService.refresh(
+        auto result = co_await m_calendarSyncEngine.refresh(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId, interval,
             displayTimeZone);
         if (const auto* summary = std::get_if<javelin::jmap::calendar::RefreshedRange>(&result);
@@ -3529,7 +3540,7 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = i18n("Calendar synchronization is not configured.")};
-        auto result = co_await m_calendarService.refreshChanged(
+        auto result = co_await m_calendarSyncEngine.refreshChanged(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
             range->second.interval, range->second.displayTimeZone);
         if (const auto* summary = std::get_if<javelin::jmap::calendar::RefreshedRange>(&result);
@@ -3556,7 +3567,7 @@ namespace javelin::app
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
             };
-        co_return co_await m_calendarService.getAuthoritativeEvent(
+        co_return co_await m_calendarProtocolClient.getAuthoritativeEvent(
             toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
             std::move(accountId), std::move(eventId), std::move(uid));
     }
@@ -3648,7 +3659,7 @@ namespace javelin::app
                                            .accountCount = 1,
                                            .eventCount = 0});
         };
-        auto result = co_await m_calendarService.create(
+        auto result = co_await m_calendarMutationEngine.create(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
             std::move(command), projectionCommitted);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
@@ -3670,7 +3681,7 @@ namespace javelin::app
                     .message = i18n("The created calendar event has no server ID."),
                 };
             }
-            auto authoritative = co_await m_calendarService.getAuthoritativeEvent(
+            auto authoritative = co_await m_calendarProtocolClient.getAuthoritativeEvent(
                 toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
                 history.accountId, history.currentEventId, history.uid);
             if (const auto* accepted =
@@ -3699,7 +3710,7 @@ namespace javelin::app
                                                    const bool visible,
                                                    const javelin::app::undo::CommandOrigin origin)
     {
-        const auto listed = m_calendarService.calendars(accountId);
+        const auto listed = m_calendarReader.calendars(accountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&listed))
             return *error;
         const auto& calendars = std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed);
@@ -3728,12 +3739,12 @@ namespace javelin::app
             return javelin::jmap::operationError(*error);
         auto prepared =
             std::get<std::optional<javelin::app::undo::HistoryEntry>>(std::move(preparedResult));
-        auto result = m_calendarService.setCalendarVisible(accountId, calendarId, visible);
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        javelin::jmap::cache::CalendarRepository repository{m_databaseConnection};
+        if (const auto cacheError = repository.setCalendarVisible(accountId, calendarId, visible))
         {
             if (prepared.has_value())
                 static_cast<void>(m_undoManager.discardNormal(prepared->entryId));
-            return *error;
+            return javelin::jmap::operationError(*cacheError);
         }
         if (prepared.has_value())
         {
@@ -3748,7 +3759,7 @@ namespace javelin::app
     CalendarApplicationService::currentCalendarPreference(
         const javelin::app::undo::CalendarPreferenceHistory& history) const
     {
-        const auto listed = m_calendarService.calendars(history.accountId);
+        const auto listed = m_calendarReader.calendars(history.accountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&listed))
             return *error;
         const auto& calendars = std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed);
@@ -3836,7 +3847,7 @@ namespace javelin::app
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
             };
-        const auto listed = m_calendarService.calendars(accountId);
+        const auto listed = m_calendarReader.calendars(accountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&listed))
             co_return *error;
         const auto& calendars = std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed);
@@ -3871,7 +3882,7 @@ namespace javelin::app
             co_return javelin::jmap::operationError(*error);
         auto prepared =
             std::get<std::optional<javelin::app::undo::HistoryEntry>>(std::move(preparedResult));
-        auto result = co_await m_calendarService.setCalendarSubscribed(
+        auto result = co_await m_calendarMutationEngine.setCalendarSubscribed(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId, accountId,
             std::move(calendarId), subscribed);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
@@ -3913,7 +3924,7 @@ namespace javelin::app
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
             };
-        const auto listed = m_calendarService.calendars(accountId);
+        const auto listed = m_calendarReader.calendars(accountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&listed))
             co_return *error;
         const auto& calendars = std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed);
@@ -3943,7 +3954,7 @@ namespace javelin::app
             co_return javelin::jmap::operationError(*error);
         auto prepared =
             std::get<std::optional<javelin::app::undo::HistoryEntry>>(std::move(preparedResult));
-        auto result = co_await m_calendarService.setDefaultCalendar(
+        auto result = co_await m_calendarMutationEngine.setDefaultCalendar(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId, accountId,
             std::move(calendarId));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
@@ -3984,7 +3995,7 @@ namespace javelin::app
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
             };
-        auto result = co_await m_calendarService.createCalendar(
+        auto result = co_await m_calendarMutationEngine.createCalendar(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
             std::move(command));
         Q_EMIT calendarCacheCommitted({.ownerAccountId = QString::fromStdString(ownerAccountId),
@@ -4007,7 +4018,7 @@ namespace javelin::app
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
             };
-        auto result = co_await m_calendarService.deleteCalendar(
+        auto result = co_await m_calendarMutationEngine.deleteCalendar(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
             std::move(command));
         Q_EMIT calendarCacheCommitted({.ownerAccountId = QString::fromStdString(ownerAccountId),
@@ -4091,7 +4102,7 @@ namespace javelin::app
                                            .accountCount = 1,
                                            .eventCount = 0});
         };
-        auto result = co_await m_calendarService.update(
+        auto result = co_await m_calendarMutationEngine.update(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
             std::move(command), projectionCommitted);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
@@ -4132,7 +4143,7 @@ namespace javelin::app
                                            .accountCount = 1,
                                            .eventCount = 0});
         };
-        auto result = co_await m_calendarService.respond(
+        auto result = co_await m_calendarMutationEngine.respond(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
             std::move(command), projectionCommitted);
         co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
@@ -4202,7 +4213,7 @@ namespace javelin::app
                                            .accountCount = 1,
                                            .eventCount = 0});
         };
-        auto result = co_await m_calendarService.remove(
+        auto result = co_await m_calendarMutationEngine.remove(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
             std::move(command), projectionCommitted);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
@@ -4234,8 +4245,8 @@ namespace javelin::app
         co_return observeResult(
             m_errorCoordinator, configuration->second.settings, ownerAccountId,
             i18n("Load Sieve scripts"),
-            co_await m_sieveService.list(toLiveConnectionSettings(configuration->second.settings),
-                                         ownerAccountId));
+            co_await m_sieveProtocolClient.list(
+                toLiveConnectionSettings(configuration->second.settings), ownerAccountId));
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveContentResult>
@@ -4249,11 +4260,11 @@ namespace javelin::app
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
             };
-        co_return observeResult(
-            m_errorCoordinator, configuration->second.settings, ownerAccountId,
-            i18n("Load Sieve script"),
-            co_await m_sieveService.load(toLiveConnectionSettings(configuration->second.settings),
-                                         ownerAccountId, std::move(script)));
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                i18n("Load Sieve script"),
+                                co_await m_sieveProtocolClient.load(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    ownerAccountId, std::move(script)));
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveValidationResult>
@@ -4268,7 +4279,7 @@ namespace javelin::app
             };
         co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
                                 i18n("Validate Sieve script"),
-                                co_await m_sieveService.validate(
+                                co_await m_sieveProtocolClient.validate(
                                     toLiveConnectionSettings(configuration->second.settings),
                                     ownerAccountId, std::move(content)));
     }
@@ -4291,7 +4302,7 @@ namespace javelin::app
             std::optional<std::string> beforeContent;
             if (!script.id.empty())
             {
-                auto loaded = co_await m_sieveService.load(
+                auto loaded = co_await m_sieveProtocolClient.load(
                     toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
                     script);
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&loaded))
@@ -4323,12 +4334,12 @@ namespace javelin::app
                 std::move(preparedResult));
         }
 
-        auto result = observeResult(
-            m_errorCoordinator, configuration->second.settings, ownerAccountId,
-            i18n("Save Sieve script"),
-            co_await m_sieveService.save(toLiveConnectionSettings(configuration->second.settings),
-                                         ownerAccountId, std::move(script), std::move(content),
-                                         operationGroupId.toStdString()));
+        auto result = observeResult(m_errorCoordinator, configuration->second.settings,
+                                    ownerAccountId, i18n("Save Sieve script"),
+                                    co_await m_sieveMutationEngine.save(
+                                        toLiveConnectionSettings(configuration->second.settings),
+                                        ownerAccountId, std::move(script), std::move(content),
+                                        operationGroupId.toStdString()));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             if (const auto historyError = retainUnknownOrDiscard(m_undoManager, prepared, *error))
@@ -4368,7 +4379,7 @@ namespace javelin::app
         std::optional<javelin::app::undo::HistoryEntry> prepared;
         if (origin == javelin::app::undo::CommandOrigin::User)
         {
-            auto loaded = co_await m_sieveService.load(
+            auto loaded = co_await m_sieveProtocolClient.load(
                 toLiveConnectionSettings(configuration->second.settings), ownerAccountId, script);
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&loaded))
                 co_return *error;
@@ -4397,7 +4408,7 @@ namespace javelin::app
         auto result =
             observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
                           i18n("Delete Sieve script"),
-                          co_await m_sieveService.remove(
+                          co_await m_sieveMutationEngine.remove(
                               toLiveConnectionSettings(configuration->second.settings),
                               ownerAccountId, std::move(script), operationGroupId.toStdString()));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
@@ -4434,7 +4445,7 @@ namespace javelin::app
         std::optional<javelin::app::undo::HistoryEntry> prepared;
         if (origin == javelin::app::undo::CommandOrigin::User)
         {
-            auto listed = co_await m_sieveService.list(
+            auto listed = co_await m_sieveProtocolClient.list(
                 toLiveConnectionSettings(configuration->second.settings), ownerAccountId);
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&listed))
                 co_return *error;
@@ -4472,7 +4483,7 @@ namespace javelin::app
         }
         auto result = observeResult(m_errorCoordinator, configuration->second.settings,
                                     ownerAccountId, i18n("Change active Sieve script"),
-                                    co_await m_sieveService.setActive(
+                                    co_await m_sieveMutationEngine.setActive(
                                         toLiveConnectionSettings(configuration->second.settings),
                                         ownerAccountId, std::move(script), active,
                                         operationGroupId.toStdString()));

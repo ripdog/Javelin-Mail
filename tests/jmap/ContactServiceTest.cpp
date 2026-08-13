@@ -1,4 +1,7 @@
-#include "jmap/contacts/ContactService.h"
+#include "jmap/contacts/ContactMediaService.h"
+#include "jmap/contacts/ContactMutationEngine.h"
+#include "jmap/contacts/ContactProtocolClient.h"
+#include "jmap/contacts/ContactSyncEngine.h"
 
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/PatchObject.h"
@@ -42,6 +45,73 @@ namespace
                 callback();
             co_return result;
         }
+    };
+
+    struct ContactDomain
+    {
+        ContactDomain(javelin::jmap::cache::DatabaseConnection& connection,
+                      javelin::jmap::cache::ContactRepository& repository,
+                      javelin::jmap::api::AbstractTransport& resourceTransport,
+                      javelin::jmap::api::JmapMethodTransport& methodTransport)
+            : protocol(methodTransport), sync(connection, repository, protocol),
+              mutations(connection, repository, protocol, sync),
+              media(connection, resourceTransport)
+        {
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactRefreshResult>
+        refreshAll(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId)
+        {
+            return sync.refreshAll(std::move(settings), std::move(ownerAccountId));
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+        setAddressBooks(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
+                        javelin::jmap::api::AddressBookSetRequest request)
+        {
+            return mutations.setAddressBooks(std::move(settings), std::move(ownerAccountId),
+                                             std::move(request));
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+        setContactCards(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
+                        javelin::jmap::api::ContactCardSetRequest request,
+                        javelin::jmap::contacts::ContactSetOptions options = {})
+        {
+            return mutations.setContactCards(std::move(settings), std::move(ownerAccountId),
+                                             std::move(request), std::move(options));
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+        setGroupMembership(javelin::jmap::LiveConnectionSettings settings,
+                           std::string ownerAccountId,
+                           javelin::jmap::contacts::SetContactGroupMembershipCommand command)
+        {
+            return mutations.setGroupMembership(std::move(settings), std::move(ownerAccountId),
+                                                std::move(command));
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+        copyContactCards(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
+                         javelin::jmap::api::ContactCardCopyRequest request)
+        {
+            return mutations.copyContactCards(std::move(settings), std::move(ownerAccountId),
+                                              std::move(request));
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactDownloadResult>
+        downloadMedia(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
+                      std::string accountId, std::string blobId, std::string mediaType)
+        {
+            return media.downloadMedia(std::move(settings), std::move(ownerAccountId),
+                                       std::move(accountId), std::move(blobId),
+                                       std::move(mediaType));
+        }
+
+        javelin::jmap::contacts::ContactProtocolClient protocol;
+        javelin::jmap::contacts::ContactSyncEngine sync;
+        javelin::jmap::contacts::ContactMutationEngine mutations;
+        javelin::jmap::contacts::ContactMediaService media;
     };
 
     void ensureApplication()
@@ -182,6 +252,11 @@ namespace
         return value;
     }
 } // namespace
+
+namespace javelin::jmap::contacts
+{
+    using ContactService = ::ContactDomain;
+}
 
 TEST_CASE("contact service greedily refreshes every contact into the cache",
           "[jmap][contacts][service]")

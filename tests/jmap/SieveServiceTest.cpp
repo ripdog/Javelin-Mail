@@ -1,4 +1,5 @@
-#include "jmap/sieve/SieveService.h"
+#include "jmap/sieve/SieveMutationEngine.h"
+#include "jmap/sieve/SieveProtocolClient.h"
 
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/SessionParser.h"
@@ -57,6 +58,68 @@ namespace
         }
     };
 
+    struct SieveDomain
+    {
+        SieveDomain(javelin::jmap::cache::DatabaseConnection& connection,
+                    javelin::jmap::api::AbstractTransport& resourceTransport,
+                    javelin::jmap::api::JmapMethodTransport& methodTransport)
+            : protocol(connection, resourceTransport, methodTransport),
+              mutations(connection, protocol)
+        {
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveListResult>
+        list(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId) const
+        {
+            return protocol.list(std::move(settings), std::move(ownerAccountId));
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveContentResult>
+        load(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
+             javelin::jmap::sieve::SieveScript script) const
+        {
+            return protocol.load(std::move(settings), std::move(ownerAccountId), std::move(script));
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveValidationResult>
+        validate(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
+                 QByteArray content) const
+        {
+            return protocol.validate(std::move(settings), std::move(ownerAccountId),
+                                     std::move(content));
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveSaveResult>
+        save(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
+             javelin::jmap::sieve::SieveScript script, QByteArray content,
+             std::optional<std::string> operationGroupId = std::nullopt) const
+        {
+            return mutations.save(std::move(settings), std::move(ownerAccountId), std::move(script),
+                                  std::move(content), std::move(operationGroupId));
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveDeleteResult>
+        remove(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
+               javelin::jmap::sieve::SieveScript script,
+               std::optional<std::string> operationGroupId = std::nullopt) const
+        {
+            return mutations.remove(std::move(settings), std::move(ownerAccountId),
+                                    std::move(script), std::move(operationGroupId));
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveActivationResult>
+        setActive(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
+                  javelin::jmap::sieve::SieveScript script, bool active,
+                  std::optional<std::string> operationGroupId = std::nullopt) const
+        {
+            return mutations.setActive(std::move(settings), std::move(ownerAccountId),
+                                       std::move(script), active, std::move(operationGroupId));
+        }
+
+        javelin::jmap::sieve::SieveProtocolClient protocol;
+        javelin::jmap::sieve::SieveMutationEngine mutations;
+    };
+
     void ensureApplication()
     {
         if (QCoreApplication::instance() != nullptr)
@@ -101,6 +164,11 @@ namespace
         return connection;
     }
 } // namespace
+
+namespace javelin::jmap::sieve
+{
+    using SieveService = ::SieveDomain;
+}
 
 TEST_CASE("sieve save never updates a script rejected by server validation",
           "[jmap][sieve][service]")

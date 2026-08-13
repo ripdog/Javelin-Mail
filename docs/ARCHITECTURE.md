@@ -141,9 +141,9 @@ The source tree is organized by responsibility rather than by feature alone:
 | `src/jmap/cache/` | SQLite schema and repositories, read models, query windows, MIME source storage, and search indexes |
 | `src/jmap/sync/` | State-change sources, refresh planning, reconciliation, mutation projection, and consistency fences |
 | `src/jmap/submission/` | Draft snapshots, attachment manifests, compose revisions, and EmailSubmission workflows |
-| `src/jmap/contacts/` | JSContact conversion, synchronization, editing, import/export, and mutation journals |
-| `src/jmap/calendar/` | JSCalendar values, recurrence editing, occurrence materialization, and calendar mutations |
-| `src/jmap/sieve/` | Sieve domain values, service operations, and optimistic mutation support |
+| `src/jmap/contacts/` | JSContact values plus focused protocol, synchronization, mutation/group, media-transfer, and mutation-journal components |
+| `src/jmap/calendar/` | JSCalendar values plus focused cache-reader, protocol, synchronization, mutation, recurrence, and occurrence-materialization components |
+| `src/jmap/sieve/` | Sieve domain values plus separate protocol/read-validation and mutation mechanics with optimistic mutation support |
 | `src/gui/` | KDE/Qt main window, KXMLGUI actions, tabs, controllers, models, delegates, message rendering, KTextEditor integration, and KConfig preferences |
 
 The principal runtime objects are:
@@ -158,6 +158,9 @@ The principal runtime objects are:
 | `MessageContentApplicationService` | daemon | Coordinates message body, attachment, and source retrieval plus content invalidation |
 | `MailNotificationService` | daemon | Owns mail-notification delivery acknowledgement/release/recovery and forwards claimed notification candidates |
 | `ContactApplicationService` / `CalendarApplicationService` / `SieveApplicationService` | daemon | Own domain application workflow and history-facing coordination without sharing mail query, mutation, or account-runtime state |
+| `ContactProtocolClient` / `ContactSyncEngine` / `ContactMutationEngine` / `ContactMediaService` | daemon | Separate contacts wire access, authoritative cache synchronization, state-changing/group operations, and binary media transfer |
+| `CalendarCacheReader` / `CalendarProtocolClient` / `CalendarSyncEngine` / `CalendarMutationEngine` | daemon | Separate cached calendar reads, JMAP protocol access, bounded refresh/materialization, and optimistic calendar/event mutations |
+| `SieveProtocolClient` / `SieveMutationEngine` | daemon | Separate Sieve list/load/validation protocol work from save/delete/activation mutation mechanics |
 | `SessionRefreshClient` / `AccountBootstrapClient` | daemon | Refresh JMAP session metadata and perform initial account/mailbox bootstrap without exposing query or mutation APIs |
 | `MailQueryClient` / `MailQueryMaterializer` | daemon | Execute bounded JMAP mail queries and commit authoritative mailbox/search windows to the cache |
 | `MessageContentClient` | daemon | Refresh MIME source/content and read cached source or attachment payloads |
@@ -313,10 +316,10 @@ GUI does not create a second thread-loading source of truth or perform network w
 Background watched-mailbox refresh uses the canonical received-at-descending collapsed window, so a
 synchronized mailbox is immediately loadable from SQLite even while its conversation children are
 still being prefetched. Any page or thread fetch that writes server Email objects reapplies active
-Email projections before the cache can be rendered. Contacts continue to materialize AddressBook
-and ContactCard snapshots through their repositories; calendars continue to materialize
-CalendarEvent objects and bounded occurrence windows through `CalendarService`. Their state tokens,
-eviction rules, and optimistic adapters remain independent.
+Email projections before the cache can be rendered. `ContactSyncEngine` materializes AddressBook
+and ContactCard snapshots through the contact repositories, while `CalendarSyncEngine` materializes
+CalendarEvent objects and bounded occurrence windows through the calendar repositories. Their state
+tokens, eviction rules, and optimistic adapters remain independent from mail and from each other.
 
 Starting or restarting an account coordinator schedules an immediate synchronization pass for all
 configured mailboxes; a quiet push stream is not proof that their cache already exists. Likewise,
@@ -398,8 +401,10 @@ drafts are deliberately not accepted implicitly: changing the supported draft re
 an explicit protocol review, fixture update, and architecture change.
 
 Calendar protocol envelopes and JSCalendar wire documents remain inside `javelin_jmap`.
-The GUI consumes typed calendar domain values and commands through `CalendarService` and
-renders committed SQLite state; it never constructs method names or raw JSON.
+`CalendarProtocolClient` and `CalendarMutationEngine` are daemon-only protocol/mutation components;
+`CalendarSyncEngine` owns bounded materialization and `CalendarCacheReader` owns cached reads. The GUI
+consumes typed calendar values from its read-only cache surface and commands through application
+ports such as `CalendarCommandPort`; it never constructs method names or raw JSON.
 
 ## Contacts synchronization
 
@@ -411,6 +416,10 @@ refreshes reconcile the small AddressBook set and advance the cached ContactCard
 changes page. A `cannotCalculateChanges` response invalidates the delta path and performs an
 atomic full ContactCard replacement, as required by RFC 8620.
 
+`ContactProtocolClient` owns contact JMAP calls, `ContactSyncEngine` owns authoritative cache
+refresh, `ContactMutationEngine` owns AddressBook/ContactCard/group mutation mechanics, and
+`ContactMediaService` owns binary contact media transfer. Application/history policy remains in
+`ContactApplicationService` and `ContactCommandService` rather than in those protocol components.
 Contact cache commits publish through the process-owned `ContactRepository`. Compose completion,
 message sender identity rendering, and the contacts view then reload from SQLite; they do not
 retain a second contact data store.

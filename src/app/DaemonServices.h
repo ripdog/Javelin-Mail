@@ -27,7 +27,10 @@ namespace javelin::jmap::auth
 
 namespace javelin::jmap::contacts
 {
-    class ContactService;
+    class ContactMediaService;
+    class ContactMutationEngine;
+    class ContactProtocolClient;
+    class ContactSyncEngine;
 } // namespace javelin::jmap::contacts
 
 namespace javelin::app
@@ -131,12 +134,17 @@ namespace javelin::jmap::submission
 }
 namespace javelin::jmap::calendar
 {
-    class CalendarService;
+    class CalendarCacheReader;
+    class CalendarMutationEngine;
+    class CalendarProtocolClient;
+    class CalendarReader;
+    class CalendarSyncEngine;
 } // namespace javelin::jmap::calendar
 namespace javelin::jmap::sieve
 {
-    class SieveService;
-}
+    class SieveMutationEngine;
+    class SieveProtocolClient;
+} // namespace javelin::jmap::sieve
 namespace javelin::jmap::identity
 {
     class IdentityService;
@@ -164,8 +172,7 @@ namespace javelin::app
         [[nodiscard]] javelin::protocol::CacheIdentity cacheIdentity() const;
         [[nodiscard]] CacheAccessBarrier& cacheAccessBarrier();
         [[nodiscard]] javelin::jmap::cache::ContactRepository& contactRepository();
-        [[nodiscard]] javelin::jmap::contacts::ContactService& contactService();
-        [[nodiscard]] javelin::jmap::calendar::CalendarService& calendarService();
+        [[nodiscard]] javelin::jmap::calendar::CalendarReader& calendarReader();
         [[nodiscard]] CalendarCommandPort& calendarCommandPort();
         [[nodiscard]] javelin::jmap::cache::IdentityRepository& identityRepository();
         [[nodiscard]] javelin::jmap::cache::MessageViewService& messageViewService();
@@ -236,10 +243,17 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::cache::AccountRepository> m_accountRepository;
         std::unique_ptr<AccountCommandService> m_accountCommandService;
         std::unique_ptr<javelin::jmap::cache::ContactRepository> m_contactRepository;
-        std::unique_ptr<javelin::jmap::contacts::ContactService> m_contactService;
-        std::unique_ptr<javelin::jmap::calendar::CalendarService> m_calendarService;
+        std::unique_ptr<javelin::jmap::contacts::ContactProtocolClient> m_contactProtocolClient;
+        std::unique_ptr<javelin::jmap::contacts::ContactSyncEngine> m_contactSyncEngine;
+        std::unique_ptr<javelin::jmap::contacts::ContactMutationEngine> m_contactMutationEngine;
+        std::unique_ptr<javelin::jmap::contacts::ContactMediaService> m_contactMediaService;
+        std::unique_ptr<javelin::jmap::calendar::CalendarCacheReader> m_calendarReader;
+        std::unique_ptr<javelin::jmap::calendar::CalendarProtocolClient> m_calendarProtocolClient;
+        std::unique_ptr<javelin::jmap::calendar::CalendarSyncEngine> m_calendarSyncEngine;
+        std::unique_ptr<javelin::jmap::calendar::CalendarMutationEngine> m_calendarMutationEngine;
         std::unique_ptr<CalendarCommandService> m_calendarCommandService;
-        std::unique_ptr<javelin::jmap::sieve::SieveService> m_sieveService;
+        std::unique_ptr<javelin::jmap::sieve::SieveProtocolClient> m_sieveProtocolClient;
+        std::unique_ptr<javelin::jmap::sieve::SieveMutationEngine> m_sieveMutationEngine;
         std::unique_ptr<javelin::jmap::identity::IdentityService> m_identityService;
         std::unique_ptr<javelin::jmap::cache::IdentityRepository> m_identityRepository;
         std::unique_ptr<javelin::jmap::cache::MailboxReadRepository> m_mailboxRepository;

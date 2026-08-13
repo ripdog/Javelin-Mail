@@ -7,7 +7,9 @@
 #include "app/undo/UndoManager.h"
 #include "jmap/api/PatchObject.h"
 #include "jmap/cache/ContactRepository.h"
-#include "jmap/contacts/ContactService.h"
+#include "jmap/contacts/ContactMediaService.h"
+#include "jmap/contacts/ContactMutationEngine.h"
+#include "jmap/contacts/ContactSyncEngine.h"
 
 #include <glaze/glaze.hpp>
 
@@ -149,11 +151,14 @@ namespace javelin::app
 
     ContactCommandService::ContactCommandService(
         AccountConnectionProvider& connectionProvider,
-        javelin::jmap::contacts::ContactService& contactService,
+        javelin::jmap::contacts::ContactSyncEngine& syncEngine,
+        javelin::jmap::contacts::ContactMutationEngine& mutationEngine,
+        javelin::jmap::contacts::ContactMediaService& mediaService,
         javelin::jmap::cache::ContactRepository& contactRepository,
         ApplicationErrorCoordinator& errorCoordinator, WorkScheduler& workScheduler,
         undo::UndoManager& undoManager)
-        : m_connectionProvider(connectionProvider), m_contactService(contactService),
+        : m_connectionProvider(connectionProvider), m_contactSyncEngine(syncEngine),
+          m_contactMutationEngine(mutationEngine), m_contactMediaService(mediaService),
           m_contactRepository(contactRepository), m_errorCoordinator(errorCoordinator),
           m_workScheduler(workScheduler), m_undoManager(undoManager)
     {
@@ -213,10 +218,10 @@ namespace javelin::app
     {
         const QString actionDescription =
             i18n("Create contact group “%1”", QString::fromStdString(command.name));
-        auto prepared =
-            m_contactService.prepareCreateGroup({.accountId = std::move(command.accountId),
-                                                 .addressBookId = std::move(command.addressBookId),
-                                                 .name = std::move(command.name)});
+        auto prepared = m_contactMutationEngine.prepareCreateGroup(
+            {.accountId = std::move(command.accountId),
+             .addressBookId = std::move(command.addressBookId),
+             .name = std::move(command.name)});
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
             co_return *error;
         co_return co_await submitContactCards(
@@ -264,11 +269,11 @@ namespace javelin::app
                 .arg(memberCount == 1 ? QString{} : QStringLiteral("s"))
                 .arg(command.included ? QStringLiteral("to") : QStringLiteral("from"))
                 .arg(groupName, QString::fromStdString(command.groupId));
-        auto prepared =
-            m_contactService.prepareGroupMembership({.accountId = std::move(command.accountId),
-                                                     .groupId = std::move(command.groupId),
-                                                     .memberUids = std::move(command.memberUids),
-                                                     .included = command.included});
+        auto prepared = m_contactMutationEngine.prepareGroupMembership(
+            {.accountId = std::move(command.accountId),
+             .groupId = std::move(command.groupId),
+             .memberUids = std::move(command.memberUids),
+             .included = command.included});
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
             co_return *error;
         auto request = std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared));
@@ -348,9 +353,9 @@ namespace javelin::app
             co_return missingConfiguration();
         co_return observeResult(
             m_errorCoordinator, *settings, ownerAccountId, i18n("Upload contact media"),
-            co_await m_contactService.uploadMedia(toLiveConnectionSettings(*settings),
-                                                  ownerAccountId, std::move(accountId),
-                                                  std::move(payload), std::move(mediaType)));
+            co_await m_contactMediaService.uploadMedia(toLiveConnectionSettings(*settings),
+                                                       ownerAccountId, std::move(accountId),
+                                                       std::move(payload), std::move(mediaType)));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactDownloadResult>
@@ -363,9 +368,9 @@ namespace javelin::app
             co_return missingConfiguration();
         co_return observeResult(
             m_errorCoordinator, *settings, ownerAccountId, i18n("Download contact media"),
-            co_await m_contactService.downloadMedia(toLiveConnectionSettings(*settings),
-                                                    ownerAccountId, std::move(accountId),
-                                                    std::move(blobId), std::move(mediaType)));
+            co_await m_contactMediaService.downloadMedia(toLiveConnectionSettings(*settings),
+                                                         ownerAccountId, std::move(accountId),
+                                                         std::move(blobId), std::move(mediaType)));
     }
 
     QCoro::Task<undo::AuthoritativeContactsResult>
@@ -377,7 +382,7 @@ namespace javelin::app
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&resolved))
             co_return *error;
         auto connection = std::get<ResolvedHistoryConnection>(std::move(resolved));
-        auto refreshed = co_await m_contactService.refreshAll(
+        auto refreshed = co_await m_contactSyncEngine.refreshAll(
             toLiveConnectionSettings(connection.settings), connection.ownerAccountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshed))
             co_return *error;
@@ -420,7 +425,7 @@ namespace javelin::app
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&resolved))
             co_return *error;
         auto connection = std::get<ResolvedHistoryConnection>(std::move(resolved));
-        co_return co_await m_contactService.setContactCards(
+        co_return co_await m_contactMutationEngine.setContactCards(
             toLiveConnectionSettings(connection.settings), std::move(connection.ownerAccountId),
             std::move(request), {.refreshAndRetryStateMismatch = true});
     }
@@ -434,7 +439,7 @@ namespace javelin::app
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&resolved))
             co_return *error;
         auto connection = std::get<ResolvedHistoryConnection>(std::move(resolved));
-        auto refreshed = co_await m_contactService.refreshAll(
+        auto refreshed = co_await m_contactSyncEngine.refreshAll(
             toLiveConnectionSettings(connection.settings), connection.ownerAccountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshed))
             co_return *error;
@@ -477,7 +482,7 @@ namespace javelin::app
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&resolved))
             co_return *error;
         auto connection = std::get<ResolvedHistoryConnection>(std::move(resolved));
-        co_return co_await m_contactService.setAddressBooks(
+        co_return co_await m_contactMutationEngine.setAddressBooks(
             toLiveConnectionSettings(connection.settings), std::move(connection.ownerAccountId),
             std::move(request));
     }
@@ -578,8 +583,8 @@ namespace javelin::app
         auto prepared = std::get<std::optional<undo::HistoryEntry>>(std::move(preparedResult));
         auto result = observeResult(
             m_errorCoordinator, *settings, ownerAccountId, i18n("Change address books"),
-            co_await m_contactService.setAddressBooks(toLiveConnectionSettings(*settings),
-                                                      ownerAccountId, std::move(request)));
+            co_await m_contactMutationEngine.setAddressBooks(toLiveConnectionSettings(*settings),
+                                                             ownerAccountId, std::move(request)));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             if (prepared.has_value())
@@ -713,7 +718,7 @@ namespace javelin::app
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
             co_return reportError(javelin::jmap::operationError(*error));
         auto prepared = std::get<std::optional<undo::HistoryEntry>>(std::move(preparedResult));
-        auto result = co_await m_contactService.setContactCards(
+        auto result = co_await m_contactMutationEngine.setContactCards(
             toLiveConnectionSettings(*settings), ownerAccountId, std::move(request),
             {.refreshAndRetryStateMismatch = true, .traceId = traceId});
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
@@ -841,8 +846,8 @@ namespace javelin::app
         auto prepared = std::get<std::optional<undo::HistoryEntry>>(std::move(preparedResult));
         auto result = observeResult(
             m_errorCoordinator, *settings, ownerAccountId, std::move(operationDescription),
-            co_await m_contactService.copyContactCards(toLiveConnectionSettings(*settings),
-                                                       ownerAccountId, std::move(request)));
+            co_await m_contactMutationEngine.copyContactCards(toLiveConnectionSettings(*settings),
+                                                              ownerAccountId, std::move(request)));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             if (prepared.has_value())

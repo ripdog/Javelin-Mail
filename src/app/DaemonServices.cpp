@@ -65,12 +65,19 @@
 #include "jmap/cache/MailboxStatisticsReadRepository.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/SubmissionRepository.h"
-#include "jmap/calendar/CalendarService.h"
-#include "jmap/contacts/ContactService.h"
+#include "jmap/calendar/CalendarCacheReader.h"
+#include "jmap/calendar/CalendarMutationEngine.h"
+#include "jmap/calendar/CalendarProtocolClient.h"
+#include "jmap/calendar/CalendarSyncEngine.h"
+#include "jmap/contacts/ContactMediaService.h"
+#include "jmap/contacts/ContactMutationEngine.h"
+#include "jmap/contacts/ContactProtocolClient.h"
+#include "jmap/contacts/ContactSyncEngine.h"
 #include "jmap/identity/IdentityService.h"
 #include "jmap/query/MailQueryClient.h"
 #include "jmap/query/MailQueryMaterializer.h"
-#include "jmap/sieve/SieveService.h"
+#include "jmap/sieve/SieveMutationEngine.h"
+#include "jmap/sieve/SieveProtocolClient.h"
 #include "jmap/submission/ComposeService.h"
 #include "jmap/sync/EmailMutationEngine.h"
 #include "jmap/sync/MailboxMutationEngine.h"
@@ -188,12 +195,30 @@ namespace javelin::app
         m_accountCommandService = std::make_unique<AccountCommandService>(*m_accountRepository);
         m_contactRepository =
             std::make_unique<javelin::jmap::cache::ContactRepository>(m_databaseConnection);
-        m_contactService = std::make_unique<javelin::jmap::contacts::ContactService>(
-            m_databaseConnection, *m_contactRepository, *m_transport, *m_methodTransport);
-        m_calendarService = std::make_unique<javelin::jmap::calendar::CalendarService>(
-            m_databaseConnection, *m_methodTransport);
-        m_sieveService = std::make_unique<javelin::jmap::sieve::SieveService>(
+        m_contactProtocolClient =
+            std::make_unique<javelin::jmap::contacts::ContactProtocolClient>(*m_methodTransport);
+        m_contactSyncEngine = std::make_unique<javelin::jmap::contacts::ContactSyncEngine>(
+            m_databaseConnection, *m_contactRepository, *m_contactProtocolClient);
+        m_contactMutationEngine = std::make_unique<javelin::jmap::contacts::ContactMutationEngine>(
+            m_databaseConnection, *m_contactRepository, *m_contactProtocolClient,
+            *m_contactSyncEngine);
+        m_contactMediaService = std::make_unique<javelin::jmap::contacts::ContactMediaService>(
+            m_databaseConnection, *m_transport);
+        m_calendarReader =
+            std::make_unique<javelin::jmap::calendar::CalendarCacheReader>(m_databaseConnection);
+        m_calendarProtocolClient =
+            std::make_unique<javelin::jmap::calendar::CalendarProtocolClient>(m_databaseConnection,
+                                                                              *m_methodTransport);
+        m_calendarSyncEngine = std::make_unique<javelin::jmap::calendar::CalendarSyncEngine>(
+            m_databaseConnection, *m_calendarProtocolClient);
+        m_calendarMutationEngine =
+            std::make_unique<javelin::jmap::calendar::CalendarMutationEngine>(
+                m_databaseConnection, *m_calendarProtocolClient, *m_calendarSyncEngine,
+                *m_calendarReader);
+        m_sieveProtocolClient = std::make_unique<javelin::jmap::sieve::SieveProtocolClient>(
             m_databaseConnection, *m_transport, *m_methodTransport);
+        m_sieveMutationEngine = std::make_unique<javelin::jmap::sieve::SieveMutationEngine>(
+            m_databaseConnection, *m_sieveProtocolClient);
         m_identityService = std::make_unique<javelin::jmap::identity::IdentityService>(
             m_databaseConnection, *m_methodTransport);
         m_identityRepository =
@@ -243,14 +268,15 @@ namespace javelin::app
             m_accountRuntimeManager.get(), &AccountRuntimeManager::notificationMailboxRefreshed,
             m_mailNotificationService.get(), &MailNotificationService::mailboxRefreshed);
         m_contactApplicationService = std::make_unique<ContactApplicationService>(
-            *m_contactRepository, *m_contactService, *m_accountRuntimeManager, *m_errorCoordinator,
-            *m_workScheduler);
+            *m_contactRepository, *m_contactSyncEngine, *m_accountRuntimeManager,
+            *m_errorCoordinator, *m_workScheduler);
         m_calendarApplicationService = std::make_unique<CalendarApplicationService>(
-            m_databaseConnection, *m_calendarService, *m_accountRuntimeManager, *m_errorCoordinator,
-            *m_workScheduler, *m_undoManager);
+            m_databaseConnection, *m_calendarReader, *m_calendarProtocolClient,
+            *m_calendarSyncEngine, *m_calendarMutationEngine, *m_accountRuntimeManager,
+            *m_errorCoordinator, *m_workScheduler, *m_undoManager);
         m_sieveApplicationService = std::make_unique<SieveApplicationService>(
-            *m_sieveService, *m_accountRuntimeManager, *m_errorCoordinator, *m_workScheduler,
-            *m_undoManager);
+            *m_sieveProtocolClient, *m_sieveMutationEngine, *m_accountRuntimeManager,
+            *m_errorCoordinator, *m_workScheduler, *m_undoManager);
         m_mailQueryApplicationService->setThreadMaterializationCoordinator(
             m_threadMaterializationCoordinator.get());
         m_mailMutationApplicationService->setThreadMaterializationCoordinator(
@@ -364,8 +390,9 @@ namespace javelin::app
         m_undoManager->setExecutor(QStringLiteral("calendar_preference"),
                                    m_calendarPreferenceExecutor.get());
         m_contactCommandService = std::make_unique<ContactCommandService>(
-            *m_accountRuntimeManager, *m_contactService, *m_contactRepository, *m_errorCoordinator,
-            *m_workScheduler, *m_undoManager);
+            *m_accountRuntimeManager, *m_contactSyncEngine, *m_contactMutationEngine,
+            *m_contactMediaService, *m_contactRepository, *m_errorCoordinator, *m_workScheduler,
+            *m_undoManager);
         m_contactHistoryExecutor =
             std::make_unique<javelin::app::undo::ContactHistoryExecutor>(*m_contactCommandService);
         m_undoManager->setExecutor(QStringLiteral("contact_card"), m_contactHistoryExecutor.get());
@@ -467,14 +494,9 @@ namespace javelin::app
         return *m_contactRepository;
     }
 
-    javelin::jmap::contacts::ContactService& DaemonServices::contactService()
+    javelin::jmap::calendar::CalendarReader& DaemonServices::calendarReader()
     {
-        return *m_contactService;
-    }
-
-    javelin::jmap::calendar::CalendarService& DaemonServices::calendarService()
-    {
-        return *m_calendarService;
+        return *m_calendarReader;
     }
 
     CalendarCommandPort& DaemonServices::calendarCommandPort()

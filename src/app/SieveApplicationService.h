@@ -1,11 +1,17 @@
 #pragma once
 
 #include "app/undo/SieveHistoryPort.h"
-#include "jmap/sieve/SieveService.h"
+#include "jmap/sieve/SieveCommandTypes.h"
 
 #include <QObject>
 
 #include <string>
+
+namespace javelin::jmap::sieve
+{
+    class SieveMutationEngine;
+    class SieveProtocolClient;
+} // namespace javelin::jmap::sieve
 
 namespace javelin::app::undo
 {
@@ -24,7 +30,8 @@ namespace javelin::app
         Q_OBJECT
 
       public:
-        SieveApplicationService(javelin::jmap::sieve::SieveService& sieveService,
+        SieveApplicationService(javelin::jmap::sieve::SieveProtocolClient& protocolClient,
+                                javelin::jmap::sieve::SieveMutationEngine& mutationEngine,
                                 AccountRuntimeManager& accountRuntime,
                                 ApplicationErrorCoordinator& errorCoordinator,
                                 WorkScheduler& workScheduler,
@@ -54,7 +61,8 @@ namespace javelin::app
                                  javelin::app::undo::CommandOrigin::User) override;
 
       private:
-        javelin::jmap::sieve::SieveService& m_sieveService;
+        javelin::jmap::sieve::SieveProtocolClient& m_sieveProtocolClient;
+        javelin::jmap::sieve::SieveMutationEngine& m_sieveMutationEngine;
         AccountRuntimeManager& m_accountRuntime;
         ApplicationErrorCoordinator& m_errorCoordinator;
         WorkScheduler& m_workScheduler;

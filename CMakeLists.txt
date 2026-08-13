@@ -507,8 +507,11 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/calendar/CalendarEventEditing.cpp
     src/jmap/calendar/CalendarEventEditing.h
     src/jmap/calendar/CalendarService.cpp
-    src/jmap/calendar/CalendarService.h
+    src/jmap/calendar/CalendarCacheReader.h
+    src/jmap/calendar/CalendarMutationEngine.h
+    src/jmap/calendar/CalendarProtocolClient.h
     src/jmap/calendar/CalendarReader.h
+    src/jmap/calendar/CalendarSyncEngine.h
     src/jmap/sieve/SieveCommandTypes.h
     src/jmap/api/MailMethods.cpp
     src/jmap/api/MailMethods.h
@@ -614,7 +617,10 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/contacts/ContactInterchange.h
     src/jmap/contacts/ContactResults.h
     src/jmap/contacts/ContactService.cpp
-    src/jmap/contacts/ContactService.h
+    src/jmap/contacts/ContactMediaService.h
+    src/jmap/contacts/ContactMutationEngine.h
+    src/jmap/contacts/ContactProtocolClient.h
+    src/jmap/contacts/ContactSyncEngine.h
     src/jmap/contacts/ContactIdentityLookup.cpp
     src/jmap/contacts/ContactIdentityLookup.h
     src/jmap/domain/MailEntityParsers.cpp
@@ -696,7 +702,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/submission/DraftMutationJournal.cpp
     src/jmap/submission/DraftMutationJournal.h
     src/jmap/sieve/SieveService.cpp
-    src/jmap/sieve/SieveService.h
+    src/jmap/sieve/SieveMutationEngine.h
+    src/jmap/sieve/SieveProtocolClient.h
     src/jmap/sieve/SieveCommandTypes.h
     src/jmap/sieve/SieveMutationJournal.cpp
     src/jmap/sieve/SieveMutationJournal.h
@@ -771,8 +778,11 @@ add_library(javelin_jmap STATIC
     src/jmap/calendar/CalendarColor.cpp
     src/jmap/calendar/CalendarColor.h
     src/jmap/calendar/CalendarService.cpp
-    src/jmap/calendar/CalendarService.h
+    src/jmap/calendar/CalendarCacheReader.h
+    src/jmap/calendar/CalendarMutationEngine.h
+    src/jmap/calendar/CalendarProtocolClient.h
     src/jmap/calendar/CalendarReader.h
+    src/jmap/calendar/CalendarSyncEngine.h
     src/jmap/calendar/CalendarEventEditing.cpp
     src/jmap/calendar/CalendarEventEditing.h
     src/jmap/cache/CalendarRepository.cpp
@@ -826,7 +836,10 @@ add_library(javelin_jmap STATIC
     src/jmap/contacts/ContactInterchange.h
     src/jmap/contacts/ContactResults.h
     src/jmap/contacts/ContactService.cpp
-    src/jmap/contacts/ContactService.h
+    src/jmap/contacts/ContactMediaService.h
+    src/jmap/contacts/ContactMutationEngine.h
+    src/jmap/contacts/ContactProtocolClient.h
+    src/jmap/contacts/ContactSyncEngine.h
     src/jmap/contacts/ContactIdentityLookup.cpp
     src/jmap/contacts/ContactIdentityLookup.h
     src/jmap/api/Transport.cpp
@@ -985,7 +998,8 @@ add_library(javelin_jmap STATIC
     src/jmap/submission/DraftMutationJournal.cpp
     src/jmap/submission/DraftMutationJournal.h
     src/jmap/sieve/SieveService.cpp
-    src/jmap/sieve/SieveService.h
+    src/jmap/sieve/SieveMutationEngine.h
+    src/jmap/sieve/SieveProtocolClient.h
     src/jmap/sieve/SieveMutationJournal.cpp
     src/jmap/sieve/SieveMutationJournal.h
     src/jmap/sieve/SieveTypes.h
@@ -1270,9 +1284,11 @@ file(GLOB_RECURSE javelin_gui_boundary_sources CONFIGURE_DEPENDS
 foreach(gui_source IN LISTS javelin_gui_boundary_sources)
     file(READ "${gui_source}" gui_source_contents)
     if(gui_source_contents MATCHES "#include \"jmap/api/(Transport|MethodEnvelope)\\.h\"" OR
-       gui_source_contents MATCHES "#include \"jmap/(cache|calendar)/(AccountRepository|ContactRepository|IdentityRepository|MessageViewService|QueryService|Database|CalendarService)\\.h\"" OR
+       gui_source_contents MATCHES "#include \"jmap/cache/(AccountRepository|ContactRepository|IdentityRepository|MessageViewService|QueryService|Database)\\.h\"" OR
+       gui_source_contents MATCHES "#include \"jmap/calendar/(CalendarCacheReader|CalendarProtocolClient|CalendarSyncEngine|CalendarMutationEngine)\\.h\"" OR
+       gui_source_contents MATCHES "#include \"jmap/contacts/(ContactProtocolClient|ContactSyncEngine|ContactMutationEngine|ContactMediaService)\\.h\"" OR
+       gui_source_contents MATCHES "#include \"jmap/sieve/(SieveProtocolClient|SieveMutationEngine)\\.h\"" OR
        gui_source_contents MATCHES "javelin::jmap::cache::Database(Connection|Transaction|WriteScope)" OR
-       gui_source_contents MATCHES "#include \"jmap/contacts/ContactService\\.h\"" OR
        gui_source_contents MATCHES "#include \"jmap/sync/(MailboxRefreshExecutor|MailboxStateRefreshExecutor)\\.h\"" OR
        gui_source_contents MATCHES "#include \"app/(AccountRuntimeManager|MailQueryApplicationService|MailMutationApplicationService|MessageContentApplicationService|MailNotificationService|ContactApplicationService|CalendarApplicationService|SieveApplicationService)\\.h\"" OR
        gui_source_contents MATCHES "javelin::app::(AccountRuntimeManager|MailQueryApplicationService|MailMutationApplicationService|MessageContentApplicationService|MailNotificationService|ContactApplicationService|CalendarApplicationService|SieveApplicationService)" OR

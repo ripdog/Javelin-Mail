@@ -3,7 +3,7 @@
 #include "app/MailApplicationTypes.h"
 #include "app/undo/CalendarHistoryPort.h"
 #include "app/undo/CalendarPreferencePort.h"
-#include "jmap/calendar/CalendarService.h"
+#include "jmap/calendar/CalendarReader.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
 #include <QObject>
@@ -13,6 +13,13 @@
 #include <string_view>
 #include <unordered_map>
 #include <variant>
+
+namespace javelin::jmap::calendar
+{
+    class CalendarMutationEngine;
+    class CalendarProtocolClient;
+    class CalendarSyncEngine;
+} // namespace javelin::jmap::calendar
 
 namespace javelin::app::undo
 {
@@ -33,7 +40,10 @@ namespace javelin::app
 
       public:
         CalendarApplicationService(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                                   javelin::jmap::calendar::CalendarService& calendarService,
+                                   javelin::jmap::calendar::CalendarReader& calendarReader,
+                                   javelin::jmap::calendar::CalendarProtocolClient& protocolClient,
+                                   javelin::jmap::calendar::CalendarSyncEngine& syncEngine,
+                                   javelin::jmap::calendar::CalendarMutationEngine& mutationEngine,
                                    AccountRuntimeManager& accountRuntime,
                                    ApplicationErrorCoordinator& errorCoordinator,
                                    WorkScheduler& workScheduler,
@@ -109,7 +119,10 @@ namespace javelin::app
         };
 
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
-        javelin::jmap::calendar::CalendarService& m_calendarService;
+        javelin::jmap::calendar::CalendarReader& m_calendarReader;
+        javelin::jmap::calendar::CalendarProtocolClient& m_calendarProtocolClient;
+        javelin::jmap::calendar::CalendarSyncEngine& m_calendarSyncEngine;
+        javelin::jmap::calendar::CalendarMutationEngine& m_calendarMutationEngine;
         AccountRuntimeManager& m_accountRuntime;
         ApplicationErrorCoordinator& m_errorCoordinator;
         WorkScheduler& m_workScheduler;
