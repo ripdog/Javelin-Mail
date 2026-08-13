@@ -1,10 +1,18 @@
 #pragma once
 
-#include <QObject>
+class QObject;
 
-class NoRttiAccessibleObject final : public QObject
+class NoRttiAccessibleObjectHandle final
 {
   public:
-    NoRttiAccessibleObject();
-    ~NoRttiAccessibleObject() override;
+    NoRttiAccessibleObjectHandle();
+    ~NoRttiAccessibleObjectHandle();
+
+    NoRttiAccessibleObjectHandle(const NoRttiAccessibleObjectHandle&) = delete;
+    NoRttiAccessibleObjectHandle& operator=(const NoRttiAccessibleObjectHandle&) = delete;
+
+    [[nodiscard]] QObject* get() const;
+
+  private:
+    QObject* m_object = nullptr;
 };

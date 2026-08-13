@@ -38,6 +38,7 @@ namespace javelin::app
         QString cacheRootPath;
         QString settingsPath;
         std::shared_ptr<AccountCredentialStore> credentialStore;
+        bool enableNetworkReachability = true;
     };
 
     enum class DaemonStartupErrorCode

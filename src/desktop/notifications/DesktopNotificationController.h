@@ -71,7 +71,8 @@ namespace javelin::app
                                         const QString& activationToken);
         void calendarNotificationAction(const QString& key, bool snooze);
         void undoSendRequested(const QString& sendId);
-        void undoableSendWindowEnded(const QString& sendId, DesktopNotificationCloseReason reason);
+        void undoableSendWindowEnded(const QString& sendId,
+                                     javelin::app::DesktopNotificationCloseReason reason);
 
       private Q_SLOTS:
         void onActionInvoked(uint notificationId, const QString& actionKey);

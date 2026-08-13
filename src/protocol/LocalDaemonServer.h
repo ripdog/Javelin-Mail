@@ -41,7 +41,8 @@ namespace javelin::protocol
 
       Q_SIGNALS:
         void connectionOpened();
-        void connectionClosed(SocketDisconnectReason reason, const QString& detail);
+        void connectionClosed(javelin::protocol::SocketDisconnectReason reason,
+                              const QString& detail);
 
       private:
         struct PendingFrame

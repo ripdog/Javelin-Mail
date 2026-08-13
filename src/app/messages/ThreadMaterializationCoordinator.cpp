@@ -363,9 +363,17 @@ namespace javelin::app
             if (queue.pending.empty() || !queue.active.empty())
                 continue;
 
-            const auto highest = std::ranges::max_element(queue.pending, {}, [](const auto& entry)
-                                                          { return entry.second.priority; });
-            const auto priority = highest->second.priority;
+            std::optional<WorkPriority> highestPriority;
+            for (const auto& [threadId, pending] : queue.pending)
+            {
+                Q_UNUSED(threadId);
+                if (!highestPriority.has_value() ||
+                    static_cast<int>(pending.priority) > static_cast<int>(*highestPriority))
+                    highestPriority = pending.priority;
+            }
+            if (!highestPriority.has_value())
+                continue;
+            const auto priority = *highestPriority;
             const auto admissionId = std::string{"thread-materialization:"} + accountId;
             auto admission = m_workScheduler.admitTransient(admissionId, accountId, priority);
             if (!admission.has_value())

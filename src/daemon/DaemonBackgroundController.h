@@ -32,7 +32,7 @@ namespace javelin::app
         DaemonBackgroundController(DaemonBackgroundController&&) = delete;
         DaemonBackgroundController& operator=(DaemonBackgroundController&&) = delete;
 
-        void start();
+        void start(bool enableNetworkReachability = true);
         void stop();
 
       Q_SIGNALS:

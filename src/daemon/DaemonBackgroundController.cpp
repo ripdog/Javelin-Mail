@@ -70,7 +70,7 @@ namespace javelin::app
         stop();
     }
 
-    void DaemonBackgroundController::start()
+    void DaemonBackgroundController::start(const bool enableNetworkReachability)
     {
         if (m_started)
             return;
@@ -214,7 +214,8 @@ namespace javelin::app
                                  << error->message;
         m_services.deferredSendService().start();
         m_services.calendarNotificationService().start();
-        setupNetworkReachability();
+        if (enableNetworkReachability)
+            setupNetworkReachability();
         refreshTrayUnreadCount();
         if (!m_tray->start())
             qInfo() << QStringLiteral("Tray integration is unavailable; daemon services continue");

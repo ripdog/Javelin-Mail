@@ -90,6 +90,7 @@ namespace
             .cacheRootPath = cacheRoot,
             .settingsPath = settingsPath,
             .credentialStore = testCredentialStore(),
+            .enableNetworkReachability = false,
         };
     }
 } // namespace

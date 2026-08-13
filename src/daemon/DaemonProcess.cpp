@@ -341,7 +341,7 @@ namespace javelin::app
             m_background = std::make_unique<DaemonBackgroundController>(*m_services, this);
             m_services->commandDispatcher().setEventSink(this);
             connectOperationalEvents();
-            m_background->start();
+            m_background->start(m_options.enableNetworkReachability);
         }
         catch (const std::exception& exception)
         {

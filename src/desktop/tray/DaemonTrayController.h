@@ -48,13 +48,13 @@ namespace javelin::app
         Q_PROPERTY(QString Category READ category CONSTANT)
         Q_PROPERTY(QString Id READ id CONSTANT)
         Q_PROPERTY(QString Title READ title CONSTANT)
-        Q_PROPERTY(QString Status READ status)
+        Q_PROPERTY(QString Status READ status NOTIFY NewStatus)
         Q_PROPERTY(int WindowId READ windowId CONSTANT)
         Q_PROPERTY(QString IconThemePath READ iconThemePath CONSTANT)
         Q_PROPERTY(QDBusObjectPath Menu READ menu CONSTANT)
         Q_PROPERTY(bool ItemIsMenu READ itemIsMenu CONSTANT)
         Q_PROPERTY(QString IconName READ iconName CONSTANT)
-        Q_PROPERTY(javelin::app::TrayToolTip ToolTip READ toolTip)
+        Q_PROPERTY(javelin::app::TrayToolTip ToolTip READ toolTip NOTIFY NewToolTip)
 
       public:
         explicit DaemonTrayController(WorkScheduler& workScheduler, QObject* parent = nullptr);
