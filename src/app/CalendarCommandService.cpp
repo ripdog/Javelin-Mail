@@ -1,15 +1,16 @@
 #include "app/CalendarCommandService.h"
 
-#include "app/MailApplicationService.h"
+#include "app/CalendarApplicationService.h"
 
 #include <utility>
 
 namespace javelin::app
 {
-    CalendarCommandService::CalendarCommandService(MailApplicationService& service, QObject* parent)
+    CalendarCommandService::CalendarCommandService(CalendarApplicationService& service,
+                                                   QObject* parent)
         : CalendarCommandPort(parent), m_service(service)
     {
-        connect(&m_service, &MailApplicationService::calendarCacheCommitted, this,
+        connect(&m_service, &CalendarApplicationService::calendarCacheCommitted, this,
                 &CalendarCommandPort::calendarCacheCommitted);
     }
 

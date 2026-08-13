@@ -1,9 +1,11 @@
 #include "app/DaemonProcess.h"
+#include "app/AccountRuntimeManager.h"
 #include "app/CacheLocationProvider.h"
 #include "app/DaemonRemoteActionDispatcher.h"
 #include "app/DaemonServices.h"
 #include "app/LogStore.h"
-#include "app/MailApplicationService.h"
+#include "app/MailMutationApplicationService.h"
+#include "app/MailQueryApplicationService.h"
 #include "app/MailboxTreeCacheRead.h"
 #include "app/MessageListMaterializationPort.h"
 #include "app/RemoteCodec.h"
@@ -667,7 +669,7 @@ TEST_CASE("completed offline mailbox pages materialize without server access",
         "'account-1','EmailQuery',"
         "'mailbox:archive|sort:receivedAt:desc|collapseThreads:true','state-current')")));
 
-    services.mailService().applySettings({javelin::app::AccountSyncConfiguration{
+    services.accountRuntimeManager().applySettings({javelin::app::AccountSyncConfiguration{
         .settings = {.connectionId = "connection-1",
                      .revision = 0,
                      .sessionUrl = "http://127.0.0.1:9/jmap",
@@ -682,7 +684,7 @@ TEST_CASE("completed offline mailbox pages materialize without server access",
         .notificationMailboxIds = {},
     }});
 
-    const auto result = QCoro::waitFor(services.mailService().requestMailboxWindow({
+    const auto result = QCoro::waitFor(services.mailQueryApplicationService().requestMailboxWindow({
         .accountId = "account-1",
         .mailboxId = "archive",
         .offset = 100,
@@ -803,19 +805,22 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
                       .has_value());
 
     std::vector<javelin::app::MailCacheChange> cacheChanges;
-    QObject::connect(&services.mailService(), &javelin::app::MailApplicationService::cacheCommitted,
-                     &services.mailService(), [&cacheChanges](javelin::app::MailCacheChange change)
+    QObject::connect(&services.mailMutationApplicationService(),
+                     &javelin::app::MailMutationApplicationService::cacheCommitted,
+                     &services.mailMutationApplicationService(),
+                     [&cacheChanges](javelin::app::MailCacheChange change)
                      { cacheChanges.push_back(std::move(change)); });
 
-    const auto queued = QCoro::waitFor(services.mailService().queueMailboxSelectionMutation({
-        .accountId = "account-1",
-        .selection = {javelin::app::SelectedCollapsedThread{
-            .threadId = "thread-1",
-        }},
-        .operation = javelin::app::MailboxSelectionOperation::Archive,
-        .sourceMailboxId = "inbox",
-        .destinationMailboxId = std::nullopt,
-    }));
+    const auto queued =
+        QCoro::waitFor(services.mailMutationApplicationService().queueMailboxSelectionMutation({
+            .accountId = "account-1",
+            .selection = {javelin::app::SelectedCollapsedThread{
+                .threadId = "thread-1",
+            }},
+            .operation = javelin::app::MailboxSelectionOperation::Archive,
+            .sourceMailboxId = "inbox",
+            .destinationMailboxId = std::nullopt,
+        }));
     const auto* summary = std::get_if<javelin::app::QueuedMailboxSelectionMutation>(&queued);
     REQUIRE(summary != nullptr);
     CHECK(summary->queuedEmailCount == 2);
@@ -847,7 +852,7 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     REQUIRE((*archivePage)->items.size() == 1);
     CHECK((*archivePage)->items.front().emailId == "email-1");
 
-    services.mailService().applySettings({javelin::app::AccountSyncConfiguration{
+    services.accountRuntimeManager().applySettings({javelin::app::AccountSyncConfiguration{
         .settings = {.connectionId = "connection-1",
                      .revision = 0,
                      .sessionUrl = "http://127.0.0.1:9/jmap",
@@ -862,16 +867,17 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
         .notificationMailboxIds = {},
     }});
 
-    const auto materialized = QCoro::waitFor(services.mailService().requestMailboxWindow({
-        .accountId = "account-1",
-        .mailboxId = "archive",
-        .offset = 0,
-        .limit = 100,
-        .sort = {},
-        .forceRefresh = false,
-        .anchor = std::nullopt,
-        .anchorOffset = 1,
-    }));
+    const auto materialized =
+        QCoro::waitFor(services.mailQueryApplicationService().requestMailboxWindow({
+            .accountId = "account-1",
+            .mailboxId = "archive",
+            .offset = 0,
+            .limit = 100,
+            .sort = {},
+            .forceRefresh = false,
+            .anchor = std::nullopt,
+            .anchorOffset = 1,
+        }));
     const auto* materializedSummary =
         std::get_if<javelin::app::MailboxWindowSummary>(&materialized);
     REQUIRE(materializedSummary != nullptr);
@@ -883,23 +889,25 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     REQUIRE(offlineScope.exec(QStringLiteral(
         "INSERT INTO offline_mailbox_scopes(account_id,mailbox_id,desired,status,generation,"
         "completed_generation) VALUES('account-1','archive',1,'complete',3,3)")));
-    const auto offlineFlagged = QCoro::waitFor(
-        services.mailService().queueSetMessagesFlagged("account-1", "archive",
-                                                       {javelin::app::SelectedCollapsedThread{
-                                                           .threadId = "thread-1",
-                                                       }},
-                                                       true));
+    const auto offlineFlagged =
+        QCoro::waitFor(services.mailMutationApplicationService().queueSetMessagesFlagged(
+            "account-1", "archive",
+            {javelin::app::SelectedCollapsedThread{
+                .threadId = "thread-1",
+            }},
+            true));
     const auto* offlineSummary =
         std::get_if<javelin::app::QueuedMessageSelectionMutation>(&offlineFlagged);
     REQUIRE(offlineSummary != nullptr);
     CHECK(offlineSummary->queuedEmailCount == 2);
 
-    const auto unavailable = QCoro::waitFor(
-        services.mailService().queueSetMessagesFlagged("account-1", std::nullopt,
-                                                       {javelin::app::SelectedCollapsedThread{
-                                                           .threadId = "thread-1",
-                                                       }},
-                                                       true));
+    const auto unavailable =
+        QCoro::waitFor(services.mailMutationApplicationService().queueSetMessagesFlagged(
+            "account-1", std::nullopt,
+            {javelin::app::SelectedCollapsedThread{
+                .threadId = "thread-1",
+            }},
+            true));
     CHECK(std::holds_alternative<javelin::jmap::OperationError>(unavailable));
     QSqlQuery mutationCount{connection.database()};
     REQUIRE(mutationCount.exec(QStringLiteral("SELECT COUNT(*) FROM mutation_journal")));
@@ -989,13 +997,16 @@ TEST_CASE("Thread materialization invalidates affected windows once per batch",
                       .has_value());
 
     std::vector<javelin::app::MailCacheChange> changes;
-    QObject::connect(&services.mailService(), &javelin::app::MailApplicationService::cacheCommitted,
-                     &services.mailService(), [&changes](javelin::app::MailCacheChange change)
+    QObject::connect(&services.mailQueryApplicationService(),
+                     &javelin::app::MailQueryApplicationService::cacheCommitted,
+                     &services.mailQueryApplicationService(),
+                     [&changes](javelin::app::MailCacheChange change)
                      { changes.push_back(std::move(change)); });
 
-    services.mailService().publishThreadMaterializationCommitted(QStringLiteral("account-1"), {});
+    services.mailQueryApplicationService().publishThreadMaterializationCommitted(
+        QStringLiteral("account-1"), {});
     CHECK(changes.empty());
-    services.mailService().publishThreadMaterializationCommitted(
+    services.mailQueryApplicationService().publishThreadMaterializationCommitted(
         QStringLiteral("account-1"), {QStringLiteral("thread-a"), QStringLiteral("thread-b")});
 
     REQUIRE(changes.size() == 1);

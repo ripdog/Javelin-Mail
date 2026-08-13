@@ -2,14 +2,17 @@
 
 #include "app/AccountCommandService.h"
 #include "app/AccountRefreshCommandService.h"
+#include "app/AccountRuntimeManager.h"
 #include "app/ApplicationErrorCoordinator.h"
 #include "app/CacheAccessBarrier.h"
 #include "app/CacheLocationProvider.h"
+#include "app/CalendarApplicationService.h"
 #include "app/CalendarCommandService.h"
 #include "app/CalendarNotificationService.h"
 #include "app/CommandDispatcher.h"
 #include "app/ComposeCommandService.h"
 #include "app/ComposeService.h"
+#include "app/ContactApplicationService.h"
 #include "app/ContactCommandService.h"
 #include "app/DeferredSendRepository.h"
 #include "app/DeferredSendService.h"
@@ -19,13 +22,17 @@
 #include "app/IdentityCommandService.h"
 #include "app/LocalMaintenanceService.h"
 #include "app/MailApplicationEventsService.h"
-#include "app/MailApplicationService.h"
 #include "app/MailCommandService.h"
 #include "app/MailIndexService.h"
+#include "app/MailMutationApplicationService.h"
+#include "app/MailNotificationService.h"
+#include "app/MailQueryApplicationService.h"
 #include "app/MailboxMaintenanceRegistry.h"
+#include "app/MessageContentApplicationService.h"
 #include "app/MessageContentCommandService.h"
 #include "app/MessageListSessionFactoryService.h"
 #include "app/MessageNavigationCoordinator.h"
+#include "app/SieveApplicationService.h"
 #include "app/SieveCommandService.h"
 #include "app/ThreadMaterializationCoordinator.h"
 #include "app/ThreadMembershipMaterializationWorker.h"
@@ -214,41 +221,64 @@ namespace javelin::app
         m_deferredSendSubmitter =
             std::make_unique<ComposeDeferredSendSubmitter>(*m_jmapComposeService);
         m_errorCoordinator = std::make_unique<ApplicationErrorCoordinator>(*m_accountRepository);
-        m_mailService = std::make_unique<MailApplicationService>(
+        m_accountRuntimeManager = std::make_unique<AccountRuntimeManager>(
             m_databaseConnection, *m_sessionRefreshClient, *m_accountBootstrapClient,
-            *m_mailQueryClient, *m_mailQueryMaterializer, *m_messageContentClient,
-            *m_emailMutationEngine, *m_mailboxMutationEngine, *m_methodTransport,
-            *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns, *m_accountRepository,
-            *m_mailboxRepository, *m_mailTagRepository, *m_mailboxStatisticsRepository,
-            *m_mailboxMessageRepository, *m_mailboxFilterRepository, *m_contactRepository,
-            *m_contactService, *m_calendarService, *m_sieveService, *m_errorCoordinator,
+            *m_methodTransport, *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns,
+            *m_accountRepository, *m_mailboxRepository, *m_errorCoordinator, *m_workScheduler);
+        m_mailQueryApplicationService = std::make_unique<MailQueryApplicationService>(
+            m_databaseConnection, *m_mailQueryMaterializer, *m_contactRepository,
+            *m_mailTagRepository, *m_mailboxStatisticsRepository, *m_mailboxMessageRepository,
+            *m_mailboxFilterRepository, *m_accountRuntimeManager, *m_errorCoordinator,
+            *m_workScheduler, *m_mailboxMaintenanceRegistry);
+        m_mailMutationApplicationService = std::make_unique<MailMutationApplicationService>(
+            m_databaseConnection, *m_emailMutationEngine, *m_mailboxMutationEngine,
+            *m_mailQueryClient, *m_mailboxRepository, *m_mailTagRepository,
+            *m_mailboxMessageRepository, *m_accountRuntimeManager, *m_errorCoordinator,
             *m_workScheduler, *m_mailboxMaintenanceRegistry, *m_undoManager);
-        m_mailService->setThreadMaterializationCoordinator(
+        m_messageContentApplicationService = std::make_unique<MessageContentApplicationService>(
+            m_databaseConnection, *m_messageContentClient, *m_accountRuntimeManager,
+            *m_errorCoordinator, *m_workScheduler, *m_mailboxMaintenanceRegistry);
+        m_mailNotificationService = std::make_unique<MailNotificationService>(m_databaseConnection);
+        QObject::connect(
+            m_accountRuntimeManager.get(), &AccountRuntimeManager::notificationMailboxRefreshed,
+            m_mailNotificationService.get(), &MailNotificationService::mailboxRefreshed);
+        m_contactApplicationService = std::make_unique<ContactApplicationService>(
+            *m_contactRepository, *m_contactService, *m_accountRuntimeManager, *m_errorCoordinator,
+            *m_workScheduler);
+        m_calendarApplicationService = std::make_unique<CalendarApplicationService>(
+            m_databaseConnection, *m_calendarService, *m_accountRuntimeManager, *m_errorCoordinator,
+            *m_workScheduler, *m_undoManager);
+        m_sieveApplicationService = std::make_unique<SieveApplicationService>(
+            *m_sieveService, *m_accountRuntimeManager, *m_errorCoordinator, *m_workScheduler,
+            *m_undoManager);
+        m_mailQueryApplicationService->setThreadMaterializationCoordinator(
+            m_threadMaterializationCoordinator.get());
+        m_mailMutationApplicationService->setThreadMaterializationCoordinator(
             m_threadMaterializationCoordinator.get());
         m_threadMembershipMaterializationWorker =
             std::make_unique<ThreadMembershipMaterializationWorker>(
-                m_databaseConnection, *m_methodTransport, *m_mailService);
+                m_databaseConnection, *m_methodTransport, *m_accountRuntimeManager);
         m_threadMaterializationCoordinator->setWorker(
             m_threadMembershipMaterializationWorker.get());
         QObject::connect(m_threadMembershipMaterializationWorker.get(),
                          &ThreadMembershipMaterializationWorker::membershipCommitted,
-                         m_mailService.get(),
+                         m_mailQueryApplicationService.get(),
                          [this](QString accountId, const QStringList& threadIds)
                          {
-                             m_mailService->publishThreadMaterializationCommitted(
+                             m_mailQueryApplicationService->publishThreadMaterializationCommitted(
                                  std::move(accountId), threadIds);
                          });
         QObject::connect(m_threadMembershipMaterializationWorker.get(),
                          &ThreadMembershipMaterializationWorker::childEmailsCommitted,
-                         m_mailService.get(),
+                         m_mailQueryApplicationService.get(),
                          [this](QString accountId, const QStringList& threadIds, const QStringList&)
                          {
-                             m_mailService->publishThreadMaterializationCommitted(
+                             m_mailQueryApplicationService->publishThreadMaterializationCommitted(
                                  std::move(accountId), threadIds);
                          });
         m_developerMaintenanceService = std::make_unique<DeveloperMaintenanceService>(
             location.databasePath, location.vaultRootPath, *m_mailboxMaintenanceRegistry,
-            *m_mailService, *m_workScheduler,
+            *m_mailQueryApplicationService, *m_workScheduler,
             [this](const std::string_view accountId, const std::string_view mailboxId)
             { m_fullMailSyncService->requestMailboxResync(accountId, mailboxId); },
             [this](const std::string_view accountId)
@@ -260,15 +290,16 @@ namespace javelin::app
                            "cache clear"
                         << QString::fromStdString(std::string{accountId}) << error->message;
             });
-        m_mailCommandService = std::make_unique<MailCommandService>(*m_mailService);
-        m_sieveCommandService = std::make_unique<SieveCommandService>(*m_mailService);
+        m_mailCommandService =
+            std::make_unique<MailCommandService>(*m_mailMutationApplicationService);
+        m_sieveCommandService = std::make_unique<SieveCommandService>(*m_sieveApplicationService);
         m_identityCommandService = std::make_unique<IdentityCommandService>(
-            *m_identityService, *m_accountRepository, *m_mailService, *m_errorCoordinator,
-            *m_workScheduler, *m_mailService);
+            *m_identityService, *m_accountRepository, *m_accountRuntimeManager, *m_errorCoordinator,
+            *m_workScheduler, *m_mailQueryApplicationService);
         const auto refreshIdentityAccount = [this](const QString& accountId)
         {
             auto task = m_identityCommandService->requestSenderIdentities(accountId.toStdString());
-            QCoro::connect(std::move(task), m_mailService.get(), [](const auto&) {});
+            QCoro::connect(std::move(task), m_accountRuntimeManager.get(), [](const auto&) {});
         };
         const auto refreshOwnedIdentityAccounts =
             [this, refreshIdentityAccount](const QString& ownerAccountId)
@@ -287,46 +318,53 @@ namespace javelin::app
                     refreshIdentityAccount(QString::fromStdString(account.accountId));
             }
         };
-        QObject::connect(m_mailService.get(), &MailApplicationService::senderIdentityStateChanged,
-                         m_mailService.get(), refreshIdentityAccount);
-        QObject::connect(m_mailService.get(), &MailApplicationService::sessionCapabilitiesChanged,
-                         m_mailService.get(), refreshOwnedIdentityAccounts);
-        m_accountRefreshCommandService =
-            std::make_unique<AccountRefreshCommandService>(*m_mailService);
+        QObject::connect(m_accountRuntimeManager.get(),
+                         &AccountRuntimeManager::senderIdentityStateChanged,
+                         m_accountRuntimeManager.get(), refreshIdentityAccount);
+        QObject::connect(m_accountRuntimeManager.get(),
+                         &AccountRuntimeManager::sessionCapabilitiesChanged,
+                         m_accountRuntimeManager.get(), refreshOwnedIdentityAccounts);
+        m_accountRefreshCommandService = std::make_unique<AccountRefreshCommandService>(
+            *m_accountRuntimeManager, *m_contactApplicationService);
         m_messageContentCommandService =
-            std::make_unique<MessageContentCommandService>(*m_mailService);
-        m_mailApplicationEventsService =
-            std::make_unique<MailApplicationEventsService>(*m_mailService);
+            std::make_unique<MessageContentCommandService>(*m_messageContentApplicationService);
+        m_mailApplicationEventsService = std::make_unique<MailApplicationEventsService>(
+            *m_accountRuntimeManager, *m_mailQueryApplicationService,
+            *m_mailMutationApplicationService, *m_messageContentApplicationService,
+            *m_contactApplicationService);
         m_messageListSessionFactoryService = std::make_unique<MessageListSessionFactoryService>(
-            *m_mailService, *m_mailApplicationEventsService, m_databasePath);
+            *m_mailQueryApplicationService, *m_mailApplicationEventsService, m_databasePath);
         m_commandDispatcher = std::make_unique<CommandDispatcher>(*m_accountRefreshCommandService);
-        m_calendarCommandService = std::make_unique<CalendarCommandService>(*m_mailService);
+        m_calendarCommandService =
+            std::make_unique<CalendarCommandService>(*m_calendarApplicationService);
         m_deferredSendService = std::make_unique<DeferredSendService>(
-            *m_deferredSendRepository, *m_deferredSendSubmitter, *m_mailService, *m_undoManager);
+            *m_deferredSendRepository, *m_deferredSendSubmitter, *m_accountRuntimeManager,
+            *m_undoManager);
         m_undoManager->setExecutor(QStringLiteral("deferred_send"), m_deferredSendService.get());
         m_composeService = std::make_unique<ComposeService>(
-            *m_jmapComposeService, *m_errorCoordinator, *m_workScheduler, *m_mailService,
-            *m_mailService, *m_undoManager, *m_deferredSendService);
+            *m_jmapComposeService, *m_errorCoordinator, *m_workScheduler, *m_accountRuntimeManager,
+            *m_mailQueryApplicationService, *m_undoManager, *m_deferredSendService);
         m_composeCommandService = std::make_unique<ComposeCommandService>(*m_composeService);
         m_draftHistoryExecutor =
             std::make_unique<javelin::app::undo::DraftHistoryExecutor>(*m_composeService);
         m_undoManager->setExecutor(QStringLiteral("draft"), m_draftHistoryExecutor.get());
-        m_mailHistoryExecutor =
-            std::make_unique<javelin::app::undo::MailHistoryExecutor>(*m_mailService);
+        m_mailHistoryExecutor = std::make_unique<javelin::app::undo::MailHistoryExecutor>(
+            *m_mailMutationApplicationService);
         m_undoManager->setExecutor(QStringLiteral("mail_patch"), m_mailHistoryExecutor.get());
         m_sieveHistoryExecutor =
-            std::make_unique<javelin::app::undo::SieveHistoryExecutor>(*m_mailService);
+            std::make_unique<javelin::app::undo::SieveHistoryExecutor>(*m_sieveApplicationService);
         m_undoManager->setExecutor(QStringLiteral("sieve"), m_sieveHistoryExecutor.get());
-        m_calendarHistoryExecutor =
-            std::make_unique<javelin::app::undo::CalendarHistoryExecutor>(*m_mailService);
+        m_calendarHistoryExecutor = std::make_unique<javelin::app::undo::CalendarHistoryExecutor>(
+            *m_calendarApplicationService);
         m_undoManager->setExecutor(QStringLiteral("calendar_event"),
                                    m_calendarHistoryExecutor.get());
         m_calendarPreferenceExecutor =
-            std::make_unique<javelin::app::undo::CalendarPreferenceExecutor>(*m_mailService);
+            std::make_unique<javelin::app::undo::CalendarPreferenceExecutor>(
+                *m_calendarApplicationService);
         m_undoManager->setExecutor(QStringLiteral("calendar_preference"),
                                    m_calendarPreferenceExecutor.get());
         m_contactCommandService = std::make_unique<ContactCommandService>(
-            *m_mailService, *m_contactService, *m_contactRepository, *m_errorCoordinator,
+            *m_accountRuntimeManager, *m_contactService, *m_contactRepository, *m_errorCoordinator,
             *m_workScheduler, *m_undoManager);
         m_contactHistoryExecutor =
             std::make_unique<javelin::app::undo::ContactHistoryExecutor>(*m_contactCommandService);
@@ -338,28 +376,31 @@ namespace javelin::app
                                    m_addressBookHistoryExecutor.get());
         QObject::connect(
             m_fullMailSyncService.get(), &FullMailSyncService::mailboxWindowCommitted,
-            m_mailService.get(),
+            m_mailQueryApplicationService.get(),
             [this](QString accountId, QString mailboxId, const quint64 offset, const quint64 limit)
             {
-                m_mailService->publishMailboxWindowCommitted(
+                m_mailQueryApplicationService->publishMailboxWindowCommitted(
                     std::move(accountId), std::move(mailboxId), static_cast<std::size_t>(offset),
                     static_cast<std::size_t>(limit));
             });
         QObject::connect(m_fullMailSyncService.get(), &FullMailSyncService::messageContentCommitted,
-                         m_mailService.get(),
-                         &MailApplicationService::publishMessageContentCommitted);
-        QObject::connect(m_mailService.get(), &MailApplicationService::cacheCommitted,
-                         m_fullMailSyncService.get(),
-                         [this](const MailCacheChange& change)
-                         {
-                             if (change.mailboxTreeChanged)
-                                 m_fullMailSyncService->refreshMailboxVisibility(
-                                     change.accountId.toStdString());
-                         });
+                         m_messageContentApplicationService.get(),
+                         &MessageContentApplicationService::publishMessageContentCommitted);
+        const auto refreshMailboxVisibility = [this](const MailCacheChange& change)
+        {
+            if (change.mailboxTreeChanged)
+                m_fullMailSyncService->refreshMailboxVisibility(change.accountId.toStdString());
+        };
+        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::cacheCommitted,
+                         m_fullMailSyncService.get(), refreshMailboxVisibility);
+        QObject::connect(m_mailMutationApplicationService.get(),
+                         &MailMutationApplicationService::cacheCommitted,
+                         m_fullMailSyncService.get(), refreshMailboxVisibility);
         m_messageNavigationCoordinator = std::make_unique<MessageNavigationCoordinator>();
-        m_calendarNotificationService =
-            std::make_unique<CalendarNotificationService>(m_databaseConnection, *m_mailService);
-        QObject::connect(m_mailService.get(), &MailApplicationService::calendarCacheCommitted,
+        m_calendarNotificationService = std::make_unique<CalendarNotificationService>(
+            m_databaseConnection, *m_calendarApplicationService);
+        QObject::connect(m_calendarApplicationService.get(),
+                         &CalendarApplicationService::calendarCacheCommitted,
                          m_calendarNotificationService.get(), [this](const CalendarCacheChange&)
                          { m_calendarNotificationService->requestScan(); });
     }
@@ -382,7 +423,7 @@ namespace javelin::app
     {
         m_transport->setRefreshHandler(handler);
         m_methodTransport->setRefreshHandler(handler);
-        m_mailService->setAuthenticationRefreshHandler(std::move(handler));
+        m_accountRuntimeManager->setAuthenticationRefreshHandler(std::move(handler));
     }
 
     javelin::jmap::cache::AccountRepository& DaemonServices::accountRepository()
@@ -521,9 +562,44 @@ namespace javelin::app
         return *m_contactCommandService;
     }
 
-    MailApplicationService& DaemonServices::mailService()
+    AccountRuntimeManager& DaemonServices::accountRuntimeManager()
     {
-        return *m_mailService;
+        return *m_accountRuntimeManager;
+    }
+
+    MailQueryApplicationService& DaemonServices::mailQueryApplicationService()
+    {
+        return *m_mailQueryApplicationService;
+    }
+
+    MailMutationApplicationService& DaemonServices::mailMutationApplicationService()
+    {
+        return *m_mailMutationApplicationService;
+    }
+
+    MessageContentApplicationService& DaemonServices::messageContentApplicationService()
+    {
+        return *m_messageContentApplicationService;
+    }
+
+    MailNotificationService& DaemonServices::mailNotificationService()
+    {
+        return *m_mailNotificationService;
+    }
+
+    ContactApplicationService& DaemonServices::contactApplicationService()
+    {
+        return *m_contactApplicationService;
+    }
+
+    CalendarApplicationService& DaemonServices::calendarApplicationService()
+    {
+        return *m_calendarApplicationService;
+    }
+
+    SieveApplicationService& DaemonServices::sieveApplicationService()
+    {
+        return *m_sieveApplicationService;
     }
 
     MessageNavigationPort& DaemonServices::messageNavigationPort()

@@ -1,10 +1,10 @@
 #include "app/SieveCommandService.h"
 
-#include "app/MailApplicationService.h"
+#include "app/SieveApplicationService.h"
 
 namespace javelin::app
 {
-    SieveCommandService::SieveCommandService(MailApplicationService& service) : m_service(service)
+    SieveCommandService::SieveCommandService(SieveApplicationService& service) : m_service(service)
     {
     }
 

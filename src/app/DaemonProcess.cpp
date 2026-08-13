@@ -1,5 +1,6 @@
 #include "app/DaemonProcess.h"
 
+#include "app/AccountRuntimeManager.h"
 #include "app/CacheAccessBarrier.h"
 #include "app/CalendarNotificationService.h"
 #include "app/CommandDispatcher.h"
@@ -10,8 +11,8 @@
 #include "app/FullMailSyncService.h"
 #include "app/LocalMaintenanceService.h"
 #include "app/MailApplicationEventsPorts.h"
-#include "app/MailApplicationService.h"
 #include "app/MailIndexService.h"
+#include "app/MailQueryApplicationService.h"
 #include "app/PerformanceMetrics.h"
 #include "app/ProcessInstanceLock.h"
 #include "app/SettingsRepository.h"
@@ -613,7 +614,7 @@ namespace javelin::app
 
         const auto requestId = request.id;
         const auto startedAt = std::chrono::steady_clock::now();
-        auto task = m_services->mailService().requestMailboxWindow({
+        auto task = m_services->mailQueryApplicationService().requestMailboxWindow({
             .accountId = mailbox->accountId.toStdString(),
             .mailboxId = mailbox->mailboxId.toStdString(),
             .offset = static_cast<std::size_t>(mailbox->offset),
@@ -1105,7 +1106,7 @@ namespace javelin::app
                                  .arg(configurations.size())
                                  .arg(configurations.size() == 1 ? QString{} : QStringLiteral("s"),
                                       configuredAccountIds.join(QStringLiteral(", ")));
-        m_services->mailService().applySettings(configurations);
+        m_services->accountRuntimeManager().applySettings(configurations);
         m_services->fullMailSyncService().applySettings(std::move(fullSync));
         m_services->mailIndexService().applyAccounts(std::move(accountIds));
         m_services->localMaintenanceService().requestReplay();

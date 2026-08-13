@@ -135,7 +135,8 @@ The source tree is organized by responsibility rather than by feature alone:
 | Area | Responsibility |
 | --- | --- |
 | `src/protocol/` | Process-boundary value types, framing, socket transport, correlation, limits, and transport conformance |
-| `src/app/` | Composition roots, application commands, settings, background scheduling, notifications, history, and GUI remote adapters |
+| `src/app/` | Composition roots, focused application services, commands, settings, background scheduling, notifications, history, and GUI remote adapters |
+| `src/app/account/` | Per-account synchronization coordinator declarations and account-runtime ownership |
 | `src/jmap/api/` | Session discovery, capabilities, typed JMAP envelopes, HTTP/WebSocket transport, and resource transfer |
 | `src/jmap/cache/` | SQLite schema and repositories, read models, query windows, MIME source storage, and search indexes |
 | `src/jmap/sync/` | State-change sources, refresh planning, reconciliation, mutation projection, and consistency fences |
@@ -150,7 +151,13 @@ The principal runtime objects are:
 | Component | Process | Role |
 | --- | --- | --- |
 | `DaemonProcess` | daemon | Starts settings, cache recovery, service composition, sockets, and daemon lifecycle |
-| `DaemonServices` | daemon | Owns writable repositories, JMAP transports, coordinators, command services, and background work |
+| `DaemonServices` | daemon | Composition root for writable repositories, JMAP transports, focused application services, command services, and background work |
+| `AccountRuntimeManager` | daemon | Owns account configuration, `AccountSyncCoordinator` lifetimes, session/authentication refresh, network recovery, and account status |
+| `MailQueryApplicationService` | daemon | Owns mailbox observations, mailbox/search materialization demand, Thread materialization demand, and query-cache publication |
+| `MailMutationApplicationService` | daemon | Expands selections, queues/submits/reconciles Email and mailbox mutations, owns tag jobs, and implements mail history operations |
+| `MessageContentApplicationService` | daemon | Coordinates message body, attachment, and source retrieval plus content invalidation |
+| `MailNotificationService` | daemon | Owns mail-notification delivery acknowledgement/release/recovery and forwards claimed notification candidates |
+| `ContactApplicationService` / `CalendarApplicationService` / `SieveApplicationService` | daemon | Own domain application workflow and history-facing coordination without sharing mail query, mutation, or account-runtime state |
 | `SessionRefreshClient` / `AccountBootstrapClient` | daemon | Refresh JMAP session metadata and perform initial account/mailbox bootstrap without exposing query or mutation APIs |
 | `MailQueryClient` / `MailQueryMaterializer` | daemon | Execute bounded JMAP mail queries and commit authoritative mailbox/search windows to the cache |
 | `MessageContentClient` | daemon | Refresh MIME source/content and read cached source or attachment payloads |
@@ -174,8 +181,9 @@ The principal runtime objects are:
 `DaemonServices` is the operational composition root. It is the only place where writable cache
 repositories, JMAP transports, synchronization services, history executors, settings, and background
 controllers are assembled together. Mail protocol work is intentionally injected as narrow
-capabilities: there is no aggregate JMAP object combining session discovery, queries, content
-retrieval, Email mutation, and mailbox lifecycle. `GuiServices` is deliberately smaller: it exposes
+capabilities, and daemon application policy is likewise split by responsibility: no application
+object combines account runtime, queries, content, mutations, notifications, contacts, calendars,
+and Sieve. `GuiServices` is deliberately smaller: it exposes
 read-only cache readers and remote ports matching the interfaces expected by GUI controllers.
 
 ## Representative runtime flows
@@ -239,7 +247,7 @@ and announces committed changes; the cache remains the data plane.
 
 ```text
 WebSocket push or EventSource state change
-  -> account coordinator / LongPollService
+  -> AccountSyncCoordinator
   -> typed refresh and reconciliation
   -> cache commit and invalidation
   -> notification discovery outbox
@@ -271,10 +279,11 @@ identity and shared selection state. Selection restoration, activation, navigati
 action availability, and list presentation are separated into deterministic policies plus narrow Qt
 adapters so cache changes cannot reinterpret row numbers as user intent.
 
-The account synchronization service owns state-change consumption, debounce and single-flight
-refresh, mailbox interest, state tokens, cache reconciliation, retries, and post-commit publication.
-Consumers reload affected state from SQLite only after the daemon has committed the corresponding
-transaction.
+`AccountSyncCoordinator` owns state-change consumption, debounce and single-flight refresh, state
+tokens, cache reconciliation, retries, and post-commit publication for one configured account.
+`AccountRuntimeManager` owns coordinator lifetime and configuration, while
+`MailQueryApplicationService` owns transient mailbox observation demand. Consumers reload affected
+state from SQLite only after the daemon has committed the corresponding transaction.
 
 ## Cache materialization and navigation
 

@@ -309,11 +309,18 @@ set(JAVELIN_FORMAT_FILES
     src/app/LogStore.cpp
     src/app/LogStore.h
     src/app/LongPollService.cpp
-    src/app/LongPollService.h
+    src/app/account/AccountSyncCoordinator.h
     src/app/OAuthRefreshSingleFlight.cpp
     src/app/OAuthRefreshSingleFlight.h
     src/app/MailApplicationService.cpp
-    src/app/MailApplicationService.h
+    src/app/AccountRuntimeManager.h
+    src/app/CalendarApplicationService.h
+    src/app/ContactApplicationService.h
+    src/app/MailMutationApplicationService.h
+    src/app/MailNotificationService.h
+    src/app/MailQueryApplicationService.h
+    src/app/MessageContentApplicationService.h
+    src/app/SieveApplicationService.h
     src/app/EmailMutationBatchSubmitter.cpp
     src/app/EmailMutationBatchSubmitter.h
     src/app/ThreadMaterializationCoordinator.cpp
@@ -1267,6 +1274,8 @@ foreach(gui_source IN LISTS javelin_gui_boundary_sources)
        gui_source_contents MATCHES "javelin::jmap::cache::Database(Connection|Transaction|WriteScope)" OR
        gui_source_contents MATCHES "#include \"jmap/contacts/ContactService\\.h\"" OR
        gui_source_contents MATCHES "#include \"jmap/sync/(MailboxRefreshExecutor|MailboxStateRefreshExecutor)\\.h\"" OR
+       gui_source_contents MATCHES "#include \"app/(AccountRuntimeManager|MailQueryApplicationService|MailMutationApplicationService|MessageContentApplicationService|MailNotificationService|ContactApplicationService|CalendarApplicationService|SieveApplicationService)\\.h\"" OR
+       gui_source_contents MATCHES "javelin::app::(AccountRuntimeManager|MailQueryApplicationService|MailMutationApplicationService|MessageContentApplicationService|MailNotificationService|ContactApplicationService|CalendarApplicationService|SieveApplicationService)" OR
        gui_source_contents MATCHES "#include \"app/MailApplicationService\\.h\"" OR
        gui_source_contents MATCHES "javelin::app::MailApplicationService" OR
        gui_source_contents MATCHES "AccountSyncConfiguration" OR
@@ -1275,7 +1284,7 @@ foreach(gui_source IN LISTS javelin_gui_boundary_sources)
        gui_source_contents MATCHES "javelin::jmap::LiveConnectionSettings" OR
        gui_source_contents MATCHES "javelin::jmap::api::((AddressBook|ContactCard)(Set|Copy)Request|ContactDocument)" OR
        gui_source_contents MATCHES "javelin::jmap::submission::ComposeService" OR
-       gui_source_contents MATCHES "javelin::app::LongPoll(Service|Coordinator|AccountConfiguration)" OR
+       gui_source_contents MATCHES "javelin::app::(AccountSyncCoordinator|LongPoll(Service|Coordinator|AccountConfiguration))" OR
        gui_source_contents MATCHES "#include \"app/(DaemonServices|ProcessServices|WorkScheduler|MessageNavigationCoordinator)\\.h\"" OR
        gui_source_contents MATCHES "javelin::app::(DaemonServices|ProcessServices|WorkScheduler|MessageNavigationCoordinator|UndoManager)")
         message(FATAL_ERROR "GUI boundary violation in ${gui_source}")
@@ -1290,7 +1299,7 @@ set(javelin_contacts_gui_sources
 )
 foreach(contacts_gui_source IN LISTS javelin_contacts_gui_sources)
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${contacts_gui_source}" contacts_gui_source_contents)
-    if(contacts_gui_source_contents MATCHES "javelin::app::(ContactCommandService|MailApplicationService)")
+    if(contacts_gui_source_contents MATCHES "javelin::app::(ContactCommandService|ContactApplicationService|MailApplicationService)")
         message(FATAL_ERROR "Contacts GUI must depend on application ports: ${contacts_gui_source}")
     endif()
 endforeach()
@@ -1303,7 +1312,7 @@ foreach(mail_command_gui_source IN LISTS javelin_mail_command_gui_sources)
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${mail_command_gui_source}"
          mail_command_gui_source_contents)
     if(mail_command_gui_source_contents MATCHES
-       "javelin::app::MailApplicationService|app/MailApplicationService\\.h")
+       "javelin::app::(MailApplicationService|MailMutationApplicationService)|app/(MailApplicationService|MailMutationApplicationService)\\.h")
         message(FATAL_ERROR
                 "Message command GUI must depend on MailCommandPort: ${mail_command_gui_source}")
     endif()
@@ -1333,7 +1342,7 @@ foreach(calendar_command_gui_source IN LISTS javelin_calendar_command_gui_source
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${calendar_command_gui_source}"
          calendar_command_gui_source_contents)
     if(calendar_command_gui_source_contents MATCHES
-       "javelin::app::MailApplicationService|app/MailApplicationService\\.h")
+       "javelin::app::(MailApplicationService|CalendarApplicationService)|app/(MailApplicationService|CalendarApplicationService)\\.h")
         message(FATAL_ERROR
                 "Calendar GUI must depend on CalendarCommandPort: ${calendar_command_gui_source}")
     endif()
@@ -1347,7 +1356,7 @@ foreach(sieve_command_gui_source IN LISTS javelin_sieve_command_gui_sources)
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${sieve_command_gui_source}"
          sieve_command_gui_source_contents)
     if(sieve_command_gui_source_contents MATCHES
-       "javelin::app::MailApplicationService|app/MailApplicationService\.h")
+       "javelin::app::(MailApplicationService|SieveApplicationService)|app/(MailApplicationService|SieveApplicationService)\.h")
         message(FATAL_ERROR
                 "Sieve GUI must depend on SieveCommandPort: ${sieve_command_gui_source}")
     endif()
@@ -1367,7 +1376,7 @@ foreach(refresh_content_gui_source IN LISTS javelin_refresh_content_gui_sources)
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${refresh_content_gui_source}"
          refresh_content_gui_source_contents)
     if(refresh_content_gui_source_contents MATCHES
-       "javelin::app::MailApplicationService|app/MailApplicationService\.h")
+       "javelin::app::(MailApplicationService|AccountRuntimeManager|MailQueryApplicationService|MessageContentApplicationService)|app/(MailApplicationService|AccountRuntimeManager|MailQueryApplicationService|MessageContentApplicationService)\.h")
         message(FATAL_ERROR
                 "Refresh/content GUI must depend on application ports: ${refresh_content_gui_source}")
     endif()
@@ -1521,11 +1530,18 @@ add_library(javelin_daemon_core STATIC
     src/app/LogStore.cpp
     src/app/LogStore.h
     src/app/LongPollService.cpp
-    src/app/LongPollService.h
+    src/app/account/AccountSyncCoordinator.h
     src/app/OAuthRefreshSingleFlight.cpp
     src/app/OAuthRefreshSingleFlight.h
     src/app/MailApplicationService.cpp
-    src/app/MailApplicationService.h
+    src/app/AccountRuntimeManager.h
+    src/app/CalendarApplicationService.h
+    src/app/ContactApplicationService.h
+    src/app/MailMutationApplicationService.h
+    src/app/MailNotificationService.h
+    src/app/MailQueryApplicationService.h
+    src/app/MessageContentApplicationService.h
+    src/app/SieveApplicationService.h
     src/app/EmailMutationBatchSubmitter.cpp
     src/app/EmailMutationBatchSubmitter.h
     src/app/ThreadMaterializationCoordinator.cpp

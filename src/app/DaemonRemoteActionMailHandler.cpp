@@ -2,7 +2,7 @@
 
 #include "app/DaemonServices.h"
 #include "app/MailApplicationPorts.h"
-#include "app/MailApplicationService.h"
+#include "app/MailQueryApplicationService.h"
 #include "app/MessageContentApplicationPorts.h"
 
 namespace javelin::app
@@ -175,7 +175,7 @@ namespace javelin::app
                             id, QStringLiteral("The mailbox observation identifier is invalid."));
                     m_mailboxObservations.emplace(
                         observationId, std::make_unique<MailboxObservation>(
-                                           m_services.mailService().observeMailbox(
+                                           m_services.mailQueryApplicationService().observeMailbox(
                                                std::move(accountId), std::move(mailboxId))));
                     return acceptEmpty<actions::MailboxObserve>(id);
                 });
@@ -193,7 +193,8 @@ namespace javelin::app
                 [this, &id](MailboxWindowIntent intent)
                 {
                     return launchAction<actions::MailboxWindow>(
-                        id, m_services.mailService().requestMailboxWindow(std::move(intent)));
+                        id, m_services.mailQueryApplicationService().requestMailboxWindow(
+                                std::move(intent)));
                 });
         case actions::SearchWindow::id.value:
             return dispatchDecoded<actions::SearchWindow>(
@@ -201,15 +202,16 @@ namespace javelin::app
                 [this, &id](SearchWindowIntent intent)
                 {
                     return launchAction<actions::SearchWindow>(
-                        id, m_services.mailService().requestSearchWindow(std::move(intent)));
+                        id, m_services.mailQueryApplicationService().requestSearchWindow(
+                                std::move(intent)));
                 });
         case actions::SearchRetire::id.value:
             return dispatchDecoded<actions::SearchRetire>(
                 id, command,
                 [this, &id](std::string accountId, std::string windowKey)
                 {
-                    m_services.mailService().retireSearchWindow(std::move(accountId),
-                                                                std::move(windowKey));
+                    m_services.mailQueryApplicationService().retireSearchWindow(
+                        std::move(accountId), std::move(windowKey));
                     return acceptEmpty<actions::SearchRetire>(id);
                 });
         case actions::ThreadEnsure::id.value:
@@ -217,7 +219,7 @@ namespace javelin::app
                 id, command,
                 [this, &id](ThreadMaterializationIntent intent)
                 {
-                    m_services.mailService().ensureThread(std::move(intent));
+                    m_services.mailQueryApplicationService().ensureThread(std::move(intent));
                     return acceptEmpty<actions::ThreadEnsure>(id);
                 });
         default:

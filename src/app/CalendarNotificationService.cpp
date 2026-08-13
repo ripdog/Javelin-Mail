@@ -1,5 +1,5 @@
 #include "app/CalendarNotificationService.h"
-#include "app/MailApplicationService.h"
+#include "app/CalendarApplicationService.h"
 
 #include "app/undo/HistoryTypes.h"
 #include "jmap/cache/CalendarRepository.h"
@@ -19,10 +19,10 @@
 namespace javelin::app
 {
     CalendarNotificationService::CalendarNotificationService(
-        javelin::jmap::cache::DatabaseConnection& connection, MailApplicationService& mailService,
-        QObject* parent)
+        javelin::jmap::cache::DatabaseConnection& connection,
+        CalendarApplicationService& calendarService, QObject* parent)
         : QObject(parent), m_connection(connection), m_repository(connection),
-          m_mailService(mailService), m_timer(new QTimer(this))
+          m_calendarService(calendarService), m_timer(new QTimer(this))
     {
         m_timer->setSingleShot(true);
         connect(m_timer, &QTimer::timeout, this, &CalendarNotificationService::scan);
@@ -84,7 +84,7 @@ namespace javelin::app
             qWarning().noquote() << error->message;
             return;
         }
-        auto task = m_mailService.updateCalendarEvent(
+        auto task = m_calendarService.updateCalendarEvent(
             candidate.ownerAccountId,
             {.accountId = candidate.accountId,
              .event = javelin::jmap::calendar::acknowledgeAlert(

@@ -4,12 +4,14 @@
 
 namespace javelin::app
 {
-    class MailApplicationService;
+    class AccountRuntimeManager;
+    class ContactApplicationService;
 
     class AccountRefreshCommandService final : public AccountRefreshPort
     {
       public:
-        explicit AccountRefreshCommandService(MailApplicationService& service);
+        AccountRefreshCommandService(AccountRuntimeManager& accountRuntime,
+                                     ContactApplicationService& contacts);
 
         [[nodiscard]] bool requestAccountSynchronization(std::string_view accountId) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::LiveRefreshResult>
@@ -18,6 +20,7 @@ namespace javelin::app
         requestContacts(std::string ownerAccountId) override;
 
       private:
-        MailApplicationService& m_service;
+        AccountRuntimeManager& m_accountRuntime;
+        ContactApplicationService& m_contacts;
     };
 } // namespace javelin::app

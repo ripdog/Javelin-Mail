@@ -1,8 +1,11 @@
+#include "app/AccountRuntimeManager.h"
+#include "app/CalendarApplicationService.h"
 #include "app/ComposeService.h"
 #include "app/ContactApplicationPorts.h"
 #include "app/DaemonServices.h"
 #include "app/DeferredSendService.h"
-#include "app/MailApplicationService.h"
+#include "app/MailMutationApplicationService.h"
+#include "app/SieveApplicationService.h"
 #include "app/undo/AddressBookHistoryExecutor.h"
 #include "app/undo/AddressBookHistoryPort.h"
 #include "app/undo/CalendarHistoryExecutor.h"
@@ -213,9 +216,10 @@ namespace
     {
       public:
         explicit ExecutorRegistry(javelin::app::DaemonServices& services)
-            : m_draft{services.composeService()}, m_mail{services.mailService()},
-              m_sieve{services.mailService()}, m_calendar{services.mailService()},
-              m_calendarPreference{services.mailService()},
+            : m_draft{services.composeService()}, m_mail{services.mailMutationApplicationService()},
+              m_sieve{services.sieveApplicationService()},
+              m_calendar{services.calendarApplicationService()},
+              m_calendarPreference{services.calendarApplicationService()},
               m_contactPort{dynamic_cast<javelin::app::undo::ContactHistoryPort*>(
                   &services.contactCommandPort())},
               m_addressBookPort{dynamic_cast<javelin::app::undo::AddressBookHistoryPort*>(
@@ -366,7 +370,7 @@ int main(int argc, char* argv[])
             throw std::runtime_error("No complete configured Javelin connection is available");
 
         javelin::app::DaemonServices services;
-        services.mailService().applySettings(syncConfigurations(connections));
+        services.accountRuntimeManager().applySettings(syncConfigurations(connections));
         const bool autonomous = parser.isSet(QStringLiteral("autonomous"));
         if (autonomous)
         {

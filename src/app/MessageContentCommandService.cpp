@@ -1,12 +1,13 @@
 #include "app/MessageContentCommandService.h"
 
-#include "app/MailApplicationService.h"
+#include "app/MessageContentApplicationService.h"
 
 #include <utility>
 
 namespace javelin::app
 {
-    MessageContentCommandService::MessageContentCommandService(MailApplicationService& service)
+    MessageContentCommandService::MessageContentCommandService(
+        MessageContentApplicationService& service)
         : m_service(service)
     {
     }

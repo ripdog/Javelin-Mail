@@ -75,7 +75,14 @@ namespace javelin::app
     class CalendarCommandService;
     class MessageNavigationPort;
     class MessageNavigationCoordinator;
-    class MailApplicationService;
+    class AccountRuntimeManager;
+    class CalendarApplicationService;
+    class ContactApplicationService;
+    class MailMutationApplicationService;
+    class MailNotificationService;
+    class MailQueryApplicationService;
+    class MessageContentApplicationService;
+    class SieveApplicationService;
     class ThreadMaterializationCoordinator;
     class ThreadMembershipMaterializationWorker;
 } // namespace javelin::app
@@ -176,7 +183,14 @@ namespace javelin::app
         [[nodiscard]] UndoCommandPort& undoCommandPort();
         [[nodiscard]] DeferredSendService& deferredSendService();
         [[nodiscard]] ContactCommandPort& contactCommandPort();
-        [[nodiscard]] MailApplicationService& mailService();
+        [[nodiscard]] AccountRuntimeManager& accountRuntimeManager();
+        [[nodiscard]] MailQueryApplicationService& mailQueryApplicationService();
+        [[nodiscard]] MailMutationApplicationService& mailMutationApplicationService();
+        [[nodiscard]] MessageContentApplicationService& messageContentApplicationService();
+        [[nodiscard]] MailNotificationService& mailNotificationService();
+        [[nodiscard]] ContactApplicationService& contactApplicationService();
+        [[nodiscard]] CalendarApplicationService& calendarApplicationService();
+        [[nodiscard]] SieveApplicationService& sieveApplicationService();
         [[nodiscard]] MessageNavigationPort& messageNavigationPort();
         [[nodiscard]] ApplicationErrorCoordinator& errorCoordinator();
         [[nodiscard]] CalendarNotificationService& calendarNotificationService();
@@ -244,7 +258,14 @@ namespace javelin::app
         std::unique_ptr<ComposeCommandService> m_composeCommandService;
         std::unique_ptr<DeferredSendService> m_deferredSendService;
         std::unique_ptr<ApplicationErrorCoordinator> m_errorCoordinator;
-        std::unique_ptr<MailApplicationService> m_mailService;
+        std::unique_ptr<AccountRuntimeManager> m_accountRuntimeManager;
+        std::unique_ptr<MailQueryApplicationService> m_mailQueryApplicationService;
+        std::unique_ptr<MailMutationApplicationService> m_mailMutationApplicationService;
+        std::unique_ptr<MessageContentApplicationService> m_messageContentApplicationService;
+        std::unique_ptr<MailNotificationService> m_mailNotificationService;
+        std::unique_ptr<ContactApplicationService> m_contactApplicationService;
+        std::unique_ptr<CalendarApplicationService> m_calendarApplicationService;
+        std::unique_ptr<SieveApplicationService> m_sieveApplicationService;
         std::unique_ptr<MailCommandService> m_mailCommandService;
         std::unique_ptr<SieveCommandService> m_sieveCommandService;
         std::unique_ptr<IdentityCommandService> m_identityCommandService;

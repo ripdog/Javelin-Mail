@@ -1,12 +1,13 @@
 #include "tools/UndoRedoAutonomousSuite.h"
 
+#include "app/CalendarApplicationService.h"
 #include "app/ComposeService.h"
 #include "app/ContactApplicationPorts.h"
 #include "app/DaemonServices.h"
-#include "app/MailApplicationService.h"
 #include "app/undo/AddressBookHistoryExecutor.h"
 #include "app/undo/AddressBookHistoryPort.h"
 #include "app/undo/CalendarHistoryExecutor.h"
+#include "app/undo/CalendarHistoryPort.h"
 #include "app/undo/ContactHistoryExecutor.h"
 #include "app/undo/ContactHistoryPort.h"
 #include "app/undo/DraftHistoryExecutor.h"
@@ -77,7 +78,7 @@ namespace javelin::tools
             std::string calendarId;
             std::string uid;
             std::string runTag;
-            javelin::app::MailApplicationService& port;
+            javelin::app::undo::CalendarHistoryPort& port;
             CalendarHistoryExecutor executor;
             javelin::jmap::sync::MutationJournalRepository journal;
         };
@@ -776,14 +777,14 @@ namespace javelin::tools
                 throw std::runtime_error("no writable calendar is available");
             CalendarFixtureContext context{
                 // Calendar history stores the owner account id in this field, matching
-                // MailApplicationService's CalendarHistoryPort contract.
+                // CalendarHistoryPort deliberately uses the stable series identity for recovery.
                 .connectionId = account.accountIds.front(),
                 .accountId = target->first,
                 .calendarId = target->second,
                 .uid = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
                 .runTag = runTag,
-                .port = services.mailService(),
-                .executor = CalendarHistoryExecutor{services.mailService()},
+                .port = services.calendarApplicationService(),
+                .executor = CalendarHistoryExecutor{services.calendarApplicationService()},
                 .journal =
                     javelin::jmap::sync::MutationJournalRepository{services.databaseConnection()},
             };

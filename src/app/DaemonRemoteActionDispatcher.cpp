@@ -1,8 +1,8 @@
 #include "app/DaemonRemoteActionDispatcher.h"
+#include "app/MailQueryApplicationService.h"
 
 #include "app/DaemonServices.h"
 #include "app/LogStore.h"
-#include "app/MailApplicationService.h"
 #include "app/PerformanceMetrics.h"
 #include "app/UndoApplicationPorts.h"
 

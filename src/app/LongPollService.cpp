@@ -1,12 +1,10 @@
-#include "app/LongPollService.h"
+#include "app/account/AccountSyncCoordinator.h"
 
-#include "app/MessageSubject.h"
 #include "app/StateChangePolicy.h"
 #include "app/WorkScheduler.h"
 
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/Session.h"
-#include "jmap/cache/NotificationRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/sync/MailDeltaRefreshExecutor.h"
@@ -565,22 +563,9 @@ namespace javelin::app
                 hasNewMail = hasNewMail || !summary->insertedEmailIds.empty();
                 if (runContext->configuration.notificationMailboxIds.contains(mailboxId))
                 {
-                    javelin::jmap::cache::NotificationRepository notifications{
-                        m_databaseConnection};
-                    const auto candidates = notifications.enqueueUnreadMailboxEmails(
-                        runContext->configuration.accountId, mailboxId);
-                    if (const auto* error =
-                            std::get_if<javelin::jmap::cache::DatabaseError>(&candidates))
-                    {
-                        qWarning().noquote() << "Notification observation failed" << error->message;
-                    }
-                    else
-                    {
-                        const auto& pending = std::get<
-                            std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
-                            candidates);
-                        publishNotifications(*runContext, mailboxId, mailboxName, pending);
-                    }
+                    Q_EMIT notificationMailboxRefreshed(
+                        QString::fromStdString(runContext->configuration.accountId),
+                        QString::fromStdString(mailboxId), QString::fromStdString(mailboxName));
                 }
             }
             else if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
@@ -1013,45 +998,6 @@ namespace javelin::app
         Q_EMIT operationFailed(operation, error);
         if (javelin::jmap::isAuthenticationError(error))
             pauseForAuthentication();
-    }
-
-    void AccountSyncCoordinator::publishNotifications(
-        const RunContext& runContext, const std::string_view mailboxId,
-        const std::string_view mailboxName,
-        const std::vector<javelin::jmap::sync::RefreshNotificationCandidate>& candidates)
-    {
-        if (candidates.empty())
-        {
-            return;
-        }
-
-        const auto& target = candidates.front();
-
-        QString title;
-        QString message;
-        if (candidates.size() == 1)
-        {
-            title = QStringLiteral("New mail in %1")
-                        .arg(QString::fromStdString(std::string{mailboxName}));
-            message = subjectForDisplay(candidates.front().subject);
-        }
-        else
-        {
-            title = QStringLiteral("%1 new messages in %2")
-                        .arg(candidates.size())
-                        .arg(QString::fromStdString(std::string{mailboxName}));
-            message = subjectForDisplay(candidates.front().subject);
-        }
-
-        QStringList deliveredEmailIds;
-        deliveredEmailIds.reserve(static_cast<qsizetype>(candidates.size()));
-        for (const auto& candidate : candidates)
-            deliveredEmailIds.push_back(QString::fromStdString(candidate.emailId));
-        Q_EMIT notificationRaised(
-            QString::fromStdString(runContext.configuration.accountId),
-            QString::fromStdString(std::string{mailboxId}), QString::fromStdString(target.threadId),
-            QString::fromStdString(target.emailId),
-            QString::fromStdString(std::string{mailboxName}), title, message, deliveredEmailIds);
     }
 
 } // namespace javelin::app

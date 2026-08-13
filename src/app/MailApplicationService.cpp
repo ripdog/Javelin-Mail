@@ -1,8 +1,16 @@
-#include "app/MailApplicationService.h"
+#include "app/AccountRuntimeManager.h"
+#include "app/CalendarApplicationService.h"
+#include "app/ContactApplicationService.h"
+#include "app/MailMutationApplicationService.h"
+#include "app/MailNotificationService.h"
+#include "app/MailQueryApplicationService.h"
+#include "app/MessageContentApplicationService.h"
+#include "app/SieveApplicationService.h"
 
 #include "app/ApplicationErrorCoordinator.h"
 #include "app/EmailMutationBatchSubmitter.h"
 #include "app/MailboxMaintenanceRegistry.h"
+#include "app/MessageSubject.h"
 #include "app/StateChangePolicy.h"
 #include "app/ThreadMaterializationCoordinator.h"
 #include "app/WorkScheduler.h"
@@ -332,7 +340,7 @@ namespace javelin::app
     } // namespace
 
     MailboxObservation::MailboxObservation(
-        MailApplicationService& service,
+        MailQueryApplicationService& service,
         const javelin::jmap::sync::MailboxInterestRegistry::ObservationId observationId)
         : m_service(&service), m_observationId(observationId)
     {
@@ -377,72 +385,24 @@ namespace javelin::app
         return m_service != nullptr && m_observationId != 0;
     }
 
-    MailApplicationService::MailApplicationService(
+    AccountRuntimeManager::AccountRuntimeManager(
         javelin::jmap::cache::DatabaseConnection& databaseConnection,
         javelin::jmap::SessionRefreshClient& sessionRefreshClient,
         javelin::jmap::AccountBootstrapClient& accountBootstrapClient,
-        javelin::jmap::MailQueryClient& queryClient,
-        javelin::jmap::MailQueryMaterializer& queryMaterializer,
-        javelin::jmap::MessageContentClient& messageContentClient,
-        javelin::jmap::EmailMutationEngine& emailMutationEngine,
-        javelin::jmap::MailboxMutationEngine& mailboxMutationEngine,
         javelin::jmap::api::JmapMethodTransport& methodTransport,
         QNetworkAccessManager& networkAccessManager,
         javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
         javelin::jmap::cache::AccountRepository& accountRepository,
         javelin::jmap::cache::MailboxReader& mailboxReader,
-        javelin::jmap::cache::MailTagReader& mailTagReader,
-        javelin::jmap::cache::MailboxStatisticsReader& mailboxStatisticsReader,
-        javelin::jmap::cache::MailboxMessageReader& mailboxMessageReader,
-        javelin::jmap::cache::MailboxFilterReader& mailboxFilterReader,
-        javelin::jmap::cache::ContactRepository& contactRepository,
-        javelin::jmap::contacts::ContactService& contactService,
-        javelin::jmap::calendar::CalendarService& calendarService,
-        javelin::jmap::sieve::SieveService& sieveService,
         ApplicationErrorCoordinator& errorCoordinator, WorkScheduler& workScheduler,
-        MailboxMaintenanceRegistry& mailboxMaintenanceRegistry,
-        javelin::app::undo::UndoManager& undoManager, QObject* parent)
+        QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection),
           m_sessionRefreshClient(sessionRefreshClient),
-          m_accountBootstrapClient(accountBootstrapClient), m_queryClient(queryClient),
-          m_queryMaterializer(queryMaterializer), m_messageContentClient(messageContentClient),
-          m_emailMutationEngine(emailMutationEngine),
-          m_mailboxMutationEngine(mailboxMutationEngine), m_methodTransport(methodTransport),
+          m_accountBootstrapClient(accountBootstrapClient), m_methodTransport(methodTransport),
           m_networkAccessManager(networkAccessManager), m_transportCooldowns(cooldowns),
           m_accountRepository(accountRepository), m_mailboxReader(mailboxReader),
-          m_mailTagReader(mailTagReader), m_mailboxStatisticsReader(mailboxStatisticsReader),
-          m_mailboxMessageReader(mailboxMessageReader), m_mailboxFilterReader(mailboxFilterReader),
-          m_contactReader(contactRepository), m_contactService(contactService),
-          m_calendarService(calendarService), m_sieveService(sieveService),
-          m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler),
-          m_mailboxMaintenanceRegistry(mailboxMaintenanceRegistry), m_undoManager(undoManager)
+          m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler)
     {
-        connect(&contactRepository, &javelin::jmap::cache::ContactRepository::contactsChanged, this,
-                [this](const QString& accountId)
-                {
-                    Q_EMIT cacheCommitted(MailCacheChange{
-                        .accountId = accountId,
-                        .mailboxIds = {},
-                        .queryWindows = {},
-                        .searchWindows = {},
-                        .mailboxTreeChanged = false,
-                        .hasNewMail = false,
-                        .optimisticProjection = false,
-                        .contactsChanged = true,
-                    });
-                });
-        connect(&m_workScheduler, &WorkScheduler::jobsChanged, this,
-                [this]()
-                {
-                    scheduleContactRefreshPump();
-                    scheduleTagDeletionPump();
-                });
-        connect(&m_workScheduler, &WorkScheduler::foregroundAvailabilityChanged, this,
-                [this]()
-                {
-                    scheduleContactRefreshPump();
-                    scheduleTagDeletionPump();
-                });
         connect(&m_errorCoordinator, &ApplicationErrorCoordinator::authenticationPauseChanged, this,
                 [this](const QString& connectionId, const bool paused)
                 {
@@ -459,27 +419,256 @@ namespace javelin::app
                         else
                         {
                             applyAccountConfiguration(accountId);
-                            const auto listed = m_workScheduler.list();
-                            if (const auto* jobs = std::get_if<std::vector<WorkRecord>>(&listed))
-                            {
-                                for (const auto& job : *jobs)
-                                {
-                                    if (job.kind == WorkKind::TagDeletion &&
-                                        job.accountId == std::optional<std::string>{accountId} &&
-                                        job.status == WorkStatus::WaitingForAuth)
-                                    {
-                                        static_cast<void>(m_workScheduler.update(
-                                            job.jobId, WorkStatus::Queued, job.progress,
-                                            job.checkpointJson));
-                                    }
-                                }
-                            }
                         }
                     }
                 });
     }
 
-    void MailApplicationService::applySettings(std::vector<AccountSyncConfiguration> configurations)
+    MailQueryApplicationService::MailQueryApplicationService(
+        javelin::jmap::cache::DatabaseConnection& databaseConnection,
+        javelin::jmap::MailQueryMaterializer& queryMaterializer,
+        javelin::jmap::cache::ContactReader& contactReader,
+        javelin::jmap::cache::MailTagReader& mailTagReader,
+        javelin::jmap::cache::MailboxStatisticsReader& mailboxStatisticsReader,
+        javelin::jmap::cache::MailboxMessageReader& mailboxMessageReader,
+        javelin::jmap::cache::MailboxFilterReader& mailboxFilterReader,
+        AccountRuntimeManager& accountRuntime, ApplicationErrorCoordinator& errorCoordinator,
+        WorkScheduler& workScheduler, MailboxMaintenanceRegistry& mailboxMaintenanceRegistry,
+        QObject* parent)
+        : QObject(parent), m_databaseConnection(databaseConnection),
+          m_queryMaterializer(queryMaterializer), m_contactReader(contactReader),
+          m_mailTagReader(mailTagReader), m_mailboxStatisticsReader(mailboxStatisticsReader),
+          m_mailboxMessageReader(mailboxMessageReader), m_mailboxFilterReader(mailboxFilterReader),
+          m_accountRuntime(accountRuntime), m_errorCoordinator(errorCoordinator),
+          m_workScheduler(workScheduler), m_mailboxMaintenanceRegistry(mailboxMaintenanceRegistry)
+    {
+        connect(&m_accountRuntime, &AccountRuntimeManager::configurationSetChanged, this,
+                [this]
+                {
+                    const auto configured = m_accountRuntime.configuredAccountIds();
+                    m_mailboxInterests.eraseAccountsNotIn(
+                        std::unordered_set<std::string>{configured.begin(), configured.end()});
+                });
+        connect(
+            &m_accountRuntime, &AccountRuntimeManager::cacheCommitted, this,
+            [this](const MailCacheChange& change)
+            {
+                if (m_threadMaterializationCoordinator == nullptr)
+                    return;
+                for (const auto& window : change.queryWindows)
+                {
+                    const auto queryKey = javelin::jmap::sync::mailboxQueryKey({
+                        .mailboxId = window.mailboxId.toStdString(),
+                        .sortProperty = "receivedAt",
+                        .isAscending = false,
+                        .collapseThreads = true,
+                    });
+                    if (const auto error = m_threadMaterializationCoordinator->enqueueMailboxWindow(
+                            change.accountId.toStdString(), queryKey, window.offset, window.limit))
+                        qWarning().noquote()
+                            << "Could not enqueue refreshed mailbox Thread materialization"
+                            << error->message;
+                }
+            });
+    }
+
+    MailMutationApplicationService::MailMutationApplicationService(
+        javelin::jmap::cache::DatabaseConnection& databaseConnection,
+        javelin::jmap::EmailMutationEngine& emailMutationEngine,
+        javelin::jmap::MailboxMutationEngine& mailboxMutationEngine,
+        javelin::jmap::MailQueryClient& queryClient,
+        javelin::jmap::cache::MailboxReader& mailboxReader,
+        javelin::jmap::cache::MailTagReader& mailTagReader,
+        javelin::jmap::cache::MailboxMessageReader& mailboxMessageReader,
+        AccountRuntimeManager& accountRuntime, ApplicationErrorCoordinator& errorCoordinator,
+        WorkScheduler& workScheduler, MailboxMaintenanceRegistry& mailboxMaintenanceRegistry,
+        javelin::app::undo::UndoManager& undoManager, QObject* parent)
+        : QObject(parent), m_databaseConnection(databaseConnection),
+          m_emailMutationEngine(emailMutationEngine),
+          m_mailboxMutationEngine(mailboxMutationEngine), m_queryClient(queryClient),
+          m_mailboxReader(mailboxReader), m_mailTagReader(mailTagReader),
+          m_mailboxMessageReader(mailboxMessageReader), m_accountRuntime(accountRuntime),
+          m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler),
+          m_mailboxMaintenanceRegistry(mailboxMaintenanceRegistry), m_undoManager(undoManager)
+    {
+        connect(&m_workScheduler, &WorkScheduler::jobsChanged, this,
+                [this] { scheduleTagDeletionPump(); });
+        connect(&m_workScheduler, &WorkScheduler::foregroundAvailabilityChanged, this,
+                [this] { scheduleTagDeletionPump(); });
+        connect(&m_accountRuntime, &AccountRuntimeManager::accountConfigured, this,
+                [this](const QString& accountId) { accountConfigured(accountId.toStdString()); });
+        connect(&m_accountRuntime, &AccountRuntimeManager::sessionRefreshed, this,
+                [this](const QString& accountId) { accountConfigured(accountId.toStdString()); });
+        connect(&m_accountRuntime, &AccountRuntimeManager::networkReachable, this,
+                &MailMutationApplicationService::networkBecameReachable);
+        connect(
+            &m_errorCoordinator, &ApplicationErrorCoordinator::authenticationPauseChanged, this,
+            [this](const QString& connectionId, const bool paused)
+            {
+                if (paused)
+                    return;
+                const auto listed = m_workScheduler.list();
+                if (const auto* jobs = std::get_if<std::vector<WorkRecord>>(&listed))
+                {
+                    for (const auto& job : *jobs)
+                    {
+                        if (job.kind != WorkKind::TagDeletion ||
+                            job.status != WorkStatus::WaitingForAuth || !job.accountId.has_value())
+                            continue;
+                        const auto settings =
+                            m_accountRuntime.connectionSettingsFor(*job.accountId);
+                        if (settings.has_value() &&
+                            settings->connectionId == connectionId.toStdString())
+                        {
+                            static_cast<void>(m_workScheduler.update(
+                                job.jobId, WorkStatus::Queued, job.progress, job.checkpointJson));
+                        }
+                    }
+                }
+                scheduleTagDeletionPump();
+            });
+    }
+
+    void MailMutationApplicationService::setThreadMaterializationCoordinator(
+        ThreadMaterializationCoordinator* coordinator)
+    {
+        m_threadMaterializationCoordinator = coordinator;
+    }
+
+    void MailMutationApplicationService::accountConfigured(std::string accountId)
+    {
+        schedulePendingEmailMutationReplay(accountId);
+        scheduleMailboxMutationReconciliation(std::move(accountId));
+        scheduleTagDeletionPump();
+    }
+
+    void MailMutationApplicationService::networkBecameReachable()
+    {
+        for (const auto& accountId : m_accountRuntime.configuredAccountIds())
+        {
+            schedulePendingEmailMutationReplay(accountId);
+            scheduleMailboxMutationReconciliation(accountId);
+        }
+        const auto listed = m_workScheduler.list();
+        if (const auto* jobs = std::get_if<std::vector<WorkRecord>>(&listed))
+        {
+            for (const auto& job : *jobs)
+            {
+                if (job.kind == WorkKind::TagDeletion &&
+                    job.status == WorkStatus::WaitingForNetwork && job.accountId.has_value() &&
+                    m_accountRuntime.configurationFor(*job.accountId).has_value())
+                {
+                    static_cast<void>(m_workScheduler.update(job.jobId, WorkStatus::Queued,
+                                                             job.progress, job.checkpointJson));
+                }
+            }
+        }
+        scheduleTagDeletionPump();
+    }
+
+    MessageContentApplicationService::MessageContentApplicationService(
+        javelin::jmap::cache::DatabaseConnection& databaseConnection,
+        javelin::jmap::MessageContentClient& messageContentClient,
+        AccountRuntimeManager& accountRuntime, ApplicationErrorCoordinator& errorCoordinator,
+        WorkScheduler& workScheduler, MailboxMaintenanceRegistry& mailboxMaintenanceRegistry,
+        QObject* parent)
+        : QObject(parent), m_databaseConnection(databaseConnection),
+          m_messageContentClient(messageContentClient), m_accountRuntime(accountRuntime),
+          m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler),
+          m_mailboxMaintenanceRegistry(mailboxMaintenanceRegistry)
+    {
+    }
+
+    MailNotificationService::MailNotificationService(
+        javelin::jmap::cache::DatabaseConnection& databaseConnection, QObject* parent)
+        : QObject(parent), m_databaseConnection(databaseConnection)
+    {
+    }
+
+    ContactApplicationService::ContactApplicationService(
+        javelin::jmap::cache::ContactRepository& contactRepository,
+        javelin::jmap::contacts::ContactService& contactService,
+        AccountRuntimeManager& accountRuntime, ApplicationErrorCoordinator& errorCoordinator,
+        WorkScheduler& workScheduler, QObject* parent)
+        : QObject(parent), m_contactService(contactService), m_accountRuntime(accountRuntime),
+          m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler)
+    {
+        connect(&contactRepository, &javelin::jmap::cache::ContactRepository::contactsChanged, this,
+                [this](const QString& accountId)
+                {
+                    Q_EMIT cacheCommitted(MailCacheChange{
+                        .accountId = accountId,
+                        .mailboxIds = {},
+                        .queryWindows = {},
+                        .searchWindows = {},
+                        .mailboxTreeChanged = false,
+                        .hasNewMail = false,
+                        .optimisticProjection = false,
+                        .contactsChanged = true,
+                    });
+                });
+        connect(&m_workScheduler, &WorkScheduler::jobsChanged, this,
+                [this] { scheduleRefreshPump(); });
+        connect(&m_workScheduler, &WorkScheduler::foregroundAvailabilityChanged, this,
+                [this] { scheduleRefreshPump(); });
+        connect(&m_accountRuntime, &AccountRuntimeManager::contactStateChanged, this,
+                [this](const QString& ownerAccountId)
+                { scheduleRefresh(ownerAccountId.toStdString()); });
+        connect(&m_accountRuntime, &AccountRuntimeManager::accountConfigured, this,
+                [this](const QString&) { restoreRefreshJobs(); });
+        connect(&m_accountRuntime, &AccountRuntimeManager::configurationSetChanged, this,
+                [this]
+                {
+                    const auto configured = m_accountRuntime.configuredAccountIds();
+                    const std::unordered_set<std::string> configuredSet{configured.begin(),
+                                                                        configured.end()};
+                    std::erase_if(m_pendingContactRefreshes,
+                                  [&configuredSet](const std::string& accountId)
+                                  { return !configuredSet.contains(accountId); });
+                });
+        connect(&m_errorCoordinator, &ApplicationErrorCoordinator::authenticationPauseChanged, this,
+                [this](const QString& connectionId, const bool paused)
+                {
+                    if (paused)
+                        return;
+                    const std::vector<std::string> pending{m_pendingContactRefreshes.begin(),
+                                                           m_pendingContactRefreshes.end()};
+                    for (const auto& accountId : pending)
+                    {
+                        const auto settings = m_accountRuntime.connectionSettingsFor(accountId);
+                        if (settings.has_value() &&
+                            settings->connectionId == connectionId.toStdString())
+                            scheduleRefresh(accountId);
+                    }
+                });
+    }
+
+    CalendarApplicationService::CalendarApplicationService(
+        javelin::jmap::cache::DatabaseConnection& databaseConnection,
+        javelin::jmap::calendar::CalendarService& calendarService,
+        AccountRuntimeManager& accountRuntime, ApplicationErrorCoordinator& errorCoordinator,
+        WorkScheduler& workScheduler, javelin::app::undo::UndoManager& undoManager, QObject* parent)
+        : QObject(parent), m_databaseConnection(databaseConnection),
+          m_calendarService(calendarService), m_accountRuntime(accountRuntime),
+          m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler),
+          m_undoManager(undoManager)
+    {
+        connect(&m_accountRuntime, &AccountRuntimeManager::calendarStateChanged, this,
+                [this](const QString& ownerAccountId)
+                { scheduleRefresh(ownerAccountId.toStdString()); });
+    }
+
+    SieveApplicationService::SieveApplicationService(
+        javelin::jmap::sieve::SieveService& sieveService, AccountRuntimeManager& accountRuntime,
+        ApplicationErrorCoordinator& errorCoordinator, WorkScheduler& workScheduler,
+        javelin::app::undo::UndoManager& undoManager, QObject* parent)
+        : QObject(parent), m_sieveService(sieveService), m_accountRuntime(accountRuntime),
+          m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler),
+          m_undoManager(undoManager)
+    {
+    }
+
+    void AccountRuntimeManager::applySettings(std::vector<AccountSyncConfiguration> configurations)
     {
         const bool accountConfigurationsChanged =
             m_configurations.size() != configurations.size() ||
@@ -513,6 +702,7 @@ namespace javelin::app
             m_errorCoordinator.settingsApplied(connectionId, revision);
             if (configurationChanged)
                 applyAccountConfiguration(accountId);
+            Q_EMIT accountConfigured(QString::fromStdString(accountId));
         }
 
         for (auto coordinatorIt = m_coordinators.begin(); coordinatorIt != m_coordinators.end();)
@@ -523,39 +713,27 @@ namespace javelin::app
                 continue;
             }
 
-            Q_EMIT accountStatusChanged(QString::fromStdString(coordinatorIt->first),
+            const auto removedAccountId = coordinatorIt->first;
+            Q_EMIT accountStatusChanged(QString::fromStdString(removedAccountId),
                                         AccountSyncCoordinator::Status::Disconnected);
             disconnect(coordinatorIt->second.get(), nullptr, this, nullptr);
             coordinatorIt = m_coordinators.erase(coordinatorIt);
+            m_observedMailboxIds.erase(removedAccountId);
+            Q_EMIT accountRemoved(QString::fromStdString(removedAccountId));
         }
         std::erase_if(m_configurations, [&configuredAccountIds](const auto& entry)
                       { return !configuredAccountIds.contains(entry.first); });
-        std::erase_if(m_pendingContactRefreshes,
-                      [&configuredAccountIds](const std::string& accountId)
-                      { return !configuredAccountIds.contains(accountId); });
-        m_mailboxInterests.eraseAccountsNotIn(configuredAccountIds);
         for (const auto& connectionId : previousConnectionIds)
         {
             if (!configuredConnectionIds.contains(connectionId))
                 m_errorCoordinator.forgetConnection(connectionId);
         }
-        restoreContactRefreshJobs();
-        if (m_threadMaterializationCoordinator != nullptr)
-        {
-            for (const auto& accountId : configuredAccountIds)
-            {
-                if (const auto error =
-                        m_threadMaterializationCoordinator->restoreAccount(accountId))
-                    qWarning().noquote() << "Could not restore Thread materialization targets"
-                                         << QString::fromStdString(accountId) << error->message;
-            }
-        }
-        scheduleTagDeletionPump();
         if (accountConfigurationsChanged)
             refreshConfiguredSessions();
+        Q_EMIT configurationSetChanged();
     }
 
-    void MailApplicationService::setThreadMaterializationCoordinator(
+    void MailQueryApplicationService::setThreadMaterializationCoordinator(
         ThreadMaterializationCoordinator* coordinator)
     {
         if (m_threadMaterializationCoordinator != nullptr)
@@ -585,51 +763,43 @@ namespace javelin::app
                         .error = std::move(error),
                     });
                 });
+        const auto restoreTargets = [this]
+        {
+            if (m_threadMaterializationCoordinator == nullptr)
+                return;
+            for (const auto& accountId : m_accountRuntime.configuredAccountIds())
+            {
+                if (const auto error =
+                        m_threadMaterializationCoordinator->restoreAccount(accountId))
+                    qWarning().noquote() << "Could not restore Thread materialization targets"
+                                         << QString::fromStdString(accountId) << error->message;
+            }
+        };
+        connect(&m_accountRuntime, &AccountRuntimeManager::configurationSetChanged, this,
+                restoreTargets);
+        connect(&m_accountRuntime, &AccountRuntimeManager::networkReachable, this, restoreTargets);
+        restoreTargets();
     }
 
-    void MailApplicationService::setAuthenticationRefreshHandler(
+    void AccountRuntimeManager::setAuthenticationRefreshHandler(
         javelin::jmap::auth::AccessTokenRefreshHandler handler)
     {
         m_authenticationRefreshHandler = std::move(handler);
     }
 
-    void MailApplicationService::networkBecameReachable()
+    void AccountRuntimeManager::networkBecameReachable()
     {
         m_networkAccessManager.clearConnectionCache();
         for (const auto& [accountId, coordinator] : m_coordinators)
         {
+            static_cast<void>(accountId);
             coordinator->networkBecameReachable();
-            schedulePendingEmailMutationReplay(accountId);
-            scheduleMailboxMutationReconciliation(accountId);
-            if (m_threadMaterializationCoordinator != nullptr)
-            {
-                if (const auto error =
-                        m_threadMaterializationCoordinator->restoreAccount(accountId))
-                    qWarning().noquote()
-                        << "Could not restore Thread materialization after network "
-                           "recovery"
-                        << QString::fromStdString(accountId) << error->message;
-            }
         }
-        const auto listed = m_workScheduler.list();
-        if (const auto* jobs = std::get_if<std::vector<WorkRecord>>(&listed))
-        {
-            for (const auto& job : *jobs)
-            {
-                if (job.kind == WorkKind::TagDeletion &&
-                    job.status == WorkStatus::WaitingForNetwork && job.accountId.has_value() &&
-                    m_configurations.contains(*job.accountId))
-                {
-                    static_cast<void>(m_workScheduler.update(job.jobId, WorkStatus::Queued,
-                                                             job.progress, job.checkpointJson));
-                }
-            }
-        }
-        scheduleTagDeletionPump();
+        Q_EMIT networkReachable();
     }
 
     std::unordered_map<std::string, AccountSyncCoordinator::Status>
-    MailApplicationService::accountStatuses() const
+    AccountRuntimeManager::accountStatuses() const
     {
         std::unordered_map<std::string, AccountSyncCoordinator::Status> statuses;
         statuses.reserve(m_coordinators.size());
@@ -639,7 +809,7 @@ namespace javelin::app
     }
 
     std::optional<AccountConnectionSettings>
-    MailApplicationService::connectionSettingsFor(const std::string_view ownerAccountId) const
+    AccountRuntimeManager::connectionSettingsFor(const std::string_view ownerAccountId) const
     {
         const auto configuration = m_configurations.find(std::string{ownerAccountId});
         return configuration != m_configurations.end()
@@ -647,7 +817,43 @@ namespace javelin::app
                    : std::nullopt;
     }
 
-    void MailApplicationService::refreshConfiguredSessions()
+    std::optional<AccountSyncConfigurationView>
+    AccountRuntimeManager::configurationFor(const std::string_view accountId) const
+    {
+        const auto configuration = m_configurations.find(std::string{accountId});
+        if (configuration == m_configurations.end())
+            return std::nullopt;
+        return AccountSyncConfigurationView{configuration->second};
+    }
+
+    std::vector<std::string> AccountRuntimeManager::configuredAccountIds() const
+    {
+        std::vector<std::string> accountIds;
+        accountIds.reserve(m_configurations.size());
+        for (const auto& [accountId, configuration] : m_configurations)
+        {
+            static_cast<void>(configuration);
+            accountIds.push_back(accountId);
+        }
+        return accountIds;
+    }
+
+    void AccountRuntimeManager::refreshAccountConfiguration(const std::string_view accountId)
+    {
+        applyAccountConfiguration(std::string{accountId});
+    }
+
+    void AccountRuntimeManager::setObservedMailboxIds(std::string accountId,
+                                                      std::vector<std::string> mailboxIds)
+    {
+        if (mailboxIds.empty())
+            m_observedMailboxIds.erase(accountId);
+        else
+            m_observedMailboxIds.insert_or_assign(accountId, std::move(mailboxIds));
+        applyAccountConfiguration(accountId);
+    }
+
+    void AccountRuntimeManager::refreshConfiguredSessions()
     {
         javelin::jmap::cache::SessionRepository sessions{m_databaseConnection};
         for (const auto& [accountId, configuration] : m_configurations)
@@ -671,8 +877,8 @@ namespace javelin::app
         }
     }
 
-    void MailApplicationService::startSessionRefresh(const std::string& ownerAccountId,
-                                                     const AccountConnectionSettings& settings)
+    void AccountRuntimeManager::startSessionRefresh(const std::string& ownerAccountId,
+                                                    const AccountConnectionSettings& settings)
     {
         if (!m_sessionRefreshesInFlight.insert(ownerAccountId).second)
         {
@@ -712,33 +918,34 @@ namespace javelin::app
                     if (configuration.settings.connectionId == appliedSettings.connectionId)
                     {
                         applyAccountConfiguration(accountId);
-                        scheduleMailboxMutationReconciliation(accountId);
                     }
                 }
                 Q_EMIT sessionCapabilitiesChanged(QString::fromStdString(ownerAccountId));
+                Q_EMIT sessionRefreshed(QString::fromStdString(ownerAccountId));
                 m_workScheduler.endForegroundWork();
-                schedulePendingEmailMutationReplay(ownerAccountId);
             });
     }
 
-    void MailApplicationService::scheduleMailboxMutationReconciliation(std::string accountId)
+    void
+    MailMutationApplicationService::scheduleMailboxMutationReconciliation(std::string accountId)
     {
-        if (!m_configurations.contains(accountId) ||
+        if (!m_accountRuntime.connectionSettingsFor(accountId).has_value() ||
             !m_mailboxMutationReconciliationsInFlight.insert(accountId).second)
             return;
         auto task = reconcileMailboxMutations(accountId);
         QCoro::connect(std::move(task), this, [] {});
     }
 
-    QCoro::Task<void> MailApplicationService::reconcileMailboxMutations(std::string accountId)
+    QCoro::Task<void>
+    MailMutationApplicationService::reconcileMailboxMutations(std::string accountId)
     {
-        const auto configuration = m_configurations.find(accountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.connectionSettingsFor(accountId);
+        if (!configuration.has_value())
         {
             m_mailboxMutationReconciliationsInFlight.erase(accountId);
             co_return;
         }
-        const auto settings = toLiveConnectionSettings(configuration->second.settings);
+        const auto settings = toLiveConnectionSettings(*configuration);
         bool changed = false;
         bool reconciliationFailed = false;
 
@@ -809,12 +1016,12 @@ namespace javelin::app
             .hasNewMail = false,
             .optimisticProjection = unresolved,
         });
-        applyAccountConfiguration(accountId);
+        m_accountRuntime.refreshAccountConfiguration(accountId);
     }
 
-    void MailApplicationService::schedulePendingEmailMutationReplay(std::string accountId)
+    void MailMutationApplicationService::schedulePendingEmailMutationReplay(std::string accountId)
     {
-        if (!m_configurations.contains(accountId) ||
+        if (!m_accountRuntime.connectionSettingsFor(accountId).has_value() ||
             !m_pendingMutationReplaysInFlight.insert(accountId).second)
         {
             return;
@@ -846,23 +1053,23 @@ namespace javelin::app
                             << "Queued mail replay submitted" << QString::fromStdString(accountId)
                             << summary.updatedEmailCount << "updated" << summary.failedEmailCount
                             << "failed";
-                        if (m_configurations.contains(accountId))
+                        if (m_accountRuntime.connectionSettingsFor(accountId).has_value())
                             schedulePendingEmailMutationReplay(accountId);
                     });
             });
     }
 
-    void MailApplicationService::applyAccountConfiguration(const std::string& accountId)
+    void AccountRuntimeManager::applyAccountConfiguration(const std::string& accountId)
     {
         const auto stored = m_configurations.find(accountId);
         if (stored == m_configurations.end())
             return;
 
         auto configuration = stored->second;
-        auto observedMailboxIds = m_mailboxInterests.mailboxIds(accountId);
-        configuration.mailboxIds.insert(configuration.mailboxIds.end(),
-                                        std::make_move_iterator(observedMailboxIds.begin()),
-                                        std::make_move_iterator(observedMailboxIds.end()));
+        const auto observed = m_observedMailboxIds.find(accountId);
+        if (observed != m_observedMailboxIds.end())
+            configuration.mailboxIds.insert(configuration.mailboxIds.end(),
+                                            observed->second.begin(), observed->second.end());
         std::ranges::sort(configuration.mailboxIds);
         configuration.mailboxIds.erase(std::ranges::unique(configuration.mailboxIds).begin(),
                                        configuration.mailboxIds.end());
@@ -885,18 +1092,16 @@ namespace javelin::app
         coordinatorIt->second->applySettings(std::move(configuration.settings), accountId,
                                              std::move(configuration.mailboxIds),
                                              std::move(configuration.notificationMailboxIds));
-        if (m_pendingContactRefreshes.contains(accountId))
-            scheduleContactRefresh(accountId);
     }
 
-    MailboxObservation MailApplicationService::observeMailbox(std::string accountId,
-                                                              std::string mailboxId)
+    MailboxObservation MailQueryApplicationService::observeMailbox(std::string accountId,
+                                                                   std::string mailboxId)
     {
         const auto configuredAccountId = accountId;
         const auto observedMailboxId = mailboxId;
         const auto observationId =
             m_mailboxInterests.observe(std::move(accountId), std::move(mailboxId));
-        applyAccountConfiguration(configuredAccountId);
+        publishObservedMailboxIds(configuredAccountId);
         if (m_threadMaterializationCoordinator != nullptr)
         {
             if (const auto error = m_threadMaterializationCoordinator->enqueueRetainedMailbox(
@@ -909,8 +1114,9 @@ namespace javelin::app
         return MailboxObservation{*this, observationId};
     }
 
-    MailboxObservationLease MailApplicationService::beginMailboxObservation(std::string accountId,
-                                                                            std::string mailboxId)
+    MailboxObservationLease
+    MailQueryApplicationService::beginMailboxObservation(std::string accountId,
+                                                         std::string mailboxId)
     {
         auto observation = std::make_shared<MailboxObservation>(
             observeMailbox(std::move(accountId), std::move(mailboxId)));
@@ -918,7 +1124,7 @@ namespace javelin::app
                                        { observation.reset(); }};
     }
 
-    void MailApplicationService::releaseMailboxObservation(
+    void MailQueryApplicationService::releaseMailboxObservation(
         const javelin::jmap::sync::MailboxInterestRegistry::ObservationId observationId)
     {
         const auto interest = m_mailboxInterests.unobserve(observationId);
@@ -926,10 +1132,15 @@ namespace javelin::app
         {
             return;
         }
-        applyAccountConfiguration(interest->accountId);
+        publishObservedMailboxIds(interest->accountId);
     }
 
-    bool MailApplicationService::beginSearchWindowRequest(const std::string& leaseKey)
+    void MailQueryApplicationService::publishObservedMailboxIds(const std::string& accountId)
+    {
+        m_accountRuntime.setObservedMailboxIds(accountId, m_mailboxInterests.mailboxIds(accountId));
+    }
+
+    bool MailQueryApplicationService::beginSearchWindowRequest(const std::string& leaseKey)
     {
         auto& state = m_searchWindowRequests[leaseKey];
         if (state.retired)
@@ -938,7 +1149,7 @@ namespace javelin::app
         return true;
     }
 
-    void MailApplicationService::finishSearchWindowRequest(const std::string& leaseKey)
+    void MailQueryApplicationService::finishSearchWindowRequest(const std::string& leaseKey)
     {
         const auto found = m_searchWindowRequests.find(leaseKey);
         if (found == m_searchWindowRequests.end())
@@ -949,13 +1160,13 @@ namespace javelin::app
             m_searchWindowRequests.erase(found);
     }
 
-    bool MailApplicationService::searchWindowRetired(const std::string& leaseKey) const
+    bool MailQueryApplicationService::searchWindowRetired(const std::string& leaseKey) const
     {
         const auto found = m_searchWindowRequests.find(leaseKey);
         return found != m_searchWindowRequests.end() && found->second.retired;
     }
 
-    bool MailApplicationService::requestAccountSynchronization(const std::string_view accountId)
+    bool AccountRuntimeManager::requestAccountSynchronization(const std::string_view accountId)
     {
         const auto coordinator = m_coordinators.find(std::string{accountId});
         if (coordinator == m_coordinators.end())
@@ -963,10 +1174,46 @@ namespace javelin::app
         return coordinator->second->requestSynchronization();
     }
 
+    void MailNotificationService::mailboxRefreshed(const QString& accountId,
+                                                   const QString& mailboxId,
+                                                   const QString& mailboxName)
+    {
+        javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
+        const auto candidates = notifications.enqueueUnreadMailboxEmails(accountId.toStdString(),
+                                                                         mailboxId.toStdString());
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&candidates))
+        {
+            qWarning().noquote() << "Notification observation failed" << error->message;
+            return;
+        }
+
+        const auto& pending =
+            std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(candidates);
+        if (pending.empty())
+            return;
+
+        const auto& target = pending.front();
+        QString title;
+        if (pending.size() == 1)
+            title = QStringLiteral("New mail in %1").arg(mailboxName);
+        else
+            title = QStringLiteral("%1 new messages in %2").arg(pending.size()).arg(mailboxName);
+        const auto message = subjectForDisplay(target.subject);
+
+        QStringList deliveredEmailIds;
+        deliveredEmailIds.reserve(static_cast<qsizetype>(pending.size()));
+        for (const auto& candidate : pending)
+            deliveredEmailIds.push_back(QString::fromStdString(candidate.emailId));
+
+        Q_EMIT notificationRaised(accountId, mailboxId, QString::fromStdString(target.threadId),
+                                  QString::fromStdString(target.emailId), mailboxName, title,
+                                  message, deliveredEmailIds);
+    }
+
     std::optional<javelin::jmap::cache::DatabaseError>
-    MailApplicationService::markMailNotificationsDelivered(const std::string_view accountId,
-                                                           const std::string_view mailboxId,
-                                                           const QStringList& emailIds)
+    MailNotificationService::markDelivered(const std::string_view accountId,
+                                           const std::string_view mailboxId,
+                                           const QStringList& emailIds)
     {
         std::vector<std::string> ids;
         ids.reserve(static_cast<std::size_t>(emailIds.size()));
@@ -977,8 +1224,8 @@ namespace javelin::app
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
-    MailApplicationService::releaseMailNotificationDispatches(const std::string_view accountId,
-                                                              const QStringList& emailIds)
+    MailNotificationService::releaseDispatches(const std::string_view accountId,
+                                               const QStringList& emailIds)
     {
         std::vector<std::string> ids;
         ids.reserve(static_cast<std::size_t>(emailIds.size()));
@@ -988,21 +1235,21 @@ namespace javelin::app
         return notifications.releaseDispatches(accountId, ids);
     }
 
-    std::optional<javelin::jmap::cache::DatabaseError>
-    MailApplicationService::recoverMailNotificationDispatches()
+    std::optional<javelin::jmap::cache::DatabaseError> MailNotificationService::recoverDispatches()
     {
         javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
         return notifications.recoverDispatches();
     }
 
-    void MailApplicationService::publishCacheChange(MailCacheChange change)
+    void MailQueryApplicationService::publishCacheChange(MailCacheChange change)
     {
         Q_EMIT cacheCommitted(std::move(change));
     }
 
-    void MailApplicationService::publishMailboxWindowCommitted(QString accountId, QString mailboxId,
-                                                               const std::size_t offset,
-                                                               const std::size_t limit)
+    void MailQueryApplicationService::publishMailboxWindowCommitted(QString accountId,
+                                                                    QString mailboxId,
+                                                                    const std::size_t offset,
+                                                                    const std::size_t limit)
     {
         Q_EMIT cacheCommitted(MailCacheChange{
             .accountId = std::move(accountId),
@@ -1019,7 +1266,8 @@ namespace javelin::app
         });
     }
 
-    void MailApplicationService::publishMessageContentCommitted(QString accountId, QString emailId)
+    void MessageContentApplicationService::publishMessageContentCommitted(QString accountId,
+                                                                          QString emailId)
     {
         Q_EMIT cacheCommitted(MailCacheChange{
             .accountId = std::move(accountId),
@@ -1030,7 +1278,8 @@ namespace javelin::app
         });
     }
 
-    void MailApplicationService::publishThreadMaterializationCommitted(QString accountId,
+    void
+    MailQueryApplicationService::publishThreadMaterializationCommitted(QString accountId,
                                                                        const QStringList& threadIds)
     {
         if (threadIds.empty())
@@ -1117,7 +1366,7 @@ namespace javelin::app
     }
 
     QCoro::Task<MailboxWindowResult>
-    MailApplicationService::requestMailboxWindow(MailboxWindowIntent intent)
+    MailQueryApplicationService::requestMailboxWindow(MailboxWindowIntent intent)
     {
         if (m_mailboxMaintenanceRegistry.isActive(QString::fromStdString(intent.accountId),
                                                   QString::fromStdString(intent.mailboxId)))
@@ -1126,8 +1375,8 @@ namespace javelin::app
                 .message = i18n("The mailbox cache is being cleared."),
             };
         }
-        const auto configuration = m_configurations.find(intent.accountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.connectionSettingsFor(intent.accountId);
+        if (!configuration.has_value())
         {
             co_return javelin::jmap::OperationError{
                 .message = accountSynchronizationNotConfigured(),
@@ -1277,16 +1526,16 @@ namespace javelin::app
 
         const ForegroundWorkScope foreground{m_workScheduler};
         auto result = co_await m_queryMaterializer.queryMailboxPage(
-            toLiveConnectionSettings(configuration->second.settings), intent.accountId,
-            intent.mailboxId, intent.offset, intent.limit, intent.sort, std::move(intent.anchor),
+            toLiveConnectionSettings(*configuration), intent.accountId, intent.mailboxId,
+            intent.offset, intent.limit, intent.sort, std::move(intent.anchor),
             intent.anchorOffset);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
-            m_errorCoordinator.reportFailure(configuration->second.settings, intent.accountId,
+            m_errorCoordinator.reportFailure(*configuration, intent.accountId,
                                              QStringLiteral("Load mailbox messages"), *error);
             co_return *error;
         }
-        m_errorCoordinator.reportSuccess(configuration->second.settings.connectionId);
+        m_errorCoordinator.reportSuccess(configuration->connectionId);
 
         auto page = std::get<javelin::jmap::MailboxPageSummary>(std::move(result));
         if (m_threadMaterializationCoordinator != nullptr)
@@ -1323,7 +1572,7 @@ namespace javelin::app
         co_return summary;
     }
 
-    void MailApplicationService::ensureThread(ThreadMaterializationIntent intent)
+    void MailQueryApplicationService::ensureThread(ThreadMaterializationIntent intent)
     {
         if (m_threadMaterializationCoordinator == nullptr || intent.accountId.empty() ||
             intent.threadId.empty())
@@ -1339,10 +1588,10 @@ namespace javelin::app
     }
 
     QCoro::Task<SearchWindowResult>
-    MailApplicationService::requestSearchWindow(SearchWindowIntent intent)
+    MailQueryApplicationService::requestSearchWindow(SearchWindowIntent intent)
     {
-        const auto configuration = m_configurations.find(intent.accountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.connectionSettingsFor(intent.accountId);
+        if (!configuration.has_value())
         {
             co_return javelin::jmap::OperationError{
                 .message = accountSynchronizationNotConfigured(),
@@ -1457,7 +1706,7 @@ namespace javelin::app
             resolution.userKeywords = std::get<std::vector<std::string>>(keywords);
         }
 
-        const auto settings = configuration->second.settings;
+        const auto settings = *configuration;
         const ForegroundWorkScope foreground{m_workScheduler};
         auto result = co_await m_queryMaterializer.searchMessages(
             toLiveConnectionSettings(settings), intent.accountId, intent.criteria, intent.offset,
@@ -1515,7 +1764,8 @@ namespace javelin::app
         co_return summary;
     }
 
-    void MailApplicationService::retireSearchWindow(std::string accountId, std::string windowKey)
+    void MailQueryApplicationService::retireSearchWindow(std::string accountId,
+                                                         std::string windowKey)
     {
         const auto leaseKey = searchWindowLeaseKey(accountId, windowKey);
         auto& state = m_searchWindowRequests[leaseKey];
@@ -1528,7 +1778,7 @@ namespace javelin::app
     }
 
     QCoro::Task<std::optional<javelin::jmap::OperationError>>
-    MailApplicationService::ensureMessageSelectionMaterialized(
+    MailMutationApplicationService::ensureMessageSelectionMaterialized(
         std::string accountId, std::optional<std::string> sourceMailboxId,
         MessageSelection selection)
     {
@@ -1586,7 +1836,8 @@ namespace javelin::app
     }
 
     QCoro::Task<QueuedMailboxSelectionMutationResult>
-    MailApplicationService::queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent)
+    MailMutationApplicationService::queueMailboxSelectionMutation(
+        MailboxSelectionMutationIntent intent)
     {
         if (const auto error = co_await ensureMessageSelectionMaterialized(
                 intent.accountId, intent.sourceMailboxId, intent.selection))
@@ -1595,7 +1846,7 @@ namespace javelin::app
     }
 
     QueuedMailboxSelectionMutationResult
-    MailApplicationService::queueResolvedMailboxSelectionMutation(
+    MailMutationApplicationService::queueResolvedMailboxSelectionMutation(
         MailboxSelectionMutationIntent intent)
     {
         javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
@@ -1770,9 +2021,9 @@ namespace javelin::app
     }
 
     QCoro::Task<QueuedMessageSelectionMutationResult>
-    MailApplicationService::queueDestroyMessages(std::string accountId,
-                                                 std::optional<std::string> sourceMailboxId,
-                                                 MessageSelection selection)
+    MailMutationApplicationService::queueDestroyMessages(std::string accountId,
+                                                         std::optional<std::string> sourceMailboxId,
+                                                         MessageSelection selection)
     {
         if (const auto error =
                 co_await ensureMessageSelectionMaterialized(accountId, sourceMailboxId, selection))
@@ -1783,9 +2034,9 @@ namespace javelin::app
     }
 
     QCoro::Task<QueuedMessageSelectionMutationResult>
-    MailApplicationService::queueMarkMessagesUnread(std::string accountId,
-                                                    std::optional<std::string> sourceMailboxId,
-                                                    MessageSelection selection)
+    MailMutationApplicationService::queueMarkMessagesUnread(
+        std::string accountId, std::optional<std::string> sourceMailboxId,
+        MessageSelection selection)
     {
         if (const auto error =
                 co_await ensureMessageSelectionMaterialized(accountId, sourceMailboxId, selection))
@@ -1795,7 +2046,8 @@ namespace javelin::app
                                                SelectedMessageMutation::MarkUnread);
     }
 
-    QueuedMessageSelectionMutationResult MailApplicationService::queueSelectedMessageMutation(
+    QueuedMessageSelectionMutationResult
+    MailMutationApplicationService::queueSelectedMessageMutation(
         std::string accountId, std::optional<std::string> sourceMailboxId,
         MessageSelection selection, const SelectedMessageMutation mutation)
     {
@@ -1946,7 +2198,7 @@ namespace javelin::app
     }
 
     QueuedMessageSelectionMutationResult
-    MailApplicationService::queueMarkEmailRead(std::string accountId, std::string emailId)
+    MailMutationApplicationService::queueMarkEmailRead(std::string accountId, std::string emailId)
     {
         javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
         const auto found = emails.find(accountId, emailId);
@@ -2009,9 +2261,9 @@ namespace javelin::app
     }
 
     QCoro::Task<QueuedMessageSelectionMutationResult>
-    MailApplicationService::queueSetMessagesFlagged(std::string accountId,
-                                                    std::optional<std::string> sourceMailboxId,
-                                                    MessageSelection selection, const bool flagged)
+    MailMutationApplicationService::queueSetMessagesFlagged(
+        std::string accountId, std::optional<std::string> sourceMailboxId,
+        MessageSelection selection, const bool flagged)
     {
         if (const auto error =
                 co_await ensureMessageSelectionMaterialized(accountId, sourceMailboxId, selection))
@@ -2022,9 +2274,11 @@ namespace javelin::app
             false);
     }
 
-    QCoro::Task<QueuedMessageSelectionMutationResult> MailApplicationService::queueSetMessagesTag(
-        std::string accountId, std::optional<std::string> sourceMailboxId,
-        MessageSelection selection, std::string keyword, const bool enabled)
+    QCoro::Task<QueuedMessageSelectionMutationResult>
+    MailMutationApplicationService::queueSetMessagesTag(std::string accountId,
+                                                        std::optional<std::string> sourceMailboxId,
+                                                        MessageSelection selection,
+                                                        std::string keyword, const bool enabled)
     {
         keyword = javelin::jmap::domain::canonicalKeyword(std::move(keyword));
         if (!javelin::jmap::domain::isValidKeyword(keyword) ||
@@ -2044,7 +2298,7 @@ namespace javelin::app
             enabled ? QStringLiteral("Add Tag") : QStringLiteral("Remove Tag"), true);
     }
 
-    QueuedMessageSelectionMutationResult MailApplicationService::queueSetMessagesKeyword(
+    QueuedMessageSelectionMutationResult MailMutationApplicationService::queueSetMessagesKeyword(
         std::string accountId, std::optional<std::string> sourceMailboxId,
         MessageSelection selection, std::string keyword, const bool enabled, QString historyVerb,
         const bool appendKeywordToHistoryLabel)
@@ -2165,7 +2419,7 @@ namespace javelin::app
     }
 
     SaveMailTagDefinitionResult
-    MailApplicationService::saveTagDefinition(SaveMailTagDefinition definition)
+    MailMutationApplicationService::saveTagDefinition(SaveMailTagDefinition definition)
     {
         const auto displayName = QString::fromStdString(definition.displayName).trimmed();
         if (displayName.isEmpty())
@@ -2258,8 +2512,8 @@ namespace javelin::app
         };
     }
 
-    QueuedMailTagDeletionResult MailApplicationService::deleteTag(std::string accountId,
-                                                                  std::string keyword)
+    QueuedMailTagDeletionResult MailMutationApplicationService::deleteTag(std::string accountId,
+                                                                          std::string keyword)
     {
         keyword = javelin::jmap::domain::canonicalKeyword(std::move(keyword));
         if (!javelin::jmap::domain::isValidKeyword(keyword) ||
@@ -2303,11 +2557,12 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::MailboxSubscriptionChangeResult>
-    MailApplicationService::setMailboxSubscribed(std::string accountId, std::string mailboxId,
-                                                 const bool subscribed)
+    MailMutationApplicationService::setMailboxSubscribed(std::string accountId,
+                                                         std::string mailboxId,
+                                                         const bool subscribed)
     {
-        const auto configuration = m_configurations.find(accountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(accountId);
+        if (!configuration.has_value())
         {
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::NotFound,
@@ -2336,17 +2591,17 @@ namespace javelin::app
             std::holds_alternative<javelin::jmap::cache::DatabaseError>(active) ||
             !std::get<std::vector<javelin::jmap::sync::MutationRecord>>(active).empty();
         publishMailboxTree(unresolved);
-        applyAccountConfiguration(accountId);
+        m_accountRuntime.refreshAccountConfiguration(accountId);
         if (unresolved)
             scheduleMailboxMutationReconciliation(accountId);
         co_return result;
     }
 
     QCoro::Task<javelin::jmap::MailboxCreateResult>
-    MailApplicationService::createMailbox(std::string accountId, std::string name)
+    MailMutationApplicationService::createMailbox(std::string accountId, std::string name)
     {
-        const auto configuration = m_configurations.find(accountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(accountId);
+        if (!configuration.has_value())
         {
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::NotFound,
@@ -2375,17 +2630,17 @@ namespace javelin::app
             std::holds_alternative<javelin::jmap::cache::DatabaseError>(active) ||
             !std::get<std::vector<javelin::jmap::sync::MutationRecord>>(active).empty();
         publishMailboxTree(unresolved);
-        applyAccountConfiguration(accountId);
+        m_accountRuntime.refreshAccountConfiguration(accountId);
         if (unresolved)
             scheduleMailboxMutationReconciliation(accountId);
         co_return result;
     }
 
     QCoro::Task<javelin::jmap::MailboxDestroyResult>
-    MailApplicationService::destroyMailbox(std::string accountId, std::string mailboxId)
+    MailMutationApplicationService::destroyMailbox(std::string accountId, std::string mailboxId)
     {
-        const auto configuration = m_configurations.find(accountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(accountId);
+        if (!configuration.has_value())
         {
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::NotFound,
@@ -2414,15 +2669,15 @@ namespace javelin::app
             std::holds_alternative<javelin::jmap::cache::DatabaseError>(active) ||
             !std::get<std::vector<javelin::jmap::sync::MutationRecord>>(active).empty();
         publishMailboxTree(unresolved);
-        applyAccountConfiguration(accountId);
+        m_accountRuntime.refreshAccountConfiguration(accountId);
         if (unresolved)
             scheduleMailboxMutationReconciliation(accountId);
         co_return result;
     }
 
     javelin::jmap::QueuedEmailMutationResult
-    MailApplicationService::queueExactEmailMutation(std::string accountId,
-                                                    javelin::jmap::EmailMailboxMutation mutation)
+    MailMutationApplicationService::queueExactEmailMutation(
+        std::string accountId, javelin::jmap::EmailMailboxMutation mutation)
     {
         auto result = queueExactEmailMutations(std::move(accountId), {std::move(mutation)});
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
@@ -2431,7 +2686,8 @@ namespace javelin::app
         return std::move(queued.front());
     }
 
-    javelin::jmap::QueuedEmailMutationsResult MailApplicationService::queueExactEmailMutations(
+    javelin::jmap::QueuedEmailMutationsResult
+    MailMutationApplicationService::queueExactEmailMutations(
         std::string accountId, std::vector<javelin::jmap::EmailMailboxMutation> mutations)
     {
         auto result = m_emailMutationEngine.queueBatch(accountId, std::move(mutations));
@@ -2470,12 +2726,12 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
-    MailApplicationService::submitPendingEmailMutations(std::string accountId,
-                                                        std::optional<std::string> operationGroupId)
+    MailMutationApplicationService::submitPendingEmailMutations(
+        std::string accountId, std::optional<std::string> operationGroupId)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(accountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(accountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .message = accountSynchronizationNotConfigured(),
             };
@@ -2608,11 +2864,11 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::AuthoritativeEmailsResult>
-    MailApplicationService::getAuthoritativeEmails(std::string accountId,
-                                                   std::vector<std::string> emailIds)
+    MailMutationApplicationService::getAuthoritativeEmails(std::string accountId,
+                                                           std::vector<std::string> emailIds)
     {
-        const auto configuration = m_configurations.find(accountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(accountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::InvalidRequest,
                 .message = accountSynchronizationNotConfigured(),
@@ -2623,8 +2879,8 @@ namespace javelin::app
     }
 
     javelin::jmap::AuthoritativeEmailsResult
-    MailApplicationService::getEffectiveEmails(const std::string_view accountId,
-                                               const std::span<const std::string> emailIds)
+    MailMutationApplicationService::getEffectiveEmails(const std::string_view accountId,
+                                                       const std::span<const std::string> emailIds)
     {
         javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
         javelin::jmap::cache::SyncStateRepository states{m_databaseConnection};
@@ -2661,7 +2917,8 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::MessageContentRefreshResult>
-    MailApplicationService::requestMessageContent(std::string accountId, std::string emailId)
+    MessageContentApplicationService::requestMessageContent(std::string accountId,
+                                                            std::string emailId)
     {
         const auto maintenance = emailMaintenanceActive(
             m_databaseConnection, m_mailboxMaintenanceRegistry, accountId, emailId);
@@ -2671,8 +2928,8 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .message = i18n("The mailbox cache is being cleared."),
             };
-        const auto configuration = m_configurations.find(accountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(accountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .message = accountSynchronizationNotConfigured(),
             };
@@ -2683,7 +2940,7 @@ namespace javelin::app
                                         toLiveConnectionSettings(configuration->second.settings),
                                         accountId, std::move(emailId)));
         if (std::holds_alternative<javelin::jmap::MessageContentUnavailable>(result))
-            static_cast<void>(requestAccountSynchronization(accountId));
+            static_cast<void>(m_accountRuntime.requestAccountSynchronization(accountId));
         if (const auto* summary = std::get_if<javelin::jmap::MessageContentRefreshSummary>(&result);
             summary != nullptr && !summary->usedCachedContent)
         {
@@ -2694,8 +2951,8 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::AttachmentDownloadResult>
-    MailApplicationService::requestAttachment(std::string accountId, std::string emailId,
-                                              std::string partId)
+    MessageContentApplicationService::requestAttachment(std::string accountId, std::string emailId,
+                                                        std::string partId)
     {
         const auto maintenance = emailMaintenanceActive(
             m_databaseConnection, m_mailboxMaintenanceRegistry, accountId, emailId);
@@ -2706,8 +2963,8 @@ namespace javelin::app
                 .message = i18n("The mailbox cache is being cleared."),
             };
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(accountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(accountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .message = accountSynchronizationNotConfigured(),
             };
@@ -2718,7 +2975,8 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::MessageSourceDownloadResult>
-    MailApplicationService::requestMessageSource(std::string accountId, std::string emailId)
+    MessageContentApplicationService::requestMessageSource(std::string accountId,
+                                                           std::string emailId)
     {
         const auto maintenance = emailMaintenanceActive(
             m_databaseConnection, m_mailboxMaintenanceRegistry, accountId, emailId);
@@ -2734,31 +2992,20 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::LiveRefreshResult>
-    MailApplicationService::bootstrapAccount(AccountBootstrapIntent intent)
+    AccountRuntimeManager::bootstrapAccount(AccountBootstrapIntent intent)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
         const auto liveSettings = toLiveConnectionSettings(intent.settings);
         auto result = co_await m_accountBootstrapClient.bootstrap(liveSettings, {},
                                                                   std::move(intent.mailboxIds));
-        if (const auto* summary = std::get_if<javelin::jmap::LiveRefreshSummary>(&result))
-        {
-            const auto pending =
-                co_await m_emailMutationEngine.submitPending(liveSettings, summary->accountId);
-            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&pending))
-            {
-                qWarning().noquote()
-                    << "Queued Email mutation submission after account bootstrap failed"
-                    << QString::fromStdString(summary->accountId) << error->message;
-            }
-        }
         co_return observeResult(m_errorCoordinator, intent.settings, {},
                                 QStringLiteral("Synchronize account"), std::move(result));
     }
 
-    void MailApplicationService::scheduleContactRefresh(std::string ownerAccountId)
+    void ContactApplicationService::scheduleRefresh(std::string ownerAccountId)
     {
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             return;
 
         m_pendingContactRefreshes.insert(ownerAccountId);
@@ -2808,10 +3055,10 @@ namespace javelin::app
             static_cast<void>(
                 m_workScheduler.update(jobId, WorkStatus::Queued, {}, QStringLiteral("{}")));
         }
-        scheduleContactRefreshPump();
+        scheduleRefreshPump();
     }
 
-    void MailApplicationService::restoreContactRefreshJobs()
+    void ContactApplicationService::restoreRefreshJobs()
     {
         const auto listed = m_workScheduler.list();
         const auto* jobs = std::get_if<std::vector<WorkRecord>>(&listed);
@@ -2824,13 +3071,13 @@ namespace javelin::app
         {
             if (job.kind != WorkKind::ContactRefresh || !job.accountId.has_value() ||
                 !shouldRestoreContactRefresh(job.status) ||
-                !m_configurations.contains(*job.accountId))
+                !m_accountRuntime.configurationFor(*job.accountId).has_value())
                 continue;
-            scheduleContactRefresh(*job.accountId);
+            scheduleRefresh(*job.accountId);
         }
     }
 
-    void MailApplicationService::scheduleContactRefreshPump()
+    void ContactApplicationService::scheduleRefreshPump()
     {
         if (m_pendingContactRefreshes.empty() || m_contactRefreshPumpScheduled)
             return;
@@ -2839,11 +3086,11 @@ namespace javelin::app
                            [this]()
                            {
                                m_contactRefreshPumpScheduled = false;
-                               pumpContactRefreshes();
+                               pumpRefreshes();
                            });
     }
 
-    void MailApplicationService::pumpContactRefreshes()
+    void ContactApplicationService::pumpRefreshes()
     {
         if (!m_workScheduler.mayStartBackgroundNetwork())
             return;
@@ -2854,7 +3101,7 @@ namespace javelin::app
         {
             if (m_runningContactRefreshes.contains(ownerAccountId))
                 continue;
-            if (!m_configurations.contains(ownerAccountId))
+            if (!m_accountRuntime.configurationFor(ownerAccountId).has_value())
             {
                 m_pendingContactRefreshes.erase(ownerAccountId);
                 continue;
@@ -2870,7 +3117,7 @@ namespace javelin::app
 
             m_pendingContactRefreshes.erase(ownerAccountId);
             m_runningContactRefreshes.insert(ownerAccountId);
-            auto task = runContactRefresh(ownerAccountId, jobId);
+            auto task = runRefresh(ownerAccountId, jobId);
             QCoro::connect(std::move(task), this,
                            [this, ownerAccountId, jobId]()
                            {
@@ -2889,21 +3136,21 @@ namespace javelin::app
                                            jobId, WorkStatus::Queued, {}, QStringLiteral("{}")));
                                    }
                                }
-                               scheduleContactRefreshPump();
+                               scheduleRefreshPump();
                            });
         }
     }
 
-    QCoro::Task<void> MailApplicationService::runContactRefresh(std::string ownerAccountId,
-                                                                std::string jobId)
+    QCoro::Task<void> ContactApplicationService::runRefresh(std::string ownerAccountId,
+                                                            std::string jobId)
     {
         WorkProgress progress;
         progress.detail = i18n("Checking for contact changes");
         static_cast<void>(
             m_workScheduler.update(jobId, WorkStatus::Running, progress, QStringLiteral("{}")));
 
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
         {
             static_cast<void>(m_workScheduler.update(
                 jobId, WorkStatus::Failed, progress, QStringLiteral("{}"),
@@ -2943,7 +3190,7 @@ namespace javelin::app
                                            return;
                                        static_cast<void>(m_workScheduler.update(
                                            jobId, WorkStatus::Queued, {}, QStringLiteral("{}")));
-                                       scheduleContactRefreshPump();
+                                       scheduleRefreshPump();
                                    });
             }
             co_return;
@@ -2958,7 +3205,7 @@ namespace javelin::app
             m_workScheduler.update(jobId, WorkStatus::Complete, progress, QStringLiteral("{}")));
     }
 
-    void MailApplicationService::scheduleTagDeletionPump()
+    void MailMutationApplicationService::scheduleTagDeletionPump()
     {
         if (m_tagDeletionPumpScheduled)
             return;
@@ -2971,7 +3218,7 @@ namespace javelin::app
                            });
     }
 
-    void MailApplicationService::pumpTagDeletions()
+    void MailMutationApplicationService::pumpTagDeletions()
     {
         if (!m_workScheduler.mayStartBackgroundNetwork())
             return;
@@ -2984,7 +3231,7 @@ namespace javelin::app
         {
             if (job.kind != WorkKind::TagDeletion || job.status != WorkStatus::Queued ||
                 !job.accountId.has_value() || m_runningTagDeletions.contains(*job.accountId) ||
-                !m_configurations.contains(*job.accountId))
+                !m_accountRuntime.configurationFor(*job.accountId).has_value())
                 continue;
             const auto keyword = tagDeletionKeyword(job.checkpointJson);
             if (!keyword.has_value())
@@ -3009,9 +3256,9 @@ namespace javelin::app
         }
     }
 
-    QCoro::Task<void> MailApplicationService::runTagDeletion(std::string jobId,
-                                                             std::string accountId,
-                                                             std::string keyword)
+    QCoro::Task<void> MailMutationApplicationService::runTagDeletion(std::string jobId,
+                                                                     std::string accountId,
+                                                                     std::string keyword)
     {
         constexpr std::size_t batchSize = 25;
         const auto checkpoint = tagDeletionCheckpoint(keyword);
@@ -3033,8 +3280,8 @@ namespace javelin::app
             return status;
         };
 
-        const auto configuration = m_configurations.find(accountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(accountId);
+        if (!configuration.has_value())
         {
             static_cast<void>(m_workScheduler.update(jobId, WorkStatus::Failed, progress,
                                                      checkpoint,
@@ -3211,11 +3458,11 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactRefreshResult>
-    MailApplicationService::requestContacts(std::string accountId)
+    ContactApplicationService::requestContacts(std::string accountId)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(accountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(accountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .message = accountSynchronizationNotConfigured(),
             };
@@ -3227,13 +3474,13 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
-    MailApplicationService::requestCalendarRange(
+    CalendarApplicationService::requestCalendarRange(
         std::string ownerAccountId, javelin::jmap::calendar::VisibleInterval interval,
         javelin::jmap::calendar::TimeZoneId displayTimeZone)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -3257,13 +3504,28 @@ namespace javelin::app
                                 i18n("Synchronize calendar"), std::move(result));
     }
 
+    void CalendarApplicationService::scheduleRefresh(std::string ownerAccountId)
+    {
+        if (!m_visibleCalendarRanges.contains(ownerAccountId))
+            return;
+        auto task = requestCalendarChanges(std::move(ownerAccountId));
+        QCoro::connect(std::move(task), this,
+                       [](const javelin::jmap::calendar::CalendarRefreshResult& result)
+                       {
+                           if (const auto* error =
+                                   std::get_if<javelin::jmap::OperationError>(&result))
+                               qWarning().noquote()
+                                   << "Calendar state-change refresh failed" << error->message;
+                       });
+    }
+
     QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
-    MailApplicationService::requestCalendarChanges(std::string ownerAccountId)
+    CalendarApplicationService::requestCalendarChanges(std::string ownerAccountId)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
         const auto range = m_visibleCalendarRanges.find(ownerAccountId);
-        if (configuration == m_configurations.end() || range == m_visibleCalendarRanges.end())
+        if (!configuration.has_value() || range == m_visibleCalendarRanges.end())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = i18n("Calendar synchronization is not configured.")};
@@ -3282,14 +3544,14 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::AuthoritativeCalendarEventResult>
-    MailApplicationService::getAuthoritativeCalendarEvent(std::string ownerAccountId,
-                                                          std::string accountId,
-                                                          std::optional<std::string> eventId,
-                                                          std::string uid)
+    CalendarApplicationService::getAuthoritativeCalendarEvent(std::string ownerAccountId,
+                                                              std::string accountId,
+                                                              std::optional<std::string> eventId,
+                                                              std::string uid)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -3300,8 +3562,8 @@ namespace javelin::app
     }
 
     javelin::jmap::calendar::AuthoritativeCalendarEventResult
-    MailApplicationService::getEffectiveCalendarEvent(const std::string_view accountId,
-                                                      const std::optional<std::string>& eventId)
+    CalendarApplicationService::getEffectiveCalendarEvent(const std::string_view accountId,
+                                                          const std::optional<std::string>& eventId)
     {
         javelin::jmap::cache::CalendarRepository repository{m_databaseConnection};
         const auto stateResult = repository.stateToken(accountId, "CalendarEvent");
@@ -3332,13 +3594,13 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
-    MailApplicationService::createCalendarEvent(std::string ownerAccountId,
-                                                javelin::jmap::calendar::CreateEventCommand command,
-                                                const javelin::app::undo::CommandOrigin origin)
+    CalendarApplicationService::createCalendarEvent(
+        std::string ownerAccountId, javelin::jmap::calendar::CreateEventCommand command,
+        const javelin::app::undo::CommandOrigin origin)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -3433,9 +3695,9 @@ namespace javelin::app
     }
 
     javelin::jmap::calendar::CalendarPreferenceResult
-    MailApplicationService::setCalendarVisible(std::string accountId, std::string calendarId,
-                                               const bool visible,
-                                               const javelin::app::undo::CommandOrigin origin)
+    CalendarApplicationService::setCalendarVisible(std::string accountId, std::string calendarId,
+                                                   const bool visible,
+                                                   const javelin::app::undo::CommandOrigin origin)
     {
         const auto listed = m_calendarService.calendars(accountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&listed))
@@ -3483,7 +3745,7 @@ namespace javelin::app
     }
 
     std::variant<std::optional<std::string>, javelin::jmap::OperationError>
-    MailApplicationService::currentCalendarPreference(
+    CalendarApplicationService::currentCalendarPreference(
         const javelin::app::undo::CalendarPreferenceHistory& history) const
     {
         const auto listed = m_calendarService.calendars(history.accountId);
@@ -3517,7 +3779,7 @@ namespace javelin::app
     }
 
     QCoro::Task<std::optional<javelin::jmap::OperationError>>
-    MailApplicationService::applyCalendarPreference(
+    CalendarApplicationService::applyCalendarPreference(
         javelin::app::undo::CalendarPreferenceHistory history, std::optional<std::string> value,
         const javelin::app::undo::CommandOrigin origin)
     {
@@ -3563,13 +3825,13 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
-    MailApplicationService::setCalendarSubscribed(std::string ownerAccountId, std::string accountId,
-                                                  std::string calendarId, const bool subscribed,
-                                                  const javelin::app::undo::CommandOrigin origin)
+    CalendarApplicationService::setCalendarSubscribed(
+        std::string ownerAccountId, std::string accountId, std::string calendarId,
+        const bool subscribed, const javelin::app::undo::CommandOrigin origin)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -3640,13 +3902,13 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
-    MailApplicationService::setDefaultCalendar(std::string ownerAccountId, std::string accountId,
-                                               std::string calendarId,
-                                               const javelin::app::undo::CommandOrigin origin)
+    CalendarApplicationService::setDefaultCalendar(std::string ownerAccountId,
+                                                   std::string accountId, std::string calendarId,
+                                                   const javelin::app::undo::CommandOrigin origin)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -3712,12 +3974,12 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
-    MailApplicationService::createCalendar(std::string ownerAccountId,
-                                           javelin::jmap::calendar::CreateCalendarCommand command)
+    CalendarApplicationService::createCalendar(
+        std::string ownerAccountId, javelin::jmap::calendar::CreateCalendarCommand command)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -3735,12 +3997,12 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
-    MailApplicationService::deleteCalendar(std::string ownerAccountId,
-                                           javelin::jmap::calendar::DeleteCalendarCommand command)
+    CalendarApplicationService::deleteCalendar(
+        std::string ownerAccountId, javelin::jmap::calendar::DeleteCalendarCommand command)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -3758,13 +4020,13 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
-    MailApplicationService::updateCalendarEvent(std::string ownerAccountId,
-                                                javelin::jmap::calendar::UpdateEventCommand command,
-                                                const javelin::app::undo::CommandOrigin origin)
+    CalendarApplicationService::updateCalendarEvent(
+        std::string ownerAccountId, javelin::jmap::calendar::UpdateEventCommand command,
+        const javelin::app::undo::CommandOrigin origin)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -3849,12 +4111,12 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
-    MailApplicationService::respondToCalendarEvent(
+    CalendarApplicationService::respondToCalendarEvent(
         std::string ownerAccountId, javelin::jmap::calendar::RespondToEventCommand command)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -3878,13 +4140,13 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
-    MailApplicationService::deleteCalendarEvent(std::string ownerAccountId,
-                                                javelin::jmap::calendar::DeleteEventCommand command,
-                                                const javelin::app::undo::CommandOrigin origin)
+    CalendarApplicationService::deleteCalendarEvent(
+        std::string ownerAccountId, javelin::jmap::calendar::DeleteEventCommand command,
+        const javelin::app::undo::CommandOrigin origin)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -3960,11 +4222,11 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveListResult>
-    MailApplicationService::requestSieveScripts(std::string ownerAccountId)
+    SieveApplicationService::requestSieveScripts(std::string ownerAccountId)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -3977,12 +4239,12 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveContentResult>
-    MailApplicationService::requestSieveScript(std::string ownerAccountId,
-                                               javelin::jmap::sieve::SieveScript script)
+    SieveApplicationService::requestSieveScript(std::string ownerAccountId,
+                                                javelin::jmap::sieve::SieveScript script)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -3995,11 +4257,11 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveValidationResult>
-    MailApplicationService::validateSieveScript(std::string ownerAccountId, QByteArray content)
+    SieveApplicationService::validateSieveScript(std::string ownerAccountId, QByteArray content)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -4011,13 +4273,13 @@ namespace javelin::app
                                     ownerAccountId, std::move(content)));
     }
 
-    QCoro::Task<javelin::jmap::sieve::SieveSaveResult> MailApplicationService::saveSieveScript(
+    QCoro::Task<javelin::jmap::sieve::SieveSaveResult> SieveApplicationService::saveSieveScript(
         std::string ownerAccountId, javelin::jmap::sieve::SieveScript script, QByteArray content,
         const javelin::app::undo::CommandOrigin origin)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -4091,13 +4353,13 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveDeleteResult>
-    MailApplicationService::deleteSieveScript(std::string ownerAccountId,
-                                              javelin::jmap::sieve::SieveScript script,
-                                              const javelin::app::undo::CommandOrigin origin)
+    SieveApplicationService::deleteSieveScript(std::string ownerAccountId,
+                                               javelin::jmap::sieve::SieveScript script,
+                                               const javelin::app::undo::CommandOrigin origin)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -4156,14 +4418,14 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveActivationResult>
-    MailApplicationService::setSieveScriptActive(std::string ownerAccountId,
-                                                 javelin::jmap::sieve::SieveScript script,
-                                                 const bool active,
-                                                 const javelin::app::undo::CommandOrigin origin)
+    SieveApplicationService::setSieveScriptActive(std::string ownerAccountId,
+                                                  javelin::jmap::sieve::SieveScript script,
+                                                  const bool active,
+                                                  const javelin::app::undo::CommandOrigin origin)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
@@ -4229,41 +4491,19 @@ namespace javelin::app
         co_return result;
     }
 
-    void MailApplicationService::connectCoordinator(const std::string& accountId,
-                                                    AccountSyncCoordinator& coordinator)
+    void AccountRuntimeManager::connectCoordinator(const std::string& accountId,
+                                                   AccountSyncCoordinator& coordinator)
     {
         connect(&coordinator, &AccountSyncCoordinator::statusChanged, this,
                 [this, accountId](const auto status)
                 { Q_EMIT accountStatusChanged(QString::fromStdString(accountId), status); });
         connect(&coordinator, &AccountSyncCoordinator::cacheCommitted, this,
-                [this](const MailCacheChange& change)
-                {
-                    if (m_threadMaterializationCoordinator != nullptr)
-                    {
-                        for (const auto& window : change.queryWindows)
-                        {
-                            const auto queryKey = javelin::jmap::sync::mailboxQueryKey({
-                                .mailboxId = window.mailboxId.toStdString(),
-                                .sortProperty = "receivedAt",
-                                .isAscending = false,
-                                .collapseThreads = true,
-                            });
-                            if (const auto error =
-                                    m_threadMaterializationCoordinator->enqueueMailboxWindow(
-                                        change.accountId.toStdString(), queryKey, window.offset,
-                                        window.limit))
-                                qWarning().noquote()
-                                    << "Could not enqueue refreshed mailbox Thread materialization"
-                                    << error->message;
-                        }
-                    }
-                    Q_EMIT cacheCommitted(change);
-                });
+                &AccountRuntimeManager::cacheCommitted);
         connect(&coordinator, &AccountSyncCoordinator::contactStateChanged, this,
                 [this](const QString& ownerAccountId, const auto& changedStates)
                 {
                     static_cast<void>(changedStates);
-                    scheduleContactRefresh(ownerAccountId.toStdString());
+                    Q_EMIT contactStateChanged(ownerAccountId);
                 });
         connect(&coordinator, &AccountSyncCoordinator::identityStateChanged, this,
                 [this](const QString& ownerAccountId, const auto& changedStates)
@@ -4280,23 +4520,10 @@ namespace javelin::app
                 [this](const QString& ownerAccountId, const auto& changedStates)
                 {
                     static_cast<void>(changedStates);
-                    const auto owner = ownerAccountId.toStdString();
-                    const auto range = m_visibleCalendarRanges.find(owner);
-                    if (range == m_visibleCalendarRanges.end())
-                        return;
-                    auto task = requestCalendarChanges(owner);
-                    QCoro::connect(std::move(task), this,
-                                   [](const javelin::jmap::calendar::CalendarRefreshResult& result)
-                                   {
-                                       if (const auto* error =
-                                               std::get_if<javelin::jmap::OperationError>(&result))
-                                           qWarning().noquote()
-                                               << "Calendar state-change refresh failed"
-                                               << error->message;
-                                   });
+                    Q_EMIT calendarStateChanged(ownerAccountId);
                 });
-        connect(&coordinator, &AccountSyncCoordinator::notificationRaised, this,
-                &MailApplicationService::notificationRaised);
+        connect(&coordinator, &AccountSyncCoordinator::notificationMailboxRefreshed, this,
+                &AccountRuntimeManager::notificationMailboxRefreshed);
         connect(
             &coordinator, &AccountSyncCoordinator::operationFailed, this,
             [this, accountId](const QString& operation, const javelin::jmap::OperationError& error)

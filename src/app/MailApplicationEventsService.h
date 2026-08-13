@@ -5,21 +5,29 @@
 
 namespace javelin::app
 {
-    class MailApplicationService;
+    class AccountRuntimeManager;
+    class ContactApplicationService;
+    class MailMutationApplicationService;
+    class MailQueryApplicationService;
+    class MessageContentApplicationService;
 
     class MailApplicationEventsService final : public MailApplicationEventsPort
     {
         Q_OBJECT
 
       public:
-        explicit MailApplicationEventsService(MailApplicationService& service,
-                                              QObject* parent = nullptr);
+        MailApplicationEventsService(AccountRuntimeManager& accountRuntime,
+                                     MailQueryApplicationService& queries,
+                                     MailMutationApplicationService& mutations,
+                                     MessageContentApplicationService& content,
+                                     ContactApplicationService& contacts,
+                                     QObject* parent = nullptr);
 
         [[nodiscard]] std::unordered_map<std::string, MailAccountStatus>
         accountStatuses() const override;
 
       private:
-        MailApplicationService& m_service;
+        AccountRuntimeManager& m_accountRuntime;
         CacheInvalidationPublisher m_invalidationPublisher;
     };
 } // namespace javelin::app

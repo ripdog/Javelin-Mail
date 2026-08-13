@@ -4,12 +4,12 @@
 
 namespace javelin::app
 {
-    class MailApplicationService;
+    class MessageContentApplicationService;
 
     class MessageContentCommandService final : public MessageContentPort
     {
       public:
-        explicit MessageContentCommandService(MailApplicationService& service);
+        explicit MessageContentCommandService(MessageContentApplicationService& service);
 
         [[nodiscard]] QCoro::Task<javelin::jmap::MessageContentRefreshResult>
         requestMessageContent(std::string accountId, std::string emailId) override;
@@ -19,6 +19,6 @@ namespace javelin::app
         requestMessageSource(std::string accountId, std::string emailId) override;
 
       private:
-        MailApplicationService& m_service;
+        MessageContentApplicationService& m_service;
     };
 } // namespace javelin::app
