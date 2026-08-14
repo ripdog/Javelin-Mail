@@ -195,6 +195,7 @@ TEST_CASE("month calendar event activation requests the event's actual day", "[g
 
     QDate agendaDate;
     QString agendaEventId;
+    QString contextEventId;
     QObject::connect(&widget, &javelin::gui::calendar::MonthCalendarWidget::dayAgendaRequested,
                      &widget,
                      [&agendaDate, &agendaEventId](const QDate& date, const QString&,
@@ -203,6 +204,10 @@ TEST_CASE("month calendar event activation requests the event's actual day", "[g
                          agendaDate = date;
                          agendaEventId = eventId;
                      });
+    QObject::connect(
+        &widget, &javelin::gui::calendar::MonthCalendarWidget::eventContextMenuRequested, &widget,
+        [&contextEventId](const QPoint&, const QString&, const QString& eventId, const QString&)
+        { contextEventId = eventId; });
 
     const auto buttons = widget.findChildren<QToolButton*>();
     const auto eventButton = std::ranges::find_if(
@@ -222,10 +227,13 @@ TEST_CASE("month calendar event activation requests the event's actual day", "[g
                         Qt::NoModifier};
     QApplication::sendEvent(*eventButton, &press);
     QApplication::sendEvent(*eventButton, &release);
+    REQUIRE(QMetaObject::invokeMethod(*eventButton, "customContextMenuRequested",
+                                      Qt::DirectConnection, Q_ARG(QPoint, QPoint(2, 3))));
 
     CHECK_FALSE(activatedButton.isNull());
     CHECK(agendaDate == QDate{2026, 8, 12});
     CHECK(agendaEventId == QStringLiteral("event"));
+    CHECK(contextEventId == QStringLiteral("event"));
     CHECK(widget.selectedDate() == QDate{2026, 8, 12});
 }
 

@@ -359,6 +359,22 @@ namespace javelin::protocol
                             limits))
                         return error;
                 }
+                if (workspace.calendarEventContextMenuLayout.size() > limits.maximumCollectionItems)
+                {
+                    return BoundaryError{
+                        .code = BoundaryErrorCode::TooManyValues,
+                        .field = QStringLiteral("update.workspace.calendarEventContextMenuLayout"),
+                        .detail = QStringLiteral("collection exceeds the protocol limit")};
+                }
+                for (const auto& actionId : workspace.calendarEventContextMenuLayout)
+                {
+                    if (auto error = requiredStringError(
+                            actionId,
+                            QStringLiteral(
+                                "update.workspace.calendarEventContextMenuLayout.actionId"),
+                            limits))
+                        return error;
+                }
             }
             return std::nullopt;
         }
@@ -536,6 +552,9 @@ namespace javelin::protocol
                             size += stringSize(overrideValue.calendarId) +
                                     stringSize(overrideValue.color);
                         for (const auto& actionId : value.update.workspace->emailContextMenuLayout)
+                            size += stringSize(actionId);
+                        for (const auto& actionId :
+                             value.update.workspace->calendarEventContextMenuLayout)
                             size += stringSize(actionId);
                     }
                     return size;

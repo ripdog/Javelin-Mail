@@ -65,6 +65,8 @@ namespace javelin::gui::calendar
         void dayChanged(QDate date);
         void newEventRequested(QDateTime start, QDateTime end);
         void editRequested(QString accountId, QString eventId, QString recurrenceId);
+        void eventContextMenuRequested(QPoint globalPosition, QString accountId, QString eventId,
+                                       QString recurrenceId);
 
       protected:
         void showEvent(QShowEvent* event) override;

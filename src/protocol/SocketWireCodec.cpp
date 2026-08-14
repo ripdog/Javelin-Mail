@@ -433,6 +433,10 @@ namespace javelin::protocol
                    writeVector(writer, workspace.emailContextMenuLayout,
                                limits.maximumCollectionItems,
                                QStringLiteral("workspace.emailContextMenuLayout"),
+                               [&writer](const QString& value) { return writer.string(value); }) &&
+                   writeVector(writer, workspace.calendarEventContextMenuLayout,
+                               limits.maximumCollectionItems,
+                               QStringLiteral("workspace.calendarEventContextMenuLayout"),
                                [&writer](const QString& value) { return writer.string(value); });
         }
 
@@ -453,6 +457,10 @@ namespace javelin::protocol
                    readVector(reader, workspace.emailContextMenuLayout,
                               limits.maximumCollectionItems,
                               QStringLiteral("workspace.emailContextMenuLayout"),
+                              [&reader](QString& value) { return reader.string(value); }) &&
+                   readVector(reader, workspace.calendarEventContextMenuLayout,
+                              limits.maximumCollectionItems,
+                              QStringLiteral("workspace.calendarEventContextMenuLayout"),
                               [&reader](QString& value) { return reader.string(value); });
         }
 

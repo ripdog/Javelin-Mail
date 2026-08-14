@@ -288,6 +288,7 @@ add_executable(javelin_gui_policy_tests
     gui/MailboxSortTest.cpp
     gui/MessageActionPolicyTest.cpp
     gui/EmailContextMenuLayoutTest.cpp
+    gui/CalendarEventContextMenuLayoutTest.cpp
     gui/MessageActionSelectionTest.cpp
     gui/MessageContentPolicyTest.cpp
     gui/MessageSelectionRestorationTest.cpp
@@ -378,6 +379,7 @@ add_executable(javelin_gui_widget_tests
     gui/IconUtilsTest.cpp
     gui/IndeterminateProgressBarTest.cpp
     gui/EmailContextMenuEditorDialogTest.cpp
+    gui/CalendarEventContextMenuEditorDialogTest.cpp
     gui/MessageBannerWidgetTest.cpp
     gui/MessageDragListViewTest.cpp
     gui/MailboxPreferenceStateTest.cpp

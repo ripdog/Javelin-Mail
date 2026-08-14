@@ -15,6 +15,7 @@
 #include "app/UndoApplicationPorts.h"
 #include "gui/FontUtils.h"
 #include "gui/IconUtils.h"
+#include "gui/calendar/CalendarEventContextMenuEditorDialog.h"
 #include "gui/compose/MailtoParser.h"
 #include "gui/developer/DeveloperOptionsDialog.h"
 #include "gui/identity/IdentityManagerDialog.h"
@@ -575,6 +576,29 @@ namespace javelin::gui::shell
                         plugActionList(QStringLiteral("email_context_menu_layout"), actions);
                 });
         }
+        m_calendarEventContextMenu = qobject_cast<QMenu*>(
+            guiFactory()->container(QStringLiteral("calendar_event_context_menu"), this));
+        if (m_calendarEventContextMenu != nullptr)
+        {
+            m_calendarTabController->configureEventContextMenu(
+                *m_calendarEventContextMenu,
+                [this] { return m_settings.workspaceSettings().calendarEventContextMenuLayout; },
+                [this](const QList<QAction*>& actions)
+                {
+                    unplugActionList(QStringLiteral("calendar_event_context_menu_layout"));
+                    if (!actions.empty())
+                        plugActionList(QStringLiteral("calendar_event_context_menu_layout"),
+                                       actions);
+                },
+                {.edit = *m_calendarEventEditAction,
+                 .duplicate = *m_calendarEventDuplicateAction,
+                 .move = *m_calendarEventMoveAction,
+                 .accept = *m_calendarEventAcceptAction,
+                 .tentative = *m_calendarEventTentativeAction,
+                 .decline = *m_calendarEventDeclineAction,
+                 .copyDetails = *m_calendarEventCopyDetailsAction,
+                 .deleteEvent = *m_calendarEventDeleteAction});
+        }
         if (auto* composeToolBar = toolBar(QStringLiteral("composeToolBar"));
             composeToolBar != nullptr)
         {
@@ -790,6 +814,14 @@ namespace javelin::gui::shell
                 &MainWindow::configureEmailContextMenu);
         actionCollection()->addAction(QStringLiteral("configure_email_context_menu"),
                                       m_configureEmailContextMenuAction);
+
+        m_configureCalendarEventContextMenuAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("configure")),
+                        i18n("Configure Calendar Event Context Menu…"), this);
+        connect(m_configureCalendarEventContextMenuAction, &QAction::triggered, this,
+                &MainWindow::configureCalendarEventContextMenu);
+        actionCollection()->addAction(QStringLiteral("configure_calendar_event_context_menu"),
+                                      m_configureCalendarEventContextMenuAction);
 
         m_themeController = new ThemeController(
             *this, *m_quickFilterController, *m_messageSortButton,
@@ -1107,6 +1139,35 @@ namespace javelin::gui::shell
         connect(m_calendarRefreshAction, &QAction::triggered, this,
                 [this] { refreshActiveTabFromServer(); });
         actionCollection()->addAction(QStringLiteral("calendar_refresh"), m_calendarRefreshAction);
+
+        const auto addCalendarEventAction =
+            [this](QAction*& target, const QString& id, const QString& icon, const QString& text)
+        {
+            target = new QAction(QIcon::fromTheme(icon), text, this);
+            actionCollection()->addAction(id, target);
+            KActionCollection::setShortcutsConfigurable(target, false);
+        };
+        addCalendarEventAction(m_calendarEventEditAction, QStringLiteral("calendar_event_edit"),
+                               QStringLiteral("document-edit"), i18n("Edit Event…"));
+        addCalendarEventAction(m_calendarEventDuplicateAction,
+                               QStringLiteral("calendar_event_duplicate"),
+                               QStringLiteral("edit-copy"), i18n("Duplicate Event…"));
+        addCalendarEventAction(m_calendarEventMoveAction, QStringLiteral("calendar_event_move"),
+                               QStringLiteral("mail-move"), i18n("Move to Calendar"));
+        addCalendarEventAction(m_calendarEventAcceptAction, QStringLiteral("calendar_event_accept"),
+                               QStringLiteral("dialog-ok-apply"),
+                               i18nc("@action calendar RSVP", "Accept"));
+        addCalendarEventAction(
+            m_calendarEventTentativeAction, QStringLiteral("calendar_event_tentative"),
+            QStringLiteral("dialog-question"), i18nc("@action calendar RSVP", "Tentative"));
+        addCalendarEventAction(
+            m_calendarEventDeclineAction, QStringLiteral("calendar_event_decline"),
+            QStringLiteral("dialog-cancel"), i18nc("@action calendar RSVP", "Decline"));
+        addCalendarEventAction(m_calendarEventCopyDetailsAction,
+                               QStringLiteral("calendar_event_copy_details"),
+                               QStringLiteral("edit-copy"), i18n("Copy Event Details"));
+        addCalendarEventAction(m_calendarEventDeleteAction, QStringLiteral("calendar_event_delete"),
+                               QStringLiteral("edit-delete"), i18n("Delete Event…"));
 
         auto* logAction = new QAction(QIcon::fromTheme(QStringLiteral("view-list-text")),
                                       i18n("Application Log"), this);
@@ -3023,6 +3084,13 @@ namespace javelin::gui::shell
     void MainWindow::configureEmailContextMenu()
     {
         EmailContextMenuEditorDialog dialog{m_settings, *actionCollection(), this};
+        dialog.exec();
+    }
+
+    void MainWindow::configureCalendarEventContextMenu()
+    {
+        javelin::gui::calendar::CalendarEventContextMenuEditorDialog dialog{
+            m_settings, *actionCollection(), this};
         dialog.exec();
     }
 

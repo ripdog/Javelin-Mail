@@ -193,6 +193,28 @@ TEST_CASE("day agenda event selection fills details and exposes edit explicitly"
     dialog.close();
 }
 
+TEST_CASE("day agenda event buttons request the shared context menu", "[gui][calendar][agenda]")
+{
+    javelin::gui::calendar::DayAgendaDialog dialog;
+    const auto selected = event(QStringLiteral("context-event"), QTime{11, 0}, QTime{12, 0},
+                                QStringLiteral("Context event"));
+    dialog.setDay(QDate{2026, 8, 10}, {selected});
+    dialog.show();
+    settleGui();
+
+    const auto buttons = dialog.findChildren<QToolButton*>(QStringLiteral("dayAgendaEventButton"));
+    REQUIRE(buttons.size() == 1);
+    QString requestedEventId;
+    QObject::connect(
+        &dialog, &javelin::gui::calendar::DayAgendaDialog::eventContextMenuRequested, &dialog,
+        [&requestedEventId](const QPoint&, const QString&, const QString& eventId, const QString&)
+        { requestedEventId = eventId; });
+    REQUIRE(QMetaObject::invokeMethod(buttons.front(), "customContextMenuRequested",
+                                      Qt::DirectConnection, Q_ARG(QPoint, QPoint(3, 4))));
+    CHECK(requestedEventId == QStringLiteral("context-event"));
+    dialog.close();
+}
+
 TEST_CASE("day agenda creates inclusive quarter-hour ranges by click and drag",
           "[gui][calendar][agenda]")
 {

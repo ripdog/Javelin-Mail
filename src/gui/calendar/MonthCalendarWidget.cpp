@@ -147,7 +147,8 @@ namespace javelin::gui::calendar
         }
 
         void addEvent(const MonthEvent& event, const QDate& cellDate,
-                      std::function<void()> activated)
+                      std::function<void()> activated,
+                      std::function<void(const QPoint&)> contextMenuRequested)
         {
             const auto segment =
                 monthEventSegment(event.title, event.start, event.end, event.allDay, cellDate);
@@ -157,6 +158,11 @@ namespace javelin::gui::calendar
                 eventAccessibleName(event, cellDate), event.color, segment.begins, segment.ends);
             chip->setToolTip(event.title);
             QObject::connect(chip, &QToolButton::clicked, chip, std::move(activated));
+            chip->setContextMenuPolicy(Qt::CustomContextMenu);
+            QObject::connect(
+                chip, &QWidget::customContextMenuRequested, chip,
+                [chip, contextMenuRequested = std::move(contextMenuRequested)](const QPoint& point)
+                { contextMenuRequested(chip->mapToGlobal(point)); });
             m_layout->insertWidget(m_layout->count() - 1, chip);
         }
 
@@ -1322,6 +1328,13 @@ namespace javelin::gui::calendar
                         selectDate(date);
                         Q_EMIT dayAgendaRequested(
                             date, QString::fromStdString(event->accountId),
+                            QString::fromStdString(event->eventId),
+                            QString::fromStdString(event->recurrenceId.value_or(std::string{})));
+                    },
+                    [this, event](const QPoint& globalPosition)
+                    {
+                        Q_EMIT eventContextMenuRequested(
+                            globalPosition, QString::fromStdString(event->accountId),
                             QString::fromStdString(event->eventId),
                             QString::fromStdString(event->recurrenceId.value_or(std::string{})));
                     });

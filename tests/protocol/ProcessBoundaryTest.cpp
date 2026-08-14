@@ -110,7 +110,10 @@ namespace
                                                     .color = QStringLiteral("#123456")}},
                         .emailContextMenuLayout = {QStringLiteral("compose_reply"),
                                                    QStringLiteral("separator"),
-                                                   QStringLiteral("archive_email")}}}};
+                                                   QStringLiteral("archive_email")},
+                        .calendarEventContextMenuLayout = {
+                            QStringLiteral("calendar_event_edit"), QStringLiteral("separator"),
+                            QStringLiteral("calendar_event_delete")}}}};
         }
 
         SettingsUpdateReply handleUpdateSettings(UpdateSettingsRequest request) override
@@ -307,7 +310,9 @@ namespace
                      .composeRichTextDefault = true,
                      .calendarColorOverrides = {{.calendarId = QStringLiteral("calendar-2"),
                                                  .color = QStringLiteral("#abcdef")}},
-                     .emailContextMenuLayout = {QStringLiteral("archive_email")}}}});
+                     .emailContextMenuLayout = {QStringLiteral("archive_email")},
+                     .calendarEventContextMenuLayout = {
+                         QStringLiteral("calendar_event_copy_details")}}}});
         REQUIRE(std::holds_alternative<SettingsUpdated>(settingsUpdate));
         CHECK(std::get<SettingsUpdated>(settingsUpdate).revision.value == 6);
         REQUIRE(handler.receivedSettingsUpdate.has_value());
@@ -319,6 +324,8 @@ namespace
         REQUIRE(handler.receivedSettingsUpdate->update.workspace.has_value());
         CHECK(handler.receivedSettingsUpdate->update.workspace->emailContextMenuLayout ==
               std::vector<QString>{QStringLiteral("archive_email")});
+        CHECK(handler.receivedSettingsUpdate->update.workspace->calendarEventContextMenuLayout ==
+              std::vector<QString>{QStringLiteral("calendar_event_copy_details")});
         CHECK(account.oauthClientId == QStringLiteral("client-id"));
         CHECK(account.oauthIssuer == QStringLiteral("https://auth.example.com"));
         CHECK(account.oauthResource == QStringLiteral("https://mail.example.com/jmap"));
@@ -607,6 +614,7 @@ TEST_CASE("workspace settings enforce protocol bounds", "[protocol][settings]")
         .mainWindowState = QByteArrayLiteral("large"),
         .calendarColorOverrides = {},
         .emailContextMenuLayout = {QStringLiteral("compose_reply")},
+        .calendarEventContextMenuLayout = {},
     };
 
     const auto reply =
@@ -630,6 +638,7 @@ TEST_CASE("email context menu settings enforce collection bounds", "[protocol][s
         .calendarColorOverrides = {},
         .emailContextMenuLayout = {QStringLiteral("compose_reply"),
                                    QStringLiteral("archive_email")},
+        .calendarEventContextMenuLayout = {},
     };
 
     const auto reply =
@@ -638,6 +647,31 @@ TEST_CASE("email context menu settings enforce collection bounds", "[protocol][s
     REQUIRE(rejected != nullptr);
     CHECK(rejected->error.code == BoundaryErrorCode::TooManyValues);
     CHECK(rejected->error.field == QStringLiteral("update.workspace.emailContextMenuLayout"));
+    CHECK_FALSE(handler.receivedSettingsUpdate.has_value());
+}
+
+TEST_CASE("calendar event context menu settings enforce collection bounds", "[protocol][settings]")
+{
+    RecordingHandler handler;
+    InProcessEndpoint endpoint{handler, {.maximumCollectionItems = 1}};
+    SettingsUpdate update;
+    update.workspace = WorkspaceSettings{
+        .formatVersion = 1,
+        .mainWindowState = {},
+        .composeRichTextDefault = true,
+        .calendarColorOverrides = {},
+        .emailContextMenuLayout = {},
+        .calendarEventContextMenuLayout = {QStringLiteral("calendar_event_edit"),
+                                           QStringLiteral("calendar_event_delete")},
+    };
+
+    const auto reply =
+        endpoint.updateSettings({.baseRevision = {.value = 5}, .update = std::move(update)});
+    const auto* rejected = std::get_if<SettingsUpdateRejected>(&reply);
+    REQUIRE(rejected != nullptr);
+    CHECK(rejected->error.code == BoundaryErrorCode::TooManyValues);
+    CHECK(rejected->error.field ==
+          QStringLiteral("update.workspace.calendarEventContextMenuLayout"));
     CHECK_FALSE(handler.receivedSettingsUpdate.has_value());
 }
 
@@ -660,6 +694,9 @@ TEST_CASE("endpoint exposes settings, handshake, lifecycle and events through ty
     CHECK(snapshot->snapshot.workspace.emailContextMenuLayout ==
           std::vector<QString>{QStringLiteral("compose_reply"), QStringLiteral("separator"),
                                QStringLiteral("archive_email")});
+    CHECK(snapshot->snapshot.workspace.calendarEventContextMenuLayout ==
+          std::vector<QString>{QStringLiteral("calendar_event_edit"), QStringLiteral("separator"),
+                               QStringLiteral("calendar_event_delete")});
 
     CHECK_FALSE(endpoint.ping().has_value());
     CHECK(handler.pinged);

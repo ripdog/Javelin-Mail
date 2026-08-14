@@ -103,6 +103,11 @@ namespace javelin::gui::calendar
                                 const QString& recurrenceId);
         void eventActivated(const QString& accountId, const QString& eventId,
                             const QString& recurrenceId);
+        void eventContextMenuRequested(const QPoint& globalPosition, const QString& accountId,
+                                       const QString& eventId, const QString& recurrenceId);
+        void eventContextActionRequested(const QString& actionId, const QString& accountId,
+                                         const QString& eventId, const QString& recurrenceId,
+                                         const QString& targetCalendarId);
         void emptyTimeActivated(const QDateTime& start, const QDateTime& end);
         void calendarSubscriptionChanged(const QString& calendarId, bool subscribed);
         void defaultCalendarChanged(const QString& calendarId);

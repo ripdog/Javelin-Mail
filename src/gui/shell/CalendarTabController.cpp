@@ -1,5 +1,6 @@
 #include "gui/shell/CalendarTabController.h"
 
+#include "gui/calendar/CalendarEventContextMenuLayout.h"
 #include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/DayAgendaDialog.h"
 #include "gui/calendar/EventDialog.h"
@@ -13,8 +14,11 @@
 #include <KLocalizedString>
 
 #include <QAbstractButton>
+#include <QAction>
+#include <QClipboard>
 #include <QDateTime>
 #include <QDebug>
+#include <QGuiApplication>
 #include <QLocale>
 #include <QLoggingCategory>
 #include <QMenu>
@@ -315,6 +319,477 @@ namespace javelin::gui::shell
     {
     }
 
+    void CalendarTabController::configureEventContextMenu(
+        QMenu& menu, std::function<std::vector<QString>()> configuredLayout,
+        std::function<void(const QList<QAction*>&)> replaceActionList,
+        CalendarEventContextActions actions)
+    {
+        m_eventContextMenu = &menu;
+        m_configuredEventContextMenuLayout = std::move(configuredLayout);
+        m_replaceEventContextMenuActionList = std::move(replaceActionList);
+        m_eventContextActions.emplace(actions);
+
+        const auto request = [this](const QString& actionId)
+        {
+            if (m_eventContextWidget == nullptr)
+                return;
+            Q_EMIT m_eventContextWidget->eventContextActionRequested(
+                actionId, m_eventContextAccountId, m_eventContextEventId,
+                m_eventContextRecurrenceId, {});
+        };
+        connect(&actions.edit, &QAction::triggered, this,
+                [request] { request(QStringLiteral("calendar_event_edit")); });
+        connect(&actions.duplicate, &QAction::triggered, this,
+                [request] { request(QStringLiteral("calendar_event_duplicate")); });
+        connect(&actions.accept, &QAction::triggered, this,
+                [request] { request(QStringLiteral("calendar_event_accept")); });
+        connect(&actions.tentative, &QAction::triggered, this,
+                [request] { request(QStringLiteral("calendar_event_tentative")); });
+        connect(&actions.decline, &QAction::triggered, this,
+                [request] { request(QStringLiteral("calendar_event_decline")); });
+        connect(&actions.copyDetails, &QAction::triggered, this,
+                [request] { request(QStringLiteral("calendar_event_copy_details")); });
+        connect(&actions.deleteEvent, &QAction::triggered, this,
+                [request] { request(QStringLiteral("calendar_event_delete")); });
+    }
+
+    void CalendarTabController::showEventContextMenu(
+        javelin::gui::calendar::MonthCalendarWidget& widget, const QPoint& globalPosition,
+        const QString& accountId, const QString& eventId, const QString& recurrenceId)
+    {
+        if (m_eventContextMenu == nullptr || !m_configuredEventContextMenuLayout ||
+            !m_replaceEventContextMenuActionList || !m_eventContextActions)
+            return;
+
+        const auto accountsResult = m_calendarReader.accounts();
+        const auto* accounts =
+            std::get_if<std::vector<javelin::jmap::cache::CalendarAccount>>(&accountsResult);
+        if (accounts == nullptr)
+            return;
+        const auto account = std::ranges::find(*accounts, accountId.toStdString(),
+                                               &javelin::jmap::cache::CalendarAccount::accountId);
+        if (account == accounts->end())
+            return;
+
+        const javelin::jmap::calendar::VisibleInterval interval{
+            .start = {.value =
+                          widget.visibleStart().toString(Qt::ISODate).toStdString() + "T00:00:00"},
+            .end = {.value =
+                        widget.visibleEnd().toString(Qt::ISODate).toStdString() + "T00:00:00"}};
+        const javelin::jmap::calendar::TimeZoneId timeZone{
+            .value = QTimeZone::systemTimeZoneId().toStdString()};
+        const auto loaded = m_calendarReader.loadCached(account->accountId, interval, timeZone);
+        const auto* window =
+            std::get_if<std::optional<javelin::jmap::cache::CalendarWindow>>(&loaded);
+        if (window == nullptr || !window->has_value())
+            return;
+        const auto event = std::ranges::find(window->value().events, eventId.toStdString(),
+                                             &javelin::jmap::calendar::CalendarEvent::id);
+        if (event == window->value().events.end())
+            return;
+        const auto calendarsResult = m_calendarReader.calendars(account->accountId);
+        const auto* calendars =
+            std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(&calendarsResult);
+        if (calendars == nullptr)
+            return;
+
+        const auto writable = [](const javelin::jmap::calendar::Calendar& calendar)
+        { return calendar.myRights.mayWriteAll || calendar.myRights.mayWriteOwn; };
+        const bool editable =
+            event->isOrigin &&
+            std::ranges::any_of(*calendars,
+                                [&event, &writable](const auto& calendar)
+                                {
+                                    const auto membership = event->calendarIds.find(calendar.id);
+                                    return membership != event->calendarIds.end() &&
+                                           membership->second && writable(calendar);
+                                });
+        const bool rsvp = !event->isOrigin && canRsvp(*event, *calendars);
+        const bool canDuplicate =
+            std::ranges::any_of(*calendars, [&writable](const auto& calendar)
+                                { return calendar.isSubscribed && writable(calendar); });
+
+        m_replaceEventContextMenuActionList({});
+        qDeleteAll(m_eventContextMenuObjects);
+        m_eventContextMenuObjects.clear();
+        m_eventContextWidget = &widget;
+        m_eventContextAccountId = accountId;
+        m_eventContextEventId = eventId;
+        m_eventContextRecurrenceId = recurrenceId;
+
+        QMenu* moveMenu = nullptr;
+        const auto actionForId = [&](const QString& id) -> QAction*
+        {
+            if (id == QStringLiteral("calendar_event_edit"))
+                return editable ? &m_eventContextActions->edit : nullptr;
+            if (id == QStringLiteral("calendar_event_duplicate"))
+                return canDuplicate ? &m_eventContextActions->duplicate : nullptr;
+            if (id == QStringLiteral("calendar_event_move"))
+            {
+                if (!editable)
+                    return nullptr;
+                moveMenu = new QMenu(i18n("Move to Calendar"), m_eventContextMenu);
+                moveMenu->setIcon(QIcon::fromTheme(QStringLiteral("mail-move")));
+                m_eventContextMenuObjects.push_back(moveMenu);
+                for (const auto& calendar : *calendars)
+                {
+                    const auto membership = event->calendarIds.find(calendar.id);
+                    if (!calendar.isSubscribed || !writable(calendar) ||
+                        (membership != event->calendarIds.end() && membership->second))
+                        continue;
+                    auto* destination = moveMenu->addAction(QString::fromStdString(calendar.name));
+                    connect(destination, &QAction::triggered, this,
+                            [this, calendarId = QString::fromStdString(calendar.id)]
+                            {
+                                if (m_eventContextWidget != nullptr)
+                                    Q_EMIT m_eventContextWidget->eventContextActionRequested(
+                                        QStringLiteral("calendar_event_move"),
+                                        m_eventContextAccountId, m_eventContextEventId,
+                                        m_eventContextRecurrenceId, calendarId);
+                            });
+                }
+                return moveMenu->actions().empty() ? nullptr : moveMenu->menuAction();
+            }
+            if (id == QStringLiteral("calendar_event_accept"))
+                return rsvp ? &m_eventContextActions->accept : nullptr;
+            if (id == QStringLiteral("calendar_event_tentative"))
+                return rsvp ? &m_eventContextActions->tentative : nullptr;
+            if (id == QStringLiteral("calendar_event_decline"))
+                return rsvp ? &m_eventContextActions->decline : nullptr;
+            if (id == QStringLiteral("calendar_event_copy_details"))
+                return &m_eventContextActions->copyDetails;
+            if (id == QStringLiteral("calendar_event_delete"))
+                return editable ? &m_eventContextActions->deleteEvent : nullptr;
+            return nullptr;
+        };
+
+        QList<QAction*> actions;
+        bool separatorPending = false;
+        for (const auto& id : javelin::gui::calendar::visibleCalendarEventContextMenuLayout(
+                 m_configuredEventContextMenuLayout(), {.editable = editable,
+                                                        .duplicable = canDuplicate,
+                                                        .movable = editable,
+                                                        .rsvp = rsvp}))
+        {
+            if (id == javelin::gui::calendar::calendarEventContextMenuSeparatorId())
+            {
+                separatorPending = !actions.empty();
+                continue;
+            }
+            auto* action = actionForId(id);
+            if (action == nullptr)
+                continue;
+            if (separatorPending)
+            {
+                auto* separator = new QAction(m_eventContextMenu);
+                separator->setSeparator(true);
+                m_eventContextMenuObjects.push_back(separator);
+                actions.push_back(separator);
+                separatorPending = false;
+            }
+            actions.push_back(action);
+        }
+        m_replaceEventContextMenuActionList(actions);
+        m_eventContextMenu->exec(globalPosition);
+    }
+
+    void CalendarTabController::handleEventContextAction(
+        javelin::gui::calendar::MonthCalendarWidget& widget, const QString& actionId,
+        const QString& accountId, const QString& eventId, const QString& recurrenceId,
+        const QString& targetCalendarId)
+    {
+        if (actionId == QStringLiteral("calendar_event_edit"))
+        {
+            Q_EMIT widget.eventActivated(accountId, eventId, recurrenceId);
+            return;
+        }
+
+        const auto accountsResult = m_calendarReader.accounts();
+        const auto* accounts =
+            std::get_if<std::vector<javelin::jmap::cache::CalendarAccount>>(&accountsResult);
+        if (accounts == nullptr)
+            return;
+        const auto account = std::ranges::find(*accounts, accountId.toStdString(),
+                                               &javelin::jmap::cache::CalendarAccount::accountId);
+        if (account == accounts->end())
+            return;
+        const javelin::jmap::calendar::VisibleInterval interval{
+            .start = {.value =
+                          widget.visibleStart().toString(Qt::ISODate).toStdString() + "T00:00:00"},
+            .end = {.value =
+                        widget.visibleEnd().toString(Qt::ISODate).toStdString() + "T00:00:00"}};
+        const javelin::jmap::calendar::TimeZoneId timeZone{
+            .value = QTimeZone::systemTimeZoneId().toStdString()};
+        const auto loaded = m_calendarReader.loadCached(account->accountId, interval, timeZone);
+        const auto* window =
+            std::get_if<std::optional<javelin::jmap::cache::CalendarWindow>>(&loaded);
+        if (window == nullptr || !window->has_value())
+            return;
+        const auto foundEvent = std::ranges::find(window->value().events, eventId.toStdString(),
+                                                  &javelin::jmap::calendar::CalendarEvent::id);
+        if (foundEvent == window->value().events.end())
+            return;
+        const auto calendarsResult = m_calendarReader.calendars(account->accountId);
+        const auto* calendars =
+            std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(&calendarsResult);
+        if (calendars == nullptr)
+            return;
+
+        auto selectedEvent = *foundEvent;
+        if (!recurrenceId.isEmpty())
+        {
+            const auto occurrence = std::ranges::find_if(
+                window->value().occurrences,
+                [&eventId, &recurrenceId](const auto& candidate)
+                {
+                    return candidate.eventId == eventId.toStdString() && candidate.recurrenceId &&
+                           candidate.recurrenceId->value == recurrenceId.toStdString();
+                });
+            if (occurrence == window->value().occurrences.end())
+            {
+                Q_EMIT statusMessage(
+                    i18n("This occurrence is no longer available. Refresh and try again."), 10000);
+                return;
+            }
+            selectedEvent.start = occurrence->localStart;
+            const auto start = QDateTime::fromString(
+                QString::fromStdString(occurrence->localStart.value), Qt::ISODate);
+            const auto end = QDateTime::fromString(
+                QString::fromStdString(occurrence->localEnd.value), Qt::ISODate);
+            selectedEvent.duration.value =
+                (occurrence->allDay ? QStringLiteral("P%1D").arg(start.date().daysTo(end.date()))
+                                    : QStringLiteral("PT%1S").arg(start.secsTo(end)))
+                    .toStdString();
+            if (const auto existingOverride =
+                    foundEvent->recurrenceOverrides.find(recurrenceId.toStdString());
+                existingOverride != foundEvent->recurrenceOverrides.end() &&
+                existingOverride->second.title)
+                selectedEvent.title = *existingOverride->second.title;
+        }
+
+        const bool requiresMaterialization =
+            foundEvent->recurrenceRule.has_value() || !foundEvent->recurrenceOverrides.empty();
+        const auto materialization =
+            requiresMaterialization
+                ? std::optional{javelin::jmap::calendar::CalendarRangeMaterialization{
+                      .interval = interval,
+                      .displayTimeZone = timeZone,
+                  }}
+                : std::nullopt;
+        const auto reportResult = [this](javelin::jmap::calendar::CalendarMutationResult result)
+        {
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                Q_EMIT operationFailed(*error);
+        };
+
+        if (actionId == QStringLiteral("calendar_event_accept") ||
+            actionId == QStringLiteral("calendar_event_tentative") ||
+            actionId == QStringLiteral("calendar_event_decline"))
+        {
+            const auto status =
+                actionId == QStringLiteral("calendar_event_accept")      ? std::string{"accepted"}
+                : actionId == QStringLiteral("calendar_event_tentative") ? std::string{"tentative"}
+                                                                         : std::string{"declined"};
+            auto task = m_calendarCommandPort.respondToCalendarEvent(
+                account->ownerAccountId, {.accountId = account->accountId,
+                                          .eventId = foundEvent->id,
+                                          .participationStatus = status,
+                                          .ifInState = std::nullopt,
+                                          .materialization = materialization});
+            QCoro::connect(std::move(task), &widget, reportResult);
+            return;
+        }
+
+        if (actionId == QStringLiteral("calendar_event_copy_details"))
+        {
+            const auto start = QDateTime::fromString(
+                QString::fromStdString(selectedEvent.start.value), Qt::ISODate);
+            QStringList details{
+                selectedEvent.title.empty() ? i18n("Untitled event")
+                                            : QString::fromStdString(selectedEvent.title),
+                selectedEvent.showWithoutTime
+                    ? QLocale{}.toString(start.date(), QLocale::LongFormat)
+                    : i18nc("calendar event copied date and time", "%1 at %2",
+                            QLocale{}.toString(start.date(), QLocale::LongFormat),
+                            QLocale{}.toString(start.time(), QLocale::ShortFormat)),
+            };
+            if (selectedEvent.location && !selectedEvent.location->empty())
+                details.push_back(
+                    i18n("Location: %1", QString::fromStdString(*selectedEvent.location)));
+            if (selectedEvent.organizerCalendarAddress ||
+                std::ranges::any_of(selectedEvent.attendees,
+                                    [](const auto& attendee) { return attendee.isOwner; }))
+                details.push_back(i18n("Organizer: %1", invitationOrganizer(selectedEvent)));
+            QStringList attendees;
+            for (const auto& attendee : selectedEvent.attendees)
+                if (attendee.isAttendee && !attendee.isOwner)
+                    attendees.push_back(participantLabel(attendee));
+            if (!attendees.isEmpty())
+                details.push_back(i18n("Attendees: %1", attendees.join(QStringLiteral(", "))));
+            if (selectedEvent.description && !selectedEvent.description->empty())
+                details.push_back(QStringLiteral("\n") +
+                                  QString::fromStdString(*selectedEvent.description));
+            QGuiApplication::clipboard()->setText(details.join(QLatin1Char('\n')));
+            return;
+        }
+
+        if (actionId == QStringLiteral("calendar_event_move"))
+        {
+            if (targetCalendarId.isEmpty())
+                return;
+            if (!recurrenceId.isEmpty() &&
+                QMessageBox::question(
+                    &widget, i18n("Move recurring event"),
+                    i18n("Move the entire recurring series to the selected calendar?")) !=
+                    QMessageBox::Yes)
+                return;
+            auto moved = *foundEvent;
+            moved.calendarIds.clear();
+            moved.calendarIds.emplace(targetCalendarId.toStdString(), true);
+            auto task = m_calendarCommandPort.updateCalendarEvent(
+                account->ownerAccountId, {.accountId = account->accountId,
+                                          .event = std::move(moved),
+                                          .operationGroupId = std::nullopt,
+                                          .ifInState = std::nullopt,
+                                          .materialization = materialization});
+            QCoro::connect(std::move(task), &widget, reportResult);
+            return;
+        }
+
+        if (actionId == QStringLiteral("calendar_event_delete"))
+        {
+            bool occurrenceOnly = false;
+            if (!recurrenceId.isEmpty())
+            {
+                QMessageBox prompt{&widget};
+                prompt.setWindowTitle(i18n("Delete recurring event"));
+                prompt.setText(i18n("Delete only this occurrence or the entire series?"));
+                auto* occurrenceButton =
+                    prompt.addButton(i18n("This occurrence"), QMessageBox::AcceptRole);
+                auto* seriesButton =
+                    prompt.addButton(i18n("Entire series"), QMessageBox::DestructiveRole);
+                prompt.addButton(QMessageBox::Cancel);
+                prompt.exec();
+                if (prompt.clickedButton() == occurrenceButton)
+                    occurrenceOnly = true;
+                else if (prompt.clickedButton() != seriesButton)
+                    return;
+            }
+            else if (QMessageBox::question(&widget, i18n("Delete event"),
+                                           i18n("Delete this event?")) != QMessageBox::Yes)
+                return;
+
+            if (occurrenceOnly)
+            {
+                auto updated = javelin::jmap::calendar::excludeOccurrence(
+                    *foundEvent, {.value = recurrenceId.toStdString()});
+                auto task = m_calendarCommandPort.updateCalendarEvent(
+                    account->ownerAccountId, {.accountId = account->accountId,
+                                              .event = std::move(updated),
+                                              .operationGroupId = std::nullopt,
+                                              .ifInState = std::nullopt,
+                                              .materialization = materialization});
+                QCoro::connect(std::move(task), &widget, reportResult);
+            }
+            else
+            {
+                std::vector<std::string> calendarIds;
+                for (const auto& [calendarId, present] : foundEvent->calendarIds)
+                    if (present)
+                        calendarIds.push_back(calendarId);
+                auto task = m_calendarCommandPort.deleteCalendarEvent(
+                    account->ownerAccountId, {.accountId = account->accountId,
+                                              .eventId = foundEvent->id,
+                                              .calendarIds = std::move(calendarIds),
+                                              .operationGroupId = std::nullopt,
+                                              .ifInState = std::nullopt});
+                QCoro::connect(std::move(task), &widget, reportResult);
+            }
+            return;
+        }
+
+        if (actionId != QStringLiteral("calendar_event_duplicate"))
+            return;
+        std::vector<javelin::jmap::calendar::Calendar> writableCalendars;
+        std::ranges::copy_if(*calendars, std::back_inserter(writableCalendars),
+                             [](const auto& calendar)
+                             {
+                                 return calendar.isSubscribed && (calendar.myRights.mayWriteAll ||
+                                                                  calendar.myRights.mayWriteOwn);
+                             });
+        if (writableCalendars.empty())
+            return;
+        auto duplicate = selectedEvent;
+        const auto currentDestination = std::ranges::find_if(
+            writableCalendars,
+            [&duplicate](const auto& calendar)
+            {
+                const auto membership = duplicate.calendarIds.find(calendar.id);
+                return membership != duplicate.calendarIds.end() && membership->second;
+            });
+        const auto defaultDestination =
+            currentDestination != writableCalendars.end()
+                ? currentDestination
+                : std::ranges::find(writableCalendars, true,
+                                    &javelin::jmap::calendar::Calendar::isDefault);
+        const auto destination = defaultDestination != writableCalendars.end()
+                                     ? defaultDestination
+                                     : writableCalendars.begin();
+        duplicate.id.clear();
+        duplicate.baseEventId.reset();
+        duplicate.recurrenceId.reset();
+        duplicate.uid.clear();
+        duplicate.isOrigin = true;
+        if (!foundEvent->isOrigin)
+        {
+            duplicate.organizerCalendarAddress.reset();
+            duplicate.attendees.clear();
+        }
+        duplicate.calendarIds.clear();
+        duplicate.calendarIds.emplace(destination->id, true);
+        if (!recurrenceId.isEmpty())
+        {
+            duplicate.recurrenceRule.reset();
+            duplicate.recurrenceOverrides.clear();
+        }
+        auto* dialog = new javelin::gui::calendar::EventDialog(writableCalendars, &widget);
+        dialog->setAttribute(Qt::WA_DeleteOnClose, false);
+        dialog->setEvent(duplicate);
+        if (dialog->exec() != QDialog::Accepted)
+        {
+            dialog->deleteLater();
+            return;
+        }
+        duplicate = dialog->eventDocument();
+        const bool duplicateRequiresMaterialization =
+            duplicate.recurrenceRule.has_value() || !duplicate.recurrenceOverrides.empty();
+        auto task = m_calendarCommandPort.createCalendarEvent(
+            account->ownerAccountId,
+            {.accountId = duplicate.accountId,
+             .event = std::move(duplicate),
+             .operationGroupId = std::nullopt,
+             .ifInState = std::nullopt,
+             .materialization =
+                 duplicateRequiresMaterialization
+                     ? std::optional{javelin::jmap::calendar::CalendarRangeMaterialization{
+                           .interval = interval,
+                           .displayTimeZone = timeZone,
+                       }}
+                     : std::nullopt});
+        QCoro::connect(std::move(task), dialog,
+                       [dialog](javelin::jmap::calendar::CalendarMutationResult result)
+                       {
+                           if (const auto* error =
+                                   std::get_if<javelin::jmap::OperationError>(&result))
+                           {
+                               dialog->showMutationError(error->message);
+                               dialog->show();
+                               return;
+                           }
+                           dialog->deleteLater();
+                       });
+    }
+
     void CalendarTabController::applicationPaletteChanged()
     {
         for (auto& tab : m_tabs)
@@ -435,6 +910,16 @@ namespace javelin::gui::shell
                             Q_EMIT widget->eventActivated(selectedAccountId, selectedEventId,
                                                           selectedRecurrenceId);
                         });
+                connect(
+                    dialog, &javelin::gui::calendar::DayAgendaDialog::eventContextMenuRequested,
+                    widget,
+                    [widget](const QPoint& globalPosition, const QString& selectedAccountId,
+                             const QString& selectedEventId, const QString& selectedRecurrenceId)
+                    {
+                        Q_EMIT widget->eventContextMenuRequested(globalPosition, selectedAccountId,
+                                                                 selectedEventId,
+                                                                 selectedRecurrenceId);
+                    });
                 connect(&m_calendarCommandPort,
                         &javelin::app::CalendarCommandPort::calendarCacheCommitted, dialog,
                         [dialog, accounts,
@@ -941,6 +1426,20 @@ namespace javelin::gui::shell
                                    dialog->deleteLater();
                                });
             });
+        connect(widget, &javelin::gui::calendar::MonthCalendarWidget::eventContextActionRequested,
+                widget,
+                [this, widget](const QString& actionId, const QString& accountId,
+                               const QString& eventId, const QString& recurrenceId,
+                               const QString& targetCalendarId)
+                {
+                    handleEventContextAction(*widget, actionId, accountId, eventId, recurrenceId,
+                                             targetCalendarId);
+                });
+        connect(
+            widget, &javelin::gui::calendar::MonthCalendarWidget::eventContextMenuRequested, widget,
+            [this, widget](const QPoint& globalPosition, const QString& accountId,
+                           const QString& eventId, const QString& recurrenceId)
+            { showEventContextMenu(*widget, globalPosition, accountId, eventId, recurrenceId); });
         refreshVisible(widget->visibleStart(), widget->visibleEnd());
         m_contentStack.addWidget(widget);
         m_tabs.push_back(TabState{

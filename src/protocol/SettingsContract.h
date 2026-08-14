@@ -74,6 +74,7 @@ namespace javelin::protocol
         bool composeRichTextDefault = true;
         std::vector<CalendarColorOverride> calendarColorOverrides;
         std::vector<QString> emailContextMenuLayout;
+        std::vector<QString> calendarEventContextMenuLayout;
         friend bool operator==(const WorkspaceSettings&, const WorkspaceSettings&) = default;
     };
 
@@ -100,7 +101,7 @@ namespace javelin::protocol
     struct SettingsSnapshot
     {
         SettingsRevision revision;
-        std::uint32_t schemaVersion = 6;
+        std::uint32_t schemaVersion = 7;
         std::vector<AccountSettings> accounts;
         std::vector<MailboxSelectionSettings> syncedMailboxSelections;
         std::vector<MailboxSelectionSettings> notificationMailboxSelections;

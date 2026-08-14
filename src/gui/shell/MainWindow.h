@@ -273,6 +273,7 @@ namespace javelin::gui::shell
         void openDeveloperOptions();
         void openPreferences();
         void configureEmailContextMenu();
+        void configureCalendarEventContextMenu();
         void reloadAccounts();
         void refreshMessageListPreservingSelection();
         void refreshSelectionFromModels();
@@ -359,6 +360,7 @@ namespace javelin::gui::shell
         QAction* m_quitAction = nullptr;
         QAction* m_preferencesAction = nullptr;
         QAction* m_configureEmailContextMenuAction = nullptr;
+        QAction* m_configureCalendarEventContextMenuAction = nullptr;
         QAction* m_developerOptionsAction = nullptr;
         QAction* m_newMessageAction = nullptr;
         QAction* m_contactsAction = nullptr;
@@ -382,6 +384,15 @@ namespace javelin::gui::shell
         QAction* m_viewSourceAction = nullptr;
         QAction* m_findSenderContextAction = nullptr;
         QPointer<QMenu> m_emailContextMenu;
+        QMenu* m_calendarEventContextMenu = nullptr;
+        QAction* m_calendarEventEditAction = nullptr;
+        QAction* m_calendarEventDuplicateAction = nullptr;
+        QAction* m_calendarEventMoveAction = nullptr;
+        QAction* m_calendarEventAcceptAction = nullptr;
+        QAction* m_calendarEventTentativeAction = nullptr;
+        QAction* m_calendarEventDeclineAction = nullptr;
+        QAction* m_calendarEventCopyDetailsAction = nullptr;
+        QAction* m_calendarEventDeleteAction = nullptr;
         QAction* m_advancedSearchAction = nullptr;
         QAction* m_composeSendAction = nullptr;
         QAction* m_composeScheduleSendAction = nullptr;

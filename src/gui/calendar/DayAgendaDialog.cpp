@@ -214,10 +214,11 @@ namespace javelin::gui::calendar
                 setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
             }
 
-            void setEvents(const QDate& date, const std::vector<DayAgendaEvent>& events,
-                           QWidget* detailsTarget,
-                           std::function<void(const DayAgendaEventKey&)> selected,
-                           std::function<void(const QDateTime&, const QDateTime&)> create)
+            void setEvents(
+                const QDate& date, const std::vector<DayAgendaEvent>& events,
+                QWidget* detailsTarget, std::function<void(const DayAgendaEventKey&)> selected,
+                std::function<void(const QDateTime&, const QDateTime&)> create,
+                std::function<void(const QPoint&, const DayAgendaEventKey&)> contextMenuRequested)
             {
                 m_date = date;
                 m_selected = std::move(selected);
@@ -260,6 +261,11 @@ namespace javelin::gui::calendar
                                          if (m_selected)
                                              m_selected(key);
                                      });
+                    button->setContextMenuPolicy(Qt::CustomContextMenu);
+                    QObject::connect(button, &QWidget::customContextMenuRequested, button,
+                                     [button, key = placement.event->key,
+                                      contextMenuRequested](const QPoint& point)
+                                     { contextMenuRequested(button->mapToGlobal(point), key); });
                     m_buttons.push_back(button);
                 }
                 layoutButtons();
@@ -724,6 +730,13 @@ namespace javelin::gui::calendar
             auto* button = createAgendaEventButton(event, m_date, m_detailsScroll, m_allDayPanel);
             connect(button, &QToolButton::clicked, this,
                     [this, key = event.key] { selectEvent(key); });
+            button->setContextMenuPolicy(Qt::CustomContextMenu);
+            connect(button, &QWidget::customContextMenuRequested, this,
+                    [this, button, key = event.key](const QPoint& point)
+                    {
+                        Q_EMIT eventContextMenuRequested(button->mapToGlobal(point), key.accountId,
+                                                         key.eventId, key.recurrenceId);
+                    });
             m_allDayLayout->addWidget(button);
             m_eventButtons.push_back(button);
         }
@@ -733,7 +746,12 @@ namespace javelin::gui::calendar
         timeline->setEvents(
             m_date, m_events, m_detailsScroll, [this](const DayAgendaEventKey& key)
             { selectEvent(key); }, [this](const QDateTime& start, const QDateTime& end)
-            { Q_EMIT newEventRequested(start, end); });
+            { Q_EMIT newEventRequested(start, end); },
+            [this](const QPoint& globalPosition, const DayAgendaEventKey& key)
+            {
+                Q_EMIT eventContextMenuRequested(globalPosition, key.accountId, key.eventId,
+                                                 key.recurrenceId);
+            });
         for (auto* button : timeline->buttons())
             m_eventButtons.push_back(button);
 
