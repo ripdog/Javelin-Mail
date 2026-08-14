@@ -1,6 +1,7 @@
 #include "gui/messages/MessageDragListView.h"
 
 #include <QDrag>
+#include <QFocusEvent>
 #include <QItemSelectionModel>
 #include <QPainter>
 
@@ -8,6 +9,18 @@
 
 namespace javelin::gui::messages
 {
+
+    void MessageDragListView::focusInEvent(QFocusEvent* event)
+    {
+        QListView::focusInEvent(event);
+        auto* selection = selectionModel();
+        if (selection == nullptr || !currentIndex().isValid() ||
+            !selection->selectedRows().isEmpty())
+            return;
+
+        selection->select(currentIndex(),
+                          QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    }
 
     void MessageDragListView::startDrag(const Qt::DropActions supportedActions)
     {

@@ -11,6 +11,7 @@ namespace javelin::gui::messages
         using QListView::QListView;
 
       protected:
+        void focusInEvent(QFocusEvent* event) override;
         void startDrag(Qt::DropActions supportedActions) override;
     };
 

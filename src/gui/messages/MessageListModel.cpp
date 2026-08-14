@@ -67,7 +67,7 @@ namespace javelin::gui::messages
                 QString::fromUtf8(isoTimestamp.data(), static_cast<qsizetype>(isoTimestamp.size()));
             const auto dateTime = QDateTime::fromString(value, Qt::ISODate);
             return dateTime.isValid()
-                       ? QLocale{}.toString(dateTime.toLocalTime(), QLocale::ShortFormat)
+                       ? QLocale{}.toString(dateTime.toLocalTime(), QLocale::LongFormat)
                        : value;
         }
 
@@ -173,9 +173,7 @@ namespace javelin::gui::messages
 
         if (role == Qt::AccessibleDescriptionRole)
         {
-            return tooltipPreview.isEmpty() ? QVariant{}
-                                            : QVariant{i18nc("@info accessible message preview",
-                                                             "Preview: %1", tooltipPreview)};
+            return {};
         }
 
         if (role == EmailIdRole)

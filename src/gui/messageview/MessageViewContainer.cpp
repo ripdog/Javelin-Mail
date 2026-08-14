@@ -2,6 +2,7 @@
 #include "app/MessageSubject.h"
 #include "gui/FontUtils.h"
 #include "gui/IconUtils.h"
+#include "gui/accessibility/AccessibleFactory.h"
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/messageview/MessageBannerWidget.h"
 #include "gui/messageview/MessageViewPresentation.h"
@@ -16,6 +17,8 @@
 
 #include <KLocalizedString>
 
+#include <QAccessible>
+#include <QAccessibleWidget>
 #include <QAction>
 #include <QApplication>
 #include <QDateTime>
@@ -56,6 +59,148 @@ namespace javelin::gui::messageview
         constexpr std::string_view TranslationBannerId{"translation"};
         constexpr std::string_view JunkBannerId{"junk"};
         constexpr std::string_view UnsubscribeBannerId{"unsubscribe"};
+        constexpr auto AccessibleDocumentTextProperty = "_javelin_accessible_document_text";
+
+        class AccessibleMessageView final : public QAccessibleWidget,
+                                            public QAccessibleTextInterface
+        {
+          public:
+            explicit AccessibleMessageView(MessageViewContainer* view)
+                : QAccessibleWidget(view, QAccessible::Document)
+            {
+            }
+
+            [[nodiscard]] void* interface_cast(const QAccessible::InterfaceType type) override
+            {
+                if (type == QAccessible::TextInterface)
+                    return static_cast<QAccessibleTextInterface*>(this);
+                return QAccessibleWidget::interface_cast(type);
+            }
+
+            [[nodiscard]] QAccessible::State state() const override
+            {
+                auto result = QAccessibleWidget::state();
+                result.focusable = true;
+                result.focused = widget() != nullptr && widget()->hasFocus();
+                result.readOnly = true;
+                result.selectableText = true;
+                return result;
+            }
+
+            void selection(const int selectionIndex, int* startOffset,
+                           int* endOffset) const override
+            {
+                Q_UNUSED(selectionIndex);
+                if (startOffset != nullptr)
+                    *startOffset = -1;
+                if (endOffset != nullptr)
+                    *endOffset = -1;
+            }
+
+            [[nodiscard]] int selectionCount() const override
+            {
+                return 0;
+            }
+
+            void addSelection(const int startOffset, const int endOffset) override
+            {
+                Q_UNUSED(startOffset);
+                Q_UNUSED(endOffset);
+            }
+
+            void removeSelection(const int selectionIndex) override
+            {
+                Q_UNUSED(selectionIndex);
+            }
+
+            void setSelection(const int selectionIndex, const int startOffset,
+                              const int endOffset) override
+            {
+                Q_UNUSED(selectionIndex);
+                Q_UNUSED(startOffset);
+                Q_UNUSED(endOffset);
+            }
+
+            [[nodiscard]] int cursorPosition() const override
+            {
+                return m_cursorPosition;
+            }
+
+            void setCursorPosition(const int position) override
+            {
+                m_cursorPosition = std::clamp(position, 0, characterCount());
+            }
+
+            [[nodiscard]] QString text(const int startOffset, const int endOffset) const override
+            {
+                const auto contents = documentText();
+                const auto length = static_cast<int>(contents.size());
+                const auto start = std::clamp(startOffset, 0, length);
+                const auto end = endOffset < 0 ? length : std::clamp(endOffset, start, length);
+                return contents.mid(start, end - start);
+            }
+
+            [[nodiscard]] int characterCount() const override
+            {
+                return static_cast<int>(documentText().size());
+            }
+
+            [[nodiscard]] QRect characterRect(const int offset) const override
+            {
+                Q_UNUSED(offset);
+                return {};
+            }
+
+            [[nodiscard]] int offsetAtPoint(const QPoint& point) const override
+            {
+                Q_UNUSED(point);
+                return -1;
+            }
+
+            void scrollToSubstring(const int startIndex, const int endIndex) override
+            {
+                Q_UNUSED(startIndex);
+                Q_UNUSED(endIndex);
+            }
+
+            [[nodiscard]] QString attributes(const int offset, int* startOffset,
+                                             int* endOffset) const override
+            {
+                Q_UNUSED(offset);
+                if (startOffset != nullptr)
+                    *startOffset = 0;
+                if (endOffset != nullptr)
+                    *endOffset = characterCount();
+                return {};
+            }
+
+          private:
+            [[nodiscard]] QString documentText() const
+            {
+                return object() != nullptr
+                           ? object()->property(AccessibleDocumentTextProperty).toString()
+                           : QString{};
+            }
+
+            int m_cursorPosition = 0;
+        };
+
+        [[nodiscard]] QAccessibleInterface* messageViewAccessibleFactory(const QString& key,
+                                                                         QObject* object)
+        {
+            auto* view = accessibility::factoryObject<MessageViewContainer>(key, object);
+            return view != nullptr ? new AccessibleMessageView(view) : nullptr;
+        }
+
+        void ensureMessageViewAccessibilityFactoryInstalled()
+        {
+            static const bool installed = []
+            {
+                QAccessible::installFactory(messageViewAccessibleFactory);
+                return true;
+            }();
+            Q_UNUSED(installed);
+        }
 
         [[nodiscard]] QString
         detectionText(const javelin::jmap::cache::MessageViewSnapshot& snapshot)
@@ -139,7 +284,9 @@ namespace javelin::gui::messageview
             return labels.join(QStringLiteral(", "));
         }
 
-        [[nodiscard]] QString formatReceivedDateTime(const std::string& receivedAt)
+        [[nodiscard]] QString
+        formatReceivedDateTime(const std::string& receivedAt,
+                               const QLocale::FormatType format = QLocale::ShortFormat)
         {
             const auto rawValue = QString::fromStdString(receivedAt);
             auto dateTime = QDateTime::fromString(rawValue, Qt::ISODateWithMs);
@@ -152,7 +299,7 @@ namespace javelin::gui::messageview
                 return rawValue;
             }
 
-            return QLocale{}.toString(dateTime.toLocalTime(), QLocale::ShortFormat);
+            return QLocale{}.toString(dateTime.toLocalTime(), format);
         }
 
         [[nodiscard]] QString languageName(const std::string& languageCode)
@@ -392,6 +539,10 @@ namespace javelin::gui::messageview
         : QWidget(parent), m_settings(settings), m_translationService(translationService),
           m_contactIdentityLookup(contactIdentityLookup)
     {
+        ensureMessageViewAccessibilityFactoryInstalled();
+        setFocusPolicy(Qt::StrongFocus);
+        setAccessibleName(i18nc("@info accessible message view", "Message view"));
+
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(8, 8, 8, 0);
         layout->setSpacing(8);
@@ -973,6 +1124,91 @@ namespace javelin::gui::messageview
             m_bodyStack->setCurrentWidget(m_htmlView);
             break;
         }
+        updateAccessibleDocument();
+    }
+
+    void MessageViewContainer::updateAccessibleDocument()
+    {
+        const auto oldName = accessibleName();
+        const auto oldText = property(AccessibleDocumentTextProperty).toString();
+        auto name = m_titleLabel != nullptr ? m_titleLabel->text().simplified() : QString{};
+        if (name.isEmpty())
+            name = i18nc("@info accessible message view", "Message view");
+
+        QStringList parts;
+        const auto append = [&parts](QString value)
+        {
+            value = value.trimmed();
+            if (!value.isEmpty() && !parts.contains(value))
+                parts.push_back(std::move(value));
+        };
+        append(name);
+        if (m_metadataWidget != nullptr && m_metadataWidget->isVisible())
+        {
+            append(m_fromLabel->text());
+            append(m_toLabel->text());
+            if (m_snapshot.has_value())
+            {
+                append(i18nc(
+                    "@label email received date", "Received: %1",
+                    formatReceivedDateTime(m_snapshot->email.receivedAt, QLocale::LongFormat)));
+            }
+            else
+            {
+                append(m_receivedLabel->text());
+            }
+        }
+        else if (m_detailLabel != nullptr && m_detailLabel->isVisible())
+        {
+            append(m_detailLabel->text());
+        }
+
+        if (m_snapshot.has_value())
+        {
+            QString bodyText;
+            if (m_messageTranslated && !m_accessibleTranslatedBody.isEmpty())
+            {
+                bodyText = m_accessibleTranslatedBody;
+            }
+            else if (m_activeView == ActiveView::PlainText && m_plainTextView != nullptr)
+            {
+                bodyText = m_plainTextView->toPlainText();
+            }
+            else if (m_snapshot->plainTextBody.has_value())
+            {
+                bodyText = QString::fromStdString(m_snapshot->plainTextBody->value);
+            }
+            else if (m_snapshot->htmlBody.has_value())
+            {
+                bodyText = javelin::jmap::render::plainTextFromHtml(
+                    QString::fromStdString(m_snapshot->htmlBody->value));
+            }
+            append(std::move(bodyText));
+        }
+        else if (m_placeholderTitleLabel != nullptr && m_placeholderTitleLabel->isVisible())
+        {
+            append(m_placeholderTitleLabel->text());
+            if (m_placeholderDetailLabel != nullptr && m_placeholderDetailLabel->isVisible())
+                append(m_placeholderDetailLabel->text());
+        }
+
+        const auto documentText = parts.join(QLatin1Char{'\n'});
+        setAccessibleName(name);
+        setAccessibleDescription({});
+        setProperty(AccessibleDocumentTextProperty, documentText);
+
+        if (!QAccessible::isActive())
+            return;
+        if (oldName != name && hasFocus())
+        {
+            QAccessibleEvent event{this, QAccessible::NameChanged};
+            QAccessible::updateAccessibility(&event);
+        }
+        if (oldText != documentText && hasFocus())
+        {
+            QAccessibleTextUpdateEvent event{this, 0, oldText, documentText};
+            QAccessible::updateAccessibility(&event);
+        }
     }
 
     void MessageViewContainer::setErrorState(const QString& errorMessage)
@@ -1303,6 +1539,16 @@ namespace javelin::gui::messageview
         const auto applyTranslatedChunks =
             [this](const javelin::gui::translation::TranslationChunks& chunks) -> bool
         {
+            QStringList accessibleChunks;
+            for (const auto& group : chunks)
+            {
+                for (const auto& chunk : group)
+                {
+                    if (!chunk.trimmed().isEmpty())
+                        accessibleChunks.push_back(chunk);
+                }
+            }
+
             if (m_activeView == ActiveView::PlainText)
             {
                 if (chunks.empty() || chunks.front().empty())
@@ -1311,12 +1557,14 @@ namespace javelin::gui::messageview
                 }
                 m_originalPlainText = m_plainTextView->toPlainText();
                 m_plainTextView->setHtml(linkifyPlainText(chunks.front().front()));
+                m_accessibleTranslatedBody = accessibleChunks.join(QLatin1Char{'\n'});
                 return true;
             }
 
             if (m_activeView == ActiveView::Html)
             {
                 m_htmlView->applyTranslationChunks(chunks);
+                m_accessibleTranslatedBody = accessibleChunks.join(QLatin1Char{'\n'});
                 return true;
             }
 
@@ -1371,6 +1619,7 @@ namespace javelin::gui::messageview
 
                     m_messageTranslated = true;
                     updateLanguageBanner();
+                    updateAccessibleDocument();
                 });
         };
 
@@ -1417,9 +1666,11 @@ namespace javelin::gui::messageview
         m_translationInProgress = false;
         m_messageTranslated = false;
         m_originalPlainText.clear();
+        m_accessibleTranslatedBody.clear();
         m_translationError.clear();
         m_translationProgressText.clear();
         updateLanguageBanner();
+        updateAccessibleDocument();
     }
 
     void MessageViewContainer::startLanguageDetection()
@@ -1480,6 +1731,7 @@ namespace javelin::gui::messageview
             m_translationInProgress = false;
             m_messageTranslated = false;
             m_originalPlainText.clear();
+            m_accessibleTranslatedBody.clear();
             m_translationError.clear();
             m_autoTranslateAttempted = false;
             m_translationWasAutomatic = false;

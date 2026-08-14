@@ -6,7 +6,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QElapsedTimer>
+#include <QLocale>
 #include <QSqlQuery>
 #include <QString>
 #include <QTemporaryDir>
@@ -332,14 +334,17 @@ TEST_CASE("message list model exposes painted message state to accessibility",
     const auto text = model.data(index, Qt::AccessibleTextRole).toString();
     CHECK(text.contains(QStringLiteral("Alice")));
     CHECK(text.contains(QStringLiteral("Quarterly update")));
+    const auto received =
+        QDateTime::fromString(QStringLiteral("2026-08-10T08:15:00+12:00"), Qt::ISODate);
+    REQUIRE(received.isValid());
+    CHECK(text.contains(QLocale{}.toString(received.toLocalTime(), QLocale::LongFormat)));
     CHECK(text.contains(QStringLiteral("Unread")));
     CHECK(text.contains(QStringLiteral("Starred")));
     CHECK(text.contains(QStringLiteral("Has attachment")));
     CHECK(text.contains(QStringLiteral("2 messages in this mailbox")));
     CHECK(text.contains(QStringLiteral("Work")));
     CHECK(text.contains(QStringLiteral("Inbox, Projects")));
-    CHECK(model.data(index, Qt::AccessibleDescriptionRole).toString() ==
-          QStringLiteral("Preview: The preview text"));
+    CHECK(model.data(index, Qt::AccessibleDescriptionRole).toString().isEmpty());
 }
 
 TEST_CASE("message list model expands a known conversation without an exact mailbox count",

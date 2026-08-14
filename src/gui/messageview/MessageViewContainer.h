@@ -89,6 +89,7 @@ namespace javelin::gui::messageview
         };
 
         void setActiveView(ActiveView view);
+        void updateAccessibleDocument();
         void startSnapshotLoad(javelin::jmap::cache::MessageViewReader& messageViewReader,
                                bool requestContentIfMissing);
         void updatePresentation(bool reloadBody = true);
@@ -175,6 +176,7 @@ namespace javelin::gui::messageview
         std::uint64_t m_snapshotLoadToken = 0;
         bool m_messageTranslated = false;
         QString m_originalPlainText;
+        QString m_accessibleTranslatedBody;
         QString m_translationError;
         QString m_translationProgressText;
         bool m_autoTranslateAttempted = false;

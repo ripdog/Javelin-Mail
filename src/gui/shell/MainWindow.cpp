@@ -1688,6 +1688,24 @@ namespace javelin::gui::shell
         centralLayout->addWidget(m_contentStack);
 
         setCentralWidget(centralContainer);
+
+        QWidget::setTabOrder(m_mailboxView, m_searchServerButton);
+        QWidget::setTabOrder(m_searchServerButton, m_quickFilterButton);
+        QWidget::setTabOrder(m_quickFilterButton, m_quickFilterPinButton);
+        QWidget::setTabOrder(m_quickFilterPinButton, m_quickFilterUnreadButton);
+        QWidget::setTabOrder(m_quickFilterUnreadButton, m_quickFilterStarredButton);
+        QWidget::setTabOrder(m_quickFilterStarredButton, m_quickFilterContactButton);
+        QWidget::setTabOrder(m_quickFilterContactButton, m_quickFilterTagsButton);
+        QWidget::setTabOrder(m_quickFilterTagsButton, m_quickFilterAttachmentButton);
+        QWidget::setTabOrder(m_quickFilterAttachmentButton, m_quickFilterTextEdit);
+        QWidget::setTabOrder(m_quickFilterTextEdit, m_quickFilterSenderButton);
+        QWidget::setTabOrder(m_quickFilterSenderButton, m_quickFilterRecipientsButton);
+        QWidget::setTabOrder(m_quickFilterRecipientsButton, m_quickFilterSubjectButton);
+        QWidget::setTabOrder(m_quickFilterSubjectButton, m_quickFilterBodyButton);
+        QWidget::setTabOrder(m_quickFilterBodyButton, m_messageSortButton);
+        QWidget::setTabOrder(m_messageSortButton, m_messageView);
+        QWidget::setTabOrder(m_messageView, m_messageViewContainer);
+
         m_messageListPanePresenter =
             std::make_unique<javelin::gui::messages::MessageListPanePresenter>(
                 *m_messageListTitleLabel, *m_messageListMetaLabel, *m_messageEmptyState,
