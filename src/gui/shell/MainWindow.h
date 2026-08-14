@@ -7,6 +7,7 @@
 
 #include <KXmlGuiWindow>
 #include <QModelIndex>
+#include <QPointer>
 
 #include <cstdint>
 #include <functional>
@@ -380,7 +381,7 @@ namespace javelin::gui::shell
         QAction* m_copyAction = nullptr;
         QAction* m_viewSourceAction = nullptr;
         QAction* m_findSenderContextAction = nullptr;
-        QMenu* m_emailContextMenu = nullptr;
+        QPointer<QMenu> m_emailContextMenu;
         QAction* m_advancedSearchAction = nullptr;
         QAction* m_composeSendAction = nullptr;
         QAction* m_composeScheduleSendAction = nullptr;

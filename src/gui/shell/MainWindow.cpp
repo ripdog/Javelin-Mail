@@ -931,6 +931,8 @@ namespace javelin::gui::shell
 
         m_findSenderContextAction = new QAction(QIcon::fromTheme(QStringLiteral("system-search")),
                                                 i18n("Find all conversations with sender"), this);
+        connect(m_findSenderContextAction, &QAction::triggered, this,
+                [this] { findConversationsWithSender(m_messageView->currentIndex()); });
         actionCollection()->addAction(QStringLiteral("find_conversations_with_sender"),
                                       m_findSenderContextAction);
         KActionCollection::setShortcutsConfigurable(m_findSenderContextAction, false);
@@ -1337,6 +1339,7 @@ namespace javelin::gui::shell
                 {
                     markSearchTabsStaleForAccount(accountId.toStdString());
                     refreshMessageListPreservingSelection();
+                    m_messageModel->refreshExpandedThreadMembers();
                     refreshSelectionFromModels();
                     m_messageViewContainer->refresh(m_messageViewReader);
                     updateEmptyStates();
@@ -2170,6 +2173,20 @@ namespace javelin::gui::shell
     void MainWindow::saveNewToolbarConfig()
     {
         KXmlGuiWindow::saveNewToolbarConfig();
+        m_emailContextMenu = qobject_cast<QMenu*>(
+            guiFactory()->container(QStringLiteral("email_context_menu"), this));
+        if (m_emailContextMenu != nullptr)
+        {
+            m_mailActionController->configureContextMenu(
+                *m_emailContextMenu,
+                [this] { return m_settings.workspaceSettings().emailContextMenuLayout; },
+                [this](const QList<QAction*>& actions)
+                {
+                    unplugActionList(QStringLiteral("email_context_menu_layout"));
+                    if (!actions.empty())
+                        plugActionList(QStringLiteral("email_context_menu_layout"), actions);
+                });
+        }
         updateToolbarForActiveTab();
     }
 

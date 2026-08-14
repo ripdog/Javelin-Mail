@@ -1376,7 +1376,8 @@ namespace javelin::protocol
                     else if constexpr (std::is_same_v<Route, OpenMailtoRoute>)
                         return writer.string(value.uri) && writer.string(value.activationToken);
                     else if constexpr (std::is_same_v<Route, ShowUndoSendDialogRoute>)
-                        return writer.string(value.sendId) && writer.string(value.title) &&
+                        return value.deadlineEpochMilliseconds >= 0 &&
+                               writer.string(value.sendId) && writer.string(value.title) &&
                                writer.string(value.message) &&
                                writer.qword(static_cast<quint64>(value.deadlineEpochMilliseconds));
                     else if constexpr (std::is_same_v<Route, CloseUndoSendDialogRoute>)
@@ -1466,6 +1467,8 @@ namespace javelin::protocol
                 quint64 deadline = 0;
                 if (!reader.string(value.sendId) || !reader.string(value.title) ||
                     !reader.string(value.message) || !reader.qword(deadline))
+                    return false;
+                if (deadline > static_cast<quint64>(std::numeric_limits<qint64>::max()))
                     return false;
                 value.deadlineEpochMilliseconds = static_cast<qint64>(deadline);
                 route = std::move(value);
@@ -2044,8 +2047,9 @@ namespace javelin::protocol
                             return writer.byte(7) && writer.string(value.uri) &&
                                    writer.string(value.activationToken);
                         else if constexpr (std::is_same_v<Route, ShowUndoSendDialogRoute>)
-                            return writer.byte(8) && writer.string(value.sendId) &&
-                                   writer.string(value.title) && writer.string(value.message) &&
+                            return value.deadlineEpochMilliseconds >= 0 && writer.byte(8) &&
+                                   writer.string(value.sendId) && writer.string(value.title) &&
+                                   writer.string(value.message) &&
                                    writer.qword(
                                        static_cast<quint64>(value.deadlineEpochMilliseconds));
                         else if constexpr (std::is_same_v<Route, CloseUndoSendDialogRoute>)
@@ -2151,6 +2155,8 @@ namespace javelin::protocol
             quint64 deadline = 0;
             if (!reader.string(route.sendId) || !reader.string(route.title) ||
                 !reader.string(route.message) || !reader.qword(deadline))
+                return malformed(QStringLiteral("invalid undo send dialog activation route"));
+            if (deadline > static_cast<quint64>(std::numeric_limits<qint64>::max()))
                 return malformed(QStringLiteral("invalid undo send dialog activation route"));
             route.deadlineEpochMilliseconds = static_cast<qint64>(deadline);
             if (const auto error = reader.finish())

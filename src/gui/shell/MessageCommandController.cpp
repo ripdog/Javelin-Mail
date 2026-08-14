@@ -92,7 +92,7 @@ namespace javelin::gui::shell
     void MessageCommandController::deleteSelection(std::optional<std::string> accountId,
                                                    std::optional<std::string> sourceMailboxId)
     {
-        if (!accountId.has_value() || !sourceMailboxId.has_value())
+        if (!accountId.has_value())
         {
             Q_EMIT statusMessage(i18n("Select a message to delete."), 3000);
             return;

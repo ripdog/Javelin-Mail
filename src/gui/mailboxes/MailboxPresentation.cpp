@@ -164,6 +164,8 @@ namespace javelin::gui::mailboxes
             return QStringLiteral(":/icons/thunderbird-icons/folder.svg");
         if (*role == "inbox")
             return QStringLiteral(":/icons/thunderbird-icons/inbox.svg");
+        if (*role == "archive")
+            return QStringLiteral(":/icons/thunderbird-icons/archive.svg");
         if (*role == "drafts")
             return QStringLiteral(":/icons/thunderbird-icons/draft.svg");
         if (*role == "sent")
