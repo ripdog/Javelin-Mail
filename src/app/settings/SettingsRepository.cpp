@@ -55,9 +55,10 @@ namespace javelin::app
         constexpr auto workspaceCalendarColorsKey = "calendarColorOverrides";
         constexpr auto workspaceCalendarIdKey = "calendarId";
         constexpr auto workspaceColorKey = "color";
+        constexpr auto workspaceEmailContextMenuLayoutKey = "emailContextMenuLayout";
         constexpr auto legacyWindowGroup = "mainWindow";
         constexpr auto legacyCalendarColorsKey = "calendar/colorOverrides";
-        constexpr int settingsSchemaVersion = 5;
+        constexpr int settingsSchemaVersion = 6;
         constexpr int workspaceFormatVersion = 1;
         constexpr int maximumAccounts = 256;
         constexpr int maximumSelections = 256;
@@ -228,6 +229,8 @@ namespace javelin::app
                 settings.value(settingKey(workspaceWindowStateKey)).toByteArray();
             workspace.composeRichTextDefault =
                 settings.value(settingKey(workspaceComposeRichTextDefaultKey), true).toBool();
+            workspace.emailContextMenuLayout = toVector(
+                settings.value(settingKey(workspaceEmailContextMenuLayoutKey)).toStringList());
             if (workspace.mainWindowState.size() > maximumWorkspaceBytes)
             {
                 settings.endGroup();
@@ -261,6 +264,9 @@ namespace javelin::app
             }
             settings.endArray();
             settings.endGroup();
+            if (static_cast<int>(workspace.emailContextMenuLayout.size()) > maximumSelections)
+                return invalidValue(settingKey(workspaceEmailContextMenuLayoutKey),
+                                    QStringLiteral("too many context menu entries"));
             std::ranges::sort(workspace.calendarColorOverrides, {},
                               &javelin::protocol::CalendarColorOverride::calendarId);
             const auto duplicate =
@@ -411,7 +417,7 @@ namespace javelin::app
             bool ok = false;
             const auto version = settings.value(settingKey(schemaVersionKey)).toUInt(&ok);
             if (!ok || (version != 1 && version != 2 && version != 3 && version != 4 &&
-                        version != settingsSchemaVersion))
+                        version != 5 && version != settingsSchemaVersion))
             {
                 return SettingsRepositoryError{
                     .code = SettingsRepositoryErrorCode::UnsupportedSchema,
@@ -426,7 +432,7 @@ namespace javelin::app
         if (const auto error = migrateLegacyCredentials())
             return error;
 
-        const auto legacy = readSnapshot(true);
+        const auto legacy = readSnapshot(storedSchemaVersion < 5);
         if (const auto* error = std::get_if<SettingsRepositoryError>(&legacy))
         {
             return SettingsRepositoryError{.code = SettingsRepositoryErrorCode::MigrationFailed,
@@ -748,6 +754,8 @@ namespace javelin::app
         settings.setValue(settingKey(workspaceWindowStateKey), snapshot.workspace.mainWindowState);
         settings.setValue(settingKey(workspaceComposeRichTextDefaultKey),
                           snapshot.workspace.composeRichTextDefault);
+        settings.setValue(settingKey(workspaceEmailContextMenuLayoutKey),
+                          toStringList(snapshot.workspace.emailContextMenuLayout));
         settings.beginWriteArray(
             settingKey(workspaceCalendarColorsKey),
             static_cast<int>(snapshot.workspace.calendarColorOverrides.size()));

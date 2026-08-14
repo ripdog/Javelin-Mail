@@ -271,6 +271,7 @@ namespace javelin::gui::shell
         void viewSelectedMessageSource();
         void openDeveloperOptions();
         void openPreferences();
+        void configureEmailContextMenu();
         void reloadAccounts();
         void refreshMessageListPreservingSelection();
         void refreshSelectionFromModels();
@@ -356,6 +357,7 @@ namespace javelin::gui::shell
         QAction* m_refreshAction = nullptr;
         QAction* m_quitAction = nullptr;
         QAction* m_preferencesAction = nullptr;
+        QAction* m_configureEmailContextMenuAction = nullptr;
         QAction* m_developerOptionsAction = nullptr;
         QAction* m_newMessageAction = nullptr;
         QAction* m_contactsAction = nullptr;
@@ -377,6 +379,8 @@ namespace javelin::gui::shell
         QAction* m_moveAction = nullptr;
         QAction* m_copyAction = nullptr;
         QAction* m_viewSourceAction = nullptr;
+        QAction* m_findSenderContextAction = nullptr;
+        QMenu* m_emailContextMenu = nullptr;
         QAction* m_advancedSearchAction = nullptr;
         QAction* m_composeSendAction = nullptr;
         QAction* m_composeScheduleSendAction = nullptr;

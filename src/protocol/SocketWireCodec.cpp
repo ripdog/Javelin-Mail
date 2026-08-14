@@ -429,7 +429,11 @@ namespace javelin::protocol
                        writer, workspace.calendarColorOverrides, limits.maximumCollectionItems,
                        QStringLiteral("workspace.calendarColorOverrides"),
                        [&writer](const CalendarColorOverride& value)
-                       { return writer.string(value.calendarId) && writer.string(value.color); });
+                       { return writer.string(value.calendarId) && writer.string(value.color); }) &&
+                   writeVector(writer, workspace.emailContextMenuLayout,
+                               limits.maximumCollectionItems,
+                               QStringLiteral("workspace.emailContextMenuLayout"),
+                               [&writer](const QString& value) { return writer.string(value); });
         }
 
         bool readWorkspaceSettings(PayloadReader& reader, WorkspaceSettings& workspace,
@@ -442,10 +446,14 @@ namespace javelin::protocol
                     limits.maximumWorkspaceBytes)
                 return false;
             return readVector(
-                reader, workspace.calendarColorOverrides, limits.maximumCollectionItems,
-                QStringLiteral("workspace.calendarColorOverrides"),
-                [&reader](CalendarColorOverride& value)
-                { return reader.string(value.calendarId) && reader.string(value.color); });
+                       reader, workspace.calendarColorOverrides, limits.maximumCollectionItems,
+                       QStringLiteral("workspace.calendarColorOverrides"),
+                       [&reader](CalendarColorOverride& value)
+                       { return reader.string(value.calendarId) && reader.string(value.color); }) &&
+                   readVector(reader, workspace.emailContextMenuLayout,
+                              limits.maximumCollectionItems,
+                              QStringLiteral("workspace.emailContextMenuLayout"),
+                              [&reader](QString& value) { return reader.string(value); });
         }
 
         bool writeSettingsUpdate(PayloadWriter& writer, const SettingsUpdate& update,

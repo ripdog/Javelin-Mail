@@ -1,5 +1,5 @@
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
-<gui name="javelinmail" version="17">
+<gui name="javelinmail" version="18">
   <MenuBar>
     <Menu name="file"><text>&amp;File</text>
       <Action name="compose_new_message"/>
@@ -37,6 +37,7 @@
     </Menu>
     <Menu name="settings"><text>&amp;Settings</text>
       <Action name="options_configure"/>
+      <Action name="configure_email_context_menu"/>
       <Separator/>
       <Action name="open_developer_options"/>
     </Menu>
@@ -97,4 +98,7 @@
     <Action name="calendar_list"/>
     <Action name="calendar_refresh"/>
   </ToolBar>
+  <Menu name="email_context_menu"><text>Email Context Menu</text>
+    <ActionList name="email_context_menu_layout"/>
+  </Menu>
 </gui>

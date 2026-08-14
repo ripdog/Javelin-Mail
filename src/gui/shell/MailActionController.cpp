@@ -3,6 +3,7 @@
 #include "app/MailApplicationPorts.h"
 #include "gui/IconUtils.h"
 #include "gui/messages/MessageListModel.h"
+#include "gui/shell/EmailContextMenuLayout.h"
 #include "gui/shell/MessageActionPolicy.h"
 #include "gui/shell/MessageCommandController.h"
 #include "gui/shell/MessageSelectionController.h"
@@ -227,6 +228,15 @@ namespace javelin::gui::shell
         m_actions.viewSource.setEnabled(actions.viewSource);
     }
 
+    void MailActionController::configureContextMenu(
+        QMenu& menu, std::function<std::vector<QString>()> configuredLayout,
+        std::function<void(const QList<QAction*>&)> replaceActionList)
+    {
+        m_contextMenu = &menu;
+        m_configuredContextMenuLayout = std::move(configuredLayout);
+        m_replaceContextMenuActionList = std::move(replaceActionList);
+    }
+
     void MailActionController::showContextMenu(
         const QPoint& position, std::function<void(QModelIndex)> findConversationsWithSender)
     {
@@ -256,48 +266,118 @@ namespace javelin::gui::shell
                                            draftsMailbox.has_value() &&
                                            *sourceMailboxId == draftsMailbox->id;
 
-        QMenu menu{&m_parentWidget};
-        if (activeMailboxIsDrafts)
-        {
-            menu.addAction(&m_actions.editDraft);
-            menu.addSeparator();
-        }
-        menu.addAction(&m_actions.viewSource);
-        menu.addAction(&m_actions.markUnread);
-        menu.addAction(&m_actions.star);
         const auto senderEmail =
             index.data(javelin::gui::messages::MessageListModel::SenderEmailRole)
                 .toString()
                 .trimmed();
-        if (!senderEmail.isEmpty())
-        {
-            auto* findSenderAction =
-                menu.addAction(i18n("Find all conversations with %1", senderEmail));
-            connect(findSenderAction, &QAction::triggered, this,
-                    [index, findConversationsWithSender = std::move(findConversationsWithSender)]
-                    { findConversationsWithSender(index); });
-        }
-        if (sourceMailboxId.has_value() || activeTabIsSearch())
-        {
-            menu.addSeparator();
-            menu.addAction(&m_actions.archive);
-            if (sourceMailboxId.has_value())
-            {
-                menu.addAction(&m_actions.deleteFromMailbox);
-                menu.addAction(&m_actions.permanentDelete);
-            }
-            menu.addAction(&m_actions.junk);
-            menu.addAction(&m_actions.tags);
-            menu.addSeparator();
-            auto* moveMenu = menu.addMenu(i18n("Move to"));
-            auto* copyMenu = menu.addMenu(i18n("Copy to"));
-            m_commandController.populateDestinationMenus(moveMenu, copyMenu, *accountId,
-                                                         sourceMailboxId, selection);
-            moveMenu->setEnabled(!moveMenu->actions().empty());
-            copyMenu->setEnabled(!copyMenu->actions().empty());
-        }
+        if (m_contextMenu == nullptr || !m_configuredContextMenuLayout ||
+            !m_replaceContextMenuActionList)
+            return;
 
-        menu.exec(m_messageView.viewport()->mapToGlobal(position));
+        m_replaceContextMenuActionList({});
+        qDeleteAll(m_contextMenuObjects);
+        m_contextMenuObjects.clear();
+
+        QMenu* moveMenu = nullptr;
+        QMenu* copyMenu = nullptr;
+        const auto destinationMenu = [this, &moveMenu, &copyMenu, &selection, &accountId,
+                                      &sourceMailboxId](const bool move) -> QMenu*
+        {
+            auto*& target = move ? moveMenu : copyMenu;
+            if (target != nullptr)
+                return target;
+            target = new QMenu(move ? i18n("Move to") : i18n("Copy to"), m_contextMenu);
+            target->setIcon(move ? QIcon::fromTheme(QStringLiteral("mail-move"))
+                                 : QIcon::fromTheme(QStringLiteral("edit-copy")));
+            m_contextMenuObjects.push_back(target);
+            if (move)
+                m_commandController.populateDestinationMenus(target, nullptr, *accountId,
+                                                             sourceMailboxId, selection);
+            else
+                m_commandController.populateDestinationMenus(nullptr, target, *accountId,
+                                                             sourceMailboxId, selection);
+            return target;
+        };
+
+        const auto actionForId = [&](const QString& id) -> QAction*
+        {
+            if (id == QStringLiteral("compose_edit_draft"))
+                return activeMailboxIsDrafts ? &m_actions.editDraft : nullptr;
+            if (id == QStringLiteral("compose_reply"))
+                return &m_actions.reply;
+            if (id == QStringLiteral("compose_reply_all"))
+                return &m_actions.replyAll;
+            if (id == QStringLiteral("compose_forward"))
+                return &m_actions.forward;
+            if (id == QStringLiteral("archive_email"))
+                return &m_actions.archive;
+            if (id == QStringLiteral("delete_email"))
+                return sourceMailboxId.has_value() ? &m_actions.deleteFromMailbox : nullptr;
+            if (id == QStringLiteral("mark_email_unread"))
+                return &m_actions.markUnread;
+            if (id == QStringLiteral("toggle_email_starred"))
+                return &m_actions.star;
+            if (id == QStringLiteral("tag_email"))
+                return &m_actions.tags;
+            if (id == QStringLiteral("move_email"))
+            {
+                if (!sourceMailboxId.has_value() && !activeTabIsSearch())
+                    return nullptr;
+                auto* menu = destinationMenu(true);
+                return menu->actions().empty() ? nullptr : menu->menuAction();
+            }
+            if (id == QStringLiteral("copy_email"))
+            {
+                if (!sourceMailboxId.has_value() && !activeTabIsSearch())
+                    return nullptr;
+                auto* menu = destinationMenu(false);
+                return menu->actions().empty() ? nullptr : menu->menuAction();
+            }
+            if (id == QStringLiteral("toggle_email_junk"))
+                return &m_actions.junk;
+            if (id == QStringLiteral("find_conversations_with_sender"))
+            {
+                if (senderEmail.isEmpty())
+                    return nullptr;
+                auto* action =
+                    new QAction(i18n("Find all conversations with %1", senderEmail), m_contextMenu);
+                m_contextMenuObjects.push_back(action);
+                connect(action, &QAction::triggered, this, [index, findConversationsWithSender]
+                        { findConversationsWithSender(index); });
+                return action;
+            }
+            if (id == QStringLiteral("view_message_source"))
+                return &m_actions.viewSource;
+            if (id == QStringLiteral("permanently_delete_email"))
+                return &m_actions.permanentDelete;
+            return nullptr;
+        };
+
+        QList<QAction*> contextActions;
+        bool separatorPending = false;
+        for (const auto& id : effectiveEmailContextMenuLayout(m_configuredContextMenuLayout()))
+        {
+            if (id == emailContextMenuSeparatorId())
+            {
+                separatorPending = !contextActions.empty();
+                continue;
+            }
+            auto* action = actionForId(id);
+            if (action == nullptr)
+                continue;
+            if (separatorPending)
+            {
+                auto* separator = new QAction(m_contextMenu);
+                separator->setSeparator(true);
+                m_contextMenuObjects.push_back(separator);
+                contextActions.push_back(separator);
+                separatorPending = false;
+            }
+            contextActions.push_back(action);
+        }
+        m_replaceContextMenuActionList(contextActions);
+
+        m_contextMenu->exec(m_messageView.viewport()->mapToGlobal(position));
     }
 
     void MailActionController::rebuildTagsMenu()

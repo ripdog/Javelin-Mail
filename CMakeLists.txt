@@ -653,6 +653,10 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/ComposeTabPolicy.h
     src/gui/shell/MessageActionPolicy.cpp
     src/gui/shell/MessageActionPolicy.h
+    src/gui/shell/EmailContextMenuLayout.cpp
+    src/gui/shell/EmailContextMenuLayout.h
+    src/gui/shell/EmailContextMenuEditorDialog.cpp
+    src/gui/shell/EmailContextMenuEditorDialog.h
     src/gui/shell/MessageListPresentationPolicy.cpp
     src/gui/shell/MessageListPresentationPolicy.h
     src/gui/shell/MessageListTabBindingPresenter.cpp
@@ -1466,6 +1470,10 @@ add_library(javelin_gui STATIC
     src/gui/shell/ComposeTabPolicy.h
     src/gui/shell/MessageActionPolicy.cpp
     src/gui/shell/MessageActionPolicy.h
+    src/gui/shell/EmailContextMenuLayout.cpp
+    src/gui/shell/EmailContextMenuLayout.h
+    src/gui/shell/EmailContextMenuEditorDialog.cpp
+    src/gui/shell/EmailContextMenuEditorDialog.h
     src/gui/shell/MessageListPresentationPolicy.cpp
     src/gui/shell/MessageListPresentationPolicy.h
     src/gui/shell/MessageListTabBindingPresenter.cpp
