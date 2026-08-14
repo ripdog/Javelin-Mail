@@ -93,7 +93,7 @@ namespace javelin::gui::shell
       private:
         void queueArchive(std::string accountId, std::optional<std::string> sourceMailboxId,
                           javelin::app::MessageSelection selection);
-        void queueDelete(std::string accountId, std::string sourceMailboxId,
+        void queueDelete(std::string accountId, std::optional<std::string> sourceMailboxId,
                          javelin::app::MessageSelection selection);
         void queueDestroy(std::string accountId, std::optional<std::string> sourceMailboxId,
                           javelin::app::MessageSelection selection);

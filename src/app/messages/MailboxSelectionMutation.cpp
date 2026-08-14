@@ -149,14 +149,11 @@ namespace javelin::app
             if (intent.operation == MailboxSelectionOperation::Move ||
                 intent.operation == MailboxSelectionOperation::Junk)
             {
-                if (intent.sourceMailboxId.has_value())
+                const bool emailIsInSelectionMailbox =
+                    intent.sourceMailboxId.has_value() &&
+                    std::ranges::contains(email.mailboxIds, *intent.sourceMailboxId);
+                if (emailIsInSelectionMailbox)
                 {
-                    if (std::ranges::find(email.mailboxIds, *intent.sourceMailboxId) ==
-                        email.mailboxIds.end())
-                    {
-                        return i18n("Message %1 is no longer in the source mailbox.",
-                                    QString::fromStdString(emailId));
-                    }
                     if (*intent.sourceMailboxId != destination->id)
                     {
                         removeMailboxIds.push_back(*intent.sourceMailboxId);
@@ -164,6 +161,9 @@ namespace javelin::app
                 }
                 else
                 {
+                    // A mailbox view can display an explicit Email because another member of its
+                    // Thread is resident there. In that case the view mailbox is selection
+                    // context, not this Email's source. Move it from its actual cached residency.
                     for (const auto& mailboxId : email.mailboxIds)
                     {
                         if (mailboxId != destination->id)

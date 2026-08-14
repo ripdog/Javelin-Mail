@@ -104,18 +104,9 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto trashMailbox = findMailboxByRole(m_mailboxReader, *accountId, "trash");
-        if (trashMailbox.has_value() && trashMailbox->id == *sourceMailboxId)
-        {
-            if (confirmPermanentDelete(selection.size()))
-            {
-                queueDestroy(std::move(*accountId), std::move(sourceMailboxId),
-                             std::move(selection));
-            }
-            return;
-        }
-
-        queueDelete(std::move(*accountId), std::move(*sourceMailboxId), std::move(selection));
+        // The open tab can expose a Thread child resident outside that mailbox. Never infer
+        // permanent deletion from the tab being Trash; that remains a separate explicit action.
+        queueDelete(std::move(*accountId), std::move(sourceMailboxId), std::move(selection));
     }
 
     void
@@ -205,13 +196,12 @@ namespace javelin::gui::shell
                     });
         };
 
-        for (const auto* mailbox : javelin::gui::mailboxes::mailboxesInDisplayOrder(*mailboxes))
+        // The open mailbox scopes collapsed-thread resolution; it does not describe the
+        // residency of every visible or selected Email. Keep every writable mailbox available so
+        // mixed selections can copy or move the members that are not already in that destination.
+        for (const auto* mailbox :
+             javelin::gui::mailboxes::writableMailboxesInDisplayOrder(*mailboxes))
         {
-            if ((sourceMailboxId.has_value() && mailbox->id == *sourceMailboxId) ||
-                !mailbox->myRights.mayAddItems)
-            {
-                continue;
-            }
             addDestination(moveMenu, MessageTransferOperation::Move, i18n("Queued move."),
                            *mailbox);
             addDestination(copyMenu, MessageTransferOperation::Copy, i18n("Queued copy."),
@@ -631,7 +621,8 @@ namespace javelin::gui::shell
             });
     }
 
-    void MessageCommandController::queueDelete(std::string accountId, std::string sourceMailboxId,
+    void MessageCommandController::queueDelete(std::string accountId,
+                                               std::optional<std::string> sourceMailboxId,
                                                javelin::app::MessageSelection selection)
     {
         const auto trashMailbox = findMailboxByRole(m_mailboxReader, accountId, "trash");

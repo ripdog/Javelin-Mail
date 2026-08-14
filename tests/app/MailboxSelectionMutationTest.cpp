@@ -123,6 +123,102 @@ TEST_CASE("mailbox move removes only its explicit source", "[app][mailbox-mutati
     CHECK(plan.mutations.front().removeMailboxIds == std::vector<std::string>{"inbox"});
 }
 
+TEST_CASE("mailbox move uses an explicit Email's resident mailboxes when view context differs",
+          "[app][mailbox-mutation][thread]")
+{
+    const javelin::app::MailboxSelectionMutationIntent intent{
+        .accountId = "account-1",
+        .selection = {javelin::app::SelectedEmail{.emailId = "archived-child"}},
+        .operation = javelin::app::MailboxSelectionOperation::Move,
+        .sourceMailboxId = "inbox",
+        .destinationMailboxId = "projects",
+    };
+
+    const auto result = javelin::app::planMailboxSelectionMutation(
+        intent, {"archived-child"}, {email("archived-child", {"archive", "destination"})},
+        mailboxes);
+    REQUIRE(std::holds_alternative<javelin::app::PlannedMailboxSelectionMutation>(result));
+    const auto& plan = std::get<javelin::app::PlannedMailboxSelectionMutation>(result);
+    REQUIRE(plan.mutations.size() == 1);
+    CHECK(plan.mutations.front().addMailboxIds == std::vector<std::string>{"projects"});
+    CHECK(plan.mutations.front().removeMailboxIds ==
+          std::vector<std::string>{"archive", "destination"});
+}
+
+TEST_CASE("mixed-residency copies can target either selected mailbox",
+          "[app][mailbox-mutation][thread]")
+{
+    const auto selectedEmails =
+        std::vector{email("inbox-email", {"inbox"}), email("archive-email", {"archive"})};
+
+    for (const auto& destination : std::vector<std::string>{"inbox", "archive"})
+    {
+        const javelin::app::MailboxSelectionMutationIntent intent{
+            .accountId = "account-1",
+            .selection = {javelin::app::SelectedEmail{.emailId = "inbox-email"},
+                          javelin::app::SelectedEmail{.emailId = "archive-email"}},
+            .operation = javelin::app::MailboxSelectionOperation::Copy,
+            .sourceMailboxId = "inbox",
+            .destinationMailboxId = destination,
+        };
+
+        const auto result = javelin::app::planMailboxSelectionMutation(
+            intent, {"inbox-email", "archive-email"}, selectedEmails, mailboxes);
+        REQUIRE(std::holds_alternative<javelin::app::PlannedMailboxSelectionMutation>(result));
+        const auto& plan = std::get<javelin::app::PlannedMailboxSelectionMutation>(result);
+        REQUIRE(plan.mutations.size() == 1);
+        CHECK(plan.mutations.front().emailId ==
+              (destination == "inbox" ? "archive-email" : "inbox-email"));
+        CHECK(plan.mutations.front().addMailboxIds == std::vector<std::string>{destination});
+        CHECK(plan.mutations.front().removeMailboxIds.empty());
+        CHECK(plan.skippedEmailCount == 1);
+    }
+}
+
+TEST_CASE("search move applies per-Email residency across a mixed selection",
+          "[app][mailbox-mutation][search]")
+{
+    const javelin::app::MailboxSelectionMutationIntent intent{
+        .accountId = "account-1",
+        .selection = {javelin::app::SelectedEmail{.emailId = "inbox-email"},
+                      javelin::app::SelectedEmail{.emailId = "archive-email"}},
+        .operation = javelin::app::MailboxSelectionOperation::Move,
+        .sourceMailboxId = std::nullopt,
+        .destinationMailboxId = "inbox",
+    };
+
+    const auto result = javelin::app::planMailboxSelectionMutation(
+        intent, {"inbox-email", "archive-email"},
+        {email("inbox-email", {"inbox"}), email("archive-email", {"archive"})}, mailboxes);
+    REQUIRE(std::holds_alternative<javelin::app::PlannedMailboxSelectionMutation>(result));
+    const auto& plan = std::get<javelin::app::PlannedMailboxSelectionMutation>(result);
+    REQUIRE(plan.mutations.size() == 1);
+    CHECK(plan.mutations.front().emailId == "archive-email");
+    CHECK(plan.mutations.front().addMailboxIds == std::vector<std::string>{"inbox"});
+    CHECK(plan.mutations.front().removeMailboxIds == std::vector<std::string>{"archive"});
+    CHECK(plan.skippedEmailCount == 1);
+}
+
+TEST_CASE("junk move uses an explicit Email's resident mailbox when view context differs",
+          "[app][mailbox-mutation][junk][thread]")
+{
+    const javelin::app::MailboxSelectionMutationIntent intent{
+        .accountId = "account-1",
+        .selection = {javelin::app::SelectedEmail{.emailId = "archived-child"}},
+        .operation = javelin::app::MailboxSelectionOperation::Junk,
+        .sourceMailboxId = "inbox",
+        .destinationMailboxId = std::nullopt,
+    };
+
+    const auto result = javelin::app::planMailboxSelectionMutation(
+        intent, {"archived-child"}, {email("archived-child", {"archive"})}, mailboxes);
+    REQUIRE(std::holds_alternative<javelin::app::PlannedMailboxSelectionMutation>(result));
+    const auto& plan = std::get<javelin::app::PlannedMailboxSelectionMutation>(result);
+    REQUIRE(plan.mutations.size() == 1);
+    CHECK(plan.mutations.front().addMailboxIds == std::vector<std::string>{"junk"});
+    CHECK(plan.mutations.front().removeMailboxIds == std::vector<std::string>{"archive"});
+}
+
 TEST_CASE("mailbox mutation planning rejects insufficient rights before queuing",
           "[app][mailbox-mutation]")
 {

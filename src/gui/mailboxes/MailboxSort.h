@@ -61,4 +61,13 @@ namespace javelin::gui::mailboxes
             { return mailboxDisplayLess(left->role, left->name, right->role, right->name); });
         return ordered;
     }
+
+    [[nodiscard]] inline std::vector<const javelin::jmap::cache::MailboxTreeItem*>
+    writableMailboxesInDisplayOrder(
+        const std::vector<javelin::jmap::cache::MailboxTreeItem>& mailboxes)
+    {
+        auto ordered = mailboxesInDisplayOrder(mailboxes);
+        std::erase_if(ordered, [](const auto* mailbox) { return !mailbox->myRights.mayAddItems; });
+        return ordered;
+    }
 } // namespace javelin::gui::mailboxes

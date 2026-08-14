@@ -48,3 +48,21 @@ TEST_CASE("mailbox display order puts special-use mailboxes before alphabetical 
     CHECK(ids == std::vector<std::string>{"inbox", "archive", "drafts", "scheduled", "sent", "junk",
                                           "trash", "alpha", "zebra"});
 }
+
+TEST_CASE("transfer destinations retain every writable mailbox including the open mailbox",
+          "[gui][mailbox][transfer]")
+{
+    auto inbox = mailbox("inbox", "Inbox", "inbox");
+    inbox.myRights.mayAddItems = true;
+    auto archive = mailbox("archive", "Archive", "archive");
+    archive.myRights.mayAddItems = true;
+    auto readOnly = mailbox("shared", "Shared");
+    readOnly.myRights.mayAddItems = false;
+
+    const std::vector mailboxes{inbox, archive, readOnly};
+    const auto destinations = javelin::gui::mailboxes::writableMailboxesInDisplayOrder(mailboxes);
+
+    REQUIRE(destinations.size() == 2);
+    CHECK(destinations[0]->id == "inbox");
+    CHECK(destinations[1]->id == "archive");
+}
