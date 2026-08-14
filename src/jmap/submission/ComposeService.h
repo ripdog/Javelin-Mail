@@ -1,8 +1,12 @@
 #pragma once
 
-#include "jmap/JmapCore.h"
+#include "storage/sqlite/DatabaseConnection.h"
+
+#include "jmap/MessageContentClient.h"
+#include "jmap/api/LiveConnectionSettings.h"
 #include "jmap/submission/ComposeRevisionGate.h"
 #include "jmap/submission/ComposeTypes.h"
+#include "jmap/sync/EmailMutationEngine.h"
 
 #include <QCoroTask>
 
@@ -32,7 +36,8 @@ namespace javelin::jmap::submission
         ComposeService(javelin::jmap::cache::DatabaseConnection& connection,
                        javelin::jmap::api::AbstractTransport& resourceTransport,
                        javelin::jmap::api::JmapMethodTransport& methodTransport,
-                       javelin::jmap::JmapCore& jmapCore);
+                       javelin::jmap::MessageContentClient& contentClient,
+                       javelin::jmap::EmailMutationEngine& emailMutationEngine);
 
         [[nodiscard]] QCoro::Task<std::variant<DraftSnapshot, javelin::jmap::OperationError>>
         open(javelin::jmap::LiveConnectionSettings settings, OpenComposeRequest request);
@@ -80,7 +85,8 @@ namespace javelin::jmap::submission
         javelin::jmap::cache::DatabaseConnection& m_connection;
         javelin::jmap::api::AbstractTransport& m_resourceTransport;
         javelin::jmap::api::JmapMethodTransport& m_methodTransport;
-        javelin::jmap::JmapCore& m_jmapCore;
+        javelin::jmap::MessageContentClient& m_contentClient;
+        javelin::jmap::EmailMutationEngine& m_emailMutationEngine;
         ComposeRevisionGate m_revisionGate;
     };
 

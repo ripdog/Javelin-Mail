@@ -4,7 +4,6 @@
 #include "app/MessageListSession.h"
 #include "app/MessageListSessionFactory.h"
 #include "app/RefreshGeneration.h"
-#include "jmap/cache/QueryReader.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
 
@@ -24,9 +23,8 @@ namespace javelin::app
       public:
         MailboxSession(std::string accountId, std::string mailboxId, QString title,
                        std::optional<std::string> role, javelin::jmap::query::EmailListSort sort,
-                       javelin::jmap::cache::QueryReader& queryReader,
-                       MessageListMaterializationPort& materializationPort, std::size_t windowSize,
-                       MailApplicationEventsPort& events,
+                       QString databasePath, MessageListMaterializationPort& materializationPort,
+                       std::size_t windowSize, MailApplicationEventsPort& events,
                        std::optional<RestoredMailboxState> restored = std::nullopt,
                        QObject* parent = nullptr);
         ~MailboxSession() override;
@@ -79,7 +77,7 @@ namespace javelin::app
         std::optional<std::size_t> m_quickFilterContinuityPreferredIndex;
         std::optional<std::string> m_quickFilterAuthoritativeAnchorEmailId;
         bool m_quickFilterContinuityApplied = false;
-        javelin::jmap::cache::QueryReader& m_queryReader;
+        QString m_databasePath;
         MessageListMaterializationPort& m_materializationPort;
         MailApplicationEventsPort& m_events;
         std::size_t m_windowSize;

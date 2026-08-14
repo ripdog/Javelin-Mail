@@ -1,13 +1,21 @@
-#include "jmap/cache/QueryService.h"
 #include "FixtureReader.h"
 #include "app/MessageListCacheRead.h"
 #include "app/MessageSelection.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailSearchIndex.h"
+#include "jmap/cache/MailSearchReadRepository.h"
+#include "jmap/cache/MailTagReadRepository.h"
+#include "jmap/cache/MailboxFilterReadRepository.h"
+#include "jmap/cache/MailboxMessageReadRepository.h"
+#include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
+#include "jmap/cache/MailboxStatisticsReadRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
+#include "jmap/cache/MessageSummaryReadRepository.h"
+#include "jmap/cache/QueryWindowReadRepository.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "jmap/cache/ThreadReadRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 #include "jmap/domain/MailKeywords.h"
@@ -129,7 +137,8 @@ TEST_CASE("mail keyword classification preserves arbitrary dollar-prefixed tags"
     CHECK_FALSE(hasStandardKeywordSemantics("work"));
 }
 
-TEST_CASE("query service returns mailbox tree rows shaped for a tree model", "[jmap][cache][query]")
+TEST_CASE("mailbox reader returns mailbox tree rows shaped for a tree model",
+          "[jmap][cache][mailbox]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -148,8 +157,8 @@ TEST_CASE("query service returns mailbox tree rows shaped for a tree model", "[j
     javelin::jmap::cache::MailboxRepository mailboxRepository{databaseContext.connection};
     REQUIRE_FALSE(mailboxRepository.replaceAll("account-1", {inbox, child}).has_value());
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto result = queryService.listMailboxTree("account-1");
+    javelin::jmap::cache::MailboxReadRepository mailboxReader{databaseContext.connection};
+    const auto result = mailboxReader.listMailboxTree("account-1");
 
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailboxTreeItem>>(result));
     const auto& items = std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(result);
@@ -165,7 +174,7 @@ TEST_CASE("query service returns mailbox tree rows shaped for a tree model", "[j
     CHECK(*items.back().parentId == "mbx-inbox");
 }
 
-TEST_CASE("query service returns paged compact message list rows", "[jmap][cache][query]")
+TEST_CASE("mailbox message reader returns paged compact message list rows", "[jmap][cache][query]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -225,7 +234,7 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
             .markSearchIndexed("account-1", "eml-2", "eml-2-hash", "Body-derived plaintext preview")
             .has_value());
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
+    javelin::jmap::cache::MailboxMessageReadRepository queryService{databaseContext.connection};
     const auto firstPage = queryService.listMailboxMessages("account-1", "mbx-inbox", 1, 0);
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(firstPage));
     const auto& firstItems =
@@ -285,7 +294,7 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     CHECK(subjectItems[1].emailId == "eml-2");
 }
 
-TEST_CASE("query service applies quick filters before thread collapsing",
+TEST_CASE("mailbox filter reader applies quick filters before thread collapsing",
           "[jmap][cache][query][quick-filter]")
 {
     ApplicationGuard application;
@@ -338,7 +347,8 @@ TEST_CASE("query service applies quick filters before thread collapsing",
                                   .body = QStringLiteral("A hidden narwhal appears here.")})
             .has_value());
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
+    javelin::jmap::cache::MailboxFilterReadRepository queryService{databaseContext.connection};
+    javelin::jmap::cache::MailTagReadRepository mailTagReader{databaseContext.connection};
     const javelin::jmap::search::EmailSearchCriteria criteria{
         .unreadOnly = true,
         .starredOnly = true,
@@ -363,7 +373,7 @@ TEST_CASE("query service applies quick filters before thread collapsing",
     REQUIRE(std::holds_alternative<std::size_t>(count));
     CHECK(std::get<std::size_t>(count) == 1);
 
-    const auto keywords = queryService.listUserKeywords("account-1", "mbx-inbox");
+    const auto keywords = mailTagReader.listUserKeywords("account-1", "mbx-inbox");
     REQUIRE(std::holds_alternative<std::vector<std::string>>(keywords));
     CHECK(std::get<std::vector<std::string>>(keywords) ==
           std::vector<std::string>{"$custom", "personal", "work"});
@@ -383,7 +393,7 @@ TEST_CASE("query service applies quick filters before thread collapsing",
         "INSERT INTO mail_tag_definitions(account_id,keyword,display_name,color,sort_order) "
         "VALUES('account-1','work','Work Items','#123456',10)"));
     REQUIRE(tagDefinition.exec());
-    const auto tagKeywords = queryService.listTagKeywords("account-1");
+    const auto tagKeywords = mailTagReader.listTagKeywords("account-1");
     REQUIRE(std::holds_alternative<std::vector<std::string>>(tagKeywords));
     CHECK(std::get<std::vector<std::string>>(tagKeywords) == std::vector<std::string>{"work"});
 
@@ -400,7 +410,7 @@ TEST_CASE("query service applies quick filters before thread collapsing",
     CHECK(taggedItems.front().tags.front().displayName == QStringLiteral("Work Items"));
     CHECK(taggedItems.front().tags.front().color == QStringLiteral("#123456"));
 
-    const auto definitions = queryService.listTagDefinitions("account-1");
+    const auto definitions = mailTagReader.listTagDefinitions("account-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::TagDefinition>>(definitions));
     const auto& tags = std::get<std::vector<javelin::jmap::cache::TagDefinition>>(definitions);
     REQUIRE(tags.size() == 1);
@@ -409,7 +419,7 @@ TEST_CASE("query service applies quick filters before thread collapsing",
     CHECK(tags.front().color == QStringLiteral("#123456"));
 
     const auto memberships =
-        queryService.listEmailKeywordMemberships("account-1", {"quick-body", "quick-unread"});
+        mailTagReader.listEmailKeywordMemberships("account-1", {"quick-body", "quick-unread"});
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::EmailKeywordMembership>>(
         memberships));
     const auto& membershipRows =
@@ -423,14 +433,14 @@ TEST_CASE("query service applies quick filters before thread collapsing",
         "INSERT INTO background_jobs(job_id,account_id,kind,priority,status,title,checkpoint_json) "
         "VALUES('tag-delete:test','account-1','tag_deletion',2,'waiting_for_network',"
         "'Delete tag Work Items','{\"keyword\":\"work\"}')")));
-    const auto visibleKeywords = queryService.listUserKeywords("account-1", "mbx-inbox");
+    const auto visibleKeywords = mailTagReader.listUserKeywords("account-1", "mbx-inbox");
     REQUIRE(std::holds_alternative<std::vector<std::string>>(visibleKeywords));
     CHECK(std::get<std::vector<std::string>>(visibleKeywords) ==
           std::vector<std::string>{"$custom", "personal"});
-    const auto visibleTagKeywords = queryService.listTagKeywords("account-1");
+    const auto visibleTagKeywords = mailTagReader.listTagKeywords("account-1");
     REQUIRE(std::holds_alternative<std::vector<std::string>>(visibleTagKeywords));
     CHECK(std::get<std::vector<std::string>>(visibleTagKeywords).empty());
-    const auto visibleDefinitions = queryService.listTagDefinitions("account-1");
+    const auto visibleDefinitions = mailTagReader.listTagDefinitions("account-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::TagDefinition>>(
         visibleDefinitions));
     CHECK(std::get<std::vector<javelin::jmap::cache::TagDefinition>>(visibleDefinitions).empty());
@@ -493,7 +503,7 @@ TEST_CASE("offline mailbox coverage exposes only the published crawl generation 
         "status,payload_json) VALUES('mutation-1','account-1','Email','projected-addition',"
         "'email_patch','pending','{}')")));
 
-    javelin::jmap::cache::QueryService queries{databaseContext.connection};
+    javelin::jmap::cache::MailboxMessageReadRepository queries{databaseContext.connection};
     const auto coverageResult = queries.offlineMailboxCoverage("account-1", "mbx-inbox");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::OfflineMailboxCoverage>>(
         coverageResult));
@@ -535,8 +545,7 @@ TEST_CASE("offline mailbox coverage exposes only the published crawl generation 
     CHECK(completeCoverage->enumerationComplete);
 }
 
-TEST_CASE("query service full text search covers cached subjects and bodies",
-          "[jmap][cache][query][search]")
+TEST_CASE("mail search reader covers cached subjects and bodies", "[jmap][cache][query][search]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -585,8 +594,8 @@ TEST_CASE("query service full text search covers cached subjects and bodies",
                                   .body = QStringLiteral("The telescope found a rare albatross.")})
             .has_value());
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto result = queryService.searchCachedMessageText("account-1", "rare albatross", 10);
+    javelin::jmap::cache::MailSearchReadRepository mailSearch{databaseContext.connection};
+    const auto result = mailSearch.searchCachedMessageText("account-1", "rare albatross", 10);
 
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(result));
     const auto& items = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(result);
@@ -596,7 +605,7 @@ TEST_CASE("query service full text search covers cached subjects and bodies",
     CHECK(
         std::ranges::any_of(items, [](const auto& item) { return item.emailId == "body-match"; }));
 
-    const auto snapshot = queryService.searchAllCachedMessageText("account-1", "rare albatross");
+    const auto snapshot = mailSearch.searchAllCachedMessageText("account-1", "rare albatross");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(snapshot));
     const auto& snapshotItems =
         std::get<std::vector<javelin::jmap::cache::MessageListItem>>(snapshot);
@@ -604,7 +613,7 @@ TEST_CASE("query service full text search covers cached subjects and bodies",
     CHECK(snapshotItems.at(0).emailId == "body-match");
     CHECK(snapshotItems.at(1).emailId == "subject-match");
 
-    const auto ascendingSnapshot = queryService.searchAllCachedMessageText(
+    const auto ascendingSnapshot = mailSearch.searchAllCachedMessageText(
         "account-1", "rare albatross",
         {.property = javelin::jmap::query::EmailListSortProperty::ReceivedAt,
          .direction = javelin::jmap::query::EmailListSortDirection::Ascending});
@@ -617,7 +626,7 @@ TEST_CASE("query service full text search covers cached subjects and bodies",
     CHECK(ascendingItems.at(1).emailId == "body-match");
 }
 
-TEST_CASE("query service returns thread messages in cached thread order", "[jmap][cache][query]")
+TEST_CASE("thread reader returns messages in cached thread order", "[jmap][cache][query]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -655,8 +664,8 @@ TEST_CASE("query service returns thread messages in cached thread order", "[jmap
                                                }})
                       .has_value());
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto result = queryService.listThreadMessages("account-1", "thr-1");
+    javelin::jmap::cache::ThreadReadRepository threadReader{databaseContext.connection};
+    const auto result = threadReader.listThreadMessages("account-1", "thr-1");
 
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(result));
     const auto& items = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(result);
@@ -698,7 +707,10 @@ TEST_CASE("mailbox thread queries exclude members moved to another mailbox", "[j
                                                }})
                       .has_value());
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
+    javelin::jmap::cache::MailboxMessageReadRepository queryService{databaseContext.connection};
+    javelin::jmap::cache::QueryWindowReadRepository queryWindows{databaseContext.connection,
+                                                                 queryService};
+    javelin::jmap::cache::ThreadReadRepository threadReader{databaseContext.connection};
     const auto mailboxPage = queryService.listMailboxMessages("account-1", "mbx-inbox", 100, 0);
     REQUIRE(
         std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(mailboxPage));
@@ -725,7 +737,7 @@ TEST_CASE("mailbox thread queries exclude members moved to another mailbox", "[j
                           .emailIds = {"eml-inbox"},
                       })
                       .has_value());
-    const auto cachedWindow = queryService.loadMailboxWindow("account-1", queryKey, 0, 100, {});
+    const auto cachedWindow = queryWindows.loadMailboxWindow("account-1", queryKey, 0, 100, {});
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
         cachedWindow));
     const auto& cachedPage =
@@ -736,7 +748,7 @@ TEST_CASE("mailbox thread queries exclude members moved to another mailbox", "[j
     CHECK(cachedPage->items.front().globalThreadMessageCount == std::optional<std::uint64_t>{2});
 
     const auto mailboxThread =
-        queryService.listMailboxThreadMessages("account-1", "mbx-inbox", "thr-1");
+        threadReader.listMailboxThreadMessages("account-1", "mbx-inbox", "thr-1");
     REQUIRE(
         std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(mailboxThread));
     const auto& members =
@@ -751,21 +763,88 @@ TEST_CASE("mailbox thread queries exclude members moved to another mailbox", "[j
         },
     };
     const auto resolved = javelin::app::resolveMessageSelection(
-        queryService, threadRepository, "account-1", "mbx-inbox", selection);
+        threadReader, threadRepository, "account-1", "mbx-inbox", selection);
     REQUIRE(std::holds_alternative<std::vector<std::string>>(resolved));
     CHECK(std::get<std::vector<std::string>>(resolved) == std::vector<std::string>{"eml-inbox"});
 
     const auto globalResolved = javelin::app::resolveMessageSelection(
-        queryService, threadRepository, "account-1", std::nullopt, selection);
+        threadReader, threadRepository, "account-1", std::nullopt, selection);
     REQUIRE(std::holds_alternative<std::vector<std::string>>(globalResolved));
     CHECK(std::get<std::vector<std::string>>(globalResolved) ==
           std::vector<std::string>{"eml-inbox", "eml-archive"});
 
     REQUIRE_FALSE(
         threadRepository.markStale("account-1", std::vector<std::string>{"thr-1"}).has_value());
-    const auto incomplete = javelin::app::resolveMessageSelection(
-        queryService, threadRepository, "account-1", "mbx-inbox", selection);
-    CHECK(std::holds_alternative<QString>(incomplete));
+    const auto mailboxScopedWithStaleThread = javelin::app::resolveMessageSelection(
+        threadReader, threadRepository, "account-1", "mbx-inbox", selection);
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(mailboxScopedWithStaleThread));
+    CHECK(std::get<std::vector<std::string>>(mailboxScopedWithStaleThread) ==
+          std::vector<std::string>{"eml-inbox"});
+
+    const auto incompleteGlobal = javelin::app::resolveMessageSelection(
+        threadReader, threadRepository, "account-1", std::nullopt, selection);
+    CHECK(std::holds_alternative<QString>(incompleteGlobal));
+}
+
+TEST_CASE("mailbox-scoped collapsed Thread selection uses cached mailbox membership",
+          "[jmap][cache][query][thread-selection]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    auto representative = loadEmailFixture();
+    representative.id = "representative";
+    representative.threadId = "thread-1";
+    representative.mailboxIds = {"mbx-inbox"};
+    representative.receivedAt = "2026-08-14T00:00:00Z";
+    auto secondInbox = representative;
+    secondInbox.id = "second-inbox";
+    secondInbox.receivedAt = "2026-08-14T00:01:00Z";
+    auto thirdInbox = representative;
+    thirdInbox.id = "third-inbox";
+    thirdInbox.receivedAt = "2026-08-14T00:02:00Z";
+    auto archived = representative;
+    archived.id = "archived";
+    archived.mailboxIds = {"mbx-archive"};
+    archived.receivedAt = "2026-08-14T00:03:00Z";
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(
+        emails.replaceAll("account-1", {representative, secondInbox, thirdInbox, archived})
+            .has_value());
+
+    // Deliberately reproduce the old contradiction: the normalized Thread claims to be current,
+    // but omits two cached Inbox members that still carry this thread_id.
+    javelin::jmap::cache::ThreadRepository threads{databaseContext.connection};
+    REQUIRE_FALSE(threads
+                      .replaceAll("account-1",
+                                  {{.id = "thread-1", .emailIds = {"representative", "archived"}}})
+                      .has_value());
+
+    javelin::jmap::cache::ThreadReadRepository threadReader{databaseContext.connection};
+    const auto normalized =
+        threadReader.listMailboxThreadMessages("account-1", "mbx-inbox", "thread-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(normalized));
+    REQUIRE(std::get<std::vector<javelin::jmap::cache::MessageListItem>>(normalized).size() == 1);
+
+    const javelin::app::MessageSelection selection{
+        javelin::app::SelectedCollapsedThread{.threadId = "thread-1"}};
+    const auto resolved = javelin::app::resolveMessageSelection(threadReader, threads, "account-1",
+                                                                "mbx-inbox", selection);
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(resolved));
+    CHECK(std::get<std::vector<std::string>>(resolved) ==
+          std::vector<std::string>{"representative", "second-inbox", "third-inbox"});
+
+    const javelin::app::MessageSelection individual{
+        javelin::app::SelectedEmail{.emailId = "representative"}};
+    const auto individualResolved = javelin::app::resolveMessageSelection(
+        threadReader, threads, "account-1", "mbx-inbox", individual);
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(individualResolved));
+    CHECK(std::get<std::vector<std::string>>(individualResolved) ==
+          std::vector<std::string>{"representative"});
 }
 
 TEST_CASE("thread expansion snapshot rejects incomplete normalized membership cardinality",
@@ -832,11 +911,11 @@ TEST_CASE("complete offline mailbox threads resolve and expand without normalize
         "INSERT INTO offline_mailbox_membership(account_id,mailbox_id,email_id,generation,"
         "position) VALUES('account-1','mbx-inbox','offline-older',4,0),"
         "('account-1','mbx-inbox','offline-newer',4,1)")));
-    javelin::jmap::cache::QueryService queries{databaseContext.connection};
+    javelin::jmap::cache::ThreadReadRepository threadReader{databaseContext.connection};
     javelin::jmap::cache::ThreadRepository threads{databaseContext.connection};
     const javelin::app::MessageSelection selection{
         javelin::app::SelectedCollapsedThread{.threadId = "offline-thread"}};
-    const auto resolved = javelin::app::resolveMessageSelection(queries, threads, "account-1",
+    const auto resolved = javelin::app::resolveMessageSelection(threadReader, threads, "account-1",
                                                                 "mbx-inbox", selection);
     REQUIRE(std::holds_alternative<std::vector<std::string>>(resolved));
     CHECK(std::get<std::vector<std::string>>(resolved) ==
@@ -958,8 +1037,10 @@ TEST_CASE("mailbox window summaries stay representative-only as thread coverage 
                       })
                       .has_value());
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto partialResult = queryService.loadMailboxWindow("account-1", queryKey, 0, 100, {});
+    javelin::jmap::cache::MailboxMessageReadRepository queryService{databaseContext.connection};
+    javelin::jmap::cache::QueryWindowReadRepository queryWindows{databaseContext.connection,
+                                                                 queryService};
+    const auto partialResult = queryWindows.loadMailboxWindow("account-1", queryKey, 0, 100, {});
     const auto* partial =
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&partialResult);
     REQUIRE(partial != nullptr);
@@ -974,7 +1055,7 @@ TEST_CASE("mailbox window summaries stay representative-only as thread coverage 
     CHECK_FALSE(partialItem.isFlagged);
 
     REQUIRE_FALSE(emails.upsertMany("account-1", {newerChild}).has_value());
-    const auto completeResult = queryService.loadMailboxWindow("account-1", queryKey, 0, 100, {});
+    const auto completeResult = queryWindows.loadMailboxWindow("account-1", queryKey, 0, 100, {});
     const auto* complete =
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&completeResult);
     REQUIRE(complete != nullptr);
@@ -989,8 +1070,7 @@ TEST_CASE("mailbox window summaries stay representative-only as thread coverage 
     CHECK_FALSE(completeItem.isFlagged);
 }
 
-TEST_CASE("query service rehydrates cached representative rows by email id order",
-          "[jmap][cache][query]")
+TEST_CASE("message summary reader rehydrates cached rows by email id order", "[jmap][cache][query]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -1053,8 +1133,10 @@ TEST_CASE("query service rehydrates cached representative rows by email id order
                                   })
                       .has_value());
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto result = queryService.listMessagesByEmailIds("account-1", {"eml-3", "eml-2"});
+    javelin::jmap::cache::MessageSummaryReadRepository messageSummaries{databaseContext.connection};
+    javelin::jmap::cache::MailboxStatisticsReadRepository mailboxStatistics{
+        databaseContext.connection};
+    const auto result = messageSummaries.listMessagesByEmailIds("account-1", {"eml-3", "eml-2"});
 
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(result));
     const auto& items = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(result);
@@ -1076,15 +1158,16 @@ TEST_CASE("query service rehydrates cached representative rows by email id order
     CHECK(items[1].isFlagged);
     CHECK(items[1].isJunk);
 
-    const auto inboxUnread = queryService.countUnreadMailboxEmails("account-1", "mbx-inbox");
+    const auto inboxUnread = mailboxStatistics.countUnreadMailboxEmails("account-1", "mbx-inbox");
     REQUIRE(std::holds_alternative<std::size_t>(inboxUnread));
     CHECK(std::get<std::size_t>(inboxUnread) == 2);
-    const auto archiveUnread = queryService.countUnreadMailboxEmails("account-1", "mbx-archive");
+    const auto archiveUnread =
+        mailboxStatistics.countUnreadMailboxEmails("account-1", "mbx-archive");
     REQUIRE(std::holds_alternative<std::size_t>(archiveUnread));
     CHECK(std::get<std::size_t>(archiveUnread) == 1);
 }
 
-TEST_CASE("query service finds a mailbox email without requiring a cached thread row",
+TEST_CASE("message summary reader finds a mailbox email without a cached thread row",
           "[jmap][cache][query]")
 {
     ApplicationGuard application;
@@ -1119,8 +1202,8 @@ TEST_CASE("query service finds a mailbox email without requiring a cached thread
     REQUIRE_FALSE(
         emailRepository.replaceAll("account-1", {selected, sibling, archived}).has_value());
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto result = queryService.findMailboxMessage("account-1", inbox.id, selected.id);
+    javelin::jmap::cache::MessageSummaryReadRepository messageSummaries{databaseContext.connection};
+    const auto result = messageSummaries.findMailboxMessage("account-1", inbox.id, selected.id);
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MessageListItem>>(result));
     const auto& item = std::get<std::optional<javelin::jmap::cache::MessageListItem>>(result);
     REQUIRE(item.has_value());
@@ -1130,13 +1213,13 @@ TEST_CASE("query service finds a mailbox email without requiring a cached thread
     CHECK_FALSE(item->globalThreadMessageCount.has_value());
     CHECK_FALSE(item->isUnread);
 
-    const auto missing = queryService.findMailboxMessage("account-1", inbox.id, archived.id);
+    const auto missing = messageSummaries.findMailboxMessage("account-1", inbox.id, archived.id);
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MessageListItem>>(missing));
     CHECK_FALSE(
         std::get<std::optional<javelin::jmap::cache::MessageListItem>>(missing).has_value());
 }
 
-TEST_CASE("query service loads sparse mailbox pages from authoritative window order",
+TEST_CASE("query window reader loads sparse mailbox pages from authoritative order",
           "[jmap][cache][query][pagination]")
 {
     ApplicationGuard application;
@@ -1172,8 +1255,10 @@ TEST_CASE("query service loads sparse mailbox pages from authoritative window or
                       })
                       .has_value());
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto result = queryService.loadMailboxWindow("account-1", queryKey, 200, 100);
+    javelin::jmap::cache::MailboxMessageReadRepository queryService{databaseContext.connection};
+    javelin::jmap::cache::QueryWindowReadRepository queryWindows{databaseContext.connection,
+                                                                 queryService};
+    const auto result = queryWindows.loadMailboxWindow("account-1", queryKey, 200, 100);
     const auto* page = std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&result);
     REQUIRE(page != nullptr);
     REQUIRE(page->has_value());
@@ -1185,7 +1270,7 @@ TEST_CASE("query service loads sparse mailbox pages from authoritative window or
     CHECK((*page)->total == std::optional<std::size_t>{1000});
 }
 
-TEST_CASE("query service distinguishes a stale mailbox window from an empty page",
+TEST_CASE("query window reader distinguishes a stale mailbox window from an empty page",
           "[jmap][cache][query][pagination]")
 {
     ApplicationGuard application;
@@ -1211,8 +1296,10 @@ TEST_CASE("query service distinguishes a stale mailbox window from an empty page
                       .has_value());
     REQUIRE_FALSE(windows.invalidateMailbox("account-1", "mbx-inbox").has_value());
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto staleResult = queryService.loadMailboxWindow("account-1", queryKey, 0, 100);
+    javelin::jmap::cache::MailboxMessageReadRepository queryService{databaseContext.connection};
+    javelin::jmap::cache::QueryWindowReadRepository queryWindows{databaseContext.connection,
+                                                                 queryService};
+    const auto staleResult = queryWindows.loadMailboxWindow("account-1", queryKey, 0, 100);
     const auto* stale =
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&staleResult);
     REQUIRE(stale != nullptr);
@@ -1234,7 +1321,7 @@ TEST_CASE("query service distinguishes a stale mailbox window from an empty page
                       })
                       .has_value());
 
-    const auto emptyResult = queryService.loadMailboxWindow("account-1", queryKey, 0, 100);
+    const auto emptyResult = queryWindows.loadMailboxWindow("account-1", queryKey, 0, 100);
     const auto* empty =
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&emptyResult);
     REQUIRE(empty != nullptr);
@@ -1407,7 +1494,7 @@ TEST_CASE("complete offline mailbox state versions locally sorted page windows",
                               "state-current")
                       .has_value());
 
-    javelin::jmap::cache::QueryService queries{databaseContext.connection};
+    javelin::jmap::cache::MailboxMessageReadRepository queries{databaseContext.connection};
     const auto result =
         queries.completeOfflineMailboxQueryState("account-1", "mbx-inbox", canonicalQueryKey);
     const auto* state = std::get_if<std::optional<std::string>>(&result);

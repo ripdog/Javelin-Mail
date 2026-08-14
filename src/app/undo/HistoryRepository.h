@@ -1,8 +1,8 @@
 #pragma once
 
 #include "app/undo/HistoryTypes.h"
-#include "jmap/cache/Database.h"
 #include "jmap/sync/MutationJournal.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <optional>
 #include <string_view>

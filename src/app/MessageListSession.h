@@ -1,7 +1,7 @@
 #pragma once
 
 #include "jmap/OperationError.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/MessageListReadTypes.h"
 #include "jmap/query/EmailListSort.h"
 
 #include <QObject>

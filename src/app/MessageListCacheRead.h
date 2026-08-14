@@ -1,6 +1,9 @@
 #pragma once
 
-#include "jmap/cache/QueryService.h"
+#include "storage/sqlite/DatabaseConnection.h"
+
+#include "jmap/cache/MailboxMessageReadRepository.h"
+#include "jmap/cache/ThreadReadRepository.h"
 
 #include <QSqlError>
 #include <QSqlQuery>
@@ -8,6 +11,7 @@
 
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -44,11 +48,12 @@ namespace javelin::app
             return javelin::jmap::cache::databaseError(
                 QStringLiteral("Begin message-list Thread snapshot"), database.lastError());
         }
-        javelin::jmap::cache::QueryService queryService{connection};
+        javelin::jmap::cache::MailboxMessageReadRepository mailboxMessages{connection};
+        javelin::jmap::cache::ThreadReadRepository threadReader{connection};
         bool completeOfflineMailbox = false;
         if (mailboxId.has_value())
         {
-            const auto offlineState = queryService.offlineMailboxComplete(accountId, *mailboxId);
+            const auto offlineState = mailboxMessages.offlineMailboxComplete(accountId, *mailboxId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&offlineState))
             {
                 static_cast<void>(database.rollback());
@@ -92,10 +97,10 @@ namespace javelin::app
 
         auto itemsResult =
             normalizedThreadComplete
-                ? queryService.listThreadMessages(accountId, threadId)
-                : queryService.listMailboxThreadMessages(
+                ? threadReader.listThreadMessages(accountId, threadId)
+                : threadReader.listMailboxThreadMessages(
                       accountId, *mailboxId, threadId,
-                      javelin::jmap::cache::MailboxThreadMembershipSource::CompleteOfflineMailbox);
+                      javelin::jmap::cache::MailboxThreadMembershipSource::CachedMailbox);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&itemsResult))
         {
             static_cast<void>(database.rollback());
@@ -106,6 +111,37 @@ namespace javelin::app
                 std::move(itemsResult)),
             .complete = true,
         };
+        if (mailboxId.has_value() && normalizedThreadComplete)
+        {
+            QSqlQuery currentMailboxMembers{database};
+            currentMailboxMembers.prepare(QStringLiteral(
+                "SELECT membership.email_id FROM email_mailboxes membership "
+                "INNER JOIN emails email ON email.account_id=membership.account_id "
+                " AND email.email_id=membership.email_id "
+                "WHERE membership.account_id=:account_id AND membership.mailbox_id=:mailbox_id "
+                " AND email.thread_id=:thread_id"));
+            currentMailboxMembers.bindValue(QStringLiteral(":account_id"),
+                                            QString::fromStdString(accountId));
+            currentMailboxMembers.bindValue(QStringLiteral(":mailbox_id"),
+                                            QString::fromStdString(*mailboxId));
+            currentMailboxMembers.bindValue(QStringLiteral(":thread_id"),
+                                            QString::fromStdString(threadId));
+            if (!currentMailboxMembers.exec())
+            {
+                static_cast<void>(database.rollback());
+                return javelin::jmap::cache::databaseError(
+                    QStringLiteral("Read current mailbox Thread members"),
+                    currentMailboxMembers.lastError());
+            }
+            std::unordered_set<std::string> currentEmailIds;
+            while (currentMailboxMembers.next())
+                currentEmailIds.insert(currentMailboxMembers.value(0).toString().toStdString());
+            for (auto& item : snapshot.items)
+            {
+                if (currentEmailIds.contains(item.emailId))
+                    item.mailboxNames.clear();
+            }
+        }
         if (!database.commit())
         {
             return javelin::jmap::cache::databaseError(

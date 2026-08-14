@@ -1,5 +1,5 @@
-#include "app/GuiMailApplicationEvents.h"
-#include "app/GuiDaemonSession.h"
+#include "client/GuiMailApplicationEvents.h"
+#include "client/GuiDaemonSession.h"
 
 #include <catch2/catch_test_macros.hpp>
 

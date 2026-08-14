@@ -4,7 +4,6 @@
 #include "app/MessageListSession.h"
 #include "app/MessageListSessionFactory.h"
 #include "app/RefreshGeneration.h"
-#include "jmap/cache/QueryReader.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
 
@@ -26,8 +25,7 @@ namespace javelin::app
     {
       public:
         SearchSession(std::string accountId, javelin::jmap::search::EmailSearchCriteria criteria,
-                      javelin::jmap::query::EmailListSort sort,
-                      javelin::jmap::cache::QueryReader& queryReader,
+                      javelin::jmap::query::EmailListSort sort, QString databasePath,
                       MessageListMaterializationPort& materializationPort,
                       MailApplicationEventsPort& events, std::size_t windowSize,
                       std::optional<RestoredSearchState> restored = std::nullopt,
@@ -72,7 +70,7 @@ namespace javelin::app
         std::string m_query;
         javelin::jmap::search::EmailSearchCriteria m_criteria;
         javelin::jmap::query::EmailListSort m_sort;
-        javelin::jmap::cache::QueryReader& m_queryReader;
+        QString m_databasePath;
         MessageListMaterializationPort& m_materializationPort;
         MailApplicationEventsPort& m_events;
         std::size_t m_windowSize;

@@ -975,6 +975,18 @@ namespace javelin::gui::shell
         }
     }
 
+    bool CalendarTabController::available(const std::optional<std::string_view> accountId) const
+    {
+        const auto accounts = m_calendarReader.accounts();
+        const auto* values =
+            std::get_if<std::vector<javelin::jmap::cache::CalendarAccount>>(&accounts);
+        if (values == nullptr)
+            return false;
+        return !accountId.has_value() ||
+               std::ranges::any_of(*values, [accountId](const auto& account)
+                                   { return account.accountId == *accountId; });
+    }
+
     bool CalendarTabController::refresh(const TabState* tab)
     {
         auto* widget = widgetForTab(tab);

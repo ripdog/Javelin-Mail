@@ -2,7 +2,7 @@
 
 #include "app/AccountRefreshApplicationPorts.h"
 #include "gui/settings/ConnectionSettings.h"
-#include "jmap/JmapCore.h"
+#include "jmap/AccountBootstrapClient.h"
 #include "jmap/OperationError.h"
 #include "jmap/contacts/ContactResults.h"
 

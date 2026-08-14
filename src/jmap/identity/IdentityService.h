@@ -1,6 +1,8 @@
 #pragma once
 
-#include "jmap/JmapCore.h"
+#include "storage/sqlite/DatabaseConnection.h"
+
+#include "jmap/api/LiveConnectionSettings.h"
 #include "jmap/identity/IdentityCommandTypes.h"
 
 #include <QCoroTask>

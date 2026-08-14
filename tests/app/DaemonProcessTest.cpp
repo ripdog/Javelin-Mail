@@ -1,20 +1,25 @@
-#include "app/DaemonProcess.h"
+#include "daemon/DaemonProcess.h"
+#include "app/AccountRuntimeManager.h"
 #include "app/CacheLocationProvider.h"
-#include "app/DaemonRemoteActionDispatcher.h"
-#include "app/DaemonServices.h"
 #include "app/LogStore.h"
-#include "app/MailApplicationService.h"
+#include "app/MailMutationApplicationService.h"
+#include "app/MailQueryApplicationService.h"
 #include "app/MailboxTreeCacheRead.h"
 #include "app/MessageListMaterializationPort.h"
 #include "app/RemoteCodec.h"
-#include "jmap/cache/Database.h"
+#include "app/undo/UndoManager.h"
+#include "daemon/DaemonServices.h"
+#include "daemon/actions/DaemonRemoteActionDispatcher.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/QueryWindowReadRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
+#include "protocol/actions/ActionCatalog.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroTask>
 #include <catch2/catch_test_macros.hpp>
@@ -50,6 +55,15 @@ namespace
         std::unique_ptr<QCoreApplication> m_application;
     };
 
+    template <typename Action, typename... Arguments>
+    [[nodiscard]] QByteArray actionPayload(const Arguments&... arguments)
+    {
+        auto encoded =
+            javelin::app::remote::encodeVersioned<Action::requestSchemaVersion>(arguments...);
+        REQUIRE(std::holds_alternative<QByteArray>(encoded));
+        return std::get<QByteArray>(std::move(encoded));
+    }
+
     [[nodiscard]] std::shared_ptr<javelin::app::MemoryAccountCredentialStore> testCredentialStore()
     {
         static auto store = std::make_shared<javelin::app::MemoryAccountCredentialStore>();
@@ -77,6 +91,7 @@ namespace
             .cacheRootPath = cacheRoot,
             .settingsPath = settingsPath,
             .credentialStore = testCredentialStore(),
+            .enableNetworkReachability = false,
         };
     }
 } // namespace
@@ -144,14 +159,14 @@ TEST_CASE("daemon log subscription publishes history and live entries", "[app][d
                   .subsystem = QStringLiteral("daemon.test"),
                   .message = QStringLiteral("historical")});
 
-    const auto subscribePayload = javelin::app::remote::encode(true);
-    REQUIRE(std::holds_alternative<QByteArray>(subscribePayload));
+    const auto subscribePayload =
+        actionPayload<javelin::protocol::actions::DeveloperLogSetSubscribed>(true);
     const auto subscribe = dispatcher.dispatch({
         .id = {.value = QUuid::createUuid()},
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::DeveloperLogSetSubscribed,
-                .payload = std::get<QByteArray>(subscribePayload),
+                .action = javelin::protocol::actions::DeveloperLogSetSubscribed::id,
+                .payload = subscribePayload,
             },
     });
     REQUIRE(std::holds_alternative<javelin::protocol::CommandAccepted>(subscribe));
@@ -167,14 +182,14 @@ TEST_CASE("daemon log subscription publishes history and live entries", "[app][d
     REQUIRE(eventSink.events.back().entries.size() == 1);
     CHECK(eventSink.events.back().entries.front().message == QStringLiteral("live"));
 
-    const auto unsubscribePayload = javelin::app::remote::encode(false);
-    REQUIRE(std::holds_alternative<QByteArray>(unsubscribePayload));
+    const auto unsubscribePayload =
+        actionPayload<javelin::protocol::actions::DeveloperLogSetSubscribed>(false);
     const auto unsubscribe = dispatcher.dispatch({
         .id = {.value = QUuid::createUuid()},
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::DeveloperLogSetSubscribed,
-                .payload = std::get<QByteArray>(unsubscribePayload),
+                .action = javelin::protocol::actions::DeveloperLogSetSubscribed::id,
+                .payload = unsubscribePayload,
             },
     });
     REQUIRE(std::holds_alternative<javelin::protocol::CommandAccepted>(unsubscribe));
@@ -232,15 +247,14 @@ TEST_CASE("account bootstrap hydrates credentials before reaching the JMAP servi
                      .oauthClientId = {}},
         .mailboxIds = {},
     };
-    const auto payload = javelin::app::remote::encode(intent);
-    REQUIRE(std::holds_alternative<QByteArray>(payload));
+    const auto payload = actionPayload<javelin::protocol::actions::AccountBootstrap>(intent);
 
     const auto reply = dispatcher.dispatch({
         .id = {.value = QUuid::createUuid()},
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::AccountBootstrap,
-                .payload = std::get<QByteArray>(payload),
+                .action = javelin::protocol::actions::AccountBootstrap::id,
+                .payload = payload,
             },
     });
     const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reply);
@@ -657,7 +671,7 @@ TEST_CASE("completed offline mailbox pages materialize without server access",
         "'account-1','EmailQuery',"
         "'mailbox:archive|sort:receivedAt:desc|collapseThreads:true','state-current')")));
 
-    services.mailService().applySettings({javelin::app::AccountSyncConfiguration{
+    services.accountRuntimeManager().applySettings({javelin::app::AccountSyncConfiguration{
         .settings = {.connectionId = "connection-1",
                      .revision = 0,
                      .sessionUrl = "http://127.0.0.1:9/jmap",
@@ -672,7 +686,7 @@ TEST_CASE("completed offline mailbox pages materialize without server access",
         .notificationMailboxIds = {},
     }});
 
-    const auto result = QCoro::waitFor(services.mailService().requestMailboxWindow({
+    const auto result = QCoro::waitFor(services.mailQueryApplicationService().requestMailboxWindow({
         .accountId = "account-1",
         .mailboxId = "archive",
         .offset = 100,
@@ -690,7 +704,7 @@ TEST_CASE("completed offline mailbox pages materialize without server access",
     CHECK(summary->queryState == "state-current");
 }
 
-TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritatively",
+TEST_CASE("collapsed Thread archive uses cached source members without Thread refetch",
           "[app][daemon][mail][optimistic][thread-coverage]")
 {
     ApplicationGuard application;
@@ -720,7 +734,7 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     inbox.id = "inbox";
     inbox.name = "Inbox";
     inbox.role = "inbox";
-    inbox.totalEmails = 2;
+    inbox.totalEmails = 3;
     inbox.totalThreads = 1;
     inbox.isSubscribed = true;
     inbox.myRights = rights;
@@ -743,12 +757,16 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     auto child = email;
     child.id = "email-2";
     child.receivedAt = "2026-08-06T03:00:00Z";
+    auto secondChild = email;
+    secondChild.id = "email-3";
+    secondChild.receivedAt = "2026-08-06T02:00:00Z";
     javelin::jmap::cache::EmailRepository emails{connection};
-    REQUIRE_FALSE(emails.replaceAll("account-1", {email, child}).has_value());
+    REQUIRE_FALSE(emails.replaceAll("account-1", {email, child, secondChild}).has_value());
     javelin::jmap::cache::ThreadRepository threads{connection};
-    REQUIRE_FALSE(
-        threads.upsertMany("account-1", {{.id = "thread-1", .emailIds = {"email-1", "email-2"}}})
-            .has_value());
+    REQUIRE_FALSE(threads
+                      .upsertMany("account-1", {{.id = "thread-1",
+                                                 .emailIds = {"email-1", "email-2", "email-3"}}})
+                      .has_value());
 
     const auto inboxQueryKey = javelin::jmap::sync::mailboxQueryKey({
         .mailboxId = "inbox",
@@ -792,32 +810,53 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
                       })
                       .has_value());
 
+    // A mailbox-scoped collapsed Thread must not need a synchronous Thread/get. Even with
+    // normalized membership stale, the source mailbox projection already identifies its members.
+    REQUIRE_FALSE(threads.markStale("account-1", std::vector<std::string>{"thread-1"}).has_value());
+
     std::vector<javelin::app::MailCacheChange> cacheChanges;
-    QObject::connect(&services.mailService(), &javelin::app::MailApplicationService::cacheCommitted,
-                     &services.mailService(), [&cacheChanges](javelin::app::MailCacheChange change)
+    QObject::connect(&services.mailMutationApplicationService(),
+                     &javelin::app::MailMutationApplicationService::cacheCommitted,
+                     &services.mailMutationApplicationService(),
+                     [&cacheChanges](javelin::app::MailCacheChange change)
                      { cacheChanges.push_back(std::move(change)); });
 
-    const auto queued = QCoro::waitFor(services.mailService().queueMailboxSelectionMutation({
-        .accountId = "account-1",
-        .selection = {javelin::app::SelectedCollapsedThread{
-            .threadId = "thread-1",
-        }},
-        .operation = javelin::app::MailboxSelectionOperation::Archive,
-        .sourceMailboxId = "inbox",
-        .destinationMailboxId = std::nullopt,
-    }));
+    const auto queued =
+        QCoro::waitFor(services.mailMutationApplicationService().queueMailboxSelectionMutation({
+            .accountId = "account-1",
+            .selection = {javelin::app::SelectedCollapsedThread{
+                .threadId = "thread-1",
+            }},
+            .operation = javelin::app::MailboxSelectionOperation::Archive,
+            .sourceMailboxId = "inbox",
+            .destinationMailboxId = std::nullopt,
+        }));
     const auto* summary = std::get_if<javelin::app::QueuedMailboxSelectionMutation>(&queued);
     REQUIRE(summary != nullptr);
-    CHECK(summary->queuedEmailCount == 2);
-    CHECK(summary->queuedMutations.size() == 2);
+    CHECK(summary->queuedEmailCount == 3);
+    CHECK(summary->queuedMutations.size() == 3);
+    REQUIRE(summary->historyEntryId.has_value());
+    const auto historyEntry =
+        std::ranges::find(services.undoManager().entries(), *summary->historyEntryId,
+                          &javelin::app::undo::HistoryEntry::entryId);
+    REQUIRE(historyEntry != services.undoManager().entries().end());
+    const auto* archiveHistory =
+        std::get_if<javelin::app::undo::MailPatchHistory>(&historyEntry->payload);
+    REQUIRE(archiveHistory != nullptr);
+    REQUIRE(archiveHistory->items.size() == 3);
+    CHECK(archiveHistory->items[0].inverse.addMailboxIds == std::vector<std::string>{"inbox"});
+    CHECK(archiveHistory->items[1].inverse.addMailboxIds == std::vector<std::string>{"inbox"});
+    CHECK(archiveHistory->items[2].inverse.addMailboxIds == std::vector<std::string>{"inbox"});
     REQUIRE(cacheChanges.size() == 1);
     CHECK(cacheChanges.front().optimisticProjection);
     CHECK(cacheChanges.front().mailboxIds.size() == 2);
     CHECK(cacheChanges.front().mailboxIds.contains(QStringLiteral("inbox")));
     CHECK(cacheChanges.front().mailboxIds.contains(QStringLiteral("archive")));
 
-    javelin::jmap::cache::QueryService queries{connection};
-    const auto inboxPageResult = queries.loadMailboxWindow("account-1", inboxQueryKey, 0, 100, {});
+    javelin::jmap::cache::MailboxMessageReadRepository mailboxMessages{connection};
+    javelin::jmap::cache::QueryWindowReadRepository queryWindows{connection, mailboxMessages};
+    const auto inboxPageResult =
+        queryWindows.loadMailboxWindow("account-1", inboxQueryKey, 0, 100, {});
     const auto* inboxPage =
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&inboxPageResult);
     REQUIRE(inboxPage != nullptr);
@@ -826,7 +865,7 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     CHECK((*inboxPage)->items.empty());
 
     const auto archivePageResult =
-        queries.loadMailboxWindow("account-1", archiveQueryKey, 0, 100, {});
+        queryWindows.loadMailboxWindow("account-1", archiveQueryKey, 0, 100, {});
     const auto* archivePage =
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&archivePageResult);
     REQUIRE(archivePage != nullptr);
@@ -835,7 +874,7 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     REQUIRE((*archivePage)->items.size() == 1);
     CHECK((*archivePage)->items.front().emailId == "email-1");
 
-    services.mailService().applySettings({javelin::app::AccountSyncConfiguration{
+    services.accountRuntimeManager().applySettings({javelin::app::AccountSyncConfiguration{
         .settings = {.connectionId = "connection-1",
                      .revision = 0,
                      .sessionUrl = "http://127.0.0.1:9/jmap",
@@ -850,16 +889,17 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
         .notificationMailboxIds = {},
     }});
 
-    const auto materialized = QCoro::waitFor(services.mailService().requestMailboxWindow({
-        .accountId = "account-1",
-        .mailboxId = "archive",
-        .offset = 0,
-        .limit = 100,
-        .sort = {},
-        .forceRefresh = false,
-        .anchor = std::nullopt,
-        .anchorOffset = 1,
-    }));
+    const auto materialized =
+        QCoro::waitFor(services.mailQueryApplicationService().requestMailboxWindow({
+            .accountId = "account-1",
+            .mailboxId = "archive",
+            .offset = 0,
+            .limit = 100,
+            .sort = {},
+            .forceRefresh = false,
+            .anchor = std::nullopt,
+            .anchorOffset = 1,
+        }));
     const auto* materializedSummary =
         std::get_if<javelin::app::MailboxWindowSummary>(&materialized);
     REQUIRE(materializedSummary != nullptr);
@@ -871,28 +911,30 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     REQUIRE(offlineScope.exec(QStringLiteral(
         "INSERT INTO offline_mailbox_scopes(account_id,mailbox_id,desired,status,generation,"
         "completed_generation) VALUES('account-1','archive',1,'complete',3,3)")));
-    const auto offlineFlagged = QCoro::waitFor(
-        services.mailService().queueSetMessagesFlagged("account-1", "archive",
-                                                       {javelin::app::SelectedCollapsedThread{
-                                                           .threadId = "thread-1",
-                                                       }},
-                                                       true));
+    const auto offlineFlagged =
+        QCoro::waitFor(services.mailMutationApplicationService().queueSetMessagesFlagged(
+            "account-1", "archive",
+            {javelin::app::SelectedCollapsedThread{
+                .threadId = "thread-1",
+            }},
+            true));
     const auto* offlineSummary =
         std::get_if<javelin::app::QueuedMessageSelectionMutation>(&offlineFlagged);
     REQUIRE(offlineSummary != nullptr);
-    CHECK(offlineSummary->queuedEmailCount == 2);
+    CHECK(offlineSummary->queuedEmailCount == 3);
 
-    const auto unavailable = QCoro::waitFor(
-        services.mailService().queueSetMessagesFlagged("account-1", std::nullopt,
-                                                       {javelin::app::SelectedCollapsedThread{
-                                                           .threadId = "thread-1",
-                                                       }},
-                                                       true));
+    const auto unavailable =
+        QCoro::waitFor(services.mailMutationApplicationService().queueSetMessagesFlagged(
+            "account-1", std::nullopt,
+            {javelin::app::SelectedCollapsedThread{
+                .threadId = "thread-1",
+            }},
+            true));
     CHECK(std::holds_alternative<javelin::jmap::OperationError>(unavailable));
     QSqlQuery mutationCount{connection.database()};
     REQUIRE(mutationCount.exec(QStringLiteral("SELECT COUNT(*) FROM mutation_journal")));
     REQUIRE(mutationCount.next());
-    CHECK(mutationCount.value(0).toInt() == 4);
+    CHECK(mutationCount.value(0).toInt() == 6);
 }
 
 TEST_CASE("Thread materialization invalidates affected windows once per batch",
@@ -977,13 +1019,16 @@ TEST_CASE("Thread materialization invalidates affected windows once per batch",
                       .has_value());
 
     std::vector<javelin::app::MailCacheChange> changes;
-    QObject::connect(&services.mailService(), &javelin::app::MailApplicationService::cacheCommitted,
-                     &services.mailService(), [&changes](javelin::app::MailCacheChange change)
+    QObject::connect(&services.mailQueryApplicationService(),
+                     &javelin::app::MailQueryApplicationService::cacheCommitted,
+                     &services.mailQueryApplicationService(),
+                     [&changes](javelin::app::MailCacheChange change)
                      { changes.push_back(std::move(change)); });
 
-    services.mailService().publishThreadMaterializationCommitted(QStringLiteral("account-1"), {});
+    services.mailQueryApplicationService().publishThreadMaterializationCommitted(
+        QStringLiteral("account-1"), {});
     CHECK(changes.empty());
-    services.mailService().publishThreadMaterializationCommitted(
+    services.mailQueryApplicationService().publishThreadMaterializationCommitted(
         QStringLiteral("account-1"), {QStringLiteral("thread-a"), QStringLiteral("thread-b")});
 
     REQUIRE(changes.size() == 1);
@@ -1049,14 +1094,14 @@ TEST_CASE("daemon replays completed remote action results", "[app][daemon][ipc][
         runtimeDirectory, cacheRoot, temporaryDirectory.filePath(QStringLiteral("settings.ini")))};
     REQUIRE_FALSE(process.start().has_value());
 
-    const auto encoded = javelin::app::remote::encode(std::string{"missing-owner"});
-    REQUIRE(std::holds_alternative<QByteArray>(encoded));
+    const auto encoded = actionPayload<javelin::protocol::actions::ContactRequestRefresh>(
+        std::string{"missing-owner"});
     const javelin::protocol::CommandRequest request{
         .id = {.value = QUuid::createUuid()},
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::ContactRequestRefresh,
-                .payload = std::get<QByteArray>(encoded),
+                .action = javelin::protocol::actions::ContactRequestRefresh::id,
+                .payload = encoded,
             },
     };
     const auto admitted = process.handleCommand(request);
@@ -1123,8 +1168,8 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
         .id = commandId,
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::WorkSummary,
-                .payload = {},
+                .action = javelin::protocol::actions::WorkSummary::id,
+                .payload = actionPayload<javelin::protocol::actions::WorkSummary>(),
             },
     });
     const auto* summaryAccepted = std::get_if<javelin::protocol::CommandAccepted>(&first);
@@ -1132,14 +1177,14 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
     CHECK(summaryAccepted->epoch == epoch);
     CHECK(summaryAccepted->changedDomains.empty());
 
-    const auto jobId = javelin::app::remote::encode(std::string{"missing-job"});
-    REQUIRE(std::holds_alternative<QByteArray>(jobId));
+    const auto jobId =
+        actionPayload<javelin::protocol::actions::WorkRetry>(std::string{"missing-job"});
     const auto workMutation = dispatcher.dispatch({
         .id = {.value = QUuid::createUuid()},
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::WorkRetry,
-                .payload = std::get<QByteArray>(jobId),
+                .action = javelin::protocol::actions::WorkRetry::id,
+                .payload = jobId,
             },
     });
     const auto* workAccepted = std::get_if<javelin::protocol::CommandAccepted>(&workMutation);
@@ -1148,14 +1193,14 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
     CHECK(workAccepted->changedDomains ==
           std::vector{javelin::protocol::ChangedDomain::BackgroundJobs});
 
-    const auto differentJobId = javelin::app::remote::encode(std::string{"different-job"});
-    REQUIRE(std::holds_alternative<QByteArray>(differentJobId));
+    const auto differentJobId =
+        actionPayload<javelin::protocol::actions::WorkRetry>(std::string{"different-job"});
     const auto changedPayloadReplay = dispatcher.dispatch({
         .id = workAccepted->id,
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::WorkRetry,
-                .payload = std::get<QByteArray>(differentJobId),
+                .action = javelin::protocol::actions::WorkRetry::id,
+                .payload = differentJobId,
             },
     });
     const auto* changedPayloadRejected =
@@ -1169,8 +1214,8 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
         .id = commandId,
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::WorkList,
-                .payload = {},
+                .action = javelin::protocol::actions::WorkList::id,
+                .payload = actionPayload<javelin::protocol::actions::WorkList>(),
             },
     });
     const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reused);
@@ -1178,14 +1223,14 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
     CHECK(rejected->error.code == javelin::protocol::BoundaryErrorCode::InvalidRequest);
 
     const auto acknowledgementPayload =
-        javelin::app::remote::encode(commandId.value.toString(QUuid::WithoutBraces));
-    REQUIRE(std::holds_alternative<QByteArray>(acknowledgementPayload));
+        actionPayload<javelin::protocol::actions::AcknowledgeRemoteActionResult>(
+            commandId.value.toString(QUuid::WithoutBraces));
     const auto acknowledgement = dispatcher.dispatch({
         .id = {.value = QUuid::createUuid()},
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::AcknowledgeRemoteActionResult,
-                .payload = std::get<QByteArray>(acknowledgementPayload),
+                .action = javelin::protocol::actions::AcknowledgeRemoteActionResult::id,
+                .payload = acknowledgementPayload,
             },
     });
     REQUIRE(std::holds_alternative<javelin::protocol::CommandAccepted>(acknowledgement));
@@ -1194,11 +1239,73 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
         .id = commandId,
         .command =
             javelin::protocol::RemoteActionCommand{
-                .kind = javelin::protocol::RemoteActionKind::WorkList,
-                .payload = {},
+                .action = javelin::protocol::actions::WorkList::id,
+                .payload = actionPayload<javelin::protocol::actions::WorkList>(),
             },
     });
     CHECK(std::holds_alternative<javelin::protocol::CommandAccepted>(reusedAfterAcknowledgement));
+}
+
+TEST_CASE("daemon action boundary rejects unknown actions and oversized payloads",
+          "[app][daemon][ipc][protocol]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+
+    auto locationResult = javelin::app::CacheLocationProvider{cacheRoot}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(locationResult));
+    javelin::app::DaemonServices services{
+        std::get<javelin::app::CacheLocation>(std::move(locationResult))};
+
+    struct EventSink final : javelin::protocol::BoundaryEventSink
+    {
+        void onBoundaryEvent(const javelin::protocol::BoundaryEvent&) override
+        {
+        }
+    } eventSink;
+
+    javelin::app::DaemonRemoteActionDispatcher dispatcher{
+        services,
+        eventSink,
+        [] { return javelin::protocol::InvalidationEpoch{.value = 1}; },
+        []() -> std::optional<javelin::protocol::BoundaryError> { return std::nullopt; },
+        [](javelin::app::AccountAuthenticationResult result) { return result; },
+        [](javelin::app::AccountConnectionSettings settings)
+            -> std::variant<javelin::app::AccountConnectionSettings, QString> { return settings; },
+        [](javelin::app::OAuthRevocationRequest request)
+            -> std::variant<javelin::app::OAuthRevocationRequest, QString> { return request; }};
+
+    const auto unknown = dispatcher.dispatch({
+        .id = {.value = QUuid::createUuid()},
+        .command =
+            javelin::protocol::RemoteActionCommand{
+                .action = {.value = 65000},
+                .payload = {},
+            },
+    });
+    const auto* unknownRejected = std::get_if<javelin::protocol::CommandRejected>(&unknown);
+    REQUIRE(unknownRejected != nullptr);
+    CHECK(unknownRejected->error.code ==
+          javelin::protocol::BoundaryErrorCode::UnsupportedOperation);
+
+    const auto oversized = dispatcher.dispatch({
+        .id = {.value = QUuid::createUuid()},
+        .command =
+            javelin::protocol::RemoteActionCommand{
+                .action = javelin::protocol::actions::WorkSummary::id,
+                .payload = QByteArray(
+                    static_cast<qsizetype>(
+                        javelin::protocol::actions::WorkSummary::maximumPayloadBytes + 1),
+                    'x'),
+            },
+    });
+    const auto* oversizedRejected = std::get_if<javelin::protocol::CommandRejected>(&oversized);
+    REQUIRE(oversizedRejected != nullptr);
+    CHECK(oversizedRejected->error.code == javelin::protocol::BoundaryErrorCode::ValueTooLarge);
 }
 
 TEST_CASE("daemon configures only cached JMAP accounts with the Mail capability",

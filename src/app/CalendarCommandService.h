@@ -4,12 +4,13 @@
 
 namespace javelin::app
 {
-    class MailApplicationService;
+    class CalendarApplicationService;
 
     class CalendarCommandService final : public CalendarCommandPort
     {
       public:
-        explicit CalendarCommandService(MailApplicationService& service, QObject* parent = nullptr);
+        explicit CalendarCommandService(CalendarApplicationService& service,
+                                        QObject* parent = nullptr);
 
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
         requestCalendarRange(std::string ownerAccountId,
@@ -48,7 +49,7 @@ namespace javelin::app
                            undo::CommandOrigin origin = undo::CommandOrigin::User) override;
 
       private:
-        MailApplicationService& m_service;
+        CalendarApplicationService& m_service;
     };
 
 } // namespace javelin::app

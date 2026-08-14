@@ -1,7 +1,7 @@
 #pragma once
 
 #include "jmap/calendar/CalendarReader.h"
-#include "protocol/ProcessBoundary.h"
+#include "protocol/ProtocolTypes.h"
 
 #include <QString>
 #include <QStringList>

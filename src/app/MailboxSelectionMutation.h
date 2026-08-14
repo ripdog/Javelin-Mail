@@ -1,8 +1,9 @@
 #pragma once
 
+#include "jmap/cache/MailboxReadRepository.h"
+
 #include "app/MessageSelection.h"
 #include "jmap/EmailMutation.h"
-#include "jmap/cache/QueryService.h"
 #include "jmap/domain/MailEntities.h"
 
 #include <QString>

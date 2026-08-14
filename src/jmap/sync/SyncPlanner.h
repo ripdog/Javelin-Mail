@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storage/DatabaseError.h"
+
 #include "jmap/cache/SyncStateRepository.h"
 
 #include <span>

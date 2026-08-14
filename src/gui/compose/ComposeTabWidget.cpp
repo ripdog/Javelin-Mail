@@ -1,16 +1,20 @@
 #include "gui/compose/ComposeTabWidget.h"
 
 #include "app/ComposeApplicationPorts.h"
+#include "gui/compose/AttachmentController.h"
+#include "gui/compose/ComposeAutosaveController.h"
+
 #include "gui/compose/ComposeBodyConverter.h"
+#include "gui/compose/ComposeIdentityController.h"
+#include "gui/compose/ComposeRecipientController.h"
 #include "gui/compose/ComposeUiPreferences.h"
 #include "gui/compose/ComposerInlineImageCodec.h"
-#include "gui/compose/IdentityPresentation.h"
+#include "gui/compose/InlineImageController.h"
 #include "gui/compose/JavelinComposerEdit.h"
-#include "gui/compose/SignatureTrackingPolicy.h"
+#include "gui/compose/SignatureController.h"
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/GuiSettings.h"
-#include "gui/widgets/EmailAddressLineEdit.h"
 #include "jmap/cache/AccountReadRepository.h"
 #include "jmap/cache/IdentityReader.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
@@ -96,12 +100,12 @@ namespace javelin::gui::compose
 
         constexpr auto richEditorTabIndex = 0;
         constexpr auto previewTabIndex = 1;
-        constexpr auto senderIdentityIdRole = Qt::UserRole;
-        constexpr auto senderAccountIdRole = Qt::UserRole + 1;
-        constexpr auto senderEmailRole = Qt::UserRole + 2;
-        constexpr auto senderTextSignatureRole = Qt::UserRole + 3;
-        constexpr auto senderHtmlSignatureRole = Qt::UserRole + 4;
-        constexpr auto senderBccRole = Qt::UserRole + 5;
+        constexpr auto senderIdentityIdRole = ComposeIdentityController::identityIdRole;
+        constexpr auto senderAccountIdRole = ComposeIdentityController::accountIdRole;
+        constexpr auto senderEmailRole = ComposeIdentityController::emailRole;
+        constexpr auto senderTextSignatureRole = ComposeIdentityController::textSignatureRole;
+        constexpr auto senderHtmlSignatureRole = ComposeIdentityController::htmlSignatureRole;
+        constexpr auto senderBccRole = ComposeIdentityController::bccRole;
 
         struct ImageInsertTiming
         {
@@ -109,22 +113,6 @@ namespace javelin::gui::compose
             std::optional<qint64> acceptedAtMilliseconds;
             QString sourceFilePath;
             QMetaObject::Connection documentChangeConnection;
-        };
-
-        struct PreparedInlineImage
-        {
-            QString filePath;
-            QString displayName;
-            QString mediaType;
-            QString error;
-            qint64 size = 0;
-            qint64 processingMilliseconds = 0;
-            bool reencoded = false;
-
-            [[nodiscard]] bool succeeded() const
-            {
-                return error.isEmpty();
-            }
         };
 
         [[nodiscard]] QString imageDialogSourceFilePath(const QDialog& dialog)
@@ -164,205 +152,6 @@ namespace javelin::gui::compose
             return i18n("Compose");
         }
 
-        [[nodiscard]] QString displayAddress(const javelin::jmap::domain::EmailAddress& address)
-        {
-            if (address.name.has_value() && !address.name->empty())
-            {
-                return QStringLiteral("%1 <%2>").arg(QString::fromStdString(*address.name),
-                                                     QString::fromStdString(address.email));
-            }
-
-            return QString::fromStdString(address.email);
-        }
-
-        [[nodiscard]] QString
-        formatAddresses(const std::vector<javelin::jmap::domain::EmailAddress>& addresses)
-        {
-            QStringList parts;
-            for (const auto& address : addresses)
-            {
-                parts.push_back(displayAddress(address));
-            }
-            return parts.join(QStringLiteral(", "));
-        }
-
-        [[nodiscard]] std::optional<javelin::jmap::domain::EmailAddress>
-        parseAddressToken(const QString& token)
-        {
-            const auto trimmed = token.trimmed();
-            if (trimmed.isEmpty())
-            {
-                return std::nullopt;
-            }
-
-            const auto openBracket = trimmed.lastIndexOf(QLatin1Char('<'));
-            const auto closeBracket = trimmed.lastIndexOf(QLatin1Char('>'));
-            if (openBracket >= 0 && closeBracket > openBracket)
-            {
-                const auto name = trimmed.left(openBracket).trimmed().remove(QLatin1Char('"'));
-                const auto email =
-                    trimmed.mid(openBracket + 1, closeBracket - openBracket - 1).trimmed();
-                if (!email.contains(QLatin1Char('@')))
-                {
-                    return std::nullopt;
-                }
-                return javelin::jmap::domain::EmailAddress{
-                    .name = name.isEmpty() ? std::nullopt
-                                           : std::optional<std::string>{name.toStdString()},
-                    .email = email.toStdString(),
-                };
-            }
-
-            if (!trimmed.contains(QLatin1Char('@')))
-            {
-                return std::nullopt;
-            }
-
-            return javelin::jmap::domain::EmailAddress{
-                .name = std::nullopt,
-                .email = trimmed.toStdString(),
-            };
-        }
-
-        [[nodiscard]] std::vector<javelin::jmap::domain::EmailAddress>
-        parseAddresses(const QString& value)
-        {
-            std::vector<javelin::jmap::domain::EmailAddress> addresses;
-            QString current;
-            bool insideAngleBrackets = false;
-            for (const auto character : value)
-            {
-                if (character == QLatin1Char('<'))
-                {
-                    insideAngleBrackets = true;
-                }
-                else if (character == QLatin1Char('>'))
-                {
-                    insideAngleBrackets = false;
-                }
-
-                if (!insideAngleBrackets &&
-                    (character == QLatin1Char(',') || character == QLatin1Char(';')))
-                {
-                    if (const auto parsed = parseAddressToken(current))
-                    {
-                        addresses.push_back(*parsed);
-                    }
-                    current.clear();
-                    continue;
-                }
-
-                current.append(character);
-            }
-
-            if (const auto parsed = parseAddressToken(current))
-            {
-                addresses.push_back(*parsed);
-            }
-
-            return addresses;
-        }
-
-        [[nodiscard]] QString attachmentSizeLabel(const std::uint64_t size)
-        {
-            constexpr double kib = 1024.0;
-            constexpr double mib = 1024.0 * kib;
-            constexpr double gib = 1024.0 * mib;
-
-            if (size >= static_cast<std::uint64_t>(gib))
-            {
-                return i18nc("@item file size", "%1 GB",
-                             QString::number(static_cast<double>(size) / gib, 'f', 1));
-            }
-            if (size >= static_cast<std::uint64_t>(mib))
-            {
-                return i18nc("@item file size", "%1 MB",
-                             QString::number(static_cast<double>(size) / mib, 'f', 1));
-            }
-            if (size >= static_cast<std::uint64_t>(kib))
-            {
-                return i18nc("@item file size", "%1 KB",
-                             QString::number(static_cast<double>(size) / kib, 'f', 1));
-            }
-
-            return i18nc("@item file size", "%1 B", static_cast<qulonglong>(size));
-        }
-
-        [[nodiscard]] QString
-        attachmentItemText(const javelin::jmap::submission::DraftAttachment& attachment)
-        {
-            const auto displayName =
-                !attachment.displayName.empty()
-                    ? QString::fromStdString(attachment.displayName)
-                    : QFileInfo{QString::fromStdString(attachment.localFilePath)}.fileName();
-            const auto mediaType = attachment.mediaType.empty()
-                                       ? i18nc("@item unknown attachment media type", "attachment")
-                                       : QString::fromStdString(attachment.mediaType);
-            return QStringLiteral("%1  •  %2  •  %3")
-                .arg(displayName, mediaType, attachmentSizeLabel(attachment.size));
-        }
-
-        [[nodiscard]] QString
-        attachmentDisplayName(const javelin::jmap::submission::DraftAttachment& attachment)
-        {
-            if (!attachment.displayName.empty())
-            {
-                return QString::fromStdString(attachment.displayName);
-            }
-            if (!attachment.localFilePath.empty())
-            {
-                return QFileInfo{QString::fromStdString(attachment.localFilePath)}.fileName();
-            }
-            return i18n("Attachment");
-        }
-
-        [[nodiscard]] QIcon
-        attachmentIcon(const javelin::jmap::submission::DraftAttachment& attachment)
-        {
-            QFileIconProvider iconProvider;
-            auto icon = iconProvider.icon(QFileInfo{attachmentDisplayName(attachment)});
-            if (!icon.isNull())
-            {
-                return icon;
-            }
-
-            const QMimeDatabase mimeDatabase;
-            const auto mimeType =
-                mimeDatabase.mimeTypeForName(QString::fromStdString(attachment.mediaType));
-            icon = QIcon::fromTheme(mimeType.iconName());
-            if (icon.isNull())
-            {
-                icon = QIcon::fromTheme(mimeType.genericIconName());
-            }
-            if (icon.isNull())
-            {
-                icon = QIcon::fromTheme(QStringLiteral("mail-attachment"));
-            }
-            if (icon.isNull())
-            {
-                icon = QApplication::style()->standardIcon(QStyle::SP_FileIcon);
-            }
-            return icon;
-        }
-
-        [[nodiscard]] bool
-        isImageAttachment(const javelin::jmap::submission::DraftAttachment& attachment)
-        {
-            if (!attachment.mediaType.empty())
-            {
-                return attachment.mediaType.rfind("image/", 0) == 0;
-            }
-            if (attachment.localFilePath.empty())
-            {
-                return false;
-            }
-
-            QMimeDatabase mimeDatabase;
-            const auto mimeType = mimeDatabase.mimeTypeForFile(
-                QString::fromStdString(attachment.localFilePath), QMimeDatabase::MatchContent);
-            return mimeType.name().startsWith(QStringLiteral("image/"));
-        }
-
         [[nodiscard]] QString detectedMediaType(const QString& filePath)
         {
             QMimeDatabase mimeDatabase;
@@ -371,208 +160,6 @@ namespace javelin::gui::compose
             return mimeType.isValid() ? mimeType.name()
                                       : QStringLiteral("application/octet-stream");
         }
-
-        [[nodiscard]] std::string newContentId()
-        {
-            const auto uuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            return QStringLiteral("javelin-%1@inline").arg(uuid).toStdString();
-        }
-
-        [[nodiscard]] QString draftAssetDirectory(const std::string& composeSessionId)
-        {
-            return QDir{QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)}.filePath(
-                QStringLiteral("draft-assets/%1").arg(QString::fromStdString(composeSessionId)));
-        }
-
-        [[nodiscard]] bool canPreserveInlineImage(const QString& mediaType)
-        {
-            return mediaType == QStringLiteral("image/png") ||
-                   mediaType == QStringLiteral("image/jpeg") ||
-                   mediaType == QStringLiteral("image/gif");
-        }
-
-        [[nodiscard]] PreparedInlineImage prepareInlineImage(QString sourceFilePath, QImage image,
-                                                             QString destinationDirectory,
-                                                             QString assetId)
-        {
-            QElapsedTimer elapsed;
-            elapsed.start();
-
-            PreparedInlineImage result;
-            if (!QDir{}.mkpath(destinationDirectory))
-            {
-                result.error = QStringLiteral("Could not create storage for the inserted image.");
-                result.processingMilliseconds = elapsed.elapsed();
-                return result;
-            }
-
-            const QFileInfo sourceFile{sourceFilePath};
-            const auto sourceMediaType = sourceFile.exists() && sourceFile.isFile()
-                                             ? detectedMediaType(sourceFilePath)
-                                             : QString{};
-            if (!sourceMediaType.isEmpty() && canPreserveInlineImage(sourceMediaType))
-            {
-                const auto suffix =
-                    sourceMediaType == QStringLiteral("image/jpeg")  ? QStringLiteral("jpg")
-                    : sourceMediaType == QStringLiteral("image/gif") ? QStringLiteral("gif")
-                                                                     : QStringLiteral("png");
-                result.filePath = QDir{destinationDirectory}.filePath(
-                    QStringLiteral("inserted-%1.%2").arg(assetId, suffix));
-                if (!QFile::copy(sourceFile.absoluteFilePath(), result.filePath))
-                {
-                    result.error = QStringLiteral("Could not stage the inserted image.");
-                    result.filePath.clear();
-                    result.processingMilliseconds = elapsed.elapsed();
-                    return result;
-                }
-                result.displayName = sourceFile.fileName();
-                result.mediaType = sourceMediaType;
-            }
-            else
-            {
-                result.reencoded = true;
-                result.filePath = QDir{destinationDirectory}.filePath(
-                    QStringLiteral("inserted-%1.png").arg(assetId));
-                if (!image.save(result.filePath, "PNG"))
-                {
-                    result.error = QStringLiteral("Could not encode the inserted image as PNG.");
-                    result.filePath.clear();
-                    result.processingMilliseconds = elapsed.elapsed();
-                    return result;
-                }
-                const auto sourceBaseName = sourceFile.completeBaseName().trimmed();
-                result.displayName = sourceBaseName.isEmpty()
-                                         ? QStringLiteral("image.png")
-                                         : QStringLiteral("%1.png").arg(sourceBaseName);
-                result.mediaType = QStringLiteral("image/png");
-            }
-
-            result.size = QFileInfo{result.filePath}.size();
-            result.processingMilliseconds = elapsed.elapsed();
-            return result;
-        }
-
-        [[nodiscard]] bool documentContainsImageResource(const QTextDocument& document,
-                                                         const QString& resourceName)
-        {
-            for (auto block = document.begin(); block.isValid(); block = block.next())
-            {
-                for (auto fragment = block.begin(); !fragment.atEnd(); ++fragment)
-                {
-                    const auto textFragment = fragment.fragment();
-                    if (textFragment.isValid() && textFragment.charFormat().isImageFormat() &&
-                        textFragment.charFormat().toImageFormat().name() == resourceName)
-                    {
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }
-
-        void removeImageResource(QTextDocument& document, const QString& resourceName)
-        {
-            for (auto block = document.begin(); block.isValid(); block = block.next())
-            {
-                for (auto fragment = block.begin(); !fragment.atEnd(); ++fragment)
-                {
-                    const auto textFragment = fragment.fragment();
-                    if (!textFragment.isValid() || !textFragment.charFormat().isImageFormat() ||
-                        textFragment.charFormat().toImageFormat().name() != resourceName)
-                    {
-                        continue;
-                    }
-
-                    QTextCursor cursor{&document};
-                    cursor.setPosition(textFragment.position());
-                    cursor.setPosition(textFragment.position() + textFragment.length(),
-                                       QTextCursor::KeepAnchor);
-                    cursor.removeSelectedText();
-                    return;
-                }
-            }
-        }
-
-        class DraftAttachmentChip : public QWidget
-        {
-          public:
-            DraftAttachmentChip(const javelin::jmap::submission::DraftAttachment& attachment,
-                                const bool embeddingAllowed, std::function<void()> removeAction,
-                                std::function<void(bool)> embedAction, QWidget* parent = nullptr)
-                : QWidget(parent), m_removeAction(std::move(removeAction)),
-                  m_embedAction(std::move(embedAction))
-            {
-                setToolTip(attachmentItemText(attachment));
-
-                auto* layout = new QHBoxLayout(this);
-                layout->setContentsMargins(4, 0, 2, 0);
-                layout->setSpacing(4);
-
-                auto* iconLabel = new QLabel(this);
-                iconLabel->setPixmap(attachmentIcon(attachment).pixmap(16, 16));
-                iconLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-
-                auto* nameLabel = new QLabel(attachmentDisplayName(attachment), this);
-                nameLabel->setMinimumWidth(80);
-                nameLabel->setMaximumWidth(220);
-                nameLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
-
-                auto* sizeLabel = new QLabel(attachmentSizeLabel(attachment.size), this);
-                sizeLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
-
-                if (embeddingAllowed && isImageAttachment(attachment))
-                {
-                    auto* attachRadio = new QRadioButton(i18nc("@option:radio", "Attach"), this);
-                    auto* embedRadio = new QRadioButton(i18nc("@option:radio", "Embed"), this);
-                    attachRadio->setChecked(!attachment.inlineDisposition);
-                    embedRadio->setChecked(attachment.inlineDisposition);
-                    attachRadio->setToolTip(i18n("Send this image as an attachment"));
-                    embedRadio->setToolTip(i18n("Show this image in the message body"));
-                    connect(attachRadio, &QRadioButton::toggled, this,
-                            [this](const bool checked)
-                            {
-                                if (checked && m_embedAction)
-                                {
-                                    m_embedAction(false);
-                                }
-                            });
-                    connect(embedRadio, &QRadioButton::toggled, this,
-                            [this](const bool checked)
-                            {
-                                if (checked && m_embedAction)
-                                {
-                                    m_embedAction(true);
-                                }
-                            });
-                    layout->addWidget(attachRadio);
-                    layout->addWidget(embedRadio);
-                }
-
-                auto* removeButton = new QToolButton(this);
-                removeButton->setText(QStringLiteral("x"));
-                removeButton->setToolTip(i18n("Remove attachment"));
-                removeButton->setAccessibleName(i18n("Remove attachment"));
-                removeButton->setAutoRaise(true);
-                removeButton->setFixedSize(22, 22);
-                connect(removeButton, &QToolButton::clicked, this,
-                        [this]
-                        {
-                            if (m_removeAction)
-                            {
-                                m_removeAction();
-                            }
-                        });
-
-                layout->addWidget(iconLabel);
-                layout->addWidget(nameLabel);
-                layout->addWidget(sizeLabel);
-                layout->addWidget(removeButton);
-            }
-
-          private:
-            std::function<void()> m_removeAction;
-            std::function<void(bool)> m_embedAction;
-        };
 
         [[nodiscard]] std::optional<javelin::app::AccountConnectionSettings>
         liveSettings(const javelin::gui::settings::GuiSettings& guiSettings,
@@ -593,6 +180,8 @@ namespace javelin::gui::compose
 
     } // namespace
 
+    ComposeTabWidget::~ComposeTabWidget() = default;
+
     ComposeTabWidget::ComposeTabWidget(
         javelin::gui::settings::GuiSettings& settings,
         javelin::app::ComposeCommandPort& composeCommandPort,
@@ -602,20 +191,43 @@ namespace javelin::gui::compose
         javelin::jmap::submission::DraftSnapshot snapshot, QWidget* parent,
         const bool hasUnsavedChanges)
         : QWidget(parent), m_settings(settings), m_composeCommandPort(composeCommandPort),
-          m_accountReader(accountReader), m_identityRepository(identityRepository),
-          m_contactIdentityLookup(contactIdentityLookup), m_snapshot(std::move(snapshot)),
-          m_hasUnsavedChanges(hasUnsavedChanges)
+          m_accountReader(accountReader), m_contactIdentityLookup(contactIdentityLookup),
+          m_snapshot(std::move(snapshot))
     {
+        m_autosaveController = new ComposeAutosaveController(
+            hasUnsavedChanges, [this] { persistWorkingCopy(); }, this);
         setAcceptDrops(true);
         setupUi();
+        m_attachmentController = std::make_unique<AttachmentController>(
+            *m_attachmentScrollArea, *m_attachmentStrip, *m_attachmentStripLayout, m_snapshot,
+            [this](const std::size_t index) { removeAttachmentAt(index); },
+            [this](const std::size_t index, const bool embedded)
+            { setAttachmentEmbedded(index, embedded); });
+        m_inlineImageController = std::make_unique<InlineImageController>(
+            *m_richTextEdit, m_snapshot,
+            [this]
+            {
+                populateAttachments();
+                scheduleWorkingCopySave();
+            },
+            [this](QString message, const int timeoutMs)
+            { Q_EMIT statusMessageRequested(message, timeoutMs); },
+            [this] { Q_EMIT toolbarStateChanged(); },
+            [this](const bool succeeded) { finishInlineImagePreparation(succeeded); });
         createToolbarActions();
+        m_identityController = std::make_unique<ComposeIdentityController>(
+            m_settings, m_composeCommandPort, m_accountReader, identityRepository, *m_fromCombo,
+            *this, [this](QString message, const int timeoutMs)
+            { Q_EMIT statusMessageRequested(message, timeoutMs); },
+            [this]
+            {
+                loadIdentities();
+                Q_EMIT toolbarStateChanged();
+            });
+        m_signatureController = std::make_unique<SignatureController>(
+            *m_fromCombo, *m_richTextEdit, m_snapshot, [this] { scheduleWorkingCopySave(); });
         loadIdentities();
         applySnapshotToUi();
-
-        m_autosaveTimer = new QTimer(this);
-        m_autosaveTimer->setSingleShot(true);
-        m_autosaveTimer->setInterval(350);
-        connect(m_autosaveTimer, &QTimer::timeout, this, &ComposeTabWidget::persistWorkingCopy);
 
         connect(
             m_fromCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
@@ -667,16 +279,10 @@ namespace javelin::gui::compose
                         scheduleWorkingCopySave();
                     }
                 });
-        connect(m_richTextEdit->document(), &QTextDocument::contentsChange, this,
-                [this](const int position, const int removed, const int added)
-                {
-                    if (m_syncingUi || m_signatureProgrammaticEdit || !m_signatureTracked)
-                        return;
-                    if (changeTouchesTrackedSignature({.start = m_signatureCursor.selectionStart(),
-                                                       .end = m_signatureCursor.selectionEnd()},
-                                                      position, removed, added))
-                        m_signatureCustom = true;
-                });
+        connect(
+            m_richTextEdit->document(), &QTextDocument::contentsChange, this,
+            [this](const int position, const int removed, const int added)
+            { m_signatureController->noteDocumentChange(position, removed, added, m_syncingUi); });
         connect(m_richTextEdit, &QTextEdit::currentCharFormatChanged, this,
                 [this](const QTextCharFormat& format)
                 {
@@ -741,7 +347,7 @@ namespace javelin::gui::compose
 
     bool ComposeTabWidget::hasUnsavedChanges() const
     {
-        return m_hasUnsavedChanges;
+        return m_autosaveController->hasUnsavedChanges();
     }
 
     bool ComposeTabWidget::operationInFlight() const
@@ -887,11 +493,12 @@ namespace javelin::gui::compose
         connect(m_signatureMenu, &QMenu::aboutToShow, this,
                 &ComposeTabWidget::refreshSignatureMenu);
 
-        m_recipientRowsLayout = new QVBoxLayout();
-        m_recipientRowsLayout->setContentsMargins(0, 0, 0, 0);
-        m_recipientRowsLayout->setSpacing(4);
-        headerLayout->addLayout(m_recipientRowsLayout);
-        addRecipientRow(RecipientType::To);
+        auto* recipientRowsLayout = new QVBoxLayout();
+        recipientRowsLayout->setContentsMargins(0, 0, 0, 0);
+        recipientRowsLayout->setSpacing(4);
+        headerLayout->addLayout(recipientRowsLayout);
+        m_recipientController = std::make_unique<ComposeRecipientController>(
+            *recipientRowsLayout, *this, [this] { scheduleWorkingCopySave(); });
 
         auto* subjectRow = new QHBoxLayout();
         m_subjectLabel = new QLabel(i18nc("@label email subject", "Subject"), headerWidget);
@@ -901,7 +508,7 @@ namespace javelin::gui::compose
         subjectRow->addWidget(m_subjectLabel);
         subjectRow->addWidget(m_subjectEdit, 1);
         headerLayout->addLayout(subjectRow);
-        updateRecipientRowWidths();
+        m_recipientController->updateLabelWidths(*m_fromLabel, *m_subjectLabel);
 
         rootLayout->addWidget(headerWidget);
 
@@ -1008,159 +615,7 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::loadIdentities()
     {
-        const QSignalBlocker blocker{m_fromCombo};
-        const auto selectedAccountId = QString::fromStdString(m_snapshot.accountId);
-        const auto selectedIdentityId = QString::fromStdString(m_snapshot.identityId);
-        int selectedIndex = -1;
-        int optionCount = 0;
-
-        const auto accountsResult = m_accountReader.listAll();
-        const auto* accounts =
-            std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult);
-        if (accounts == nullptr)
-        {
-            const auto& error = std::get<javelin::jmap::cache::DatabaseError>(accountsResult);
-            Q_EMIT statusMessageRequested(error.message, 10000);
-            return;
-        }
-
-        std::unordered_set<std::string> mailAccountIds;
-        mailAccountIds.reserve(accounts->size());
-        for (const auto& account : *accounts)
-        {
-            if (account.hasMailCapability && account.hasSubmissionCapability)
-                mailAccountIds.insert(account.accountId);
-        }
-
-        struct SenderIdentityOption
-        {
-            QString accountId;
-            QString accountDisplayName;
-            javelin::jmap::domain::Identity identity;
-        };
-        std::vector<SenderIdentityOption> options;
-        std::unordered_map<std::string, std::size_t> identityCountByEmail;
-        std::unordered_set<std::string> accountsWithIdentities;
-
-        m_fromCombo->clear();
-        for (const auto& connection : m_settings.accounts())
-        {
-            const auto accountDisplayName =
-                connection.displayName.isEmpty() ? connection.loginEmail : connection.displayName;
-            for (const auto& cachedAccountId : connection.cachedAccountIds)
-            {
-                const auto accountId = cachedAccountId.toStdString();
-                if (!mailAccountIds.contains(accountId))
-                    continue;
-                const auto identitiesResult = m_identityRepository.listByAccount(accountId);
-                if (const auto* error =
-                        std::get_if<javelin::jmap::cache::DatabaseError>(&identitiesResult))
-                {
-                    Q_EMIT statusMessageRequested(error->message, 10000);
-                    continue;
-                }
-
-                const auto& identities =
-                    std::get<std::vector<javelin::jmap::domain::Identity>>(identitiesResult);
-                bool hasSenderIdentity = false;
-                for (const auto& identity : identities)
-                {
-                    if (isWildcardSenderIdentity(identity))
-                        continue;
-                    hasSenderIdentity = true;
-                    auto emailKey = QString::fromStdString(identity.email)
-                                        .trimmed()
-                                        .toCaseFolded()
-                                        .toStdString();
-                    ++identityCountByEmail[emailKey];
-                    accountsWithIdentities.insert(accountId);
-                    options.push_back({
-                        .accountId = cachedAccountId,
-                        .accountDisplayName = accountDisplayName,
-                        .identity = identity,
-                    });
-                }
-
-                if (!hasSenderIdentity && !m_identityLoadsStarted.contains(accountId) &&
-                    !connection.sessionUrl.isEmpty() && !connection.loginEmail.isEmpty() &&
-                    connection.hasCredentials)
-                {
-                    m_identityLoadsStarted.insert(accountId);
-                    auto task = m_composeCommandPort.loadSenderIdentities(
-                        javelin::gui::settings::toAccountConnectionSettings(connection), accountId);
-                    QCoro::connect(std::move(task), this,
-                                   [this](std::variant<std::vector<javelin::jmap::domain::Identity>,
-                                                       javelin::jmap::OperationError>
-                                              result)
-                                   {
-                                       if (const auto* error =
-                                               std::get_if<javelin::jmap::OperationError>(&result))
-                                       {
-                                           Q_EMIT statusMessageRequested(error->message, 10000);
-                                           return;
-                                       }
-                                       loadIdentities();
-                                   });
-                }
-            }
-        }
-
-        const bool includeAccountName = accountsWithIdentities.size() > 1;
-        for (const auto& option : options)
-        {
-            const auto emailKey = QString::fromStdString(option.identity.email)
-                                      .trimmed()
-                                      .toCaseFolded()
-                                      .toStdString();
-            const int index = m_fromCombo->count();
-            m_fromCombo->addItem(
-                composeIdentityDisplayText(option.identity, option.accountDisplayName,
-                                           identityCountByEmail[emailKey], includeAccountName));
-            m_fromCombo->setItemData(index, QString::fromStdString(option.identity.id),
-                                     senderIdentityIdRole);
-            m_fromCombo->setItemData(index, option.accountId, senderAccountIdRole);
-            m_fromCombo->setItemData(index, QString::fromStdString(option.identity.email),
-                                     senderEmailRole);
-            m_fromCombo->setItemData(index,
-                                     option.identity.textSignature.has_value()
-                                         ? QString::fromStdString(*option.identity.textSignature)
-                                         : QString{},
-                                     senderTextSignatureRole);
-            m_fromCombo->setItemData(index,
-                                     option.identity.htmlSignature.has_value()
-                                         ? QString::fromStdString(*option.identity.htmlSignature)
-                                         : QString{},
-                                     senderHtmlSignatureRole);
-            m_fromCombo->setItemData(index, formatAddresses(option.identity.bcc), senderBccRole);
-            if (option.accountId == selectedAccountId &&
-                QString::fromStdString(option.identity.id) == selectedIdentityId)
-            {
-                selectedIndex = index;
-            }
-        }
-        optionCount = static_cast<int>(options.size());
-
-        if (selectedIndex >= 0)
-        {
-            m_fromCombo->setCurrentIndex(selectedIndex);
-        }
-        else if (!selectedIdentityId.isEmpty())
-        {
-            m_fromCombo->setPlaceholderText(i18n("Sender identity unavailable — choose another"));
-            m_fromCombo->setCurrentIndex(-1);
-            Q_EMIT statusMessageRequested(i18n("The draft's sender identity is no longer "
-                                               "available. Choose another sender before sending."),
-                                          10000);
-        }
-        else if (optionCount > 0)
-        {
-            m_fromCombo->setCurrentIndex(0);
-        }
-        else
-        {
-            Q_EMIT statusMessageRequested(
-                i18n("No sender identities are available for configured accounts."), 10000);
-        }
+        m_identityController->load(m_snapshot.accountId, m_snapshot.identityId);
         m_previousIdentityIndex = m_fromCombo->currentIndex();
     }
 
@@ -1169,7 +624,7 @@ namespace javelin::gui::compose
         const auto selectedAccountId = m_fromCombo->currentData(senderAccountIdRole).toString();
         const bool replaceNativeSignature =
             (changedAccountId.isEmpty() || changedAccountId == selectedAccountId) &&
-            m_signatureTracked && !m_signatureCustom && !m_signatureExplicitlyRemoved;
+            m_signatureController->shouldRestoreAfterIdentityReload();
         loadIdentities();
         const auto selectedIdentityStillAvailable =
             m_fromCombo->currentIndex() >= 0 &&
@@ -1182,143 +637,19 @@ namespace javelin::gui::compose
         Q_EMIT toolbarStateChanged();
     }
 
-    QString ComposeTabWidget::signaturePlainTextForIndex(const int index) const
-    {
-        if (index < 0 || index >= m_fromCombo->count())
-            return {};
-        const auto text = m_fromCombo->itemData(index, senderTextSignatureRole).toString();
-        const auto html = m_fromCombo->itemData(index, senderHtmlSignatureRole).toString();
-        if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RichText &&
-            !html.isEmpty())
-            return plainTextFromHtml(html);
-        if (!text.isEmpty())
-            return text;
-        return html.isEmpty() ? QString{} : plainTextFromHtml(html);
-    }
-
-    QString ComposeTabWidget::signatureHtmlForIndex(const int index) const
-    {
-        if (index < 0 || index >= m_fromCombo->count())
-            return {};
-        const auto html = m_fromCombo->itemData(index, senderHtmlSignatureRole).toString();
-        if (!html.isEmpty())
-            return html;
-        const auto text = m_fromCombo->itemData(index, senderTextSignatureRole).toString();
-        return text.isEmpty() ? QString{} : htmlFromPlainText(text);
-    }
-
-    int ComposeTabWidget::defaultSignatureInsertionPosition() const
-    {
-        if (m_signatureInsertionPosition >= 0 &&
-            m_signatureInsertionPosition <= m_richTextEdit->document()->characterCount() - 1)
-            return m_signatureInsertionPosition;
-
-        for (auto block = m_richTextEdit->document()->begin(); block.isValid();
-             block = block.next())
-        {
-            const auto format = block.blockFormat();
-            if (std::abs(format.leftMargin() - 40.0) < 0.01 &&
-                std::abs(format.rightMargin() - 40.0) < 0.01)
-                return block.position();
-            if (block.text().contains(QStringLiteral("---------- Forwarded message ----------")))
-                return block.position();
-        }
-        return std::max(0, m_richTextEdit->document()->characterCount() - 1);
-    }
-
     void ComposeTabWidget::initializeSignatureTracking()
     {
-        m_signatureTracked = false;
-        m_signatureCustom = false;
-        m_signatureExplicitlyRemoved = false;
-        m_signatureInsertionPosition = -1;
-        const auto signature = signaturePlainTextForIndex(m_fromCombo->currentIndex());
-        if (signature.trimmed().isEmpty())
-        {
-            m_signatureInsertionPosition = defaultSignatureInsertionPosition();
-            return;
-        }
-        auto cursor = m_richTextEdit->document()->find(signature);
-        if (cursor.isNull())
-        {
-            m_signatureInsertionPosition = defaultSignatureInsertionPosition();
-            return;
-        }
-        m_signatureCursor = cursor;
-        m_signatureInsertionPosition = cursor.selectionStart();
-        m_signatureTracked = true;
+        m_signatureController->initialize();
     }
 
     void ComposeTabWidget::replaceTrackedSignatureForIndex(const int index, const bool forceInsert)
     {
-        if (!shouldReplaceTrackedSignature(m_signatureTracked, m_signatureCustom,
-                                           m_signatureExplicitlyRemoved, forceInsert))
-            return;
-
-        const auto plain = signaturePlainTextForIndex(index);
-        const auto html = signatureHtmlForIndex(index);
-        const bool wasTracked = m_signatureTracked;
-        const bool hadExplicitRemoval = m_signatureExplicitlyRemoved;
-        const int start =
-            wasTracked ? m_signatureCursor.selectionStart() : defaultSignatureInsertionPosition();
-        m_signatureProgrammaticEdit = true;
-        QTextCursor cursor{m_richTextEdit->document()};
-        cursor.setPosition(start);
-        if (wasTracked)
-        {
-            cursor.setPosition(m_signatureCursor.selectionEnd(), QTextCursor::KeepAnchor);
-            cursor.removeSelectedText();
-        }
-        else if (forceInsert && !hadExplicitRemoval && (!plain.isEmpty() || !html.isEmpty()))
-        {
-            if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RichText)
-                cursor.insertHtml(QStringLiteral("<p><br/></p>"));
-            else
-            {
-                const auto body = m_richTextEdit->toPlainText();
-                cursor.insertText(body.isEmpty() ? QStringLiteral("\n") : QStringLiteral("\n\n"));
-            }
-        }
-        const int insertionStart = cursor.position();
-        if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RichText)
-        {
-            if (!html.isEmpty())
-                cursor.insertHtml(html);
-        }
-        else if (!plain.isEmpty())
-            cursor.insertText(plain);
-        const int insertionEnd = cursor.position();
-        m_signatureProgrammaticEdit = false;
-
-        m_signatureInsertionPosition = insertionStart;
-        m_signatureTracked = insertionEnd > insertionStart;
-        m_signatureCustom = false;
-        m_signatureExplicitlyRemoved = false;
-        if (m_signatureTracked)
-        {
-            m_signatureCursor = QTextCursor{m_richTextEdit->document()};
-            m_signatureCursor.setPosition(insertionStart);
-            m_signatureCursor.setPosition(insertionEnd, QTextCursor::KeepAnchor);
-        }
-        scheduleWorkingCopySave();
+        m_signatureController->replaceForIdentity(index, forceInsert);
     }
 
     void ComposeTabWidget::removeTrackedSignature()
     {
-        if (!m_signatureTracked)
-        {
-            m_signatureExplicitlyRemoved = true;
-            return;
-        }
-        m_signatureInsertionPosition = m_signatureCursor.selectionStart();
-        m_signatureProgrammaticEdit = true;
-        auto cursor = m_signatureCursor;
-        cursor.removeSelectedText();
-        m_signatureProgrammaticEdit = false;
-        m_signatureTracked = false;
-        m_signatureCustom = false;
-        m_signatureExplicitlyRemoved = true;
-        scheduleWorkingCopySave();
+        m_signatureController->remove();
     }
 
     void ComposeTabWidget::refreshSignatureMenu()
@@ -1326,12 +657,7 @@ namespace javelin::gui::compose
         m_signatureMenu->clear();
         auto* useIdentity = m_signatureMenu->addAction(i18n("Use Identity Signature"));
         connect(useIdentity, &QAction::triggered, this,
-                [this]
-                {
-                    m_signatureExplicitlyRemoved = false;
-                    m_signatureCustom = false;
-                    replaceTrackedSignatureForIndex(m_fromCombo->currentIndex(), true);
-                });
+                [this] { m_signatureController->restoreIdentity(m_fromCombo->currentIndex()); });
         auto* noSignature = m_signatureMenu->addAction(i18n("No Signature for This Message"));
         connect(noSignature, &QAction::triggered, this, &ComposeTabWidget::removeTrackedSignature);
 
@@ -1387,7 +713,10 @@ namespace javelin::gui::compose
         }
         m_previousIdentityIndex = m_fromCombo->currentIndex();
 
-        resetRecipientRows();
+        m_recipientController->setSyncing(true);
+        m_recipientController->reset(m_snapshot);
+        m_recipientController->setSyncing(false);
+        m_recipientController->updateLabelWidths(*m_fromLabel, *m_subjectLabel);
         m_subjectEdit->setText(m_snapshot.subject.has_value()
                                    ? QString::fromStdString(*m_snapshot.subject)
                                    : QString{});
@@ -1420,28 +749,7 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::populateAttachments()
     {
-        m_attachmentScrollArea->setVisible(!m_snapshot.attachments.empty());
-        while (m_attachmentStripLayout->count() > 0)
-        {
-            auto* item = m_attachmentStripLayout->takeAt(0);
-            if (auto* widget = item->widget())
-            {
-                widget->deleteLater();
-            }
-            delete item;
-        }
-
-        for (std::size_t index = 0; index < m_snapshot.attachments.size(); ++index)
-        {
-            auto* chip = new DraftAttachmentChip(
-                m_snapshot.attachments[index],
-                m_snapshot.editorMode != javelin::jmap::submission::BodyEditorMode::PlainText,
-                [this, index] { removeAttachmentAt(index); }, [this, index](const bool embedded)
-                { setAttachmentEmbedded(index, embedded); }, m_attachmentStrip);
-            chip->setEnabled(!m_operationInFlight);
-            m_attachmentStripLayout->addWidget(chip);
-        }
-        m_attachmentStripLayout->addStretch(1);
+        m_attachmentController->refresh(m_operationInFlight);
     }
 
     void ComposeTabWidget::refreshPreview()
@@ -1511,18 +819,12 @@ namespace javelin::gui::compose
 
         const bool plainTextMode = !richText;
         const bool restoreNativeSignature =
-            m_signatureTracked && !m_signatureCustom && !m_signatureExplicitlyRemoved;
+            m_signatureController->shouldRestoreAfterIdentityReload();
         const int selectedIdentityIndex = m_fromCombo->currentIndex();
         const auto removeNativeSignature = [this, restoreNativeSignature]
         {
-            if (!restoreNativeSignature)
-                return;
-            m_signatureInsertionPosition = m_signatureCursor.selectionStart();
-            m_signatureProgrammaticEdit = true;
-            auto signatureCursor = m_signatureCursor;
-            signatureCursor.removeSelectedText();
-            m_signatureProgrammaticEdit = false;
-            m_signatureTracked = false;
+            if (restoreNativeSignature)
+                (void)m_signatureController->detachForBodyFormatSwitch();
         };
         if (plainTextMode &&
             m_snapshot.editorMode != javelin::jmap::submission::BodyEditorMode::PlainText)
@@ -1587,180 +889,30 @@ namespace javelin::gui::compose
         scheduleWorkingCopySave();
     }
 
-    void ComposeTabWidget::addRecipientRow(const RecipientType type, const QString& text)
-    {
-        auto* rowWidget = new QWidget(this);
-        auto* rowLayout = new QHBoxLayout(rowWidget);
-        rowLayout->setContentsMargins(0, 0, 0, 0);
-        rowLayout->setSpacing(6);
-
-        auto* typeCombo = new QComboBox(rowWidget);
-        typeCombo->setAccessibleName(
-            i18nc("@label accessible email recipient type", "Recipient type"));
-        typeCombo->addItem(i18nc("@label email recipients", "To"),
-                           static_cast<int>(RecipientType::To));
-        typeCombo->addItem(i18nc("@label email carbon-copy recipients", "Cc"),
-                           static_cast<int>(RecipientType::Cc));
-        typeCombo->addItem(i18nc("@label email blind-carbon-copy recipients", "Bcc"),
-                           static_cast<int>(RecipientType::Bcc));
-        const auto typeIndex = typeCombo->findData(static_cast<int>(type));
-        if (typeIndex >= 0)
-            typeCombo->setCurrentIndex(typeIndex);
-
-        auto* edit = new widgets::EmailAddressLineEdit(true, rowWidget);
-        edit->setPlaceholderText(QStringLiteral("alice@example.com, Bob <bob@example.com>"));
-        edit->setText(text);
-        const auto updateAccessibleName = [typeCombo, edit]
-        {
-            edit->setAccessibleName(i18nc("@label accessible email recipients", "%1 recipients",
-                                          typeCombo->currentText()));
-        };
-        updateAccessibleName();
-        rowLayout->addWidget(typeCombo);
-        rowLayout->addWidget(edit, 1);
-        m_recipientRowsLayout->addWidget(rowWidget);
-        m_recipientRows.push_back({.widget = rowWidget, .typeCombo = typeCombo, .edit = edit});
-
-        if (m_headerLabelWidth > 0)
-            typeCombo->setFixedWidth(m_headerLabelWidth);
-
-        connect(typeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
-                [this, updateAccessibleName](const int)
-                {
-                    updateAccessibleName();
-                    if (!m_syncingUi)
-                        scheduleWorkingCopySave();
-                });
-        connect(edit, &QLineEdit::textChanged, this,
-                [this](const QString&)
-                {
-                    if (m_syncingUi)
-                        return;
-                    ensureTrailingRecipientRow();
-                    scheduleWorkingCopySave();
-                });
-    }
-
-    void ComposeTabWidget::resetRecipientRows()
-    {
-        for (const auto& row : m_recipientRows)
-            delete row.widget;
-        m_recipientRows.clear();
-
-        if (!m_snapshot.to.empty())
-            addRecipientRow(RecipientType::To, formatAddresses(m_snapshot.to));
-        if (!m_snapshot.cc.empty())
-            addRecipientRow(RecipientType::Cc, formatAddresses(m_snapshot.cc));
-        if (!m_snapshot.bcc.empty())
-            addRecipientRow(RecipientType::Bcc, formatAddresses(m_snapshot.bcc));
-        ensureTrailingRecipientRow();
-        updateRecipientRowWidths();
-    }
-
-    void ComposeTabWidget::ensureTrailingRecipientRow()
-    {
-        if (m_recipientRows.empty() || !m_recipientRows.back().edit->text().trimmed().isEmpty())
-            addRecipientRow(RecipientType::To);
-    }
-
     void ComposeTabWidget::setRecipientText(const RecipientType type, const QString& text)
     {
-        RecipientRow* target = nullptr;
-        for (auto& row : m_recipientRows)
-        {
-            if (row.typeCombo->currentData().toInt() == static_cast<int>(type))
-            {
-                target = &row;
-                break;
-            }
-        }
-
-        if (target == nullptr && text.trimmed().isEmpty())
-            return;
-
-        if (target == nullptr)
-        {
-            if (!m_recipientRows.empty() && m_recipientRows.back().edit->text().trimmed().isEmpty())
-            {
-                target = &m_recipientRows.back();
-                const auto typeIndex = target->typeCombo->findData(static_cast<int>(type));
-                if (typeIndex >= 0)
-                    target->typeCombo->setCurrentIndex(typeIndex);
-            }
-            else
-            {
-                addRecipientRow(type);
-                target = &m_recipientRows.back();
-            }
-        }
-
-        const bool previousSyncing = m_syncingUi;
-        m_syncingUi = true;
-        target->edit->setText(text);
-        for (auto& row : m_recipientRows)
-        {
-            if (&row != target && row.typeCombo->currentData().toInt() == static_cast<int>(type))
-                row.edit->clear();
-        }
-        m_syncingUi = previousSyncing;
-        ensureTrailingRecipientRow();
+        m_recipientController->setText(type, text);
     }
 
     QString ComposeTabWidget::recipientText(const RecipientType type) const
     {
-        QStringList values;
-        for (const auto& row : m_recipientRows)
-        {
-            if (row.typeCombo->currentData().toInt() != static_cast<int>(type))
-                continue;
-            const auto text = row.edit->text().trimmed();
-            if (!text.isEmpty())
-                values.push_back(text);
-        }
-        return values.join(QStringLiteral(", "));
+        return m_recipientController->text(type);
     }
 
     std::vector<javelin::jmap::domain::EmailAddress>
     ComposeTabWidget::recipientAddresses(const RecipientType type) const
     {
-        std::vector<javelin::jmap::domain::EmailAddress> addresses;
-        for (const auto& row : m_recipientRows)
-        {
-            if (row.typeCombo->currentData().toInt() != static_cast<int>(type))
-                continue;
-            const auto parsed = parseAddresses(row.edit->text());
-            addresses.insert(addresses.end(), parsed.begin(), parsed.end());
-        }
-        return addresses;
-    }
-
-    void ComposeTabWidget::updateRecipientRowWidths()
-    {
-        if (m_fromLabel == nullptr || m_subjectLabel == nullptr || m_recipientRows.empty())
-            return;
-        m_headerLabelWidth =
-            std::max({m_fromLabel->sizeHint().width(), m_subjectLabel->sizeHint().width(),
-                      m_recipientRows.front().typeCombo->sizeHint().width()});
-        m_fromLabel->setFixedWidth(m_headerLabelWidth);
-        m_subjectLabel->setFixedWidth(m_headerLabelWidth);
-        for (const auto& row : m_recipientRows)
-            row.typeCombo->setFixedWidth(m_headerLabelWidth);
+        return m_recipientController->addresses(type);
     }
 
     void ComposeTabWidget::scheduleWorkingCopySave()
     {
-        m_hasUnsavedChanges = true;
-        if (m_operationInFlight)
-        {
-            return;
-        }
-
-        m_autosaveTimer->start();
+        m_autosaveController->schedule();
     }
 
     void ComposeTabWidget::persistWorkingCopy()
     {
-        if (m_pendingInlineImageJobs != 0)
+        if (m_inlineImageController->hasPendingJobs())
             return;
 
         syncSnapshotFromUi();
@@ -1774,12 +926,9 @@ namespace javelin::gui::compose
     void ComposeTabWidget::setBusy(const bool busy)
     {
         m_operationInFlight = busy;
+        m_autosaveController->setBusy(busy);
         m_fromCombo->setEnabled(!busy);
-        for (const auto& row : m_recipientRows)
-        {
-            row.typeCombo->setEnabled(!busy);
-            row.edit->setEnabled(!busy);
-        }
+        m_recipientController->setEnabled(!busy);
         m_subjectEdit->setEnabled(!busy);
         m_richTextEdit->setEnabled(!busy);
         m_editorTabs->setEnabled(!busy);
@@ -1846,7 +995,7 @@ namespace javelin::gui::compose
                 i18n("This sender's server does not support scheduled sending."), 10000);
             return;
         }
-        if (m_pendingInlineImageJobs != 0)
+        if (m_inlineImageController->hasPendingJobs())
         {
             m_deferredOperation = DeferredOperation::ScheduleSend;
             Q_EMIT statusMessageRequested(i18n("Finishing image processing before scheduling…"),
@@ -1910,53 +1059,12 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::addInlineImagePath(const QString& filePath)
     {
-        const QFileInfo info{filePath};
-        const QImage image{filePath};
-        if (!info.exists() || !info.isFile() || image.isNull())
-        {
-            Q_EMIT statusMessageRequested(i18n("The selected image could not be loaded."), 7000);
-            return;
-        }
-
-        m_snapshot.attachments.push_back(javelin::jmap::submission::DraftAttachment{
-            .localFilePath = filePath.toStdString(),
-            .displayName = info.fileName().toStdString(),
-            .mediaType = detectedMediaType(filePath).toStdString(),
-            .size = static_cast<std::uint64_t>(info.size()),
-            .blobId = std::nullopt,
-            .inlineDisposition = true,
-            .contentId = newContentId(),
-            .contentHash = std::nullopt,
-        });
-        insertEmbeddedImage(m_snapshot.attachments.size() - 1);
-        populateAttachments();
-        scheduleWorkingCopySave();
+        m_inlineImageController->addImagePath(filePath);
     }
 
     void ComposeTabWidget::addPastedInlineImage(const QImage& image)
     {
-        if (image.isNull())
-        {
-            return;
-        }
-
-        const auto directory = draftAssetDirectory(m_snapshot.composeSessionId);
-        if (!QDir{}.mkpath(directory))
-        {
-            Q_EMIT statusMessageRequested(i18n("Could not create storage for the pasted image."),
-                                          10000);
-            return;
-        }
-
-        const auto fileName =
-            QStringLiteral("pasted-%1.png").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-        const auto filePath = QDir{directory}.filePath(fileName);
-        if (!image.save(filePath, "PNG"))
-        {
-            Q_EMIT statusMessageRequested(i18n("Could not save the pasted image."), 10000);
-            return;
-        }
-        addInlineImagePath(filePath);
+        m_inlineImageController->addPastedImage(image);
     }
 
     void ComposeTabWidget::insertImage()
@@ -2036,137 +1144,15 @@ namespace javelin::gui::compose
     void ComposeTabWidget::adoptInsertedComposerImage(const int insertionPosition,
                                                       const QString& sourceFilePath)
     {
-        QElapsedTimer dispatchElapsed;
-        dispatchElapsed.start();
-        auto* document = m_richTextEdit->document();
-        const auto block = document->findBlock(insertionPosition);
-        QTextFragment insertedFragment;
-        for (auto fragment = block.begin(); !fragment.atEnd(); ++fragment)
-        {
-            const auto candidate = fragment.fragment();
-            if (candidate.isValid() && candidate.position() <= insertionPosition &&
-                insertionPosition < candidate.position() + candidate.length() &&
-                candidate.charFormat().isImageFormat())
-            {
-                insertedFragment = candidate;
-                break;
-            }
-        }
-        if (!insertedFragment.isValid())
-        {
-            qCWarning(logComposeImage).noquote()
-                << "inserted image adoption failed to locate the image fragment"
-                << "elapsedMs" << dispatchElapsed.elapsed() << "insertionPosition"
-                << insertionPosition;
-            Q_EMIT statusMessageRequested(i18n("The inserted image could not be tracked."), 10000);
-            return;
-        }
-
-        auto imageFormat = insertedFragment.charFormat().toImageFormat();
-        const auto originalResourceName = imageFormat.name();
-        const auto image = qvariant_cast<QImage>(
-            document->resource(QTextDocument::ImageResource, QUrl{originalResourceName}));
-        if (image.isNull())
-        {
-            qCWarning(logComposeImage).noquote()
-                << "inserted image adoption could not retrieve the document resource"
-                << "elapsedMs" << dispatchElapsed.elapsed() << "resourceName"
-                << originalResourceName;
-            Q_EMIT statusMessageRequested(i18n("The inserted image could not be loaded."), 10000);
-            return;
-        }
-
-        const auto contentId = newContentId();
-        const auto resourceName = composerEditorResourceName(contentId);
-        document->addResource(QTextDocument::ImageResource, QUrl{resourceName}, image);
-        imageFormat.setName(resourceName);
-        QTextCursor imageCursor{document};
-        imageCursor.setPosition(insertedFragment.position());
-        imageCursor.setPosition(insertedFragment.position() + insertedFragment.length(),
-                                QTextCursor::KeepAnchor);
-        imageCursor.setCharFormat(imageFormat);
-
-        const auto destinationDirectory = draftAssetDirectory(m_snapshot.composeSessionId);
-        const auto assetId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        auto* watcher = new QFutureWatcher<PreparedInlineImage>(this);
-        ++m_pendingInlineImageJobs;
-        Q_EMIT toolbarStateChanged();
-
-        connect(watcher, &QFutureWatcher<PreparedInlineImage>::finished, this,
-                [this, watcher, resourceName, contentId]
-                {
-                    const auto result = watcher->result();
-                    watcher->deleteLater();
-
-                    const bool stillReferenced =
-                        documentContainsImageResource(*m_richTextEdit->document(), resourceName);
-                    if (!result.succeeded())
-                    {
-                        qCWarning(logComposeImage).noquote()
-                            << "inserted image preparation failed"
-                            << "processingMs" << result.processingMilliseconds << "error"
-                            << result.error;
-                        if (stillReferenced)
-                            removeImageResource(*m_richTextEdit->document(), resourceName);
-                        if (m_deferredOperation == DeferredOperation::Send)
-                            m_deferredOperation = DeferredOperation::None;
-                        Q_EMIT statusMessageRequested(
-                            i18n("The inserted image could not be prepared."), 10000);
-                        finishInlineImagePreparation();
-                        return;
-                    }
-
-                    if (!stillReferenced)
-                    {
-                        QFile::remove(result.filePath);
-                        qCInfo(logComposeImage).noquote()
-                            << "prepared image discarded because it was removed from the editor"
-                            << "processingMs" << result.processingMilliseconds;
-                        finishInlineImagePreparation();
-                        return;
-                    }
-
-                    m_snapshot.attachments.push_back(javelin::jmap::submission::DraftAttachment{
-                        .localFilePath = result.filePath.toStdString(),
-                        .displayName = result.displayName.toStdString(),
-                        .mediaType = result.mediaType.toStdString(),
-                        .size = static_cast<std::uint64_t>(result.size),
-                        .blobId = std::nullopt,
-                        .inlineDisposition = true,
-                        .contentId = contentId,
-                        .contentHash = std::nullopt,
-                    });
-                    populateAttachments();
-                    qCInfo(logComposeImage).noquote()
-                        << "inserted image preparation complete"
-                        << "processingMs" << result.processingMilliseconds << "reencoded"
-                        << result.reencoded << "encodedBytes" << result.size << "mediaType"
-                        << result.mediaType << "attachmentCount" << m_snapshot.attachments.size();
-                    finishInlineImagePreparation();
-                });
-
-        watcher->setFuture(QtConcurrent::run(
-            [sourceFilePath, image, destinationDirectory, assetId]
-            { return prepareInlineImage(sourceFilePath, image, destinationDirectory, assetId); }));
-        qCInfo(logComposeImage).noquote()
-            << "inserted image preparation dispatched"
-            << "dispatchMs" << dispatchElapsed.elapsed() << "width" << image.width() << "height"
-            << image.height() << "decodedBytes" << image.sizeInBytes() << "sourceFile"
-            << sourceFilePath;
+        m_inlineImageController->adoptInsertedComposerImage(insertionPosition, sourceFilePath);
     }
 
-    void ComposeTabWidget::finishInlineImagePreparation()
+    void ComposeTabWidget::finishInlineImagePreparation(const bool succeeded)
     {
-        if (m_pendingInlineImageJobs == 0)
-            return;
-
-        --m_pendingInlineImageJobs;
-        Q_EMIT toolbarStateChanged();
-        if (m_pendingInlineImageJobs != 0)
-            return;
-
         scheduleWorkingCopySave();
-        const auto deferredOperation = std::exchange(m_deferredOperation, DeferredOperation::None);
+        auto deferredOperation = std::exchange(m_deferredOperation, DeferredOperation::None);
+        if (!succeeded && deferredOperation == DeferredOperation::Send)
+            deferredOperation = DeferredOperation::None;
         QTimer::singleShot(0, this,
                            [this, deferredOperation]
                            {
@@ -2211,30 +1197,8 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::setAttachmentEmbedded(const std::size_t index, const bool embedded)
     {
-        if (index >= m_snapshot.attachments.size() ||
-            m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::PlainText ||
-            embedded == m_snapshot.attachments[index].inlineDisposition)
-        {
+        if (!m_inlineImageController->setAttachmentEmbedded(index, embedded))
             return;
-        }
-
-        auto& attachment = m_snapshot.attachments[index];
-        attachment.inlineDisposition = embedded;
-        if (embedded)
-        {
-            if (!attachment.contentId.has_value())
-            {
-                attachment.contentId = newContentId();
-            }
-            insertEmbeddedImage(index);
-        }
-        else if (attachment.contentId.has_value())
-        {
-            removeEmbeddedImageReference(*attachment.contentId);
-            attachment.contentId = std::nullopt;
-        }
-
-        populateAttachments();
         refreshPreview();
         syncSnapshotFromUi();
         scheduleWorkingCopySave();
@@ -2242,87 +1206,32 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::insertEmbeddedImage(const std::size_t index)
     {
-        if (index >= m_snapshot.attachments.size())
-        {
-            return;
-        }
-
-        const auto& attachment = m_snapshot.attachments[index];
-        if (!attachment.contentId.has_value())
-        {
-            return;
-        }
-
-        const QImage image{QString::fromStdString(attachment.localFilePath)};
-        if (image.isNull())
-        {
-            return;
-        }
-
-        const auto resourceName = composerEditorResourceName(*attachment.contentId);
-        const auto width = std::min(image.width(), 720);
-        const auto height = image.width() > 0 ? image.height() * width / image.width() : -1;
-        m_richTextEdit->composerControler()->composerImages()->addImageHelper(resourceName, image,
-                                                                              width, height);
+        m_inlineImageController->insertEmbeddedImage(index);
     }
 
     void ComposeTabWidget::removeEmbeddedImageReference(const std::string& contentId)
     {
-        const auto cidUrl = composerContentIdUrl(contentId);
-        const QRegularExpression imageTagPattern{
-            QStringLiteral("<img\\b[^>]*\\bsrc\\s*=\\s*([\"'])%1\\1[^>]*>")
-                .arg(QRegularExpression::escape(cidUrl)),
-            QRegularExpression::CaseInsensitiveOption};
-
-        auto html = stableEditorHtml();
-        html.remove(imageTagPattern);
-        setEditorHtml(html);
+        m_inlineImageController->removeEmbeddedImageReference(contentId);
     }
 
     void ComposeTabWidget::setEditorHtml(const QString& html)
     {
-        if (m_richTextEdit->textMode() == KPIMTextEdit::RichTextComposer::Plain)
-        {
-            m_richTextEdit->activateRichText();
-        }
-        m_richTextEdit->setTextOrHtml(
-            htmlForQtDocument(editorHtmlForInlineAttachments(html, m_snapshot.attachments)));
-        loadInlineImageResources();
+        m_inlineImageController->setEditorHtml(html);
     }
 
     void ComposeTabWidget::loadInlineImageResources()
     {
-        auto* images = m_richTextEdit->composerControler()->composerImages();
-        for (const auto& attachment : m_snapshot.attachments)
-        {
-            if (!attachment.inlineDisposition || !attachment.contentId.has_value() ||
-                attachment.localFilePath.empty())
-            {
-                continue;
-            }
-
-            const QImage image{QString::fromStdString(attachment.localFilePath)};
-            if (image.isNull())
-            {
-                continue;
-            }
-            const auto resourceName = composerEditorResourceName(*attachment.contentId);
-            images->loadImage(image, resourceName, resourceName);
-        }
+        m_inlineImageController->loadResources();
     }
 
     QString ComposeTabWidget::stableEditorHtml()
     {
-        return stableHtmlForInlineAttachments(m_richTextEdit->toCleanHtml(),
-                                              m_snapshot.attachments);
+        return m_inlineImageController->stableHtml();
     }
 
     void ComposeTabWidget::reconcileInlineAttachmentReferences(const QString& html)
     {
-        if (reconcileInlineAttachments(m_snapshot.attachments, html))
-        {
-            populateAttachments();
-        }
+        m_inlineImageController->reconcileAttachmentReferences(html);
     }
 
     void ComposeTabWidget::startSaveDraft(const bool closeAfterSave)
@@ -2331,7 +1240,7 @@ namespace javelin::gui::compose
         {
             return;
         }
-        if (m_pendingInlineImageJobs != 0)
+        if (m_inlineImageController->hasPendingJobs())
         {
             m_deferredOperation = closeAfterSave ? DeferredOperation::SaveDraftAndClose
                                                  : DeferredOperation::SaveDraft;
@@ -2349,10 +1258,6 @@ namespace javelin::gui::compose
             return;
         }
 
-        if (m_autosaveTimer->isActive())
-        {
-            m_autosaveTimer->stop();
-        }
         if (const auto error = m_composeCommandPort.storeWorkingCopy(m_snapshot))
         {
             Q_EMIT statusMessageRequested(error->message, 10000);
@@ -2387,7 +1292,7 @@ namespace javelin::gui::compose
                     return;
                 }
 
-                m_hasUnsavedChanges = false;
+                m_autosaveController->markSaved();
                 Q_EMIT statusMessageRequested(i18n("Draft saved."), 5000);
                 if (m_closeAfterSave)
                 {
@@ -2417,7 +1322,7 @@ namespace javelin::gui::compose
                 i18n("Choose an available sender identity before sending."), 10000);
             return;
         }
-        if (m_pendingInlineImageJobs != 0)
+        if (m_inlineImageController->hasPendingJobs())
         {
             m_deferredOperation = DeferredOperation::Send;
             Q_EMIT statusMessageRequested(i18n("Finishing image processing before sending…"),

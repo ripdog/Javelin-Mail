@@ -1,7 +1,9 @@
 #pragma once
 
 #include "app/undo/HistoryTypes.h"
-#include "jmap/sieve/SieveService.h"
+#include "jmap/sieve/SieveCommandTypes.h"
+
+#include <QCoroTask>
 
 namespace javelin::app::undo
 {

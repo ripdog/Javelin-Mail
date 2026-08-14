@@ -31,7 +31,7 @@ namespace javelin::app
         accountStatuses() const = 0;
 
       Q_SIGNALS:
-        void accountStatusChanged(const QString& accountId, MailAccountStatus status);
+        void accountStatusChanged(const QString& accountId, javelin::app::MailAccountStatus status);
         void sessionCapabilitiesChanged(const QString& ownerAccountId);
         void cacheInvalidated(javelin::app::MailCacheInvalidation invalidation);
         void threadMaterializationProgress(javelin::app::ThreadMaterializationProgress progress);

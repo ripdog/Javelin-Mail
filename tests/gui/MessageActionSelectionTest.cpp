@@ -1,4 +1,5 @@
 #include "gui/messages/MessageActionSelection.h"
+#include "gui/messages/MessageDragListView.h"
 #include "gui/messages/MessageListModel.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -52,9 +53,29 @@ TEST_CASE("message action selection preserves collapsed threads and filters unre
     REQUIRE(collapsed != nullptr);
     CHECK(collapsed->threadId == "thread-1");
 
-    const auto* email = std::get_if<javelin::app::SelectedEmail>(&selection[1]);
-    REQUIRE(email != nullptr);
-    CHECK(email->emailId == "email-2");
+    const auto* singleKnownMemberThread =
+        std::get_if<javelin::app::SelectedCollapsedThread>(&selection[1]);
+    REQUIRE(singleKnownMemberThread != nullptr);
+    CHECK(singleKnownMemberThread->threadId == "thread-2");
+}
+
+TEST_CASE("message drag count reflects collapsed mailbox Thread membership",
+          "[gui][messages][selection][drag]")
+{
+    QStandardItemModel model;
+    model.appendRow(messageItem(QStringLiteral("email-1"), QStringLiteral("thread-1"),
+                                javelin::gui::messages::MessageListModel::RowKind::ThreadSummary, 7,
+                                false, false));
+    model.appendRow(messageItem(QStringLiteral("email-2"), QStringLiteral("thread-2"),
+                                javelin::gui::messages::MessageListModel::RowKind::ThreadSummary, 5,
+                                true, false));
+    model.appendRow(messageItem(QStringLiteral("email-3"), QStringLiteral("thread-2"),
+                                javelin::gui::messages::MessageListModel::RowKind::ThreadMember, 1,
+                                true, false));
+
+    CHECK(javelin::gui::messages::representedMessageCountForDrag({model.index(0, 0)}) == 7);
+    CHECK(javelin::gui::messages::representedMessageCountForDrag(
+              {model.index(1, 0), model.index(2, 0)}) == 2);
 }
 
 TEST_CASE("message action selection falls back to the current expanded summary",

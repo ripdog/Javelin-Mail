@@ -4,6 +4,12 @@ SQLite runs in WAL mode so independent thread-owned readers may proceed while a 
 `javelind` is the only process permitted to open the main cache for writing. It coordinates daemon
 writes before asking SQLite for its single write lock; `javelin` opens only the read surface.
 
+Persistence implementation files live under `src/storage/`, grouped by domain. The established
+cache/repository interfaces and value types remain under `src/jmap/cache/` so protocol and
+application code can share those contracts without making persistence implementation part of the
+JMAP protocol layer. New persistence `.cpp` files must not be added to `src/jmap/cache/`; CMake
+enforces that boundary.
+
 ## Connection ownership
 
 - A `DatabaseConnection` belongs to the thread on which it is opened.

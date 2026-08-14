@@ -1,4 +1,7 @@
-#include "jmap/calendar/CalendarService.h"
+#include "jmap/calendar/CalendarCacheReader.h"
+#include "jmap/calendar/CalendarMutationEngine.h"
+#include "jmap/calendar/CalendarProtocolClient.h"
+#include "jmap/calendar/CalendarSyncEngine.h"
 
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MethodCaller.h"
@@ -159,12 +162,11 @@ namespace javelin::jmap::calendar
         }
 
         template <typename IsCurrent>
-        QCoro::Task<BatchedCalendarEvents>
-        getCalendarEventsBatched(api::MethodCaller& caller, const LiveConnectionSettings& settings,
-                                 const api::Session& session, const std::string& accountId,
-                                 const std::vector<std::string>& ids,
-                                 const TimeZoneId& displayTimeZone, const std::size_t batchLimit,
-                                 const std::string_view callId, IsCurrent isCurrent)
+        QCoro::Task<BatchedCalendarEvents> getCalendarEventsBatched(
+            CalendarProtocolClient& protocolClient, const LiveConnectionSettings& settings,
+            const api::Session& session, const std::string& accountId,
+            const std::vector<std::string>& ids, const TimeZoneId& displayTimeZone,
+            const std::size_t batchLimit, const std::string_view callId, IsCurrent isCurrent)
         {
             if (batchLimit == 0)
                 co_return error(OperationErrorCode::UnsupportedCapability,
@@ -196,8 +198,8 @@ namespace javelin::jmap::calendar
                 api::RequestBuilder builder;
                 builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
                 const auto handle = builder.call(*request, std::string{callId});
-                const auto result =
-                    co_await caller.call(context(settings, session, accountId), builder);
+                const auto result = co_await protocolClient.call(
+                    context(settings, session, accountId), std::move(builder));
                 if (!isCurrent())
                     co_return SupersededRefresh{};
                 const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
@@ -742,15 +744,43 @@ namespace javelin::jmap::calendar
         }
     } // namespace
 
-    CalendarService::CalendarService(cache::DatabaseConnection& connection,
-                                     api::JmapMethodTransport& methodTransport)
+    CalendarCacheReader::CalendarCacheReader(cache::DatabaseConnection& connection)
+        : m_connection(connection)
+    {
+    }
+
+    CalendarProtocolClient::CalendarProtocolClient(cache::DatabaseConnection& connection,
+                                                   api::JmapMethodTransport& methodTransport)
         : m_connection(connection), m_methodTransport(methodTransport)
     {
     }
 
-    CalendarLoadResult CalendarService::loadCached(const std::string_view accountId,
-                                                   const VisibleInterval& interval,
-                                                   const TimeZoneId& displayTimeZone) const
+    QCoro::Task<api::MethodCallerResult>
+    CalendarProtocolClient::call(api::ApiRequestContext requestContext,
+                                 api::RequestBuilder request) const
+    {
+        api::MethodCaller caller{m_methodTransport};
+        co_return co_await caller.call(std::move(requestContext), std::move(request));
+    }
+
+    CalendarSyncEngine::CalendarSyncEngine(cache::DatabaseConnection& connection,
+                                           CalendarProtocolClient& protocolClient)
+        : m_connection(connection), m_protocolClient(protocolClient)
+    {
+    }
+
+    CalendarMutationEngine::CalendarMutationEngine(cache::DatabaseConnection& connection,
+                                                   CalendarProtocolClient& protocolClient,
+                                                   CalendarSyncEngine& syncEngine,
+                                                   CalendarReader& reader)
+        : m_connection(connection), m_protocolClient(protocolClient), m_syncEngine(syncEngine),
+          m_reader(reader)
+    {
+    }
+
+    CalendarLoadResult CalendarCacheReader::loadCached(const std::string_view accountId,
+                                                       const VisibleInterval& interval,
+                                                       const TimeZoneId& displayTimeZone) const
     {
         cache::CalendarRepository repository{m_connection};
         auto loaded =
@@ -760,7 +790,7 @@ namespace javelin::jmap::calendar
         return std::get<std::optional<cache::CalendarWindow>>(std::move(loaded));
     }
 
-    CalendarAccountsResult CalendarService::accounts() const
+    CalendarAccountsResult CalendarCacheReader::accounts() const
     {
         cache::CalendarRepository repository{m_connection};
         auto loaded = repository.listAccounts();
@@ -769,7 +799,7 @@ namespace javelin::jmap::calendar
         return std::get<std::vector<cache::CalendarAccount>>(std::move(loaded));
     }
 
-    CalendarListResult CalendarService::calendars(const std::string_view accountId) const
+    CalendarListResult CalendarCacheReader::calendars(const std::string_view accountId) const
     {
         cache::CalendarRepository repository{m_connection};
         auto loaded = repository.listCalendars(accountId);
@@ -778,19 +808,8 @@ namespace javelin::jmap::calendar
         return std::get<std::vector<Calendar>>(std::move(loaded));
     }
 
-    CalendarPreferenceResult CalendarService::setCalendarVisible(const std::string_view accountId,
-                                                                 const std::string_view calendarId,
-                                                                 const bool visible)
-    {
-        cache::CalendarRepository repository{m_connection};
-        if (const auto cacheError = repository.setCalendarVisible(accountId, calendarId, visible))
-            return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
-        return std::monostate{};
-    }
-
-    QCoro::Task<CalendarMutationResult>
-    CalendarService::createCalendar(LiveConnectionSettings settings, std::string ownerAccountId,
-                                    CreateCalendarCommand command)
+    QCoro::Task<CalendarMutationResult> CalendarMutationEngine::createCalendar(
+        LiveConnectionSettings settings, std::string ownerAccountId, CreateCalendarCommand command)
     {
         if (command.name.empty() || command.name.size() > 255)
             co_return error(OperationErrorCode::InvalidUserInput,
@@ -849,11 +868,10 @@ namespace javelin::jmap::calendar
                                           std::move(projected), std::nullopt);
     }
 
-    QCoro::Task<CalendarMutationResult>
-    CalendarService::deleteCalendar(LiveConnectionSettings settings, std::string ownerAccountId,
-                                    DeleteCalendarCommand command)
+    QCoro::Task<CalendarMutationResult> CalendarMutationEngine::deleteCalendar(
+        LiveConnectionSettings settings, std::string ownerAccountId, DeleteCalendarCommand command)
     {
-        const auto listed = calendars(command.accountId);
+        const auto listed = m_reader.calendars(command.accountId);
         if (const auto* serviceError = std::get_if<OperationError>(&listed))
             co_return *serviceError;
         const auto& available = std::get<std::vector<Calendar>>(listed);
@@ -885,7 +903,7 @@ namespace javelin::jmap::calendar
                                           std::nullopt, std::move(command.calendarId));
     }
 
-    QCoro::Task<CalendarMutationResult> CalendarService::mutateCalendar(
+    QCoro::Task<CalendarMutationResult> CalendarMutationEngine::mutateCalendar(
         LiveConnectionSettings settings, api::Session session, api::CalendarSetRequest request,
         std::optional<Calendar> projectedCalendar, std::optional<std::string> deletedCalendarId)
     {
@@ -980,9 +998,8 @@ namespace javelin::jmap::calendar
         api::RequestBuilder builder;
         builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
         const auto handle = builder.call(*method, "calendar-set-manager");
-        api::MethodCaller caller{m_methodTransport};
-        const auto result =
-            co_await caller.call(context(settings, session, request.accountId), builder);
+        const auto result = co_await m_protocolClient.call(
+            context(settings, session, request.accountId), std::move(builder));
         const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
         if (!envelope)
         {
@@ -1106,10 +1123,9 @@ namespace javelin::jmap::calendar
         };
     }
 
-    QCoro::Task<AuthoritativeCalendarEventResult>
-    CalendarService::getAuthoritativeEvent(LiveConnectionSettings settings,
-                                           std::string ownerAccountId, std::string accountId,
-                                           std::optional<std::string> eventId, std::string uid)
+    QCoro::Task<AuthoritativeCalendarEventResult> CalendarProtocolClient::getAuthoritativeEvent(
+        LiveConnectionSettings settings, std::string ownerAccountId, std::string accountId,
+        std::optional<std::string> eventId, std::string uid)
     {
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
         if (const auto* serviceError = std::get_if<OperationError>(&sessionResult))
@@ -1120,7 +1136,6 @@ namespace javelin::jmap::calendar
             co_return error(
                 OperationErrorCode::UnsupportedCapability,
                 QStringLiteral("This account does not support JMAP Calendars draft-26."));
-        api::MethodCaller caller{m_methodTransport};
         std::vector<std::string> eventIds;
         if (eventId.has_value())
             eventIds.push_back(*eventId);
@@ -1149,7 +1164,7 @@ namespace javelin::jmap::calendar
             builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
             const auto handle = builder.call(*query, "calendar-history-query");
             const auto result =
-                co_await caller.call(context(settings, session, accountId), builder);
+                co_await call(context(settings, session, accountId), std::move(builder));
             const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
             if (!envelope)
                 co_return callError(result);
@@ -1168,7 +1183,7 @@ namespace javelin::jmap::calendar
                 ? static_cast<std::size_t>(*session.capabilities.coreDetails->maxObjectsInGet)
                 : std::numeric_limits<std::size_t>::max();
         auto result = co_await getCalendarEventsBatched(
-            caller, settings, session, accountId, eventIds, TimeZoneId{.value = "Etc/UTC"},
+            *this, settings, session, accountId, eventIds, TimeZoneId{.value = "Etc/UTC"},
             batchLimit, "calendar-history-get", [] { return true; });
         if (const auto* serviceError = std::get_if<OperationError>(&result))
             co_return *serviceError;
@@ -1185,11 +1200,11 @@ namespace javelin::jmap::calendar
     }
 
     QCoro::Task<CalendarMutationResult>
-    CalendarService::setCalendarSubscribed(LiveConnectionSettings settings,
-                                           std::string ownerAccountId, std::string accountId,
-                                           std::string calendarId, const bool subscribed)
+    CalendarMutationEngine::setCalendarSubscribed(LiveConnectionSettings settings,
+                                                  std::string ownerAccountId, std::string accountId,
+                                                  std::string calendarId, const bool subscribed)
     {
-        const auto listed = calendars(accountId);
+        const auto listed = m_reader.calendars(accountId);
         if (const auto* serviceError = std::get_if<OperationError>(&listed))
             co_return *serviceError;
         const auto& available = std::get<std::vector<Calendar>>(listed);
@@ -1303,8 +1318,8 @@ namespace javelin::jmap::calendar
         api::RequestBuilder builder;
         builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
         const auto handle = builder.call(*method, "calendar-set-subscription");
-        api::MethodCaller caller{m_methodTransport};
-        const auto result = co_await caller.call(context(settings, session, accountId), builder);
+        const auto result = co_await m_protocolClient.call(context(settings, session, accountId),
+                                                           std::move(builder));
         const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
         if (!envelope)
         {
@@ -1384,10 +1399,11 @@ namespace javelin::jmap::calendar
     }
 
     QCoro::Task<CalendarMutationResult>
-    CalendarService::setDefaultCalendar(LiveConnectionSettings settings, std::string ownerAccountId,
-                                        std::string accountId, std::string calendarId)
+    CalendarMutationEngine::setDefaultCalendar(LiveConnectionSettings settings,
+                                               std::string ownerAccountId, std::string accountId,
+                                               std::string calendarId)
     {
-        const auto listed = calendars(accountId);
+        const auto listed = m_reader.calendars(accountId);
         if (const auto* serviceError = std::get_if<OperationError>(&listed))
             co_return *serviceError;
         const auto& available = std::get<std::vector<Calendar>>(listed);
@@ -1506,8 +1522,8 @@ namespace javelin::jmap::calendar
         api::RequestBuilder builder;
         builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
         const auto handle = builder.call(*method, "calendar-set-default");
-        api::MethodCaller caller{m_methodTransport};
-        const auto result = co_await caller.call(context(settings, session, accountId), builder);
+        const auto result = co_await m_protocolClient.call(context(settings, session, accountId),
+                                                           std::move(builder));
         const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
         if (!envelope)
         {
@@ -1562,8 +1578,8 @@ namespace javelin::jmap::calendar
             verifyBuilder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
             const auto verifyHandle =
                 verifyBuilder.call(*verification, "calendar-get-default-verification");
-            const auto verifyResult =
-                co_await caller.call(context(settings, session, accountId), verifyBuilder);
+            const auto verifyResult = co_await m_protocolClient.call(
+                context(settings, session, accountId), std::move(verifyBuilder));
             const auto* verifyEnvelope = std::get_if<api::ResponseEnvelope>(&verifyResult);
             if (!verifyEnvelope)
             {
@@ -1620,21 +1636,26 @@ namespace javelin::jmap::calendar
         };
     }
 
-    std::uint64_t CalendarService::beginRefresh(const std::string_view ownerAccountId)
+    void CalendarSyncEngine::invalidateRefresh(const std::string_view ownerAccountId)
+    {
+        static_cast<void>(beginRefresh(ownerAccountId));
+    }
+
+    std::uint64_t CalendarSyncEngine::beginRefresh(const std::string_view ownerAccountId)
     {
         return ++m_refreshGenerations[std::string{ownerAccountId}];
     }
 
-    bool CalendarService::isCurrentRefresh(const std::string_view ownerAccountId,
-                                           const std::uint64_t generation) const
+    bool CalendarSyncEngine::isCurrentRefresh(const std::string_view ownerAccountId,
+                                              const std::uint64_t generation) const
     {
         const auto current = m_refreshGenerations.find(std::string{ownerAccountId});
         return current != m_refreshGenerations.end() && current->second == generation;
     }
 
     QCoro::Task<CalendarRefreshResult>
-    CalendarService::refreshChanged(LiveConnectionSettings settings, std::string ownerAccountId,
-                                    VisibleInterval interval, TimeZoneId displayTimeZone)
+    CalendarSyncEngine::refreshChanged(LiveConnectionSettings settings, std::string ownerAccountId,
+                                       VisibleInterval interval, TimeZoneId displayTimeZone)
     {
         const auto generation = beginRefresh(ownerAccountId);
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
@@ -1642,7 +1663,6 @@ namespace javelin::jmap::calendar
             co_return *serviceError;
         const auto& session = std::get<api::Session>(sessionResult);
         cache::CalendarRepository repository{m_connection};
-        api::MethodCaller caller{m_methodTransport};
         RefreshedRange summary{.interval = interval,
                                .displayTimeZone = displayTimeZone,
                                .accountCount = 0,
@@ -1709,8 +1729,8 @@ namespace javelin::jmap::calendar
             builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
             const auto calendarHandle = builder.call(*calendarRequest, "calendar-changes");
             const auto eventHandle = builder.call(*eventRequest, "calendar-event-changes");
-            const auto result =
-                co_await caller.call(context(settings, session, accountId), builder);
+            const auto result = co_await m_protocolClient.call(
+                context(settings, session, accountId), std::move(builder));
             if (!isCurrentRefresh(ownerAccountId, generation))
                 co_return summary;
             const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
@@ -1778,8 +1798,8 @@ namespace javelin::jmap::calendar
                 api::RequestBuilder getBuilder;
                 getBuilder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
                 const auto getHandle = getBuilder.call(*getRequest, "changed-calendar-events");
-                const auto getResult =
-                    co_await caller.call(context(settings, session, accountId), getBuilder);
+                const auto getResult = co_await m_protocolClient.call(
+                    context(settings, session, accountId), std::move(getBuilder));
                 if (!isCurrentRefresh(ownerAccountId, generation))
                     co_return summary;
                 const auto* getEnvelope = std::get_if<api::ResponseEnvelope>(&getResult);
@@ -1853,10 +1873,10 @@ namespace javelin::jmap::calendar
         co_return summary;
     }
 
-    QCoro::Task<CalendarRefreshResult> CalendarService::refresh(LiveConnectionSettings settings,
-                                                                std::string ownerAccountId,
-                                                                VisibleInterval interval,
-                                                                TimeZoneId displayTimeZone)
+    QCoro::Task<CalendarRefreshResult> CalendarSyncEngine::refresh(LiveConnectionSettings settings,
+                                                                   std::string ownerAccountId,
+                                                                   VisibleInterval interval,
+                                                                   TimeZoneId displayTimeZone)
     {
         const auto generation = beginRefresh(ownerAccountId);
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
@@ -1867,7 +1887,6 @@ namespace javelin::jmap::calendar
                                .displayTimeZone = displayTimeZone,
                                .accountCount = 0,
                                .eventCount = 0};
-        api::MethodCaller caller{m_methodTransport};
         for (const auto& [accountId, account] : session.accounts)
         {
             if (!account.accountCapabilities.calendars)
@@ -1918,8 +1937,8 @@ namespace javelin::jmap::calendar
             const auto queryHandle = builder.call(*queryRequest, "calendar-event-query");
             const auto baseQueryHandle =
                 builder.call(*baseQueryRequest, "calendar-base-event-query");
-            const auto result =
-                co_await caller.call(context(settings, session, accountId), builder);
+            const auto result = co_await m_protocolClient.call(
+                context(settings, session, accountId), std::move(builder));
             if (!isCurrentRefresh(ownerAccountId, generation))
                 co_return summary;
             const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
@@ -2110,8 +2129,8 @@ namespace javelin::jmap::calendar
                 api::RequestBuilder nextBuilder;
                 nextBuilder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
                 const auto nextHandle = nextBuilder.call(*nextRequest, "calendar-event-query");
-                const auto nextResult =
-                    co_await caller.call(context(settings, session, accountId), nextBuilder);
+                const auto nextResult = co_await m_protocolClient.call(
+                    context(settings, session, accountId), std::move(nextBuilder));
                 if (!isCurrentRefresh(ownerAccountId, generation))
                     co_return summary;
                 const auto* nextEnvelope = std::get_if<api::ResponseEnvelope>(&nextResult);
@@ -2149,8 +2168,8 @@ namespace javelin::jmap::calendar
                 api::RequestBuilder nextBuilder;
                 nextBuilder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
                 const auto nextHandle = nextBuilder.call(*nextRequest, "calendar-base-event-query");
-                const auto nextResult =
-                    co_await caller.call(context(settings, session, accountId), nextBuilder);
+                const auto nextResult = co_await m_protocolClient.call(
+                    context(settings, session, accountId), std::move(nextBuilder));
                 if (!isCurrentRefresh(ownerAccountId, generation))
                     co_return summary;
                 const auto* nextEnvelope = std::get_if<api::ResponseEnvelope>(&nextResult);
@@ -2174,8 +2193,8 @@ namespace javelin::jmap::calendar
                     ? static_cast<std::size_t>(*session.capabilities.coreDetails->maxObjectsInGet)
                     : std::numeric_limits<std::size_t>::max();
             auto getResult = co_await getCalendarEventsBatched(
-                caller, settings, session, accountId, eventIds, displayTimeZone, batchLimit,
-                "calendar-event-get", [this, &ownerAccountId, generation]
+                m_protocolClient, settings, session, accountId, eventIds, displayTimeZone,
+                batchLimit, "calendar-event-get", [this, &ownerAccountId, generation]
                 { return isCurrentRefresh(ownerAccountId, generation); });
             if (std::holds_alternative<SupersededRefresh>(getResult))
                 co_return summary;
@@ -2183,8 +2202,8 @@ namespace javelin::jmap::calendar
                 co_return *serviceError;
             auto events = std::get<api::CalendarEventGetResponse>(std::move(getResult));
             auto baseGetResult = co_await getCalendarEventsBatched(
-                caller, settings, session, accountId, baseEventIds, displayTimeZone, batchLimit,
-                "calendar-base-event-get", [this, &ownerAccountId, generation]
+                m_protocolClient, settings, session, accountId, baseEventIds, displayTimeZone,
+                batchLimit, "calendar-base-event-get", [this, &ownerAccountId, generation]
                 { return isCurrentRefresh(ownerAccountId, generation); });
             if (std::holds_alternative<SupersededRefresh>(baseGetResult))
                 co_return summary;
@@ -2228,8 +2247,8 @@ namespace javelin::jmap::calendar
                         std::string{api::calendarsCapabilityUri});
                     const auto recoveryHandle = recoveryBuilder.call(
                         *recoveryRequest, "calendar-base-event-recovery-query");
-                    const auto recoveryResult = co_await caller.call(
-                        context(settings, session, accountId), recoveryBuilder);
+                    const auto recoveryResult = co_await m_protocolClient.call(
+                        context(settings, session, accountId), std::move(recoveryBuilder));
                     if (!isCurrentRefresh(ownerAccountId, generation))
                         co_return summary;
                     const auto* recoveryEnvelope =
@@ -2260,8 +2279,8 @@ namespace javelin::jmap::calendar
             if (!recoveredBaseIds.empty())
             {
                 auto recoveredGetResult = co_await getCalendarEventsBatched(
-                    caller, settings, session, accountId, recoveredBaseIds, displayTimeZone,
-                    batchLimit, "calendar-base-event-recovery-get",
+                    m_protocolClient, settings, session, accountId, recoveredBaseIds,
+                    displayTimeZone, batchLimit, "calendar-base-event-recovery-get",
                     [this, &ownerAccountId, generation]
                     { return isCurrentRefresh(ownerAccountId, generation); });
                 if (std::holds_alternative<SupersededRefresh>(recoveredGetResult))
@@ -2422,8 +2441,9 @@ namespace javelin::jmap::calendar
     }
 
     QCoro::Task<CalendarMutationResult>
-    CalendarService::create(LiveConnectionSettings settings, std::string ownerAccountId,
-                            CreateEventCommand command, std::function<void()> projectionCommitted)
+    CalendarMutationEngine::create(LiveConnectionSettings settings, std::string ownerAccountId,
+                                   CreateEventCommand command,
+                                   std::function<void()> projectionCommitted)
     {
         if (!command.ifInState)
         {
@@ -2453,8 +2473,9 @@ namespace javelin::jmap::calendar
     }
 
     QCoro::Task<CalendarMutationResult>
-    CalendarService::update(LiveConnectionSettings settings, std::string ownerAccountId,
-                            UpdateEventCommand command, std::function<void()> projectionCommitted)
+    CalendarMutationEngine::update(LiveConnectionSettings settings, std::string ownerAccountId,
+                                   UpdateEventCommand command,
+                                   std::function<void()> projectionCommitted)
     {
         if (!command.ifInState)
         {
@@ -2503,8 +2524,9 @@ namespace javelin::jmap::calendar
     }
 
     QCoro::Task<CalendarMutationResult>
-    CalendarService::remove(LiveConnectionSettings settings, std::string ownerAccountId,
-                            DeleteEventCommand command, std::function<void()> projectionCommitted)
+    CalendarMutationEngine::remove(LiveConnectionSettings settings, std::string ownerAccountId,
+                                   DeleteEventCommand command,
+                                   std::function<void()> projectionCommitted)
     {
         if (!command.ifInState)
         {
@@ -2526,9 +2548,9 @@ namespace javelin::jmap::calendar
     }
 
     QCoro::Task<CalendarMutationResult>
-    CalendarService::respond(LiveConnectionSettings settings, std::string ownerAccountId,
-                             RespondToEventCommand command,
-                             std::function<void()> projectionCommitted)
+    CalendarMutationEngine::respond(LiveConnectionSettings settings, std::string ownerAccountId,
+                                    RespondToEventCommand command,
+                                    std::function<void()> projectionCommitted)
     {
         if (command.participationStatus != "accepted" &&
             command.participationStatus != "tentative" && command.participationStatus != "declined")
@@ -2584,9 +2606,8 @@ namespace javelin::jmap::calendar
         identityBuilder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
         const auto identityHandle =
             identityBuilder.call(*identitiesMethod, "participant-identities");
-        api::MethodCaller caller{m_methodTransport};
-        const auto identityResult =
-            co_await caller.call(context(settings, session, command.accountId), identityBuilder);
+        const auto identityResult = co_await m_protocolClient.call(
+            context(settings, session, command.accountId), std::move(identityBuilder));
         const auto* identityEnvelope = std::get_if<api::ResponseEnvelope>(&identityResult);
         if (!identityEnvelope)
             co_return callError(identityResult);
@@ -2646,7 +2667,7 @@ namespace javelin::jmap::calendar
                                   std::move(projectionCommitted));
     }
 
-    QCoro::Task<CalendarMutationResult> CalendarService::mutate(
+    QCoro::Task<CalendarMutationResult> CalendarMutationEngine::mutate(
         LiveConnectionSettings settings, std::string ownerAccountId,
         api::CalendarEventSetRequest request, std::vector<std::string> calendarIds,
         std::optional<std::string> operationGroupId,
@@ -2744,9 +2765,8 @@ namespace javelin::jmap::calendar
                                 QStringLiteral("Unable to serialize expanded event retrieval."));
             getHandle = builder.call(*get, "calendar-event-materialization-get");
         }
-        api::MethodCaller caller{m_methodTransport};
-        const auto result =
-            co_await caller.call(context(settings, session, request.accountId), builder);
+        const auto result = co_await m_protocolClient.call(
+            context(settings, session, request.accountId), std::move(builder));
         const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
         if (!envelope)
         {
@@ -2872,7 +2892,7 @@ namespace javelin::jmap::calendar
             !materializationComplete;
         if (projectionCommitted)
             projectionCommitted();
-        static_cast<void>(beginRefresh(ownerAccountId));
+        m_syncEngine.invalidateRefresh(ownerAccountId);
         co_return accepted;
     }
 } // namespace javelin::jmap::calendar

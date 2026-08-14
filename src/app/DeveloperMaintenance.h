@@ -1,6 +1,6 @@
 #pragma once
 
-#include "jmap/cache/Database.h"
+#include "storage/DatabaseError.h"
 
 #include <QCoroTask>
 

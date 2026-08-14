@@ -2,8 +2,8 @@
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/Transport.h"
-#include "jmap/cache/Database.h"
 #include "jmap/cache/SessionRepository.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroSignal>
 #include <QCoroTask>

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storage/DatabaseError.h"
+
 #include "app/AccountApplicationPorts.h"
 
 namespace javelin::jmap::cache

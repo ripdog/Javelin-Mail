@@ -1,4 +1,10 @@
-#include "jmap/JmapCore.h"
+#include "jmap/AccountBootstrapClient.h"
+#include "jmap/MessageContentClient.h"
+#include "jmap/api/SessionRefreshClient.h"
+#include "jmap/query/MailQueryClient.h"
+#include "jmap/query/MailQueryMaterializer.h"
+#include "jmap/sync/EmailMutationEngine.h"
+#include "jmap/sync/MailboxMutationEngine.h"
 
 #include "jmap/api/Error.h"
 #include "jmap/api/JmapMethodTransport.h"
@@ -17,6 +23,7 @@
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/MessageContentTypes.h"
+#include "jmap/cache/MessageSummaryReadRepository.h"
 #include "jmap/cache/MimeMessageParser.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
@@ -52,11 +59,12 @@ namespace javelin::jmap
 {
     Q_LOGGING_CATEGORY(logMessageContent, "jmap.messagecontent", QtInfoMsg)
 
-    struct JmapCore::Impl
+    struct MailCapabilityContext
     {
         javelin::jmap::cache::DatabaseConnection* databaseConnection = nullptr;
         javelin::jmap::api::AbstractTransport* resourceTransport = nullptr;
         javelin::jmap::api::JmapMethodTransport* methodTransport = nullptr;
+        MailQueryClient* queryClient = nullptr;
     };
 
     namespace
@@ -397,18 +405,6 @@ namespace javelin::jmap
                 .requestLimits = javelin::jmap::api::coreRequestLimits(session),
             };
         }
-
-        struct CollapsedQueryPage
-        {
-            std::size_t representativeCount = 0;
-            std::size_t position = 0;
-            std::size_t returnedLimit = 0;
-            std::optional<std::size_t> total;
-            std::string queryState;
-            std::string emailState;
-            std::vector<std::string> representativeIds;
-            std::vector<javelin::jmap::domain::Email> representatives;
-        };
 
         [[nodiscard]] QCoro::Task<std::variant<CollapsedQueryPage, OperationError>>
         performCollapsedQueryPage(javelin::jmap::cache::DatabaseConnection& databaseConnection,
@@ -1098,20 +1094,85 @@ namespace javelin::jmap
 
     } // namespace
 
-    JmapCore::JmapCore(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                       javelin::jmap::api::AbstractTransport& resourceTransport,
-                       javelin::jmap::api::JmapMethodTransport& methodTransport)
-        : m_impl(std::make_unique<Impl>())
+    SessionRefreshClient::SessionRefreshClient(
+        javelin::jmap::cache::DatabaseConnection& databaseConnection,
+        javelin::jmap::api::AbstractTransport& resourceTransport)
+        : m_impl(std::make_unique<MailCapabilityContext>())
+    {
+        m_impl->databaseConnection = &databaseConnection;
+        m_impl->resourceTransport = &resourceTransport;
+    }
+
+    SessionRefreshClient::~SessionRefreshClient() = default;
+
+    AccountBootstrapClient::AccountBootstrapClient(
+        javelin::jmap::cache::DatabaseConnection& databaseConnection,
+        javelin::jmap::api::AbstractTransport& resourceTransport,
+        javelin::jmap::api::JmapMethodTransport& methodTransport)
+        : m_impl(std::make_unique<MailCapabilityContext>())
     {
         m_impl->databaseConnection = &databaseConnection;
         m_impl->resourceTransport = &resourceTransport;
         m_impl->methodTransport = &methodTransport;
     }
 
-    JmapCore::~JmapCore() = default;
+    AccountBootstrapClient::~AccountBootstrapClient() = default;
 
-    QCoro::Task<SessionRefreshResult> JmapCore::refreshSession(LiveConnectionSettings settings,
-                                                               std::string ownerAccountId)
+    MailQueryClient::MailQueryClient(javelin::jmap::cache::DatabaseConnection& databaseConnection,
+                                     javelin::jmap::api::JmapMethodTransport& methodTransport)
+        : m_impl(std::make_unique<MailCapabilityContext>())
+    {
+        m_impl->databaseConnection = &databaseConnection;
+        m_impl->methodTransport = &methodTransport;
+    }
+
+    MailQueryClient::~MailQueryClient() = default;
+
+    MailQueryMaterializer::MailQueryMaterializer(
+        javelin::jmap::cache::DatabaseConnection& databaseConnection, MailQueryClient& queryClient)
+        : m_impl(std::make_unique<MailCapabilityContext>())
+    {
+        m_impl->databaseConnection = &databaseConnection;
+        m_impl->queryClient = &queryClient;
+    }
+
+    MailQueryMaterializer::~MailQueryMaterializer() = default;
+
+    MessageContentClient::MessageContentClient(
+        javelin::jmap::cache::DatabaseConnection& databaseConnection,
+        javelin::jmap::api::AbstractTransport& resourceTransport)
+        : m_impl(std::make_unique<MailCapabilityContext>())
+    {
+        m_impl->databaseConnection = &databaseConnection;
+        m_impl->resourceTransport = &resourceTransport;
+    }
+
+    MessageContentClient::~MessageContentClient() = default;
+
+    EmailMutationEngine::EmailMutationEngine(
+        javelin::jmap::cache::DatabaseConnection& databaseConnection,
+        javelin::jmap::api::JmapMethodTransport& methodTransport)
+        : m_impl(std::make_unique<MailCapabilityContext>())
+    {
+        m_impl->databaseConnection = &databaseConnection;
+        m_impl->methodTransport = &methodTransport;
+    }
+
+    EmailMutationEngine::~EmailMutationEngine() = default;
+
+    MailboxMutationEngine::MailboxMutationEngine(
+        javelin::jmap::cache::DatabaseConnection& databaseConnection,
+        javelin::jmap::api::JmapMethodTransport& methodTransport)
+        : m_impl(std::make_unique<MailCapabilityContext>())
+    {
+        m_impl->databaseConnection = &databaseConnection;
+        m_impl->methodTransport = &methodTransport;
+    }
+
+    MailboxMutationEngine::~MailboxMutationEngine() = default;
+
+    QCoro::Task<SessionRefreshResult> SessionRefreshClient::refresh(LiveConnectionSettings settings,
+                                                                    std::string ownerAccountId)
     {
         if (m_impl->databaseConnection == nullptr || m_impl->resourceTransport == nullptr)
         {
@@ -1172,9 +1233,9 @@ namespace javelin::jmap
     }
 
     QCoro::Task<LiveRefreshResult>
-    JmapCore::refreshFromServer(LiveConnectionSettings settings,
-                                std::function<void(const QString&)> progressCallback,
-                                std::vector<std::string> configuredMailboxIds)
+    AccountBootstrapClient::bootstrap(LiveConnectionSettings settings,
+                                      std::function<void(const QString&)> progressCallback,
+                                      std::vector<std::string> configuredMailboxIds)
     {
         const auto reportProgress = [&progressCallback](const QString& message)
         {
@@ -1184,7 +1245,7 @@ namespace javelin::jmap
             }
         };
 
-        qInfo().noquote() << "JMAP core refresh start"
+        qInfo().noquote() << "Account bootstrap start"
                           << QString::fromStdString(settings.loginEmail)
                           << QString::fromStdString(settings.sessionUrl);
         reportProgress(QStringLiteral("Discovering JMAP session..."));
@@ -1239,7 +1300,7 @@ namespace javelin::jmap
 
         const auto& accountId = *session.primaryAccounts.mailAccountId;
         javelin::jmap::cache::SessionRepository sessionRepository{*m_impl->databaseConnection};
-        qInfo().noquote() << "JMAP core saving session and accounts"
+        qInfo().noquote() << "Account bootstrap saving session and accounts"
                           << QString::fromStdString(accountId)
                           << static_cast<qulonglong>(session.accounts.size());
         if (const auto error = sessionRepository.replace(accountId, session))
@@ -1248,7 +1309,7 @@ namespace javelin::jmap
         }
         reportProgress(QStringLiteral("Cached session. Fetching mailboxes..."));
         const auto apiRequestContext = buildApiRequestContext(settings, accountId, session);
-        qInfo().noquote() << "JMAP core mailbox request context ready"
+        qInfo().noquote() << "Account bootstrap mailbox request context ready"
                           << QString::fromStdString(apiRequestContext.apiUrl);
 
         javelin::jmap::api::MethodCaller methodCaller{*m_impl->methodTransport};
@@ -1262,7 +1323,7 @@ namespace javelin::jmap
                 .message = QStringLiteral("Failed to encode the Mailbox/get request."),
             };
         }
-        qInfo().noquote() << "JMAP core Mailbox/get request encoded"
+        qInfo().noquote() << "Account bootstrap Mailbox/get request encoded"
                           << QString::fromStdString(mailboxRequest->arguments);
 
         javelin::jmap::api::RequestBuilder mailboxRequestBuilder;
@@ -1348,15 +1409,7 @@ namespace javelin::jmap
                                         .arg(parsedMailboxes.list.size())
                                         .arg(emailCount)
                                         .arg(QString::fromStdString(settings.loginEmail));
-        qInfo().noquote() << "JMAP core refresh success" << refreshSummary;
-
-        const auto pendingSubmit = co_await submitPendingEmailMutations(settings, accountId);
-        if (const auto* summary = std::get_if<SubmittedEmailMutations>(&pendingSubmit);
-            summary != nullptr && summary->updatedEmailCount > 0)
-        {
-            reportProgress(QStringLiteral("Submitted %1 queued mailbox updates.")
-                               .arg(summary->updatedEmailCount));
-        }
+        qInfo().noquote() << "Account bootstrap success" << refreshSummary;
 
         co_return LiveRefreshSummary{
             .accountId = accountId,
@@ -1370,9 +1423,9 @@ namespace javelin::jmap
     }
 
     QCoro::Task<MessageContentRefreshResult>
-    JmapCore::refreshMessageContent(LiveConnectionSettings settings, std::string accountId,
-                                    std::string emailId,
-                                    std::function<void(const QString&)> progressCallback)
+    MessageContentClient::refresh(LiveConnectionSettings settings, std::string accountId,
+                                  std::string emailId,
+                                  std::function<void(const QString&)> progressCallback)
     {
         const auto reportProgress = [&progressCallback](const QString& message)
         {
@@ -1383,7 +1436,7 @@ namespace javelin::jmap
         };
 
         qCDebug(logMessageContent).noquote()
-            << "JMAP core message content refresh start" << QString::fromStdString(accountId)
+            << "Message content refresh start" << QString::fromStdString(accountId)
             << QString::fromStdString(emailId);
         reportProgress(QStringLiteral("Checking for saved message content..."));
         if (m_impl->databaseConnection == nullptr || m_impl->resourceTransport == nullptr)
@@ -1418,7 +1471,7 @@ namespace javelin::jmap
         if (sourceBlobId.has_value() && *sourceBlobId == email.blobId)
         {
             qCDebug(logMessageContent).noquote()
-                << "JMAP core message source using cached data" << QString::fromStdString(emailId);
+                << "Message source using cached data" << QString::fromStdString(emailId);
             reportProgress(QStringLiteral("Opened message from saved content."));
             co_return MessageContentRefreshSummary{
                 .accountId = std::move(accountId),
@@ -1497,7 +1550,7 @@ namespace javelin::jmap
         }
 
         qCDebug(logMessageContent).noquote()
-            << "JMAP core message source refresh success" << QString::fromStdString(emailId)
+            << "Message source refresh success" << QString::fromStdString(emailId)
             << static_cast<qulonglong>(payloadSize);
         reportProgress(QStringLiteral("Message ready."));
 
@@ -1510,9 +1563,28 @@ namespace javelin::jmap
         };
     }
 
+    QCoro::Task<CollapsedQueryPageResult> MailQueryClient::queryCollapsedPage(
+        LiveConnectionSettings settings, std::string accountId,
+        javelin::jmap::api::EmailQueryFilter filter, const std::size_t offset,
+        const std::size_t limit, javelin::jmap::query::EmailListSort sort,
+        std::optional<std::string> anchor, const std::int64_t anchorOffset,
+        std::function<void(const QString&)> progressCallback)
+    {
+        if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
+        {
+            co_return OperationError{
+                .message = QStringLiteral("Mail queries are unavailable."),
+            };
+        }
+        co_return co_await performCollapsedQueryPage(
+            *m_impl->databaseConnection, *m_impl->methodTransport, std::move(settings),
+            std::move(accountId), std::move(filter), offset, limit, std::move(sort),
+            std::move(anchor), anchorOffset, std::move(progressCallback));
+    }
+
     QCoro::Task<EmailIdQueryPageResult>
-    JmapCore::queryEmailIdsByKeyword(LiveConnectionSettings settings, std::string accountId,
-                                     std::string keyword, const std::size_t limit)
+    MailQueryClient::queryEmailIdsByKeyword(LiveConnectionSettings settings, std::string accountId,
+                                            std::string keyword, const std::size_t limit)
     {
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
@@ -1574,10 +1646,9 @@ namespace javelin::jmap
         };
     }
 
-    QCoro::Task<FullMailboxPageResult>
-    JmapCore::materializeFullMailboxPage(LiveConnectionSettings settings, std::string accountId,
-                                         std::string mailboxId, const std::size_t position,
-                                         const std::size_t limit, std::optional<std::string> anchor)
+    QCoro::Task<FullMailboxPageResult> MailQueryClient::fetchFullMailboxPage(
+        LiveConnectionSettings settings, std::string accountId, std::string mailboxId,
+        const std::size_t position, const std::size_t limit, std::optional<std::string> anchor)
     {
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
@@ -1685,11 +1756,9 @@ namespace javelin::jmap
     }
 
     QCoro::Task<AttachmentDownloadResult>
-    JmapCore::downloadAttachment(LiveConnectionSettings settings, std::string accountId,
-                                 std::string emailId, std::string partId)
+    MessageContentClient::loadAttachment(std::string accountId, std::string emailId,
+                                         std::string partId)
     {
-        Q_UNUSED(settings);
-
         if (m_impl->databaseConnection == nullptr)
         {
             co_return OperationError{
@@ -1756,7 +1825,7 @@ namespace javelin::jmap
     }
 
     QCoro::Task<MessageSourceDownloadResult>
-    JmapCore::loadCachedMessageSource(std::string accountId, std::string emailId)
+    MessageContentClient::loadCachedSource(std::string accountId, std::string emailId)
     {
         if (m_impl->databaseConnection == nullptr)
         {
@@ -1801,24 +1870,8 @@ namespace javelin::jmap
         };
     }
 
-    QueuedEmailMutationResult JmapCore::queueMoveEmail(std::string accountId, std::string emailId,
-                                                       std::string sourceMailboxId,
-                                                       std::string destinationMailboxId)
-    {
-        if (m_impl->databaseConnection == nullptr)
-        {
-            return OperationError{
-                .message = QStringLiteral("Queued mutations are unavailable in this process."),
-            };
-        }
-
-        return sync::queueMailboxEmailMutation(*m_impl->databaseConnection, std::move(accountId),
-                                               std::move(emailId), std::move(sourceMailboxId),
-                                               std::move(destinationMailboxId), true);
-    }
-
-    QueuedEmailMutationResult JmapCore::queueEmailMailboxMutation(std::string accountId,
-                                                                  EmailMailboxMutation mutation)
+    QueuedEmailMutationResult EmailMutationEngine::queue(std::string accountId,
+                                                         EmailMailboxMutation mutation)
     {
         if (m_impl->databaseConnection == nullptr)
         {
@@ -1832,8 +1885,8 @@ namespace javelin::jmap
     }
 
     QueuedEmailMutationsResult
-    JmapCore::queueEmailMailboxMutations(std::string accountId,
-                                         std::vector<EmailMailboxMutation> mutations)
+    EmailMutationEngine::queueBatch(std::string accountId,
+                                    std::vector<EmailMailboxMutation> mutations)
     {
         if (m_impl->databaseConnection == nullptr)
         {
@@ -1845,106 +1898,16 @@ namespace javelin::jmap
                                          std::move(mutations));
     }
 
-    QueuedEmailMutationResult JmapCore::queueCopyEmail(std::string accountId, std::string emailId,
-                                                       std::string sourceMailboxId,
-                                                       std::string destinationMailboxId)
-    {
-        if (m_impl->databaseConnection == nullptr)
-        {
-            return OperationError{
-                .message = QStringLiteral("Queued mutations are unavailable in this process."),
-            };
-        }
-
-        return sync::queueMailboxEmailMutation(*m_impl->databaseConnection, std::move(accountId),
-                                               std::move(emailId), std::move(sourceMailboxId),
-                                               std::move(destinationMailboxId), false);
-    }
-
-    QueuedEmailMutationResult JmapCore::queueArchiveEmail(std::string accountId,
-                                                          std::string emailId,
-                                                          std::string sourceMailboxId,
-                                                          std::string archiveMailboxId)
-    {
-        return queueMoveEmail(std::move(accountId), std::move(emailId), std::move(sourceMailboxId),
-                              std::move(archiveMailboxId));
-    }
-
-    QueuedEmailMutationResult JmapCore::queueDeleteEmail(std::string accountId, std::string emailId,
-                                                         std::string sourceMailboxId,
-                                                         std::string trashMailboxId)
-    {
-        return queueMoveEmail(std::move(accountId), std::move(emailId), std::move(sourceMailboxId),
-                              std::move(trashMailboxId));
-    }
-
-    QueuedEmailMutationResult
-    JmapCore::queueDestroyEmail(std::string accountId, std::string emailId,
-                                std::optional<std::string> operationGroupId)
-    {
-        if (m_impl->databaseConnection == nullptr)
-        {
-            return OperationError{
-                .message = QStringLiteral("Queued mutations are unavailable in this process."),
-            };
-        }
-
-        return sync::queueDestroyEmailMutation(*m_impl->databaseConnection, std::move(accountId),
-                                               std::move(emailId), std::move(operationGroupId));
-    }
-
-    QueuedEmailMutationResult JmapCore::queueMarkEmailRead(std::string accountId,
-                                                           std::string emailId)
-    {
-        if (m_impl->databaseConnection == nullptr)
-        {
-            return OperationError{
-                .message = QStringLiteral("Queued mutations are unavailable in this process."),
-            };
-        }
-
-        return sync::queueEmailKeywordMutation(*m_impl->databaseConnection, std::move(accountId),
-                                               std::move(emailId), "$seen", true);
-    }
-
-    QueuedEmailMutationResult JmapCore::queueMarkEmailUnread(std::string accountId,
-                                                             std::string emailId)
-    {
-        if (m_impl->databaseConnection == nullptr)
-        {
-            return OperationError{
-                .message = QStringLiteral("Queued mutations are unavailable in this process."),
-            };
-        }
-
-        return sync::queueEmailKeywordMutation(*m_impl->databaseConnection, std::move(accountId),
-                                               std::move(emailId), "$seen", false);
-    }
-
-    QueuedEmailMutationResult
-    JmapCore::queueSetEmailFlagged(std::string accountId, std::string emailId, const bool flagged)
-    {
-        if (m_impl->databaseConnection == nullptr)
-        {
-            return OperationError{
-                .message = QStringLiteral("Queued mutations are unavailable in this process."),
-            };
-        }
-
-        return sync::queueEmailKeywordMutation(*m_impl->databaseConnection, std::move(accountId),
-                                               std::move(emailId), "$flagged", flagged);
-    }
-
     QCoro::Task<SubmittedEmailMutationsResult>
-    JmapCore::submitPendingEmailMutations(LiveConnectionSettings settings, std::string accountId,
-                                          std::optional<std::string> operationGroupId,
-                                          const std::size_t limit,
-                                          std::optional<std::string> ifInStateOverride)
+    EmailMutationEngine::submitPending(LiveConnectionSettings settings, std::string accountId,
+                                       std::optional<std::string> operationGroupId,
+                                       const std::size_t limit,
+                                       std::optional<std::string> ifInStateOverride)
     {
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
             co_return OperationError{
-                .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
+                .message = QStringLiteral("Required mail capability dependencies are unavailable."),
             };
         }
 
@@ -2573,13 +2536,13 @@ namespace javelin::jmap
     }
 
     QCoro::Task<AuthoritativeEmailsResult>
-    JmapCore::getAuthoritativeEmails(LiveConnectionSettings settings, std::string accountId,
-                                     std::vector<std::string> emailIds)
+    EmailMutationEngine::getAuthoritative(LiveConnectionSettings settings, std::string accountId,
+                                          std::vector<std::string> emailIds)
     {
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
             co_return OperationError{
-                .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
+                .message = QStringLiteral("Required mail capability dependencies are unavailable."),
             };
         }
         if (const auto validationError = validateLoginSettings(settings, true))
@@ -2632,14 +2595,14 @@ namespace javelin::jmap
     }
 
     QCoro::Task<MailboxSubscriptionChangeResult>
-    JmapCore::setMailboxSubscribed(LiveConnectionSettings settings, std::string accountId,
-                                   std::string mailboxId, const bool subscribed,
-                                   std::function<void()> projectionCommitted)
+    MailboxMutationEngine::setSubscribed(LiveConnectionSettings settings, std::string accountId,
+                                         std::string mailboxId, const bool subscribed,
+                                         std::function<void()> projectionCommitted)
     {
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
             co_return OperationError{
-                .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
+                .message = QStringLiteral("Required mail capability dependencies are unavailable."),
             };
         }
         if (const auto validationError = validateLoginSettings(settings, true))
@@ -2741,12 +2704,13 @@ namespace javelin::jmap
     }
 
     QCoro::Task<MailboxSubscriptionChangeResult>
-    JmapCore::reconcileMailboxSubscription(LiveConnectionSettings settings, std::string accountId)
+    MailboxMutationEngine::reconcileSubscription(LiveConnectionSettings settings,
+                                                 std::string accountId)
     {
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
             co_return OperationError{
-                .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
+                .message = QStringLiteral("Required mail capability dependencies are unavailable."),
             };
         }
         if (const auto validationError = validateLoginSettings(settings, true))
@@ -2851,13 +2815,13 @@ namespace javelin::jmap
     }
 
     QCoro::Task<MailboxCreateResult>
-    JmapCore::createMailbox(LiveConnectionSettings settings, std::string accountId,
-                            std::string name, std::function<void()> projectionCommitted)
+    MailboxMutationEngine::create(LiveConnectionSettings settings, std::string accountId,
+                                  std::string name, std::function<void()> projectionCommitted)
     {
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
             co_return OperationError{
-                .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
+                .message = QStringLiteral("Required mail capability dependencies are unavailable."),
             };
         }
         if (const auto validationError = validateLoginSettings(settings, true))
@@ -2973,12 +2937,12 @@ namespace javelin::jmap
     }
 
     QCoro::Task<MailboxCreateResult>
-    JmapCore::reconcileMailboxCreate(LiveConnectionSettings settings, std::string accountId)
+    MailboxMutationEngine::reconcileCreate(LiveConnectionSettings settings, std::string accountId)
     {
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
             co_return OperationError{
-                .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
+                .message = QStringLiteral("Required mail capability dependencies are unavailable."),
             };
         }
         if (const auto validationError = validateLoginSettings(settings, true))
@@ -3077,13 +3041,13 @@ namespace javelin::jmap
     }
 
     QCoro::Task<MailboxDestroyResult>
-    JmapCore::destroyMailbox(LiveConnectionSettings settings, std::string accountId,
-                             std::string mailboxId, std::function<void()> projectionCommitted)
+    MailboxMutationEngine::destroy(LiveConnectionSettings settings, std::string accountId,
+                                   std::string mailboxId, std::function<void()> projectionCommitted)
     {
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
             co_return OperationError{
-                .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
+                .message = QStringLiteral("Required mail capability dependencies are unavailable."),
             };
         }
         if (const auto validationError = validateLoginSettings(settings, true))
@@ -3197,12 +3161,12 @@ namespace javelin::jmap
     }
 
     QCoro::Task<MailboxDestroyResult>
-    JmapCore::reconcileMailboxDestroy(LiveConnectionSettings settings, std::string accountId)
+    MailboxMutationEngine::reconcileDestroy(LiveConnectionSettings settings, std::string accountId)
     {
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
             co_return OperationError{
-                .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
+                .message = QStringLiteral("Required mail capability dependencies are unavailable."),
             };
         }
         if (const auto validationError = validateLoginSettings(settings, true))
@@ -3289,7 +3253,7 @@ namespace javelin::jmap
                                        .mailboxId = std::move(mutation.mailboxId)};
     }
 
-    QCoro::Task<MessageSearchResult> JmapCore::searchMessages(
+    QCoro::Task<MessageSearchResult> MailQueryMaterializer::searchMessages(
         LiveConnectionSettings settings, std::string accountId, std::string query,
         const std::size_t offset, const std::size_t limit, javelin::jmap::query::EmailListSort sort,
         std::optional<std::string> anchor, std::optional<std::string> windowKey,
@@ -3302,7 +3266,7 @@ namespace javelin::jmap
             {});
     }
 
-    QCoro::Task<MessageSearchResult> JmapCore::searchMessages(
+    QCoro::Task<MessageSearchResult> MailQueryMaterializer::searchMessages(
         LiveConnectionSettings settings, std::string accountId,
         javelin::jmap::search::EmailSearchCriteria criteria, const std::size_t offset,
         const std::size_t limit, javelin::jmap::query::EmailListSort sort,
@@ -3320,13 +3284,13 @@ namespace javelin::jmap
 
         auto query = javelin::jmap::search::displayString(criteria);
         const auto queryKey = windowKey.value_or(javelin::jmap::search::cacheKey(criteria, sort));
-        qInfo().noquote() << "JMAP core search start" << QString::fromStdString(accountId)
-                          << QString::fromStdString(query);
+        qInfo().noquote() << "Mail search materialization start"
+                          << QString::fromStdString(accountId) << QString::fromStdString(query);
         reportProgress(QStringLiteral("Searching the server..."));
-        if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
+        if (m_impl->databaseConnection == nullptr || m_impl->queryClient == nullptr)
         {
             co_return OperationError{
-                .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
+                .message = QStringLiteral("Mail query materialization is unavailable."),
             };
         }
 
@@ -3337,10 +3301,9 @@ namespace javelin::jmap
             };
         }
 
-        const auto pageResult = co_await performCollapsedQueryPage(
-            *m_impl->databaseConnection, *m_impl->methodTransport, settings, accountId,
-            javelin::jmap::search::toEmailQueryFilter(criteria, resolution), offset, limit,
-            std::move(sort), std::move(anchor), 1, reportProgress);
+        const auto pageResult = co_await m_impl->queryClient->queryCollapsedPage(
+            settings, accountId, javelin::jmap::search::toEmailQueryFilter(criteria, resolution),
+            offset, limit, std::move(sort), std::move(anchor), 1, reportProgress);
         if (const auto* error = std::get_if<OperationError>(&pageResult))
         {
             co_return *error;
@@ -3380,8 +3343,9 @@ namespace javelin::jmap
         if (const auto error = transaction.commit())
             co_return javelin::jmap::operationError(*error);
 
-        javelin::jmap::cache::QueryService queryService{*m_impl->databaseConnection};
-        const auto cachedResults = queryService.listMessagesByEmailIds(accountId, emailIds);
+        javelin::jmap::cache::MessageSummaryReadRepository messageSummaries{
+            *m_impl->databaseConnection};
+        const auto cachedResults = messageSummaries.listMessagesByEmailIds(accountId, emailIds);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedResults))
         {
             co_return javelin::jmap::operationError(*error);
@@ -3402,12 +3366,11 @@ namespace javelin::jmap
         };
     }
 
-    QCoro::Task<MailboxPageResult>
-    JmapCore::queryMailboxPage(LiveConnectionSettings settings, std::string accountId,
-                               std::string mailboxId, const std::size_t offset,
-                               const std::size_t limit, javelin::jmap::query::EmailListSort sort,
-                               std::optional<std::string> anchor, const std::int64_t anchorOffset,
-                               std::function<void(const QString&)> progressCallback)
+    QCoro::Task<MailboxPageResult> MailQueryMaterializer::queryMailboxPage(
+        LiveConnectionSettings settings, std::string accountId, std::string mailboxId,
+        const std::size_t offset, const std::size_t limit, javelin::jmap::query::EmailListSort sort,
+        std::optional<std::string> anchor, const std::int64_t anchorOffset,
+        std::function<void(const QString&)> progressCallback)
     {
         const auto reportProgress = [&progressCallback](const QString& message)
         {
@@ -3417,20 +3380,20 @@ namespace javelin::jmap
             }
         };
 
-        qInfo().noquote() << "JMAP core mailbox page query" << QString::fromStdString(accountId)
+        qInfo().noquote() << "Mailbox page materialization" << QString::fromStdString(accountId)
                           << QString::fromStdString(mailboxId) << static_cast<qulonglong>(offset)
                           << static_cast<qulonglong>(limit);
         reportProgress(QStringLiteral("Fetching mailbox page from the server..."));
-        if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
+        if (m_impl->databaseConnection == nullptr || m_impl->queryClient == nullptr)
         {
             co_return OperationError{
-                .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
+                .message = QStringLiteral("Mail query materialization is unavailable."),
             };
         }
 
         const bool anchoredRequest = anchor.has_value();
-        const auto pageResult = co_await performCollapsedQueryPage(
-            *m_impl->databaseConnection, *m_impl->methodTransport, settings, accountId,
+        const auto pageResult = co_await m_impl->queryClient->queryCollapsedPage(
+            settings, accountId,
             javelin::jmap::api::EmailQueryFilter{
                 .inMailbox = mailboxId,
                 .text = std::nullopt,
@@ -3484,9 +3447,10 @@ namespace javelin::jmap
         if (const auto error = transaction.commit())
             co_return javelin::jmap::operationError(*error);
 
-        javelin::jmap::cache::QueryService queryService{*m_impl->databaseConnection};
+        javelin::jmap::cache::MessageSummaryReadRepository messageSummaries{
+            *m_impl->databaseConnection};
         const auto cachedResults =
-            queryService.listMessagesByEmailIds(accountId, page.representativeIds);
+            messageSummaries.listMessagesByEmailIds(accountId, page.representativeIds);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedResults))
             co_return javelin::jmap::operationError(*error);
         auto results = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(cachedResults);

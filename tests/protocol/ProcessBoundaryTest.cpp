@@ -1,5 +1,9 @@
 #include "protocol/InProcessEndpoint.h"
-#include "protocol/SocketTransport.h"
+#include "protocol/LocalActivationClient.h"
+#include "protocol/LocalActivationServer.h"
+#include "protocol/LocalDaemonClient.h"
+#include "protocol/LocalDaemonServer.h"
+#include "protocol/SocketFrameCodec.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -224,7 +228,7 @@ namespace
 
         const CommandRequest remoteCommand{.id = {.value = QUuid::createUuid()},
                                            .command = RemoteActionCommand{
-                                               .kind = RemoteActionKind::WorkSummary,
+                                               .action = ActionId{.value = 66},
                                                .payload = QByteArray{"remote\0payload", 14},
                                            }};
         const auto remoteReply = commandClient.submitCommand(remoteCommand);
@@ -564,6 +568,24 @@ TEST_CASE("endpoint validates bounded values and estimates their frame size", "[
     CHECK(estimatedEncodedSize(ClientRequest{request}) < BoundaryLimits{}.maximumFrameBytes);
 }
 
+TEST_CASE("settings collections enforce protocol bounds", "[protocol][settings]")
+{
+    RecordingHandler handler;
+    InProcessEndpoint endpoint{handler, {.maximumCollectionItems = 2}};
+    SettingsUpdate update;
+    update.remoteContentSenders =
+        std::vector{QStringLiteral("one@example.test"), QStringLiteral("two@example.test"),
+                    QStringLiteral("three@example.test")};
+
+    const auto reply =
+        endpoint.updateSettings({.baseRevision = {.value = 5}, .update = std::move(update)});
+    const auto* rejected = std::get_if<SettingsUpdateRejected>(&reply);
+    REQUIRE(rejected != nullptr);
+    CHECK(rejected->error.code == BoundaryErrorCode::TooManyValues);
+    CHECK(rejected->error.field == QStringLiteral("update.remoteContentSenders"));
+    CHECK_FALSE(handler.receivedSettingsUpdate.has_value());
+}
+
 TEST_CASE("workspace settings enforce protocol bounds", "[protocol][settings]")
 {
     RecordingHandler handler;
@@ -680,6 +702,16 @@ TEST_CASE("socket frame codec handles partial, oversized, and unknown frames", "
     CHECK(std::get<SocketFrameError>(unknownResult).code ==
           SocketFrameErrorCode::UnknownMessageKind);
 
+    QByteArray unsupportedVersion = bytes;
+    unsupportedVersion[4] = static_cast<char>(0x7f);
+    unsupportedVersion[5] = static_cast<char>(0xff);
+    SocketFrameDecoder unsupportedVersionDecoder;
+    REQUIRE_FALSE(unsupportedVersionDecoder.append(unsupportedVersion).has_value());
+    const auto unsupportedVersionResult = unsupportedVersionDecoder.takeFrame();
+    REQUIRE(std::holds_alternative<SocketFrameError>(unsupportedVersionResult));
+    CHECK(std::get<SocketFrameError>(unsupportedVersionResult).code ==
+          SocketFrameErrorCode::UnsupportedVersion);
+
     BoundaryLimits smallLimits{.maximumFrameBytes = 32};
     const auto oversized = encodeSocketFrame(SocketFrameKind::PingRequest, 1, QByteArray(16, 'x'),
                                              smallLimits.maximumFrameBytes);
@@ -696,6 +728,55 @@ TEST_CASE("socket frame codec handles partial, oversized, and unknown frames", "
     REQUIRE(std::holds_alternative<std::optional<SocketFrame>>(malformedFrame));
     CHECK(std::get<std::optional<SocketFrame>>(malformedFrame)->kind ==
           SocketFrameKind::CommandRequest);
+}
+
+TEST_CASE("socket frame decoder handles every deterministic chunk boundary",
+          "[protocol][socket][property]")
+{
+    for (const qsizetype payloadSize : std::array<qsizetype, 6>{0, 1, 7, 31, 127, 1024})
+    {
+        QByteArray payload(payloadSize, '\0');
+        for (qsizetype index = 0; index < payload.size(); ++index)
+            payload[index] = static_cast<char>((index * 37 + payloadSize) & 0xff);
+
+        const auto encoded =
+            encodeSocketFrame(SocketFrameKind::BoundaryEventFrame, 0x12345678, payload);
+        const auto* bytes = std::get_if<QByteArray>(&encoded);
+        REQUIRE(bytes != nullptr);
+
+        for (std::uint32_t seed = 1; seed <= 16; ++seed)
+        {
+            SocketFrameDecoder decoder;
+            qsizetype offset = 0;
+            std::uint32_t state = seed;
+            while (offset < bytes->size())
+            {
+                state = state * 1664525U + 1013904223U;
+                const qsizetype chunk = std::min<qsizetype>(1 + static_cast<qsizetype>(state % 23U),
+                                                            bytes->size() - offset);
+                CHECK_FALSE(decoder.append(bytes->mid(offset, chunk)).has_value());
+                offset += chunk;
+            }
+
+            const auto decoded = decoder.takeFrame();
+            const auto* frame = std::get_if<std::optional<SocketFrame>>(&decoded);
+            REQUIRE(frame != nullptr);
+            REQUIRE(frame->has_value());
+            CHECK((*frame)->kind == SocketFrameKind::BoundaryEventFrame);
+            CHECK((*frame)->correlation == 0x12345678);
+            CHECK((*frame)->payload == payload);
+        }
+
+        for (qsizetype length = 0; length < bytes->size(); ++length)
+        {
+            SocketFrameDecoder decoder;
+            CHECK_FALSE(decoder.append(bytes->left(length)).has_value());
+            const auto decoded = decoder.takeFrame();
+            const auto* frame = std::get_if<std::optional<SocketFrame>>(&decoded);
+            REQUIRE(frame != nullptr);
+            CHECK_FALSE(frame->has_value());
+        }
+    }
 }
 
 TEST_CASE("socket endpoint runs the transport-neutral typed surface", "[protocol][socket]")
@@ -827,17 +908,16 @@ TEST_CASE("socket endpoint admits every onboarding remote action", "[protocol][s
                       .build = {.application = QStringLiteral("Javelin-Mail"),
                                 .revision = QStringLiteral("test")}})));
 
-    const std::array actions{
-        RemoteActionKind::OnboardingDiscover,    RemoteActionKind::OnboardingStartOAuth,
-        RemoteActionKind::OnboardingFinishOAuth, RemoteActionKind::OnboardingAuthenticateManually,
-        RemoteActionKind::OnboardingRevokeOAuth, RemoteActionKind::OnboardingCancelOAuth,
+    const std::array actionIds{
+        ActionId{.value = 67}, ActionId{.value = 68}, ActionId{.value = 69},
+        ActionId{.value = 70}, ActionId{.value = 71}, ActionId{.value = 72},
     };
-    for (const auto action : actions)
+    for (const auto action : actionIds)
     {
         const auto payload = QByteArrayLiteral("onboarding-payload");
         const auto reply = client.submitCommand({
             .id = {.value = QUuid::createUuid()},
-            .command = RemoteActionCommand{.kind = action, .payload = payload},
+            .command = RemoteActionCommand{.action = action, .payload = payload},
         });
         const auto* accepted = std::get_if<CommandAccepted>(&reply);
         REQUIRE(accepted != nullptr);

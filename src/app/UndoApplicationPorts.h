@@ -1,7 +1,7 @@
 #pragma once
 
 #include "app/undo/HistoryCommandExecutor.h"
-#include "jmap/cache/Database.h"
+#include "storage/DatabaseError.h"
 
 #include <QCoroTask>
 

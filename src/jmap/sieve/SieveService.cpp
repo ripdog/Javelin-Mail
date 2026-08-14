@@ -1,4 +1,5 @@
-#include "jmap/sieve/SieveService.h"
+#include "jmap/sieve/SieveMutationEngine.h"
+#include "jmap/sieve/SieveProtocolClient.h"
 
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/RequestBuilder.h"
@@ -466,16 +467,24 @@ namespace javelin::jmap::sieve
         }
     } // namespace
 
-    SieveService::SieveService(cache::DatabaseConnection& connection,
-                               api::AbstractTransport& resourceTransport,
-                               api::JmapMethodTransport& methodTransport)
+    SieveProtocolClient::SieveProtocolClient(cache::DatabaseConnection& connection,
+                                             api::AbstractTransport& resourceTransport,
+                                             api::JmapMethodTransport& methodTransport)
         : m_connection(connection), m_resourceTransport(resourceTransport),
           m_methodTransport(methodTransport)
     {
     }
 
-    QCoro::Task<SieveListResult> SieveService::list(LiveConnectionSettings settings,
-                                                    std::string ownerAccountId) const
+    SieveMutationEngine::SieveMutationEngine(cache::DatabaseConnection& connection,
+                                             SieveProtocolClient& protocolClient)
+        : m_connection(connection), m_protocolClient(protocolClient),
+          m_resourceTransport(protocolClient.m_resourceTransport),
+          m_methodTransport(protocolClient.m_methodTransport)
+    {
+    }
+
+    QCoro::Task<SieveListResult> SieveProtocolClient::list(LiveConnectionSettings settings,
+                                                           std::string ownerAccountId) const
     {
         auto contextResult = co_await resolveContext(m_resourceTransport, std::move(settings),
                                                      std::move(ownerAccountId));
@@ -570,9 +579,9 @@ namespace javelin::jmap::sieve
         co_return visibleScripts;
     }
 
-    QCoro::Task<SieveContentResult> SieveService::load(LiveConnectionSettings settings,
-                                                       std::string ownerAccountId,
-                                                       SieveScript script) const
+    QCoro::Task<SieveContentResult> SieveProtocolClient::load(LiveConnectionSettings settings,
+                                                              std::string ownerAccountId,
+                                                              SieveScript script) const
     {
         auto contextResult = co_await resolveContext(m_resourceTransport, std::move(settings),
                                                      std::move(ownerAccountId));
@@ -600,9 +609,9 @@ namespace javelin::jmap::sieve
         co_return std::get<api::HttpResponse>(std::move(result)).body;
     }
 
-    QCoro::Task<SieveValidationResult> SieveService::validate(LiveConnectionSettings settings,
-                                                              std::string ownerAccountId,
-                                                              QByteArray content) const
+    QCoro::Task<SieveValidationResult>
+    SieveProtocolClient::validate(LiveConnectionSettings settings, std::string ownerAccountId,
+                                  QByteArray content) const
     {
         auto contextResult = co_await resolveContext(m_resourceTransport, std::move(settings),
                                                      std::move(ownerAccountId));
@@ -617,9 +626,9 @@ namespace javelin::jmap::sieve
     }
 
     QCoro::Task<SieveSaveResult>
-    SieveService::save(LiveConnectionSettings settings, std::string ownerAccountId,
-                       SieveScript script, QByteArray content,
-                       std::optional<std::string> operationGroupId) const
+    SieveMutationEngine::save(LiveConnectionSettings settings, std::string ownerAccountId,
+                              SieveScript script, QByteArray content,
+                              std::optional<std::string> operationGroupId) const
     {
         auto contextResult = co_await resolveContext(m_resourceTransport, std::move(settings),
                                                      std::move(ownerAccountId));
@@ -828,8 +837,9 @@ namespace javelin::jmap::sieve
     }
 
     QCoro::Task<SieveDeleteResult>
-    SieveService::remove(LiveConnectionSettings settings, std::string ownerAccountId,
-                         SieveScript script, std::optional<std::string> operationGroupId) const
+    SieveMutationEngine::remove(LiveConnectionSettings settings, std::string ownerAccountId,
+                                SieveScript script,
+                                std::optional<std::string> operationGroupId) const
     {
         if (script.id.empty())
             co_return std::monostate{};
@@ -974,9 +984,9 @@ namespace javelin::jmap::sieve
     }
 
     QCoro::Task<SieveActivationResult>
-    SieveService::setActive(LiveConnectionSettings settings, std::string ownerAccountId,
-                            SieveScript script, const bool active,
-                            std::optional<std::string> operationGroupId) const
+    SieveMutationEngine::setActive(LiveConnectionSettings settings, std::string ownerAccountId,
+                                   SieveScript script, const bool active,
+                                   std::optional<std::string> operationGroupId) const
     {
         if (script.id.empty())
             co_return error(OperationErrorCode::ProtocolViolation,

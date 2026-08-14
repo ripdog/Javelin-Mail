@@ -4,12 +4,12 @@
 
 namespace javelin::app
 {
-    class MailApplicationService;
+    class SieveApplicationService;
 
     class SieveCommandService final : public SieveCommandPort
     {
       public:
-        explicit SieveCommandService(MailApplicationService& service);
+        explicit SieveCommandService(SieveApplicationService& service);
 
         [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveListResult>
         requestSieveScripts(std::string ownerAccountId) override;
@@ -29,6 +29,6 @@ namespace javelin::app
                              bool active, undo::CommandOrigin origin) override;
 
       private:
-        MailApplicationService& m_service;
+        SieveApplicationService& m_service;
     };
 } // namespace javelin::app

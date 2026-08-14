@@ -1,4 +1,7 @@
-#include "jmap/contacts/ContactService.h"
+#include "jmap/contacts/ContactMediaService.h"
+#include "jmap/contacts/ContactMutationEngine.h"
+#include "jmap/contacts/ContactProtocolClient.h"
+#include "jmap/contacts/ContactSyncEngine.h"
 
 #include "jmap/api/Error.h"
 #include "jmap/api/JmapMethodTransport.h"
@@ -221,7 +224,7 @@ namespace javelin::jmap::contacts
         }
 
         [[nodiscard]] QCoro::Task<ContactMethodResult>
-        callContactMethod(javelin::jmap::api::JmapMethodTransport& methodTransport,
+        callContactMethod(ContactProtocolClient& protocolClient,
                           const javelin::jmap::LiveConnectionSettings& settings,
                           const javelin::jmap::api::Session& session, const std::string& accountId,
                           std::string methodName, std::string arguments)
@@ -233,9 +236,8 @@ namespace javelin::jmap::contacts
                 javelin::jmap::api::MethodRequest<javelin::jmap::api::MethodInvocation>{
                     .name = std::move(methodName), .arguments = std::move(arguments)},
                 "contacts-method"));
-            javelin::jmap::api::MethodCaller caller{methodTransport};
-            const auto callResult =
-                co_await caller.call(context(settings, session, accountId), builder);
+            const auto callResult = co_await protocolClient.call(
+                context(settings, session, accountId), std::move(builder));
             const auto* envelope = std::get_if<javelin::jmap::api::ResponseEnvelope>(&callResult);
             if (envelope == nullptr)
                 co_return callError(callResult);
@@ -260,7 +262,7 @@ namespace javelin::jmap::contacts
         }
 
         [[nodiscard]] QCoro::Task<ContactGetBatchResult>
-        fetchContactCards(javelin::jmap::api::JmapMethodTransport& methodTransport,
+        fetchContactCards(ContactProtocolClient& protocolClient,
                           const javelin::jmap::LiveConnectionSettings& settings,
                           const javelin::jmap::api::Session& session, const std::string& accountId,
                           const std::vector<std::string>& ids, const std::string_view expectedState)
@@ -286,7 +288,7 @@ namespace javelin::jmap::contacts
                 if (!arguments.has_value())
                     co_return error(QStringLiteral("Unable to serialize ContactCard/get."));
                 auto callResult = co_await callContactMethod(
-                    methodTransport, settings, session, accountId, "ContactCard/get", *arguments);
+                    protocolClient, settings, session, accountId, "ContactCard/get", *arguments);
                 if (const auto* callFailure =
                         std::get_if<javelin::jmap::OperationError>(&callResult))
                     co_return *callFailure;
@@ -337,7 +339,7 @@ namespace javelin::jmap::contacts
         [[nodiscard]] QCoro::Task<IncrementalRefreshResult>
         refreshAccountIncrementally(javelin::jmap::cache::ContactRepository& repository,
                                     javelin::jmap::cache::DatabaseConnection& connection,
-                                    javelin::jmap::api::JmapMethodTransport& methodTransport,
+                                    ContactProtocolClient& protocolClient,
                                     const javelin::jmap::LiveConnectionSettings& settings,
                                     const javelin::jmap::api::Session& session,
                                     const std::string& accountId, std::string state)
@@ -362,7 +364,7 @@ namespace javelin::jmap::contacts
             if (!booksArguments.has_value())
                 co_return error(QStringLiteral("Unable to serialize AddressBook/get."));
             auto booksCall = co_await callContactMethod(
-                methodTransport, settings, session, accountId, "AddressBook/get", *booksArguments);
+                protocolClient, settings, session, accountId, "AddressBook/get", *booksArguments);
             if (const auto* callFailure = std::get_if<javelin::jmap::OperationError>(&booksCall))
                 co_return *callFailure;
             if (const auto* methodFailure = std::get_if<MethodFailure>(&booksCall))
@@ -389,7 +391,7 @@ namespace javelin::jmap::contacts
                 if (!changesArguments.has_value())
                     co_return error(QStringLiteral("Unable to serialize ContactCard/changes."));
                 auto changesCall =
-                    co_await callContactMethod(methodTransport, settings, session, accountId,
+                    co_await callContactMethod(protocolClient, settings, session, accountId,
                                                "ContactCard/changes", *changesArguments);
                 if (const auto* callFailure =
                         std::get_if<javelin::jmap::OperationError>(&changesCall))
@@ -421,7 +423,7 @@ namespace javelin::jmap::contacts
                 collectChanged(changes.value->created);
                 collectChanged(changes.value->updated);
                 auto fetched =
-                    co_await fetchContactCards(methodTransport, settings, session, accountId,
+                    co_await fetchContactCards(protocolClient, settings, session, accountId,
                                                changedIds, changes.value->newState);
                 if (const auto* fetchError = std::get_if<javelin::jmap::OperationError>(&fetched))
                     co_return *fetchError;
@@ -901,7 +903,7 @@ namespace javelin::jmap::contacts
         }
 
         [[nodiscard]] QCoro::Task<SetObjectsResult>
-        setObjects(javelin::jmap::api::JmapMethodTransport& methodTransport,
+        setObjects(ContactProtocolClient& protocolClient,
                    javelin::jmap::cache::DatabaseConnection& connection,
                    javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
                    std::string accountId, std::string methodName,
@@ -932,9 +934,8 @@ namespace javelin::jmap::contacts
                 javelin::jmap::api::MethodRequest<javelin::jmap::api::SetResult>{
                     .name = std::move(methodName), .arguments = std::move(*serialized)},
                 "contacts-set"));
-            javelin::jmap::api::MethodCaller caller{methodTransport};
-            const auto callResult =
-                co_await caller.call(context(settings, session, accountId), builder);
+            const auto callResult = co_await protocolClient.call(
+                context(settings, session, accountId), std::move(builder));
             const auto* envelope = std::get_if<javelin::jmap::api::ResponseEnvelope>(&callResult);
             if (envelope == nullptr)
             {
@@ -972,7 +973,7 @@ namespace javelin::jmap::contacts
         }
 
         [[nodiscard]] QCoro::Task<CopyObjectsResult>
-        copyObjects(javelin::jmap::api::JmapMethodTransport& methodTransport,
+        copyObjects(ContactProtocolClient& protocolClient,
                     javelin::jmap::cache::DatabaseConnection& connection,
                     javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
                     const javelin::jmap::api::ContactCardCopyRequest& request,
@@ -998,9 +999,8 @@ namespace javelin::jmap::contacts
                 javelin::jmap::api::MethodRequest<javelin::jmap::api::SetResult>{
                     .name = "ContactCard/copy", .arguments = serialized},
                 "contacts-copy"));
-            javelin::jmap::api::MethodCaller caller{methodTransport};
-            const auto callResult =
-                co_await caller.call(context(settings, session, request.accountId), builder);
+            const auto callResult = co_await protocolClient.call(
+                context(settings, session, request.accountId), std::move(builder));
             const auto* envelope = std::get_if<javelin::jmap::api::ResponseEnvelope>(&callResult);
             if (envelope == nullptr)
                 co_return callError(callResult);
@@ -2022,18 +2022,44 @@ namespace javelin::jmap::contacts
         }
     } // namespace
 
-    ContactService::ContactService(javelin::jmap::cache::DatabaseConnection& connection,
-                                   javelin::jmap::cache::ContactRepository& repository,
-                                   javelin::jmap::api::AbstractTransport& resourceTransport,
-                                   javelin::jmap::api::JmapMethodTransport& methodTransport)
-        : m_connection(connection), m_repository(repository),
-          m_resourceTransport(resourceTransport), m_methodTransport(methodTransport)
+    ContactProtocolClient::ContactProtocolClient(api::JmapMethodTransport& methodTransport)
+        : m_methodTransport(methodTransport)
+    {
+    }
+
+    QCoro::Task<api::MethodCallerResult>
+    ContactProtocolClient::call(api::ApiRequestContext requestContext,
+                                api::RequestBuilder request) const
+    {
+        api::MethodCaller caller{m_methodTransport};
+        co_return co_await caller.call(std::move(requestContext), std::move(request));
+    }
+
+    ContactSyncEngine::ContactSyncEngine(cache::DatabaseConnection& connection,
+                                         cache::ContactRepository& repository,
+                                         ContactProtocolClient& protocolClient)
+        : m_connection(connection), m_repository(repository), m_protocolClient(protocolClient)
+    {
+    }
+
+    ContactMutationEngine::ContactMutationEngine(cache::DatabaseConnection& connection,
+                                                 cache::ContactRepository& repository,
+                                                 ContactProtocolClient& protocolClient,
+                                                 ContactSyncEngine& syncEngine)
+        : m_connection(connection), m_repository(repository), m_protocolClient(protocolClient),
+          m_syncEngine(syncEngine)
+    {
+    }
+
+    ContactMediaService::ContactMediaService(cache::DatabaseConnection& connection,
+                                             api::AbstractTransport& resourceTransport)
+        : m_connection(connection), m_resourceTransport(resourceTransport)
     {
     }
 
     QCoro::Task<ContactRefreshResult>
-    ContactService::refreshAll(javelin::jmap::LiveConnectionSettings settings,
-                               std::string ownerAccountId)
+    ContactSyncEngine::refreshAll(javelin::jmap::LiveConnectionSettings settings,
+                                  std::string ownerAccountId)
     {
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
         if (const auto* loadError = std::get_if<javelin::jmap::OperationError>(&sessionResult))
@@ -2074,7 +2100,7 @@ namespace javelin::jmap::contacts
                 !stateRecord->stateToken.empty())
             {
                 auto incremental = co_await refreshAccountIncrementally(
-                    m_repository, m_connection, m_methodTransport, settings, session, accountId,
+                    m_repository, m_connection, m_protocolClient, settings, session, accountId,
                     stateRecord->stateToken);
                 if (const auto* incrementalError =
                         std::get_if<javelin::jmap::OperationError>(&incremental))
@@ -2121,9 +2147,8 @@ namespace javelin::jmap::contacts
                 javelin::jmap::api::MethodRequest<javelin::jmap::api::ContactCardGetResponse>{
                     .name = "ContactCard/get", .arguments = *getArguments},
                 "contact-cards"));
-            javelin::jmap::api::MethodCaller caller{m_methodTransport};
-            const auto callResult =
-                co_await caller.call(context(settings, session, accountId), builder);
+            const auto callResult = co_await m_protocolClient.call(
+                context(settings, session, accountId), std::move(builder));
             const auto* envelope = std::get_if<javelin::jmap::api::ResponseEnvelope>(&callResult);
             if (envelope == nullptr)
             {
@@ -2240,9 +2265,9 @@ namespace javelin::jmap::contacts
     }
 
     QCoro::Task<ContactMutationResult>
-    ContactService::setAddressBooks(javelin::jmap::LiveConnectionSettings settings,
-                                    std::string ownerAccountId,
-                                    javelin::jmap::api::AddressBookSetRequest request)
+    ContactMutationEngine::setAddressBooks(javelin::jmap::LiveConnectionSettings settings,
+                                           std::string ownerAccountId,
+                                           javelin::jmap::api::AddressBookSetRequest request)
     {
         const auto accountId = request.accountId;
         if (!request.ifInState.has_value())
@@ -2284,9 +2309,9 @@ namespace javelin::jmap::contacts
                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
         }
 
-        const auto result = co_await setObjects(m_methodTransport, m_connection,
-                                                std::move(settings), std::move(ownerAccountId),
-                                                accountId, "AddressBook/set", serialized);
+        const auto result = co_await setObjects(m_protocolClient, m_connection, std::move(settings),
+                                                std::move(ownerAccountId), accountId,
+                                                "AddressBook/set", serialized);
         if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&result))
         {
             if (const auto cacheError = journal.transition(
@@ -2316,7 +2341,7 @@ namespace javelin::jmap::contacts
         co_return reconciled;
     }
 
-    QCoro::Task<ContactMutationResult> ContactService::setContactCards(
+    QCoro::Task<ContactMutationResult> ContactMutationEngine::setContactCards(
         javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
         javelin::jmap::api::ContactCardSetRequest request, const ContactSetOptions options)
     {
@@ -2364,7 +2389,7 @@ namespace javelin::jmap::contacts
             }
         }
 
-        auto result = co_await setObjects(m_methodTransport, m_connection, settings, ownerAccountId,
+        auto result = co_await setObjects(m_protocolClient, m_connection, settings, ownerAccountId,
                                           accountId, "ContactCard/set", serialized);
         if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&result);
             options.refreshAndRetryStateMismatch && operationError != nullptr &&
@@ -2393,7 +2418,7 @@ namespace javelin::jmap::contacts
                                  javelin::jmap::OperationErrorCode::LocalStorageFailure);
                 return failure;
             };
-            const auto refreshed = co_await refreshAll(settings, ownerAccountId);
+            const auto refreshed = co_await m_syncEngine.refreshAll(settings, ownerAccountId);
             if (const auto* refreshError = std::get_if<javelin::jmap::OperationError>(&refreshed))
                 co_return rejectRetry(*refreshError);
 
@@ -2424,7 +2449,7 @@ namespace javelin::jmap::contacts
                     prepared.records, javelin::jmap::sync::MutationStatus::InFlight))
                 co_return error(cacheError->message,
                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
-            result = co_await setObjects(m_methodTransport, m_connection, settings, ownerAccountId,
+            result = co_await setObjects(m_protocolClient, m_connection, settings, ownerAccountId,
                                          accountId, "ContactCard/set", serialized);
         }
         if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&result))
@@ -2472,7 +2497,7 @@ namespace javelin::jmap::contacts
     }
 
     PreparedContactCardMutation
-    ContactService::prepareCreateGroup(CreateContactGroupCommand command) const
+    ContactMutationEngine::prepareCreateGroup(CreateContactGroupCommand command) const
     {
         const auto accounts = m_repository.listAccounts();
         if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&accounts))
@@ -2519,7 +2544,7 @@ namespace javelin::jmap::contacts
     }
 
     PreparedContactCardMutation
-    ContactService::prepareGroupMembership(SetContactGroupMembershipCommand command) const
+    ContactMutationEngine::prepareGroupMembership(SetContactGroupMembershipCommand command) const
     {
         if (command.memberUids.empty() ||
             std::ranges::any_of(command.memberUids,
@@ -2599,8 +2624,9 @@ namespace javelin::jmap::contacts
     }
 
     QCoro::Task<ContactMutationResult>
-    ContactService::createGroup(javelin::jmap::LiveConnectionSettings settings,
-                                std::string ownerAccountId, CreateContactGroupCommand command)
+    ContactMutationEngine::createGroup(javelin::jmap::LiveConnectionSettings settings,
+                                       std::string ownerAccountId,
+                                       CreateContactGroupCommand command)
     {
         auto prepared = prepareCreateGroup(std::move(command));
         if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&prepared))
@@ -2611,9 +2637,9 @@ namespace javelin::jmap::contacts
     }
 
     QCoro::Task<ContactMutationResult>
-    ContactService::setGroupMembership(javelin::jmap::LiveConnectionSettings settings,
-                                       std::string ownerAccountId,
-                                       SetContactGroupMembershipCommand command)
+    ContactMutationEngine::setGroupMembership(javelin::jmap::LiveConnectionSettings settings,
+                                              std::string ownerAccountId,
+                                              SetContactGroupMembershipCommand command)
     {
         auto prepared = prepareGroupMembership(std::move(command));
         if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&prepared))
@@ -2632,9 +2658,9 @@ namespace javelin::jmap::contacts
     }
 
     QCoro::Task<ContactMutationResult>
-    ContactService::copyContactCards(javelin::jmap::LiveConnectionSettings settings,
-                                     std::string ownerAccountId,
-                                     javelin::jmap::api::ContactCardCopyRequest request)
+    ContactMutationEngine::copyContactCards(javelin::jmap::LiveConnectionSettings settings,
+                                            std::string ownerAccountId,
+                                            javelin::jmap::api::ContactCardCopyRequest request)
     {
         if (!request.ifFromInState.has_value())
         {
@@ -2674,7 +2700,7 @@ namespace javelin::jmap::contacts
         }
 
         const auto result =
-            co_await copyObjects(m_methodTransport, m_connection, std::move(settings),
+            co_await copyObjects(m_protocolClient, m_connection, std::move(settings),
                                  std::move(ownerAccountId), request, *serialized);
         if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&result))
         {
@@ -2705,9 +2731,9 @@ namespace javelin::jmap::contacts
     }
 
     QCoro::Task<ContactUploadResult>
-    ContactService::uploadMedia(javelin::jmap::LiveConnectionSettings settings,
-                                std::string ownerAccountId, std::string accountId,
-                                QByteArray payload, std::string mediaType)
+    ContactMediaService::uploadMedia(javelin::jmap::LiveConnectionSettings settings,
+                                     std::string ownerAccountId, std::string accountId,
+                                     QByteArray payload, std::string mediaType)
     {
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
         if (const auto* loadError = std::get_if<javelin::jmap::OperationError>(&sessionResult))
@@ -2751,9 +2777,9 @@ namespace javelin::jmap::contacts
     }
 
     QCoro::Task<ContactDownloadResult>
-    ContactService::downloadMedia(javelin::jmap::LiveConnectionSettings settings,
-                                  std::string ownerAccountId, std::string accountId,
-                                  std::string blobId, std::string mediaType)
+    ContactMediaService::downloadMedia(javelin::jmap::LiveConnectionSettings settings,
+                                       std::string ownerAccountId, std::string accountId,
+                                       std::string blobId, std::string mediaType)
     {
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
         if (const auto* loadError = std::get_if<javelin::jmap::OperationError>(&sessionResult))

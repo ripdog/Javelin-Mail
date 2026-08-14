@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storage/sqlite/DatabaseConnection.h"
+
 #include "jmap/cache/CalendarNotificationRepository.h"
 
 #include <QObject>
@@ -10,7 +12,7 @@ class QTimer;
 
 namespace javelin::app
 {
-    class MailApplicationService;
+    class CalendarApplicationService;
 
     class CalendarNotificationService final : public QObject
     {
@@ -18,7 +20,7 @@ namespace javelin::app
 
       public:
         explicit CalendarNotificationService(javelin::jmap::cache::DatabaseConnection& connection,
-                                             MailApplicationService& mailService,
+                                             CalendarApplicationService& calendarService,
                                              QObject* parent = nullptr);
         void start();
         void requestScan();
@@ -36,7 +38,7 @@ namespace javelin::app
       private:
         javelin::jmap::cache::DatabaseConnection& m_connection;
         javelin::jmap::cache::CalendarNotificationRepository m_repository;
-        MailApplicationService& m_mailService;
+        CalendarApplicationService& m_calendarService;
         QTimer* m_timer = nullptr;
         std::unordered_map<std::string, javelin::jmap::cache::CalendarNotificationCandidate>
             m_candidates;

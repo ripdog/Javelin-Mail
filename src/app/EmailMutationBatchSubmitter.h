@@ -1,6 +1,6 @@
 #pragma once
 
-#include "jmap/JmapCore.h"
+#include "jmap/sync/EmailMutationEngine.h"
 
 #include <QCoroTask>
 
@@ -21,7 +21,7 @@ namespace javelin::app
     class EmailMutationBatchSubmitter
     {
       public:
-        explicit EmailMutationBatchSubmitter(javelin::jmap::JmapCore& core);
+        explicit EmailMutationBatchSubmitter(javelin::jmap::EmailMutationEngine& mutationEngine);
 
         [[nodiscard]] QCoro::Task<EmailMutationBatchSubmission>
         submit(javelin::jmap::LiveConnectionSettings settings, std::string accountId,
@@ -29,7 +29,7 @@ namespace javelin::app
                std::function<void()> batchPrepared = {});
 
       private:
-        javelin::jmap::JmapCore& m_core;
+        javelin::jmap::EmailMutationEngine& m_mutationEngine;
     };
 
 } // namespace javelin::app

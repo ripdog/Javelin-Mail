@@ -2,10 +2,10 @@
 
 #include "app/MailboxMaintenanceRegistry.h"
 #include "app/WorkScheduler.h"
-#include "jmap/cache/Database.h"
 #include "jmap/cache/MailVault.h"
-#include "jmap/cache/QueryService.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
+#include "jmap/cache/ThreadReadRepository.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroTask>
 
@@ -461,9 +461,9 @@ TEST_CASE("mailbox clear preserves complete optimistic Thread membership",
                                     "account_id='account-1' AND email_id IN "
                                     "('optimistic-parent','optimistic-child')")) == 0);
 
-    javelin::jmap::cache::QueryService queries{context.connection};
+    javelin::jmap::cache::ThreadReadRepository threadReader{context.connection};
     const auto members =
-        queries.listMailboxThreadMessages("account-1", "inbox", "optimistic-thread");
+        threadReader.listMailboxThreadMessages("account-1", "inbox", "optimistic-thread");
     const auto* items = std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&members);
     REQUIRE(items != nullptr);
     REQUIRE(items->size() == 2);

@@ -1,15 +1,17 @@
 #pragma once
 
+#include "gui/messageview/MessageBodyPresenter.h"
 #include "gui/translation/LanguageDetection.h"
 #include "gui/translation/TranslationTypes.h"
+#include "jmap/cache/MessageListReadTypes.h"
 #include "jmap/cache/MessageViewReader.h"
-#include "jmap/cache/QueryReader.h"
 
 #include <QString>
 #include <QWidget>
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -43,7 +45,11 @@ namespace javelin::gui::settings
 namespace javelin::gui::messageview
 {
     class HtmlMessageView;
+    class MessageAttachmentPanel;
+    class MessageBannerCoordinator;
     class MessageBannerWidget;
+    class MessageTranslationController;
+    class RemoteContentController;
 
     class MessageViewContainer : public QWidget
     {
@@ -80,13 +86,7 @@ namespace javelin::gui::messageview
         void notJunkRequested(QString accountId, QString mailboxId, QString emailId);
 
       private:
-        enum class ActiveView
-        {
-            Placeholder,
-            Multiple,
-            PlainText,
-            Html,
-        };
+        using ActiveView = MessageBodyPresenter::View;
 
         void setActiveView(ActiveView view);
         void updateAccessibleDocument();
@@ -100,29 +100,21 @@ namespace javelin::gui::messageview
         void updateLanguageBanner();
         void startLanguageDetection();
         void translateCurrentMessage();
-        void translateCurrentMessage(bool automatic,
-                                     javelin::gui::translation::ExternalFetchPolicy fetchPolicy);
         void restoreCurrentTranslation();
         void updateTranslateOptionsMenu();
         void setAutoTranslateSender(bool enabled);
         void setAutoTranslateDomain(bool enabled);
         void maybeAutoTranslateCurrentMessage();
-        void updateAttachmentSection();
-        void rebuildAttachmentRows();
         void rebuildMultipleSelectionRows();
         void permitRemoteContentForCurrentSender();
         void permitRemoteContentForCurrentDomain();
-        void addRemoteContentPermit(bool sender, QString value);
-        [[nodiscard]] QString attachmentStatusText() const;
         [[nodiscard]] QString currentSenderAddress() const;
         [[nodiscard]] QString currentSenderDomain() const;
         [[nodiscard]] QString contactAwareSenderLabel() const;
-        [[nodiscard]] std::string messageBannerKey(std::string_view bannerId) const;
         [[nodiscard]] bool messageBannerDismissed(std::string_view bannerId) const;
         void dismissMessageBanner(std::string_view bannerId);
         [[nodiscard]] QString serverDisplayName() const;
         void changeEvent(QEvent* event) override;
-        void resizeEvent(QResizeEvent* event) override;
 
         std::optional<std::string> m_accountId;
         std::optional<std::string> m_mailboxId;
@@ -141,10 +133,7 @@ namespace javelin::gui::messageview
         QWidget* m_placeholderPanel = nullptr;
         QLabel* m_placeholderTitleLabel = nullptr;
         QLabel* m_placeholderDetailLabel = nullptr;
-        QLabel* m_attachmentStatusLabel = nullptr;
-        QToolButton* m_attachmentExpanderButton = nullptr;
-        QWidget* m_attachmentHeaderWidget = nullptr;
-        QToolButton* m_saveAllAttachmentsButton = nullptr;
+        MessageAttachmentPanel* m_attachmentPanel = nullptr;
         QToolButton* m_permitSenderRemoteContentButton = nullptr;
         QToolButton* m_permitDomainRemoteContentButton = nullptr;
         QToolButton* m_remoteContentButton = nullptr;
@@ -166,26 +155,11 @@ namespace javelin::gui::messageview
         QVBoxLayout* m_multipleSelectionLayout = nullptr;
         QTextBrowser* m_plainTextView = nullptr;
         HtmlMessageView* m_htmlView = nullptr;
-        QWidget* m_attachmentListWidget = nullptr;
-        QGridLayout* m_attachmentListLayout = nullptr;
-        ActiveView m_activeView = ActiveView::Placeholder;
-        bool m_attachmentsExpanded = false;
-        bool m_attachmentsCollapsed = false;
-        bool m_translationInProgress = false;
-        std::uint64_t m_translationRequestToken = 0;
+        std::unique_ptr<MessageBodyPresenter> m_bodyPresenter;
+        std::unique_ptr<MessageTranslationController> m_translationController;
         std::uint64_t m_snapshotLoadToken = 0;
-        bool m_messageTranslated = false;
-        QString m_originalPlainText;
-        QString m_accessibleTranslatedBody;
-        QString m_translationError;
-        QString m_translationProgressText;
-        bool m_autoTranslateAttempted = false;
-        bool m_translationWasAutomatic = false;
-        bool m_languageDetectionStarted = false;
-        std::optional<javelin::gui::translation::LanguageDetectionResult> m_languageDetection;
-        bool m_shouldOfferTranslation = false;
-        bool m_htmlDocumentLoaded = false;
-        std::unordered_set<std::string> m_dismissedMessageBanners;
+        std::unique_ptr<MessageBannerCoordinator> m_bannerCoordinator;
+        std::unique_ptr<RemoteContentController> m_remoteContentController;
     };
 
 } // namespace javelin::gui::messageview

@@ -1,6 +1,5 @@
 #include "app/undo/MailHistoryExecutor.h"
 
-#include "app/MailApplicationService.h"
 #include "jmap/OperationError.h"
 
 #include <KLocalizedString>

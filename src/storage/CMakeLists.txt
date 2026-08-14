@@ -1,0 +1,52 @@
+# Read-only cache/storage surface shared by the daemon and GUI process. Public compatibility
+# headers remain at their established include paths, while implementations live under storage.
+add_library(javelin_cache_read STATIC
+    ${PROJECT_SOURCE_DIR}/src/app/runtime/CacheAccessBarrier.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/CacheAccessBarrier.h
+    ${PROJECT_SOURCE_DIR}/src/app/runtime/CacheLocationProvider.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/CacheLocationProvider.h
+    ${PROJECT_SOURCE_DIR}/src/storage/DatabaseError.h
+    ${PROJECT_SOURCE_DIR}/src/storage/migrations/DefaultMigrationSteps.h
+    ${PROJECT_SOURCE_DIR}/src/storage/migrations/DefaultMigrations.cpp
+    ${PROJECT_SOURCE_DIR}/src/storage/migrations/Migrations1To13.cpp
+    ${PROJECT_SOURCE_DIR}/src/storage/migrations/Migrations14To28.cpp
+    ${PROJECT_SOURCE_DIR}/src/storage/migrations/Migrations29To36.cpp
+    ${PROJECT_SOURCE_DIR}/src/storage/migrations/Migrations37To49.cpp
+    ${PROJECT_SOURCE_DIR}/src/storage/migrations/MigrationRunner.cpp
+    ${PROJECT_SOURCE_DIR}/src/storage/migrations/MigrationRunner.h
+    ${PROJECT_SOURCE_DIR}/src/storage/sqlite/DatabaseConnection.h
+    ${PROJECT_SOURCE_DIR}/src/storage/sqlite/DatabaseInfrastructure.cpp
+    ${PROJECT_SOURCE_DIR}/src/storage/messages/EmailReadRepository.cpp
+    ${PROJECT_SOURCE_DIR}/src/jmap/cache/EmailReadRepository.h
+    ${PROJECT_SOURCE_DIR}/src/jmap/cache/MessageContentTypes.h
+    ${PROJECT_SOURCE_DIR}/src/storage/messages/MessageViewService.cpp
+    ${PROJECT_SOURCE_DIR}/src/jmap/cache/MessageViewService.h
+    ${PROJECT_SOURCE_DIR}/src/jmap/cache/MessageViewReader.h
+    ${PROJECT_SOURCE_DIR}/src/storage/messages/MimeMessageParser.cpp
+    ${PROJECT_SOURCE_DIR}/src/jmap/cache/MimeMessageParser.h
+    ${PROJECT_SOURCE_DIR}/src/storage/messages/MailVault.cpp
+    ${PROJECT_SOURCE_DIR}/src/jmap/cache/MailVault.h
+    ${PROJECT_SOURCE_DIR}/src/storage/messages/RawMessageSourceReadRepository.cpp
+    ${PROJECT_SOURCE_DIR}/src/jmap/cache/RawMessageSourceReadRepository.h
+    ${PROJECT_SOURCE_DIR}/src/jmap/render/HtmlMessageDocumentBuilder.cpp
+    ${PROJECT_SOURCE_DIR}/src/jmap/render/HtmlMessageDocumentBuilder.h
+    ${PROJECT_SOURCE_DIR}/src/jmap/render/HtmlTextExtractor.cpp
+    ${PROJECT_SOURCE_DIR}/src/jmap/render/HtmlTextExtractor.h
+    ${PROJECT_SOURCE_DIR}/src/jmap/render/InlineMessageUrl.cpp
+    ${PROJECT_SOURCE_DIR}/src/jmap/render/InlineMessageUrl.h
+)
+target_include_directories(javelin_cache_read PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+)
+target_link_libraries(javelin_cache_read
+    PUBLIC
+        KPim6::Mime
+        Qt::Concurrent
+        Qt::Core
+        Qt::Sql
+    PRIVATE
+        KF6::Codecs
+)
+javelin_set_project_warnings(javelin_cache_read)
+javelin_enable_static_analysis(javelin_cache_read)
+javelin_enable_sanitizers(javelin_cache_read)

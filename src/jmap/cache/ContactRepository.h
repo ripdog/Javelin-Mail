@@ -1,5 +1,7 @@
 #pragma once
 
+#include "storage/sqlite/DatabaseConnection.h"
+
 #include "jmap/api/ContactsMethods.h"
 #include "jmap/cache/ContactReader.h"
 
@@ -73,6 +75,8 @@ namespace javelin::jmap::cache
                                    DatabaseError>
         findByEmail(std::string_view normalizedEmail,
                     std::optional<std::string_view> accountId = std::nullopt) const override;
+        [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
+        listEmailAddresses() const override;
         void notifyChanged(std::string_view accountId);
 
       Q_SIGNALS:

@@ -4,12 +4,12 @@
 
 namespace javelin::app
 {
-    class MailApplicationService;
+    class MailMutationApplicationService;
 
     class MailCommandService final : public MailCommandPort
     {
       public:
-        explicit MailCommandService(MailApplicationService& service);
+        explicit MailCommandService(MailMutationApplicationService& service);
 
         [[nodiscard]] QCoro::Task<QueuedMailboxSelectionMutationResult>
         queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent) override;
@@ -44,7 +44,7 @@ namespace javelin::app
             std::optional<std::string> operationGroupId = std::nullopt) override;
 
       private:
-        MailApplicationService& m_service;
+        MailMutationApplicationService& m_service;
     };
 
 } // namespace javelin::app

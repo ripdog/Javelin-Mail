@@ -5,7 +5,7 @@
 #include <QIODevice>
 #include <QString>
 
-#include <boost/pfr/core.hpp>
+#include <glaze/glaze.hpp>
 
 #include <array>
 #include <chrono>
@@ -323,6 +323,80 @@ namespace javelin::app::remote
             return (read(reader, std::get<Indices>(tuple)) && ...);
         }
 
+        template <typename Value, std::size_t... Indices>
+        bool writeAggregate(Writer& writer, const Value& value, std::index_sequence<Indices...>)
+        {
+            constexpr auto names = glz::member_names<Value>;
+            auto fields = glz::to_tie(value);
+            if (!writer.qtValue(static_cast<quint16>(1)) || !writer.count(sizeof...(Indices)))
+                return false;
+            return ((write(writer, std::string{names[Indices]}) &&
+                     write(writer, glz::get<Indices>(fields))) &&
+                    ...);
+        }
+
+        template <typename Value, std::size_t Index = 0>
+        bool readAggregateField(Reader& reader, Value& value, const std::size_t requestedIndex)
+        {
+            constexpr auto fieldCount = glz::member_names<Value>.size();
+            if constexpr (Index >= fieldCount)
+            {
+                return reader.fail(QStringLiteral("Remote aggregate field index is invalid."));
+            }
+            else
+            {
+                if (requestedIndex == Index)
+                {
+                    auto fields = glz::to_tie(value);
+                    return read(reader, glz::get<Index>(fields));
+                }
+                return readAggregateField<Value, Index + 1>(reader, value, requestedIndex);
+            }
+        }
+
+        template <typename Value> bool readAggregate(Reader& reader, Value& value)
+        {
+            constexpr auto names = glz::member_names<Value>;
+            constexpr auto fieldCount = names.size();
+            quint16 schemaVersion = 0;
+            if (!reader.qtValue(schemaVersion) || schemaVersion != 1)
+                return reader.fail(
+                    QStringLiteral("Remote aggregate schema version is unsupported."));
+            std::uint32_t encodedCount = 0;
+            if (!reader.count(encodedCount) || encodedCount != fieldCount)
+                return reader.fail(QStringLiteral("Remote aggregate field count is invalid."));
+
+            std::array<bool, fieldCount> seen{};
+            for (std::uint32_t encodedIndex = 0; encodedIndex < encodedCount; ++encodedIndex)
+            {
+                std::string fieldName;
+                if (!read(reader, fieldName))
+                    return false;
+                std::optional<std::size_t> fieldIndex;
+                for (std::size_t index = 0; index < fieldCount; ++index)
+                {
+                    if (names[index] == fieldName)
+                    {
+                        fieldIndex = index;
+                        break;
+                    }
+                }
+                if (!fieldIndex.has_value())
+                    return reader.fail(QStringLiteral("Remote aggregate field is unknown."));
+                if (seen[*fieldIndex])
+                    return reader.fail(QStringLiteral("Remote aggregate field is duplicated."));
+                seen[*fieldIndex] = true;
+                if (!readAggregateField(reader, value, *fieldIndex))
+                    return false;
+            }
+            for (const bool wasSeen : seen)
+            {
+                if (!wasSeen)
+                    return reader.fail(QStringLiteral("Remote aggregate field is missing."));
+            }
+            return true;
+        }
+
         template <typename T> bool write(Writer& writer, const T& value)
         {
             using Value = std::remove_cvref_t<T>;
@@ -435,10 +509,8 @@ namespace javelin::app::remote
             }
             else if constexpr (std::is_aggregate_v<Value>)
             {
-                bool result = true;
-                boost::pfr::for_each_field(value, [&writer, &result](const auto& field)
-                                           { result = result && write(writer, field); });
-                return result;
+                return writeAggregate(writer, value,
+                                      std::make_index_sequence<glz::member_names<Value>.size()>{});
             }
             else
             {
@@ -622,10 +694,7 @@ namespace javelin::app::remote
             }
             else if constexpr (std::is_aggregate_v<Value>)
             {
-                bool result = true;
-                boost::pfr::for_each_field(value, [&reader, &result](auto& field)
-                                           { result = result && read(reader, field); });
-                return result;
+                return readAggregate(reader, value);
             }
             else
             {
@@ -664,5 +733,56 @@ namespace javelin::app::remote
         if (const auto* error = std::get_if<CodecError>(&decoded))
             return *error;
         return std::get<0>(std::get<std::tuple<Value>>(decoded));
+    }
+
+    template <std::uint16_t SchemaVersion, typename... Values>
+    EncodeResult encodeVersioned(const Values&... values)
+    {
+        return encode(static_cast<std::uint16_t>(SchemaVersion), values...);
+    }
+
+    template <std::uint16_t SchemaVersion, typename... Values>
+    DecodeResult<std::tuple<Values...>> decodeVersioned(const QByteArray& payload)
+    {
+        auto decoded = decode<std::uint16_t, Values...>(payload);
+        if (const auto* error = std::get_if<CodecError>(&decoded))
+            return *error;
+        auto values = std::get<std::tuple<std::uint16_t, Values...>>(std::move(decoded));
+        if (std::get<0>(values) != SchemaVersion)
+            return CodecError{.message =
+                                  QStringLiteral("Remote action schema version is unsupported.")};
+        return std::apply([]<typename Version, typename... Rest>(Version&&, Rest&&... rest)
+                          { return std::tuple<Values...>{std::forward<Rest>(rest)...}; },
+                          std::move(values));
+    }
+
+    template <std::uint16_t SchemaVersion, typename Value>
+    DecodeResult<Value> decodeVersionedValue(const QByteArray& payload)
+    {
+        auto decoded = decodeVersioned<SchemaVersion, Value>(payload);
+        if (const auto* error = std::get_if<CodecError>(&decoded))
+            return *error;
+        return std::get<0>(std::get<std::tuple<Value>>(std::move(decoded)));
+    }
+
+    namespace detail
+    {
+        template <std::uint16_t SchemaVersion, typename Tuple> struct VersionedTupleDecoder;
+
+        template <std::uint16_t SchemaVersion, typename... Values>
+        struct VersionedTupleDecoder<SchemaVersion, std::tuple<Values...>>
+        {
+            [[nodiscard]] static DecodeResult<std::tuple<Values...>>
+            decode(const QByteArray& payload)
+            {
+                return remote::decodeVersioned<SchemaVersion, Values...>(payload);
+            }
+        };
+    } // namespace detail
+
+    template <std::uint16_t SchemaVersion, typename Tuple>
+    DecodeResult<Tuple> decodeVersionedTuple(const QByteArray& payload)
+    {
+        return detail::VersionedTupleDecoder<SchemaVersion, Tuple>::decode(payload);
     }
 } // namespace javelin::app::remote

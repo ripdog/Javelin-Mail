@@ -1,7 +1,7 @@
 #pragma once
 
-#include "jmap/cache/Database.h"
 #include "jmap/domain/MailEntities.h"
+#include "storage/DatabaseError.h"
 
 #include <optional>
 #include <string>

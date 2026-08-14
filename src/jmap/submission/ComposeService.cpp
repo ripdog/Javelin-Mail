@@ -13,8 +13,8 @@
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/IdentityRepository.h"
 #include "jmap/cache/MailVault.h"
+#include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/cache/MessageViewService.h"
-#include "jmap/cache/QueryService.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SubmissionRepository.h"
 #include "jmap/render/HtmlBodyEmbedding.h"
@@ -165,8 +165,8 @@ namespace javelin::jmap::submission
         findMailboxByRole(javelin::jmap::cache::DatabaseConnection& connection,
                           const std::string_view accountId, const std::string_view role)
         {
-            javelin::jmap::cache::QueryService queryService{connection};
-            const auto result = queryService.listMailboxTree(accountId);
+            javelin::jmap::cache::MailboxReadRepository mailboxReader{connection};
+            const auto result = mailboxReader.listMailboxTree(accountId);
             const auto* mailboxes =
                 std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&result);
             if (mailboxes == nullptr)
@@ -418,8 +418,8 @@ namespace javelin::jmap::submission
         [[nodiscard]] QCoro::Task<
             std::variant<std::vector<DraftAttachment>, javelin::jmap::OperationError>>
         materializeInlineDraftImages(
-            javelin::jmap::cache::DatabaseConnection& connection, javelin::jmap::JmapCore& core,
-            javelin::jmap::LiveConnectionSettings settings, const std::string& accountId,
+            javelin::jmap::cache::DatabaseConnection& connection,
+            javelin::jmap::MessageContentClient& contentClient, const std::string& accountId,
             const std::string& emailId,
             const std::vector<javelin::jmap::cache::MessageAttachment>& sourceAttachments)
         {
@@ -436,7 +436,7 @@ namespace javelin::jmap::submission
                 }
 
                 const auto download =
-                    co_await core.downloadAttachment(settings, accountId, emailId, source.partId);
+                    co_await contentClient.loadAttachment(accountId, emailId, source.partId);
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&download))
                 {
                     co_return *error;
@@ -905,9 +905,11 @@ namespace javelin::jmap::submission
     ComposeService::ComposeService(javelin::jmap::cache::DatabaseConnection& connection,
                                    javelin::jmap::api::AbstractTransport& resourceTransport,
                                    javelin::jmap::api::JmapMethodTransport& methodTransport,
-                                   javelin::jmap::JmapCore& jmapCore)
+                                   javelin::jmap::MessageContentClient& contentClient,
+                                   javelin::jmap::EmailMutationEngine& emailMutationEngine)
         : m_connection(connection), m_resourceTransport(resourceTransport),
-          m_methodTransport(methodTransport), m_jmapCore(jmapCore)
+          m_methodTransport(methodTransport), m_contentClient(contentClient),
+          m_emailMutationEngine(emailMutationEngine)
     {
     }
 
@@ -1025,7 +1027,7 @@ namespace javelin::jmap::submission
         }
 
         const auto refreshResult =
-            co_await m_jmapCore.refreshMessageContent(settings, request.accountId, *sourceEmailId);
+            co_await m_contentClient.refresh(settings, request.accountId, *sourceEmailId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
         {
             co_return *error;
@@ -1138,7 +1140,7 @@ namespace javelin::jmap::submission
             snapshot.threading.references = messageSnapshot->email.references;
             {
                 auto attachments = co_await materializeInlineDraftImages(
-                    m_connection, m_jmapCore, settings, request.accountId, *sourceEmailId,
+                    m_connection, m_contentClient, request.accountId, *sourceEmailId,
                     messageSnapshot->attachments);
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&attachments))
                 {
@@ -1683,12 +1685,17 @@ namespace javelin::jmap::submission
                                 std::string accountId, std::string draftEmailId,
                                 std::string operationGroupId)
     {
-        const auto queued = m_jmapCore.queueDestroyEmail(accountId, draftEmailId, operationGroupId);
+        const auto queued =
+            m_emailMutationEngine.queue(accountId, javelin::jmap::EmailMailboxMutation{
+                                                       .emailId = draftEmailId,
+                                                       .operationGroupId = operationGroupId,
+                                                       .destroy = true,
+                                                   });
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queued))
             co_return *error;
         const auto& mutation = std::get<javelin::jmap::QueuedEmailMutation>(queued);
-        auto submitted = co_await m_jmapCore.submitPendingEmailMutations(
-            std::move(settings), accountId, operationGroupId);
+        auto submitted = co_await m_emailMutationEngine.submitPending(std::move(settings),
+                                                                      accountId, operationGroupId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&submitted))
             co_return *error;
         const auto& summary = std::get<javelin::jmap::SubmittedEmailMutations>(submitted);

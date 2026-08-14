@@ -62,9 +62,9 @@ TEST_CASE("calendar accessibility factories ignore Qt objects without C++ RTTI",
           "[gui][calendar][accessibility]")
 {
     javelin::gui::calendar::CalendarEventButton button;
-    NoRttiAccessibleObject foreignObject;
+    NoRttiAccessibleObjectHandle foreignObject;
 
-    CHECK(QAccessible::queryAccessibleInterface(&foreignObject) == nullptr);
+    CHECK(QAccessible::queryAccessibleInterface(foreignObject.get()) == nullptr);
 }
 
 TEST_CASE("month calendar accessibility exposes one named table with concise date cells",

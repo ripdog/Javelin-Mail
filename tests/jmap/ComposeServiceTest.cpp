@@ -1,15 +1,17 @@
 #include "jmap/submission/ComposeService.h"
 
-#include "jmap/JmapCore.h"
+#include "jmap/MessageContentClient.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Session.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/IdentityRepository.h"
+#include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/QueryWindowReadRepository.h"
 #include "jmap/cache/SessionRepository.h"
+#include "jmap/sync/EmailMutationEngine.h"
 #include "jmap/sync/MutationJournal.h"
 
 #include <QCoroTask>
@@ -48,6 +50,23 @@ namespace
                 beforeReturn();
             co_return result;
         }
+    };
+
+    struct ComposeCapabilities
+    {
+        ComposeCapabilities(javelin::jmap::cache::DatabaseConnection& connection,
+                            javelin::jmap::api::AbstractTransport& resourceTransport,
+                            javelin::jmap::api::JmapMethodTransport& methodTransport)
+            : contentClient(connection, resourceTransport),
+              emailMutationEngine(connection, methodTransport),
+              service(connection, resourceTransport, methodTransport, contentClient,
+                      emailMutationEngine)
+        {
+        }
+
+        javelin::jmap::MessageContentClient contentClient;
+        javelin::jmap::EmailMutationEngine emailMutationEngine;
+        javelin::jmap::submission::ComposeService service;
     };
 
     void ensureApplication()
@@ -256,8 +275,8 @@ TEST_CASE("compose uses owner credentials for a secondary submission account",
             R"({"methodResponses":[["Identity/get",{"accountId":"sending-account","state":"i1","list":[{"id":"identity-1","name":"Alice","email":"alice@example.test","replyTo":null,"bcc":null,"textSignature":"","htmlSignature":"","mayDelete":true}],"notFound":[]},"identities"]],"sessionState":"s2"})"),
     });
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::JmapCore core{connection, transport, methodTransport};
-    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    ComposeCapabilities capabilities{connection, transport, methodTransport};
+    auto& service = capabilities.service;
 
     const auto result = QCoro::waitFor(service.loadSenderIdentities(
         {
@@ -295,8 +314,8 @@ TEST_CASE("new compose sessions use the requested editor mode", "[jmap][submissi
 
     FakeTransport transport;
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::JmapCore core{connection, transport, methodTransport};
-    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    ComposeCapabilities capabilities{connection, transport, methodTransport};
+    auto& service = capabilities.service;
 
     const auto result = QCoro::waitFor(service.open(
         {
@@ -351,8 +370,8 @@ TEST_CASE("new compose sessions place the selected Identity signature after an e
 
     FakeTransport transport;
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::JmapCore core{connection, transport, methodTransport};
-    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    ComposeCapabilities capabilities{connection, transport, methodTransport};
+    auto& service = capabilities.service;
 
     const auto result = QCoro::waitFor(service.open(
         {
@@ -413,8 +432,8 @@ TEST_CASE("plain text compose creates no HTML body alternative", "[jmap][submiss
     FakeTransport transport;
     transport.results = {draftCreatedResponse()};
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::JmapCore core{connection, transport, methodTransport};
-    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    ComposeCapabilities capabilities{connection, transport, methodTransport};
+    auto& service = capabilities.service;
     const auto result = QCoro::waitFor(service.saveDraft(
         {
             .sessionUrl = "https://account-2.example.test/.well-known/jmap",
@@ -441,8 +460,10 @@ TEST_CASE("plain text compose creates no HTML body alternative", "[jmap][submiss
     REQUIRE(std::holds_alternative<javelin::jmap::submission::DraftSaveSummary>(result));
     const auto& summary = std::get<javelin::jmap::submission::DraftSaveSummary>(result);
     CHECK(summary.affectedMailboxIds == std::vector<std::string>{"account-2-drafts"});
-    javelin::jmap::cache::QueryService queries{connection};
-    const auto projectedResult = queries.loadMailboxWindow("account-2", draftsQueryKey, 0, 100, {});
+    javelin::jmap::cache::MailboxMessageReadRepository mailboxMessages{connection};
+    javelin::jmap::cache::QueryWindowReadRepository queryWindows{connection, mailboxMessages};
+    const auto projectedResult =
+        queryWindows.loadMailboxWindow("account-2", draftsQueryKey, 0, 100, {});
     const auto* projected =
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&projectedResult);
     REQUIRE(projected != nullptr);
@@ -501,8 +522,8 @@ TEST_CASE("compose sending uses the account selected with the From identity",
         CHECK(std::ranges::find(email->keywords, "$draft") == email->keywords.end());
     };
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::JmapCore core{connection, transport, methodTransport};
-    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    ComposeCapabilities capabilities{connection, transport, methodTransport};
+    auto& service = capabilities.service;
 
     const javelin::jmap::LiveConnectionSettings liveSettings{
         .sessionUrl = "https://account-2.example.test/.well-known/jmap",
@@ -586,8 +607,8 @@ TEST_CASE("scheduled submission uses HOLDUNTIL and validates the server delay li
     FakeTransport transport;
     transport.results = {draftCreatedResponse(), submittedResponse()};
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::JmapCore core{connection, transport, methodTransport};
-    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    ComposeCapabilities capabilities{connection, transport, methodTransport};
+    auto& service = capabilities.service;
     const javelin::jmap::LiveConnectionSettings liveSettings{
         .sessionUrl = "https://account-2.example.test/.well-known/jmap",
         .loginEmail = "shared-login@example.test",
@@ -650,8 +671,8 @@ TEST_CASE("submission rejection reports the server SetError",
     FakeTransport transport;
     transport.results = {draftCreatedResponse(), submissionRejectedResponse()};
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::JmapCore core{connection, transport, methodTransport};
-    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    ComposeCapabilities capabilities{connection, transport, methodTransport};
+    auto& service = capabilities.service;
     const javelin::jmap::LiveConnectionSettings liveSettings{
         .sessionUrl = "https://account-2.example.test/.well-known/jmap",
         .loginEmail = "shared-login@example.test",
@@ -717,8 +738,8 @@ TEST_CASE("an ambiguous submission keeps the optimistic Sent projection durable"
         },
     };
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::JmapCore core{connection, transport, methodTransport};
-    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    ComposeCapabilities capabilities{connection, transport, methodTransport};
+    auto& service = capabilities.service;
     const auto result = QCoro::waitFor(service.send(
         {
             .sessionUrl = "https://account-2.example.test/.well-known/jmap",
@@ -840,8 +861,8 @@ TEST_CASE("draft replacement creates the new draft before destroying the old one
         }
     };
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::JmapCore core{connection, transport, methodTransport};
-    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    ComposeCapabilities capabilities{connection, transport, methodTransport};
+    auto& service = capabilities.service;
     const auto result = QCoro::waitFor(service.saveDraft(
         {
             .sessionUrl = "https://account-2.example.test/.well-known/jmap",
@@ -894,8 +915,8 @@ TEST_CASE("an ambiguous draft creation keeps the local draft projection",
         },
     };
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::JmapCore core{connection, transport, methodTransport};
-    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    ComposeCapabilities capabilities{connection, transport, methodTransport};
+    auto& service = capabilities.service;
     const auto result = QCoro::waitFor(service.saveDraft(
         {
             .sessionUrl = "https://account-2.example.test/.well-known/jmap",
@@ -987,8 +1008,8 @@ TEST_CASE("compose save rejects a replaced attachment source",
 
     FakeTransport transport;
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::JmapCore core{connection, transport, methodTransport};
-    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    ComposeCapabilities capabilities{connection, transport, methodTransport};
+    auto& service = capabilities.service;
     const auto result = QCoro::waitFor(service.saveDraft(
         {
             .sessionUrl = "https://account-1.example.test/.well-known/jmap",

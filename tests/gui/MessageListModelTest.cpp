@@ -1,7 +1,6 @@
 #include "gui/messages/MessageListModel.h"
-#include "jmap/cache/Database.h"
-#include "jmap/cache/QueryService.h"
 #include "jmap/cache/ThreadRepository.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -43,12 +42,12 @@ namespace
     {
         QTemporaryDir directory;
         javelin::jmap::cache::DatabaseConnection connection;
-        javelin::jmap::cache::QueryService queries;
+        QString queries;
 
         TestDatabase(QTemporaryDir temporaryDirectory,
                      javelin::jmap::cache::DatabaseConnection databaseConnection)
             : directory(std::move(temporaryDirectory)), connection(std::move(databaseConnection)),
-              queries(connection)
+              queries(connection.database().databaseName())
         {
         }
     };
@@ -73,9 +72,9 @@ namespace
         REQUIRE(query.exec(QStringLiteral(
             "INSERT INTO accounts(account_id,email_address,session_url,is_primary) VALUES("
             "'account-1','alice@example.com','https://example.com/jmap',1)")));
-        REQUIRE(
-            query.exec(QStringLiteral("INSERT INTO mailboxes(account_id,mailbox_id,name) VALUES("
-                                      "'account-1','mailbox-1','Inbox')")));
+        REQUIRE(query.exec(QStringLiteral(
+            "INSERT INTO mailboxes(account_id,mailbox_id,name,sort_order) VALUES("
+            "'account-1','mailbox-1','Inbox',0),('account-1','mailbox-archive','Archive',1)")));
         REQUIRE(query.exec(QStringLiteral(
             "INSERT INTO emails(account_id,email_id,thread_id,subject,received_at) VALUES("
             "'account-1','email-1','thread-1','First','2026-08-10T10:00:00Z')")));
@@ -97,12 +96,10 @@ namespace
         REQUIRE(query.exec(QStringLiteral(
             "INSERT INTO emails(account_id,email_id,thread_id,subject,received_at) VALUES("
             "'account-1','email-2','thread-1','Second','2026-08-10T11:00:00Z')")));
-        if (inMailbox)
-        {
-            REQUIRE(query.exec(
-                QStringLiteral("INSERT INTO email_mailboxes(account_id,email_id,mailbox_id) VALUES("
-                               "'account-1','email-2','mailbox-1')")));
-        }
+        REQUIRE(query.exec(
+            QStringLiteral("INSERT INTO email_mailboxes(account_id,email_id,mailbox_id) VALUES("
+                           "'account-1','email-2','%1')")
+                .arg(inMailbox ? QStringLiteral("mailbox-1") : QStringLiteral("mailbox-archive"))));
     }
 
     [[nodiscard]] bool waitUntil(const std::function<bool()>& predicate)
@@ -183,8 +180,32 @@ TEST_CASE("message list expansion waits for complete Thread cache coverage",
     seedSecondThreadEmail(database.connection, true);
     model.setItems("account-1", "mailbox-1", {summary});
     REQUIRE(waitUntil([&] { return model.rowCount() == 2; }));
-    CHECK(model.data(model.index(1), javelin::gui::messages::MessageListModel::EmailIdRole)
-              .toString() == QStringLiteral("email-2"));
+    const auto currentMailboxMemberIndex = model.index(1);
+    CHECK(
+        model.data(currentMailboxMemberIndex, javelin::gui::messages::MessageListModel::EmailIdRole)
+            .toString() == QStringLiteral("email-2"));
+    CHECK(model
+              .data(currentMailboxMemberIndex,
+                    javelin::gui::messages::MessageListModel::MailboxNamesRole)
+              .toStringList()
+              .isEmpty());
+
+    QSqlQuery moveMember{database.connection.database()};
+    REQUIRE(moveMember.exec(QStringLiteral(
+        "DELETE FROM email_mailboxes WHERE account_id='account-1' AND email_id='email-2'")));
+    REQUIRE(moveMember.exec(
+        QStringLiteral("INSERT INTO email_mailboxes(account_id,email_id,mailbox_id) VALUES("
+                       "'account-1','email-2','mailbox-archive')")));
+    model.refreshExpandedThreadMembers();
+    REQUIRE(waitUntil(
+        [&]
+        {
+            return model
+                       .data(model.index(1),
+                             javelin::gui::messages::MessageListModel::MailboxNamesRole)
+                       .toStringList() == QStringList{QStringLiteral("Archive")};
+        }));
+    CHECK(model.rowCount() == 2);
     CHECK(materializationRequests == 1);
 }
 
@@ -227,25 +248,33 @@ TEST_CASE("Thread expansion includes children outside the represented mailbox",
     mailboxModel.setItems("account-1", "mailbox-1", {summary});
     REQUIRE(mailboxModel.setThreadExpanded("thread-1", true));
     REQUIRE(waitUntil([&] { return mailboxModel.rowCount() == 2; }));
+    const auto mailboxMemberIndex = mailboxModel.index(1);
+    CHECK(
+        mailboxModel.data(mailboxMemberIndex, javelin::gui::messages::MessageListModel::EmailIdRole)
+            .toString() == QStringLiteral("email-2"));
     CHECK(mailboxModel
-              .data(mailboxModel.index(1), javelin::gui::messages::MessageListModel::EmailIdRole)
-              .toString() == QStringLiteral("email-2"));
+              .data(mailboxMemberIndex, javelin::gui::messages::MessageListModel::MailboxNamesRole)
+              .toStringList() == QStringList{QStringLiteral("Archive")});
+    CHECK(mailboxModel.data(mailboxMemberIndex, Qt::AccessibleTextRole)
+              .toString()
+              .contains(QStringLiteral("Mailboxes: Archive")));
 
     javelin::gui::messages::MessageListModel searchModel{database.queries};
     searchModel.setItems("account-1", std::nullopt, {summary});
     REQUIRE(searchModel.setThreadExpanded("thread-1", true));
     REQUIRE(waitUntil([&] { return searchModel.rowCount() == 2; }));
-    CHECK(searchModel
-              .data(searchModel.index(1), javelin::gui::messages::MessageListModel::EmailIdRole)
+    const auto searchMemberIndex = searchModel.index(1);
+    CHECK(searchModel.data(searchMemberIndex, javelin::gui::messages::MessageListModel::EmailIdRole)
               .toString() == QStringLiteral("email-2"));
+    CHECK(searchModel
+              .data(searchMemberIndex, javelin::gui::messages::MessageListModel::MailboxNamesRole)
+              .toStringList() == QStringList{QStringLiteral("Archive")});
 }
 
 TEST_CASE("message list model displays a placeholder for missing subjects",
           "[gui][messages][model]")
 {
-    javelin::jmap::cache::DatabaseConnection connection;
-    javelin::jmap::cache::QueryService queryService{connection};
-    javelin::gui::messages::MessageListModel model{queryService};
+    javelin::gui::messages::MessageListModel model{QString{}};
 
     auto first = item("email-1", "thread-1");
     auto second = item("email-2", "thread-2");
@@ -263,9 +292,7 @@ TEST_CASE("message list model displays a placeholder for missing subjects",
 TEST_CASE("message list model exposes tags already carried by message rows",
           "[gui][messages][model][tags]")
 {
-    javelin::jmap::cache::DatabaseConnection connection;
-    javelin::jmap::cache::QueryService queryService{connection};
-    javelin::gui::messages::MessageListModel model{queryService};
+    javelin::gui::messages::MessageListModel model{QString{}};
 
     auto tagged = item("email-1", "thread-1");
     tagged.tags.push_back(javelin::jmap::cache::MessageListTag{
@@ -286,9 +313,7 @@ TEST_CASE("message list model exposes tags already carried by message rows",
 TEST_CASE("message list model normalizes tooltips and prefers cached body previews",
           "[gui][messages][model][tooltip]")
 {
-    javelin::jmap::cache::DatabaseConnection connection;
-    javelin::jmap::cache::QueryService queryService{connection};
-    javelin::gui::messages::MessageListModel model{queryService};
+    javelin::gui::messages::MessageListModel model{QString{}};
 
     auto serverPreview = item("email-1", "thread-1");
     serverPreview.preview = "\n\n      Server   preview\n   text   ";
@@ -308,9 +333,7 @@ TEST_CASE("message list model normalizes tooltips and prefers cached body previe
 TEST_CASE("message list model exposes painted message state to accessibility",
           "[gui][messages][model][accessibility]")
 {
-    javelin::jmap::cache::DatabaseConnection connection;
-    javelin::jmap::cache::QueryService queryService{connection};
-    javelin::gui::messages::MessageListModel model{queryService};
+    javelin::gui::messages::MessageListModel model{QString{}};
 
     auto accessible = item("email-1", "thread-1", true);
     accessible.subject = "Quarterly update";
@@ -350,9 +373,7 @@ TEST_CASE("message list model exposes painted message state to accessibility",
 TEST_CASE("message list model expands a known conversation without an exact mailbox count",
           "[gui][messages][model][accessibility][thread-coverage]")
 {
-    javelin::jmap::cache::DatabaseConnection connection;
-    javelin::jmap::cache::QueryService queryService{connection};
-    javelin::gui::messages::MessageListModel model{queryService};
+    javelin::gui::messages::MessageListModel model{QString{}};
 
     auto conversation = item("email-1", "thread-1");
     conversation.mailboxThreadMessageCount.reset();
@@ -374,9 +395,7 @@ TEST_CASE("message list model expands a known conversation without an exact mail
 TEST_CASE("message list model marks one cached row read without resetting its list",
           "[gui][messages][model]")
 {
-    javelin::jmap::cache::DatabaseConnection connection;
-    javelin::jmap::cache::QueryService queryService{connection};
-    javelin::gui::messages::MessageListModel model{queryService};
+    javelin::gui::messages::MessageListModel model{QString{}};
 
     model.setItems(std::optional<std::string>{"account-1"}, std::optional<std::string>{"mailbox-1"},
                    {item("email-1", "thread-1", true), item("email-2", "thread-2", true)});
@@ -393,9 +412,7 @@ TEST_CASE("message list model marks one cached row read without resetting its li
 TEST_CASE("message list model appends an infinite-scroll tail without resetting existing rows",
           "[gui][messages][model][infinite-scroll]")
 {
-    javelin::jmap::cache::DatabaseConnection connection;
-    javelin::jmap::cache::QueryService queryService{connection};
-    javelin::gui::messages::MessageListModel model{queryService};
+    javelin::gui::messages::MessageListModel model{QString{}};
 
     model.setItems(std::optional<std::string>{"account-1"}, std::optional<std::string>{"mailbox-1"},
                    {item("email-1", "thread-1"), item("email-2", "thread-2")});

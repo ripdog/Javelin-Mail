@@ -1,7 +1,7 @@
 #pragma once
 
 #include "jmap/EmailMutation.h"
-#include "jmap/JmapCore.h"
+#include "jmap/sync/EmailMutationEngine.h"
 
 #include <QCoroTask>
 

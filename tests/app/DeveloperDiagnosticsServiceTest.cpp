@@ -1,8 +1,8 @@
 #include "app/DeveloperDiagnosticsService.h"
 
-#include "jmap/cache/Database.h"
 #include "jmap/cache/MailVault.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
+#include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroTask>
 

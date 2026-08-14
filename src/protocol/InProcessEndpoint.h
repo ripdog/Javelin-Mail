@@ -1,6 +1,8 @@
 #pragma once
 
-#include "protocol/ProcessBoundary.h"
+#include "protocol/BoundaryEventContract.h"
+#include "protocol/DaemonRequestHandler.h"
+#include "protocol/ProtocolValidation.h"
 
 namespace javelin::protocol
 {

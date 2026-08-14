@@ -2,7 +2,9 @@
 
 This document covers build-environment setup, compilation, testing, local execution, and packaging.
 See [ARCHITECTURE.md](ARCHITECTURE.md) for component ownership and runtime interactions, and
-[DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for the current engineering roadmap.
+[DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for the current engineering roadmap. The staged programme
+for making those boundaries explicit in the source and build graphs is tracked in
+[STRUCTURAL_REFACTOR_IMPLEMENTATION_PLAN.md](STRUCTURAL_REFACTOR_IMPLEMENTATION_PLAN.md).
 
 ## Supported development environment
 
@@ -102,11 +104,17 @@ cmake --build --preset debug
 For a focused build and test run in the shared workspace, use:
 
 ```sh
-scripts/check-debug.sh --target javelin_jmap_tests --tests 'SessionClient'
+scripts/check-debug.sh --target javelin_jmap_protocol_tests --tests 'SessionClient'
 ```
 
+The test graph is split by production boundary: protocol, storage/cache, JMAP protocol, JMAP sync, JMAP domain, daemon application, GUI policy, GUI widgets, and explicit integration targets. Pick the narrowest target that owns the behavior under test; test executables link production libraries instead of compiling production `.cpp` files directly.
+
 Repeat `--target` to build more than one target. Run the complete configure, build, test, and format
-workflow only for final verification:
+workflow only for final verification. Source placement follows target ownership: process-client
+adapters live in `src/client/`, daemon composition in `src/daemon/`, desktop integration in
+`src/desktop/`, persistence implementations in `src/storage/`, and application implementations in
+focused `src/app` subdirectories. CMake rejects implementation files added directly to `src/app` or
+`src/jmap/cache`.
 
 ```sh
 scripts/check-debug.sh --full

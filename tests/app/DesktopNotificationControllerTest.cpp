@@ -1,8 +1,8 @@
-#include "app/DesktopNotificationController.h"
+#include "desktop/notifications/DesktopNotificationController.h"
 
 #include "app/CacheLocationProvider.h"
-#include "app/DaemonBackgroundController.h"
-#include "app/DaemonServices.h"
+#include "daemon/DaemonBackgroundController.h"
+#include "daemon/DaemonServices.h"
 
 #include <QCoreApplication>
 #include <QDir>

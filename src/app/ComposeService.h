@@ -2,7 +2,7 @@
 
 #include "app/AccountConnectionSettings.h"
 #include "app/undo/DraftHistoryPort.h"
-#include "jmap/JmapCore.h"
+#include "jmap/OperationError.h"
 #include "jmap/submission/ComposeTypes.h"
 
 #include <QCoroTask>

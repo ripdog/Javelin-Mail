@@ -1,0 +1,255 @@
+#include "jmap/cache/SearchWindowRepository.h"
+
+#include "jmap/cache/SearchWindowReadRepository.h"
+
+#include <QSqlError>
+#include <QSqlQuery>
+#include <QVariant>
+
+namespace javelin::jmap::cache
+{
+
+    namespace
+    {
+        [[nodiscard]] DatabaseError queryError(const QString& operation, const QSqlQuery& query)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = operation + QStringLiteral(": ") + query.lastError().text(),
+            };
+        }
+
+        void bindWindowKey(QSqlQuery& query, const std::string_view accountId,
+                           const std::string_view queryKey, const std::size_t offset,
+                           const std::size_t limit)
+        {
+            query.bindValue(QStringLiteral(":account_id"),
+                            QString::fromStdString(std::string{accountId}));
+            query.bindValue(QStringLiteral(":query_key"),
+                            QString::fromStdString(std::string{queryKey}));
+            query.bindValue(QStringLiteral(":offset"), static_cast<qulonglong>(offset));
+            query.bindValue(QStringLiteral(":limit"), static_cast<qulonglong>(limit));
+        }
+    } // namespace
+
+    SearchWindowRepository::SearchWindowRepository(DatabaseConnection& connection)
+        : m_connection(connection)
+    {
+    }
+
+    std::optional<DatabaseError> SearchWindowRepository::replace(const SearchWindowRecord& window)
+    {
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Begin search-window transaction"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = replace(transaction, window))
+            return error;
+        return transaction.commit();
+    }
+
+    std::optional<DatabaseError> SearchWindowRepository::replace(DatabaseTransaction& transaction,
+                                                                 const SearchWindowRecord& window)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message =
+                    QStringLiteral("Search-window replacement requires a matching transaction"),
+            };
+        }
+        auto& database = m_connection.database();
+
+        QSqlQuery deleteStaleWindows{database};
+        deleteStaleWindows.prepare(QStringLiteral(
+            "DELETE FROM search_windows WHERE account_id=:account_id AND query_key=:query_key "
+            "AND query_state<>:query_state"));
+        deleteStaleWindows.bindValue(QStringLiteral(":account_id"),
+                                     QString::fromStdString(window.accountId));
+        deleteStaleWindows.bindValue(QStringLiteral(":query_key"),
+                                     QString::fromStdString(window.queryKey));
+        deleteStaleWindows.bindValue(QStringLiteral(":query_state"),
+                                     QString::fromStdString(window.queryState));
+        if (!deleteStaleWindows.exec())
+        {
+            const auto error =
+                queryError(QStringLiteral("Invalidate stale search windows"), deleteStaleWindows);
+            return error;
+        }
+
+        QSqlQuery replaceWindow{database};
+        replaceWindow.prepare(QStringLiteral(
+            "INSERT INTO search_windows "
+            "(account_id, query_key, window_offset, window_limit, position, returned_limit, total, "
+            "query_state, coverage, materialization, updated_at) VALUES (:account_id, :query_key, "
+            ":offset, :limit, :position, :returned_limit, :total, :query_state, 'server', "
+            "'complete', CURRENT_TIMESTAMP) "
+            "ON CONFLICT(account_id, query_key, window_offset, window_limit) DO UPDATE SET "
+            "position = excluded.position, returned_limit = excluded.returned_limit, "
+            "total = excluded.total, query_state = excluded.query_state, coverage = 'server', "
+            "materialization = 'complete', "
+            "updated_at = CURRENT_TIMESTAMP"));
+        bindWindowKey(replaceWindow, window.accountId, window.queryKey, window.offset,
+                      window.limit);
+        replaceWindow.bindValue(QStringLiteral(":total"),
+                                window.total.has_value()
+                                    ? QVariant{static_cast<qulonglong>(*window.total)}
+                                    : QVariant{});
+        replaceWindow.bindValue(QStringLiteral(":position"),
+                                static_cast<qulonglong>(window.position));
+        replaceWindow.bindValue(QStringLiteral(":returned_limit"),
+                                static_cast<qulonglong>(window.returnedLimit));
+        replaceWindow.bindValue(QStringLiteral(":query_state"),
+                                QString::fromStdString(window.queryState));
+        if (!replaceWindow.exec())
+        {
+            const auto error = queryError(QStringLiteral("Replace search window"), replaceWindow);
+            return error;
+        }
+
+        QSqlQuery deleteItems{database};
+        deleteItems.prepare(QStringLiteral(
+            "DELETE FROM search_window_items WHERE account_id = :account_id AND query_key = "
+            ":query_key AND window_offset = :offset AND window_limit = :limit"));
+        bindWindowKey(deleteItems, window.accountId, window.queryKey, window.offset, window.limit);
+        if (!deleteItems.exec())
+        {
+            const auto error =
+                queryError(QStringLiteral("Delete search-window items"), deleteItems);
+            return error;
+        }
+
+        QSqlQuery insertItem{database};
+        insertItem.prepare(QStringLiteral(
+            "INSERT INTO search_window_items "
+            "(account_id, query_key, window_offset, window_limit, position, email_id) "
+            "VALUES (:account_id, :query_key, :offset, :limit, :position, :email_id)"));
+        for (std::size_t position = 0; position < window.emailIds.size(); ++position)
+        {
+            bindWindowKey(insertItem, window.accountId, window.queryKey, window.offset,
+                          window.limit);
+            insertItem.bindValue(QStringLiteral(":position"), static_cast<qulonglong>(position));
+            insertItem.bindValue(QStringLiteral(":email_id"),
+                                 QString::fromStdString(window.emailIds[position]));
+            if (!insertItem.exec())
+            {
+                const auto error =
+                    queryError(QStringLiteral("Insert search-window item"), insertItem);
+                return error;
+            }
+        }
+
+        QSqlQuery evictWindows{database};
+        evictWindows.prepare(QStringLiteral(
+            "DELETE FROM search_windows WHERE (account_id,query_key,window_offset,window_limit) "
+            "IN (SELECT account_id,query_key,window_offset,window_limit FROM search_windows WHERE "
+            "account_id=:account_id AND query_key=:query_key ORDER BY updated_at DESC,"
+            "window_offset DESC LIMIT -1 OFFSET 64)"));
+        evictWindows.bindValue(QStringLiteral(":account_id"),
+                               QString::fromStdString(window.accountId));
+        evictWindows.bindValue(QStringLiteral(":query_key"),
+                               QString::fromStdString(window.queryKey));
+        if (!evictWindows.exec())
+        {
+            const auto error = queryError(QStringLiteral("Evict old search windows"), evictWindows);
+            return error;
+        }
+
+        return std::nullopt;
+    }
+
+    SearchWindowResult SearchWindowRepository::find(const std::string_view accountId,
+                                                    const std::string_view queryKey,
+                                                    const std::size_t offset,
+                                                    const std::size_t limit) const
+    {
+        return SearchWindowReadRepository{m_connection}.find(accountId, queryKey, offset, limit);
+    }
+
+    std::variant<bool, DatabaseError>
+    SearchWindowRepository::containsEmail(const std::string_view accountId,
+                                          const std::string_view emailId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT EXISTS(SELECT 1 FROM search_window_items WHERE account_id=:account_id "
+            "AND email_id=:email_id)"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":email_id"), QString::fromStdString(std::string{emailId}));
+        if (!query.exec() || !query.next())
+            return queryError(QStringLiteral("Check search windows for Email"), query);
+        return query.value(0).toBool();
+    }
+
+    std::optional<DatabaseError>
+    SearchWindowRepository::invalidateAccount(DatabaseTransaction& transaction,
+                                              const std::string_view accountId)
+    {
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral(
+                    "Search-window invalidation requires an active matching transaction"),
+            };
+        }
+        QSqlQuery query{m_connection.database()};
+        query.prepare(
+            QStringLiteral("UPDATE search_windows SET coverage='stale',materialization='partial' "
+                           "WHERE account_id=:account_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Invalidate search windows"), query);
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError>
+    SearchWindowRepository::projectAccount(DatabaseTransaction& transaction,
+                                           const std::string_view accountId)
+    {
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral(
+                    "Search-window projection requires an active matching transaction"),
+            };
+        }
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "UPDATE search_windows SET coverage='locally_projected',materialization='partial' "
+            "WHERE account_id=:account_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Project search windows"), query);
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError>
+    SearchWindowRepository::eraseQuery(const std::string_view accountId,
+                                       const std::string_view queryKey)
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "DELETE FROM search_windows WHERE account_id=:account_id AND query_key=:query_key"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":query_key"),
+                        QString::fromStdString(std::string{queryKey}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Delete search session windows"), query);
+        return std::nullopt;
+    }
+
+} // namespace javelin::jmap::cache

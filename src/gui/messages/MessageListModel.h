@@ -1,8 +1,9 @@
 #pragma once
 
-#include "jmap/cache/QueryReader.h"
+#include "jmap/cache/MessageListReadTypes.h"
 
 #include <QAbstractListModel>
+#include <QString>
 
 #include <cstddef>
 #include <cstdint>
@@ -49,8 +50,7 @@ namespace javelin::gui::messages
             IsSearchResultRole,
         };
 
-        explicit MessageListModel(javelin::jmap::cache::QueryReader& queryReader,
-                                  QObject* parent = nullptr);
+        explicit MessageListModel(QString databasePath, QObject* parent = nullptr);
         ~MessageListModel() override;
 
         [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex{}) const override;
@@ -66,6 +66,7 @@ namespace javelin::gui::messages
         [[nodiscard]] bool setThreadExpanded(std::string_view threadId, bool expanded);
         [[nodiscard]] bool toggleThreadExpanded(std::string_view threadId);
         [[nodiscard]] bool isThreadExpanded(std::string_view threadId) const;
+        void refreshExpandedThreadMembers();
         [[nodiscard]] std::optional<std::string>
         summaryEmailIdForThread(std::string_view threadId) const;
         [[nodiscard]] bool setEmailRead(std::string_view emailId);
@@ -94,14 +95,14 @@ namespace javelin::gui::messages
         itemForRow(const VisibleRow& row) const;
         [[nodiscard]] std::optional<std::size_t> findThreadIndex(std::string_view threadId) const;
         [[nodiscard]] std::optional<int> visibleSummaryRowForThread(std::size_t threadIndex) const;
-        void startThreadMembersLoad(std::size_t threadIndex);
+        void startThreadMembersLoad(std::size_t threadIndex, bool refreshLoaded = false);
         void retryPendingThreadMembersLoads();
         [[nodiscard]] int visibleBlockStartForThread(std::size_t threadIndex) const;
         [[nodiscard]] int visibleBlockSizeForThread(std::size_t threadIndex) const;
         void reindexVisibleRows();
         void rebuildVisibleRows();
 
-        javelin::jmap::cache::QueryReader& m_queryReader;
+        QString m_databasePath;
         std::optional<std::string> m_accountId;
         std::optional<std::string> m_mailboxId;
         std::vector<ThreadEntry> m_threads;

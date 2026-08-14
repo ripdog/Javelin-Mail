@@ -10,6 +10,8 @@ file(READ "${INPUT_FILE}" compile_commands)
 
 set(problematic_flags
     " -mno-direct-extern-access"
+    " -Wlogical-op"
+    " -fcoroutines"
 )
 
 foreach(flag IN LISTS problematic_flags)

@@ -51,6 +51,12 @@ accepted trade-off in favour of a simpler and faster application.
                      └─────────────────────┘
 ```
 
+The source tree mirrors the process boundary. `src/daemon/` owns daemon composition and action
+routing, `src/desktop/` owns daemon-hosted desktop integration, and `src/client/` owns GUI-process
+session/reconnect and remote application-port adapters. `src/gui/` is reserved for presentation and
+GUI feature code rather than IPC or daemon composition. Shared application contracts remain under
+`src/app/`, whose implementation files are grouped into focused feature/runtime subdirectories.
+
 The central rules are:
 
 > The daemon is the sole operational authority and the sole SQLite writer.
@@ -1004,13 +1010,20 @@ allows it to remain a `QCoreApplication`; using `QSystemTrayIcon` may require a 
 but still must not pull in the main GUI or WebEngine.
 
 GUI controllers must stop depending directly on concrete daemon services such as
-`MailApplicationService`, `ComposeService`, `CalendarService`, `UndoManager`, or `WorkScheduler`.
+`MailMutationApplicationService`, `ComposeService`, `CalendarMutationEngine`, `UndoManager`, or
+`WorkScheduler`.
 They consume:
 
 - read-only repositories;
 - typed command and settings clients;
 - cache invalidations; and
 - transient daemon status interfaces.
+
+Within the GUI process, `MainWindow` is a KXMLGUI shell rather than the owner of feature policy.
+Workspace/list-session state, quick filters, mail actions/tags, authentication prompting, and theme
+state are owned by focused controllers. The GUI bootstrap remains the composition root for concrete
+compose, contacts, and calendar dependencies and supplies those feature controllers through typed
+factories; the shell is not given `GuiServices&` or the feature command ports themselves.
 
 ## Implementation sequence
 

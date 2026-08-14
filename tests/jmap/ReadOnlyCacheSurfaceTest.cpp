@@ -1,7 +1,7 @@
 #include "FixtureReader.h"
+#include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MessageViewService.h"
-#include "jmap/cache/QueryService.h"
 #include "jmap/domain/MailEntityParsers.h"
 
 #include <QCoreApplication>
@@ -39,8 +39,7 @@ namespace
     }
 } // namespace
 
-TEST_CASE("read-only query service exposes cache reads and rejects query-window writes",
-          "[jmap][cache][read-only]")
+TEST_CASE("read-only cache repositories expose cache reads", "[jmap][cache][read-only]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -75,17 +74,11 @@ TEST_CASE("read-only query service exposes cache reads and rejects query-window 
             .openForCurrentThread("query");
     REQUIRE(std::holds_alternative<javelin::jmap::cache::ReadOnlyDatabaseConnection>(guiResult));
     auto gui = std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(std::move(guiResult));
-    javelin::jmap::cache::QueryService query{gui};
+    javelin::jmap::cache::MailboxReadRepository mailboxReader{gui};
 
-    const auto tree = query.listMailboxTree("account-1");
+    const auto tree = mailboxReader.listMailboxTree("account-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailboxTreeItem>>(tree));
     REQUIRE(std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(tree).size() == 1);
-
-    const auto writeAttempt = query.eraseSearchWindows("account-1", "query");
-    REQUIRE(writeAttempt.has_value());
-    CHECK(writeAttempt->code == javelin::jmap::cache::DatabaseErrorCode::QueryFailed);
-    CHECK(writeAttempt->message ==
-          QStringLiteral("Erase search windows requires daemon cache access"));
 }
 
 TEST_CASE("message view service can load through a read-only connection",

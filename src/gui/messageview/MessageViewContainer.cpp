@@ -4,9 +4,13 @@
 #include "gui/IconUtils.h"
 #include "gui/accessibility/AccessibleFactory.h"
 #include "gui/messageview/HtmlMessageView.h"
+#include "gui/messageview/MessageAttachmentPanel.h"
+#include "gui/messageview/MessageBannerCoordinator.h"
 #include "gui/messageview/MessageBannerWidget.h"
+#include "gui/messageview/MessageTranslationController.h"
 #include "gui/messageview/MessageViewPresentation.h"
 #include "gui/messageview/PlainTextLinkifier.h"
+#include "gui/messageview/RemoteContentController.h"
 #include "gui/settings/GuiSettings.h"
 #include "gui/translation/TranslationService.h"
 #include "gui/widgets/IndeterminateProgressBar.h"
@@ -202,33 +206,6 @@ namespace javelin::gui::messageview
             Q_UNUSED(installed);
         }
 
-        [[nodiscard]] QString
-        detectionText(const javelin::jmap::cache::MessageViewSnapshot& snapshot)
-        {
-            const bool hasCompletePlainText =
-                snapshot.plainTextBody.has_value() && !snapshot.plainTextBody->isTruncated;
-            const bool hasCompleteHtml =
-                snapshot.htmlBody.has_value() && !snapshot.htmlBody->isTruncated;
-            if (hasCompletePlainText)
-            {
-                return QString::fromStdString(snapshot.plainTextBody->value);
-            }
-
-            if (hasCompleteHtml)
-            {
-                return javelin::jmap::render::plainTextFromHtml(
-                    QString::fromStdString(snapshot.htmlBody->value));
-            }
-
-            return {};
-        }
-
-        [[nodiscard]] QString
-        attachmentName(const javelin::jmap::cache::MessageAttachment& attachment)
-        {
-            return QString::fromStdString(attachment.name.value_or(attachment.partId));
-        }
-
         [[nodiscard]] std::optional<std::string>
         renderedBodyKey(const std::optional<javelin::jmap::cache::MessageViewSnapshot>& snapshot)
         {
@@ -324,125 +301,6 @@ namespace javelin::gui::messageview
             label->setFocusPolicy(Qt::NoFocus);
         }
 
-        [[nodiscard]] QIcon
-        attachmentIcon(const javelin::jmap::cache::MessageAttachment& attachment)
-        {
-            const auto fileName = attachmentName(attachment);
-            const QFileInfo fileInfo(fileName);
-            QFileIconProvider iconProvider;
-            auto icon = iconProvider.icon(fileInfo);
-            if (!icon.isNull())
-            {
-                return icon;
-            }
-
-            const QMimeDatabase mimeDatabase;
-            const auto mimeType =
-                mimeDatabase.mimeTypeForName(QString::fromStdString(attachment.mediaType));
-            icon = QIcon::fromTheme(mimeType.iconName());
-            if (icon.isNull())
-            {
-                icon = QIcon::fromTheme(mimeType.genericIconName());
-            }
-            if (icon.isNull())
-            {
-                icon = QIcon::fromTheme(QStringLiteral("mail-attachment"));
-            }
-            if (icon.isNull())
-            {
-                icon = QApplication::style()->standardIcon(QStyle::SP_FileIcon);
-            }
-            return icon;
-        }
-
-        class AttachmentTile : public QFrame
-        {
-          public:
-            AttachmentTile(const javelin::jmap::cache::MessageAttachment& attachment,
-                           std::function<void()> openAction, std::function<void()> saveAction,
-                           QString saveToolTip, QWidget* parent = nullptr)
-                : QFrame(parent)
-            {
-                const auto fileName = attachmentName(attachment);
-                setToolTip(fileName);
-                setFrameStyle(QFrame::NoFrame);
-                setObjectName(QStringLiteral("attachmentTile"));
-                setMinimumWidth(minimumTileWidth);
-                setStyleSheet(QStringLiteral("#attachmentTile {"
-                                             " background: rgba(255, 255, 255, 0.06);"
-                                             " border: 1px solid rgba(255, 255, 255, 0.08);"
-                                             " border-radius: 6px;"
-                                             "}"
-                                             "#attachmentTile QToolButton {"
-                                             " background: transparent;"
-                                             " border: 0;"
-                                             " border-radius: 0;"
-                                             " padding: 6px 8px;"
-                                             "}"
-                                             "#attachmentTile QToolButton:hover {"
-                                             " background: rgba(255, 255, 255, 0.06);"
-                                             "}"
-                                             "#attachmentTile QToolButton:pressed {"
-                                             " background: rgba(255, 255, 255, 0.1);"
-                                             "}"
-                                             "#attachmentTile #saveAttachmentButton {"
-                                             " border-left: 1px solid rgba(255, 255, 255, 0.12);"
-                                             "}"));
-
-                auto* layout = new QHBoxLayout(this);
-                layout->setContentsMargins(0, 0, 0, 0);
-                layout->setSpacing(0);
-
-                auto* openButton = new QToolButton(this);
-                openButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-                openButton->setIcon(attachmentIcon(attachment));
-                openButton->setText(fileName);
-                openButton->setToolTip(i18n("Open %1 in default application", fileName));
-                openButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-                connect(openButton, &QToolButton::clicked, this,
-                        [action = std::move(openAction)]
-                        {
-                            if (action)
-                            {
-                                action();
-                            }
-                        });
-
-                auto* saveButton = new QToolButton(this);
-                saveButton->setObjectName(QStringLiteral("saveAttachmentButton"));
-                saveButton->setIcon(QIcon::fromTheme(QStringLiteral("edit-download")));
-                saveButton->setAccessibleName(saveToolTip);
-                saveButton->setToolTip(std::move(saveToolTip));
-                saveButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
-                connect(saveButton, &QToolButton::clicked, this,
-                        [action = std::move(saveAction)]
-                        {
-                            if (action)
-                            {
-                                action();
-                            }
-                        });
-
-                layout->addWidget(openButton, 1);
-                layout->addWidget(saveButton);
-
-                const int preferredWidth =
-                    openButton->sizeHint().width() + saveButton->sizeHint().width();
-                m_targetWidth = std::clamp(preferredWidth, minimumTileWidth, maximumTileWidth);
-                setMaximumWidth(maximumTileWidth);
-            }
-
-            [[nodiscard]] int targetWidth() const
-            {
-                return m_targetWidth;
-            }
-
-          private:
-            static constexpr int minimumTileWidth = 200;
-            static constexpr int maximumTileWidth = 500;
-            int m_targetWidth = minimumTileWidth;
-        };
-
         class MessagePreviewTile : public QFrame
         {
           public:
@@ -501,35 +359,6 @@ namespace javelin::gui::messageview
             std::function<void()> m_activateAction;
         };
 
-        [[nodiscard]] std::vector<const javelin::jmap::cache::MessageAttachment*>
-        visibleAttachments(const std::optional<javelin::jmap::cache::MessageViewSnapshot>& snapshot)
-        {
-            std::vector<const javelin::jmap::cache::MessageAttachment*> attachments;
-            if (!snapshot.has_value())
-            {
-                return attachments;
-            }
-
-            attachments.reserve(snapshot->attachments.size());
-            for (const auto& attachment : snapshot->attachments)
-            {
-                const bool isEmbeddedInline =
-                    attachment.cid.has_value() && attachment.disposition.has_value() &&
-                    std::ranges::equal(*attachment.disposition, std::string_view{"inline"},
-                                       [](const char left, const char right)
-                                       {
-                                           return std::tolower(static_cast<unsigned char>(left)) ==
-                                                  std::tolower(static_cast<unsigned char>(right));
-                                       });
-                if (!isEmbeddedInline)
-                {
-                    attachments.push_back(&attachment);
-                }
-            }
-
-            return attachments;
-        }
-
     } // namespace
 
     MessageViewContainer::MessageViewContainer(
@@ -543,6 +372,9 @@ namespace javelin::gui::messageview
         setFocusPolicy(Qt::StrongFocus);
         setAccessibleName(i18nc("@info accessible message view", "Message view"));
 
+        m_bannerCoordinator =
+            std::make_unique<MessageBannerCoordinator>(m_settings, m_accountId, m_emailId);
+        m_remoteContentController = std::make_unique<RemoteContentController>(m_settings);
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(8, 8, 8, 0);
         layout->setSpacing(8);
@@ -782,79 +614,48 @@ namespace javelin::gui::messageview
 
         m_htmlView = new HtmlMessageView(m_settings.messageAppearanceSettings(), this);
         m_htmlView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        m_bodyPresenter = std::make_unique<MessageBodyPresenter>(*m_bodyStack, *m_placeholderPanel,
+                                                                 *m_multipleSelectionScrollArea,
+                                                                 *m_plainTextView, *m_htmlView);
+        m_translationController = std::make_unique<MessageTranslationController>(
+            m_translationService, *m_bodyPresenter, *m_plainTextView, *m_htmlView, m_snapshot,
+            m_emailId, [this] { return currentSenderAddress(); },
+            [this] { return currentSenderDomain(); });
+        connect(m_translationController.get(), &MessageTranslationController::stateChanged, this,
+                [this]
+                {
+                    updateLanguageBanner();
+                    updateAccessibleDocument();
+                });
         connect(m_htmlView, &HtmlMessageView::viewSourceRequested, this,
                 &MessageViewContainer::viewSourceRequested);
         connect(m_htmlView, &HtmlMessageView::hoveredLinkChanged, this,
                 &MessageViewContainer::hoveredLinkChanged);
-        connect(m_htmlView, &HtmlMessageView::documentLoaded, this,
-                [this](const QString& documentId)
-                {
-                    if (!m_accountId.has_value() || !m_emailId.has_value() ||
-                        documentId != QString::fromStdString(*m_accountId + "\n" + *m_emailId))
-                    {
-                        return;
-                    }
-                    m_htmlDocumentLoaded = true;
-                    m_loading = false;
-                    updatePresentation(false);
-                    if (m_activeView == ActiveView::Html)
-                    {
-                        maybeAutoTranslateCurrentMessage();
-                    }
-                });
+        connect(
+            m_htmlView, &HtmlMessageView::documentLoaded, this,
+            [this](const QString& documentId)
+            {
+                if (!m_bodyPresenter->acceptHtmlDocumentLoaded(documentId, m_accountId, m_emailId))
+                    return;
+                m_loading = false;
+                updatePresentation(false);
+                if (m_bodyPresenter->activeView() == ActiveView::Html)
+                    maybeAutoTranslateCurrentMessage();
+            });
 
         m_bodyStack->addWidget(m_placeholderPanel);
         m_bodyStack->addWidget(m_multipleSelectionScrollArea);
         m_bodyStack->addWidget(m_plainTextView);
         m_bodyStack->addWidget(m_htmlView);
 
-        m_attachmentStatusLabel = new QLabel(this);
-        m_attachmentStatusLabel->setWordWrap(false);
-        m_attachmentStatusLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
-        makeLabelSelectable(m_attachmentStatusLabel);
-        m_attachmentStatusLabel->setVisible(false);
-
-        m_attachmentHeaderWidget = new QWidget(this);
-        auto* attachmentHeaderLayout = new QHBoxLayout(m_attachmentHeaderWidget);
-        attachmentHeaderLayout->setContentsMargins(0, 0, 0, 0);
-        attachmentHeaderLayout->setSpacing(4);
-
-        m_attachmentExpanderButton = new QToolButton(m_attachmentHeaderWidget);
-        m_attachmentExpanderButton->setAutoRaise(true);
-        m_attachmentExpanderButton->setArrowType(Qt::RightArrow);
-        connect(m_attachmentExpanderButton, &QToolButton::clicked, this,
-                [this]
-                {
-                    m_attachmentsExpanded = !m_attachmentsExpanded;
-                    updateAttachmentSection();
-                });
-
-        m_attachmentStatusLabel->setParent(m_attachmentHeaderWidget);
-
-        m_saveAllAttachmentsButton = new QToolButton(m_attachmentHeaderWidget);
-        m_saveAllAttachmentsButton->setText(i18nc("@action:button", "Save All"));
-        connect(m_saveAllAttachmentsButton, &QToolButton::clicked, this,
-                [this]
-                {
-                    if (m_accountId.has_value() && m_emailId.has_value())
-                    {
-                        Q_EMIT saveAllAttachmentsRequested(QString::fromStdString(*m_accountId),
-                                                           QString::fromStdString(*m_emailId));
-                    }
-                });
-
-        m_attachmentListWidget = new QWidget(m_attachmentHeaderWidget);
-        m_attachmentListLayout = new QGridLayout(m_attachmentListWidget);
-        m_attachmentListLayout->setContentsMargins(0, 0, 0, 0);
-        m_attachmentListLayout->setHorizontalSpacing(6);
-        m_attachmentListLayout->setVerticalSpacing(6);
-        m_attachmentListLayout->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-        m_attachmentListWidget->setVisible(false);
-
-        attachmentHeaderLayout->addWidget(m_attachmentStatusLabel);
-        attachmentHeaderLayout->addWidget(m_attachmentListWidget, 1);
-        attachmentHeaderLayout->addWidget(m_saveAllAttachmentsButton);
-        m_attachmentHeaderWidget->setVisible(false);
+        m_attachmentPanel =
+            new MessageAttachmentPanel(m_settings, m_accountId, m_emailId, m_snapshot, this);
+        connect(m_attachmentPanel, &MessageAttachmentPanel::saveAttachmentRequested, this,
+                &MessageViewContainer::saveAttachmentRequested);
+        connect(m_attachmentPanel, &MessageAttachmentPanel::openAttachmentRequested, this,
+                &MessageViewContainer::openAttachmentRequested);
+        connect(m_attachmentPanel, &MessageAttachmentPanel::saveAllAttachmentsRequested, this,
+                &MessageViewContainer::saveAllAttachmentsRequested);
 
         layout->addWidget(headerWidget);
         layout->addWidget(m_remoteContentBanner);
@@ -862,42 +663,18 @@ namespace javelin::gui::messageview
         layout->addWidget(m_junkBanner);
         layout->addWidget(m_unsubscribeBanner);
         layout->addWidget(m_bodyStack, 1);
-        layout->addWidget(m_attachmentHeaderWidget);
+        layout->addWidget(m_attachmentPanel);
 
         connect(&m_contactIdentityLookup,
                 &javelin::jmap::contacts::ContactIdentityLookup::contactDataChanged, this,
                 [this]
                 {
                     if (m_snapshot.has_value())
+                    {
                         m_fromLabel->setText(
                             i18nc("@label email sender", "From: %1", contactAwareSenderLabel()));
-                });
-        connect(&m_translationService,
-                &javelin::gui::translation::TranslationService::localModelDownloadProgress, this,
-                [this](const QString& sourceLanguage, const QString& targetLanguage,
-                       const qint64 received, const qint64 total)
-                {
-                    if (!m_translationInProgress)
-                    {
-                        return;
+                        updateAccessibleDocument();
                     }
-                    const auto direction =
-                        QStringLiteral("%1 → %2").arg(languageName(sourceLanguage.toStdString()),
-                                                      languageName(targetLanguage.toStdString()));
-                    if (total > 0)
-                    {
-                        const auto percentage = static_cast<int>(std::clamp(
-                            100.0 * static_cast<double>(received) / static_cast<double>(total), 0.0,
-                            100.0));
-                        m_translationProgressText =
-                            i18n("Downloading %1 translation model… %2%", direction, percentage);
-                    }
-                    else
-                    {
-                        m_translationProgressText =
-                            i18n("Downloading %1 translation model…", direction);
-                    }
-                    updateLanguageBanner();
                 });
         updatePresentation();
     }
@@ -926,38 +703,7 @@ namespace javelin::gui::messageview
 
     void MessageViewContainer::translationSettingsChanged()
     {
-        ++m_translationRequestToken;
-        m_translationInProgress = false;
-        m_translationError.clear();
-        m_translationProgressText.clear();
-        m_autoTranslateAttempted = false;
-        m_translationWasAutomatic = false;
-        if (m_messageTranslated)
-        {
-            restoreCurrentTranslation();
-        }
-        else
-        {
-            updateLanguageBanner();
-        }
-
-        if (!m_translationService.isEnabled() || !m_snapshot.has_value())
-        {
-            return;
-        }
-        if (m_languageDetection.has_value())
-        {
-            m_shouldOfferTranslation =
-                javelin::gui::translation::shouldOfferTranslation(
-                    *m_languageDetection, m_translationService.targetLanguage().toStdString()) &&
-                m_translationService.supportsTranslationRoute(
-                    QString::fromStdString(m_languageDetection->languageCode));
-            updateLanguageBanner();
-            maybeAutoTranslateCurrentMessage();
-            return;
-        }
-        m_languageDetectionStarted = false;
-        startLanguageDetection();
+        m_translationController->settingsChanged();
     }
 
     void MessageViewContainer::setSelection(
@@ -977,18 +723,7 @@ namespace javelin::gui::messageview
         m_emailId = std::move(emailId);
         m_junkMailboxId = std::move(junkMailboxId);
         m_multipleMessages.clear();
-        m_attachmentsExpanded = false;
-        ++m_translationRequestToken;
-        m_translationInProgress = false;
-        m_messageTranslated = false;
-        m_originalPlainText.clear();
-        m_translationError.clear();
-        m_autoTranslateAttempted = false;
-        m_translationWasAutomatic = false;
-        m_languageDetectionStarted = false;
-        m_languageDetection.reset();
-        m_shouldOfferTranslation = false;
-        m_htmlDocumentLoaded = false;
+        m_translationController->reset();
         ++m_snapshotLoadToken;
         m_loading = m_emailId.has_value();
         m_errorMessage.clear();
@@ -1007,18 +742,7 @@ namespace javelin::gui::messageview
         m_emailId = std::nullopt;
         m_junkMailboxId = std::nullopt;
         m_multipleMessages = std::move(messages);
-        m_attachmentsExpanded = false;
-        ++m_translationRequestToken;
-        m_translationInProgress = false;
-        m_messageTranslated = false;
-        m_originalPlainText.clear();
-        m_translationError.clear();
-        m_autoTranslateAttempted = false;
-        m_translationWasAutomatic = false;
-        m_languageDetectionStarted = false;
-        m_languageDetection.reset();
-        m_shouldOfferTranslation = false;
-        m_htmlDocumentLoaded = false;
+        m_translationController->reset();
         ++m_snapshotLoadToken;
         m_loading = false;
         m_errorMessage.clear();
@@ -1029,16 +753,7 @@ namespace javelin::gui::messageview
     void MessageViewContainer::refresh(javelin::jmap::cache::MessageViewReader& messageViewReader)
     {
         m_errorMessage.clear();
-        ++m_translationRequestToken;
-        m_translationInProgress = false;
-        m_messageTranslated = false;
-        m_originalPlainText.clear();
-        m_translationError.clear();
-        m_autoTranslateAttempted = false;
-        m_translationWasAutomatic = false;
-        m_languageDetectionStarted = false;
-        m_languageDetection.reset();
-        m_shouldOfferTranslation = false;
+        m_translationController->reset();
         m_loading = m_emailId.has_value();
         updatePresentation(false);
         startSnapshotLoad(messageViewReader, false);
@@ -1102,28 +817,12 @@ namespace javelin::gui::messageview
 
     void MessageViewContainer::setActiveView(const ActiveView view)
     {
-        m_activeView = view;
+        m_bodyPresenter->setActiveView(view);
         updateSenderRemoteContentPermit();
         updateRemoteContentButton();
         updateJunkBanner();
         updateUnsubscribeBanner();
         updateLanguageBanner();
-
-        switch (m_activeView)
-        {
-        case ActiveView::Placeholder:
-            m_bodyStack->setCurrentWidget(m_placeholderPanel);
-            break;
-        case ActiveView::Multiple:
-            m_bodyStack->setCurrentWidget(m_multipleSelectionScrollArea);
-            break;
-        case ActiveView::PlainText:
-            m_bodyStack->setCurrentWidget(m_plainTextView);
-            break;
-        case ActiveView::Html:
-            m_bodyStack->setCurrentWidget(m_htmlView);
-            break;
-        }
         updateAccessibleDocument();
     }
 
@@ -1166,11 +865,13 @@ namespace javelin::gui::messageview
         if (m_snapshot.has_value())
         {
             QString bodyText;
-            if (m_messageTranslated && !m_accessibleTranslatedBody.isEmpty())
+            if (m_translationController->messageTranslated() &&
+                !m_translationController->translatedText().isEmpty())
             {
-                bodyText = m_accessibleTranslatedBody;
+                bodyText = m_translationController->translatedText();
             }
-            else if (m_activeView == ActiveView::PlainText && m_plainTextView != nullptr)
+            else if (m_bodyPresenter->activeView() == ActiveView::PlainText &&
+                     m_plainTextView != nullptr)
             {
                 bodyText = m_plainTextView->toPlainText();
             }
@@ -1225,19 +926,7 @@ namespace javelin::gui::messageview
 
     void MessageViewContainer::updateSenderRemoteContentPermit()
     {
-        const auto sender = currentSenderAddress();
-        const auto domain = currentSenderDomain();
-        const bool permittedSender =
-            !sender.isEmpty() &&
-            m_settings.remoteContentSenders().contains(sender, Qt::CaseInsensitive);
-        const bool permittedDomain =
-            !domain.isEmpty() &&
-            m_settings.remoteContentDomains().contains(domain, Qt::CaseInsensitive);
-        const bool shouldAllow = permittedSender || permittedDomain;
-        if (m_htmlView->remoteContentEnabled() != shouldAllow)
-        {
-            m_htmlView->setRemoteContentEnabled(shouldAllow);
-        }
+        m_remoteContentController->applySavedPermit(m_snapshot, *m_htmlView);
     }
 
     void MessageViewContainer::updateRemoteContentButton()
@@ -1279,49 +968,19 @@ namespace javelin::gui::messageview
                                            : i18n("Load remote content"));
     }
 
-    std::string MessageViewContainer::messageBannerKey(const std::string_view bannerId) const
-    {
-        if (!m_accountId.has_value() || !m_emailId.has_value())
-        {
-            return {};
-        }
-        return std::string{bannerId} + '\n' + *m_accountId + '\n' + *m_emailId;
-    }
-
     bool MessageViewContainer::messageBannerDismissed(const std::string_view bannerId) const
     {
-        const auto key = messageBannerKey(bannerId);
-        return !key.empty() && m_dismissedMessageBanners.contains(key);
+        return m_bannerCoordinator->dismissed(bannerId);
     }
 
     void MessageViewContainer::dismissMessageBanner(const std::string_view bannerId)
     {
-        const auto key = messageBannerKey(bannerId);
-        if (!key.empty())
-        {
-            m_dismissedMessageBanners.insert(key);
-        }
+        m_bannerCoordinator->dismiss(bannerId);
     }
 
     QString MessageViewContainer::serverDisplayName() const
     {
-        if (!m_accountId.has_value())
-        {
-            return i18n("Server");
-        }
-
-        const auto accountId = QString::fromStdString(*m_accountId);
-        const auto account = m_settings.accountForCachedId(accountId);
-        auto name = QUrl{account.sessionUrl}.host();
-        if (name.isEmpty())
-        {
-            name = account.displayName.trimmed();
-        }
-        if (name.isEmpty())
-        {
-            name = account.loginEmail.trimmed();
-        }
-        return name.isEmpty() ? i18n("Server") : name;
+        return m_bannerCoordinator->serverDisplayName();
     }
 
     void MessageViewContainer::updateJunkBanner()
@@ -1360,14 +1019,14 @@ namespace javelin::gui::messageview
 
     void MessageViewContainer::updateLanguageBanner()
     {
-        const bool canTranslateView =
-            m_translationService.isEnabled() &&
-            (m_activeView == ActiveView::PlainText || m_activeView == ActiveView::Html);
-        const bool hasLanguageOffer =
-            m_snapshot.has_value() && m_languageDetection.has_value() && m_shouldOfferTranslation;
-        const bool shouldShow = canTranslateView && !messageBannerDismissed(TranslationBannerId) &&
-                                (hasLanguageOffer || m_translationInProgress ||
-                                 m_messageTranslated || !m_translationError.isEmpty());
+        const auto& detection = m_translationController->languageDetection();
+        const bool hasLanguageOffer = m_snapshot.has_value() && detection.has_value() &&
+                                      m_translationController->shouldOfferTranslation();
+        const bool shouldShow = m_translationController->canTranslateActiveView() &&
+                                !messageBannerDismissed(TranslationBannerId) &&
+                                (hasLanguageOffer || m_translationController->inProgress() ||
+                                 m_translationController->messageTranslated() ||
+                                 !m_translationController->error().isEmpty());
         m_translationBanner->setVisible(shouldShow);
         updateTranslateOptionsMenu();
         if (!shouldShow)
@@ -1377,38 +1036,36 @@ namespace javelin::gui::messageview
         }
 
         const auto targetName = languageName(m_translationService.targetLanguage().toStdString());
-        m_translateButton->setEnabled(!m_translationInProgress);
-        m_translateButton->setText(m_messageTranslated ? i18n("Show original")
-                                                       : i18nc("@action:button", "Translate"));
-        m_translateButton->setToolTip(m_messageTranslated
+        m_translateButton->setEnabled(!m_translationController->inProgress());
+        m_translateButton->setText(m_translationController->messageTranslated()
+                                       ? i18n("Show original")
+                                       : i18nc("@action:button", "Translate"));
+        m_translateButton->setToolTip(m_translationController->messageTranslated()
                                           ? i18n("Restore the original message text")
                                           : i18n("Translate this message to %1", targetName));
 
-        if (m_translationInProgress)
+        if (m_translationController->inProgress())
         {
-            m_translationBanner->setText(m_translationProgressText.isEmpty()
+            m_translationBanner->setText(m_translationController->progressText().isEmpty()
                                              ? i18n("Translating message…")
-                                             : m_translationProgressText);
+                                             : m_translationController->progressText());
             return;
         }
-
-        if (!m_translationError.isEmpty())
+        if (!m_translationController->error().isEmpty())
         {
-            m_translationBanner->setText(m_translationError);
+            m_translationBanner->setText(m_translationController->error());
             return;
         }
-
-        if (m_messageTranslated)
+        if (m_translationController->messageTranslated())
         {
-            m_translationBanner->setText(m_translationWasAutomatic
+            m_translationBanner->setText(m_translationController->translationWasAutomatic()
                                              ? i18n("Auto-translated to %1.", targetName)
                                              : i18n("Message translated to %1.", targetName));
             return;
         }
 
-        const auto& detection = *m_languageDetection;
         m_translationBanner->setText(
-            i18n("This message appears to be in %1.", languageName(detection.languageCode)));
+            i18n("This message appears to be in %1.", languageName(detection->languageCode)));
     }
 
     void MessageViewContainer::updateTranslateOptionsMenu()
@@ -1427,323 +1084,55 @@ namespace javelin::gui::messageview
             if (kind == QStringLiteral("sender"))
             {
                 action->setEnabled(m_translationService.isEnabled() && !sender.isEmpty());
-                action->setChecked(m_translationService.settings().autoTranslateSenders.contains(
-                    sender, Qt::CaseInsensitive));
+                action->setChecked(m_translationController->senderRuleEnabled());
             }
             else if (kind == QStringLiteral("domain"))
             {
                 action->setEnabled(m_translationService.isEnabled() && !domain.isEmpty());
-                action->setChecked(m_translationService.settings().autoTranslateDomains.contains(
-                    domain, Qt::CaseInsensitive));
+                action->setChecked(m_translationController->domainRuleEnabled());
             }
         }
     }
 
     void MessageViewContainer::setAutoTranslateSender(const bool enabled)
     {
-        if (const auto error =
-                m_translationService.setAutoTranslateSender(currentSenderAddress(), enabled))
-        {
-            m_translationError = i18n("Could not save translation rule: %1", error->message);
-            updateLanguageBanner();
-            return;
-        }
-        if (enabled)
-        {
-            if (const auto error =
-                    m_translationService.setAutoTranslateDomain(currentSenderDomain(), false))
-            {
-                m_translationError = i18n("Could not save translation rule: %1", error->message);
-                updateLanguageBanner();
-                return;
-            }
-            m_autoTranslateAttempted = false;
-        }
-        updateTranslateOptionsMenu();
-        maybeAutoTranslateCurrentMessage();
+        m_translationController->setAutoTranslateSender(enabled);
     }
 
     void MessageViewContainer::setAutoTranslateDomain(const bool enabled)
     {
-        if (const auto error =
-                m_translationService.setAutoTranslateDomain(currentSenderDomain(), enabled))
-        {
-            m_translationError = i18n("Could not save translation rule: %1", error->message);
-            updateLanguageBanner();
-            return;
-        }
-        if (enabled)
-        {
-            if (const auto error =
-                    m_translationService.setAutoTranslateSender(currentSenderAddress(), false))
-            {
-                m_translationError = i18n("Could not save translation rule: %1", error->message);
-                updateLanguageBanner();
-                return;
-            }
-            m_autoTranslateAttempted = false;
-        }
-        updateTranslateOptionsMenu();
-        maybeAutoTranslateCurrentMessage();
+        m_translationController->setAutoTranslateDomain(enabled);
     }
 
     void MessageViewContainer::maybeAutoTranslateCurrentMessage()
     {
-        if (!m_translationService.isEnabled() || m_autoTranslateAttempted || m_messageTranslated ||
-            m_translationInProgress || !m_snapshot.has_value() || !m_shouldOfferTranslation)
-        {
-            return;
-        }
-        if (m_activeView == ActiveView::Html && !m_htmlDocumentLoaded)
-        {
-            return;
-        }
-
-        const auto fetchPolicy =
-            m_translationService.shouldAutoTranslate(currentSenderAddress(), currentSenderDomain())
-                ? javelin::gui::translation::ExternalFetchPolicy::AllowExternalFetch
-                : javelin::gui::translation::ExternalFetchPolicy::InstalledAndCachedOnly;
-
-        m_autoTranslateAttempted = true;
-        translateCurrentMessage(true, fetchPolicy);
+        m_translationController->maybeAutoTranslate();
     }
 
     void MessageViewContainer::translateCurrentMessage()
     {
-        if (m_messageTranslated)
-        {
-            restoreCurrentTranslation();
-            return;
-        }
-
-        translateCurrentMessage(false,
-                                javelin::gui::translation::ExternalFetchPolicy::AllowExternalFetch);
-    }
-
-    void MessageViewContainer::translateCurrentMessage(
-        const bool automatic, const javelin::gui::translation::ExternalFetchPolicy fetchPolicy)
-    {
-        if (!m_translationService.isEnabled() || !m_snapshot.has_value() || m_translationInProgress)
-        {
-            return;
-        }
-
-        const auto selectedEmailId = m_emailId;
-        const auto requestToken = ++m_translationRequestToken;
-        m_translationInProgress = true;
-        m_translationError.clear();
-        m_translationProgressText.clear();
-        m_translationWasAutomatic = automatic;
-        updateLanguageBanner();
-
-        const auto applyTranslatedChunks =
-            [this](const javelin::gui::translation::TranslationChunks& chunks) -> bool
-        {
-            QStringList accessibleChunks;
-            for (const auto& group : chunks)
-            {
-                for (const auto& chunk : group)
-                {
-                    if (!chunk.trimmed().isEmpty())
-                        accessibleChunks.push_back(chunk);
-                }
-            }
-
-            if (m_activeView == ActiveView::PlainText)
-            {
-                if (chunks.empty() || chunks.front().empty())
-                {
-                    return false;
-                }
-                m_originalPlainText = m_plainTextView->toPlainText();
-                m_plainTextView->setHtml(linkifyPlainText(chunks.front().front()));
-                m_accessibleTranslatedBody = accessibleChunks.join(QLatin1Char{'\n'});
-                return true;
-            }
-
-            if (m_activeView == ActiveView::Html)
-            {
-                m_htmlView->applyTranslationChunks(chunks);
-                m_accessibleTranslatedBody = accessibleChunks.join(QLatin1Char{'\n'});
-                return true;
-            }
-
-            return false;
-        };
-
-        const auto translateChunks =
-            [this, selectedEmailId, requestToken, fetchPolicy,
-             applyTranslatedChunks](javelin::gui::translation::TranslationChunks chunks)
-        {
-            const auto sourceLanguage =
-                m_languageDetection.has_value()
-                    ? QString::fromStdString(m_languageDetection->languageCode)
-                    : QStringLiteral("auto");
-            auto task =
-                m_translationService.translate(std::move(chunks), sourceLanguage, fetchPolicy);
-            QCoro::connect(
-                std::move(task), this,
-                [this, selectedEmailId, requestToken,
-                 applyTranslatedChunks](javelin::gui::translation::TranslationResult result)
-                {
-                    if (m_emailId != selectedEmailId || requestToken != m_translationRequestToken)
-                    {
-                        return;
-                    }
-
-                    m_translationInProgress = false;
-                    if (std::holds_alternative<javelin::gui::translation::TranslationUnavailable>(
-                            result))
-                    {
-                        m_translationWasAutomatic = false;
-                        updateLanguageBanner();
-                        return;
-                    }
-                    if (const auto* error =
-                            std::get_if<javelin::gui::translation::TranslationError>(&result))
-                    {
-                        m_translationError = i18n("Translation failed: %1", error->message);
-                        updateLanguageBanner();
-                        return;
-                    }
-
-                    const auto& translatedChunks =
-                        std::get<javelin::gui::translation::TranslationChunks>(result);
-                    if (!applyTranslatedChunks(translatedChunks))
-                    {
-                        m_translationError =
-                            i18n("Translation failed: no translated text was returned.");
-                        updateLanguageBanner();
-                        return;
-                    }
-
-                    m_messageTranslated = true;
-                    updateLanguageBanner();
-                    updateAccessibleDocument();
-                });
-        };
-
-        if (m_activeView == ActiveView::PlainText)
-        {
-            javelin::gui::translation::TranslationChunks chunks;
-            chunks.push_back(QStringList{m_plainTextView->toPlainText()});
-            translateChunks(std::move(chunks));
-            return;
-        }
-
-        if (m_activeView == ActiveView::Html)
-        {
-            m_htmlView->collectTranslationChunks(
-                [this, selectedEmailId, requestToken, translateChunks](QVector<QStringList> chunks)
-                {
-                    if (m_emailId != selectedEmailId || requestToken != m_translationRequestToken)
-                    {
-                        return;
-                    }
-                    if (chunks.empty())
-                    {
-                        m_translationInProgress = false;
-                        m_translationError = i18n("Translation failed: no message text was found.");
-                        updateLanguageBanner();
-                        return;
-                    }
-                    translateChunks(std::move(chunks));
-                });
-        }
+        m_translationController->translateCurrentMessage();
     }
 
     void MessageViewContainer::restoreCurrentTranslation()
     {
-        if (m_activeView == ActiveView::PlainText && !m_originalPlainText.isEmpty())
-        {
-            m_plainTextView->setHtml(linkifyPlainText(m_originalPlainText));
-        }
-        else if (m_activeView == ActiveView::Html)
-        {
-            m_htmlView->restoreOriginalText();
-        }
-
-        m_translationInProgress = false;
-        m_messageTranslated = false;
-        m_originalPlainText.clear();
-        m_accessibleTranslatedBody.clear();
-        m_translationError.clear();
-        m_translationProgressText.clear();
-        updateLanguageBanner();
-        updateAccessibleDocument();
+        m_translationController->restoreCurrentTranslation();
     }
 
     void MessageViewContainer::startLanguageDetection()
     {
-        if (!m_translationService.isEnabled() || m_languageDetectionStarted ||
-            !m_snapshot.has_value())
-        {
-            return;
-        }
-
-        const auto text = detectionText(*m_snapshot);
-        if (text.isEmpty())
-        {
-            return;
-        }
-
-        m_languageDetectionStarted = true;
-        const auto selectedEmailId = m_emailId;
-        auto* watcher =
-            new QFutureWatcher<std::optional<javelin::gui::translation::LanguageDetectionResult>>{
-                this};
-        connect(watcher,
-                &QFutureWatcher<
-                    std::optional<javelin::gui::translation::LanguageDetectionResult>>::finished,
-                this,
-                [this, watcher, selectedEmailId]
-                {
-                    const auto detection = watcher->result();
-                    watcher->deleteLater();
-                    if (m_emailId != selectedEmailId || !m_snapshot.has_value())
-                    {
-                        return;
-                    }
-
-                    m_languageDetection = detection;
-                    m_shouldOfferTranslation =
-                        detection.has_value() &&
-                        javelin::gui::translation::shouldOfferTranslation(
-                            *detection, m_translationService.targetLanguage().toStdString()) &&
-                        m_translationService.supportsTranslationRoute(
-                            QString::fromStdString(detection->languageCode));
-                    updateLanguageBanner();
-                    maybeAutoTranslateCurrentMessage();
-                });
-        watcher->setFuture(m_translationService.detectLanguage(text));
+        m_translationController->startLanguageDetection();
     }
 
     void MessageViewContainer::updatePresentation(const bool reloadBody)
     {
         if (reloadBody)
         {
-            m_plainTextView->clear();
-            if (!m_snapshot.has_value() || !m_snapshot->htmlBody.has_value())
-            {
-                m_htmlView->clearDocument();
-            }
-            ++m_translationRequestToken;
-            m_translationInProgress = false;
-            m_messageTranslated = false;
-            m_originalPlainText.clear();
-            m_accessibleTranslatedBody.clear();
-            m_translationError.clear();
-            m_autoTranslateAttempted = false;
-            m_translationWasAutomatic = false;
-            m_languageDetectionStarted = false;
-            m_languageDetection.reset();
-            m_shouldOfferTranslation = false;
-            m_htmlDocumentLoaded = false;
+            m_bodyPresenter->prepareForReload(m_snapshot);
+            m_translationController->reset();
         }
-        m_attachmentStatusLabel->clear();
-        rebuildAttachmentRows();
+        m_attachmentPanel->refresh();
         rebuildMultipleSelectionRows();
-        updateAttachmentSection();
         updateRemoteContentButton();
         updateJunkBanner();
         updateUnsubscribeBanner();
@@ -1851,37 +1240,18 @@ namespace javelin::gui::messageview
         m_receivedLabel->setText(i18nc("@label email received date", "Received: %1",
                                        formatReceivedDateTime(m_snapshot->email.receivedAt)));
 
-        if (reloadBody && m_snapshot->plainTextBody.has_value())
-        {
-            m_plainTextView->setHtml(
-                linkifyPlainText(QString::fromStdString(m_snapshot->plainTextBody->value)));
-        }
-
-        if (reloadBody && m_snapshot->htmlBody.has_value())
-        {
-            const auto renderDocument =
-                m_snapshot->htmlRenderDocument.has_value()
-                    ? QString::fromStdString(m_snapshot->htmlRenderDocument->html)
-                    : QString::fromStdString(m_snapshot->htmlBody->value);
-            m_htmlDocumentLoaded = false;
+        if (m_bodyPresenter->renderMessageBody(*m_snapshot, m_accountId, m_emailId, reloadBody))
             m_loading = true;
-            m_htmlView->setDocumentHtml(renderDocument.toStdString(),
-                                        *m_accountId + "\n" + *m_emailId);
-        }
         updateSenderRemoteContentPermit();
 
-        m_attachmentStatusLabel->setText(attachmentStatusText());
-        rebuildAttachmentRows();
-        updateAttachmentSection();
+        m_attachmentPanel->refresh();
         updateRemoteContentButton();
 
         if (m_snapshot->htmlBody.has_value())
         {
             setActiveView(ActiveView::Html);
-            if (m_htmlDocumentLoaded)
-            {
+            if (m_bodyPresenter->htmlDocumentLoaded())
                 startLanguageDetection();
-            }
         }
         else if (m_snapshot->plainTextBody.has_value())
         {
@@ -1913,39 +1283,16 @@ namespace javelin::gui::messageview
 
     void MessageViewContainer::permitRemoteContentForCurrentSender()
     {
-        addRemoteContentPermit(true, currentSenderAddress());
+        m_remoteContentController->permitSender(m_snapshot);
         updateSenderRemoteContentPermit();
         updateRemoteContentButton();
     }
 
     void MessageViewContainer::permitRemoteContentForCurrentDomain()
     {
-        addRemoteContentPermit(false, currentSenderDomain());
+        m_remoteContentController->permitDomain(m_snapshot);
         updateSenderRemoteContentPermit();
         updateRemoteContentButton();
-    }
-
-    void MessageViewContainer::addRemoteContentPermit(const bool sender, QString value)
-    {
-        value = value.trimmed().toLower();
-        if (value.isEmpty())
-            return;
-
-        auto values =
-            sender ? m_settings.remoteContentSenders() : m_settings.remoteContentDomains();
-        if (values.contains(value, Qt::CaseInsensitive))
-            return;
-        values.push_back(std::move(value));
-        values.removeDuplicates();
-        values.sort(Qt::CaseInsensitive);
-
-        javelin::protocol::SettingsUpdate update;
-        if (sender)
-            update.remoteContentSenders = {values.begin(), values.end()};
-        else
-            update.remoteContentDomains = {values.begin(), values.end()};
-        if (const auto error = m_settings.update(std::move(update)))
-            qWarning().noquote() << "Could not save remote-content permission" << error->detail;
     }
 
     QString MessageViewContainer::contactAwareSenderLabel() const
@@ -1980,106 +1327,12 @@ namespace javelin::gui::messageview
 
     QString MessageViewContainer::currentSenderAddress() const
     {
-        if (!m_snapshot.has_value() || m_snapshot->email.from.empty())
-        {
-            return {};
-        }
-        return QString::fromStdString(m_snapshot->email.from.front().email).trimmed().toLower();
+        return m_remoteContentController->senderAddress(m_snapshot);
     }
 
     QString MessageViewContainer::currentSenderDomain() const
     {
-        const auto sender = currentSenderAddress();
-        const auto atIndex = sender.lastIndexOf(QLatin1Char('@'));
-        if (atIndex < 0 || atIndex + 1 >= sender.size())
-        {
-            return {};
-        }
-        return sender.sliced(atIndex + 1).trimmed().toLower();
-    }
-
-    void MessageViewContainer::rebuildAttachmentRows()
-    {
-        while (QLayoutItem* item = m_attachmentListLayout->takeAt(0))
-        {
-            if (QWidget* widget = item->widget())
-            {
-                widget->deleteLater();
-            }
-            delete item;
-        }
-
-        const auto attachments = visibleAttachments(m_snapshot);
-        const bool hasAttachments = !attachments.empty();
-        m_attachmentListWidget->setVisible(hasAttachments);
-        m_attachmentsCollapsed = false;
-        if (!hasAttachments || !m_accountId.has_value() || !m_emailId.has_value())
-        {
-            return;
-        }
-
-        constexpr int tileSpacing = 6;
-        std::vector<AttachmentTile*> tiles;
-        tiles.reserve(attachments.size());
-        const auto attachmentSaveSettings = m_settings.attachmentSaveSettings();
-
-        for (std::size_t index = 0; index < attachments.size(); ++index)
-        {
-            const auto* attachment = attachments.at(index);
-            const auto fileName = attachmentName(*attachment);
-            const auto saveToolTip =
-                attachmentSaveSettings.alwaysAsk
-                    ? i18n("Save %1 to selected location", fileName)
-                    : i18n("Save %1 to %2", fileName, attachmentSaveSettings.directory);
-            auto* tile = new AttachmentTile(
-                *attachment,
-                [this, partId = QString::fromStdString(attachment->partId)]
-                {
-                    Q_EMIT openAttachmentRequested(QString::fromStdString(*m_accountId),
-                                                   QString::fromStdString(*m_emailId), partId);
-                },
-                [this, partId = QString::fromStdString(attachment->partId)]
-                {
-                    Q_EMIT saveAttachmentRequested(QString::fromStdString(*m_accountId),
-                                                   QString::fromStdString(*m_emailId), partId);
-                },
-                saveToolTip, m_attachmentListWidget);
-            tiles.push_back(tile);
-        }
-
-        const int availableWidth =
-            std::max(m_attachmentListWidget->contentsRect().width(),
-                     m_attachmentHeaderWidget->contentsRect().width() -
-                         m_attachmentStatusLabel->sizeHint().width() -
-                         m_saveAllAttachmentsButton->sizeHint().width() - 12);
-        int row = 0;
-        int column = 0;
-        int rowWidth = 0;
-        int maxColumnCount = 0;
-        for (auto* tile : tiles)
-        {
-            const int tileWidth = std::min(tile->targetWidth(), availableWidth);
-            const int nextWidth = column == 0 ? tileWidth : rowWidth + tileSpacing + tileWidth;
-            if (column > 0 && nextWidth > availableWidth)
-            {
-                maxColumnCount = std::max(maxColumnCount, column);
-                ++row;
-                column = 0;
-                rowWidth = 0;
-            }
-
-            tile->setFixedWidth(tileWidth);
-            m_attachmentListLayout->addWidget(tile, row, column, Qt::AlignLeft);
-            rowWidth = column == 0 ? tileWidth : rowWidth + tileSpacing + tileWidth;
-            ++column;
-        }
-        maxColumnCount = std::max(maxColumnCount, column);
-
-        for (int stretchColumn = 0; stretchColumn < maxColumnCount; ++stretchColumn)
-        {
-            m_attachmentListLayout->setColumnStretch(stretchColumn, 0);
-        }
-        m_attachmentListLayout->setColumnStretch(maxColumnCount, 1);
+        return m_remoteContentController->senderDomain(m_snapshot);
     }
 
     void MessageViewContainer::rebuildMultipleSelectionRows()
@@ -2112,50 +1365,6 @@ namespace javelin::gui::messageview
         }
 
         m_multipleSelectionLayout->addStretch(1);
-    }
-
-    QString MessageViewContainer::attachmentStatusText() const
-    {
-        if (!m_snapshot.has_value())
-        {
-            return {};
-        }
-
-        const auto attachments = visibleAttachments(m_snapshot);
-        if (!attachments.empty())
-        {
-            return i18np("%1 attachment", "%1 attachments", attachments.size());
-        }
-
-        if (m_snapshot->htmlRenderDocument.has_value() &&
-            m_snapshot->htmlRenderDocument->inlineResourceCount > 0)
-        {
-            return i18np("Inline resource: %1", "Inline resources: %1",
-                         m_snapshot->htmlRenderDocument->inlineResourceCount);
-        }
-
-        return {};
-    }
-
-    void MessageViewContainer::updateAttachmentSection()
-    {
-        const bool hasAttachments = !visibleAttachments(m_snapshot).empty();
-        m_attachmentHeaderWidget->setVisible(hasAttachments);
-        m_attachmentStatusLabel->setVisible(hasAttachments);
-        m_attachmentExpanderButton->setVisible(false);
-        m_saveAllAttachmentsButton->setVisible(hasAttachments);
-        m_saveAllAttachmentsButton->setEnabled(hasAttachments);
-        m_attachmentListWidget->setVisible(hasAttachments);
-    }
-
-    void MessageViewContainer::resizeEvent(QResizeEvent* event)
-    {
-        QWidget::resizeEvent(event);
-        if (!visibleAttachments(m_snapshot).empty())
-        {
-            rebuildAttachmentRows();
-            updateAttachmentSection();
-        }
     }
 
 } // namespace javelin::gui::messageview

@@ -5,8 +5,8 @@
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
-#include "jmap/cache/QueryService.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
@@ -376,8 +376,8 @@ TEST_CASE("mailbox refresh executor bootstraps a collapsed mailbox into the cach
     CHECK(summary.notificationCandidates.empty());
     REQUIRE(transport.requests.size() == 1);
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto listResult = queryService.listMailboxMessages("account-1", "mbx-inbox", 100);
+    javelin::jmap::cache::MailboxMessageReadRepository mailboxMessages{databaseContext.connection};
+    const auto listResult = mailboxMessages.listMailboxMessages("account-1", "mbx-inbox", 100);
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(listResult));
     const auto& items = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(listResult);
     REQUIRE(items.size() == 1);
@@ -1593,8 +1593,8 @@ TEST_CASE("mailbox refresh executor full fallback preserves unrelated account ca
     REQUIRE(inboxWindow.has_value());
     CHECK(inboxWindow->emailIds == std::vector<std::string>{"eml-2"});
 
-    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto inboxListResult = queryService.listMailboxMessages("account-1", "mbx-inbox", 100);
+    javelin::jmap::cache::MailboxMessageReadRepository mailboxMessages{databaseContext.connection};
+    const auto inboxListResult = mailboxMessages.listMailboxMessages("account-1", "mbx-inbox", 100);
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(
         inboxListResult));
     const auto& inboxItems =

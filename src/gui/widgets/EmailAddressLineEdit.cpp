@@ -1,6 +1,6 @@
 #include "gui/widgets/EmailAddressLineEdit.h"
 
-#include "app/AddressSuggestionStore.h"
+#include "gui/compose/AddressSuggestionStore.h"
 
 #include <QAbstractItemView>
 #include <QCompleter>

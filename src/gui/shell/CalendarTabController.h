@@ -9,6 +9,7 @@
 #include <QString>
 
 #include <optional>
+#include <string_view>
 #include <vector>
 
 class QMenu;
@@ -53,6 +54,8 @@ namespace javelin::gui::shell
 
         void open(std::optional<QDate> displayedMonth = std::nullopt);
         void invoke(const TabState* tab, CalendarTabCommand command);
+        [[nodiscard]] bool
+        available(std::optional<std::string_view> accountId = std::nullopt) const;
         [[nodiscard]] bool refresh(const TabState* tab);
         [[nodiscard]] bool close(TabState& tab);
         [[nodiscard]] QWidget* contentWidgetForTab(const TabState* tab) const;

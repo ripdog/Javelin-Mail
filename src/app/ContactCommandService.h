@@ -11,8 +11,10 @@
 
 namespace javelin::jmap::contacts
 {
-    class ContactService;
-}
+    class ContactMediaService;
+    class ContactMutationEngine;
+    class ContactSyncEngine;
+} // namespace javelin::jmap::contacts
 
 namespace javelin::jmap::cache
 {
@@ -35,7 +37,9 @@ namespace javelin::app
     {
       public:
         ContactCommandService(AccountConnectionProvider& connectionProvider,
-                              javelin::jmap::contacts::ContactService& contactService,
+                              javelin::jmap::contacts::ContactSyncEngine& syncEngine,
+                              javelin::jmap::contacts::ContactMutationEngine& mutationEngine,
+                              javelin::jmap::contacts::ContactMediaService& mediaService,
                               javelin::jmap::cache::ContactRepository& contactRepository,
                               ApplicationErrorCoordinator& errorCoordinator,
                               WorkScheduler& workScheduler, undo::UndoManager& undoManager);
@@ -98,7 +102,9 @@ namespace javelin::app
                           QString operationDescription);
 
         AccountConnectionProvider& m_connectionProvider;
-        javelin::jmap::contacts::ContactService& m_contactService;
+        javelin::jmap::contacts::ContactSyncEngine& m_contactSyncEngine;
+        javelin::jmap::contacts::ContactMutationEngine& m_contactMutationEngine;
+        javelin::jmap::contacts::ContactMediaService& m_contactMediaService;
         javelin::jmap::cache::ContactRepository& m_contactRepository;
         ApplicationErrorCoordinator& m_errorCoordinator;
         WorkScheduler& m_workScheduler;

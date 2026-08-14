@@ -17,6 +17,8 @@ in the focused documents for [optimistic consistency](OPTIMISTIC_CONSISTENCY.md)
 [email signatures](EMAIL_SIGNATURES_DESIGN.md), and [message rendering](RENDERING.md). The planned
 split between foreground collapsed-query materialization and bounded background thread hydration is
 specified in [THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md).
+The long-term, behavior-preserving module and ownership cleanup is tracked in
+[STRUCTURAL_REFACTOR_IMPLEMENTATION_PLAN.md](STRUCTURAL_REFACTOR_IMPLEMENTATION_PLAN.md).
 
 Javelin targets Qt 6.6 or newer, KDE Frameworks 6, and C++23. Glaze provides typed JSON parsing at
 the JMAP boundary; QCoro provides coroutine-based Qt networking. KDE Plasma is the primary desktop
@@ -28,7 +30,8 @@ The GUI is intentionally a KDE application built on Qt Widgets, not a generic Qt
 KDE theming:
 
 - `MainWindow` derives from `KXmlGuiWindow`; menus, toolbar composition, shortcut editing, and saved
-  toolbar state use KXMLGUI and KDE standard actions.
+  toolbar state use KXMLGUI and KDE standard actions. Feature policy and mutable workflow state live
+  in focused controllers rather than in the shell.
 - Preferences use `KConfigDialog`, keeping configuration presentation consistent with Plasma and
   other KDE applications while the daemon remains the canonical settings owner.
 - Compose source/plain-text modes and the Sieve editor use `KTextEditor`, including KDE syntax and
@@ -94,20 +97,32 @@ cache connection, or treats an invalidation payload as object state.
 
 The CMake graph enforces the architectural split:
 
-- `javelin_protocol` owns bounded process-boundary values, framing, socket transport, and the test-only
-  in-process endpoint.
-- `javelin_cache_read` owns database-location discovery and reusable read-only cache, MIME, vault, and
-  rendering primitives.
-- `javelin_jmap` owns typed JMAP protocol, capability negotiation, transport, cache repositories,
-  synchronization primitives, contacts, calendars, submission, Sieve, and optimistic journals. It
-  has no Widgets or WebEngine dependency.
-- `javelin_daemon_core` owns application coordination, writable repositories, settings, background
-  work, notifications, tray integration, deferred send, history, and synchronization lifecycle.
-- `javelin_gui` and the `javelin` bootstrap own presentation, read-only repositories, remote port
-  adapters, WebEngine, editing state, selection, and navigation.
+- `javelin_protocol` owns bounded process-boundary values, framing, and local socket transport. The
+  in-process endpoint is test-only support and is not part of the production protocol target.
+- `javelin_cache_read` owns database-location discovery and reusable read-only database, MIME, vault,
+  and rendering infrastructure.
+- `javelin_app_contracts` owns shared QObject application contracts and their generated metaobjects.
+- `javelin_mail_model` owns transport-independent cache/storage implementations, search/query values,
+  and contact/calendar domain helpers shared by the daemon and GUI compositions. Persistence
+  implementations live under `src/storage/`; their established public cache interfaces remain under
+  `src/jmap/cache/`.
+- `javelin_app_shared` owns list sessions, session construction, message navigation coordination, and
+  process-instance locking shared by both process compositions.
+- `javelin_jmap` owns typed JMAP protocol, capability negotiation, transport, synchronization,
+  protocol-specific repositories, contacts, calendars, submission, Sieve, and optimistic journals.
+  It has no Widgets or WebEngine dependency and consumes `javelin_mail_model` rather than recompiling
+  shared implementations.
+- `javelin_daemon_core` owns daemon application coordination, settings, background work,
+  notifications, tray integration, deferred send, history, and synchronization lifecycle.
+- `javelin_gui` owns presentation, WebEngine, editing state, selection, and GUI controllers;
+  `javelin_gui_session` owns the client-side daemon session/event bridge. GUI-process composition and
+  remote application-port adapters live under `src/client/`; the `javelin` executable remains
+  composition/bootstrap only.
 
-Configuration fails when production GUI sources access canonical `QSettings`, when GUI targets link
-`javelin_jmap` or `javelin_daemon_core`, or when daemon sources acquire Widgets/WebEngine dependencies.
+Configuration fails when a production `.cpp` has more than one target owner, production GUI sources
+access canonical `QSettings`, GUI targets link `javelin_jmap` or `javelin_daemon_core`, shared
+mail/application targets gain transport or Widgets/WebEngine dependencies, or daemon sources acquire
+Widgets/WebEngine dependencies. Test targets additionally reject direct production `.cpp` sources.
 
 ### First-run account onboarding
 
@@ -133,22 +148,44 @@ The source tree is organized by responsibility rather than by feature alone:
 | Area | Responsibility |
 | --- | --- |
 | `src/protocol/` | Process-boundary value types, framing, socket transport, correlation, limits, and transport conformance |
-| `src/app/` | Composition roots, application commands, settings, background scheduling, notifications, history, and GUI remote adapters |
+| `src/app/` | Stable application contracts and public service interfaces; implementations are grouped below by responsibility rather than accumulated at the root |
+| `src/app/account/`, `calendar/`, `compose/`, `contacts/`, `messages/`, `sieve/`, `identity/`, `work/` | Focused application workflow implementations for their domains |
+| `src/app/runtime/` | Cross-domain application runtime coordination such as cache barriers, invalidation publication, command dispatch, and process locking |
+| `src/app/undo/` | History storage, typed history executors, and Undo/Redo application coordination |
+| `src/client/` | GUI-process composition, daemon session/reconnect handling, and typed remote application-port adapters |
+| `src/daemon/` | Daemon process/bootstrap composition and lifecycle; `src/daemon/actions/` contains the remote-action dispatcher handlers |
+| `src/desktop/` | Desktop integration owned by the daemon, currently notifications and tray/StatusNotifierItem support |
+| `src/storage/` | SQLite infrastructure, migrations, and persistence implementations grouped by account/messages/contacts/calendar/compose/identity/sieve/sync |
 | `src/jmap/api/` | Session discovery, capabilities, typed JMAP envelopes, HTTP/WebSocket transport, and resource transfer |
-| `src/jmap/cache/` | SQLite schema and repositories, read models, query windows, MIME source storage, and search indexes |
+| `src/jmap/cache/` | Stable cache/read/repository interfaces and cache value types; persistence `.cpp` implementations live under `src/storage/` |
 | `src/jmap/sync/` | State-change sources, refresh planning, reconciliation, mutation projection, and consistency fences |
 | `src/jmap/submission/` | Draft snapshots, attachment manifests, compose revisions, and EmailSubmission workflows |
-| `src/jmap/contacts/` | JSContact conversion, synchronization, editing, import/export, and mutation journals |
-| `src/jmap/calendar/` | JSCalendar values, recurrence editing, occurrence materialization, and calendar mutations |
-| `src/jmap/sieve/` | Sieve domain values, service operations, and optimistic mutation support |
-| `src/gui/` | KDE/Qt main window, KXMLGUI actions, tabs, controllers, models, delegates, message rendering, KTextEditor integration, and KConfig preferences |
+| `src/jmap/contacts/` | JSContact values plus focused protocol, synchronization, mutation/group, media-transfer, and mutation-journal components |
+| `src/jmap/calendar/` | JSCalendar values plus focused cache-reader, protocol, synchronization, mutation, recurrence, and occurrence-materialization components |
+| `src/jmap/sieve/` | Sieve domain values plus separate protocol/read-validation and mutation mechanics with optimistic mutation support |
+| `src/gui/` | KDE/Qt presentation only: shell, feature controllers/widgets, models, delegates, WebEngine rendering, KTextEditor integration, and KConfig preferences |
+| `src/observability/` | Shared logging and performance instrumentation implementations |
 
 The principal runtime objects are:
 
 | Component | Process | Role |
 | --- | --- | --- |
 | `DaemonProcess` | daemon | Starts settings, cache recovery, service composition, sockets, and daemon lifecycle |
-| `DaemonServices` | daemon | Owns writable repositories, JMAP transports, coordinators, command services, and background work |
+| `DaemonServices` | daemon | Composition root for writable repositories, JMAP transports, focused application services, command services, and background work |
+| `AccountRuntimeManager` | daemon | Owns account configuration, `AccountSyncCoordinator` lifetimes, session/authentication refresh, network recovery, and account status |
+| `MailQueryApplicationService` | daemon | Owns mailbox observations, mailbox/search materialization demand, Thread materialization demand, and query-cache publication |
+| `MailMutationApplicationService` | daemon | Expands selections, queues/submits/reconciles Email and mailbox mutations, owns tag jobs, and implements mail history operations |
+| `MessageContentApplicationService` | daemon | Coordinates message body, attachment, and source retrieval plus content invalidation |
+| `MailNotificationService` | daemon | Owns mail-notification delivery acknowledgement/release/recovery and forwards claimed notification candidates |
+| `ContactApplicationService` / `CalendarApplicationService` / `SieveApplicationService` | daemon | Own domain application workflow and history-facing coordination without sharing mail query, mutation, or account-runtime state |
+| `ContactProtocolClient` / `ContactSyncEngine` / `ContactMutationEngine` / `ContactMediaService` | daemon | Separate contacts wire access, authoritative cache synchronization, state-changing/group operations, and binary media transfer |
+| `CalendarCacheReader` / `CalendarProtocolClient` / `CalendarSyncEngine` / `CalendarMutationEngine` | daemon | Separate cached calendar reads, JMAP protocol access, bounded refresh/materialization, and optimistic calendar/event mutations |
+| `SieveProtocolClient` / `SieveMutationEngine` | daemon | Separate Sieve list/load/validation protocol work from save/delete/activation mutation mechanics |
+| `SessionRefreshClient` / `AccountBootstrapClient` | daemon | Refresh JMAP session metadata and perform initial account/mailbox bootstrap without exposing query or mutation APIs |
+| `MailQueryClient` / `MailQueryMaterializer` | daemon | Execute bounded JMAP mail queries and commit authoritative mailbox/search windows to the cache |
+| `MessageContentClient` | daemon | Refresh MIME source/content and read cached source or attachment payloads |
+| `EmailMutationEngine` | daemon | Queue exact Email mutations, submit bounded mutation-journal work, and preserve optimistic/ambiguous outcomes |
+| `MailboxMutationEngine` | daemon | Execute and reconcile mailbox subscription, create, and destroy mutations through the mailbox mutation journal |
 | `DaemonRemoteActionDispatcher` | daemon | Decodes typed remote actions and routes them to application services |
 | `CommandDispatcher` | daemon | Admits stateful commands, preserves command identity, and separates rejection from later failure |
 | `SettingsRepository` | daemon | Owns the canonical revisioned settings snapshot and migration |
@@ -159,15 +196,26 @@ The principal runtime objects are:
 | `GuiDaemonSession` | GUI | Connects, negotiates protocol/build identity, handles reconnect, and coordinates cache barriers |
 | `GuiServices` | GUI | Constructs read-only repositories and typed remote application-port adapters |
 | `RemoteActionClient` | GUI | Correlates bounded request/reply actions over the daemon session |
-| `MainWindow` and controllers | GUI | Own KDE presentation, KXMLGUI actions, editing, selection, navigation, and user interaction |
+| `MainWindow` | GUI | Owns the top-level KDE shell, KXMLGUI registration, shared presentation surfaces, and shutdown/persistence coordination |
+| `MailWorkspaceController` | GUI | Owns workspace tabs, active-tab identity, mailbox/search list sessions, sort state, restoration, refresh routing, and mail-tab lifecycle |
+| `QuickFilterController` / `MailActionController` | GUI | Own quick-filter state/pinning/continuity and mail action availability, trigger routing, tags, and message context-menu policy |
+| `AuthenticationPromptCoordinator` / `ThemeController` | GUI | Own authentication prompt deduplication/reauth sequencing and dark-mode/palette/icon refresh state |
+| `ComposeTabController` / `ContactsTabController` / `CalendarTabController` | GUI | Own feature-tab workflows and toolbar state; `src/client/main.cpp` constructs them through typed factories against the shell's workspace surfaces |
 | `DaemonTrayController` | daemon | Publishes the KDE StatusNotifierItem and D-Bus menu without a Widgets dependency |
 | `DesktopNotificationController` | daemon | Publishes desktop notifications and stable GUI activation routes |
 | cache repositories | both, split by API | Daemon repositories write; GUI repositories use read-only/query-only connections |
 
 `DaemonServices` is the operational composition root. It is the only place where writable cache
 repositories, JMAP transports, synchronization services, history executors, settings, and background
-controllers are assembled together. `GuiServices` is deliberately smaller: it exposes read-only
-cache readers and remote ports matching the interfaces expected by GUI controllers.
+controllers are assembled together. Mail protocol work is intentionally injected as narrow
+capabilities, and daemon application policy is likewise split by responsibility: no application
+object combines account runtime, queries, content, mutations, notifications, contacts, calendars,
+and Sieve. `GuiServices` is deliberately smaller: it exposes
+read-only cache readers and remote ports matching the interfaces expected by GUI controllers.
+`gui_main` is the GUI composition root: concrete calendar, contacts, and compose dependencies stay
+there and are captured by a typed `MainWindowFeatureFactories` set. `MainWindow` receives controller
+factories rather than those feature services, avoiding both constructor capability sprawl and a
+`GuiServices&` service-locator dependency.
 
 ## Representative runtime flows
 
@@ -230,7 +278,7 @@ and announces committed changes; the cache remains the data plane.
 
 ```text
 WebSocket push or EventSource state change
-  -> account coordinator / LongPollService
+  -> AccountSyncCoordinator
   -> typed refresh and reconciliation
   -> cache commit and invalidation
   -> notification discovery outbox
@@ -262,10 +310,11 @@ identity and shared selection state. Selection restoration, activation, navigati
 action availability, and list presentation are separated into deterministic policies plus narrow Qt
 adapters so cache changes cannot reinterpret row numbers as user intent.
 
-The account synchronization service owns state-change consumption, debounce and single-flight
-refresh, mailbox interest, state tokens, cache reconciliation, retries, and post-commit publication.
-Consumers reload affected state from SQLite only after the daemon has committed the corresponding
-transaction.
+`AccountSyncCoordinator` owns state-change consumption, debounce and single-flight refresh, state
+tokens, cache reconciliation, retries, and post-commit publication for one configured account.
+`AccountRuntimeManager` owns coordinator lifetime and configuration, while
+`MailQueryApplicationService` owns transient mailbox observation demand. Consumers reload affected
+state from SQLite only after the daemon has committed the corresponding transaction.
 
 ## Cache materialization and navigation
 
@@ -295,10 +344,10 @@ GUI does not create a second thread-loading source of truth or perform network w
 Background watched-mailbox refresh uses the canonical received-at-descending collapsed window, so a
 synchronized mailbox is immediately loadable from SQLite even while its conversation children are
 still being prefetched. Any page or thread fetch that writes server Email objects reapplies active
-Email projections before the cache can be rendered. Contacts continue to materialize AddressBook
-and ContactCard snapshots through their repositories; calendars continue to materialize
-CalendarEvent objects and bounded occurrence windows through `CalendarService`. Their state tokens,
-eviction rules, and optimistic adapters remain independent.
+Email projections before the cache can be rendered. `ContactSyncEngine` materializes AddressBook
+and ContactCard snapshots through the contact repositories, while `CalendarSyncEngine` materializes
+CalendarEvent objects and bounded occurrence windows through the calendar repositories. Their state
+tokens, eviction rules, and optimistic adapters remain independent from mail and from each other.
 
 Starting or restarting an account coordinator schedules an immediate synchronization pass for all
 configured mailboxes; a quiet push stream is not proof that their cache already exists. Likewise,
@@ -380,8 +429,10 @@ drafts are deliberately not accepted implicitly: changing the supported draft re
 an explicit protocol review, fixture update, and architecture change.
 
 Calendar protocol envelopes and JSCalendar wire documents remain inside `javelin_jmap`.
-The GUI consumes typed calendar domain values and commands through `CalendarService` and
-renders committed SQLite state; it never constructs method names or raw JSON.
+`CalendarProtocolClient` and `CalendarMutationEngine` are daemon-only protocol/mutation components;
+`CalendarSyncEngine` owns bounded materialization and `CalendarCacheReader` owns cached reads. The GUI
+consumes typed calendar values from its read-only cache surface and commands through application
+ports such as `CalendarCommandPort`; it never constructs method names or raw JSON.
 
 ## Contacts synchronization
 
@@ -393,6 +444,10 @@ refreshes reconcile the small AddressBook set and advance the cached ContactCard
 changes page. A `cannotCalculateChanges` response invalidates the delta path and performs an
 atomic full ContactCard replacement, as required by RFC 8620.
 
+`ContactProtocolClient` owns contact JMAP calls, `ContactSyncEngine` owns authoritative cache
+refresh, `ContactMutationEngine` owns AddressBook/ContactCard/group mutation mechanics, and
+`ContactMediaService` owns binary contact media transfer. Application/history policy remains in
+`ContactApplicationService` and `ContactCommandService` rather than in those protocol components.
 Contact cache commits publish through the process-owned `ContactRepository`. Compose completion,
 message sender identity rendering, and the contacts view then reload from SQLite; they do not
 retain a second contact data store.
