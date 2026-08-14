@@ -416,26 +416,52 @@ namespace javelin::gui::messages
             beginResetModel();
             m_accountId = std::move(accountId);
             m_mailboxId = std::move(mailboxId);
+            auto previousThreads = std::move(m_threads);
             m_threads.clear();
             m_threads.reserve(items.size());
 
             std::vector<std::string> survivingExpandedThreadIds;
+            std::vector<std::string> retainedExpandedThreadIds;
             survivingExpandedThreadIds.reserve(m_expandedThreadIds.size());
+            retainedExpandedThreadIds.reserve(m_expandedThreadIds.size());
             for (const auto& item : items)
             {
-                if (containsThreadId(m_expandedThreadIds, item.threadId))
+                const bool remainsExpanded =
+                    sameContext && containsThreadId(m_expandedThreadIds, item.threadId);
+                if (remainsExpanded)
                     survivingExpandedThreadIds.push_back(item.threadId);
 
-                m_threads.push_back(ThreadEntry{
+                ThreadEntry replacement{
                     .summary = std::move(item),
                     .members = {},
                     .membersLoaded = false,
                     .membersLoading = false,
-                });
+                };
+                const auto previous =
+                    std::ranges::find(previousThreads, item.threadId, [](const ThreadEntry& thread)
+                                      { return thread.summary.threadId; });
+                if (remainsExpanded && previous != previousThreads.end() &&
+                    previous->summary.emailId == item.emailId)
+                {
+                    // Preserve the visible block until the post-commit member refresh completes.
+                    // Temporarily collapsing it changes row geometry before selection fallback.
+                    replacement.members = std::move(previous->members);
+                    replacement.memberReadFailureCount = previous->memberReadFailureCount;
+                    replacement.membersLoaded = previous->membersLoaded;
+                    if (replacement.membersLoaded)
+                        retainedExpandedThreadIds.push_back(item.threadId);
+                }
+                m_threads.push_back(std::move(replacement));
             }
             m_expandedThreadIds = std::move(survivingExpandedThreadIds);
             rebuildVisibleRows();
             endResetModel();
+            for (const auto& threadId : retainedExpandedThreadIds)
+            {
+                const auto threadIndex = findThreadIndex(threadId);
+                if (threadIndex.has_value())
+                    startThreadMembersLoad(*threadIndex, true);
+            }
             return;
         }
 

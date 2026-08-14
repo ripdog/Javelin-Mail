@@ -1,4 +1,5 @@
 #include "gui/messages/MessageListModel.h"
+#include "gui/messages/MessageSelectionRestoration.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
@@ -219,6 +220,72 @@ TEST_CASE("message list expansion waits for complete Thread cache coverage",
         }));
     CHECK(model.rowCount() == 2);
     CHECK(materializationRequests == 1);
+}
+
+TEST_CASE("optimistic list replacement retains expanded rows and selection geometry",
+          "[gui][messages][model][selection][optimistic]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeTestDatabase();
+    seedThreadContext(database.connection);
+    seedSecondThreadEmail(database.connection, true);
+
+    auto expandedSummary = item("email-1", "thread-1");
+    expandedSummary.mailboxThreadMessageCount = 2;
+    expandedSummary.globalThreadMessageCount = 2;
+    const auto removed = item("email-3", "thread-3");
+    const auto successor = item("email-4", "thread-4");
+
+    javelin::gui::messages::MessageListModel model{database.queries};
+    model.setItems("account-1", "mailbox-1", {expandedSummary, removed, successor});
+    REQUIRE(model.setThreadExpanded("thread-1", true));
+    REQUIRE(waitUntil([&] { return model.rowCount() == 4; }));
+    REQUIRE(model.data(model.index(3), javelin::gui::messages::MessageListModel::EmailIdRole)
+                .toString() == QStringLiteral("email-4"));
+
+    QSqlQuery updateMember{database.connection.database()};
+    REQUIRE(updateMember.exec(
+        QStringLiteral("UPDATE emails SET subject='Updated member' WHERE account_id='account-1' "
+                       "AND email_id='email-2'")));
+    model.setItems("account-1", "mailbox-1", {expandedSummary, successor});
+
+    REQUIRE(model.isThreadExpanded("thread-1"));
+    REQUIRE(model.rowCount() == 3);
+    CHECK(
+        model.data(model.index(1), javelin::gui::messages::MessageListModel::RowKindRole).toInt() ==
+        static_cast<int>(javelin::gui::messages::MessageListModel::RowKind::ThreadMember));
+    CHECK(model.data(model.index(2), javelin::gui::messages::MessageListModel::EmailIdRole)
+              .toString() == QStringLiteral("email-4"));
+    REQUIRE(waitUntil(
+        [&]
+        {
+            return model.data(model.index(1), javelin::gui::messages::MessageListModel::SubjectRole)
+                       .toString() == QStringLiteral("Updated member");
+        }));
+
+    std::vector<javelin::gui::messages::MessageRowIdentity> visibleRows;
+    for (int row = 0; row < model.rowCount(); ++row)
+    {
+        const auto index = model.index(row);
+        visibleRows.push_back({
+            .threadId = index.data(javelin::gui::messages::MessageListModel::ThreadIdRole)
+                            .toString()
+                            .toStdString(),
+            .emailId = index.data(javelin::gui::messages::MessageListModel::EmailIdRole)
+                           .toString()
+                           .toStdString(),
+        });
+    }
+    const auto restoration = javelin::gui::messages::planMessageSelectionRestoration(
+        visibleRows, {
+                         .threadId = "thread-3",
+                         .emailId = "email-3",
+                         .selectedEmailIds = {"email-3"},
+                         .previousRow = 2,
+                     });
+    CHECK(restoration.currentRow == std::optional<std::size_t>{2});
+    CHECK(restoration.fallbackSelected);
 }
 
 TEST_CASE("collapsing a pending Thread clears only the presentation intent",
