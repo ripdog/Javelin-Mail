@@ -36,7 +36,7 @@ is supported, but only for Mail and Contacts.
 ### Built for KDE Plasma
 
 - Native KDE menus, configurable toolbars, standard actions, shortcuts, icons, and theme integration
-- KDE configuration dialogs and remembered window, toolbar, and workspace state
+- Customizable toolbars and context menus
 - KTextEditor-powered plain-text composition, HTML source editing, and Sieve script editing
 - Plasma tray integration through KDE's StatusNotifierItem protocol
 - Desktop notifications on configurable mailboxes
