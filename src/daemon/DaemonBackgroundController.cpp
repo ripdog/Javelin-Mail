@@ -2,6 +2,7 @@
 
 #include "app/AccountRuntimeManager.h"
 #include "app/ApplicationErrorCoordinator.h"
+#include "app/CalendarInvitationService.h"
 #include "app/CalendarNotificationService.h"
 #include "app/ComposePreferences.h"
 #include "app/DeferredSendService.h"
@@ -145,6 +146,38 @@ namespace javelin::app
                     else
                         m_services.calendarNotificationService().dismiss(key);
                 });
+        connect(&m_services.calendarInvitationService(),
+                &CalendarInvitationService::invitationReady, this,
+                [this](const QString& key, const QString& calendarAccountId, const QString& eventId,
+                       const QString& recurrenceId, const QString& navigationDate,
+                       const QString& title, const QString& message)
+                {
+                    if (m_notifications->notifyCalendarInvitation(key, calendarAccountId, eventId,
+                                                                  recurrenceId, navigationDate,
+                                                                  title, message))
+                        m_services.calendarInvitationService().deliveryAccepted(key);
+                    else
+                        m_services.calendarInvitationService().deliveryFailed(key);
+                });
+        connect(&m_services.calendarInvitationService(),
+                &CalendarInvitationService::invitationResolved, m_notifications.get(),
+                &DesktopNotificationController::closeCalendarInvitation);
+        connect(m_notifications.get(), &DesktopNotificationController::calendarInvitationActivated,
+                this,
+                [this](const QString&, const QString& calendarAccountId, const QString& eventId,
+                       const QString& recurrenceId, const QString& navigationDate,
+                       const QString& activationToken)
+                {
+                    Q_EMIT activationRequested(protocol::OpenCalendarEventRoute{
+                        .calendarAccountId = calendarAccountId,
+                        .eventId = eventId,
+                        .recurrenceId = recurrenceId.isEmpty()
+                                            ? std::nullopt
+                                            : std::optional<QString>{recurrenceId},
+                        .navigationDate = navigationDate,
+                        .activationToken = activationToken,
+                    });
+                });
         connect(&m_services.deferredSendService(), &DeferredSendService::undoableSendScheduled,
                 this,
                 [this](const QString& sendId, const QString& title, const QString& message,
@@ -231,6 +264,7 @@ namespace javelin::app
                                  << error->message;
         m_services.deferredSendService().start();
         m_services.calendarNotificationService().start();
+        m_services.calendarInvitationService().start();
         if (enableNetworkReachability)
             setupNetworkReachability();
         refreshTrayUnreadCount();

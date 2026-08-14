@@ -179,6 +179,66 @@ TEST_CASE("mail notification activation preserves the message route and mailbox 
     CHECK(messageRoute->activationToken == QStringLiteral("token-21"));
 }
 
+TEST_CASE("calendar invitation notification is persistent open-only and activates its event",
+          "[app][daemon][notification][calendar][invitation]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    javelin::app::DesktopNotificationController controller{std::move(transport), false};
+
+    QString activatedKey;
+    QString activatedAccount;
+    QString activatedEvent;
+    QString activatedRecurrence;
+    QString activatedDate;
+    QString activatedToken;
+    QObject::connect(&controller,
+                     &javelin::app::DesktopNotificationController::calendarInvitationActivated,
+                     &controller,
+                     [&](const QString& key, const QString& accountId, const QString& eventId,
+                         const QString& recurrenceId, const QString& navigationDate,
+                         const QString& activationToken)
+                     {
+                         activatedKey = key;
+                         activatedAccount = accountId;
+                         activatedEvent = eventId;
+                         activatedRecurrence = recurrenceId;
+                         activatedDate = navigationDate;
+                         activatedToken = activationToken;
+                     });
+
+    REQUIRE(controller.notifyCalendarInvitation(
+        QStringLiteral("invitation-key"), QStringLiteral("calendar-account"),
+        QStringLiteral("event-42"), QStringLiteral("2026-08-21T09:30:00"),
+        QStringLiteral("2026-08-21"), QStringLiteral("Planning call"),
+        QStringLiteral("From Organizer\n21/08/2026, 9:30 am")));
+    REQUIRE(observer->request.has_value());
+    CHECK(observer->request->icon == QStringLiteral("x-office-calendar"));
+    CHECK(observer->request->summary == QStringLiteral("Calendar invitation: Planning call"));
+    CHECK(observer->request->actions ==
+          QStringList{QStringLiteral("default"), QStringLiteral("Open")});
+    CHECK(observer->request->timeoutMs == 0);
+    CHECK_FALSE(observer->request->hints.value(QStringLiteral("transient")).toBool());
+
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onActivationToken", Qt::DirectConnection,
+                                      Q_ARG(uint, observer->notificationId),
+                                      Q_ARG(QString, QStringLiteral("activation-token"))));
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onActionInvoked", Qt::DirectConnection,
+                                      Q_ARG(uint, observer->notificationId),
+                                      Q_ARG(QString, QStringLiteral("default"))));
+    CHECK(activatedKey == QStringLiteral("invitation-key"));
+    CHECK(activatedAccount == QStringLiteral("calendar-account"));
+    CHECK(activatedEvent == QStringLiteral("event-42"));
+    CHECK(activatedRecurrence == QStringLiteral("2026-08-21T09:30:00"));
+    CHECK(activatedDate == QStringLiteral("2026-08-21"));
+    CHECK(activatedToken == QStringLiteral("activation-token"));
+
+    controller.closeCalendarInvitation(QStringLiteral("invitation-key"));
+    CHECK(observer->closedId == observer->notificationId);
+}
+
 TEST_CASE("undoable send notification reports its actionable lifetime and timeout",
           "[app][daemon][notification][deferred-send]")
 {

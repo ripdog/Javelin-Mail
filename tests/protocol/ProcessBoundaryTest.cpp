@@ -1140,6 +1140,26 @@ TEST_CASE("activation socket carries typed routes to the daemon", "[protocol][so
     CHECK(receivedMailto->uri == QStringLiteral("mailto:alice@example.test?subject=Hello%20there"));
     CHECK(receivedMailto->activationToken == QStringLiteral("token-mailto"));
 
+    const auto calendarResult = SocketActivationClient::request(
+        options, ActivationRoute{
+                     OpenCalendarEventRoute{.calendarAccountId = QStringLiteral("calendar-account"),
+                                            .eventId = QStringLiteral("event-42"),
+                                            .recurrenceId = QStringLiteral("2026-08-21T09:30:00"),
+                                            .navigationDate = QStringLiteral("2026-08-21"),
+                                            .activationToken = QStringLiteral("token-calendar")}});
+    REQUIRE(std::holds_alternative<std::optional<BoundaryError>>(calendarResult));
+    CHECK_FALSE(std::get<std::optional<BoundaryError>>(calendarResult).has_value());
+    const auto calendarRoute = handler.activatedRouteSnapshot();
+    REQUIRE(calendarRoute.has_value());
+    const auto* receivedCalendar = std::get_if<OpenCalendarEventRoute>(&*calendarRoute);
+    REQUIRE(receivedCalendar != nullptr);
+    CHECK(receivedCalendar->calendarAccountId == QStringLiteral("calendar-account"));
+    CHECK(receivedCalendar->eventId == QStringLiteral("event-42"));
+    CHECK(receivedCalendar->recurrenceId ==
+          std::optional<QString>{QStringLiteral("2026-08-21T09:30:00")});
+    CHECK(receivedCalendar->navigationDate == QStringLiteral("2026-08-21"));
+    CHECK(receivedCalendar->activationToken == QStringLiteral("token-calendar"));
+
     const auto undoDialogResult = SocketActivationClient::request(
         options, ActivationRoute{ShowUndoSendDialogRoute{
                      .sendId = QStringLiteral("send-1"),

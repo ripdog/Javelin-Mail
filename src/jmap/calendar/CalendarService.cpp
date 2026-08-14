@@ -18,6 +18,8 @@
 #include <QDateTime>
 #include <QLoggingCategory>
 #include <QRegularExpression>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QUuid>
 
 #include <algorithm>
@@ -149,6 +151,7 @@ namespace javelin::jmap::calendar
                 "showWithoutTime",
                 "isDraft",
                 "isOrigin",
+                "status",
                 "organizerCalendarAddress",
                 "useDefaultAlerts",
                 "alerts",
@@ -791,6 +794,159 @@ namespace javelin::jmap::calendar
         if (const auto* cacheError = std::get_if<cache::DatabaseError>(&loaded))
             return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
         return std::get<std::vector<Calendar>>(std::move(loaded));
+    }
+
+    ParticipantIdentityListResult
+    CalendarCacheReader::participantIdentities(const std::string_view accountId) const
+    {
+        if (const auto validation = m_connection.validate())
+            return error(OperationErrorCode::LocalStorageFailure, validation->message);
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT identity_id,name,calendar_address,is_default FROM "
+            "calendar_participant_identities WHERE account_id=:account ORDER BY is_default DESC,"
+            "identity_id"));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        if (!query.exec())
+            return error(OperationErrorCode::LocalStorageFailure,
+                         QStringLiteral("Read calendar participant identities: ") +
+                             query.lastError().text());
+        std::vector<ParticipantIdentity> result;
+        while (query.next())
+        {
+            result.push_back({.id = query.value(0).toString().toStdString(),
+                              .name = query.value(1).toString().toStdString(),
+                              .calendarAddress = query.value(2).toString().toStdString(),
+                              .isDefault = query.value(3).toBool()});
+        }
+        return result;
+    }
+
+    PendingCalendarInvitationsResult CalendarCacheReader::pendingInvitations() const
+    {
+        if (const auto validation = m_connection.validate())
+            return error(OperationErrorCode::LocalStorageFailure, validation->message);
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT p.account_id,p.event_id,p.self_participant_id,e.document_json,"
+            "COALESCE(a.owner_account_id,a.account_id),"
+            "(SELECT o.local_start FROM calendar_occurrences o WHERE o.account_id=p.account_id "
+            "AND o.event_id=p.event_id AND substr(o.local_start,1,10)>=:today ORDER BY "
+            "o.local_start LIMIT 1),"
+            "(SELECT o.start_utc FROM calendar_occurrences o WHERE o.account_id=p.account_id AND "
+            "o.event_id=p.event_id AND substr(o.local_start,1,10)>=:today ORDER BY o.local_start "
+            "LIMIT 1),"
+            "(SELECT o.recurrence_id FROM calendar_occurrences o WHERE o.account_id=p.account_id "
+            "AND o.event_id=p.event_id AND substr(o.local_start,1,10)>=:today ORDER BY "
+            "o.local_start LIMIT 1) FROM calendar_pending_invitations p JOIN calendar_events e ON "
+            "e.account_id=p.account_id AND e.event_id=p.event_id JOIN accounts a ON "
+            "a.account_id=p.account_id ORDER BY p.discovered_at,p.account_id,p.event_id"));
+        query.bindValue(QStringLiteral(":today"), QDate::currentDate().toString(Qt::ISODate));
+        if (!query.exec())
+            return error(OperationErrorCode::LocalStorageFailure,
+                         QStringLiteral("Read pending calendar invitations: ") +
+                             query.lastError().text());
+
+        cache::CalendarRepository repository{m_connection};
+        std::unordered_map<std::string, std::vector<Calendar>> calendarsByAccount;
+        std::vector<PendingCalendarInvitation> result;
+        while (query.next())
+        {
+            const auto accountId = query.value(0).toString().toStdString();
+            const auto parsed =
+                api::parseCalendarEventDocument(accountId, query.value(3).toString().toStdString());
+            if (!parsed.ok())
+                return error(OperationErrorCode::LocalStorageFailure,
+                             QStringLiteral("Parse pending calendar invitation"));
+            const auto& event = *parsed.value;
+            const auto selfParticipantId = query.value(2).toString().toStdString();
+            const auto attendee =
+                std::ranges::find(event.attendees, selfParticipantId, &Attendee::id);
+            const auto organizer = [&event]() -> std::string
+            {
+                if (event.organizerCalendarAddress)
+                {
+                    const auto participant = std::ranges::find_if(
+                        event.attendees,
+                        [&event](const Attendee& value)
+                        {
+                            return value.calendarAddress == *event.organizerCalendarAddress ||
+                                   value.isOwner;
+                        });
+                    if (participant != event.attendees.end() && !participant->name.empty())
+                        return participant->name;
+                    return *event.organizerCalendarAddress;
+                }
+                const auto owner = std::ranges::find(event.attendees, true, &Attendee::isOwner);
+                return owner == event.attendees.end() ? std::string{} : owner->name;
+            }();
+
+            auto calendarsIt = calendarsByAccount.find(accountId);
+            if (calendarsIt == calendarsByAccount.end())
+            {
+                auto listed = repository.listCalendars(accountId);
+                if (const auto* cacheError = std::get_if<cache::DatabaseError>(&listed))
+                    return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+                calendarsIt =
+                    calendarsByAccount
+                        .emplace(accountId, std::get<std::vector<Calendar>>(std::move(listed)))
+                        .first;
+            }
+            bool hasMembership = false;
+            bool rsvpAllowed = true;
+            for (const auto& [calendarId, present] : event.calendarIds)
+            {
+                if (!present)
+                    continue;
+                hasMembership = true;
+                const auto calendar =
+                    std::ranges::find(calendarsIt->second, calendarId, &Calendar::id);
+                if (calendar == calendarsIt->second.end() || !calendar->myRights.mayRSVP)
+                    rsvpAllowed = false;
+            }
+            rsvpAllowed = rsvpAllowed && hasMembership;
+
+            const auto displayTime =
+                query.value(5).isNull()
+                    ? event.start
+                    : LocalDateTime{.value = query.value(5).toString().toStdString()};
+            const auto displayUtc =
+                query.value(6).isNull()
+                    ? event.utcStart
+                    : std::optional<UtcInstant>{{.value = query.value(6).toString().toStdString()}};
+            result.push_back(PendingCalendarInvitation{
+                .ownerAccountId = query.value(4).toString().toStdString(),
+                .accountId = accountId,
+                .eventId = query.value(1).toString().toStdString(),
+                .title = event.title,
+                .organizer = organizer,
+                .displayTime = displayTime,
+                .displayUtc = displayUtc,
+                .recurrenceId = query.value(7).isNull()
+                                    ? std::nullopt
+                                    : std::optional<LocalDateTime>{{.value = query.value(7)
+                                                                                 .toString()
+                                                                                 .toStdString()}},
+                .allDay = event.showWithoutTime,
+                .recurring = event.recurrenceRule.has_value(),
+                .selfParticipantId = selfParticipantId,
+                .participationStatus = attendee == event.attendees.end()
+                                           ? std::string{}
+                                           : attendee->participationStatus,
+                .rsvpAllowed = rsvpAllowed,
+            });
+        }
+        return result;
+    }
+
+    CalendarEventReadResult CalendarCacheReader::event(const std::string_view accountId,
+                                                       const std::string_view eventId) const
+    {
+        cache::CalendarRepository repository{m_connection};
+        auto loaded = repository.findEvent(accountId, eventId);
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&loaded))
+            return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        return std::get<std::optional<CalendarEvent>>(std::move(loaded));
     }
 
     QCoro::Task<CalendarMutationResult> CalendarMutationEngine::createCalendar(

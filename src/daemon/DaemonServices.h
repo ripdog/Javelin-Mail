@@ -74,6 +74,7 @@ namespace javelin::app
     class ContactCommandPort;
     class ContactCommandService;
     class CalendarNotificationService;
+    class CalendarInvitationService;
     class CalendarCommandPort;
     class CalendarCommandService;
     class MessageNavigationPort;
@@ -201,6 +202,7 @@ namespace javelin::app
         [[nodiscard]] MessageNavigationPort& messageNavigationPort();
         [[nodiscard]] ApplicationErrorCoordinator& errorCoordinator();
         [[nodiscard]] CalendarNotificationService& calendarNotificationService();
+        [[nodiscard]] CalendarInvitationService& calendarInvitationService();
         [[nodiscard]] WorkScheduler& workScheduler();
         [[nodiscard]] ThreadMaterializationCoordinator& threadMaterializationCoordinator();
         [[nodiscard]] LocalMaintenanceService& localMaintenanceService();
@@ -301,6 +303,7 @@ namespace javelin::app
         std::unique_ptr<ContactCommandService> m_contactCommandService;
         std::unique_ptr<MessageNavigationCoordinator> m_messageNavigationCoordinator;
         std::unique_ptr<CalendarNotificationService> m_calendarNotificationService;
+        std::unique_ptr<CalendarInvitationService> m_calendarInvitationService;
         std::unique_ptr<WorkScheduler> m_workScheduler;
         std::unique_ptr<ThreadMaterializationCoordinator> m_threadMaterializationCoordinator;
         std::unique_ptr<ThreadMembershipMaterializationWorker>

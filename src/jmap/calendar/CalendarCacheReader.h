@@ -19,6 +19,11 @@ namespace javelin::jmap::calendar
                    const TimeZoneId& displayTimeZone) const override;
         [[nodiscard]] CalendarAccountsResult accounts() const override;
         [[nodiscard]] CalendarListResult calendars(std::string_view accountId) const override;
+        [[nodiscard]] ParticipantIdentityListResult
+        participantIdentities(std::string_view accountId) const override;
+        [[nodiscard]] PendingCalendarInvitationsResult pendingInvitations() const override;
+        [[nodiscard]] CalendarEventReadResult event(std::string_view accountId,
+                                                    std::string_view eventId) const override;
 
       private:
         cache::DatabaseConnection& m_connection;

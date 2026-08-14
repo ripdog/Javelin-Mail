@@ -15,6 +15,8 @@ namespace javelin::jmap::cache
                 return QStringLiteral("mail");
             case NotificationDispatchKind::Calendar:
                 return QStringLiteral("calendar");
+            case NotificationDispatchKind::Invitation:
+                return QStringLiteral("invitation");
             }
             Q_UNREACHABLE();
         }

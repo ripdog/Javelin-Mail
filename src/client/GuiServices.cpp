@@ -197,6 +197,18 @@ namespace javelin::app
 
     void GuiServices::notifyCacheReaders(const javelin::protocol::CacheInvalidation& invalidation)
     {
+        if (m_calendarCommands != nullptr &&
+            std::ranges::contains(invalidation.changedDomains,
+                                  javelin::protocol::ChangedDomain::Calendars))
+        {
+            Q_EMIT m_calendarCommands->calendarCacheCommitted({
+                .ownerAccountId = invalidation.accountId,
+                .interval = {},
+                .displayTimeZone = {},
+                .accountCount = 0,
+                .eventCount = 0,
+            });
+        }
         if (invalidation.affectedKeys.empty())
             return;
         const auto accountId = invalidation.affectedKeys.front();

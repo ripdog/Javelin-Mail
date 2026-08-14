@@ -99,7 +99,8 @@ namespace javelin::app
         void senderIdentityStateChanged(const QString& ownerAccountId);
         void cacheCommitted(javelin::app::MailCacheChange change);
         void contactStateChanged(const QString& ownerAccountId);
-        void calendarStateChanged(const QString& ownerAccountId);
+        void calendarStateChanged(const QString& ownerAccountId,
+                                  const javelin::jmap::sync::AccountTypeStateMap& changedStates);
         void notificationMailboxRefreshed(const QString& accountId, const QString& mailboxId,
                                           const QString& mailboxName);
         void accountConfigured(const QString& accountId);

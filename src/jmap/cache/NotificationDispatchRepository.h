@@ -12,6 +12,7 @@ namespace javelin::jmap::cache
     {
         Mail,
         Calendar,
+        Invitation,
     };
 
     class NotificationDispatchRepository

@@ -334,6 +334,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/calendar/CalendarReader.h
     src/storage/calendar/CalendarNotificationRepository.cpp
     src/jmap/cache/CalendarNotificationRepository.h
+    src/storage/calendar/CalendarInvitationRepository.cpp
+    src/jmap/cache/CalendarInvitationRepository.h
     src/jmap/sync/StateChangeSource.h
     src/jmap/sync/MailboxInterestRegistry.cpp
     src/jmap/sync/MailboxInterestRegistry.h
@@ -359,6 +361,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/ApplicationErrorCoordinator.h
     src/app/calendar/CalendarNotificationService.cpp
     src/app/CalendarNotificationService.h
+    src/app/calendar/CalendarInvitationService.cpp
+    src/app/CalendarInvitationService.h
     src/app/CalendarApplicationPorts.h
     src/app/calendar/CalendarCommandService.cpp
     src/app/CalendarCommandService.h
@@ -1001,6 +1005,8 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/NotificationDispatchRepository.h
     src/storage/calendar/CalendarNotificationRepository.cpp
     src/jmap/cache/CalendarNotificationRepository.h
+    src/storage/calendar/CalendarInvitationRepository.cpp
+    src/jmap/cache/CalendarInvitationRepository.h
     src/jmap/sync/StateChangeSource.h
     src/jmap/sync/MailboxInterestRegistry.cpp
     src/jmap/sync/MailboxInterestRegistry.h
@@ -1754,6 +1760,8 @@ add_library(javelin_daemon_core STATIC
     src/app/ApplicationErrorCoordinator.h
     src/app/calendar/CalendarNotificationService.cpp
     src/app/CalendarNotificationService.h
+    src/app/calendar/CalendarInvitationService.cpp
+    src/app/CalendarInvitationService.h
     src/app/calendar/CalendarCommandService.cpp
     src/app/CalendarCommandService.h
     src/app/ContactApplicationPorts.h

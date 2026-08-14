@@ -69,6 +69,8 @@ namespace javelin::gui::shell
                               QObject* parent = nullptr);
 
         void open(std::optional<QDate> displayedMonth = std::nullopt);
+        void openEvent(const QString& calendarAccountId, const QString& eventId,
+                       const QString& recurrenceId, const QDate& navigationDate);
         void invoke(const TabState* tab, CalendarTabCommand command);
         [[nodiscard]] bool
         available(std::optional<std::string_view> accountId = std::nullopt) const;

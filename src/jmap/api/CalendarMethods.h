@@ -86,6 +86,46 @@ namespace javelin::jmap::api
     {
     };
 
+    struct CalendarEventNotificationQueryFilter
+    {
+        std::optional<calendar::UtcInstant> after;
+        std::optional<calendar::UtcInstant> before;
+        std::optional<calendar::CalendarEventNotificationType> type;
+        std::optional<std::vector<std::string>> calendarEventIds;
+    };
+
+    struct CalendarEventNotificationQueryRequest
+    {
+        std::string accountId;
+        CalendarEventNotificationQueryFilter filter;
+        std::uint64_t position = 0;
+        std::optional<std::uint64_t> limit;
+        bool calculateTotal = true;
+    };
+
+    struct CalendarEventNotificationQueryResponse
+    {
+        std::string accountId;
+        std::string queryState;
+        bool canCalculateChanges = false;
+        std::uint64_t position = 0;
+        std::vector<std::string> ids;
+        std::optional<std::uint64_t> total;
+        std::optional<std::uint64_t> limit;
+    };
+
+    struct CalendarEventNotificationGetResponse
+    {
+        std::string accountId;
+        std::string state;
+        std::vector<calendar::CalendarEventNotification> list;
+        std::vector<std::string> notFound;
+    };
+
+    struct CalendarEventNotificationChangesResponse : ChangesResponse
+    {
+    };
+
     enum class CalendarSetErrorType
     {
         InvalidArguments,
@@ -189,6 +229,12 @@ namespace javelin::jmap::api
     calendarEventChanges(const ChangesRequest& request);
     [[nodiscard]] std::optional<MethodRequest<CalendarEventSetResponse>>
     calendarEventSet(const CalendarEventSetRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<CalendarEventNotificationQueryResponse>>
+    calendarEventNotificationQuery(const CalendarEventNotificationQueryRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<CalendarEventNotificationGetResponse>>
+    calendarEventNotificationGet(const GetRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<CalendarEventNotificationChangesResponse>>
+    calendarEventNotificationChanges(const ChangesRequest& request);
 
     [[nodiscard]] ParsedEnvelope<ParticipantIdentityGetResponse>
     parseParticipantIdentityGetResponse(std::string_view json);
@@ -206,6 +252,12 @@ namespace javelin::jmap::api
     parseCalendarEventChangesResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<CalendarEventSetResponse>
     parseCalendarEventSetResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<CalendarEventNotificationQueryResponse>
+    parseCalendarEventNotificationQueryResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<CalendarEventNotificationGetResponse>
+    parseCalendarEventNotificationGetResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<CalendarEventNotificationChangesResponse>
+    parseCalendarEventNotificationChangesResponse(std::string_view json);
     [[nodiscard]] std::optional<std::string>
     serializeCalendarEventDocument(const calendar::CalendarEvent& event);
     [[nodiscard]] bool calendarEventWritablePropertiesEqual(const calendar::CalendarEvent& left,
@@ -275,6 +327,30 @@ namespace javelin::jmap::api
         static ParsedEnvelope<CalendarEventSetResponse> parse(std::string_view json)
         {
             return parseCalendarEventSetResponse(json);
+        }
+    };
+    template <> struct MethodResponseTraits<CalendarEventNotificationQueryResponse>
+    {
+        static constexpr std::string_view methodName = "CalendarEventNotification/query";
+        static ParsedEnvelope<CalendarEventNotificationQueryResponse> parse(std::string_view json)
+        {
+            return parseCalendarEventNotificationQueryResponse(json);
+        }
+    };
+    template <> struct MethodResponseTraits<CalendarEventNotificationGetResponse>
+    {
+        static constexpr std::string_view methodName = "CalendarEventNotification/get";
+        static ParsedEnvelope<CalendarEventNotificationGetResponse> parse(std::string_view json)
+        {
+            return parseCalendarEventNotificationGetResponse(json);
+        }
+    };
+    template <> struct MethodResponseTraits<CalendarEventNotificationChangesResponse>
+    {
+        static constexpr std::string_view methodName = "CalendarEventNotification/changes";
+        static ParsedEnvelope<CalendarEventNotificationChangesResponse> parse(std::string_view json)
+        {
+            return parseCalendarEventNotificationChangesResponse(json);
         }
     };
 } // namespace javelin::jmap::api

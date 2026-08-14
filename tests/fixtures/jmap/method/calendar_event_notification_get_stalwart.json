@@ -1,0 +1,43 @@
+{
+  "accountId": "calendar-account",
+  "state": "notification-state-2",
+  "list": [
+    {
+      "id": "notification-created-1",
+      "created": "2026-08-14T01:02:03Z",
+      "changedBy": {
+        "name": "Organizer",
+        "email": "organizer@example.test",
+        "calendarAddress": "mailto:organizer@example.test"
+      },
+      "type": "created",
+      "calendarEventId": "event-1",
+      "isDraft": false,
+      "event": {
+        "@type": "Event",
+        "id": "event-1",
+        "uid": "uid-1",
+        "calendarIds": {"calendar-1": true},
+        "title": "Planning call",
+        "start": "2026-08-20T10:00:00",
+        "duration": "PT1H",
+        "timeZone": "Pacific/Auckland",
+        "showWithoutTime": false,
+        "isDraft": false,
+        "isOrigin": false,
+        "status": "confirmed",
+        "participants": {
+          "self": {
+            "@type": "Participant",
+            "name": "Alice",
+            "calendarAddress": "mailto:alice@example.test",
+            "roles": {"attendee": true},
+            "participationStatus": "needs-action"
+          }
+        }
+      },
+      "eventPatch": {"title": "Planning call"}
+    }
+  ],
+  "notFound": []
+}

@@ -749,6 +749,24 @@ namespace javelin::gui::calendar
         m_title = new QLabel(this);
         m_title->setAlignment(Qt::AlignCenter);
         outer->addWidget(m_title);
+        m_invitationBanner = new QWidget(this);
+        m_invitationBanner->setObjectName(QStringLiteral("calendarInvitationBanner"));
+        auto* invitationLayout = new QHBoxLayout(m_invitationBanner);
+        invitationLayout->setContentsMargins(8, 4, 8, 4);
+        m_invitationLabel = new QLabel(m_invitationBanner);
+        m_invitationLabel->setObjectName(QStringLiteral("calendarInvitationBannerLabel"));
+        invitationLayout->addWidget(m_invitationLabel, 1);
+        m_viewInvitations = new QToolButton(m_invitationBanner);
+        m_viewInvitations->setObjectName(QStringLiteral("calendarViewInvitations"));
+        m_viewInvitations->setText(i18n("View invitations"));
+        m_viewInvitations->setAccessibleName(i18n("View pending calendar invitations"));
+        m_viewInvitations->setPopupMode(QToolButton::InstantPopup);
+        m_invitationMenu = new QMenu(m_viewInvitations);
+        m_invitationMenu->setObjectName(QStringLiteral("calendarInvitationMenu"));
+        m_viewInvitations->setMenu(m_invitationMenu);
+        invitationLayout->addWidget(m_viewInvitations);
+        m_invitationBanner->hide();
+        outer->addWidget(m_invitationBanner);
         m_calendarMenu = new QMenu(this);
         reloadCalendarColors();
         static_cast<void>(m_settings.connectWorkspaceChanged(this,
@@ -846,6 +864,44 @@ namespace javelin::gui::calendar
     void MonthCalendarWidget::setCalendarAccounts(std::vector<CalendarAccountDisplay> accounts)
     {
         m_calendarAccounts = std::move(accounts);
+    }
+
+    void
+    MonthCalendarWidget::setPendingInvitations(std::vector<PendingInvitationDisplay> invitations)
+    {
+        std::ranges::sort(invitations,
+                          [](const auto& left, const auto& right)
+                          {
+                              if (left.displayTime != right.displayTime)
+                                  return left.displayTime < right.displayTime;
+                              return left.title.localeAwareCompare(right.title) < 0;
+                          });
+        m_invitationMenu->clear();
+        for (const auto& invitation : invitations)
+        {
+            const auto when =
+                invitation.allDay
+                    ? QLocale{}.toString(invitation.displayTime.date(), QLocale::ShortFormat)
+                    : QLocale{}.toString(invitation.displayTime, QLocale::ShortFormat);
+            QString label =
+                i18nc("pending invitation menu item", "%1 — %2", invitation.title, when);
+            if (!invitation.organizer.isEmpty())
+                label = i18nc("pending invitation menu item with organizer", "%1 — %2 — %3",
+                              invitation.title, when, invitation.organizer);
+            auto* action = m_invitationMenu->addAction(label);
+            connect(action, &QAction::triggered, this,
+                    [this, invitation]
+                    {
+                        Q_EMIT pendingInvitationActivated(invitation.accountId, invitation.eventId,
+                                                          invitation.recurrenceId,
+                                                          invitation.navigationDate);
+                    });
+        }
+        const auto count = static_cast<int>(invitations.size());
+        m_invitationLabel->setText(i18ncp("calendar invitation banner",
+                                          "%1 invitation awaiting response",
+                                          "%1 invitations awaiting response", count));
+        m_invitationBanner->setVisible(count > 0);
     }
 
     void MonthCalendarWidget::applicationPaletteChanged()

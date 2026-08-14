@@ -6,8 +6,11 @@
 #include <QAccessible>
 #include <QApplication>
 #include <QKeyEvent>
+#include <QLabel>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPointer>
+#include <QToolButton>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -147,6 +150,75 @@ TEST_CASE("month calendar accessibility reports event counts and full event butt
     const auto eventName = eventButton->text(QAccessible::Name);
     CHECK(eventName.contains(QStringLiteral("A deliberately long planning meeting title")));
     CHECK(eventName.contains(QStringLiteral("recurring")));
+}
+
+TEST_CASE("month calendar pending invitation banner sorts and activates invitations",
+          "[gui][calendar][invitation][accessibility]")
+{
+    TestWorkspaceSettingsPort settings;
+    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    widget.setLocale(QLocale{QLocale::English, QLocale::NewZealand});
+    widget.setDisplayedMonth(QDate{2026, 8, 1});
+    widget.setPendingInvitations({
+        {.accountId = QStringLiteral("a1"),
+         .eventId = QStringLiteral("later"),
+         .recurrenceId = {},
+         .navigationDate = QDate{2026, 8, 22},
+         .title = QStringLiteral("Later planning"),
+         .organizer = QStringLiteral("Bob"),
+         .displayTime = QDateTime{QDate{2026, 8, 22}, QTime{14, 0}},
+         .allDay = false},
+        {.accountId = QStringLiteral("a2"),
+         .eventId = QStringLiteral("earlier"),
+         .recurrenceId = QStringLiteral("2026-08-20T09:00:00"),
+         .navigationDate = QDate{2026, 8, 20},
+         .title = QStringLiteral("Earlier planning"),
+         .organizer = QStringLiteral("Alice"),
+         .displayTime = QDateTime{QDate{2026, 8, 20}, QTime{9, 0}},
+         .allDay = false},
+    });
+    widget.show();
+    QApplication::processEvents();
+
+    auto* banner = widget.findChild<QWidget*>(QStringLiteral("calendarInvitationBanner"));
+    auto* label = widget.findChild<QLabel*>(QStringLiteral("calendarInvitationBannerLabel"));
+    auto* view = widget.findChild<QToolButton*>(QStringLiteral("calendarViewInvitations"));
+    auto* menu = widget.findChild<QMenu*>(QStringLiteral("calendarInvitationMenu"));
+    REQUIRE(banner != nullptr);
+    REQUIRE(label != nullptr);
+    REQUIRE(view != nullptr);
+    REQUIRE(menu != nullptr);
+    CHECK(banner->isVisible());
+    CHECK(label->text().contains(QStringLiteral("2 invitations awaiting response")));
+    CHECK(view->accessibleName().contains(QStringLiteral("pending calendar invitations")));
+    REQUIRE(menu->actions().size() == 2);
+    CHECK(menu->actions()[0]->text().startsWith(QStringLiteral("Earlier planning")));
+    CHECK(menu->actions()[0]->text().contains(QStringLiteral("Alice")));
+    CHECK(menu->actions()[1]->text().startsWith(QStringLiteral("Later planning")));
+
+    QString activatedAccount;
+    QString activatedEvent;
+    QString activatedRecurrence;
+    QDate activatedDate;
+    QObject::connect(
+        &widget, &javelin::gui::calendar::MonthCalendarWidget::pendingInvitationActivated, &widget,
+        [&](const QString& accountId, const QString& eventId, const QString& recurrenceId,
+            const QDate& navigationDate)
+        {
+            activatedAccount = accountId;
+            activatedEvent = eventId;
+            activatedRecurrence = recurrenceId;
+            activatedDate = navigationDate;
+        });
+    menu->actions()[0]->trigger();
+    CHECK(activatedAccount == QStringLiteral("a2"));
+    CHECK(activatedEvent == QStringLiteral("earlier"));
+    CHECK(activatedRecurrence == QStringLiteral("2026-08-20T09:00:00"));
+    CHECK(activatedDate == QDate{2026, 8, 20});
+
+    widget.setPendingInvitations({});
+    QApplication::processEvents();
+    CHECK_FALSE(banner->isVisible());
 }
 
 TEST_CASE("month calendar exposes the materialized events for a requested day", "[gui][calendar]")

@@ -6,6 +6,7 @@
 
 #include <QAccessible>
 #include <QAccessibleWidget>
+#include <QButtonGroup>
 #include <QDialogButtonBox>
 #include <QFont>
 #include <QFontMetrics>
@@ -607,6 +608,36 @@ namespace javelin::gui::calendar
             label->setTextInteractionFlags(Qt::TextSelectableByMouse);
             detailsLayout->addWidget(label);
         }
+        m_responseLabel = new QLabel(i18n("Your response"), details);
+        auto responseLabelFont = m_responseLabel->font();
+        responseLabelFont.setBold(true);
+        m_responseLabel->setFont(responseLabelFont);
+        detailsLayout->addWidget(m_responseLabel);
+        auto* responseRow = new QHBoxLayout;
+        m_responseButtons = new QButtonGroup(this);
+        m_responseButtons->setExclusive(true);
+        m_accept = new QPushButton(i18nc("@action:button calendar RSVP", "Accept"), details);
+        m_accept->setObjectName(QStringLiteral("dayAgendaRsvpAccept"));
+        m_tentative = new QPushButton(i18nc("@action:button calendar RSVP", "Tentative"), details);
+        m_tentative->setObjectName(QStringLiteral("dayAgendaRsvpTentative"));
+        m_decline = new QPushButton(i18nc("@action:button calendar RSVP", "Decline"), details);
+        m_decline->setObjectName(QStringLiteral("dayAgendaRsvpDecline"));
+        for (auto* button : {m_accept, m_tentative, m_decline})
+        {
+            button->setCheckable(true);
+            m_responseButtons->addButton(button);
+            responseRow->addWidget(button);
+        }
+        detailsLayout->addLayout(responseRow);
+        m_responseSeriesNote = new QLabel(details);
+        m_responseSeriesNote->setWordWrap(true);
+        detailsLayout->addWidget(m_responseSeriesNote);
+        m_responseError = new QLabel(details);
+        m_responseError->setObjectName(QStringLiteral("dayAgendaResponseError"));
+        m_responseError->setWordWrap(true);
+        m_responseError->setTextInteractionFlags(Qt::TextSelectableByMouse |
+                                                 Qt::TextSelectableByKeyboard);
+        detailsLayout->addWidget(m_responseError);
         m_edit = new QPushButton(QIcon::fromTheme(QStringLiteral("document-edit")), i18n("Edit"),
                                  details);
         m_edit->setObjectName(QStringLiteral("dayAgendaEditButton"));
@@ -643,6 +674,27 @@ namespace javelin::gui::calendar
                     Q_EMIT editRequested(m_selectedEvent->accountId, m_selectedEvent->eventId,
                                          m_selectedEvent->recurrenceId);
                 });
+        const auto connectResponse = [this](QPushButton* button, QString status)
+        {
+            connect(button, &QPushButton::clicked, this,
+                    [this, status = std::move(status)]
+                    {
+                        if (!m_selectedEvent)
+                            return;
+                        const auto found =
+                            std::ranges::find(m_events, *m_selectedEvent, &DayAgendaEvent::key);
+                        if (found == m_events.end() || !found->rsvpAllowed ||
+                            found->responseMutationPending)
+                            return;
+                        found->responseMutationPending = true;
+                        found->responseError.clear();
+                        updateDetails(*found);
+                        Q_EMIT responseRequested(found->key.accountId, found->key.eventId, status);
+                    });
+        };
+        connectResponse(m_accept, QStringLiteral("accepted"));
+        connectResponse(m_tentative, QStringLiteral("tentative"));
+        connectResponse(m_decline, QStringLiteral("declined"));
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         rebuildTabOrder();
 
@@ -674,6 +726,18 @@ namespace javelin::gui::calendar
             clearDetails();
         if (isVisible() && m_initialScrollPending)
             scheduleInitialScroll();
+    }
+
+    void DayAgendaDialog::setResponseMutationPending(const bool pending, QString error)
+    {
+        if (!m_selectedEvent)
+            return;
+        const auto found = std::ranges::find(m_events, *m_selectedEvent, &DayAgendaEvent::key);
+        if (found == m_events.end())
+            return;
+        found->responseMutationPending = pending;
+        found->responseError = std::move(error);
+        updateDetails(*found);
     }
 
     QDate DayAgendaDialog::date() const
@@ -802,6 +866,14 @@ namespace javelin::gui::calendar
             label->clear();
             label->hide();
         }
+        m_responseLabel->hide();
+        m_accept->hide();
+        m_tentative->hide();
+        m_decline->hide();
+        m_responseSeriesNote->clear();
+        m_responseSeriesNote->hide();
+        m_responseError->clear();
+        m_responseError->hide();
         m_edit->setEnabled(false);
         m_edit->hide();
         rebuildTabOrder();
@@ -836,6 +908,28 @@ namespace javelin::gui::calendar
                        event.attendees.join(QStringLiteral(", ")));
         m_detailsDescription->setVisible(!event.description.isEmpty());
         m_detailsDescription->setText(event.description);
+
+        m_responseLabel->setVisible(event.rsvpAllowed);
+        for (auto* button : {m_accept, m_tentative, m_decline})
+        {
+            button->setVisible(event.rsvpAllowed);
+            button->setEnabled(event.rsvpAllowed && !event.responseMutationPending);
+        }
+        if (event.rsvpAllowed)
+        {
+            m_responseButtons->setExclusive(false);
+            m_accept->setChecked(event.participationStatus == QStringLiteral("accepted"));
+            m_tentative->setChecked(event.participationStatus == QStringLiteral("tentative"));
+            m_decline->setChecked(event.participationStatus == QStringLiteral("declined"));
+            m_responseButtons->setExclusive(true);
+        }
+        m_responseSeriesNote->setVisible(event.rsvpAllowed && event.recurring);
+        m_responseSeriesNote->setText(event.rsvpAllowed && event.recurring
+                                          ? i18n("Your response applies to the entire series.")
+                                          : QString{});
+        m_responseError->setVisible(event.rsvpAllowed && !event.responseError.isEmpty());
+        m_responseError->setText(event.responseError);
+
         QStringList accessibleDetails{
             event.title.isEmpty() ? i18n("Untitled event") : event.title,
             i18n("When: %1", when),
@@ -851,6 +945,17 @@ namespace javelin::gui::calendar
                 i18n("Attendees: %1", event.attendees.join(QStringLiteral(", "))));
         if (!event.description.isEmpty())
             accessibleDetails.push_back(event.description);
+        if (event.rsvpAllowed)
+        {
+            accessibleDetails.push_back(
+                i18n("Your response: %1", event.participationStatus.isEmpty()
+                                              ? i18n("No response")
+                                              : event.participationStatus));
+            if (event.recurring)
+                accessibleDetails.push_back(i18n("The response applies to the entire series."));
+            if (!event.responseError.isEmpty())
+                accessibleDetails.push_back(event.responseError);
+        }
         m_detailsScroll->setAccessibleDescription(accessibleDetails.join(QLatin1Char('\n')));
         m_edit->setVisible(event.editable);
         m_edit->setEnabled(event.editable);
@@ -877,6 +982,13 @@ namespace javelin::gui::calendar
         }
         QWidget::setTabOrder(previous, m_detailsScroll);
         previous = m_detailsScroll;
+        for (auto* button : {m_accept, m_tentative, m_decline})
+        {
+            if (!button->isVisible())
+                continue;
+            QWidget::setTabOrder(previous, button);
+            previous = button;
+        }
         if (m_edit->isVisible())
         {
             QWidget::setTabOrder(previous, m_edit);

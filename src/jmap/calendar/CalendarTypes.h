@@ -200,6 +200,7 @@ namespace javelin::jmap::calendar
         bool showWithoutTime = false;
         bool isDraft = false;
         bool isOrigin = false;
+        std::optional<std::string> status = std::nullopt;
         std::optional<std::string> organizerCalendarAddress = std::nullopt;
         bool useDefaultAlerts = false;
         std::unordered_map<std::string, Alert> alerts;
@@ -210,6 +211,39 @@ namespace javelin::jmap::calendar
         std::vector<Attendee> attendees;
 
         bool operator==(const CalendarEvent&) const = default;
+    };
+
+    enum class CalendarEventNotificationType
+    {
+        Created,
+        Updated,
+        Destroyed,
+    };
+
+    struct CalendarEventNotificationPerson
+    {
+        std::string name;
+        std::optional<std::string> email;
+        std::optional<std::string> principalId;
+        std::optional<std::string> calendarAddress;
+
+        bool operator==(const CalendarEventNotificationPerson&) const = default;
+    };
+
+    struct CalendarEventNotification
+    {
+        std::string accountId;
+        std::string id;
+        UtcInstant created;
+        CalendarEventNotificationPerson changedBy;
+        std::optional<std::string> comment;
+        CalendarEventNotificationType type = CalendarEventNotificationType::Created;
+        std::string calendarEventId;
+        std::optional<bool> isDraft;
+        CalendarEvent event;
+        std::optional<std::string> eventPatchJson;
+
+        bool operator==(const CalendarEventNotification&) const = default;
     };
 
     struct Occurrence

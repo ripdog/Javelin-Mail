@@ -34,6 +34,25 @@ namespace javelin::app
                     return acceptValue<actions::CalendarReadCalendars>(
                         id, m_services.calendarReader().calendars(accountId));
                 });
+        case actions::CalendarReadPendingInvitations::id.value:
+            return acceptValue<actions::CalendarReadPendingInvitations>(
+                id, m_services.calendarReader().pendingInvitations());
+        case actions::CalendarReadEvent::id.value:
+            return dispatchDecoded<actions::CalendarReadEvent>(
+                id, command,
+                [this, &id](const std::string& accountId, const std::string& eventId)
+                {
+                    return acceptValue<actions::CalendarReadEvent>(
+                        id, m_services.calendarReader().event(accountId, eventId));
+                });
+        case actions::CalendarReadParticipantIdentities::id.value:
+            return dispatchDecoded<actions::CalendarReadParticipantIdentities>(
+                id, command,
+                [this, &id](const std::string& accountId)
+                {
+                    return acceptValue<actions::CalendarReadParticipantIdentities>(
+                        id, m_services.calendarReader().participantIdentities(accountId));
+                });
         case actions::CalendarRequestRange::id.value:
             return dispatchDecoded<actions::CalendarRequestRange>(
                 id, command,

@@ -14,7 +14,7 @@ TEST_CASE("state-change subscriptions include supported groupware data types", "
     CHECK(javelin::app::subscribedStateChangeTypes(
               {.calendar = true, .contacts = true, .identities = true}) ==
           std::vector<std::string>{"Email", "Mailbox", "Identity", "Calendar", "CalendarEvent",
-                                   "AddressBook", "ContactCard"});
+                                   "CalendarEventNotification", "AddressBook", "ContactCard"});
 }
 
 TEST_CASE("secondary Identity changes survive subscription filtering", "[app][sync][identity]")
@@ -43,7 +43,8 @@ TEST_CASE("contact state changes are routed away from mail refresh", "[app][sync
              {{"Email", "mail-2"},
               {"Mailbox", "boxes-2"},
               {"Identity", "identities-2"},
-              {"CalendarEvent", "calendar-2"}}},
+              {"CalendarEvent", "calendar-2"},
+              {"CalendarEventNotification", "notifications-2"}}},
             {"contacts-account", {{"AddressBook", "books-2"}, {"ContactCard", "contacts-2"}}},
         },
         "mail-account");
@@ -51,7 +52,9 @@ TEST_CASE("contact state changes are routed away from mail refresh", "[app][sync
     CHECK(routed.mailStates == std::unordered_map<std::string, std::string>{
                                    {"Email", "mail-2"}, {"Mailbox", "boxes-2"}});
     CHECK(routed.calendarStates == javelin::jmap::sync::AccountTypeStateMap{
-                                       {"mail-account", {{"CalendarEvent", "calendar-2"}}}});
+                                       {"mail-account",
+                                        {{"CalendarEvent", "calendar-2"},
+                                         {"CalendarEventNotification", "notifications-2"}}}});
     CHECK(routed.contactStates ==
           javelin::jmap::sync::AccountTypeStateMap{
               {"contacts-account", {{"AddressBook", "books-2"}, {"ContactCard", "contacts-2"}}}});
@@ -76,6 +79,7 @@ TEST_CASE("contact refresh rebases active mutation projections", "[app][sync][co
     CHECK_FALSE(javelin::app::shouldDeferForActiveMutation("ContactCard"));
     CHECK(javelin::app::shouldDeferForActiveMutation("Calendar"));
     CHECK(javelin::app::shouldDeferForActiveMutation("CalendarEvent"));
+    CHECK_FALSE(javelin::app::shouldDeferForActiveMutation("CalendarEventNotification"));
 }
 
 TEST_CASE("mail state changes refresh every affected watched mailbox window", "[app][sync][mail]")

@@ -136,6 +136,27 @@ namespace javelin::app
             m_client, std::string{accountId});
     }
 
+    javelin::jmap::calendar::ParticipantIdentityListResult
+    RemoteCalendarReader::participantIdentities(const std::string_view accountId) const
+    {
+        return callImmediate<javelin::protocol::actions::CalendarReadParticipantIdentities>(
+            m_client, std::string{accountId});
+    }
+
+    javelin::jmap::calendar::PendingCalendarInvitationsResult
+    RemoteCalendarReader::pendingInvitations() const
+    {
+        return callImmediate<javelin::protocol::actions::CalendarReadPendingInvitations>(m_client);
+    }
+
+    javelin::jmap::calendar::CalendarEventReadResult
+    RemoteCalendarReader::event(const std::string_view accountId,
+                                const std::string_view eventId) const
+    {
+        return callImmediate<javelin::protocol::actions::CalendarReadEvent>(
+            m_client, std::string{accountId}, std::string{eventId});
+    }
+
     RemoteCalendarCommandPort::RemoteCalendarCommandPort(RemoteActionClient& client,
                                                          QObject* parent)
         : CalendarCommandPort(parent), m_client(client)

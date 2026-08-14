@@ -58,6 +58,13 @@ namespace javelin::app
                          bool persistent, bool opensSettings);
         [[nodiscard]] bool notifyCalendarEvent(const QString& key, const QString& title,
                                                const QString& message);
+        [[nodiscard]] bool notifyCalendarInvitation(const QString& key,
+                                                    const QString& calendarAccountId,
+                                                    const QString& eventId,
+                                                    const QString& recurrenceId,
+                                                    const QString& navigationDate,
+                                                    const QString& title, const QString& message);
+        void closeCalendarInvitation(const QString& key);
         [[nodiscard]] bool notifyUndoableSend(const QString& sendId, const QString& title,
                                               const QString& message, int timeoutMs);
         void closeUndoableSendNotification(const QString& sendId);
@@ -70,6 +77,10 @@ namespace javelin::app
         void errorNotificationActivated(const QString& connectionId,
                                         const QString& activationToken);
         void calendarNotificationAction(const QString& key, bool snooze);
+        void calendarInvitationActivated(const QString& key, const QString& calendarAccountId,
+                                         const QString& eventId, const QString& recurrenceId,
+                                         const QString& navigationDate,
+                                         const QString& activationToken);
         void undoSendRequested(const QString& sendId);
         void undoableSendWindowEnded(const QString& sendId,
                                      javelin::app::DesktopNotificationCloseReason reason);
@@ -83,15 +94,20 @@ namespace javelin::app
       private:
         struct TrackedNotification
         {
-            QString accountId;
-            QString mailboxId;
-            QString mailboxName;
-            QString threadId;
-            QString emailId;
-            QString activationToken;
-            QString connectionId;
-            QString calendarNotificationKey;
-            QString sendId;
+            QString accountId = {};
+            QString mailboxId = {};
+            QString mailboxName = {};
+            QString threadId = {};
+            QString emailId = {};
+            QString activationToken = {};
+            QString connectionId = {};
+            QString calendarNotificationKey = {};
+            QString calendarInvitationKey = {};
+            QString calendarAccountId = {};
+            QString calendarEventId = {};
+            QString calendarRecurrenceId = {};
+            QString calendarNavigationDate = {};
+            QString sendId = {};
             bool opensSettings = false;
         };
 
@@ -104,6 +120,7 @@ namespace javelin::app
         std::unique_ptr<QDBusServiceWatcher> m_notificationServiceWatcher;
         std::unordered_map<uint, TrackedNotification> m_trackedNotifications;
         QHash<QString, uint> m_sendNotificationIds;
+        QHash<QString, uint> m_invitationNotificationIds;
         bool m_actionInvokedConnected = false;
         bool m_notificationClosedConnected = false;
     };

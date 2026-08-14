@@ -248,6 +248,55 @@ namespace javelin::app
         return true;
     }
 
+    bool DesktopNotificationController::notifyCalendarInvitation(
+        const QString& key, const QString& calendarAccountId, const QString& eventId,
+        const QString& recurrenceId, const QString& navigationDate, const QString& title,
+        const QString& message)
+    {
+        closeCalendarInvitation(key);
+        const QStringList actions = {
+            QString::fromLatin1(defaultActionKey),
+            i18nc("@action:button desktop notification", "Open"),
+        };
+        const auto sent = m_transport->send(
+            QStringLiteral("x-office-calendar"), i18n("Calendar invitation: %1", title), message,
+            actions, notificationHints(urgencyNormal, true, false), 0);
+        if (const auto* error = std::get_if<QString>(&sent))
+        {
+            qWarning().noquote() << "Failed to send calendar invitation notification" << *error;
+            return false;
+        }
+        const auto notificationId = std::get<uint>(sent);
+        m_invitationNotificationIds.insert(key, notificationId);
+        m_trackedNotifications.insert_or_assign(
+            notificationId, TrackedNotification{.accountId = {},
+                                                .mailboxId = {},
+                                                .mailboxName = {},
+                                                .threadId = {},
+                                                .emailId = {},
+                                                .activationToken = {},
+                                                .connectionId = {},
+                                                .calendarNotificationKey = {},
+                                                .calendarInvitationKey = key,
+                                                .calendarAccountId = calendarAccountId,
+                                                .calendarEventId = eventId,
+                                                .calendarRecurrenceId = recurrenceId,
+                                                .calendarNavigationDate = navigationDate,
+                                                .sendId = {},
+                                                .opensSettings = false});
+        return true;
+    }
+
+    void DesktopNotificationController::closeCalendarInvitation(const QString& key)
+    {
+        const auto found = m_invitationNotificationIds.find(key);
+        if (found == m_invitationNotificationIds.end())
+            return;
+        const auto notificationId = found.value();
+        untrackNotification(notificationId);
+        m_transport->close(notificationId);
+    }
+
     bool DesktopNotificationController::notifyUndoableSend(const QString& sendId,
                                                            const QString& title,
                                                            const QString& message,
@@ -329,6 +378,16 @@ namespace javelin::app
             }
             return;
         }
+        if (!tracked.calendarInvitationKey.isEmpty())
+        {
+            if (actionKey != QString::fromLatin1(defaultActionKey))
+                return;
+            Q_EMIT calendarInvitationActivated(
+                tracked.calendarInvitationKey, tracked.calendarAccountId, tracked.calendarEventId,
+                tracked.calendarRecurrenceId, tracked.calendarNavigationDate,
+                tracked.activationToken);
+            return;
+        }
         if (!tracked.sendId.isEmpty())
         {
             const auto embeddedSendId = sendIdFromUndoAction(actionKey);
@@ -397,6 +456,7 @@ namespace javelin::app
         for (const auto notificationId : notificationIds)
             untrackNotification(notificationId);
         m_sendNotificationIds.clear();
+        m_invitationNotificationIds.clear();
         for (const auto& sendId : sendIds)
             Q_EMIT undoableSendWindowEnded(sendId,
                                            DesktopNotificationCloseReason::NotificationServiceLost);
@@ -433,8 +493,13 @@ namespace javelin::app
     void DesktopNotificationController::untrackNotification(const uint notificationId)
     {
         const auto found = m_trackedNotifications.find(notificationId);
-        if (found != m_trackedNotifications.end() && !found->second.sendId.isEmpty())
-            m_sendNotificationIds.remove(found->second.sendId);
+        if (found != m_trackedNotifications.end())
+        {
+            if (!found->second.sendId.isEmpty())
+                m_sendNotificationIds.remove(found->second.sendId);
+            if (!found->second.calendarInvitationKey.isEmpty())
+                m_invitationNotificationIds.remove(found->second.calendarInvitationKey);
+        }
         m_trackedNotifications.erase(notificationId);
     }
 

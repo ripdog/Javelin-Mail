@@ -8,6 +8,7 @@
 #include "app/CacheLocationProvider.h"
 #include "app/CalendarApplicationService.h"
 #include "app/CalendarCommandService.h"
+#include "app/CalendarInvitationService.h"
 #include "app/CalendarNotificationService.h"
 #include "app/CommandDispatcher.h"
 #include "app/ComposeCommandService.h"
@@ -426,6 +427,9 @@ namespace javelin::app
         m_messageNavigationCoordinator = std::make_unique<MessageNavigationCoordinator>();
         m_calendarNotificationService = std::make_unique<CalendarNotificationService>(
             m_databaseConnection, *m_calendarApplicationService);
+        m_calendarInvitationService = std::make_unique<CalendarInvitationService>(
+            m_databaseConnection, *m_calendarProtocolClient, *m_calendarReader,
+            *m_accountRuntimeManager, *m_calendarApplicationService);
         QObject::connect(m_calendarApplicationService.get(),
                          &CalendarApplicationService::calendarCacheCommitted,
                          m_calendarNotificationService.get(), [this](const CalendarCacheChange&)
@@ -637,6 +641,11 @@ namespace javelin::app
     CalendarNotificationService& DaemonServices::calendarNotificationService()
     {
         return *m_calendarNotificationService;
+    }
+
+    CalendarInvitationService& DaemonServices::calendarInvitationService()
+    {
+        return *m_calendarInvitationService;
     }
 
     WorkScheduler& DaemonServices::workScheduler()

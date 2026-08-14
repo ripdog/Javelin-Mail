@@ -49,6 +49,12 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::calendar::CalendarAccountsResult accounts() const override;
         [[nodiscard]] javelin::jmap::calendar::CalendarListResult
         calendars(std::string_view accountId) const override;
+        [[nodiscard]] javelin::jmap::calendar::ParticipantIdentityListResult
+        participantIdentities(std::string_view accountId) const override;
+        [[nodiscard]] javelin::jmap::calendar::PendingCalendarInvitationsResult
+        pendingInvitations() const override;
+        [[nodiscard]] javelin::jmap::calendar::CalendarEventReadResult
+        event(std::string_view accountId, std::string_view eventId) const override;
 
       private:
         RemoteActionClient& m_client;

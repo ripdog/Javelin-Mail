@@ -1374,6 +1374,13 @@ namespace javelin::protocol
                     else if constexpr (std::is_same_v<Route, OpenSettingsRoute>)
                         return writer.string(value.connectionId) &&
                                writer.string(value.activationToken);
+                    else if constexpr (std::is_same_v<Route, OpenCalendarEventRoute>)
+                        return writer.string(value.calendarAccountId) &&
+                               writer.string(value.eventId) &&
+                               writer.boolean(value.recurrenceId.has_value()) &&
+                               (!value.recurrenceId || writer.string(*value.recurrenceId)) &&
+                               writer.string(value.navigationDate) &&
+                               writer.string(value.activationToken);
                     else if constexpr (std::is_same_v<Route, RestoreDraftRoute>)
                         return writer.string(value.accountId) &&
                                writer.string(value.draftEmailId) &&
@@ -1446,6 +1453,25 @@ namespace javelin::protocol
             }
             if (kind == 5)
             {
+                OpenCalendarEventRoute value;
+                bool hasRecurrenceId = false;
+                if (!reader.string(value.calendarAccountId) || !reader.string(value.eventId) ||
+                    !reader.boolean(hasRecurrenceId))
+                    return false;
+                if (hasRecurrenceId)
+                {
+                    QString recurrenceId;
+                    if (!reader.string(recurrenceId))
+                        return false;
+                    value.recurrenceId = std::move(recurrenceId);
+                }
+                if (!reader.string(value.navigationDate) || !reader.string(value.activationToken))
+                    return false;
+                route = std::move(value);
+                return true;
+            }
+            if (kind == 6)
+            {
                 RestoreDraftRoute value;
                 if (!reader.string(value.accountId) || !reader.string(value.draftEmailId) ||
                     !reader.string(value.composeSessionId) || !reader.string(value.activationToken))
@@ -1453,7 +1479,7 @@ namespace javelin::protocol
                 route = std::move(value);
                 return true;
             }
-            if (kind == 6)
+            if (kind == 7)
             {
                 OpenTaskCenterRoute value;
                 if (!reader.string(value.activationToken))
@@ -1461,7 +1487,7 @@ namespace javelin::protocol
                 route = std::move(value);
                 return true;
             }
-            if (kind == 7)
+            if (kind == 8)
             {
                 OpenMailtoRoute value;
                 if (!reader.string(value.uri) || !reader.string(value.activationToken))
@@ -1469,7 +1495,7 @@ namespace javelin::protocol
                 route = std::move(value);
                 return true;
             }
-            if (kind == 8)
+            if (kind == 9)
             {
                 ShowUndoSendDialogRoute value;
                 quint64 deadline = 0;
@@ -1482,7 +1508,7 @@ namespace javelin::protocol
                 route = std::move(value);
                 return true;
             }
-            if (kind == 9)
+            if (kind == 10)
             {
                 CloseUndoSendDialogRoute value;
                 if (!reader.string(value.sendId))
@@ -2042,26 +2068,35 @@ namespace javelin::protocol
                             return writer.byte(4) && writer.string(value.connectionId) &&
                                    writer.string(value.activationToken);
                         }
+                        else if constexpr (std::is_same_v<Route, OpenCalendarEventRoute>)
+                        {
+                            return writer.byte(5) && writer.string(value.calendarAccountId) &&
+                                   writer.string(value.eventId) &&
+                                   writer.boolean(value.recurrenceId.has_value()) &&
+                                   (!value.recurrenceId || writer.string(*value.recurrenceId)) &&
+                                   writer.string(value.navigationDate) &&
+                                   writer.string(value.activationToken);
+                        }
                         else if constexpr (std::is_same_v<Route, RestoreDraftRoute>)
                         {
-                            return writer.byte(5) && writer.string(value.accountId) &&
+                            return writer.byte(6) && writer.string(value.accountId) &&
                                    writer.string(value.draftEmailId) &&
                                    writer.string(value.composeSessionId) &&
                                    writer.string(value.activationToken);
                         }
                         else if constexpr (std::is_same_v<Route, OpenTaskCenterRoute>)
-                            return writer.byte(6) && writer.string(value.activationToken);
+                            return writer.byte(7) && writer.string(value.activationToken);
                         else if constexpr (std::is_same_v<Route, OpenMailtoRoute>)
-                            return writer.byte(7) && writer.string(value.uri) &&
+                            return writer.byte(8) && writer.string(value.uri) &&
                                    writer.string(value.activationToken);
                         else if constexpr (std::is_same_v<Route, ShowUndoSendDialogRoute>)
-                            return value.deadlineEpochMilliseconds >= 0 && writer.byte(8) &&
+                            return value.deadlineEpochMilliseconds >= 0 && writer.byte(9) &&
                                    writer.string(value.sendId) && writer.string(value.title) &&
                                    writer.string(value.message) &&
                                    writer.qword(
                                        static_cast<quint64>(value.deadlineEpochMilliseconds));
                         else if constexpr (std::is_same_v<Route, CloseUndoSendDialogRoute>)
-                            return writer.byte(9) && writer.string(value.sendId);
+                            return writer.byte(10) && writer.string(value.sendId);
                         else
                         {
                             return false;
@@ -2131,6 +2166,26 @@ namespace javelin::protocol
         }
         if (routeIndex == 5)
         {
+            OpenCalendarEventRoute route;
+            bool hasRecurrenceId = false;
+            if (!reader.string(route.calendarAccountId) || !reader.string(route.eventId) ||
+                !reader.boolean(hasRecurrenceId))
+                return malformed(QStringLiteral("invalid calendar event activation route"));
+            if (hasRecurrenceId)
+            {
+                QString recurrenceId;
+                if (!reader.string(recurrenceId))
+                    return malformed(QStringLiteral("invalid calendar event activation route"));
+                route.recurrenceId = std::move(recurrenceId);
+            }
+            if (!reader.string(route.navigationDate) || !reader.string(route.activationToken))
+                return malformed(QStringLiteral("invalid calendar event activation route"));
+            if (const auto error = reader.finish())
+                return *error;
+            return ActivationRoute{std::move(route)};
+        }
+        if (routeIndex == 6)
+        {
             RestoreDraftRoute route;
             if (!reader.string(route.accountId) || !reader.string(route.draftEmailId) ||
                 !reader.string(route.composeSessionId) || !reader.string(route.activationToken))
@@ -2139,7 +2194,7 @@ namespace javelin::protocol
                 return *error;
             return ActivationRoute{std::move(route)};
         }
-        if (routeIndex == 6)
+        if (routeIndex == 7)
         {
             OpenTaskCenterRoute route;
             if (!reader.string(route.activationToken))
@@ -2148,7 +2203,7 @@ namespace javelin::protocol
                 return *error;
             return ActivationRoute{std::move(route)};
         }
-        if (routeIndex == 7)
+        if (routeIndex == 8)
         {
             OpenMailtoRoute route;
             if (!reader.string(route.uri) || !reader.string(route.activationToken))
@@ -2157,7 +2212,7 @@ namespace javelin::protocol
                 return *error;
             return ActivationRoute{std::move(route)};
         }
-        if (routeIndex == 8)
+        if (routeIndex == 9)
         {
             ShowUndoSendDialogRoute route;
             quint64 deadline = 0;
@@ -2171,7 +2226,7 @@ namespace javelin::protocol
                 return *error;
             return ActivationRoute{std::move(route)};
         }
-        if (routeIndex == 9)
+        if (routeIndex == 10)
         {
             CloseUndoSendDialogRoute route;
             if (!reader.string(route.sendId))

@@ -38,6 +38,15 @@ namespace javelin::protocol
         QString activationToken;
     };
 
+    struct OpenCalendarEventRoute
+    {
+        QString calendarAccountId;
+        QString eventId;
+        std::optional<QString> recurrenceId;
+        QString navigationDate;
+        QString activationToken;
+    };
+
     struct RestoreDraftRoute
     {
         QString accountId;
@@ -75,10 +84,10 @@ namespace javelin::protocol
         QString sendId;
     };
 
-    using ActivationRoute =
-        std::variant<OpenMailboxRoute, OpenMessageRoute, OpenComposeRoute, RaiseGuiRoute,
-                     OpenSettingsRoute, RestoreDraftRoute, OpenTaskCenterRoute, OpenMailtoRoute,
-                     ShowUndoSendDialogRoute, CloseUndoSendDialogRoute>;
+    using ActivationRoute = std::variant<OpenMailboxRoute, OpenMessageRoute, OpenComposeRoute,
+                                         RaiseGuiRoute, OpenSettingsRoute, OpenCalendarEventRoute,
+                                         RestoreDraftRoute, OpenTaskCenterRoute, OpenMailtoRoute,
+                                         ShowUndoSendDialogRoute, CloseUndoSendDialogRoute>;
 
     struct ActivationRequested
     {

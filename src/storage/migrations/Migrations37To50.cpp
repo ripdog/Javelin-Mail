@@ -2,7 +2,7 @@
 
 namespace javelin::jmap::cache::migrations
 {
-    std::vector<MigrationStep> migrationSteps37To49()
+    std::vector<MigrationStep> migrationSteps37To50()
     {
         return {
             MigrationStep{
@@ -211,6 +211,90 @@ namespace javelin::jmap::cache::migrations
                             "DELETE CASCADE,email_id TEXT NOT NULL,requested_at TEXT NOT NULL "
                             "DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(account_id,email_id)) "
                             "STRICT"),
+                    },
+            },
+            MigrationStep{
+                .version = 50,
+                .name = QStringLiteral("calendar_invitation_notifications"),
+                .statements =
+                    {
+                        QStringLiteral("ALTER TABLE calendar_state_tokens RENAME TO "
+                                       "calendar_state_tokens_v49"),
+                        QStringLiteral(
+                            "CREATE TABLE calendar_state_tokens (account_id TEXT NOT NULL "
+                            "REFERENCES accounts(account_id) ON DELETE CASCADE,data_type TEXT "
+                            "NOT NULL CHECK(data_type IN ('Calendar','CalendarEvent',"
+                            "'CalendarEventNotification')),state TEXT NOT NULL,PRIMARY KEY("
+                            "account_id,data_type)) STRICT"),
+                        QStringLiteral(
+                            "INSERT INTO calendar_state_tokens(account_id,data_type,state) SELECT "
+                            "account_id,data_type,state FROM calendar_state_tokens_v49"),
+                        QStringLiteral("DROP TABLE calendar_state_tokens_v49"),
+                        QStringLiteral("ALTER TABLE notification_dispatch_claims RENAME TO "
+                                       "notification_dispatch_claims_v49"),
+                        QStringLiteral(
+                            "CREATE TABLE notification_dispatch_claims (kind TEXT NOT NULL "
+                            "CHECK(kind IN ('mail','calendar','invitation')),claim_key TEXT NOT "
+                            "NULL,claimed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY("
+                            "kind,claim_key)) STRICT"),
+                        QStringLiteral(
+                            "INSERT INTO notification_dispatch_claims(kind,claim_key,claimed_at) "
+                            "SELECT kind,claim_key,claimed_at FROM "
+                            "notification_dispatch_claims_v49"),
+                        QStringLiteral("DROP TABLE notification_dispatch_claims_v49"),
+                        QStringLiteral(
+                            "CREATE TABLE calendar_event_notifications (account_id TEXT NOT NULL "
+                            "REFERENCES accounts(account_id) ON DELETE CASCADE,notification_id "
+                            "TEXT NOT NULL,created TEXT,changed_by_name TEXT,changed_by_email TEXT,"
+                            "changed_by_principal_id TEXT,changed_by_calendar_address TEXT,comment "
+                            "TEXT,type TEXT CHECK(type IS NULL OR type IN "
+                            "('created','updated','destroyed')),calendar_event_id TEXT,is_draft "
+                            "INTEGER CHECK(is_draft IS NULL OR is_draft IN "
+                            "(0,1)),event_document_json "
+                            "TEXT,event_patch_json TEXT,is_deleted INTEGER NOT NULL DEFAULT 0 "
+                            "CHECK(is_deleted IN (0,1)),PRIMARY KEY(account_id,notification_id)) "
+                            "STRICT"),
+                        QStringLiteral(
+                            "CREATE INDEX idx_calendar_event_notifications_event ON "
+                            "calendar_event_notifications(account_id,calendar_event_id,created)"),
+                        QStringLiteral(
+                            "CREATE TABLE calendar_pending_invitations (account_id TEXT NOT NULL,"
+                            "event_id TEXT NOT NULL,self_participant_id TEXT NOT NULL,"
+                            "source_notification_id TEXT,discovered_at TEXT NOT NULL DEFAULT "
+                            "CURRENT_TIMESTAMP,last_seen_at TEXT NOT NULL DEFAULT "
+                            "CURRENT_TIMESTAMP,"
+                            "PRIMARY KEY(account_id,event_id),FOREIGN KEY(account_id,event_id) "
+                            "REFERENCES calendar_events(account_id,event_id) ON DELETE CASCADE) "
+                            "STRICT"),
+                        QStringLiteral(
+                            "CREATE INDEX idx_calendar_pending_invitations_discovered ON "
+                            "calendar_pending_invitations(discovered_at,account_id,event_id)"),
+                        QStringLiteral(
+                            "CREATE TABLE calendar_invitation_outbox (invitation_key TEXT PRIMARY "
+                            "KEY,account_id TEXT NOT NULL REFERENCES accounts(account_id) ON "
+                            "DELETE "
+                            "CASCADE,event_id TEXT NOT NULL,self_participant_id TEXT NOT NULL,"
+                            "source_notification_id TEXT,discovered_at TEXT NOT NULL DEFAULT "
+                            "CURRENT_TIMESTAMP,status TEXT NOT NULL DEFAULT 'pending' CHECK(status "
+                            "IN ('pending','delivered','resolved')),created_at TEXT NOT NULL "
+                            "DEFAULT "
+                            "CURRENT_TIMESTAMP,delivered_at TEXT,resolved_at "
+                            "TEXT,UNIQUE(account_id,"
+                            "event_id)) STRICT"),
+                        QStringLiteral(
+                            "CREATE INDEX idx_calendar_invitation_outbox_status ON "
+                            "calendar_invitation_outbox(status,created_at,invitation_key)"),
+                        QStringLiteral(
+                            "CREATE TABLE calendar_participant_identities (account_id TEXT NOT "
+                            "NULL "
+                            "REFERENCES accounts(account_id) ON DELETE CASCADE,identity_id TEXT "
+                            "NOT "
+                            "NULL,name TEXT NOT NULL DEFAULT '',calendar_address TEXT NOT NULL,"
+                            "is_default INTEGER NOT NULL DEFAULT 0 CHECK(is_default IN (0,1)),"
+                            "PRIMARY KEY(account_id,identity_id)) STRICT"),
+                        QStringLiteral(
+                            "CREATE INDEX idx_calendar_participant_identities_address ON "
+                            "calendar_participant_identities(account_id,calendar_address)"),
                     },
             },
         };

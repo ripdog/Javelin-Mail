@@ -1,6 +1,8 @@
 #include "jmap/cache/CalendarRepository.h"
 #include "jmap/api/CalendarMethods.h"
+#include "jmap/cache/CalendarInvitationRepository.h"
 #include "jmap/cache/CalendarNotificationRepository.h"
+#include "jmap/calendar/CalendarCacheReader.h"
 #include "jmap/calendar/CalendarMutationJournal.h"
 
 #include <QCoreApplication>
@@ -706,4 +708,248 @@ TEST_CASE("calendar reminders use their actual trigger rather than occurrence st
                              &javelin::jmap::cache::CalendarNotificationCandidate::alertId) == 1);
     CHECK(std::ranges::count(candidates, std::string{"absolute"},
                              &javelin::jmap::cache::CalendarNotificationCandidate::alertId) == 1);
+}
+
+TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not alert twice",
+          "[jmap][calendar][invitation][cache]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-invitation-reconciliation"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    QSqlQuery account{connection.database()};
+    REQUIRE(account.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository calendars{connection};
+    const javelin::jmap::calendar::Calendar work{
+        .accountId = "a1",
+        .id = "work",
+        .name = "Work",
+        .description = std::nullopt,
+        .color = "#2457a6",
+        .sortOrder = 0,
+        .isSubscribed = true,
+        .isVisible = true,
+        .isDefault = true,
+        .timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Pacific/Auckland"},
+        .defaultAlertsWithTime = {},
+        .defaultAlertsWithoutTime = {},
+        .myRights = {.mayReadFreeBusy = true,
+                     .mayReadItems = true,
+                     .mayWriteAll = false,
+                     .mayWriteOwn = false,
+                     .mayUpdatePrivate = false,
+                     .mayRSVP = true,
+                     .mayShare = false,
+                     .mayDelete = false},
+    };
+    REQUIRE_FALSE(calendars.replaceCalendars("a1", "c1", {work}).has_value());
+
+    auto invitation = event("invite-1", "2000-08-20T10:00:00");
+    invitation.isOrigin = false;
+    invitation.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
+    invitation.recurrenceRule->frequency = javelin::jmap::calendar::RecurrenceFrequency::Weekly;
+    invitation.attendees = {{.id = "organizer",
+                             .name = "Organizer",
+                             .email = "organizer@example.test",
+                             .calendarAddress = "mailto:organizer@example.test",
+                             .participationStatus = "accepted",
+                             .isOwner = true,
+                             .isAttendee = true,
+                             .roles = {{"owner", true}, {"attendee", true}},
+                             .expectReply = false,
+                             .scheduleSequence = 0,
+                             .scheduleUpdated = std::nullopt},
+                            {.id = "self",
+                             .name = "Alice",
+                             .email = "alice@example.test",
+                             .calendarAddress = "mailto:alice@example.test",
+                             .participationStatus = "needs-action",
+                             .isOwner = false,
+                             .isAttendee = true,
+                             .roles = {{"attendee", true}},
+                             .expectReply = false,
+                             .scheduleSequence = 0,
+                             .scheduleUpdated = std::nullopt}};
+    invitation.organizerCalendarAddress = "mailto:organizer@example.test";
+    const javelin::jmap::calendar::Occurrence futureOccurrence{
+        .accountId = "a1",
+        .id = "invite-1:future",
+        .eventId = "invite-1",
+        .recurrenceId = javelin::jmap::calendar::LocalDateTime{.value = "2099-08-20T10:00:00"},
+        .localStart = {.value = "2099-08-20T10:00:00"},
+        .localEnd = {.value = "2099-08-20T11:00:00"},
+        .utcStart = javelin::jmap::calendar::UtcInstant{.value = "2099-08-19T22:00:00Z"},
+        .utcEnd = javelin::jmap::calendar::UtcInstant{.value = "2099-08-19T23:00:00Z"},
+        .allDay = false,
+    };
+    REQUIRE_FALSE(calendars
+                      .reconcileWindow({.accountId = "a1",
+                                        .start = {.value = "2099-08-01T00:00:00"},
+                                        .end = {.value = "2099-09-01T00:00:00"},
+                                        .displayTimeZone = {.value = "Pacific/Auckland"},
+                                        .queryState = "q1",
+                                        .eventState = "e0",
+                                        .events = {invitation},
+                                        .occurrences = {futureOccurrence}})
+                      .has_value());
+
+    const javelin::jmap::calendar::CalendarEventNotification notification{
+        .accountId = "a1",
+        .id = "notification-1",
+        .created = {.value = "2026-08-14T01:02:03Z"},
+        .changedBy = {.name = "Organizer",
+                      .email = "organizer@example.test",
+                      .principalId = std::nullopt,
+                      .calendarAddress = "mailto:organizer@example.test"},
+        .comment = std::nullopt,
+        .type = javelin::jmap::calendar::CalendarEventNotificationType::Created,
+        .calendarEventId = "invite-1",
+        .isDraft = false,
+        .event = invitation,
+        .eventPatchJson = std::nullopt,
+    };
+
+    javelin::jmap::cache::CalendarInvitationRepository invitations{connection};
+    REQUIRE_FALSE(
+        invitations
+            .replaceParticipantIdentities("a1", {{.id = "primary",
+                                                  .name = "Alice",
+                                                  .calendarAddress = "mailto:alice@example.test",
+                                                  .isDefault = true},
+                                                 {.id = "alias",
+                                                  .name = "Alice Alias",
+                                                  .calendarAddress = "mailto:alias@example.test",
+                                                  .isDefault = false}})
+            .has_value());
+    javelin::jmap::calendar::CalendarCacheReader cacheReader{connection};
+    const auto identityRead = cacheReader.participantIdentities("a1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::ParticipantIdentity>>(
+        identityRead));
+    const auto& identities =
+        std::get<std::vector<javelin::jmap::calendar::ParticipantIdentity>>(identityRead);
+    REQUIRE(identities.size() == 2);
+    CHECK(identities.front().id == "primary");
+    CHECK(identities.back().calendarAddress == "mailto:alias@example.test");
+
+    REQUIRE_FALSE(invitations
+                      .reconcile({.accountId = "a1",
+                                  .notificationState = "n1",
+                                  .eventState = "e1",
+                                  .replaceNotifications = true,
+                                  .notifications = {notification},
+                                  .deletedNotificationIds = {},
+                                  .events = {invitation},
+                                  .nonRecurringOccurrences = {},
+                                  .destroyedEventIds = {},
+                                  .consideredEventIds = {"invite-1"},
+                                  .pendingInvitations = {{.eventId = "invite-1",
+                                                          .selfParticipantId = "self",
+                                                          .sourceNotificationId = "notification-1",
+                                                          .enqueueDesktopNotification = true}}})
+                      .has_value());
+
+    auto state = calendars.stateToken("a1", "CalendarEventNotification");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(state));
+    CHECK(std::get<std::optional<std::string>>(state) == std::optional<std::string>{"n1"});
+    QSqlQuery projected{connection.database()};
+    REQUIRE(projected.exec(QStringLiteral(
+        "SELECT p.self_participant_id,o.status FROM calendar_pending_invitations p JOIN "
+        "calendar_invitation_outbox o ON o.account_id=p.account_id AND o.event_id=p.event_id "
+        "WHERE p.account_id='a1' AND p.event_id='invite-1'")));
+    REQUIRE(projected.next());
+    CHECK(projected.value(0).toString() == QStringLiteral("self"));
+    CHECK(projected.value(1).toString() == QStringLiteral("pending"));
+
+    const auto firstClaim = invitations.claimPendingDispatches();
+    REQUIRE(std::holds_alternative<
+            std::vector<javelin::jmap::cache::CalendarInvitationDispatchCandidate>>(firstClaim));
+    const auto& candidates =
+        std::get<std::vector<javelin::jmap::cache::CalendarInvitationDispatchCandidate>>(
+            firstClaim);
+    REQUIRE(candidates.size() == 1);
+    CHECK(candidates.front().start.value == "2099-08-20T10:00:00");
+    CHECK(candidates.front().recurrenceId ==
+          std::optional<javelin::jmap::calendar::LocalDateTime>{{.value = "2099-08-20T10:00:00"}});
+    const auto invitationKey = candidates.front().invitationKey;
+    const auto duplicateClaim = invitations.claimPendingDispatches();
+    REQUIRE(std::holds_alternative<
+            std::vector<javelin::jmap::cache::CalendarInvitationDispatchCandidate>>(
+        duplicateClaim));
+    CHECK(std::get<std::vector<javelin::jmap::cache::CalendarInvitationDispatchCandidate>>(
+              duplicateClaim)
+              .empty());
+    REQUIRE_FALSE(invitations
+                      .markDelivered(invitationKey,
+                                     QDateTime::fromString(QStringLiteral("2026-08-14T02:00:00Z"),
+                                                           Qt::ISODate))
+                      .has_value());
+
+    auto accepted = invitation;
+    accepted.attendees[1].participationStatus = "accepted";
+    auto acceptTransaction = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Optimistic calendar RSVP"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(acceptTransaction));
+    auto acceptedProjection =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(acceptTransaction));
+    REQUIRE_FALSE(
+        calendars.projectEvents(acceptedProjection, "a1", "e2", {accepted}, {}, {}).has_value());
+    REQUIRE_FALSE(acceptedProjection.commit().has_value());
+
+    QSqlQuery answered{connection.database()};
+    REQUIRE(answered.exec(QStringLiteral(
+        "SELECT (SELECT count(*) FROM calendar_pending_invitations WHERE account_id='a1' AND "
+        "event_id='invite-1'),status FROM calendar_invitation_outbox WHERE account_id='a1' AND "
+        "event_id='invite-1'")));
+    REQUIRE(answered.next());
+    CHECK(answered.value(0).toInt() == 0);
+    CHECK(answered.value(1).toString() == QStringLiteral("resolved"));
+
+    auto rejectTransaction = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Reject calendar RSVP"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(rejectTransaction));
+    auto rejectedProjection =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(rejectTransaction));
+    REQUIRE_FALSE(
+        calendars.projectEvents(rejectedProjection, "a1", "e3", {invitation}, {}, {}).has_value());
+    REQUIRE_FALSE(rejectedProjection.commit().has_value());
+
+    QSqlQuery restored{connection.database()};
+    REQUIRE(restored.exec(QStringLiteral(
+        "SELECT p.self_participant_id,o.status FROM calendar_pending_invitations p JOIN "
+        "calendar_invitation_outbox o ON o.account_id=p.account_id AND o.event_id=p.event_id "
+        "WHERE p.account_id='a1' AND p.event_id='invite-1'")));
+    REQUIRE(restored.next());
+    CHECK(restored.value(0).toString() == QStringLiteral("self"));
+    CHECK(restored.value(1).toString() == QStringLiteral("resolved"));
+    const auto restoredClaim = invitations.claimPendingDispatches();
+    REQUIRE(std::holds_alternative<
+            std::vector<javelin::jmap::cache::CalendarInvitationDispatchCandidate>>(restoredClaim));
+    CHECK(std::get<std::vector<javelin::jmap::cache::CalendarInvitationDispatchCandidate>>(
+              restoredClaim)
+              .empty());
+
+    auto cancelled = invitation;
+    cancelled.status = "cancelled";
+    auto cancelTransaction = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Cancel calendar invitation"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(cancelTransaction));
+    auto cancelledProjection =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(cancelTransaction));
+    REQUIRE_FALSE(
+        calendars.projectEvents(cancelledProjection, "a1", "e4", {cancelled}, {}, {}).has_value());
+    REQUIRE_FALSE(cancelledProjection.commit().has_value());
+    QSqlQuery cancelledRow{connection.database()};
+    REQUIRE(cancelledRow.exec(QStringLiteral(
+        "SELECT count(*) FROM calendar_pending_invitations WHERE account_id='a1' AND "
+        "event_id='invite-1'")));
+    REQUIRE(cancelledRow.next());
+    CHECK(cancelledRow.value(0).toInt() == 0);
 }

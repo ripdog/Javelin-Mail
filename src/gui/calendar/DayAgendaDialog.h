@@ -10,6 +10,7 @@
 #include <optional>
 #include <vector>
 
+class QButtonGroup;
 class QLabel;
 class QPushButton;
 class QScrollArea;
@@ -42,7 +43,10 @@ namespace javelin::gui::calendar
         bool allDay = false;
         bool recurring = false;
         bool editable = false;
-        bool invitation = false;
+        bool rsvpAllowed = false;
+        QString participationStatus;
+        bool responseMutationPending = false;
+        QString responseError;
         QString organizer;
         QString location;
         QString description;
@@ -58,6 +62,7 @@ namespace javelin::gui::calendar
 
         void setDay(QDate date, std::vector<DayAgendaEvent> events,
                     std::optional<DayAgendaEventKey> selectedEvent = std::nullopt);
+        void setResponseMutationPending(bool pending, QString error = {});
         [[nodiscard]] QDate date() const;
         [[nodiscard]] std::optional<DayAgendaEventKey> selectedEvent() const;
 
@@ -65,6 +70,7 @@ namespace javelin::gui::calendar
         void dayChanged(QDate date);
         void newEventRequested(QDateTime start, QDateTime end);
         void editRequested(QString accountId, QString eventId, QString recurrenceId);
+        void responseRequested(QString accountId, QString eventId, QString participationStatus);
         void eventContextMenuRequested(QPoint globalPosition, QString accountId, QString eventId,
                                        QString recurrenceId);
 
@@ -101,6 +107,13 @@ namespace javelin::gui::calendar
         QLabel* m_detailsOrganizer = nullptr;
         QLabel* m_detailsAttendees = nullptr;
         QLabel* m_detailsDescription = nullptr;
+        QLabel* m_responseLabel = nullptr;
+        QLabel* m_responseSeriesNote = nullptr;
+        QLabel* m_responseError = nullptr;
+        QButtonGroup* m_responseButtons = nullptr;
+        QPushButton* m_accept = nullptr;
+        QPushButton* m_tentative = nullptr;
+        QPushButton* m_decline = nullptr;
         QPushButton* m_edit = nullptr;
         QPushButton* m_close = nullptr;
         std::vector<CalendarEventButton*> m_eventButtons;

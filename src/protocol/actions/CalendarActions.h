@@ -85,19 +85,34 @@ namespace javelin::protocol::actions
                    ReplayPolicy::Never, detail::calendarOnly,
                    std::tuple<std::string, javelin::jmap::calendar::RespondToEventCommand>,
                    javelin::jmap::calendar::CalendarMutationResult>;
+    using CalendarReadPendingInvitations =
+        Descriptor<90, ActionDomain::Calendar, AdmissionSemantics::Immediate,
+                   ReplayPolicy::Reexecute, 0, std::tuple<>,
+                   javelin::jmap::calendar::PendingCalendarInvitationsResult>;
+    using CalendarReadEvent =
+        Descriptor<91, ActionDomain::Calendar, AdmissionSemantics::Immediate,
+                   ReplayPolicy::Reexecute, 0, std::tuple<std::string, std::string>,
+                   javelin::jmap::calendar::CalendarEventReadResult>;
+    using CalendarReadParticipantIdentities =
+        Descriptor<92, ActionDomain::Calendar, AdmissionSemantics::Immediate,
+                   ReplayPolicy::Reexecute, 0, std::tuple<std::string>,
+                   javelin::jmap::calendar::ParticipantIdentityListResult>;
 
-    using CalendarActionTypes =
-        std::tuple<RegisteredAction<CalendarReadCached, "CalendarReadCached">,
-                   RegisteredAction<CalendarReadAccounts, "CalendarReadAccounts">,
-                   RegisteredAction<CalendarReadCalendars, "CalendarReadCalendars">,
-                   RegisteredAction<CalendarRequestRange, "CalendarRequestRange">,
-                   RegisteredAction<CalendarCreateEvent, "CalendarCreateEvent">,
-                   RegisteredAction<CalendarUpdateEvent, "CalendarUpdateEvent">,
-                   RegisteredAction<CalendarDeleteEvent, "CalendarDeleteEvent">,
-                   RegisteredAction<CalendarSetDefault, "CalendarSetDefault">,
-                   RegisteredAction<CalendarCreate, "CalendarCreate">,
-                   RegisteredAction<CalendarDelete, "CalendarDelete">,
-                   RegisteredAction<CalendarSetVisible, "CalendarSetVisible">,
-                   RegisteredAction<CalendarSetSubscribed, "CalendarSetSubscribed">,
-                   RegisteredAction<CalendarRespondEvent, "CalendarRespondEvent">>;
+    using CalendarActionTypes = std::tuple<
+        RegisteredAction<CalendarReadCached, "CalendarReadCached">,
+        RegisteredAction<CalendarReadAccounts, "CalendarReadAccounts">,
+        RegisteredAction<CalendarReadCalendars, "CalendarReadCalendars">,
+        RegisteredAction<CalendarRequestRange, "CalendarRequestRange">,
+        RegisteredAction<CalendarCreateEvent, "CalendarCreateEvent">,
+        RegisteredAction<CalendarUpdateEvent, "CalendarUpdateEvent">,
+        RegisteredAction<CalendarDeleteEvent, "CalendarDeleteEvent">,
+        RegisteredAction<CalendarSetDefault, "CalendarSetDefault">,
+        RegisteredAction<CalendarCreate, "CalendarCreate">,
+        RegisteredAction<CalendarDelete, "CalendarDelete">,
+        RegisteredAction<CalendarSetVisible, "CalendarSetVisible">,
+        RegisteredAction<CalendarSetSubscribed, "CalendarSetSubscribed">,
+        RegisteredAction<CalendarRespondEvent, "CalendarRespondEvent">,
+        RegisteredAction<CalendarReadPendingInvitations, "CalendarReadPendingInvitations">,
+        RegisteredAction<CalendarReadEvent, "CalendarReadEvent">,
+        RegisteredAction<CalendarReadParticipantIdentities, "CalendarReadParticipantIdentities">>;
 } // namespace javelin::protocol::actions

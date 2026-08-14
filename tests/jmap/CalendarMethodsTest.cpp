@@ -1,6 +1,83 @@
 #include "jmap/api/CalendarMethods.h"
+#include "FixtureReader.h"
 
 #include <catch2/catch_test_macros.hpp>
+
+TEST_CASE("calendar event notification methods serialize draft-26 arguments",
+          "[jmap][calendar][invitation]")
+{
+    const auto query = javelin::jmap::api::calendarEventNotificationQuery(
+        {.accountId = "a1",
+         .filter = {.after = javelin::jmap::calendar::UtcInstant{.value = "2026-08-14T00:00:00Z"},
+                    .before = std::nullopt,
+                    .type = javelin::jmap::calendar::CalendarEventNotificationType::Created,
+                    .calendarEventIds = std::vector<std::string>{"event-1"}},
+         .position = 4,
+         .limit = 32,
+         .calculateTotal = true});
+    REQUIRE(query.has_value());
+    CHECK(query->name == "CalendarEventNotification/query");
+    CHECK(query->arguments.find(R"("type":"created")") != std::string::npos);
+    CHECK(query->arguments.find(R"("calendarEventIds":["event-1"])") != std::string::npos);
+    CHECK(query->arguments.find(R"("sort":[{"property":"created","isAscending":true}])") !=
+          std::string::npos);
+    const auto queryResponse = javelin::jmap::api::parseCalendarEventNotificationQueryResponse(
+        R"({"accountId":"a1","queryState":"q2","canCalculateChanges":true,"position":4,"ids":["notification-1"],"total":5,"limit":32})");
+    REQUIRE(queryResponse.ok());
+    CHECK(queryResponse.value->queryState == "q2");
+    CHECK(queryResponse.value->ids == std::vector<std::string>{"notification-1"});
+    CHECK(queryResponse.value->total == std::optional<std::uint64_t>{5});
+
+    const auto get = javelin::jmap::api::calendarEventNotificationGet(
+        {.accountId = "a1",
+         .ids = std::vector<std::string>{"notification-1"},
+         .idsReference = std::nullopt,
+         .properties = std::vector<std::string>{"id", "calendarEventId", "isDraft", "event"}});
+    REQUIRE(get.has_value());
+    CHECK(get->name == "CalendarEventNotification/get");
+    CHECK(get->arguments.find(R"("calendarEventId")") != std::string::npos);
+    CHECK(get->arguments.find(R"("isDraft")") != std::string::npos);
+    CHECK(get->arguments.find(R"("event")") != std::string::npos);
+
+    const auto changes = javelin::jmap::api::calendarEventNotificationChanges(
+        {.accountId = "a1", .sinceState = "n1", .maxChanges = 128});
+    REQUIRE(changes.has_value());
+    CHECK(changes->name == "CalendarEventNotification/changes");
+    CHECK(changes->arguments.find(R"("sinceState":"n1")") != std::string::npos);
+}
+
+TEST_CASE("calendar event notification get parses explicit Stalwart-style properties",
+          "[jmap][calendar][invitation]")
+{
+    const auto json =
+        javelin::tests::loadFixture("jmap/method/calendar_event_notification_get_stalwart.json");
+    const auto parsed = javelin::jmap::api::parseCalendarEventNotificationGetResponse(json);
+    REQUIRE(parsed.ok());
+    REQUIRE(parsed.value->list.size() == 1);
+    const auto& notification = parsed.value->list.front();
+    CHECK(notification.id == "notification-created-1");
+    CHECK(notification.calendarEventId == "event-1");
+    CHECK(notification.isDraft == std::optional<bool>{false});
+    CHECK(notification.type == javelin::jmap::calendar::CalendarEventNotificationType::Created);
+    CHECK(notification.changedBy.calendarAddress ==
+          std::optional<std::string>{"mailto:organizer@example.test"});
+    CHECK(notification.event.title == "Planning call");
+    CHECK(notification.event.status == std::optional<std::string>{"confirmed"});
+    REQUIRE(notification.eventPatchJson.has_value());
+    CHECK(notification.eventPatchJson->find("title") != std::string::npos);
+}
+
+TEST_CASE("calendar event notification changes preserve created updated and destroyed ids",
+          "[jmap][calendar][invitation]")
+{
+    const auto parsed = javelin::jmap::api::parseCalendarEventNotificationChangesResponse(
+        R"({"accountId":"a1","oldState":"n1","newState":"n2","hasMoreChanges":false,"created":["n-created"],"updated":["n-updated"],"destroyed":["n-destroyed"]})");
+    REQUIRE(parsed.ok());
+    CHECK(parsed.value->created == std::vector<std::string>{"n-created"});
+    CHECK(parsed.value->updated == std::vector<std::string>{"n-updated"});
+    CHECK(parsed.value->destroyed == std::vector<std::string>{"n-destroyed"});
+    CHECK_FALSE(parsed.value->hasMoreChanges);
+}
 
 TEST_CASE("calendar writable comparison ignores server-derived fields", "[jmap][calendar]")
 {

@@ -2,6 +2,7 @@
 
 #include "app/AccountRuntimeManager.h"
 #include "app/CacheAccessBarrier.h"
+#include "app/CalendarInvitationService.h"
 #include "app/CalendarNotificationService.h"
 #include "app/CommandDispatcher.h"
 #include "app/DeferredSendService.h"
@@ -1376,6 +1377,17 @@ namespace javelin::app
                     .searchWindows = std::move(searchWindows),
                 });
             });
+        connect(&m_services->calendarInvitationService(),
+                &CalendarInvitationService::pendingInvitationCacheChanged, this,
+                [this]
+                {
+                    ++m_epoch.value;
+                    onBoundaryEvent(CacheInvalidation{
+                        .epoch = currentEpoch(),
+                        .changedDomains = {ChangedDomain::Calendars},
+                        .affectedKeys = {},
+                    });
+                });
         connect(&events, &MailApplicationEventsPort::accountStatusChanged, this,
                 [this](const QString&, MailAccountStatus) { publishStatus(); });
         connect(&events, &MailApplicationEventsPort::threadMaterializationProgress, this,

@@ -1939,6 +1939,13 @@ namespace javelin::gui::shell
         m_calendarTabController->open();
     }
 
+    void MainWindow::openCalendarEvent(const QString& calendarAccountId, const QString& eventId,
+                                       const QString& recurrenceId, const QDate& navigationDate)
+    {
+        m_calendarTabController->openEvent(calendarAccountId, eventId, recurrenceId,
+                                           navigationDate);
+    }
+
     void MainWindow::composeNewMessage()
     {
         const auto accountId =

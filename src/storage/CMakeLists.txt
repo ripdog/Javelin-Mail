@@ -11,7 +11,7 @@ add_library(javelin_cache_read STATIC
     ${PROJECT_SOURCE_DIR}/src/storage/migrations/Migrations1To13.cpp
     ${PROJECT_SOURCE_DIR}/src/storage/migrations/Migrations14To28.cpp
     ${PROJECT_SOURCE_DIR}/src/storage/migrations/Migrations29To36.cpp
-    ${PROJECT_SOURCE_DIR}/src/storage/migrations/Migrations37To49.cpp
+    ${PROJECT_SOURCE_DIR}/src/storage/migrations/Migrations37To50.cpp
     ${PROJECT_SOURCE_DIR}/src/storage/migrations/MigrationRunner.cpp
     ${PROJECT_SOURCE_DIR}/src/storage/migrations/MigrationRunner.h
     ${PROJECT_SOURCE_DIR}/src/storage/sqlite/DatabaseConnection.h

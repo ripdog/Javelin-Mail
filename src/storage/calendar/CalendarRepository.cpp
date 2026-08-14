@@ -559,7 +559,8 @@ namespace javelin::jmap::cache
     {
         if (const auto error = m_connection.validate())
             return *error;
-        if (dataType != "Calendar" && dataType != "CalendarEvent")
+        if (dataType != "Calendar" && dataType != "CalendarEvent" &&
+            dataType != "CalendarEventNotification")
             return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
                                  .message = QStringLiteral("Unsupported calendar state type")};
         QSqlQuery query{m_connection.database()};
@@ -843,7 +844,9 @@ namespace javelin::jmap::cache
                 "DELETE FROM calendar_events WHERE account_id=:account AND NOT EXISTS "
                 "(SELECT 1 FROM calendar_occurrences o WHERE "
                 "o.account_id=calendar_events.account_id "
-                "AND o.event_id=calendar_events.event_id)"));
+                "AND o.event_id=calendar_events.event_id) AND NOT EXISTS (SELECT 1 FROM "
+                "calendar_pending_invitations p WHERE p.account_id=calendar_events.account_id "
+                "AND p.event_id=calendar_events.event_id)"));
             pruneEvents.bindValue(QStringLiteral(":account"),
                                   QString::fromStdString(window.accountId));
             exec(pruneEvents, failure, QStringLiteral("Prune unreferenced calendar events"));
@@ -1038,7 +1041,9 @@ namespace javelin::jmap::cache
             pruneEvents.prepare(QStringLiteral(
                 "DELETE FROM calendar_events WHERE account_id=:account AND NOT EXISTS "
                 "(SELECT 1 FROM calendar_occurrences o WHERE o.account_id="
-                "calendar_events.account_id AND o.event_id=calendar_events.event_id)"));
+                "calendar_events.account_id AND o.event_id=calendar_events.event_id) AND NOT "
+                "EXISTS (SELECT 1 FROM calendar_pending_invitations p WHERE p.account_id="
+                "calendar_events.account_id AND p.event_id=calendar_events.event_id)"));
             pruneEvents.bindValue(QStringLiteral(":account"),
                                   QString::fromStdString(std::string{accountId}));
             exec(pruneEvents, failure, QStringLiteral("Prune delta events"));
@@ -1097,12 +1102,36 @@ namespace javelin::jmap::cache
         QSqlQuery removeEvent{database};
         removeEvent.prepare(QStringLiteral(
             "DELETE FROM calendar_events WHERE account_id=:account AND event_id=:event"));
+        QSqlQuery resolveDestroyedInvitation{database};
+        resolveDestroyedInvitation.prepare(
+            QStringLiteral("UPDATE calendar_invitation_outbox SET status='resolved',resolved_at="
+                           "COALESCE(resolved_at,CURRENT_TIMESTAMP) WHERE account_id=:account AND "
+                           "event_id=:event AND status<>'resolved'"));
+        QSqlQuery releaseDestroyedInvitation{database};
+        releaseDestroyedInvitation.prepare(QStringLiteral(
+            "DELETE FROM notification_dispatch_claims WHERE kind='invitation' AND claim_key IN "
+            "(SELECT invitation_key FROM calendar_invitation_outbox WHERE account_id=:account "
+            "AND event_id=:event)"));
         for (const auto& eventId : destroyedEventIds)
         {
             removeEvent.bindValue(QStringLiteral(":account"),
                                   QString::fromStdString(std::string{accountId}));
             removeEvent.bindValue(QStringLiteral(":event"), QString::fromStdString(eventId));
             if (!exec(removeEvent, failure, QStringLiteral("Project calendar event deletion")))
+                return failure;
+            resolveDestroyedInvitation.bindValue(QStringLiteral(":account"),
+                                                 QString::fromStdString(std::string{accountId}));
+            resolveDestroyedInvitation.bindValue(QStringLiteral(":event"),
+                                                 QString::fromStdString(eventId));
+            if (!exec(resolveDestroyedInvitation, failure,
+                      QStringLiteral("Resolve destroyed calendar invitation")))
+                return failure;
+            releaseDestroyedInvitation.bindValue(QStringLiteral(":account"),
+                                                 QString::fromStdString(std::string{accountId}));
+            releaseDestroyedInvitation.bindValue(QStringLiteral(":event"),
+                                                 QString::fromStdString(eventId));
+            if (!exec(releaseDestroyedInvitation, failure,
+                      QStringLiteral("Release destroyed invitation dispatch")))
                 return failure;
         }
 
@@ -1120,6 +1149,36 @@ namespace javelin::jmap::cache
         addMembership.prepare(QStringLiteral(
             "INSERT INTO calendar_event_calendars (account_id,event_id,calendar_id) VALUES "
             "(:account,:event,:calendar)"));
+        QSqlQuery invitationOutbox{database};
+        invitationOutbox.prepare(QStringLiteral(
+            "SELECT self_participant_id FROM calendar_invitation_outbox WHERE account_id=:account "
+            "AND event_id=:event"));
+        QSqlQuery calendarRights{database};
+        calendarRights.prepare(QStringLiteral("SELECT rights_json FROM calendars WHERE "
+                                              "account_id=:account AND calendar_id=:calendar"));
+        QSqlQuery restorePendingInvitation{database};
+        restorePendingInvitation.prepare(QStringLiteral(
+            "INSERT INTO calendar_pending_invitations(account_id,event_id,self_participant_id,"
+            "source_notification_id) SELECT account_id,event_id,self_participant_id,"
+            "source_notification_id FROM calendar_invitation_outbox WHERE account_id=:account "
+            "AND event_id=:event ON CONFLICT(account_id,event_id) DO UPDATE SET "
+            "self_participant_id=excluded.self_participant_id,source_notification_id=COALESCE("
+            "excluded.source_notification_id,calendar_pending_invitations.source_notification_id),"
+            "last_seen_at=CURRENT_TIMESTAMP"));
+        QSqlQuery removePendingInvitation{database};
+        removePendingInvitation.prepare(
+            QStringLiteral("DELETE FROM calendar_pending_invitations WHERE account_id=:account AND "
+                           "event_id=:event"));
+        QSqlQuery resolveInvitation{database};
+        resolveInvitation.prepare(QStringLiteral(
+            "UPDATE calendar_invitation_outbox SET status='resolved',resolved_at="
+            "COALESCE(resolved_at,CURRENT_TIMESTAMP) WHERE account_id=:account AND event_id=:event "
+            "AND status<>'resolved'"));
+        QSqlQuery releaseInvitation{database};
+        releaseInvitation.prepare(QStringLiteral(
+            "DELETE FROM notification_dispatch_claims WHERE kind='invitation' AND claim_key IN "
+            "(SELECT invitation_key FROM calendar_invitation_outbox WHERE account_id=:account AND "
+            "event_id=:event)"));
         for (const auto& event : events)
         {
             const auto document = api::serializeCalendarEventDocument(event);
@@ -1160,6 +1219,78 @@ namespace javelin::jmap::cache
                 if (!exec(addMembership, failure, QStringLiteral("Add projected event calendar")))
                     return failure;
             }
+
+            invitationOutbox.bindValue(QStringLiteral(":account"),
+                                       QString::fromStdString(std::string{accountId}));
+            invitationOutbox.bindValue(QStringLiteral(":event"), QString::fromStdString(event.id));
+            if (!exec(invitationOutbox, failure, QStringLiteral("Read calendar invitation outbox")))
+                return failure;
+            if (!invitationOutbox.next())
+                continue;
+
+            const auto selfParticipantId = invitationOutbox.value(0).toString().toStdString();
+            const auto participant =
+                std::ranges::find(event.attendees, selfParticipantId, &calendar::Attendee::id);
+            bool pendingInvitation = !event.isDraft && !event.isOrigin &&
+                                     event.status != std::optional<std::string>{"cancelled"} &&
+                                     participant != event.attendees.end() &&
+                                     !participant->isOwner &&
+                                     participant->participationStatus == "needs-action";
+            bool hasCalendarMembership = false;
+            if (pendingInvitation)
+            {
+                for (const auto& [calendarId, present] : event.calendarIds)
+                {
+                    if (!present)
+                        continue;
+                    hasCalendarMembership = true;
+                    calendarRights.bindValue(QStringLiteral(":account"),
+                                             QString::fromStdString(std::string{accountId}));
+                    calendarRights.bindValue(QStringLiteral(":calendar"),
+                                             QString::fromStdString(calendarId));
+                    if (!exec(calendarRights, failure,
+                              QStringLiteral("Read invitation calendar rights")))
+                        return failure;
+                    if (!calendarRights.next() || (calendarRights.value(0).toUInt() & 32U) == 0U)
+                    {
+                        pendingInvitation = false;
+                        break;
+                    }
+                }
+                pendingInvitation = pendingInvitation && hasCalendarMembership;
+            }
+
+            if (pendingInvitation)
+            {
+                restorePendingInvitation.bindValue(QStringLiteral(":account"),
+                                                   QString::fromStdString(std::string{accountId}));
+                restorePendingInvitation.bindValue(QStringLiteral(":event"),
+                                                   QString::fromStdString(event.id));
+                if (!exec(restorePendingInvitation, failure,
+                          QStringLiteral("Restore pending calendar invitation")))
+                    return failure;
+                continue;
+            }
+
+            removePendingInvitation.bindValue(QStringLiteral(":account"),
+                                              QString::fromStdString(std::string{accountId}));
+            removePendingInvitation.bindValue(QStringLiteral(":event"),
+                                              QString::fromStdString(event.id));
+            if (!exec(removePendingInvitation, failure,
+                      QStringLiteral("Project answered calendar invitation")))
+                return failure;
+            resolveInvitation.bindValue(QStringLiteral(":account"),
+                                        QString::fromStdString(std::string{accountId}));
+            resolveInvitation.bindValue(QStringLiteral(":event"), QString::fromStdString(event.id));
+            if (!exec(resolveInvitation, failure,
+                      QStringLiteral("Resolve calendar invitation outbox")))
+                return failure;
+            releaseInvitation.bindValue(QStringLiteral(":account"),
+                                        QString::fromStdString(std::string{accountId}));
+            releaseInvitation.bindValue(QStringLiteral(":event"), QString::fromStdString(event.id));
+            if (!exec(releaseInvitation, failure,
+                      QStringLiteral("Release calendar invitation dispatch")))
+                return failure;
         }
 
         QSqlQuery removeOccurrences{database};

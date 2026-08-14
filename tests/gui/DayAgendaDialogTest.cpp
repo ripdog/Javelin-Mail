@@ -34,7 +34,10 @@ namespace
             .allDay = false,
             .recurring = false,
             .editable = editable,
-            .invitation = false,
+            .rsvpAllowed = false,
+            .participationStatus = {},
+            .responseMutationPending = false,
+            .responseError = {},
             .organizer = QStringLiteral("Alice <alice@example.test>"),
             .location = QStringLiteral("Meeting room"),
             .description = QStringLiteral("Detailed agenda text"),
@@ -190,6 +193,59 @@ TEST_CASE("day agenda event selection fills details and exposes edit explicitly"
                      { editRequested = true; });
     edit->click();
     CHECK(editRequested);
+    dialog.close();
+}
+
+TEST_CASE("day agenda RSVP controls preserve confirmed state and surface failures",
+          "[gui][calendar][agenda][invitation]")
+{
+    javelin::gui::calendar::DayAgendaDialog dialog;
+    auto selected = event(QStringLiteral("invitation"), QTime{11, 0}, QTime{12, 0},
+                          QStringLiteral("Planning invitation"), false);
+    selected.rsvpAllowed = true;
+    selected.participationStatus = QStringLiteral("tentative");
+    selected.recurring = true;
+    dialog.setDay(QDate{2026, 8, 10}, {selected}, selected.key);
+    dialog.show();
+    settleGui();
+
+    auto* accept = dialog.findChild<QPushButton*>(QStringLiteral("dayAgendaRsvpAccept"));
+    auto* tentative = dialog.findChild<QPushButton*>(QStringLiteral("dayAgendaRsvpTentative"));
+    auto* decline = dialog.findChild<QPushButton*>(QStringLiteral("dayAgendaRsvpDecline"));
+    REQUIRE(accept != nullptr);
+    REQUIRE(tentative != nullptr);
+    REQUIRE(decline != nullptr);
+    CHECK(accept->isVisible());
+    CHECK(tentative->isChecked());
+    CHECK_FALSE(accept->isChecked());
+    CHECK_FALSE(decline->isChecked());
+    CHECK(accept->isEnabled());
+
+    QString requestedStatus;
+    QObject::connect(&dialog, &javelin::gui::calendar::DayAgendaDialog::responseRequested, &dialog,
+                     [&requestedStatus](const QString&, const QString&, const QString& status)
+                     { requestedStatus = status; });
+    accept->click();
+    settleGui();
+    CHECK(requestedStatus == QStringLiteral("accepted"));
+    CHECK_FALSE(accept->isEnabled());
+    CHECK_FALSE(tentative->isEnabled());
+    CHECK_FALSE(decline->isEnabled());
+
+    dialog.setResponseMutationPending(false, QStringLiteral("Server rejected the response."));
+    settleGui();
+    CHECK(accept->isEnabled());
+    CHECK(tentative->isChecked());
+    CHECK_FALSE(accept->isChecked());
+    auto* error = dialog.findChild<QLabel*>(QStringLiteral("dayAgendaResponseError"));
+    REQUIRE(error != nullptr);
+    CHECK(error->isVisible());
+    CHECK(error->text() == QStringLiteral("Server rejected the response."));
+    CHECK(error->textInteractionFlags().testFlag(Qt::TextSelectableByKeyboard));
+
+    const auto labels = dialog.findChildren<QLabel*>();
+    CHECK(std::ranges::any_of(labels, [](const QLabel* label)
+                              { return label->text().contains(QStringLiteral("entire series")); }));
     dialog.close();
 }
 

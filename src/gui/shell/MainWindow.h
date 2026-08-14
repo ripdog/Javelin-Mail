@@ -186,6 +186,8 @@ namespace javelin::gui::shell
         void openMailtoUri(const QString& uri);
         void restoreDraft(const QString& accountId, const QString& draftEmailId,
                           const QString& composeSessionId);
+        void openCalendarEvent(const QString& calendarAccountId, const QString& eventId,
+                               const QString& recurrenceId, const QDate& navigationDate);
 
       protected Q_SLOTS:
         void saveNewToolbarConfig() override;

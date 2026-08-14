@@ -223,6 +223,7 @@ namespace javelin::jmap::api::detail
         bool showWithoutTime = false;
         bool isDraft = false;
         bool isOrigin = false;
+        std::optional<std::string> status;
         std::optional<std::string> organizerCalendarAddress;
         bool useDefaultAlerts = false;
         std::unordered_map<std::string, RawAlert> alerts;
@@ -261,6 +262,70 @@ namespace javelin::jmap::api::detail
         std::string state;
         std::vector<RawEvent> list;
         std::vector<std::string> notFound;
+    };
+
+    struct RawCalendarEventNotificationPerson
+    {
+        std::string name;
+        std::optional<std::string> email;
+        std::optional<std::string> principalId;
+        std::optional<std::string> calendarAddress;
+    };
+
+    struct RawCalendarEventNotification
+    {
+        std::string id;
+        std::string created;
+        RawCalendarEventNotificationPerson changedBy;
+        std::optional<std::string> comment;
+        std::string type;
+        std::string calendarEventId;
+        std::optional<bool> isDraft;
+        RawEvent event;
+        std::optional<glz::raw_json> eventPatch;
+    };
+
+    struct RawCalendarEventNotificationGetResponse
+    {
+        std::string accountId;
+        std::string state;
+        std::vector<RawCalendarEventNotification> list;
+        std::vector<std::string> notFound;
+    };
+
+    struct RawCalendarEventNotificationQueryFilter
+    {
+        std::optional<std::string> after;
+        std::optional<std::string> before;
+        std::optional<std::string> type;
+        std::optional<std::vector<std::string>> calendarEventIds;
+    };
+
+    struct RawComparator
+    {
+        std::string property;
+        bool isAscending = true;
+    };
+
+    struct RawCalendarEventNotificationQueryRequest
+    {
+        std::string accountId;
+        RawCalendarEventNotificationQueryFilter filter;
+        std::vector<RawComparator> sort;
+        std::uint64_t position = 0;
+        std::optional<std::uint64_t> limit;
+        bool calculateTotal = true;
+    };
+
+    struct RawCalendarEventNotificationQueryResponse
+    {
+        std::string accountId;
+        std::string queryState;
+        bool canCalculateChanges = false;
+        std::uint64_t position = 0;
+        std::vector<std::string> ids;
+        std::optional<std::uint64_t> total;
+        std::optional<std::uint64_t> limit;
     };
 
     struct RawSetError
@@ -398,10 +463,11 @@ JAVELIN_GLZ_META(RawEvent, "@type", &T::type, "id", &T::id, "baseEventId", &T::b
                  "title", &T::title, "description", &T::description, "locations", &T::locations,
                  "start", &T::start, "duration", &T::duration, "timeZone", &T::timeZone,
                  "showWithoutTime", &T::showWithoutTime, "isDraft", &T::isDraft, "isOrigin",
-                 &T::isOrigin, "organizerCalendarAddress", &T::organizerCalendarAddress, "utcStart",
-                 &T::utcStart, "utcEnd", &T::utcEnd, "recurrenceRule", &T::recurrenceRule,
-                 "recurrenceOverrides", &T::recurrenceOverrides, "participants", &T::participants,
-                 "useDefaultAlerts", &T::useDefaultAlerts, "alerts", &T::alerts);
+                 &T::isOrigin, "status", &T::status, "organizerCalendarAddress",
+                 &T::organizerCalendarAddress, "utcStart", &T::utcStart, "utcEnd", &T::utcEnd,
+                 "recurrenceRule", &T::recurrenceRule, "recurrenceOverrides",
+                 &T::recurrenceOverrides, "participants", &T::participants, "useDefaultAlerts",
+                 &T::useDefaultAlerts, "alerts", &T::alerts);
 JAVELIN_GLZ_META(RawEventWrite, "@type", &T::type, "uid", &T::uid, "calendarIds", &T::calendarIds,
                  "title", &T::title, "description", &T::description, "locations", &T::locations,
                  "start", &T::start, "duration", &T::duration, "timeZone", &T::timeZone,
@@ -410,6 +476,23 @@ JAVELIN_GLZ_META(RawEventWrite, "@type", &T::type, "uid", &T::uid, "calendarIds"
                  &T::participants, "useDefaultAlerts", &T::useDefaultAlerts, "alerts", &T::alerts);
 JAVELIN_GLZ_META(RawEventGetResponse, "accountId", &T::accountId, "state", &T::state, "list",
                  &T::list, "notFound", &T::notFound);
+JAVELIN_GLZ_META(RawCalendarEventNotificationPerson, "name", &T::name, "email", &T::email,
+                 "principalId", &T::principalId, "calendarAddress", &T::calendarAddress);
+JAVELIN_GLZ_META(RawCalendarEventNotification, "id", &T::id, "created", &T::created, "changedBy",
+                 &T::changedBy, "comment", &T::comment, "type", &T::type, "calendarEventId",
+                 &T::calendarEventId, "isDraft", &T::isDraft, "event", &T::event, "eventPatch",
+                 &T::eventPatch);
+JAVELIN_GLZ_META(RawCalendarEventNotificationGetResponse, "accountId", &T::accountId, "state",
+                 &T::state, "list", &T::list, "notFound", &T::notFound);
+JAVELIN_GLZ_META(RawCalendarEventNotificationQueryFilter, "after", &T::after, "before", &T::before,
+                 "type", &T::type, "calendarEventIds", &T::calendarEventIds);
+JAVELIN_GLZ_META(RawComparator, "property", &T::property, "isAscending", &T::isAscending);
+JAVELIN_GLZ_META(RawCalendarEventNotificationQueryRequest, "accountId", &T::accountId, "filter",
+                 &T::filter, "sort", &T::sort, "position", &T::position, "limit", &T::limit,
+                 "calculateTotal", &T::calculateTotal);
+JAVELIN_GLZ_META(RawCalendarEventNotificationQueryResponse, "accountId", &T::accountId,
+                 "queryState", &T::queryState, "canCalculateChanges", &T::canCalculateChanges,
+                 "position", &T::position, "ids", &T::ids, "total", &T::total, "limit", &T::limit);
 JAVELIN_GLZ_META(RawSetError, "type", &T::type, "description", &T::description, "properties",
                  &T::properties);
 JAVELIN_GLZ_META(RawCalendarSetRequest, "accountId", &T::accountId, "ifInState", &T::ifInState,
@@ -615,6 +698,7 @@ namespace javelin::jmap::api
                 .showWithoutTime = value.showWithoutTime,
                 .isDraft = value.isDraft,
                 .isOrigin = value.isOrigin,
+                .status = value.status,
                 .organizerCalendarAddress = value.organizerCalendarAddress,
                 .useDefaultAlerts = value.useDefaultAlerts,
                 .alerts = {},
@@ -785,6 +869,7 @@ namespace javelin::jmap::api
                 .showWithoutTime = isImportedAllDayEvent(raw),
                 .isDraft = raw.isDraft,
                 .isOrigin = raw.isOrigin,
+                .status = raw.status,
                 .organizerCalendarAddress = raw.organizerCalendarAddress,
                 .useDefaultAlerts = raw.useDefaultAlerts,
                 .alerts = {},
@@ -903,6 +988,32 @@ namespace javelin::jmap::api
                             : std::nullopt});
             }
             return value;
+        }
+
+        std::string notificationType(const calendar::CalendarEventNotificationType value)
+        {
+            switch (value)
+            {
+            case calendar::CalendarEventNotificationType::Created:
+                return "created";
+            case calendar::CalendarEventNotificationType::Updated:
+                return "updated";
+            case calendar::CalendarEventNotificationType::Destroyed:
+                return "destroyed";
+            }
+            return "created";
+        }
+
+        std::optional<calendar::CalendarEventNotificationType>
+        notificationType(const std::string_view value)
+        {
+            if (value == "created")
+                return calendar::CalendarEventNotificationType::Created;
+            if (value == "updated")
+                return calendar::CalendarEventNotificationType::Updated;
+            if (value == "destroyed")
+                return calendar::CalendarEventNotificationType::Destroyed;
+            return std::nullopt;
         }
 
         CalendarSetError setError(const detail::RawSetError& raw)
@@ -1064,6 +1175,47 @@ namespace javelin::jmap::api
         return arguments ? std::optional{MethodRequest<CalendarEventSetResponse>{
                                .name = "CalendarEvent/set", .arguments = *arguments}}
                          : std::nullopt;
+    }
+
+    std::optional<MethodRequest<CalendarEventNotificationQueryResponse>>
+    calendarEventNotificationQuery(const CalendarEventNotificationQueryRequest& request)
+    {
+        const auto arguments = serialize(detail::RawCalendarEventNotificationQueryRequest{
+            .accountId = request.accountId,
+            .filter = {.after = request.filter.after ? std::optional{request.filter.after->value}
+                                                     : std::nullopt,
+                       .before = request.filter.before ? std::optional{request.filter.before->value}
+                                                       : std::nullopt,
+                       .type = request.filter.type
+                                   ? std::optional{notificationType(*request.filter.type)}
+                                   : std::nullopt,
+                       .calendarEventIds = request.filter.calendarEventIds},
+            .sort = {{.property = "created", .isAscending = true}},
+            .position = request.position,
+            .limit = request.limit,
+            .calculateTotal = request.calculateTotal});
+        return arguments ? std::optional{MethodRequest<CalendarEventNotificationQueryResponse>{
+                               .name = "CalendarEventNotification/query", .arguments = *arguments}}
+                         : std::nullopt;
+    }
+
+    std::optional<MethodRequest<CalendarEventNotificationGetResponse>>
+    calendarEventNotificationGet(const GetRequest& request)
+    {
+        const auto arguments = serializeGetRequest(request);
+        return arguments ? std::optional{MethodRequest<CalendarEventNotificationGetResponse>{
+                               .name = "CalendarEventNotification/get", .arguments = *arguments}}
+                         : std::nullopt;
+    }
+
+    std::optional<MethodRequest<CalendarEventNotificationChangesResponse>>
+    calendarEventNotificationChanges(const ChangesRequest& request)
+    {
+        const auto arguments = serializeChangesRequest(request);
+        return arguments
+                   ? std::optional{MethodRequest<CalendarEventNotificationChangesResponse>{
+                         .name = "CalendarEventNotification/changes", .arguments = *arguments}}
+                   : std::nullopt;
     }
 
     ParsedEnvelope<ParticipantIdentityGetResponse>
@@ -1256,6 +1408,75 @@ namespace javelin::jmap::api
             result.notUpdated.emplace(id, setError(value));
         for (const auto& [id, value] : raw.value->notDestroyed)
             result.notDestroyed.emplace(id, setError(value));
+        return {.value = std::move(result), .error = std::nullopt};
+    }
+
+    ParsedEnvelope<CalendarEventNotificationQueryResponse>
+    parseCalendarEventNotificationQueryResponse(std::string_view json)
+    {
+        auto raw = parseRaw<detail::RawCalendarEventNotificationQueryResponse>(json);
+        if (!raw.ok())
+            return {.value = std::nullopt, .error = raw.error};
+        return {.value =
+                    CalendarEventNotificationQueryResponse{
+                        .accountId = std::move(raw.value->accountId),
+                        .queryState = std::move(raw.value->queryState),
+                        .canCalculateChanges = raw.value->canCalculateChanges,
+                        .position = raw.value->position,
+                        .ids = std::move(raw.value->ids),
+                        .total = raw.value->total,
+                        .limit = raw.value->limit},
+                .error = std::nullopt};
+    }
+
+    ParsedEnvelope<CalendarEventNotificationGetResponse>
+    parseCalendarEventNotificationGetResponse(std::string_view json)
+    {
+        auto raw = parseRaw<detail::RawCalendarEventNotificationGetResponse>(json);
+        if (!raw.ok())
+            return {.value = std::nullopt, .error = raw.error};
+        CalendarEventNotificationGetResponse result{.accountId = raw.value->accountId,
+                                                    .state = raw.value->state,
+                                                    .list = {},
+                                                    .notFound = raw.value->notFound};
+        result.list.reserve(raw.value->list.size());
+        for (const auto& item : raw.value->list)
+        {
+            const auto parsedType = notificationType(item.type);
+            if (!parsedType)
+                return {.value = std::nullopt,
+                        .error =
+                            std::string{"Invalid CalendarEventNotification type: "} + item.type};
+            auto snapshot = event(result.accountId, item.event);
+            if (snapshot.id.empty())
+                snapshot.id = item.calendarEventId;
+            result.list.push_back(calendar::CalendarEventNotification{
+                .accountId = result.accountId,
+                .id = item.id,
+                .created = {.value = item.created},
+                .changedBy = {.name = item.changedBy.name,
+                              .email = item.changedBy.email,
+                              .principalId = item.changedBy.principalId,
+                              .calendarAddress = item.changedBy.calendarAddress},
+                .comment = item.comment,
+                .type = *parsedType,
+                .calendarEventId = item.calendarEventId,
+                .isDraft = item.isDraft,
+                .event = std::move(snapshot),
+                .eventPatchJson = item.eventPatch ? std::optional<std::string>{item.eventPatch->str}
+                                                  : std::nullopt});
+        }
+        return {.value = std::move(result), .error = std::nullopt};
+    }
+
+    ParsedEnvelope<CalendarEventNotificationChangesResponse>
+    parseCalendarEventNotificationChangesResponse(std::string_view json)
+    {
+        const auto parsed = parseChangesResponse(json);
+        if (!parsed.ok())
+            return {.value = std::nullopt, .error = parsed.error};
+        CalendarEventNotificationChangesResponse result;
+        static_cast<ChangesResponse&>(result) = *parsed.value;
         return {.value = std::move(result), .error = std::nullopt};
     }
 

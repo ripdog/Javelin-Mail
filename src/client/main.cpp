@@ -618,6 +618,16 @@ int main(int argc, char* argv[])
                     restoreMainWindow(activationRoute.activationToken);
                     mainWindow->openPreferencesForConnection(activationRoute.connectionId);
                 }
+                else if constexpr (std::is_same_v<Route, javelin::protocol::OpenCalendarEventRoute>)
+                {
+                    restoreMainWindow(activationRoute.activationToken);
+                    const auto navigationDate =
+                        QDate::fromString(activationRoute.navigationDate, Qt::ISODate);
+                    mainWindow->openCalendarEvent(
+                        activationRoute.calendarAccountId, activationRoute.eventId,
+                        activationRoute.recurrenceId.value_or(QString{}),
+                        navigationDate.isValid() ? navigationDate : QDate::currentDate());
+                }
                 else if constexpr (std::is_same_v<Route, javelin::protocol::RestoreDraftRoute>)
                 {
                     restoreMainWindow(activationRoute.activationToken);

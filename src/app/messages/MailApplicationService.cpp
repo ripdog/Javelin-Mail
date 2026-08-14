@@ -663,8 +663,19 @@ namespace javelin::app
           m_workScheduler(workScheduler), m_undoManager(undoManager)
     {
         connect(&m_accountRuntime, &AccountRuntimeManager::calendarStateChanged, this,
-                [this](const QString& ownerAccountId)
-                { scheduleRefresh(ownerAccountId.toStdString()); });
+                [this](const QString& ownerAccountId,
+                       const javelin::jmap::sync::AccountTypeStateMap& changedStates)
+                {
+                    const bool eventStateChanged =
+                        std::ranges::any_of(changedStates,
+                                            [](const auto& account)
+                                            {
+                                                return account.second.contains("Calendar") ||
+                                                       account.second.contains("CalendarEvent");
+                                            });
+                    if (eventStateChanged)
+                        scheduleRefresh(ownerAccountId.toStdString());
+                });
     }
 
     SieveApplicationService::SieveApplicationService(
@@ -4539,10 +4550,7 @@ namespace javelin::app
                 });
         connect(&coordinator, &AccountSyncCoordinator::calendarStateChanged, this,
                 [this](const QString& ownerAccountId, const auto& changedStates)
-                {
-                    static_cast<void>(changedStates);
-                    Q_EMIT calendarStateChanged(ownerAccountId);
-                });
+                { Q_EMIT calendarStateChanged(ownerAccountId, changedStates); });
         connect(&coordinator, &AccountSyncCoordinator::notificationMailboxRefreshed, this,
                 &AccountRuntimeManager::notificationMailboxRefreshed);
         connect(

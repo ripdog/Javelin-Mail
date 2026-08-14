@@ -17,6 +17,7 @@ class QFocusEvent;
 class QGridLayout;
 class QMenu;
 class QResizeEvent;
+class QToolButton;
 
 namespace javelin::gui::settings
 {
@@ -58,6 +59,18 @@ namespace javelin::gui::calendar
         QString name;
     };
 
+    struct PendingInvitationDisplay
+    {
+        QString accountId;
+        QString eventId;
+        QString recurrenceId;
+        QDate navigationDate;
+        QString title;
+        QString organizer;
+        QDateTime displayTime;
+        bool allDay = false;
+    };
+
     class AccessibleDayCell;
     class AccessibleMonthCalendar;
     class DayCellWidget;
@@ -75,6 +88,7 @@ namespace javelin::gui::calendar
         void setEvents(std::vector<MonthEvent> events);
         void setCalendars(std::vector<CalendarDisplay> calendars);
         void setCalendarAccounts(std::vector<CalendarAccountDisplay> accounts);
+        void setPendingInvitations(std::vector<PendingInvitationDisplay> invitations);
         void applicationPaletteChanged();
 
         [[nodiscard]] QDate displayedMonth() const;
@@ -103,6 +117,10 @@ namespace javelin::gui::calendar
                                 const QString& recurrenceId);
         void eventActivated(const QString& accountId, const QString& eventId,
                             const QString& recurrenceId);
+        void eventEditRequested(const QString& accountId, const QString& eventId,
+                                const QString& recurrenceId);
+        void pendingInvitationActivated(const QString& accountId, const QString& eventId,
+                                        const QString& recurrenceId, const QDate& navigationDate);
         void eventContextMenuRequested(const QPoint& globalPosition, const QString& accountId,
                                        const QString& eventId, const QString& recurrenceId);
         void eventContextActionRequested(const QString& actionId, const QString& accountId,
@@ -143,6 +161,10 @@ namespace javelin::gui::calendar
         QDate m_selectedDate;
         QGridLayout* m_grid = nullptr;
         QLabel* m_title = nullptr;
+        QWidget* m_invitationBanner = nullptr;
+        QLabel* m_invitationLabel = nullptr;
+        QToolButton* m_viewInvitations = nullptr;
+        QMenu* m_invitationMenu = nullptr;
         QMenu* m_calendarMenu = nullptr;
         std::array<QLabel*, 7> m_weekdayHeaders{};
         std::array<DayCellWidget*, 42> m_cells{};
