@@ -302,6 +302,15 @@ calendar, account refresh, message navigation, content loading, message-list ses
 follow the same pattern: GUI controllers own interaction and presentation lifetime, while daemon
 services own application policy and operational execution.
 
+The mailbox associated with a list tab is selection context, not proof that every visible Email is
+resident in that mailbox: an expanded conversation can expose members from other mailboxes. Move,
+copy, delete, and junk planning therefore evaluates each resolved Email's effective cached
+`mailboxIds`. Destination menus retain every writable mailbox, including the open mailbox, so a
+mixed-residency selection can target a mailbox already containing only part of the selection.
+Search selections use the same per-Email rule and never acquire an implied source mailbox.
+Ordinary Delete always targets Trash from those real residencies; only the distinct permanent-delete
+command may destroy Email objects, regardless of which mailbox tab happens to expose a row.
+
 Mailbox and search tabs use application-layer sessions that own query-window reads, request
 generations, observation lifetimes, incremental list loading, stale recovery, and prefetch. The GUI
 presents those bounded windows as one virtualized infinite-scrolling list; it does not expose page

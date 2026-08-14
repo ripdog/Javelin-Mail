@@ -46,6 +46,7 @@ namespace
                 .appearance = std::nullopt,
                 .attachments = std::nullopt,
                 .undoSendDelaySeconds = std::nullopt,
+                .undoSendUsesDialog = std::nullopt,
                 .workspace = std::nullopt};
     }
 
@@ -87,6 +88,7 @@ namespace
         settings.setValue(QStringLiteral("attachments/alwaysAsk"), false);
         settings.setValue(QStringLiteral("attachments/directory"), QStringLiteral("/tmp/mail"));
         settings.setValue(QStringLiteral("compose/undoSendDelaySeconds"), 30);
+        settings.setValue(QStringLiteral("compose/undoSendUsesDialog"), true);
         settings.beginGroup(QStringLiteral("mainWindow"));
         settings.setValue(QStringLiteral("geometry"), QByteArrayLiteral("legacy-geometry"));
         settings.setValue(QStringLiteral("activeTabIndex"), 0);
@@ -117,11 +119,12 @@ TEST_CASE("settings repository creates and persists its schema identity", "[app]
     const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
     REQUIRE(snapshot != nullptr);
     CHECK(snapshot->revision.value == 0);
-    CHECK(snapshot->schemaVersion == 5);
+    CHECK(snapshot->schemaVersion == 6);
     CHECK(snapshot->undoSendDelaySeconds == 10);
+    CHECK_FALSE(snapshot->undoSendUsesDialog);
 
     QSettings persisted{path, QSettings::IniFormat};
-    CHECK(persisted.value(QStringLiteral("settings/schemaVersion")).toUInt() == 5);
+    CHECK(persisted.value(QStringLiteral("settings/schemaVersion")).toUInt() == 6);
     CHECK(persisted.value(QStringLiteral("settings/revision")).toULongLong() == 0);
 }
 
@@ -158,6 +161,7 @@ TEST_CASE("settings repository migrates the complete legacy operational shape", 
     CHECK_FALSE(snapshot->attachments.alwaysAsk);
     CHECK(snapshot->attachments.directory == QStringLiteral("/tmp/mail"));
     CHECK(snapshot->undoSendDelaySeconds == 30);
+    CHECK(snapshot->undoSendUsesDialog);
     const auto workspace =
         javelin::gui::shell::deserializeMainWindowState(snapshot->workspace.mainWindowState, {});
     CHECK(workspace.geometry == QByteArrayLiteral("legacy-geometry"));
@@ -170,7 +174,7 @@ TEST_CASE("settings repository migrates the complete legacy operational shape", 
     CHECK(snapshot->workspace.calendarColorOverrides.front().color == QStringLiteral("#123456"));
 
     QSettings migrated{path, QSettings::IniFormat};
-    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 5);
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 6);
     CHECK(migrated.value(QStringLiteral("settings/revision")).toULongLong() == 0);
     CHECK_FALSE(migrated.value(QStringLiteral("translation/enabled")).toBool());
     CHECK(migrated.value(QStringLiteral("translation/targetLanguage")).toString() ==
@@ -209,13 +213,13 @@ TEST_CASE("settings repository migrates schema one workspace state", "[app][sett
     const auto result = repository.load();
     const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
     REQUIRE(snapshot != nullptr);
-    CHECK(snapshot->schemaVersion == 5);
+    CHECK(snapshot->schemaVersion == 6);
     CHECK(snapshot->revision.value == 0);
     CHECK(javelin::gui::shell::deserializeMainWindowState(snapshot->workspace.mainWindowState, {})
               .activeTabIndex == 4);
 
     QSettings migrated{path, QSettings::IniFormat};
-    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 5);
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 6);
     CHECK_FALSE(migrated.contains(QStringLiteral("mainWindow/activeTabIndex")));
 }
 
@@ -248,12 +252,37 @@ TEST_CASE("schema four migration retries legacy OAuth grants blocked by missing 
     const auto result = repository.load();
     const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
     REQUIRE(snapshot != nullptr);
-    CHECK(snapshot->schemaVersion == 5);
+    CHECK(snapshot->schemaVersion == 6);
     REQUIRE(snapshot->accounts.size() == 1);
     CHECK_FALSE(snapshot->accounts.front().reauthenticationRequired);
 
     QSettings migrated{path, QSettings::IniFormat};
-    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 5);
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 6);
+}
+
+TEST_CASE("schema five migration adds an empty email context menu override", "[app][settings]")
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("schema-five.ini"));
+    QSettings settings{path, QSettings::IniFormat};
+    settings.setValue(QStringLiteral("settings/schemaVersion"), 5);
+    settings.setValue(QStringLiteral("workspace/formatVersion"), 1);
+    settings.setValue(QStringLiteral("workspace/mainWindowState"),
+                      QByteArrayLiteral("schema-five-window"));
+    settings.sync();
+    REQUIRE(settings.status() == QSettings::NoError);
+
+    auto repository = repositoryFor(path);
+    const auto result = repository.load();
+    const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
+    REQUIRE(snapshot != nullptr);
+    CHECK(snapshot->schemaVersion == 6);
+    CHECK(snapshot->workspace.mainWindowState == QByteArrayLiteral("schema-five-window"));
+    CHECK(snapshot->workspace.emailContextMenuLayout.empty());
+
+    QSettings migrated{path, QSettings::IniFormat};
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 6);
 }
 
 TEST_CASE("settings updates require the current revision and round-trip typed values",
@@ -296,12 +325,15 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
             .mailboxIds = {},
         }};
     update.undoSendDelaySeconds = 45;
+    update.undoSendUsesDialog = true;
     update.workspace = javelin::protocol::WorkspaceSettings{
         .formatVersion = 1,
         .mainWindowState = QByteArrayLiteral("workspace-state"),
         .composeRichTextDefault = false,
         .calendarColorOverrides = {{.calendarId = QStringLiteral("calendar-2"),
                                     .color = QStringLiteral("#abcdef")}},
+        .emailContextMenuLayout = {QStringLiteral("compose_reply"), QStringLiteral("separator"),
+                                   QStringLiteral("archive_email")},
     };
     const auto accepted =
         repository.update({.baseRevision = initial->revision, .update = std::move(update)});
@@ -334,12 +366,16 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
     REQUIRE(reloaded->notificationMailboxSelections.size() == 1);
     CHECK(reloaded->notificationMailboxSelections.front().mailboxIds.empty());
     CHECK(reloaded->undoSendDelaySeconds == 45);
+    CHECK(reloaded->undoSendUsesDialog);
     CHECK(reloaded->workspace.mainWindowState == QByteArrayLiteral("workspace-state"));
     CHECK_FALSE(reloaded->workspace.composeRichTextDefault);
     REQUIRE(reloaded->workspace.calendarColorOverrides.size() == 1);
     CHECK(reloaded->workspace.calendarColorOverrides.front().calendarId ==
           QStringLiteral("calendar-2"));
     CHECK(reloaded->workspace.calendarColorOverrides.front().color == QStringLiteral("#abcdef"));
+    CHECK(reloaded->workspace.emailContextMenuLayout ==
+          std::vector<QString>{QStringLiteral("compose_reply"), QStringLiteral("separator"),
+                               QStringLiteral("archive_email")});
 
     auto staleUpdate = emptyUpdate();
     staleUpdate.appearance = javelin::protocol::AppearanceSettings{.messageColorMode = 1};

@@ -3,7 +3,7 @@
 #include "app/MailboxSession.h"
 #include "app/SearchSession.h"
 #include "gui/IconUtils.h"
-#include "gui/mailboxes/MailboxIconUtils.h"
+#include "gui/mailboxes/MailboxPresentation.h"
 #include "gui/settings/GuiSettings.h"
 
 #include <KLocalizedString>
@@ -123,7 +123,8 @@ namespace javelin::gui::shell
         {
             return mailboxTab->session == nullptr
                        ? QIcon{}
-                       : javelin::gui::mailboxes::mailboxIcon(mailboxTab->session->role(), color);
+                       : javelin::gui::mailboxes::mailboxPresentationIcon(
+                             mailboxTab->session->role(), color);
         }
         if (std::holds_alternative<SearchTabState>(tab.content))
         {

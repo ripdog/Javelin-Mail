@@ -490,13 +490,12 @@ set(JAVELIN_FORMAT_FILES
     src/gui/IconUtils.h
     src/gui/logging/LogViewerDialog.cpp
     src/gui/logging/LogViewerDialog.h
-    src/gui/mailboxes/MailboxIconUtils.cpp
-    src/gui/mailboxes/MailboxIconUtils.h
+    src/gui/mailboxes/MailboxPresentation.cpp
+    src/gui/mailboxes/MailboxPresentation.h
     src/gui/mailboxes/MailboxPropertiesDialog.cpp
     src/gui/mailboxes/MailboxPropertiesDialog.h
     src/gui/mailboxes/MailboxSelection.cpp
     src/gui/mailboxes/MailboxSelection.h
-    src/gui/mailboxes/MailboxSort.h
     src/gui/mailboxes/MailboxTreeDelegate.cpp
     src/gui/mailboxes/MailboxTreeDelegate.h
     src/gui/mailboxes/MailboxTreeModel.cpp
@@ -523,6 +522,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/compose/SignatureTrackingPolicy.h
     src/gui/compose/SendingIdentitiesDialog.cpp
     src/gui/compose/SendingIdentitiesDialog.h
+    src/gui/compose/UndoSendDialog.cpp
+    src/gui/compose/UndoSendDialog.h
     src/gui/identity/IdentityManagerDialog.cpp
     src/gui/identity/IdentityManagerDialog.h
     src/gui/compose/ComposeUiPreferences.cpp
@@ -654,6 +655,10 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/ComposeTabPolicy.h
     src/gui/shell/MessageActionPolicy.cpp
     src/gui/shell/MessageActionPolicy.h
+    src/gui/shell/EmailContextMenuLayout.cpp
+    src/gui/shell/EmailContextMenuLayout.h
+    src/gui/shell/EmailContextMenuEditorDialog.cpp
+    src/gui/shell/EmailContextMenuEditorDialog.h
     src/gui/shell/MessageListPresentationPolicy.cpp
     src/gui/shell/MessageListPresentationPolicy.h
     src/gui/shell/MessageListTabBindingPresenter.cpp
@@ -1311,13 +1316,12 @@ add_library(javelin_gui STATIC
     src/gui/developer/DeveloperOptionsDialog.h
     src/gui/logging/LogViewerDialog.cpp
     src/gui/logging/LogViewerDialog.h
-    src/gui/mailboxes/MailboxIconUtils.cpp
-    src/gui/mailboxes/MailboxIconUtils.h
+    src/gui/mailboxes/MailboxPresentation.cpp
+    src/gui/mailboxes/MailboxPresentation.h
     src/gui/mailboxes/MailboxPropertiesDialog.cpp
     src/gui/mailboxes/MailboxPropertiesDialog.h
     src/gui/mailboxes/MailboxSelection.cpp
     src/gui/mailboxes/MailboxSelection.h
-    src/gui/mailboxes/MailboxSort.h
     src/gui/compose/ComposeTabWidget.cpp
     src/gui/compose/ComposeTabWidget.h
     src/gui/compose/AttachmentController.cpp
@@ -1338,6 +1342,8 @@ add_library(javelin_gui STATIC
     src/gui/compose/SignatureTrackingPolicy.h
     src/gui/compose/SendingIdentitiesDialog.cpp
     src/gui/compose/SendingIdentitiesDialog.h
+    src/gui/compose/UndoSendDialog.cpp
+    src/gui/compose/UndoSendDialog.h
     src/gui/identity/IdentityManagerDialog.cpp
     src/gui/identity/IdentityManagerDialog.h
     src/gui/compose/ComposeUiPreferences.cpp
@@ -1468,6 +1474,10 @@ add_library(javelin_gui STATIC
     src/gui/shell/ComposeTabPolicy.h
     src/gui/shell/MessageActionPolicy.cpp
     src/gui/shell/MessageActionPolicy.h
+    src/gui/shell/EmailContextMenuLayout.cpp
+    src/gui/shell/EmailContextMenuLayout.h
+    src/gui/shell/EmailContextMenuEditorDialog.cpp
+    src/gui/shell/EmailContextMenuEditorDialog.h
     src/gui/shell/MessageListPresentationPolicy.cpp
     src/gui/shell/MessageListPresentationPolicy.h
     src/gui/shell/MessageListTabBindingPresenter.cpp

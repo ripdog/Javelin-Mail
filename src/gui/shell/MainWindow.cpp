@@ -19,7 +19,7 @@
 #include "gui/developer/DeveloperOptionsDialog.h"
 #include "gui/identity/IdentityManagerDialog.h"
 #include "gui/logging/LogViewerDialog.h"
-#include "gui/mailboxes/MailboxIconUtils.h"
+#include "gui/mailboxes/MailboxPresentation.h"
 #include "gui/mailboxes/MailboxPropertiesDialog.h"
 #include "gui/mailboxes/MailboxSelection.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
@@ -42,6 +42,7 @@
 #include "gui/shell/ComposeTabPolicy.h"
 #include "gui/shell/ContactsTabController.h"
 #include "gui/shell/ElidingLabel.h"
+#include "gui/shell/EmailContextMenuEditorDialog.h"
 #include "gui/shell/FocusedCommandRouter.h"
 #include "gui/shell/LayeredStatusBar.h"
 #include "gui/shell/MailActionController.h"
@@ -79,6 +80,7 @@
 #include <KLocalizedString>
 #include <KStandardAction>
 #include <KToolBar>
+#include <KXMLGUIFactory>
 
 #include <QAbstractButton>
 #include <QAction>
@@ -559,6 +561,20 @@ namespace javelin::gui::shell
         setupGUI(KXmlGuiWindow::ToolBar | KXmlGuiWindow::Keys | KXmlGuiWindow::Save |
                      KXmlGuiWindow::Create,
                  QStringLiteral("javelinmailui.rc"));
+        m_emailContextMenu = qobject_cast<QMenu*>(
+            guiFactory()->container(QStringLiteral("email_context_menu"), this));
+        if (m_emailContextMenu != nullptr)
+        {
+            m_mailActionController->configureContextMenu(
+                *m_emailContextMenu,
+                [this] { return m_settings.workspaceSettings().emailContextMenuLayout; },
+                [this](const QList<QAction*>& actions)
+                {
+                    unplugActionList(QStringLiteral("email_context_menu_layout"));
+                    if (!actions.empty())
+                        plugActionList(QStringLiteral("email_context_menu_layout"), actions);
+                });
+        }
         if (auto* composeToolBar = toolBar(QStringLiteral("composeToolBar"));
             composeToolBar != nullptr)
         {
@@ -767,6 +783,14 @@ namespace javelin::gui::shell
         m_preferencesAction->setIcon(
             thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/settings.svg")));
 
+        m_configureEmailContextMenuAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("configure")),
+                        i18n("Configure Email Context Menu…"), this);
+        connect(m_configureEmailContextMenuAction, &QAction::triggered, this,
+                &MainWindow::configureEmailContextMenu);
+        actionCollection()->addAction(QStringLiteral("configure_email_context_menu"),
+                                      m_configureEmailContextMenuAction);
+
         m_themeController = new ThemeController(
             *this, *m_quickFilterController, *m_messageSortButton,
             [this]
@@ -904,6 +928,14 @@ namespace javelin::gui::shell
         connect(m_viewSourceAction, &QAction::triggered, this,
                 &MainWindow::viewSelectedMessageSource);
         actionCollection()->addAction(QStringLiteral("view_message_source"), m_viewSourceAction);
+
+        m_findSenderContextAction = new QAction(QIcon::fromTheme(QStringLiteral("system-search")),
+                                                i18n("Find all conversations with sender"), this);
+        connect(m_findSenderContextAction, &QAction::triggered, this,
+                [this] { findConversationsWithSender(m_messageView->currentIndex()); });
+        actionCollection()->addAction(QStringLiteral("find_conversations_with_sender"),
+                                      m_findSenderContextAction);
+        KActionCollection::setShortcutsConfigurable(m_findSenderContextAction, false);
 
         m_advancedSearchAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/search.svg")),
@@ -1299,6 +1331,7 @@ namespace javelin::gui::shell
                 {
                     markSearchTabsStaleForAccount(accountId.toStdString());
                     refreshMessageListPreservingSelection();
+                    m_messageModel->refreshExpandedThreadMembers();
                     refreshSelectionFromModels();
                 });
         connect(m_messageCommandController, &MessageCommandController::junkStateChanged, this,
@@ -1306,6 +1339,7 @@ namespace javelin::gui::shell
                 {
                     markSearchTabsStaleForAccount(accountId.toStdString());
                     refreshMessageListPreservingSelection();
+                    m_messageModel->refreshExpandedThreadMembers();
                     refreshSelectionFromModels();
                     m_messageViewContainer->refresh(m_messageViewReader);
                     updateEmptyStates();
@@ -2139,6 +2173,20 @@ namespace javelin::gui::shell
     void MainWindow::saveNewToolbarConfig()
     {
         KXmlGuiWindow::saveNewToolbarConfig();
+        m_emailContextMenu = qobject_cast<QMenu*>(
+            guiFactory()->container(QStringLiteral("email_context_menu"), this));
+        if (m_emailContextMenu != nullptr)
+        {
+            m_mailActionController->configureContextMenu(
+                *m_emailContextMenu,
+                [this] { return m_settings.workspaceSettings().emailContextMenuLayout; },
+                [this](const QList<QAction*>& actions)
+                {
+                    unplugActionList(QStringLiteral("email_context_menu_layout"));
+                    if (!actions.empty())
+                        plugActionList(QStringLiteral("email_context_menu_layout"), actions);
+                });
+        }
         updateToolbarForActiveTab();
     }
 
@@ -2970,6 +3018,12 @@ namespace javelin::gui::shell
     void MainWindow::openPreferences()
     {
         openPreferencesForConnection({});
+    }
+
+    void MainWindow::configureEmailContextMenu()
+    {
+        EmailContextMenuEditorDialog dialog{m_settings, *actionCollection(), this};
+        dialog.exec();
     }
 
     void MainWindow::openPreferencesForConnection(const QString& connectionId)

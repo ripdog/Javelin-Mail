@@ -62,9 +62,23 @@ namespace javelin::protocol
         QString activationToken;
     };
 
+    struct ShowUndoSendDialogRoute
+    {
+        QString sendId;
+        QString title;
+        QString message;
+        qint64 deadlineEpochMilliseconds = 0;
+    };
+
+    struct CloseUndoSendDialogRoute
+    {
+        QString sendId;
+    };
+
     using ActivationRoute =
         std::variant<OpenMailboxRoute, OpenMessageRoute, OpenComposeRoute, RaiseGuiRoute,
-                     OpenSettingsRoute, RestoreDraftRoute, OpenTaskCenterRoute, OpenMailtoRoute>;
+                     OpenSettingsRoute, RestoreDraftRoute, OpenTaskCenterRoute, OpenMailtoRoute,
+                     ShowUndoSendDialogRoute, CloseUndoSendDialogRoute>;
 
     struct ActivationRequested
     {

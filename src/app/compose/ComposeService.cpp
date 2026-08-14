@@ -336,6 +336,12 @@ namespace javelin::app
         co_return result;
     }
 
+    std::variant<bool, javelin::jmap::OperationError>
+    ComposeService::cancelDeferredSend(const QString& sendId)
+    {
+        return m_deferredSendService.cancelTargeted(sendId);
+    }
+
     std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
                  javelin::jmap::OperationError>
     ComposeService::loadWorkingCopy(const std::string_view composeSessionId) const

@@ -2,9 +2,11 @@
 
 #include "gui/shell/TabWorkspace.h"
 
+#include <QList>
 #include <QModelIndex>
 #include <QObject>
 #include <QPoint>
+#include <QPointer>
 #include <QString>
 
 #include <functional>
@@ -72,6 +74,9 @@ namespace javelin::gui::shell
         void activate(const TabState* tab);
         void update();
         void rebuildTagsMenu();
+        void configureContextMenu(QMenu& menu,
+                                  std::function<std::vector<QString>()> configuredLayout,
+                                  std::function<void(const QList<QAction*>&)> replaceActionList);
         void showContextMenu(const QPoint& position,
                              std::function<void(QModelIndex)> findConversationsWithSender);
 
@@ -97,6 +102,10 @@ namespace javelin::gui::shell
         std::function<void(QString, int)> m_showStatus;
         std::function<void(const javelin::jmap::OperationError&)> m_showError;
         std::function<void()> m_refreshMessageList;
+        QPointer<QMenu> m_contextMenu;
+        std::function<std::vector<QString>()> m_configuredContextMenuLayout;
+        std::function<void(const QList<QAction*>&)> m_replaceContextMenuActionList;
+        QList<QObject*> m_contextMenuObjects;
         const TabState* m_activeTab = nullptr;
     };
 } // namespace javelin::gui::shell

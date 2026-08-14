@@ -287,6 +287,7 @@ add_executable(javelin_gui_policy_tests
     gui/MailboxSelectionTest.cpp
     gui/MailboxSortTest.cpp
     gui/MessageActionPolicyTest.cpp
+    gui/EmailContextMenuLayoutTest.cpp
     gui/MessageActionSelectionTest.cpp
     gui/MessageContentPolicyTest.cpp
     gui/MessageSelectionRestorationTest.cpp
@@ -376,12 +377,14 @@ add_executable(javelin_gui_widget_tests
     gui/FontUtilsTest.cpp
     gui/IconUtilsTest.cpp
     gui/IndeterminateProgressBarTest.cpp
+    gui/EmailContextMenuEditorDialogTest.cpp
     gui/MessageBannerWidgetTest.cpp
     gui/MessageDragListViewTest.cpp
     gui/MailboxPreferenceStateTest.cpp
     gui/MailboxPendingCreateTest.cpp
     gui/MailboxPropertiesDialogTest.cpp
     gui/SendingIdentitiesDialogTest.cpp
+    gui/UndoSendDialogTest.cpp
 )
 set_source_files_properties(gui/NoRttiAccessibleObject.cpp PROPERTIES COMPILE_OPTIONS -fno-rtti)
 target_link_libraries(javelin_gui_widget_tests

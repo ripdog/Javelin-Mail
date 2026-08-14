@@ -90,22 +90,27 @@ namespace
         SettingsReadReply handleGetSettings(const GetSettingsRequest&) override
         {
             return SettingsSnapshotReply{
-                .snapshot = {.revision = {.value = 5},
-                             .schemaVersion = 3,
-                             .accounts = {},
-                             .syncedMailboxSelections = {},
-                             .notificationMailboxSelections = {},
-                             .remoteContentSenders = {},
-                             .remoteContentDomains = {},
-                             .appearance = {},
-                             .attachments = {},
-                             .undoSendDelaySeconds = 10,
-                             .workspace = {.formatVersion = 1,
-                                           .mainWindowState = QByteArrayLiteral("window-state"),
-                                           .composeRichTextDefault = false,
-                                           .calendarColorOverrides = {
-                                               {.calendarId = QStringLiteral("calendar-1"),
-                                                .color = QStringLiteral("#123456")}}}}};
+                .snapshot = {
+                    .revision = {.value = 5},
+                    .schemaVersion = 3,
+                    .accounts = {},
+                    .syncedMailboxSelections = {},
+                    .notificationMailboxSelections = {},
+                    .remoteContentSenders = {},
+                    .remoteContentDomains = {},
+                    .appearance = {},
+                    .attachments = {},
+                    .undoSendDelaySeconds = 10,
+                    .undoSendUsesDialog = false,
+                    .workspace = {
+                        .formatVersion = 1,
+                        .mainWindowState = QByteArrayLiteral("window-state"),
+                        .composeRichTextDefault = false,
+                        .calendarColorOverrides = {{.calendarId = QStringLiteral("calendar-1"),
+                                                    .color = QStringLiteral("#123456")}},
+                        .emailContextMenuLayout = {QStringLiteral("compose_reply"),
+                                                   QStringLiteral("separator"),
+                                                   QStringLiteral("archive_email")}}}};
         }
 
         SettingsUpdateReply handleUpdateSettings(UpdateSettingsRequest request) override
@@ -295,19 +300,25 @@ namespace
                  .appearance = std::nullopt,
                  .attachments = std::nullopt,
                  .undoSendDelaySeconds = std::nullopt,
+                 .undoSendUsesDialog = true,
                  .workspace = WorkspaceSettings{
                      .formatVersion = 1,
                      .mainWindowState = QByteArrayLiteral("updated-window-state"),
                      .composeRichTextDefault = true,
                      .calendarColorOverrides = {{.calendarId = QStringLiteral("calendar-2"),
-                                                 .color = QStringLiteral("#abcdef")}}}}});
+                                                 .color = QStringLiteral("#abcdef")}},
+                     .emailContextMenuLayout = {QStringLiteral("archive_email")}}}});
         REQUIRE(std::holds_alternative<SettingsUpdated>(settingsUpdate));
         CHECK(std::get<SettingsUpdated>(settingsUpdate).revision.value == 6);
         REQUIRE(handler.receivedSettingsUpdate.has_value());
+        REQUIRE(handler.receivedSettingsUpdate->update.undoSendUsesDialog == true);
         REQUIRE(handler.receivedSettingsUpdate->update.accounts.has_value());
         REQUIRE(handler.receivedSettingsUpdate->update.accounts->size() == 1);
         const auto& account = handler.receivedSettingsUpdate->update.accounts->front();
         CHECK(account.tokenEndpoint == QStringLiteral("https://mail.example.com/token"));
+        REQUIRE(handler.receivedSettingsUpdate->update.workspace.has_value());
+        CHECK(handler.receivedSettingsUpdate->update.workspace->emailContextMenuLayout ==
+              std::vector<QString>{QStringLiteral("archive_email")});
         CHECK(account.oauthClientId == QStringLiteral("client-id"));
         CHECK(account.oauthIssuer == QStringLiteral("https://auth.example.com"));
         CHECK(account.oauthResource == QStringLiteral("https://mail.example.com/jmap"));
@@ -595,6 +606,7 @@ TEST_CASE("workspace settings enforce protocol bounds", "[protocol][settings]")
         .formatVersion = 1,
         .mainWindowState = QByteArrayLiteral("large"),
         .calendarColorOverrides = {},
+        .emailContextMenuLayout = {QStringLiteral("compose_reply")},
     };
 
     const auto reply =
@@ -603,6 +615,29 @@ TEST_CASE("workspace settings enforce protocol bounds", "[protocol][settings]")
     REQUIRE(rejected != nullptr);
     CHECK(rejected->error.code == BoundaryErrorCode::ValueTooLarge);
     CHECK(rejected->error.field == QStringLiteral("update.workspace.mainWindowState"));
+    CHECK_FALSE(handler.receivedSettingsUpdate.has_value());
+}
+
+TEST_CASE("email context menu settings enforce collection bounds", "[protocol][settings]")
+{
+    RecordingHandler handler;
+    InProcessEndpoint endpoint{handler, {.maximumCollectionItems = 1}};
+    SettingsUpdate update;
+    update.workspace = WorkspaceSettings{
+        .formatVersion = 1,
+        .mainWindowState = {},
+        .composeRichTextDefault = true,
+        .calendarColorOverrides = {},
+        .emailContextMenuLayout = {QStringLiteral("compose_reply"),
+                                   QStringLiteral("archive_email")},
+    };
+
+    const auto reply =
+        endpoint.updateSettings({.baseRevision = {.value = 5}, .update = std::move(update)});
+    const auto* rejected = std::get_if<SettingsUpdateRejected>(&reply);
+    REQUIRE(rejected != nullptr);
+    CHECK(rejected->error.code == BoundaryErrorCode::TooManyValues);
+    CHECK(rejected->error.field == QStringLiteral("update.workspace.emailContextMenuLayout"));
     CHECK_FALSE(handler.receivedSettingsUpdate.has_value());
 }
 
@@ -622,6 +657,9 @@ TEST_CASE("endpoint exposes settings, handshake, lifecycle and events through ty
     const auto* snapshot = std::get_if<SettingsSnapshotReply>(&settings);
     REQUIRE(snapshot != nullptr);
     CHECK(snapshot->snapshot.revision.value == 5);
+    CHECK(snapshot->snapshot.workspace.emailContextMenuLayout ==
+          std::vector<QString>{QStringLiteral("compose_reply"), QStringLiteral("separator"),
+                               QStringLiteral("archive_email")});
 
     CHECK_FALSE(endpoint.ping().has_value());
     CHECK(handler.pinged);
@@ -668,6 +706,7 @@ TEST_CASE("endpoint exposes settings, handshake, lifecycle and events through ty
                                             .appearance = std::nullopt,
                                             .attachments = std::nullopt,
                                             .undoSendDelaySeconds = std::nullopt,
+                                            .undoSendUsesDialog = std::nullopt,
                                             .workspace = std::nullopt}});
     CHECK(std::holds_alternative<SettingsUpdated>(update));
     REQUIRE(handler.receivedSettingsUpdate.has_value());
@@ -1063,6 +1102,24 @@ TEST_CASE("activation socket carries typed routes to the daemon", "[protocol][so
     REQUIRE(receivedMailto != nullptr);
     CHECK(receivedMailto->uri == QStringLiteral("mailto:alice@example.test?subject=Hello%20there"));
     CHECK(receivedMailto->activationToken == QStringLiteral("token-mailto"));
+
+    const auto undoDialogResult = SocketActivationClient::request(
+        options, ActivationRoute{ShowUndoSendDialogRoute{
+                     .sendId = QStringLiteral("send-1"),
+                     .title = QStringLiteral("Message scheduled"),
+                     .message = QStringLiteral("Send “Quarterly report”"),
+                     .deadlineEpochMilliseconds = 1'800'000'000'123,
+                 }});
+    REQUIRE(std::holds_alternative<std::optional<BoundaryError>>(undoDialogResult));
+    CHECK_FALSE(std::get<std::optional<BoundaryError>>(undoDialogResult).has_value());
+    const auto undoDialogRoute = handler.activatedRouteSnapshot();
+    REQUIRE(undoDialogRoute.has_value());
+    const auto* receivedUndoDialog = std::get_if<ShowUndoSendDialogRoute>(&*undoDialogRoute);
+    REQUIRE(receivedUndoDialog != nullptr);
+    CHECK(receivedUndoDialog->sendId == QStringLiteral("send-1"));
+    CHECK(receivedUndoDialog->title == QStringLiteral("Message scheduled"));
+    CHECK(receivedUndoDialog->message == QStringLiteral("Send “Quarterly report”"));
+    CHECK(receivedUndoDialog->deadlineEpochMilliseconds == 1'800'000'000'123);
 
     for (int attempt = 0; attempt < 16; ++attempt)
     {

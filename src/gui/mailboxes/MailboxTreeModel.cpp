@@ -1,8 +1,7 @@
 #include "gui/mailboxes/MailboxTreeModel.h"
 
 #include "app/MailboxTreeCacheRead.h"
-#include "gui/mailboxes/MailboxIconUtils.h"
-#include "gui/mailboxes/MailboxSort.h"
+#include "gui/mailboxes/MailboxPresentation.h"
 
 #include <KLocalizedString>
 
@@ -127,12 +126,6 @@ namespace javelin::gui::mailboxes
     }
 
     MailboxTreeModel::~MailboxTreeModel() = default;
-
-    bool MailboxTreeModel::mailboxNameLess(const std::unique_ptr<Node>& left,
-                                           const std::unique_ptr<Node>& right)
-    {
-        return mailboxDisplayLess(left->role, left->displayName, right->role, right->displayName);
-    }
 
     QModelIndex MailboxTreeModel::index(const int row, const int column,
                                         const QModelIndex& parentIndex) const
@@ -294,8 +287,8 @@ namespace javelin::gui::mailboxes
 
         if (role == Qt::DecorationRole && index.column() == 0)
         {
-            return mailboxIcon(node->role,
-                               QApplication::palette().color(QPalette::Active, QPalette::Text));
+            return mailboxPresentationIcon(
+                node->role, QApplication::palette().color(QPalette::Active, QPalette::Text));
         }
 
         if (role == Qt::ForegroundRole && index.column() == 0 &&
@@ -817,11 +810,6 @@ namespace javelin::gui::mailboxes
 
             if (!mailboxItems.empty())
             {
-                std::unordered_map<std::string, Node*> nodesById;
-                std::vector<javelin::jmap::cache::MailboxTreeItem> roots;
-                std::unordered_map<std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>>
-                    deferredChildren;
-
                 const auto preferencesFor =
                     [this](const javelin::jmap::cache::MailboxTreeItem& item)
                 {
@@ -830,119 +818,45 @@ namespace javelin::gui::mailboxes
                                ? found->second
                                : MailboxPreferenceState{.hidden = !item.isSubscribed};
                 };
-                auto attachChildren = [&nodesById, &deferredChildren,
-                                       &checkedMailboxIds = m_options.checkedMailboxIds,
-                                       &accountId = account.accountId,
-                                       &preferencesFor](const auto& self, Node* parentNode) -> void
+                const auto makeNode = [this, &preferencesFor](const auto& self,
+                                                              const MailboxPresentationNode& item,
+                                                              Node* parent) -> std::unique_ptr<Node>
                 {
-                    const auto deferredIt = deferredChildren.find(parentNode->mailboxId);
-                    if (deferredIt == deferredChildren.end())
+                    auto node = std::make_unique<Node>();
+                    node->accountId = item.accountId;
+                    node->displayName = item.mailbox.name;
+                    node->mailboxId = item.mailbox.id;
+                    node->role = item.mailbox.role;
+                    node->unreadEmails = item.mailbox.unreadEmails;
+                    node->totalThreads = item.mailbox.totalThreads;
+                    node->checked = m_options.checkedMailboxIds.contains(
+                        QString::fromStdString(item.mailbox.id));
+                    node->subscribed = item.mailbox.isSubscribed;
+                    node->pendingCreate = item.mailbox.pendingCreate;
+                    node->preferences = preferencesFor(item.mailbox);
+                    node->parent = parent;
+                    for (const auto& child : item.children)
                     {
-                        return;
+                        node->children.push_back(self(self, child, node.get()));
                     }
-
-                    auto children = std::move(deferredIt->second);
-                    deferredChildren.erase(deferredIt);
-                    for (auto& childItem : children)
-                    {
-                        auto child = std::make_unique<Node>();
-                        child->accountId = accountId;
-                        child->displayName = childItem.name;
-                        child->mailboxId = childItem.id;
-                        child->role = childItem.role;
-                        child->unreadEmails = childItem.unreadEmails;
-                        child->totalThreads = childItem.totalThreads;
-                        child->checked =
-                            checkedMailboxIds.contains(QString::fromStdString(childItem.id));
-                        child->subscribed = childItem.isSubscribed;
-                        child->pendingCreate = childItem.pendingCreate;
-                        child->preferences = preferencesFor(childItem);
-                        child->parent = parentNode;
-                        nodesById.emplace(child->mailboxId, child.get());
-                        parentNode->children.push_back(std::move(child));
-                        self(self, parentNode->children.back().get());
-                    }
+                    return node;
                 };
 
-                for (const auto& item : mailboxItems)
+                const auto presentation = buildMailboxPresentation(account.accountId, mailboxItems);
+                for (const auto& row : flattenMailboxPresentation(presentation))
                 {
-                    if (!item.parentId.has_value())
-                    {
-                        roots.push_back(item);
+                    if (row.depth != 0)
                         continue;
-                    }
-
-                    const auto parentIt = nodesById.find(*item.parentId);
-                    if (parentIt == nodesById.end())
+                    if (row.separatorBefore)
                     {
-                        deferredChildren[*item.parentId].push_back(item);
-                        continue;
+                        auto separator = std::make_unique<Node>();
+                        separator->kind = Node::Kind::Separator;
+                        separator->accountId = account.accountId;
+                        separator->parent = accountNode.get();
+                        accountNode->children.push_back(std::move(separator));
                     }
-
-                    auto child = std::make_unique<Node>();
-                    child->accountId = account.accountId;
-                    child->displayName = item.name;
-                    child->mailboxId = item.id;
-                    child->role = item.role;
-                    child->unreadEmails = item.unreadEmails;
-                    child->totalThreads = item.totalThreads;
-                    child->checked =
-                        m_options.checkedMailboxIds.contains(QString::fromStdString(item.id));
-                    child->subscribed = item.isSubscribed;
-                    child->pendingCreate = item.pendingCreate;
-                    child->preferences = preferencesFor(item);
-                    child->parent = parentIt->second;
-                    nodesById.emplace(child->mailboxId, child.get());
-                    parentIt->second->children.push_back(std::move(child));
-                    attachChildren(attachChildren, parentIt->second->children.back().get());
-                }
-
-                for (auto& rootItem : roots)
-                {
-                    auto rootMailboxNode = std::make_unique<Node>();
-                    rootMailboxNode->accountId = account.accountId;
-                    rootMailboxNode->displayName = rootItem.name;
-                    rootMailboxNode->mailboxId = rootItem.id;
-                    rootMailboxNode->role = rootItem.role;
-                    rootMailboxNode->unreadEmails = rootItem.unreadEmails;
-                    rootMailboxNode->totalThreads = rootItem.totalThreads;
-                    rootMailboxNode->checked =
-                        m_options.checkedMailboxIds.contains(QString::fromStdString(rootItem.id));
-                    rootMailboxNode->subscribed = rootItem.isSubscribed;
-                    rootMailboxNode->pendingCreate = rootItem.pendingCreate;
-                    rootMailboxNode->preferences = preferencesFor(rootItem);
-                    rootMailboxNode->parent = accountNode.get();
-                    nodesById.emplace(rootMailboxNode->mailboxId, rootMailboxNode.get());
-                    accountNode->children.push_back(std::move(rootMailboxNode));
-                    attachChildren(attachChildren, accountNode->children.back().get());
-                }
-
-                const auto sortChildrenAlphabetically = [](const auto& self, Node* parent) -> void
-                {
-                    std::ranges::sort(parent->children, mailboxNameLess);
-                    for (const auto& child : parent->children)
-                    {
-                        self(self, child.get());
-                    }
-                };
-                for (const auto& child : accountNode->children)
-                {
-                    sortChildrenAlphabetically(sortChildrenAlphabetically, child.get());
-                }
-
-                std::ranges::sort(accountNode->children, mailboxNameLess);
-
-                const auto firstOther = std::ranges::find_if(
-                    accountNode->children, [](const std::unique_ptr<Node>& child)
-                    { return specialUseMailboxRank(child->role) >= 100; });
-                if (firstOther != accountNode->children.begin() &&
-                    firstOther != accountNode->children.end())
-                {
-                    auto separator = std::make_unique<Node>();
-                    separator->kind = Node::Kind::Separator;
-                    separator->accountId = account.accountId;
-                    separator->parent = accountNode.get();
-                    accountNode->children.insert(firstOther, std::move(separator));
+                    accountNode->children.push_back(
+                        makeNode(makeNode, *row.node, accountNode.get()));
                 }
             }
 

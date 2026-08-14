@@ -3,6 +3,7 @@
 #include "app/AccountRuntimeManager.h"
 #include "app/ApplicationErrorCoordinator.h"
 #include "app/CalendarNotificationService.h"
+#include "app/ComposePreferences.h"
 #include "app/DeferredSendService.h"
 #include "app/FullMailSyncService.h"
 #include "app/LocalMaintenanceService.h"
@@ -15,6 +16,7 @@
 #include "desktop/notifications/DesktopNotificationController.h"
 #include "desktop/tray/DaemonTrayController.h"
 
+#include <QDateTime>
 #include <QDebug>
 #include <QNetworkInformation>
 
@@ -148,6 +150,17 @@ namespace javelin::app
                 [this](const QString& sendId, const QString& title, const QString& message,
                        const int timeoutMs)
                 {
+                    if (ComposePreferences::undoSendUsesDialog())
+                    {
+                        Q_EMIT activationRequested(protocol::ShowUndoSendDialogRoute{
+                            .sendId = sendId,
+                            .title = title,
+                            .message = message,
+                            .deadlineEpochMilliseconds =
+                                QDateTime::currentMSecsSinceEpoch() + timeoutMs,
+                        });
+                        return;
+                    }
                     const bool lifetimeTracked =
                         m_notifications->notifyUndoableSend(sendId, title, message, timeoutMs);
                     if (lifetimeTracked)
@@ -158,9 +171,13 @@ namespace javelin::app
             m_notifications.get(),
             [this](const QString& sendId, const QString& title, const QString& message)
             { static_cast<void>(m_notifications->notifyUndoableSend(sendId, title, message, 0)); });
-        connect(&m_services.deferredSendService(), &DeferredSendService::undoableSendClosed,
-                m_notifications.get(),
-                &DesktopNotificationController::closeUndoableSendNotification);
+        connect(&m_services.deferredSendService(), &DeferredSendService::undoableSendClosed, this,
+                [this](const QString& sendId)
+                {
+                    m_notifications->closeUndoableSendNotification(sendId);
+                    Q_EMIT activationRequested(
+                        protocol::CloseUndoSendDialogRoute{.sendId = sendId});
+                });
         connect(m_notifications.get(), &DesktopNotificationController::undoableSendWindowEnded,
                 this, [this](const QString& sendId, DesktopNotificationCloseReason)
                 { m_services.deferredSendService().notificationWindowEnded(sendId); });

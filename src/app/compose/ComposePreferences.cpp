@@ -13,6 +13,12 @@ namespace javelin::app
             settings.value(QStringLiteral("compose/undoSendDelaySeconds"), 10).toInt(), 1, 120);
     }
 
+    bool ComposePreferences::undoSendUsesDialog()
+    {
+        QSettings settings;
+        return settings.value(QStringLiteral("compose/undoSendUsesDialog"), false).toBool();
+    }
+
     void ComposePreferences::setUndoSendDelaySeconds(const int seconds)
     {
         QSettings settings;

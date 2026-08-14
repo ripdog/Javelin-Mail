@@ -1,12 +1,15 @@
 #include "desktop/notifications/DesktopNotificationController.h"
 
 #include "app/CacheLocationProvider.h"
+#include "app/DeferredSendService.h"
 #include "daemon/DaemonBackgroundController.h"
 #include "daemon/DaemonServices.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QMetaObject>
+#include <QSettings>
 #include <QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
@@ -35,6 +38,31 @@ namespace
 
       private:
         std::unique_ptr<QCoreApplication> m_application;
+    };
+
+    class ScopedSetting
+    {
+      public:
+        ScopedSetting(QString key, const QVariant& value)
+            : m_key(std::move(key)), m_previous(m_settings.value(m_key))
+        {
+            m_settings.setValue(m_key, value);
+            m_settings.sync();
+        }
+
+        ~ScopedSetting()
+        {
+            if (m_previous.isValid())
+                m_settings.setValue(m_key, m_previous);
+            else
+                m_settings.remove(m_key);
+            m_settings.sync();
+        }
+
+      private:
+        QSettings m_settings;
+        QString m_key;
+        QVariant m_previous;
     };
 
     struct NotificationRequest
@@ -167,6 +195,52 @@ TEST_CASE("undoable send notification reports its actionable lifetime and timeou
     CHECK(observer->request->actions ==
           QStringList{QStringLiteral("undo-send:send-1"), QStringLiteral("Undo Send")});
     CHECK(observer->request->hints.value(QStringLiteral("transient")).toBool());
+}
+
+TEST_CASE("dialog undo send mode routes a deadline without creating a notification",
+          "[app][daemon][notification][deferred-send]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+
+    auto location = javelin::app::CacheLocationProvider{cacheRoot}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(location));
+    javelin::app::DaemonServices services{
+        std::get<javelin::app::CacheLocation>(std::move(location))};
+    const ScopedSetting presentation{QStringLiteral("compose/undoSendUsesDialog"), true};
+    REQUIRE(QSettings{}.value(QStringLiteral("compose/undoSendUsesDialog")).toBool());
+
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* transportObserver = transport.get();
+    auto notifications =
+        std::make_unique<javelin::app::DesktopNotificationController>(std::move(transport), false);
+    javelin::app::DaemonBackgroundController background{services, std::move(notifications)};
+    background.start(false);
+
+    std::optional<javelin::protocol::ActivationRoute> activatedRoute;
+    QObject::connect(&background, &javelin::app::DaemonBackgroundController::activationRequested,
+                     &background, [&activatedRoute](javelin::protocol::ActivationRoute route)
+                     { activatedRoute = std::move(route); });
+
+    const auto before = QDateTime::currentMSecsSinceEpoch();
+    Q_EMIT services.deferredSendService().undoableSendScheduled(
+        QStringLiteral("send-dialog"), QStringLiteral("Message scheduled"),
+        QStringLiteral("Send “Quarterly report”"), 5'000);
+
+    CHECK_FALSE(transportObserver->request.has_value());
+    REQUIRE(activatedRoute.has_value());
+    const auto* dialogRoute =
+        std::get_if<javelin::protocol::ShowUndoSendDialogRoute>(&*activatedRoute);
+    REQUIRE(dialogRoute != nullptr);
+    CHECK(dialogRoute->sendId == QStringLiteral("send-dialog"));
+    CHECK(dialogRoute->title == QStringLiteral("Message scheduled"));
+    CHECK(dialogRoute->message == QStringLiteral("Send “Quarterly report”"));
+    CHECK(dialogRoute->deadlineEpochMilliseconds >= before + 5'000);
+    CHECK(dialogRoute->deadlineEpochMilliseconds <= QDateTime::currentMSecsSinceEpoch() + 5'000);
 }
 
 TEST_CASE("undoable send notification does not gate when delivery or actions are unavailable",

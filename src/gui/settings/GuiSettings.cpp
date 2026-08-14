@@ -100,6 +100,11 @@ namespace javelin::gui::settings
         return snapshot().undoSendDelaySeconds;
     }
 
+    bool GuiSettings::undoSendUsesDialog() const
+    {
+        return snapshot().undoSendUsesDialog;
+    }
+
     const javelin::protocol::WorkspaceSettings& GuiSettings::workspaceSettings() const
     {
         return snapshot().workspace;
@@ -143,6 +148,8 @@ namespace javelin::gui::settings
             value.attachments = std::move(*update.attachments);
         if (update.undoSendDelaySeconds.has_value())
             value.undoSendDelaySeconds = *update.undoSendDelaySeconds;
+        if (update.undoSendUsesDialog.has_value())
+            value.undoSendUsesDialog = *update.undoSendUsesDialog;
         if (update.workspace.has_value())
             value.workspace = std::move(*update.workspace);
         ++value.revision.value;

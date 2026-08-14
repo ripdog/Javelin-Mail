@@ -119,3 +119,11 @@ dispatch serialize on the pending-send row, so exactly one wins. Dispatch atomic
 `dispatching` and its history entry `Expired` before transport starts. Ambiguous transport remains
 expired and is reconciled; it never restores Undo eligibility. Redo schedules the same logical
 draft with a fresh delay, while editing an Undo-restored draft invalidates that Redo branch.
+
+The presentation mode is a compose preference. Notification mode preserves the desktop
+notification lifetime as the undo window: a successfully presented actionable notification gates
+dispatch until its end signal arrives. Dialog mode does not enter that gate. The daemon-owned
+single-shot timer remains authoritative and dispatches when the durable deadline is due; the GUI's
+non-modal dialog only renders that deadline as a countdown and progress bar and sends a typed
+targeted-cancellation command when **Undo Send** is selected. Closing the dialog does not cancel or
+dispatch the message.

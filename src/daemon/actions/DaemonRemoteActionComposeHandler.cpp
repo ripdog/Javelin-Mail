@@ -93,6 +93,14 @@ namespace javelin::app
                                 std::get<AccountConnectionSettings>(std::move(hydrated)),
                                 std::move(request)));
                 });
+        case actions::ComposeCancelDeferredSend::id.value:
+            return dispatchDecoded<actions::ComposeCancelDeferredSend>(
+                id, command,
+                [this, &id](const QString& sendId)
+                {
+                    return launchAction<actions::ComposeCancelDeferredSend>(
+                        id, m_services.composeCommandPort().cancelDeferredSend(sendId));
+                });
         case actions::ComposeLoadWorkingCopy::id.value:
             return dispatchDecoded<actions::ComposeLoadWorkingCopy>(
                 id, command,

@@ -102,6 +102,18 @@ namespace
                 .arg(inMailbox ? QStringLiteral("mailbox-1") : QStringLiteral("mailbox-archive"))));
     }
 
+    void seedTag(javelin::jmap::cache::DatabaseConnection& connection, const QString& emailId)
+    {
+        QSqlQuery query{connection.database()};
+        REQUIRE(query.exec(QStringLiteral(
+            "INSERT OR IGNORE INTO mail_tag_definitions(account_id,keyword,display_name,color,"
+            "sort_order) VALUES('account-1','work','Work Items','#123456',0)")));
+        query.prepare(QStringLiteral("INSERT INTO email_keywords(account_id,email_id,keyword) "
+                                     "VALUES('account-1',:email_id,'work')"));
+        query.bindValue(QStringLiteral(":email_id"), emailId);
+        REQUIRE(query.exec());
+    }
+
     [[nodiscard]] bool waitUntil(const std::function<bool()>& predicate)
     {
         QElapsedTimer timer;
@@ -269,6 +281,42 @@ TEST_CASE("Thread expansion includes children outside the represented mailbox",
     CHECK(searchModel
               .data(searchMemberIndex, javelin::gui::messages::MessageListModel::MailboxNamesRole)
               .toStringList() == QStringList{QStringLiteral("Archive")});
+}
+
+TEST_CASE("expanded Thread members expose tags and refresh after metadata changes",
+          "[gui][messages][model][tags][thread]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeTestDatabase();
+    seedThreadContext(database.connection);
+    seedSecondThreadEmail(database.connection, false);
+    seedTag(database.connection, QStringLiteral("email-2"));
+
+    auto summary = item("email-1", "thread-1");
+    summary.globalThreadMessageCount = 2;
+    javelin::gui::messages::MessageListModel model{database.queries};
+    model.setItems("account-1", "mailbox-1", {summary});
+    REQUIRE(model.setThreadExpanded("thread-1", true));
+    REQUIRE(waitUntil([&] { return model.rowCount() == 2; }));
+    CHECK(model.data(model.index(1), javelin::gui::messages::MessageListModel::TagNamesRole)
+              .toStringList() == QStringList{QStringLiteral("Work Items")});
+    CHECK(model.data(model.index(1), javelin::gui::messages::MessageListModel::TagColorsRole)
+              .toStringList() == QStringList{QStringLiteral("#123456")});
+
+    QSqlQuery removeTag{database.connection.database()};
+    REQUIRE(removeTag.exec(QStringLiteral(
+        "DELETE FROM email_keywords WHERE account_id='account-1' AND email_id='email-2' "
+        "AND keyword='work'")));
+    model.refreshExpandedThreadMembers();
+    REQUIRE(waitUntil(
+        [&]
+        {
+            return model
+                .data(model.index(1), javelin::gui::messages::MessageListModel::TagNamesRole)
+                .toStringList()
+                .isEmpty();
+        }));
 }
 
 TEST_CASE("message list model displays a placeholder for missing subjects",

@@ -429,7 +429,11 @@ namespace javelin::protocol
                        writer, workspace.calendarColorOverrides, limits.maximumCollectionItems,
                        QStringLiteral("workspace.calendarColorOverrides"),
                        [&writer](const CalendarColorOverride& value)
-                       { return writer.string(value.calendarId) && writer.string(value.color); });
+                       { return writer.string(value.calendarId) && writer.string(value.color); }) &&
+                   writeVector(writer, workspace.emailContextMenuLayout,
+                               limits.maximumCollectionItems,
+                               QStringLiteral("workspace.emailContextMenuLayout"),
+                               [&writer](const QString& value) { return writer.string(value); });
         }
 
         bool readWorkspaceSettings(PayloadReader& reader, WorkspaceSettings& workspace,
@@ -442,10 +446,14 @@ namespace javelin::protocol
                     limits.maximumWorkspaceBytes)
                 return false;
             return readVector(
-                reader, workspace.calendarColorOverrides, limits.maximumCollectionItems,
-                QStringLiteral("workspace.calendarColorOverrides"),
-                [&reader](CalendarColorOverride& value)
-                { return reader.string(value.calendarId) && reader.string(value.color); });
+                       reader, workspace.calendarColorOverrides, limits.maximumCollectionItems,
+                       QStringLiteral("workspace.calendarColorOverrides"),
+                       [&reader](CalendarColorOverride& value)
+                       { return reader.string(value.calendarId) && reader.string(value.color); }) &&
+                   readVector(reader, workspace.emailContextMenuLayout,
+                              limits.maximumCollectionItems,
+                              QStringLiteral("workspace.emailContextMenuLayout"),
+                              [&reader](QString& value) { return reader.string(value); });
         }
 
         bool writeSettingsUpdate(PayloadWriter& writer, const SettingsUpdate& update,
@@ -513,6 +521,12 @@ namespace javelin::protocol
                 return false;
             if (update.undoSendDelaySeconds.has_value() &&
                 !writer.integer(*update.undoSendDelaySeconds))
+                return false;
+
+            if (!writer.boolean(update.undoSendUsesDialog.has_value()))
+                return false;
+            if (update.undoSendUsesDialog.has_value() &&
+                !writer.boolean(*update.undoSendUsesDialog))
                 return false;
 
             if (!writer.boolean(update.workspace.has_value()))
@@ -607,6 +621,15 @@ namespace javelin::protocol
             {
                 update.undoSendDelaySeconds.emplace();
                 if (!reader.integer(*update.undoSendDelaySeconds))
+                    return false;
+            }
+
+            if (!reader.boolean(present))
+                return false;
+            if (present)
+            {
+                update.undoSendUsesDialog.emplace();
+                if (!reader.boolean(*update.undoSendUsesDialog))
                     return false;
             }
 
@@ -787,6 +810,7 @@ namespace javelin::protocol
                    writer.boolean(snapshot.attachments.alwaysAsk) &&
                    writer.string(snapshot.attachments.directory) &&
                    writer.integer(snapshot.undoSendDelaySeconds) &&
+                   writer.boolean(snapshot.undoSendUsesDialog) &&
                    writeWorkspaceSettings(writer, snapshot.workspace, limits);
         }
 
@@ -818,6 +842,7 @@ namespace javelin::protocol
                    reader.boolean(snapshot.attachments.alwaysAsk) &&
                    reader.string(snapshot.attachments.directory) &&
                    reader.integer(snapshot.undoSendDelaySeconds) &&
+                   reader.boolean(snapshot.undoSendUsesDialog) &&
                    readWorkspaceSettings(reader, snapshot.workspace, limits);
         }
 
@@ -1350,6 +1375,13 @@ namespace javelin::protocol
                         return writer.string(value.activationToken);
                     else if constexpr (std::is_same_v<Route, OpenMailtoRoute>)
                         return writer.string(value.uri) && writer.string(value.activationToken);
+                    else if constexpr (std::is_same_v<Route, ShowUndoSendDialogRoute>)
+                        return value.deadlineEpochMilliseconds >= 0 &&
+                               writer.string(value.sendId) && writer.string(value.title) &&
+                               writer.string(value.message) &&
+                               writer.qword(static_cast<quint64>(value.deadlineEpochMilliseconds));
+                    else if constexpr (std::is_same_v<Route, CloseUndoSendDialogRoute>)
+                        return writer.string(value.sendId);
                     else
                         return false;
                 },
@@ -1425,6 +1457,27 @@ namespace javelin::protocol
             {
                 OpenMailtoRoute value;
                 if (!reader.string(value.uri) || !reader.string(value.activationToken))
+                    return false;
+                route = std::move(value);
+                return true;
+            }
+            if (kind == 8)
+            {
+                ShowUndoSendDialogRoute value;
+                quint64 deadline = 0;
+                if (!reader.string(value.sendId) || !reader.string(value.title) ||
+                    !reader.string(value.message) || !reader.qword(deadline))
+                    return false;
+                if (deadline > static_cast<quint64>(std::numeric_limits<qint64>::max()))
+                    return false;
+                value.deadlineEpochMilliseconds = static_cast<qint64>(deadline);
+                route = std::move(value);
+                return true;
+            }
+            if (kind == 9)
+            {
+                CloseUndoSendDialogRoute value;
+                if (!reader.string(value.sendId))
                     return false;
                 route = std::move(value);
                 return true;
@@ -1993,6 +2046,14 @@ namespace javelin::protocol
                         else if constexpr (std::is_same_v<Route, OpenMailtoRoute>)
                             return writer.byte(7) && writer.string(value.uri) &&
                                    writer.string(value.activationToken);
+                        else if constexpr (std::is_same_v<Route, ShowUndoSendDialogRoute>)
+                            return value.deadlineEpochMilliseconds >= 0 && writer.byte(8) &&
+                                   writer.string(value.sendId) && writer.string(value.title) &&
+                                   writer.string(value.message) &&
+                                   writer.qword(
+                                       static_cast<quint64>(value.deadlineEpochMilliseconds));
+                        else if constexpr (std::is_same_v<Route, CloseUndoSendDialogRoute>)
+                            return writer.byte(9) && writer.string(value.sendId);
                         else
                         {
                             return false;
@@ -2084,6 +2145,29 @@ namespace javelin::protocol
             OpenMailtoRoute route;
             if (!reader.string(route.uri) || !reader.string(route.activationToken))
                 return malformed(QStringLiteral("invalid mailto activation route"));
+            if (const auto error = reader.finish())
+                return *error;
+            return ActivationRoute{std::move(route)};
+        }
+        if (routeIndex == 8)
+        {
+            ShowUndoSendDialogRoute route;
+            quint64 deadline = 0;
+            if (!reader.string(route.sendId) || !reader.string(route.title) ||
+                !reader.string(route.message) || !reader.qword(deadline))
+                return malformed(QStringLiteral("invalid undo send dialog activation route"));
+            if (deadline > static_cast<quint64>(std::numeric_limits<qint64>::max()))
+                return malformed(QStringLiteral("invalid undo send dialog activation route"));
+            route.deadlineEpochMilliseconds = static_cast<qint64>(deadline);
+            if (const auto error = reader.finish())
+                return *error;
+            return ActivationRoute{std::move(route)};
+        }
+        if (routeIndex == 9)
+        {
+            CloseUndoSendDialogRoute route;
+            if (!reader.string(route.sendId))
+                return malformed(QStringLiteral("invalid undo send close activation route"));
             if (const auto error = reader.finish())
                 return *error;
             return ActivationRoute{std::move(route)};
