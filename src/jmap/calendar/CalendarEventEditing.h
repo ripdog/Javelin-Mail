@@ -2,12 +2,20 @@
 
 #include "jmap/calendar/CalendarTypes.h"
 
+#include <cstddef>
+#include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace javelin::jmap::calendar
 {
+    [[nodiscard]] std::optional<std::size_t>
+    participantIndexForAddress(const CalendarEvent& event, std::string_view calendarAddress);
+    [[nodiscard]] bool eventOwnedByAddress(const CalendarEvent& event,
+                                           std::string_view calendarAddress);
+
     [[nodiscard]] std::vector<std::string>
     editableAttendeeAddresses(const std::vector<Attendee>& attendees);
 

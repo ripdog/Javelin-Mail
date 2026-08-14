@@ -10,6 +10,7 @@
 #include "jmap/auth/Auth.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/calendar/CalendarColor.h"
+#include "jmap/calendar/CalendarEventEditing.h"
 #include "jmap/calendar/CalendarMutationJournal.h"
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/MutationJournal.h"
@@ -17,7 +18,6 @@
 #include <QDateTime>
 #include <QLoggingCategory>
 #include <QRegularExpression>
-#include <QUrl>
 #include <QUuid>
 
 #include <algorithm>
@@ -269,43 +269,13 @@ namespace javelin::jmap::calendar
             return required.empty();
         }
 
-        [[nodiscard]] std::string normalizedCalendarAddress(const std::string_view address)
-        {
-            auto text =
-                QString::fromUtf8(address.data(), static_cast<qsizetype>(address.size())).trimmed();
-            QUrl url{text, QUrl::StrictMode};
-            if (!url.isValid() || url.scheme().isEmpty())
-                return text.toStdString();
-            url.setScheme(url.scheme().toLower());
-            if (!url.host().isEmpty())
-                url.setHost(url.host().toLower());
-            if (url.scheme() == QStringLiteral("mailto"))
-            {
-                auto mailbox = url.path();
-                const auto at = mailbox.lastIndexOf(QLatin1Char('@'));
-                if (at >= 0)
-                    mailbox = mailbox.first(at + 1) + mailbox.sliced(at + 1).toLower();
-                url.setPath(mailbox);
-            }
-            return url.toString(QUrl::FullyEncoded).toStdString();
-        }
-
         [[nodiscard]] std::optional<std::size_t>
         matchingParticipantIndex(const CalendarEvent& event,
                                  const std::vector<ParticipantIdentity>& identities)
         {
             const auto matchesIdentity =
                 [&event](const ParticipantIdentity& identity) -> std::optional<std::size_t>
-            {
-                const auto identityAddress = normalizedCalendarAddress(identity.calendarAddress);
-                for (std::size_t index = 0; index < event.attendees.size(); ++index)
-                {
-                    if (normalizedCalendarAddress(event.attendees[index].calendarAddress) ==
-                        identityAddress)
-                        return index;
-                }
-                return std::nullopt;
-            };
+            { return participantIndexForAddress(event, identity.calendarAddress); };
             for (const auto& identity : identities)
                 if (identity.isDefault)
                     if (const auto index = matchesIdentity(identity))
@@ -2498,7 +2468,8 @@ namespace javelin::jmap::calendar
             co_return error(OperationErrorCode::InvalidRequest,
                             QStringLiteral("The calendar event is no longer in the cache."));
         const bool privateOnly = onlyPerUserPropertiesChanged(*previous, command.event);
-        if (!previous->isOrigin && !privateOnly)
+        if (!previous->isOrigin && !eventOwnedByAddress(*previous, settings.loginEmail) &&
+            !privateOnly)
             co_return error(
                 OperationErrorCode::PermissionDenied,
                 QStringLiteral(

@@ -103,10 +103,20 @@ namespace javelin::gui::shell
             return value;
         }
 
-        [[nodiscard]] bool canRsvp(const javelin::jmap::calendar::CalendarEvent& event,
-                                   const std::vector<javelin::jmap::calendar::Calendar>& calendars)
+        [[nodiscard]] bool canEditEvent(const javelin::jmap::calendar::CalendarEvent& event,
+                                        const std::string_view configuredAddress)
         {
-            if (event.attendees.empty())
+            return event.isOrigin ||
+                   javelin::jmap::calendar::eventOwnedByAddress(event, configuredAddress);
+        }
+
+        [[nodiscard]] bool canRsvp(const javelin::jmap::calendar::CalendarEvent& event,
+                                   const std::vector<javelin::jmap::calendar::Calendar>& calendars,
+                                   const std::string_view configuredAddress)
+        {
+            const auto participant =
+                javelin::jmap::calendar::participantIndexForAddress(event, configuredAddress);
+            if (!participant || event.attendees[*participant].isOwner)
                 return false;
             std::unordered_set<std::string> required;
             for (const auto& [calendarId, present] : event.calendarIds)
@@ -211,6 +221,9 @@ namespace javelin::gui::shell
                     calendarReader.loadCached(account.accountId, interval, timeZone);
                 const auto* window =
                     std::get_if<std::optional<javelin::jmap::cache::CalendarWindow>>(&loaded);
+                const auto configuredAddress =
+                    settings.accountForCachedId(QString::fromStdString(account.accountId))
+                        .loginEmail.toStdString();
 
                 for (const auto& displayEvent : displayEvents)
                 {
@@ -281,9 +294,12 @@ namespace javelin::gui::shell
                         .allDay = displayEvent.allDay,
                         .recurring = displayEvent.recurring,
                         .editable =
-                            event != nullptr && event->isOrigin && calendar != nullptr &&
+                            event != nullptr && calendar != nullptr &&
+                            canEditEvent(*event, configuredAddress) &&
                             (calendar->myRights.mayWriteAll || calendar->myRights.mayWriteOwn),
-                        .invitation = event != nullptr && !event->isOrigin,
+                        .invitation = event != nullptr && calendars != nullptr &&
+                                      !canEditEvent(*event, configuredAddress) &&
+                                      canRsvp(*event, *calendars, configuredAddress),
                         .organizer = std::move(organizer),
                         .location = event != nullptr && event->location
                                         ? QString::fromStdString(*event->location)
@@ -395,8 +411,11 @@ namespace javelin::gui::shell
 
         const auto writable = [](const javelin::jmap::calendar::Calendar& calendar)
         { return calendar.myRights.mayWriteAll || calendar.myRights.mayWriteOwn; };
+        const auto configuredAddress =
+            m_settings.accountForCachedId(QString::fromStdString(account->accountId))
+                .loginEmail.toStdString();
         const bool editable =
-            event->isOrigin &&
+            canEditEvent(*event, configuredAddress) &&
             std::ranges::any_of(*calendars,
                                 [&event, &writable](const auto& calendar)
                                 {
@@ -404,7 +423,8 @@ namespace javelin::gui::shell
                                     return membership != event->calendarIds.end() &&
                                            membership->second && writable(calendar);
                                 });
-        const bool rsvp = !event->isOrigin && canRsvp(*event, *calendars);
+        const bool rsvp = !canEditEvent(*event, configuredAddress) &&
+                          canRsvp(*event, *calendars, configuredAddress);
         const bool canDuplicate =
             std::ranges::any_of(*calendars, [&writable](const auto& calendar)
                                 { return calendar.isSubscribed && writable(calendar); });
@@ -534,6 +554,9 @@ namespace javelin::gui::shell
             std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(&calendarsResult);
         if (calendars == nullptr)
             return;
+        const auto configuredAddress =
+            m_settings.accountForCachedId(QString::fromStdString(account->accountId))
+                .loginEmail.toStdString();
 
         auto selectedEvent = *foundEvent;
         if (!recurrenceId.isEmpty())
@@ -740,7 +763,7 @@ namespace javelin::gui::shell
         duplicate.recurrenceId.reset();
         duplicate.uid.clear();
         duplicate.isOrigin = true;
-        if (!foundEvent->isOrigin)
+        if (!canEditEvent(*foundEvent, configuredAddress))
         {
             duplicate.organizerCalendarAddress.reset();
             duplicate.attendees.clear();
@@ -1286,10 +1309,13 @@ namespace javelin::gui::shell
                         occurrenceEvent.title = *existingOverride->second.title;
                 }
 
-                if (!event->isOrigin)
+                const auto configuredAddress =
+                    m_settings.accountForCachedId(QString::fromStdString(account->accountId))
+                        .loginEmail.toStdString();
+                if (!canEditEvent(*event, configuredAddress))
                 {
-                    const auto response = promptInvitationResponse(widget, occurrenceEvent,
-                                                                   canRsvp(*event, *calendars));
+                    const auto response = promptInvitationResponse(
+                        widget, occurrenceEvent, canRsvp(*event, *calendars, configuredAddress));
                     if (!response)
                         return;
                     const bool requiresRecurrenceMaterialization =

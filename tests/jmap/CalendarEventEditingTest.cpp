@@ -34,6 +34,39 @@ TEST_CASE("editable attendee addresses exclude the owner")
           std::vector<std::string>{"guest@example.test"});
 }
 
+TEST_CASE("calendar ownership matches the configured identity independently of isOrigin")
+{
+    javelin::jmap::calendar::CalendarEvent event;
+    event.isOrigin = false;
+    event.attendees = {attendee("owner", "Owner@Example.test", true),
+                       attendee("guest", "guest@example.test")};
+
+    CHECK(javelin::jmap::calendar::eventOwnedByAddress(event, "owner@example.test"));
+    CHECK(javelin::jmap::calendar::eventOwnedByAddress(event, "MAILTO:OWNER@EXAMPLE.TEST"));
+    CHECK_FALSE(javelin::jmap::calendar::eventOwnedByAddress(event, "guest@example.test"));
+    CHECK_FALSE(javelin::jmap::calendar::eventOwnedByAddress(event, "missing@example.test"));
+}
+
+TEST_CASE("calendar participant matching accepts the participant email fallback")
+{
+    javelin::jmap::calendar::CalendarEvent event;
+    auto participant = attendee("owner", "owner@example.test", true);
+    participant.calendarAddress = "urn:uuid:calendar-owner";
+    event.attendees = {participant};
+
+    CHECK(javelin::jmap::calendar::participantIndexForAddress(event, "owner@example.test") == 0);
+}
+
+TEST_CASE("calendar ownership falls back to the organizer address")
+{
+    javelin::jmap::calendar::CalendarEvent event;
+    event.isOrigin = false;
+    event.organizerCalendarAddress = "mailto:owner@example.test";
+
+    CHECK(javelin::jmap::calendar::eventOwnedByAddress(event, "OWNER@example.test"));
+    CHECK_FALSE(javelin::jmap::calendar::eventOwnedByAddress(event, "guest@example.test"));
+}
+
 TEST_CASE("attendee edits preserve matching scheduling records and owners")
 {
     const std::vector existing{attendee("owner", "owner@example.test", true),

@@ -1,5 +1,7 @@
 #include "jmap/calendar/CalendarEventEditing.h"
 
+#include <QUrl>
+
 #include <algorithm>
 #include <cctype>
 #include <optional>
@@ -42,6 +44,21 @@ namespace
         return address;
     }
 
+    std::string normalizedCalendarAddress(const std::string_view address)
+    {
+        auto text =
+            QString::fromUtf8(address.data(), static_cast<qsizetype>(address.size())).trimmed();
+        QUrl url{text, QUrl::StrictMode};
+        if (!url.isValid() || url.scheme().isEmpty())
+            return normalizedAddress(text.toStdString());
+        url.setScheme(url.scheme().toLower());
+        if (!url.host().isEmpty())
+            url.setHost(url.host().toLower());
+        if (url.scheme() == QStringLiteral("mailto"))
+            return normalizedAddress(url.path().toStdString());
+        return url.toString(QUrl::FullyEncoded).toStdString();
+    }
+
     struct ParsedAddress
     {
         std::string name;
@@ -79,6 +96,32 @@ namespace
 
 namespace javelin::jmap::calendar
 {
+    std::optional<std::size_t> participantIndexForAddress(const CalendarEvent& event,
+                                                          const std::string_view calendarAddress)
+    {
+        const auto identity = normalizedCalendarAddress(calendarAddress);
+        if (identity.empty())
+            return std::nullopt;
+        for (std::size_t index = 0; index < event.attendees.size(); ++index)
+        {
+            const auto& attendee = event.attendees[index];
+            if (normalizedCalendarAddress(attendee.calendarAddress) == identity ||
+                (attendee.email && normalizedAddress(*attendee.email) == identity))
+                return index;
+        }
+        return std::nullopt;
+    }
+
+    bool eventOwnedByAddress(const CalendarEvent& event, const std::string_view calendarAddress)
+    {
+        const auto participant = participantIndexForAddress(event, calendarAddress);
+        if (participant && event.attendees[*participant].isOwner)
+            return true;
+        return event.organizerCalendarAddress &&
+               normalizedCalendarAddress(*event.organizerCalendarAddress) ==
+                   normalizedCalendarAddress(calendarAddress);
+    }
+
     std::vector<std::string> editableAttendeeAddresses(const std::vector<Attendee>& attendees)
     {
         std::vector<std::string> result;
