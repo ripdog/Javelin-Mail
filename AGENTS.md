@@ -66,6 +66,7 @@ Do not treat the named file or visible symptom as the full scope of the task.
 ## Build and Verification
 
 - In the shared checkout, use `scripts/check-debug.sh` so configuration, compilation, and tests are serialized.
+- Always escalate commands that execute tests so they run outside the sandbox. This includes focused and full `scripts/check-debug.sh` runs, direct `ctest` invocations, and test executables. The socket and daemon tests require local socket operations that the sandbox blocks; do not first attempt a test run inside the sandbox.
 - Before building or testing, create `/tmp/javelin-mail-xdg-runtime` with mode `0700` and set `XDG_RUNTIME_DIR` to it.
 - During implementation, build the narrowest relevant target and run focused tests. Use `scripts/check-debug.sh --full` for final verification.
 - Prefer deterministic fixtures and scripted transports over live network tests.

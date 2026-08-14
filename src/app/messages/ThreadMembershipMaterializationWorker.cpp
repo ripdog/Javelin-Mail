@@ -271,9 +271,16 @@ namespace javelin::app
                 co_return javelin::jmap::operationError(*databaseError);
             const auto& record =
                 std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(membership);
+            const auto coverage = threads.coverage(target.accountId, threadId);
+            if (const auto* databaseError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&coverage))
+                co_return javelin::jmap::operationError(*databaseError);
+            const auto& currentCoverage =
+                std::get<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverage);
             if (!record.has_value() ||
                 record->freshness != javelin::jmap::cache::ThreadMembershipFreshness::Current ||
-                record->thread.emailIds.size() != record->globalMemberCount)
+                record->thread.emailIds.size() != record->globalMemberCount ||
+                !currentCoverage.has_value() || currentCoverage->untrackedCachedEmailCount != 0)
                 membershipTargets.push_back(threadId);
         }
 

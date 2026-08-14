@@ -317,7 +317,15 @@ namespace javelin::jmap::cache
             return *error;
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
-            "SELECT t.membership_freshness,t.member_count,COUNT(e.email_id) FROM threads t LEFT "
+            "SELECT t.membership_freshness,t.member_count,COUNT(e.email_id),("
+            "SELECT COUNT(*) FROM emails cached_thread WHERE cached_thread.account_id=t.account_id "
+            "AND cached_thread.thread_id=t.thread_id AND NOT EXISTS(SELECT 1 FROM "
+            "email_summary_refresh_requests refresh WHERE "
+            "refresh.account_id=cached_thread.account_id AND "
+            "refresh.email_id=cached_thread.email_id) AND NOT EXISTS(SELECT 1 FROM "
+            "thread_email_members tracked WHERE tracked.account_id=cached_thread.account_id AND "
+            "tracked.thread_id=cached_thread.thread_id AND "
+            "tracked.email_id=cached_thread.email_id)) FROM threads t LEFT "
             "JOIN thread_email_members m ON m.account_id=t.account_id AND "
             "m.thread_id=t.thread_id LEFT JOIN emails e ON e.account_id=m.account_id AND "
             "e.email_id=m.email_id AND e.thread_id=m.thread_id AND NOT EXISTS(SELECT 1 FROM "
@@ -337,12 +345,15 @@ namespace javelin::jmap::cache
         const auto freshness = freshnessFromValue(query.value(0).toString());
         const auto globalCount = query.value(1).toULongLong();
         const auto materializedCount = query.value(2).toULongLong();
+        const auto untrackedCachedEmailCount = query.value(3).toULongLong();
         return std::optional<ThreadCoverage>{ThreadCoverage{
             .freshness = freshness,
             .globalMemberCount = globalCount,
             .materializedMemberCount = materializedCount,
-            .childEmailsComplete =
-                freshness == ThreadMembershipFreshness::Current && materializedCount == globalCount,
+            .untrackedCachedEmailCount = untrackedCachedEmailCount,
+            .childEmailsComplete = freshness == ThreadMembershipFreshness::Current &&
+                                   materializedCount == globalCount &&
+                                   untrackedCachedEmailCount == 0,
         }};
     }
 
@@ -356,7 +367,16 @@ namespace javelin::jmap::cache
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "SELECT CASE WHEN t.membership_freshness='current' AND "
-            "t.member_count=COUNT(e.email_id) THEN COUNT(em.email_id) ELSE NULL END FROM threads t "
+            "t.member_count=COUNT(e.email_id) AND NOT EXISTS(SELECT 1 FROM emails cached_thread "
+            "WHERE cached_thread.account_id=t.account_id AND cached_thread.thread_id=t.thread_id "
+            "AND NOT EXISTS(SELECT 1 FROM "
+            "email_summary_refresh_requests refresh WHERE "
+            "refresh.account_id=cached_thread.account_id AND "
+            "refresh.email_id=cached_thread.email_id) AND NOT EXISTS(SELECT 1 FROM "
+            "thread_email_members tracked WHERE tracked.account_id=cached_thread.account_id AND "
+            "tracked.thread_id=cached_thread.thread_id AND "
+            "tracked.email_id=cached_thread.email_id)) THEN COUNT(em.email_id) ELSE NULL END FROM "
+            "threads t "
             "LEFT JOIN thread_email_members m ON m.account_id=t.account_id AND "
             "m.thread_id=t.thread_id LEFT JOIN emails e ON e.account_id=m.account_id AND "
             "e.email_id=m.email_id AND e.thread_id=m.thread_id AND NOT EXISTS(SELECT 1 FROM "

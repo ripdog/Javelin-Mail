@@ -185,6 +185,21 @@ namespace javelin::jmap::cache
         writeEmails(QSqlDatabase& database, const std::string_view accountId,
                     const std::vector<javelin::jmap::domain::Email>& emails)
         {
+            QSqlQuery invalidateThreadMembership{database};
+            invalidateThreadMembership.prepare(QStringLiteral(
+                "UPDATE threads SET membership_freshness='stale' "
+                "WHERE account_id=:account_id AND membership_freshness='current' AND ("
+                "  (thread_id=:thread_id AND NOT EXISTS("
+                "    SELECT 1 FROM thread_email_members member "
+                "    WHERE member.account_id=:account_id AND member.thread_id=:thread_id "
+                "      AND member.email_id=:email_id"
+                "  )) OR ("
+                "    thread_id=(SELECT previous.thread_id FROM emails previous "
+                "               WHERE previous.account_id=:account_id "
+                "                 AND previous.email_id=:email_id) "
+                "    AND thread_id<>:thread_id"
+                "  )"
+                ")"));
             QSqlQuery emailQuery{database};
             emailQuery.prepare(QStringLiteral(
                 "INSERT INTO emails ("
@@ -261,6 +276,19 @@ namespace javelin::jmap::cache
 
             for (const auto& email : emails)
             {
+                invalidateThreadMembership.bindValue(
+                    QStringLiteral(":account_id"), QString::fromStdString(std::string{accountId}));
+                invalidateThreadMembership.bindValue(QStringLiteral(":email_id"),
+                                                     QString::fromStdString(email.id));
+                invalidateThreadMembership.bindValue(QStringLiteral(":thread_id"),
+                                                     QString::fromStdString(email.threadId));
+                if (!invalidateThreadMembership.exec())
+                {
+                    return makeQueryError(QStringLiteral("Invalidate changed Thread membership"),
+                                          invalidateThreadMembership);
+                }
+                invalidateThreadMembership.finish();
+
                 std::unordered_set<std::string> previousMailboxIds;
                 previousMailboxQuery.bindValue(QStringLiteral(":account_id"),
                                                QString::fromStdString(std::string{accountId}));

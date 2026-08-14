@@ -229,7 +229,15 @@ namespace javelin::app
             "r.thread_id,r.position,"
             "t.membership_freshness,t.member_count,COUNT(tm.email_id) AS "
             "member_rows,COUNT(e.email_id) "
-            "AS email_rows FROM requested r LEFT JOIN threads t ON t.account_id=:account_id AND "
+            "AS email_rows,(SELECT COUNT(*) FROM emails cached_thread WHERE "
+            "cached_thread.account_id=:account_id AND cached_thread.thread_id=r.thread_id AND "
+            "NOT EXISTS(SELECT 1 FROM email_summary_refresh_requests refresh WHERE "
+            "refresh.account_id=cached_thread.account_id AND "
+            "refresh.email_id=cached_thread.email_id) AND NOT EXISTS(SELECT 1 FROM "
+            "thread_email_members tracked WHERE tracked.account_id=cached_thread.account_id AND "
+            "tracked.thread_id=cached_thread.thread_id AND "
+            "tracked.email_id=cached_thread.email_id)) AS untracked_email_rows FROM requested r "
+            "LEFT JOIN threads t ON t.account_id=:account_id AND "
             "t.thread_id=r.thread_id LEFT JOIN thread_email_members tm ON "
             "tm.account_id=t.account_id "
             "AND tm.thread_id=t.thread_id LEFT JOIN emails e ON e.account_id=tm.account_id AND "
@@ -238,7 +246,7 @@ namespace javelin::app
             "refresh.email_id=tm.email_id) GROUP BY r.thread_id,r.position,t.membership_freshness,"
             "t.member_count) SELECT thread_id FROM coverage WHERE membership_freshness IS NULL OR "
             "membership_freshness<>'current' OR member_count<>member_rows OR "
-            "member_count<>email_rows "
+            "member_count<>email_rows OR untracked_email_rows<>0 "
             "ORDER BY position"));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));

@@ -274,6 +274,32 @@ TEST_CASE("authoritative Thread wait returns materialization failure without par
     CHECK(error->code == javelin::jmap::OperationErrorCode::NetworkUnavailable);
 }
 
+TEST_CASE("cached Email outside current membership is recovered as incomplete Thread coverage",
+          "[app][thread-materialization][recovery]")
+{
+    ensureApplication();
+    Fixture fixture;
+    javelin::jmap::cache::ThreadRepository threads{fixture.database};
+    REQUIRE_FALSE(threads
+                      .upsertMany("account-1", {{.id = "thread-1", .emailIds = {"email-1"}},
+                                                {.id = "thread-2", .emailIds = {"email-3"}}})
+                      .has_value());
+    javelin::app::WorkScheduler scheduler{fixture.database, nullptr, std::chrono::milliseconds{0}};
+    CompletingWorker worker{fixture.database};
+    javelin::app::ThreadMaterializationCoordinator coordinator{fixture.database, scheduler,
+                                                               &worker};
+
+    REQUIRE_FALSE(coordinator.restoreAccount("account-1").has_value());
+    waitFor([&] { return worker.targets.size() == 1; });
+
+    CHECK(worker.targets.front().threadIds == std::vector<std::string>{"thread-1"});
+    const auto coverage = threads.coverage("account-1", "thread-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverage));
+    const auto& repaired = std::get<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverage);
+    REQUIRE(repaired.has_value());
+    CHECK(repaired->childEmailsComplete);
+}
+
 TEST_CASE("thread materialization coordinator coalesces mailbox and search targets",
           "[app][thread-materialization]")
 {

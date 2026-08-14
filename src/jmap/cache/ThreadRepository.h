@@ -32,6 +32,7 @@ namespace javelin::jmap::cache
         ThreadMembershipFreshness freshness = ThreadMembershipFreshness::Current;
         std::size_t globalMemberCount = 0;
         std::size_t materializedMemberCount = 0;
+        std::size_t untrackedCachedEmailCount = 0;
         bool childEmailsComplete = false;
     };
 

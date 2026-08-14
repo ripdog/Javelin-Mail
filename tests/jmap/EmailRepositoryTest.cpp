@@ -1,5 +1,6 @@
 #include "jmap/cache/EmailRepository.h"
 #include "FixtureReader.h"
+#include "jmap/cache/ThreadRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 
 #include <QCoreApplication>
@@ -173,6 +174,45 @@ TEST_CASE("email repository normalizes missing subject and preview for cache wri
     const auto& loaded = *std::get<std::optional<javelin::jmap::domain::Email>>(result);
     CHECK(loaded.subject == std::optional<std::string>{std::string{}});
     CHECK(loaded.preview == std::optional<std::string>{std::string{}});
+}
+
+TEST_CASE("email upserts stale incomplete current Thread membership",
+          "[jmap][cache][repository][thread-materialization]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    javelin::jmap::cache::ThreadRepository threads{databaseContext.connection};
+
+    auto first = loadEmailFixture();
+    REQUIRE_FALSE(emails.upsertMany("account-1", {first}).has_value());
+    REQUIRE_FALSE(threads.upsertMany("account-1", {{.id = first.threadId, .emailIds = {first.id}}})
+                      .has_value());
+
+    REQUIRE_FALSE(emails.upsertMany("account-1", {first}).has_value());
+    auto membership = threads.findMembership("account-1", first.threadId);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(
+        membership));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(membership)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(membership)
+              ->freshness == javelin::jmap::cache::ThreadMembershipFreshness::Current);
+
+    auto reply = first;
+    reply.id = "eml-2";
+    reply.subject = "Reply";
+    REQUIRE_FALSE(emails.upsertMany("account-1", {reply}).has_value());
+
+    membership = threads.findMembership("account-1", first.threadId);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(
+        membership));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(membership)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(membership)
+              ->freshness == javelin::jmap::cache::ThreadMembershipFreshness::Stale);
 }
 
 TEST_CASE("email repository records bodyless messages as indexed without a null preview",

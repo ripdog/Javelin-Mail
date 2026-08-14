@@ -403,6 +403,43 @@ TEST_CASE("current Thread membership cardinality mismatch is repaired from the s
     CHECK(repaired->childEmailsComplete);
 }
 
+TEST_CASE("cached same-Thread Email outside membership is repaired from the server",
+          "[app][thread-materialization][recovery]")
+{
+    ensureApplication();
+    Fixture fixture;
+    fixture.seedRepresentative("thread-1");
+    QSqlQuery cachedReply{fixture.database.database()};
+    REQUIRE(cachedReply.exec(QStringLiteral("INSERT INTO emails(account_id,email_id,thread_id) "
+                                            "VALUES('account-1','child-thread-1','thread-1')")));
+    javelin::jmap::cache::ThreadRepository threads{fixture.database};
+    REQUIRE_FALSE(threads
+                      .upsertMany("account-1",
+                                  {{.id = "thread-1", .emailIds = {"representative-thread-1"}}},
+                                  "old-thread-state")
+                      .has_value());
+
+    RecordingTransport transport;
+    ConnectionProvider connections;
+    javelin::app::ThreadMembershipMaterializationWorker worker{fixture.database, transport,
+                                                               connections};
+    const auto result = QCoro::waitFor(worker.materialize({
+        .accountId = "account-1",
+        .threadIds = {"thread-1"},
+    }));
+
+    REQUIRE(std::holds_alternative<javelin::app::ThreadMaterializationSummary>(result));
+    REQUIRE(transport.batches.size() == 1);
+    CHECK(transport.batches.front() == std::vector<std::string>{"thread-1"});
+    CHECK(transport.emailBatches.empty());
+    const auto coverage = threads.coverage("account-1", "thread-1");
+    const auto& repaired = std::get<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverage);
+    REQUIRE(repaired.has_value());
+    CHECK(repaired->globalMemberCount == 2);
+    CHECK(repaired->untrackedCachedEmailCount == 0);
+    CHECK(repaired->childEmailsComplete);
+}
+
 TEST_CASE("represented Thread notFound remains a reconciliation failure",
           "[app][thread-materialization]")
 {
