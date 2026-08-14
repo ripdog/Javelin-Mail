@@ -67,6 +67,41 @@ TEST_CASE("calendar ownership falls back to the organizer address")
     CHECK_FALSE(javelin::jmap::calendar::eventOwnedByAddress(event, "guest@example.test"));
 }
 
+TEST_CASE("calendar owner and invitation classification are independent of isOrigin")
+{
+    javelin::jmap::calendar::CalendarEvent event;
+    event.isOrigin = false;
+    event.attendees = {attendee("owner", "owner@example.test", true),
+                       attendee("guest", "guest@example.test")};
+
+    CHECK(javelin::jmap::calendar::eventHasOwner(event));
+    CHECK_FALSE(javelin::jmap::calendar::eventInvitesAddress(event, "owner@example.test"));
+    CHECK(javelin::jmap::calendar::eventInvitesAddress(event, "guest@example.test"));
+    event.attendees.clear();
+    CHECK_FALSE(javelin::jmap::calendar::eventHasOwner(event));
+}
+
+TEST_CASE("calendar editability follows write-all write-own and invitation rights")
+{
+    javelin::jmap::calendar::CalendarEvent event;
+    event.isOrigin = false;
+    const javelin::jmap::calendar::CalendarRights writeOwn{.mayWriteOwn = true};
+    const javelin::jmap::calendar::CalendarRights writeAll{.mayWriteAll = true};
+    const javelin::jmap::calendar::CalendarRights readOnly;
+
+    CHECK(javelin::jmap::calendar::eventEditableWithRights(event, writeOwn, "alice@example.test"));
+    CHECK_FALSE(
+        javelin::jmap::calendar::eventEditableWithRights(event, readOnly, "alice@example.test"));
+
+    event.attendees = {attendee("owner", "owner@example.test", true),
+                       attendee("me", "alice@example.test")};
+    CHECK_FALSE(
+        javelin::jmap::calendar::eventEditableWithRights(event, writeAll, "alice@example.test"));
+    CHECK(javelin::jmap::calendar::eventEditableWithRights(event, writeAll, "other@example.test"));
+    CHECK_FALSE(
+        javelin::jmap::calendar::eventEditableWithRights(event, writeOwn, "other@example.test"));
+}
+
 TEST_CASE("attendee edits preserve matching scheduling records and owners")
 {
     const std::vector existing{attendee("owner", "owner@example.test", true),

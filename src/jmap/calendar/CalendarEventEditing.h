@@ -15,6 +15,12 @@ namespace javelin::jmap::calendar
     participantIndexForAddress(const CalendarEvent& event, std::string_view calendarAddress);
     [[nodiscard]] bool eventOwnedByAddress(const CalendarEvent& event,
                                            std::string_view calendarAddress);
+    [[nodiscard]] bool eventHasOwner(const CalendarEvent& event);
+    [[nodiscard]] bool eventInvitesAddress(const CalendarEvent& event,
+                                           std::string_view calendarAddress);
+    [[nodiscard]] bool eventEditableWithRights(const CalendarEvent& event,
+                                               const CalendarRights& rights,
+                                               std::string_view calendarAddress);
 
     [[nodiscard]] std::vector<std::string>
     editableAttendeeAddresses(const std::vector<Attendee>& attendees);

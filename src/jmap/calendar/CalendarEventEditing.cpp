@@ -122,6 +122,29 @@ namespace javelin::jmap::calendar
                    normalizedCalendarAddress(calendarAddress);
     }
 
+    bool eventHasOwner(const CalendarEvent& event)
+    {
+        return std::ranges::any_of(event.attendees,
+                                   [](const Attendee& attendee) { return attendee.isOwner; });
+    }
+
+    bool eventInvitesAddress(const CalendarEvent& event, const std::string_view calendarAddress)
+    {
+        const auto participant = participantIndexForAddress(event, calendarAddress);
+        return participant && !event.attendees[*participant].isOwner;
+    }
+
+    bool eventEditableWithRights(const CalendarEvent& event, const CalendarRights& rights,
+                                 const std::string_view calendarAddress)
+    {
+        if (!event.isOrigin && eventInvitesAddress(event, calendarAddress))
+            return false;
+        if (rights.mayWriteAll)
+            return true;
+        return rights.mayWriteOwn &&
+               (eventOwnedByAddress(event, calendarAddress) || !eventHasOwner(event));
+    }
+
     std::vector<std::string> editableAttendeeAddresses(const std::vector<Attendee>& attendees)
     {
         std::vector<std::string> result;

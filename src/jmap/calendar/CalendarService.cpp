@@ -241,6 +241,21 @@ namespace javelin::jmap::calendar
             return required.empty();
         }
 
+        bool eventWritable(const std::vector<calendar::Calendar>& calendars,
+                           const std::vector<std::string>& calendarIds, const CalendarEvent& event,
+                           const std::string_view configuredAddress)
+        {
+            std::unordered_set<std::string> required{calendarIds.begin(), calendarIds.end()};
+            for (const auto& item : calendars)
+            {
+                if (!required.erase(item.id))
+                    continue;
+                if (!eventEditableWithRights(event, item.myRights, configuredAddress))
+                    return false;
+            }
+            return required.empty();
+        }
+
         bool privateUpdatable(const std::vector<calendar::Calendar>& calendars,
                               const std::vector<std::string>& calendarIds)
         {
@@ -2468,12 +2483,13 @@ namespace javelin::jmap::calendar
             co_return error(OperationErrorCode::InvalidRequest,
                             QStringLiteral("The calendar event is no longer in the cache."));
         const bool privateOnly = onlyPerUserPropertiesChanged(*previous, command.event);
-        if (!previous->isOrigin && !eventOwnedByAddress(*previous, settings.loginEmail) &&
-            !privateOnly)
-            co_return error(
-                OperationErrorCode::PermissionDenied,
-                QStringLiteral(
-                    "Invited events may only change private reminder settings or RSVP status."));
+        const auto calendarsResult = repository.listCalendars(command.accountId);
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&calendarsResult))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        if (!privateOnly && !eventWritable(std::get<std::vector<Calendar>>(calendarsResult),
+                                           calendarIds, *previous, settings.loginEmail))
+            co_return error(OperationErrorCode::PermissionDenied,
+                            QStringLiteral("You do not have permission to modify this event."));
         if (*previous == command.event)
             co_return CommittedMutation{.accountId = std::move(command.accountId),
                                         .newState = *command.ifInState,

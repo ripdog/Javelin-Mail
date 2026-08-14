@@ -1426,6 +1426,56 @@ TEST_CASE("calendar invitation responses use participant identities and RSVP rig
         CHECK(transport.requests.front().envelope.methodCalls.front().arguments.find(
                   R"("title":"My renamed meeting")") != std::string::npos);
     }
+
+    SECTION("a non-origin ownerless event remains editable with mayWriteOwn")
+    {
+        auto ownerless = invitation;
+        ownerless.attendees.clear();
+        ownerless.organizerCalendarAddress.reset();
+        REQUIRE_FALSE(
+            calendars
+                .reconcileWindow({.accountId = "a1",
+                                  .start = {.value = "2026-06-29T00:00:00"},
+                                  .end = {.value = "2026-08-10T00:00:00"},
+                                  .displayTimeZone = {.value = "Pacific/Auckland"},
+                                  .queryState = "query-ownerless",
+                                  .eventState = "event-rsvp-1",
+                                  .events = {ownerless},
+                                  .occurrences = {{.accountId = "a1",
+                                                   .id = "event-1",
+                                                   .eventId = "event-1",
+                                                   .recurrenceId = std::nullopt,
+                                                   .localStart = ownerless.start,
+                                                   .localEnd = {.value = "2026-07-13T10:00:00"},
+                                                   .utcStart = std::nullopt,
+                                                   .utcEnd = std::nullopt,
+                                                   .allDay = false}}})
+                .has_value());
+        auto writable = work;
+        writable.myRights.mayWriteOwn = true;
+        REQUIRE_FALSE(
+            calendars.replaceCalendars("a1", "calendar-state-ownerless", {writable}).has_value());
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "CalendarEvent/set",
+                  .arguments =
+                      R"({"accountId":"a1","oldState":"event-rsvp-1","newState":"event-ownerless-2","created":{},"updated":{"event-1":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+                  .callId = "calendar-event-set"}},
+            .createdIds = std::nullopt,
+            .sessionState = "session-ownerless-update",
+        });
+        ownerless.title = "Renamed ownerless event";
+
+        const auto result = QCoro::waitFor(mutation.update(settings, "a1",
+                                                           {.accountId = "a1",
+                                                            .event = std::move(ownerless),
+                                                            .operationGroupId = std::nullopt,
+                                                            .ifInState = std::nullopt,
+                                                            .materialization = std::nullopt}));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
+        REQUIRE(transport.requests.size() == 1);
+    }
 }
 
 TEST_CASE("calendar refresh recovers a recurring base omitted by the bounded base query",
