@@ -1,6 +1,6 @@
 #include "gui/shell/MessageCommandController.h"
 
-#include "gui/mailboxes/MailboxSort.h"
+#include "gui/mailboxes/MailboxPresentation.h"
 #include "gui/messages/MessageActionSelection.h"
 #include "gui/messages/MessageListModel.h"
 #include "jmap/cache/MailboxReadRepository.h"
@@ -16,6 +16,7 @@
 #include <QLoggingCategory>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPalette>
 #include <QPersistentModelIndex>
 
 #include <ranges>
@@ -178,35 +179,57 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto addDestination = [this, &accountId, &sourceMailboxId, &selection](
-                                        QMenu* menu, const MessageTransferOperation operation,
-                                        const QString& successMessage, const auto& mailbox)
+        const auto presentation =
+            javelin::gui::mailboxes::buildMailboxPresentation(accountId, *mailboxes);
+        const auto addDestinations = [this, &accountId, &sourceMailboxId, &selection,
+                                      &presentation](QMenu* menu,
+                                                     const MessageTransferOperation operation,
+                                                     const QString& successMessage)
         {
             if (menu == nullptr)
-            {
                 return;
+
+            bool displayedSpecialUse = false;
+            bool insertedUserSeparator = false;
+            const auto iconColor = menu->palette().color(QPalette::Active, QPalette::Text);
+            for (const auto& row :
+                 javelin::gui::mailboxes::flattenMailboxPresentation(presentation))
+            {
+                const auto& destination = *row.node;
+                if (!destination.mailbox.myRights.mayAddItems)
+                    continue;
+                if (destination.group == javelin::gui::mailboxes::MailboxPresentationGroup::User &&
+                    displayedSpecialUse && !insertedUserSeparator)
+                {
+                    menu->addSeparator();
+                    insertedUserSeparator = true;
+                }
+
+                const QString indentation(static_cast<qsizetype>(row.depth), QChar{u'\u2003'});
+                auto* action =
+                    menu->addAction(javelin::gui::mailboxes::mailboxPresentationIcon(
+                                        destination.mailbox.role, iconColor),
+                                    indentation + QString::fromStdString(destination.mailbox.name));
+                connect(action, &QAction::triggered, this,
+                        [this, accountId, sourceMailboxId,
+                         destinationMailboxId = destination.mailbox.id, selection, operation,
+                         successMessage]
+                        {
+                            queueTransfer(accountId, sourceMailboxId, destinationMailboxId,
+                                          selection, operation, successMessage);
+                        });
+                displayedSpecialUse =
+                    displayedSpecialUse ||
+                    destination.group ==
+                        javelin::gui::mailboxes::MailboxPresentationGroup::SpecialUse;
             }
-            auto* action = menu->addAction(QString::fromStdString(mailbox.name));
-            connect(action, &QAction::triggered, this,
-                    [this, accountId, sourceMailboxId, destinationMailboxId = mailbox.id, selection,
-                     operation, successMessage]
-                    {
-                        queueTransfer(accountId, sourceMailboxId, destinationMailboxId, selection,
-                                      operation, successMessage);
-                    });
         };
 
         // The open mailbox scopes collapsed-thread resolution; it does not describe the
         // residency of every visible or selected Email. Keep every writable mailbox available so
         // mixed selections can copy or move the members that are not already in that destination.
-        for (const auto* mailbox :
-             javelin::gui::mailboxes::writableMailboxesInDisplayOrder(*mailboxes))
-        {
-            addDestination(moveMenu, MessageTransferOperation::Move, i18n("Queued move."),
-                           *mailbox);
-            addDestination(copyMenu, MessageTransferOperation::Copy, i18n("Queued copy."),
-                           *mailbox);
-        }
+        addDestinations(moveMenu, MessageTransferOperation::Move, i18n("Queued move."));
+        addDestinations(copyMenu, MessageTransferOperation::Copy, i18n("Queued copy."));
     }
 
     void MessageCommandController::queueTransfer(std::string accountId,

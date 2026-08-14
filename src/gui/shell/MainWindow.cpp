@@ -19,7 +19,7 @@
 #include "gui/developer/DeveloperOptionsDialog.h"
 #include "gui/identity/IdentityManagerDialog.h"
 #include "gui/logging/LogViewerDialog.h"
-#include "gui/mailboxes/MailboxIconUtils.h"
+#include "gui/mailboxes/MailboxPresentation.h"
 #include "gui/mailboxes/MailboxPropertiesDialog.h"
 #include "gui/mailboxes/MailboxSelection.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
@@ -1299,6 +1299,7 @@ namespace javelin::gui::shell
                 {
                     markSearchTabsStaleForAccount(accountId.toStdString());
                     refreshMessageListPreservingSelection();
+                    m_messageModel->refreshExpandedThreadMembers();
                     refreshSelectionFromModels();
                 });
         connect(m_messageCommandController, &MessageCommandController::junkStateChanged, this,

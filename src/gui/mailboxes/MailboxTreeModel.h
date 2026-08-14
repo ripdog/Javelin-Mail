@@ -149,8 +149,6 @@ namespace javelin::gui::mailboxes
 
         [[nodiscard]] const Node* nodeForIndex(const QModelIndex& index) const;
         [[nodiscard]] Node* nodeForIndex(const QModelIndex& index);
-        [[nodiscard]] static bool mailboxNameLess(const std::unique_ptr<Node>& left,
-                                                  const std::unique_ptr<Node>& right);
         void rebuild();
         void rebuildFromSnapshot(
             const std::vector<javelin::jmap::cache::CachedAccount>& accounts,
