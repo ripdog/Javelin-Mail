@@ -52,9 +52,10 @@ TEST_CASE("message action selection preserves collapsed threads and filters unre
     REQUIRE(collapsed != nullptr);
     CHECK(collapsed->threadId == "thread-1");
 
-    const auto* email = std::get_if<javelin::app::SelectedEmail>(&selection[1]);
-    REQUIRE(email != nullptr);
-    CHECK(email->emailId == "email-2");
+    const auto* singleKnownMemberThread =
+        std::get_if<javelin::app::SelectedCollapsedThread>(&selection[1]);
+    REQUIRE(singleKnownMemberThread != nullptr);
+    CHECK(singleKnownMemberThread->threadId == "thread-2");
 }
 
 TEST_CASE("message action selection falls back to the current expanded summary",

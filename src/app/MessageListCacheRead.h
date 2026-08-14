@@ -99,7 +99,7 @@ namespace javelin::app
                 ? threadReader.listThreadMessages(accountId, threadId)
                 : threadReader.listMailboxThreadMessages(
                       accountId, *mailboxId, threadId,
-                      javelin::jmap::cache::MailboxThreadMembershipSource::CompleteOfflineMailbox);
+                      javelin::jmap::cache::MailboxThreadMembershipSource::CachedMailbox);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&itemsResult))
         {
             static_cast<void>(database.rollback());

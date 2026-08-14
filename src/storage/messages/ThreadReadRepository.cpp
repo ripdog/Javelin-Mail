@@ -173,7 +173,7 @@ namespace javelin::jmap::cache
             "         ORDER BY a.position LIMIT 1"
             "       ) AS from_email ");
         const auto source =
-            membershipSource == MailboxThreadMembershipSource::CompleteOfflineMailbox
+            membershipSource == MailboxThreadMembershipSource::CachedMailbox
                 ? QStringLiteral(
                       "FROM emails e "
                       "INNER JOIN email_mailboxes em ON em.account_id = e.account_id "
@@ -190,7 +190,7 @@ namespace javelin::jmap::cache
             "LEFT JOIN email_keywords flagged ON flagged.account_id = e.account_id "
             "     AND flagged.email_id = e.email_id AND flagged.keyword = '$flagged' ");
         const auto predicateAndOrder =
-            membershipSource == MailboxThreadMembershipSource::CompleteOfflineMailbox
+            membershipSource == MailboxThreadMembershipSource::CachedMailbox
                 ? QStringLiteral("WHERE e.account_id = :account_id AND e.thread_id = :thread_id "
                                  "ORDER BY e.received_at ASC,e.email_id ASC")
                 : QStringLiteral("WHERE thread_email.account_id = :account_id "

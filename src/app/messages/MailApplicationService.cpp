@@ -1793,28 +1793,22 @@ namespace javelin::app
         std::string accountId, std::optional<std::string> sourceMailboxId,
         MessageSelection selection)
     {
+        // Mailbox-scoped Thread actions resolve directly from the cached Email/mailbox projection.
+        // They must not add a synchronous Thread/get before the mutation request.
+        if (sourceMailboxId.has_value())
+            co_return std::nullopt;
+
         std::vector<std::string> threadIds;
         for (const auto& item : selection)
         {
             if (const auto* thread = std::get_if<SelectedCollapsedThread>(&item);
                 thread != nullptr && !thread->threadId.empty())
-            {
                 threadIds.push_back(thread->threadId);
-            }
         }
         std::ranges::sort(threadIds);
         threadIds.erase(std::unique(threadIds.begin(), threadIds.end()), threadIds.end());
         if (threadIds.empty())
             co_return std::nullopt;
-        if (sourceMailboxId.has_value())
-        {
-            const auto offlineState =
-                m_mailboxMessageReader.offlineMailboxComplete(accountId, *sourceMailboxId);
-            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&offlineState))
-                co_return javelin::jmap::operationError(*error);
-            if (std::get<bool>(offlineState))
-                co_return std::nullopt;
-        }
 
         javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
         bool incomplete = false;
@@ -1850,6 +1844,23 @@ namespace javelin::app
     MailMutationApplicationService::queueMailboxSelectionMutation(
         MailboxSelectionMutationIntent intent)
     {
+        if (intent.operation == MailboxSelectionOperation::Archive &&
+            !intent.sourceMailboxId.has_value())
+        {
+            const auto mailboxesResult = m_mailboxReader.listMailboxTree(intent.accountId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxesResult))
+                co_return javelin::jmap::operationError(*error);
+            const auto& mailboxes =
+                std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(mailboxesResult);
+            const auto inbox = std::ranges::find(mailboxes, std::optional<std::string>{"inbox"},
+                                                 &javelin::jmap::cache::MailboxTreeItem::role);
+            if (inbox == mailboxes.end())
+                co_return javelin::jmap::OperationError{.message =
+                                                            i18n("No Inbox mailbox is available.")};
+            intent.sourceMailboxId = inbox->id;
+        }
+
         if (const auto error = co_await ensureMessageSelectionMaterialized(
                 intent.accountId, intent.sourceMailboxId, intent.selection))
             co_return *error;
@@ -1862,9 +1873,8 @@ namespace javelin::app
     {
         javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
         javelin::jmap::cache::ThreadReadRepository threadReader{m_databaseConnection};
-        auto emailIdsResult =
-            resolveMessageSelection(m_mailboxMessageReader, threadReader, threads, intent.accountId,
-                                    intent.sourceMailboxId, intent.selection);
+        auto emailIdsResult = resolveMessageSelection(threadReader, threads, intent.accountId,
+                                                      intent.sourceMailboxId, intent.selection);
         if (const auto* error = std::get_if<QString>(&emailIdsResult))
         {
             return javelin::jmap::OperationError{.message = *error};
@@ -2064,8 +2074,8 @@ namespace javelin::app
     {
         javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
         javelin::jmap::cache::ThreadReadRepository threadReader{m_databaseConnection};
-        auto emailIdsResult = resolveMessageSelection(m_mailboxMessageReader, threadReader, threads,
-                                                      accountId, sourceMailboxId, selection);
+        auto emailIdsResult =
+            resolveMessageSelection(threadReader, threads, accountId, sourceMailboxId, selection);
         if (const auto* error = std::get_if<QString>(&emailIdsResult))
         {
             return javelin::jmap::OperationError{.message = *error};
@@ -2316,8 +2326,8 @@ namespace javelin::app
     {
         javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
         javelin::jmap::cache::ThreadReadRepository threadReader{m_databaseConnection};
-        auto emailIdsResult = resolveMessageSelection(m_mailboxMessageReader, threadReader, threads,
-                                                      accountId, sourceMailboxId, selection);
+        auto emailIdsResult =
+            resolveMessageSelection(threadReader, threads, accountId, sourceMailboxId, selection);
         if (const auto* error = std::get_if<QString>(&emailIdsResult))
             return javelin::jmap::OperationError{.message = *error};
         const auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));

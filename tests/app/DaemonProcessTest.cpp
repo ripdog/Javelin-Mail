@@ -7,6 +7,7 @@
 #include "app/MailboxTreeCacheRead.h"
 #include "app/MessageListMaterializationPort.h"
 #include "app/RemoteCodec.h"
+#include "app/undo/UndoManager.h"
 #include "daemon/DaemonServices.h"
 #include "daemon/actions/DaemonRemoteActionDispatcher.h"
 #include "jmap/cache/EmailRepository.h"
@@ -703,7 +704,7 @@ TEST_CASE("completed offline mailbox pages materialize without server access",
     CHECK(summary->queryState == "state-current");
 }
 
-TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritatively",
+TEST_CASE("collapsed Thread archive uses cached source members without Thread refetch",
           "[app][daemon][mail][optimistic][thread-coverage]")
 {
     ApplicationGuard application;
@@ -733,7 +734,7 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     inbox.id = "inbox";
     inbox.name = "Inbox";
     inbox.role = "inbox";
-    inbox.totalEmails = 2;
+    inbox.totalEmails = 3;
     inbox.totalThreads = 1;
     inbox.isSubscribed = true;
     inbox.myRights = rights;
@@ -756,12 +757,16 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     auto child = email;
     child.id = "email-2";
     child.receivedAt = "2026-08-06T03:00:00Z";
+    auto secondChild = email;
+    secondChild.id = "email-3";
+    secondChild.receivedAt = "2026-08-06T02:00:00Z";
     javelin::jmap::cache::EmailRepository emails{connection};
-    REQUIRE_FALSE(emails.replaceAll("account-1", {email, child}).has_value());
+    REQUIRE_FALSE(emails.replaceAll("account-1", {email, child, secondChild}).has_value());
     javelin::jmap::cache::ThreadRepository threads{connection};
-    REQUIRE_FALSE(
-        threads.upsertMany("account-1", {{.id = "thread-1", .emailIds = {"email-1", "email-2"}}})
-            .has_value());
+    REQUIRE_FALSE(threads
+                      .upsertMany("account-1", {{.id = "thread-1",
+                                                 .emailIds = {"email-1", "email-2", "email-3"}}})
+                      .has_value());
 
     const auto inboxQueryKey = javelin::jmap::sync::mailboxQueryKey({
         .mailboxId = "inbox",
@@ -805,6 +810,10 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
                       })
                       .has_value());
 
+    // A mailbox-scoped collapsed Thread must not need a synchronous Thread/get. Even with
+    // normalized membership stale, the source mailbox projection already identifies its members.
+    REQUIRE_FALSE(threads.markStale("account-1", std::vector<std::string>{"thread-1"}).has_value());
+
     std::vector<javelin::app::MailCacheChange> cacheChanges;
     QObject::connect(&services.mailMutationApplicationService(),
                      &javelin::app::MailMutationApplicationService::cacheCommitted,
@@ -824,8 +833,20 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
         }));
     const auto* summary = std::get_if<javelin::app::QueuedMailboxSelectionMutation>(&queued);
     REQUIRE(summary != nullptr);
-    CHECK(summary->queuedEmailCount == 2);
-    CHECK(summary->queuedMutations.size() == 2);
+    CHECK(summary->queuedEmailCount == 3);
+    CHECK(summary->queuedMutations.size() == 3);
+    REQUIRE(summary->historyEntryId.has_value());
+    const auto historyEntry =
+        std::ranges::find(services.undoManager().entries(), *summary->historyEntryId,
+                          &javelin::app::undo::HistoryEntry::entryId);
+    REQUIRE(historyEntry != services.undoManager().entries().end());
+    const auto* archiveHistory =
+        std::get_if<javelin::app::undo::MailPatchHistory>(&historyEntry->payload);
+    REQUIRE(archiveHistory != nullptr);
+    REQUIRE(archiveHistory->items.size() == 3);
+    CHECK(archiveHistory->items[0].inverse.addMailboxIds == std::vector<std::string>{"inbox"});
+    CHECK(archiveHistory->items[1].inverse.addMailboxIds == std::vector<std::string>{"inbox"});
+    CHECK(archiveHistory->items[2].inverse.addMailboxIds == std::vector<std::string>{"inbox"});
     REQUIRE(cacheChanges.size() == 1);
     CHECK(cacheChanges.front().optimisticProjection);
     CHECK(cacheChanges.front().mailboxIds.size() == 2);
@@ -900,7 +921,7 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     const auto* offlineSummary =
         std::get_if<javelin::app::QueuedMessageSelectionMutation>(&offlineFlagged);
     REQUIRE(offlineSummary != nullptr);
-    CHECK(offlineSummary->queuedEmailCount == 2);
+    CHECK(offlineSummary->queuedEmailCount == 3);
 
     const auto unavailable =
         QCoro::waitFor(services.mailMutationApplicationService().queueSetMessagesFlagged(
@@ -913,7 +934,7 @@ TEST_CASE("optimistic archive resolves a complete collapsed Thread authoritative
     QSqlQuery mutationCount{connection.database()};
     REQUIRE(mutationCount.exec(QStringLiteral("SELECT COUNT(*) FROM mutation_journal")));
     REQUIRE(mutationCount.next());
-    CHECK(mutationCount.value(0).toInt() == 4);
+    CHECK(mutationCount.value(0).toInt() == 6);
 }
 
 TEST_CASE("Thread materialization invalidates affected windows once per batch",

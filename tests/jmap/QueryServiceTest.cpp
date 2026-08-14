@@ -763,21 +763,88 @@ TEST_CASE("mailbox thread queries exclude members moved to another mailbox", "[j
         },
     };
     const auto resolved = javelin::app::resolveMessageSelection(
-        queryService, threadReader, threadRepository, "account-1", "mbx-inbox", selection);
+        threadReader, threadRepository, "account-1", "mbx-inbox", selection);
     REQUIRE(std::holds_alternative<std::vector<std::string>>(resolved));
     CHECK(std::get<std::vector<std::string>>(resolved) == std::vector<std::string>{"eml-inbox"});
 
     const auto globalResolved = javelin::app::resolveMessageSelection(
-        queryService, threadReader, threadRepository, "account-1", std::nullopt, selection);
+        threadReader, threadRepository, "account-1", std::nullopt, selection);
     REQUIRE(std::holds_alternative<std::vector<std::string>>(globalResolved));
     CHECK(std::get<std::vector<std::string>>(globalResolved) ==
           std::vector<std::string>{"eml-inbox", "eml-archive"});
 
     REQUIRE_FALSE(
         threadRepository.markStale("account-1", std::vector<std::string>{"thr-1"}).has_value());
-    const auto incomplete = javelin::app::resolveMessageSelection(
-        queryService, threadReader, threadRepository, "account-1", "mbx-inbox", selection);
-    CHECK(std::holds_alternative<QString>(incomplete));
+    const auto mailboxScopedWithStaleThread = javelin::app::resolveMessageSelection(
+        threadReader, threadRepository, "account-1", "mbx-inbox", selection);
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(mailboxScopedWithStaleThread));
+    CHECK(std::get<std::vector<std::string>>(mailboxScopedWithStaleThread) ==
+          std::vector<std::string>{"eml-inbox"});
+
+    const auto incompleteGlobal = javelin::app::resolveMessageSelection(
+        threadReader, threadRepository, "account-1", std::nullopt, selection);
+    CHECK(std::holds_alternative<QString>(incompleteGlobal));
+}
+
+TEST_CASE("mailbox-scoped collapsed Thread selection uses cached mailbox membership",
+          "[jmap][cache][query][thread-selection]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    auto representative = loadEmailFixture();
+    representative.id = "representative";
+    representative.threadId = "thread-1";
+    representative.mailboxIds = {"mbx-inbox"};
+    representative.receivedAt = "2026-08-14T00:00:00Z";
+    auto secondInbox = representative;
+    secondInbox.id = "second-inbox";
+    secondInbox.receivedAt = "2026-08-14T00:01:00Z";
+    auto thirdInbox = representative;
+    thirdInbox.id = "third-inbox";
+    thirdInbox.receivedAt = "2026-08-14T00:02:00Z";
+    auto archived = representative;
+    archived.id = "archived";
+    archived.mailboxIds = {"mbx-archive"};
+    archived.receivedAt = "2026-08-14T00:03:00Z";
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(
+        emails.replaceAll("account-1", {representative, secondInbox, thirdInbox, archived})
+            .has_value());
+
+    // Deliberately reproduce the old contradiction: the normalized Thread claims to be current,
+    // but omits two cached Inbox members that still carry this thread_id.
+    javelin::jmap::cache::ThreadRepository threads{databaseContext.connection};
+    REQUIRE_FALSE(threads
+                      .replaceAll("account-1",
+                                  {{.id = "thread-1", .emailIds = {"representative", "archived"}}})
+                      .has_value());
+
+    javelin::jmap::cache::ThreadReadRepository threadReader{databaseContext.connection};
+    const auto normalized =
+        threadReader.listMailboxThreadMessages("account-1", "mbx-inbox", "thread-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(normalized));
+    REQUIRE(std::get<std::vector<javelin::jmap::cache::MessageListItem>>(normalized).size() == 1);
+
+    const javelin::app::MessageSelection selection{
+        javelin::app::SelectedCollapsedThread{.threadId = "thread-1"}};
+    const auto resolved = javelin::app::resolveMessageSelection(threadReader, threads, "account-1",
+                                                                "mbx-inbox", selection);
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(resolved));
+    CHECK(std::get<std::vector<std::string>>(resolved) ==
+          std::vector<std::string>{"representative", "second-inbox", "third-inbox"});
+
+    const javelin::app::MessageSelection individual{
+        javelin::app::SelectedEmail{.emailId = "representative"}};
+    const auto individualResolved = javelin::app::resolveMessageSelection(
+        threadReader, threads, "account-1", "mbx-inbox", individual);
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(individualResolved));
+    CHECK(std::get<std::vector<std::string>>(individualResolved) ==
+          std::vector<std::string>{"representative"});
 }
 
 TEST_CASE("thread expansion snapshot rejects incomplete normalized membership cardinality",
@@ -844,13 +911,12 @@ TEST_CASE("complete offline mailbox threads resolve and expand without normalize
         "INSERT INTO offline_mailbox_membership(account_id,mailbox_id,email_id,generation,"
         "position) VALUES('account-1','mbx-inbox','offline-older',4,0),"
         "('account-1','mbx-inbox','offline-newer',4,1)")));
-    javelin::jmap::cache::MailboxMessageReadRepository queries{databaseContext.connection};
     javelin::jmap::cache::ThreadReadRepository threadReader{databaseContext.connection};
     javelin::jmap::cache::ThreadRepository threads{databaseContext.connection};
     const javelin::app::MessageSelection selection{
         javelin::app::SelectedCollapsedThread{.threadId = "offline-thread"}};
-    const auto resolved = javelin::app::resolveMessageSelection(
-        queries, threadReader, threads, "account-1", "mbx-inbox", selection);
+    const auto resolved = javelin::app::resolveMessageSelection(threadReader, threads, "account-1",
+                                                                "mbx-inbox", selection);
     REQUIRE(std::holds_alternative<std::vector<std::string>>(resolved));
     CHECK(std::get<std::vector<std::string>>(resolved) ==
           std::vector<std::string>{"offline-older", "offline-newer"});

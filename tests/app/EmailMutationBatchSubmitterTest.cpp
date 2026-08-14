@@ -16,6 +16,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <variant>
 #include <vector>
@@ -71,7 +72,7 @@ namespace
         std::unique_ptr<javelin::jmap::EmailMutationEngine> mutationEngine;
     };
 
-    [[nodiscard]] std::unique_ptr<Fixture> makeFixture()
+    [[nodiscard]] std::unique_ptr<Fixture> makeFixture(const std::uint64_t maxObjectsInSet = 2)
     {
         auto fixture = std::make_unique<Fixture>();
         REQUIRE(fixture->directory.isValid());
@@ -90,7 +91,7 @@ namespace
         REQUIRE(parsedSession.session.has_value());
         auto session = *parsedSession.session;
         REQUIRE(session.capabilities.coreDetails.has_value());
-        session.capabilities.coreDetails->maxObjectsInSet = 2;
+        session.capabilities.coreDetails->maxObjectsInSet = maxObjectsInSet;
         javelin::jmap::cache::SessionRepository sessions{fixture->database};
         REQUIRE_FALSE(sessions.replace("u1", session).has_value());
 
@@ -132,6 +133,33 @@ namespace
         };
     }
 } // namespace
+
+TEST_CASE("Email mutation operation groups submit one Email/set when they fit the server limit",
+          "[app][email-mutation][batching][single-request]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto fixture = makeFixture(10);
+    fixture->transport.results = {
+        javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body =
+                R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"eml-1":null,"eml-2":null,"eml-3":null},"notUpdated":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
+        },
+    };
+
+    javelin::app::EmailMutationBatchSubmitter submitter{*fixture->mutationEngine};
+    const auto outcome = QCoro::waitFor(submitter.submit(settings(), "u1", "thread-command", 10));
+
+    CHECK_FALSE(outcome.error.has_value());
+    CHECK(outcome.submitted.attemptedEmailCount == 3);
+    CHECK(outcome.submitted.updatedEmailCount == 3);
+    REQUIRE(fixture->transport.requests.size() == 1);
+    CHECK(fixture->transport.requests.front().body.contains("eml-1"));
+    CHECK(fixture->transport.requests.front().body.contains("eml-2"));
+    CHECK(fixture->transport.requests.front().body.contains("eml-3"));
+    CHECK(fixture->transport.requests.front().body.contains("\"Email/set\""));
+}
 
 TEST_CASE("Email mutation operation groups settle sequential bounded batches",
           "[app][email-mutation][batching]")

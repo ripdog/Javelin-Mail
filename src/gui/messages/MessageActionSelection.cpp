@@ -55,8 +55,7 @@ namespace javelin::gui::messages
                 index.data(MessageListModel::RowKindRole).toInt());
             const bool collapsedThreadSummary =
                 rowKind == MessageListModel::RowKind::ThreadSummary &&
-                !index.data(MessageListModel::IsExpandedRole).toBool() &&
-                index.data(MessageListModel::CanExpandRole).toBool();
+                !index.data(MessageListModel::IsExpandedRole).toBool();
             if (collapsedThreadSummary)
             {
                 if (!threadId.empty() && seenThreadIds.insert(threadId).second)

@@ -78,7 +78,7 @@ namespace javelin::jmap::cache
     enum class MailboxThreadMembershipSource
     {
         NormalizedThread,
-        CompleteOfflineMailbox,
+        CachedMailbox,
     };
 
 } // namespace javelin::jmap::cache
