@@ -48,6 +48,7 @@ namespace javelin::app
         constexpr auto attachmentsAlwaysAskKey = "alwaysAsk";
         constexpr auto attachmentsDirectoryKey = "directory";
         constexpr auto composeUndoSendDelayKey = "compose/undoSendDelaySeconds";
+        constexpr auto composeUndoSendDialogKey = "compose/undoSendUsesDialog";
         constexpr auto workspaceGroup = "workspace";
         constexpr auto workspaceFormatVersionKey = "formatVersion";
         constexpr auto workspaceWindowStateKey = "mainWindowState";
@@ -300,6 +301,8 @@ namespace javelin::app
                 snapshot.attachments = *update.attachments;
             if (update.undoSendDelaySeconds.has_value())
                 snapshot.undoSendDelaySeconds = *update.undoSendDelaySeconds;
+            if (update.undoSendUsesDialog.has_value())
+                snapshot.undoSendUsesDialog = *update.undoSendUsesDialog;
             if (update.workspace.has_value())
                 snapshot.workspace = *update.workspace;
 
@@ -686,6 +689,8 @@ namespace javelin::app
         if (!ok || snapshot.undoSendDelaySeconds < 1 || snapshot.undoSendDelaySeconds > 120)
             return invalidValue(settingKey(composeUndoSendDelayKey),
                                 QStringLiteral("undo-send delay is outside the supported range"));
+        snapshot.undoSendUsesDialog =
+            settings.value(settingKey(composeUndoSendDialogKey), false).toBool();
         if (const auto error = readWorkspace(settings, snapshot.workspace, includeLegacyWorkspace))
             return *error;
         return snapshot;
@@ -749,6 +754,7 @@ namespace javelin::app
                               settingKey(attachmentsDirectoryKey),
                           snapshot.attachments.directory);
         settings.setValue(settingKey(composeUndoSendDelayKey), snapshot.undoSendDelaySeconds);
+        settings.setValue(settingKey(composeUndoSendDialogKey), snapshot.undoSendUsesDialog);
         settings.beginGroup(settingKey(workspaceGroup));
         settings.setValue(settingKey(workspaceFormatVersionKey), snapshot.workspace.formatVersion);
         settings.setValue(settingKey(workspaceWindowStateKey), snapshot.workspace.mainWindowState);

@@ -384,6 +384,7 @@ add_executable(javelin_gui_widget_tests
     gui/MailboxPendingCreateTest.cpp
     gui/MailboxPropertiesDialogTest.cpp
     gui/SendingIdentitiesDialogTest.cpp
+    gui/UndoSendDialogTest.cpp
 )
 set_source_files_properties(gui/NoRttiAccessibleObject.cpp PROPERTIES COMPILE_OPTIONS -fno-rtti)
 target_link_libraries(javelin_gui_widget_tests

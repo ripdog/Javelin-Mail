@@ -48,6 +48,12 @@ namespace javelin::app
         return m_service.scheduleSend(std::move(settings), std::move(request));
     }
 
+    QCoro::Task<std::variant<bool, javelin::jmap::OperationError>>
+    ComposeCommandService::cancelDeferredSend(QString sendId)
+    {
+        co_return m_service.cancelDeferredSend(sendId);
+    }
+
     std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
                  javelin::jmap::OperationError>
     ComposeCommandService::loadWorkingCopy(std::string_view composeSessionId) const

@@ -522,6 +522,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/compose/SignatureTrackingPolicy.h
     src/gui/compose/SendingIdentitiesDialog.cpp
     src/gui/compose/SendingIdentitiesDialog.h
+    src/gui/compose/UndoSendDialog.cpp
+    src/gui/compose/UndoSendDialog.h
     src/gui/identity/IdentityManagerDialog.cpp
     src/gui/identity/IdentityManagerDialog.h
     src/gui/compose/ComposeUiPreferences.cpp
@@ -1340,6 +1342,8 @@ add_library(javelin_gui STATIC
     src/gui/compose/SignatureTrackingPolicy.h
     src/gui/compose/SendingIdentitiesDialog.cpp
     src/gui/compose/SendingIdentitiesDialog.h
+    src/gui/compose/UndoSendDialog.cpp
+    src/gui/compose/UndoSendDialog.h
     src/gui/identity/IdentityManagerDialog.cpp
     src/gui/identity/IdentityManagerDialog.h
     src/gui/compose/ComposeUiPreferences.cpp

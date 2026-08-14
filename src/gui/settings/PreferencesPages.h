@@ -158,11 +158,14 @@ namespace javelin::gui::settings
     class ComposingPage final : public QWidget
     {
       public:
-        explicit ComposingPage(int undoSendDelaySeconds, QWidget* parent = nullptr);
+        explicit ComposingPage(int undoSendDelaySeconds, bool undoSendUsesDialog,
+                               QWidget* parent = nullptr);
 
         [[nodiscard]] QSpinBox* undoSendDelaySpinBox() const;
+        [[nodiscard]] QComboBox* undoSendPresentationCombo() const;
 
       private:
         QSpinBox* m_undoSendDelaySpinBox = nullptr;
+        QComboBox* m_undoSendPresentationCombo = nullptr;
     };
 } // namespace javelin::gui::settings

@@ -46,6 +46,7 @@ namespace
                 .appearance = std::nullopt,
                 .attachments = std::nullopt,
                 .undoSendDelaySeconds = std::nullopt,
+                .undoSendUsesDialog = std::nullopt,
                 .workspace = std::nullopt};
     }
 
@@ -87,6 +88,7 @@ namespace
         settings.setValue(QStringLiteral("attachments/alwaysAsk"), false);
         settings.setValue(QStringLiteral("attachments/directory"), QStringLiteral("/tmp/mail"));
         settings.setValue(QStringLiteral("compose/undoSendDelaySeconds"), 30);
+        settings.setValue(QStringLiteral("compose/undoSendUsesDialog"), true);
         settings.beginGroup(QStringLiteral("mainWindow"));
         settings.setValue(QStringLiteral("geometry"), QByteArrayLiteral("legacy-geometry"));
         settings.setValue(QStringLiteral("activeTabIndex"), 0);
@@ -119,6 +121,7 @@ TEST_CASE("settings repository creates and persists its schema identity", "[app]
     CHECK(snapshot->revision.value == 0);
     CHECK(snapshot->schemaVersion == 6);
     CHECK(snapshot->undoSendDelaySeconds == 10);
+    CHECK_FALSE(snapshot->undoSendUsesDialog);
 
     QSettings persisted{path, QSettings::IniFormat};
     CHECK(persisted.value(QStringLiteral("settings/schemaVersion")).toUInt() == 6);
@@ -158,6 +161,7 @@ TEST_CASE("settings repository migrates the complete legacy operational shape", 
     CHECK_FALSE(snapshot->attachments.alwaysAsk);
     CHECK(snapshot->attachments.directory == QStringLiteral("/tmp/mail"));
     CHECK(snapshot->undoSendDelaySeconds == 30);
+    CHECK(snapshot->undoSendUsesDialog);
     const auto workspace =
         javelin::gui::shell::deserializeMainWindowState(snapshot->workspace.mainWindowState, {});
     CHECK(workspace.geometry == QByteArrayLiteral("legacy-geometry"));
@@ -321,6 +325,7 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
             .mailboxIds = {},
         }};
     update.undoSendDelaySeconds = 45;
+    update.undoSendUsesDialog = true;
     update.workspace = javelin::protocol::WorkspaceSettings{
         .formatVersion = 1,
         .mainWindowState = QByteArrayLiteral("workspace-state"),
@@ -361,6 +366,7 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
     REQUIRE(reloaded->notificationMailboxSelections.size() == 1);
     CHECK(reloaded->notificationMailboxSelections.front().mailboxIds.empty());
     CHECK(reloaded->undoSendDelaySeconds == 45);
+    CHECK(reloaded->undoSendUsesDialog);
     CHECK(reloaded->workspace.mainWindowState == QByteArrayLiteral("workspace-state"));
     CHECK_FALSE(reloaded->workspace.composeRichTextDefault);
     REQUIRE(reloaded->workspace.calendarColorOverrides.size() == 1);

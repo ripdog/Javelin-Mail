@@ -39,6 +39,7 @@ namespace javelin::gui::settings
         messageAppearanceSettings() const;
         [[nodiscard]] AttachmentSaveSettings attachmentSaveSettings() const;
         [[nodiscard]] int undoSendDelaySeconds() const;
+        [[nodiscard]] bool undoSendUsesDialog() const;
         [[nodiscard]] const javelin::protocol::WorkspaceSettings&
         workspaceSettings() const override;
 

@@ -6,6 +6,7 @@
 #include "app/WorkTaskPort.h"
 #include "client/GuiDaemonSession.h"
 #include "client/GuiServices.h"
+#include "gui/compose/UndoSendDialog.h"
 #include "gui/messageview/InlineMessageSchemeHandler.h"
 
 #include "protocol/LocalActivationClient.h"
@@ -29,6 +30,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEvent>
+#include <QHash>
 #include <QIcon>
 #include <QLabel>
 #include <QLockFile>
@@ -277,7 +279,7 @@ int main(int argc, char* argv[])
         .runtimeDirectory = runtime,
         .socketPath = socketPath + QStringLiteral(".activation"),
         .limits = {},
-        .protocol = {.major = 5, .minor = 9},
+        .protocol = {.major = 5, .minor = 10},
         .expectedBuild =
             javelin::protocol::BuildIdentity{.application = QStringLiteral("Javelin-Mail"),
                                              .revision = QStringLiteral(JAVELIN_APP_VERSION)},
@@ -392,7 +394,7 @@ int main(int argc, char* argv[])
          .socketPath = socketPath,
          .daemonExecutable =
              QDir{QCoreApplication::applicationDirPath()}.filePath(QStringLiteral("javelind")),
-         .protocol = {.major = 5, .minor = 9},
+         .protocol = {.major = 5, .minor = 10},
          .build = {.application = QStringLiteral("Javelin-Mail"),
                    .revision = QStringLiteral(JAVELIN_APP_VERSION)},
          .startTimeoutMilliseconds = 5000,
@@ -419,6 +421,7 @@ int main(int argc, char* argv[])
     QPointer<javelin::gui::shell::MainWindow> mainWindow;
     QPointer<javelin::gui::tasks::TaskCenterDialog> taskCenter;
     QPointer<javelin::gui::onboarding::FirstRunWizard> firstRunWizard;
+    QHash<QString, QPointer<javelin::gui::compose::UndoSendDialog>> undoSendDialogs;
     std::vector<javelin::protocol::OpenMailtoRoute> pendingMailtos;
 
     const auto showRecovery = [&recoveryWindow, recoveryStatus, enableAndStartDaemon, startDaemon,
@@ -626,6 +629,35 @@ int main(int argc, char* argv[])
                 {
                     restoreMainWindow(activationRoute.activationToken);
                     showTaskCenter();
+                }
+                else if constexpr (std::is_same_v<Route,
+                                                  javelin::protocol::ShowUndoSendDialogRoute>)
+                {
+                    restoreMainWindow({});
+                    if (mainWindow == nullptr || !services)
+                        return;
+                    if (const auto existing = undoSendDialogs.value(activationRoute.sendId))
+                        existing->close();
+                    auto* dialog = new javelin::gui::compose::UndoSendDialog(
+                        activationRoute.sendId, activationRoute.title, activationRoute.message,
+                        activationRoute.deadlineEpochMilliseconds, services->composeCommandPort(),
+                        mainWindow);
+                    undoSendDialogs.insert(activationRoute.sendId, dialog);
+                    QObject::connect(dialog, &QObject::destroyed, mainWindow,
+                                     [&, sendId = activationRoute.sendId, dialog]
+                                     {
+                                         if (undoSendDialogs.value(sendId) == dialog)
+                                             undoSendDialogs.remove(sendId);
+                                     });
+                    dialog->show();
+                    dialog->raise();
+                    dialog->activateWindow();
+                }
+                else if constexpr (std::is_same_v<Route,
+                                                  javelin::protocol::CloseUndoSendDialogRoute>)
+                {
+                    if (const auto dialog = undoSendDialogs.take(activationRoute.sendId))
+                        dialog->close();
                 }
                 else if constexpr (std::is_same_v<Route, javelin::protocol::OpenMailtoRoute>)
                 {

@@ -272,7 +272,8 @@ namespace javelin::gui::settings
           m_autoTranslateDomains(m_translationSettings.autoTranslateDomains),
           m_messageAppearanceSettings(m_settings.messageAppearanceSettings()),
           m_attachmentSaveSettings(m_settings.attachmentSaveSettings()),
-          m_undoSendDelaySeconds(m_settings.undoSendDelaySeconds())
+          m_undoSendDelaySeconds(m_settings.undoSendDelaySeconds()),
+          m_undoSendUsesDialog(m_settings.undoSendUsesDialog())
     {
         setWindowTitle(i18n("Preferences"));
         resize(760, 420);
@@ -333,8 +334,9 @@ namespace javelin::gui::settings
         addPage(attachmentsPage, i18n("Attachments"), QStringLiteral("mail-attachment"), QString{},
                 false);
 
-        auto* composingPage = new ComposingPage(m_undoSendDelaySeconds, this);
+        auto* composingPage = new ComposingPage(m_undoSendDelaySeconds, m_undoSendUsesDialog, this);
         m_undoSendDelaySpinBox = composingPage->undoSendDelaySpinBox();
+        m_undoSendPresentationCombo = composingPage->undoSendPresentationCombo();
         addPage(composingPage, i18n("Composing"), QStringLiteral("mail-send"), QString{}, false);
 
         connect(addButton, &QPushButton::clicked, this, &PreferencesDialog::addAccount);
@@ -444,6 +446,12 @@ namespace javelin::gui::settings
                 [this](const int seconds)
                 {
                     m_undoSendDelaySeconds = seconds;
+                    noteUnsavedChanges();
+                });
+        connect(m_undoSendPresentationCombo, &QComboBox::currentIndexChanged, this,
+                [this]
+                {
+                    m_undoSendUsesDialog = m_undoSendPresentationCombo->currentData().toBool();
                     noteUnsavedChanges();
                 });
         connect(m_mailboxSyncAccount, &QComboBox::currentIndexChanged, this,
@@ -735,6 +743,7 @@ namespace javelin::gui::settings
             .directory = m_attachmentSaveSettings.directory,
         };
         update.undoSendDelaySeconds = m_undoSendDelaySeconds;
+        update.undoSendUsesDialog = m_undoSendUsesDialog;
         if (const auto error = m_settings.update(m_baseRevision, std::move(update)))
         {
             QMessageBox::critical(this, i18n("Could not save preferences"), error->detail);

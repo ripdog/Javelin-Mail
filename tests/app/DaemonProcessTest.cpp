@@ -317,6 +317,7 @@ TEST_CASE("daemon process migrates settings before exposing readiness", "[app][d
                    .appearance = std::nullopt,
                    .attachments = std::nullopt,
                    .undoSendDelaySeconds = std::nullopt,
+                   .undoSendUsesDialog = std::nullopt,
                    .workspace = std::nullopt},
     });
     const auto* updated = std::get_if<javelin::protocol::SettingsUpdated>(&update);
@@ -450,6 +451,7 @@ TEST_CASE("daemon does not queue vault metadata for undiscovered connection ids"
                    .appearance = std::nullopt,
                    .attachments = std::nullopt,
                    .undoSendDelaySeconds = std::nullopt,
+                   .undoSendUsesDialog = std::nullopt,
                    .workspace = std::nullopt},
     });
     REQUIRE(std::holds_alternative<javelin::protocol::SettingsUpdated>(update));
@@ -544,6 +546,7 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
                    .appearance = std::nullopt,
                    .attachments = std::nullopt,
                    .undoSendDelaySeconds = std::nullopt,
+                   .undoSendUsesDialog = std::nullopt,
                    .workspace = std::nullopt},
     });
     REQUIRE(std::holds_alternative<javelin::protocol::SettingsUpdated>(enable));
@@ -582,6 +585,7 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
                    .appearance = std::nullopt,
                    .attachments = std::nullopt,
                    .undoSendDelaySeconds = std::nullopt,
+                   .undoSendUsesDialog = std::nullopt,
                    .workspace = std::nullopt},
     });
     REQUIRE(std::holds_alternative<javelin::protocol::SettingsUpdated>(disable));
@@ -611,6 +615,7 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
                    .appearance = std::nullopt,
                    .attachments = std::nullopt,
                    .undoSendDelaySeconds = std::nullopt,
+                   .undoSendUsesDialog = std::nullopt,
                    .workspace = std::nullopt},
     });
     REQUIRE(std::holds_alternative<javelin::protocol::SettingsUpdated>(reenable));
@@ -1399,6 +1404,7 @@ TEST_CASE("daemon configures only cached JMAP accounts with the Mail capability"
                    .appearance = std::nullopt,
                    .attachments = std::nullopt,
                    .undoSendDelaySeconds = std::nullopt,
+                   .undoSendUsesDialog = std::nullopt,
                    .workspace = std::nullopt},
     });
     REQUIRE(std::holds_alternative<javelin::protocol::SettingsUpdated>(update));

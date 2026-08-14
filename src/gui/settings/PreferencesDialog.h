@@ -142,6 +142,7 @@ namespace javelin::gui::settings
         javelin::gui::messageview::MessageAppearanceSettings m_messageAppearanceSettings;
         AttachmentSaveSettings m_attachmentSaveSettings;
         int m_undoSendDelaySeconds = 10;
+        bool m_undoSendUsesDialog = false;
         bool m_hasPendingChanges = false;
         int m_currentRow = -1;
         QListWidget* m_accountList = nullptr;
@@ -172,6 +173,7 @@ namespace javelin::gui::settings
         QLineEdit* m_attachmentDirectoryEdit = nullptr;
         QPushButton* m_attachmentDirectoryButton = nullptr;
         QSpinBox* m_undoSendDelaySpinBox = nullptr;
+        QComboBox* m_undoSendPresentationCombo = nullptr;
         QComboBox* m_mailboxSyncAccount = nullptr;
         javelin::gui::mailboxes::MailboxTreeView* m_mailboxSyncList = nullptr;
         javelin::gui::mailboxes::MailboxTreeModel* m_mailboxSyncModel = nullptr;

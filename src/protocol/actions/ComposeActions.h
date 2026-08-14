@@ -62,6 +62,10 @@ namespace javelin::protocol::actions
         std::tuple<javelin::app::AccountConnectionSettings,
                    javelin::jmap::submission::ScheduledSendRequest>,
         std::variant<javelin::jmap::submission::SendSummary, javelin::jmap::OperationError>>;
+    using ComposeCancelDeferredSend =
+        Descriptor<89, ActionDomain::Compose, AdmissionSemantics::Asynchronous, ReplayPolicy::Never,
+                   detail::composeSend, std::tuple<QString>,
+                   std::variant<bool, javelin::jmap::OperationError>>;
 
     using ComposeActionTypes =
         std::tuple<RegisteredAction<ComposeOpen, "ComposeOpen">,
@@ -71,5 +75,6 @@ namespace javelin::protocol::actions
                    RegisteredAction<ComposeLoadWorkingCopy, "ComposeLoadWorkingCopy">,
                    RegisteredAction<ComposeStoreWorkingCopy, "ComposeStoreWorkingCopy">,
                    RegisteredAction<ComposeDiscard, "ComposeDiscard">,
-                   RegisteredAction<ComposeScheduleSend, "ComposeScheduleSend">>;
+                   RegisteredAction<ComposeScheduleSend, "ComposeScheduleSend">,
+                   RegisteredAction<ComposeCancelDeferredSend, "ComposeCancelDeferredSend">>;
 } // namespace javelin::protocol::actions

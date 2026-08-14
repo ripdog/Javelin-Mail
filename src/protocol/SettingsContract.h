@@ -87,6 +87,7 @@ namespace javelin::protocol
         std::optional<AppearanceSettings> appearance;
         std::optional<AttachmentSettings> attachments;
         std::optional<std::int32_t> undoSendDelaySeconds;
+        std::optional<bool> undoSendUsesDialog;
         std::optional<WorkspaceSettings> workspace;
     };
 
@@ -108,6 +109,7 @@ namespace javelin::protocol
         AppearanceSettings appearance;
         AttachmentSettings attachments;
         std::int32_t undoSendDelaySeconds = 10;
+        bool undoSendUsesDialog = false;
         WorkspaceSettings workspace;
         friend bool operator==(const SettingsSnapshot&, const SettingsSnapshot&) = default;
     };

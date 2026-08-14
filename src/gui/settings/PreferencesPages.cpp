@@ -432,7 +432,9 @@ namespace javelin::gui::settings
         return m_directoryButton;
     }
 
-    ComposingPage::ComposingPage(const int undoSendDelaySeconds, QWidget* parent) : QWidget(parent)
+    ComposingPage::ComposingPage(const int undoSendDelaySeconds, const bool undoSendUsesDialog,
+                                 QWidget* parent)
+        : QWidget(parent)
     {
         auto* layout = new QFormLayout(this);
         m_undoSendDelaySpinBox = new QSpinBox(this);
@@ -440,10 +442,22 @@ namespace javelin::gui::settings
         m_undoSendDelaySpinBox->setSuffix(i18nc("@item time suffix", " seconds"));
         m_undoSendDelaySpinBox->setValue(undoSendDelaySeconds);
         layout->addRow(i18n("Undo send window:"), m_undoSendDelaySpinBox);
+
+        m_undoSendPresentationCombo = new QComboBox(this);
+        m_undoSendPresentationCombo->addItem(i18nc("@item:inlistbox", "Desktop notification"),
+                                             false);
+        m_undoSendPresentationCombo->addItem(i18nc("@item:inlistbox", "Non-modal dialog"), true);
+        m_undoSendPresentationCombo->setCurrentIndex(undoSendUsesDialog ? 1 : 0);
+        layout->addRow(i18n("Undo send controls:"), m_undoSendPresentationCombo);
     }
 
     QSpinBox* ComposingPage::undoSendDelaySpinBox() const
     {
         return m_undoSendDelaySpinBox;
+    }
+
+    QComboBox* ComposingPage::undoSendPresentationCombo() const
+    {
+        return m_undoSendPresentationCombo;
     }
 } // namespace javelin::gui::settings

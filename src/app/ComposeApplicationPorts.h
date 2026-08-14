@@ -40,6 +40,8 @@ namespace javelin::app
             std::variant<javelin::jmap::submission::SendSummary, javelin::jmap::OperationError>>
         scheduleSend(AccountConnectionSettings settings,
                      javelin::jmap::submission::ScheduledSendRequest request) = 0;
+        [[nodiscard]] virtual QCoro::Task<std::variant<bool, javelin::jmap::OperationError>>
+        cancelDeferredSend(QString sendId) = 0;
         [[nodiscard]] virtual std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
                                            javelin::jmap::OperationError>
         loadWorkingCopy(std::string_view composeSessionId) const = 0;

@@ -317,6 +317,13 @@ namespace javelin::app
                                                                      std::move(request));
     }
 
+    QCoro::Task<std::variant<bool, javelin::jmap::OperationError>>
+    RemoteComposeCommandPort::cancelDeferredSend(QString sendId)
+    {
+        return call<javelin::protocol::actions::ComposeCancelDeferredSend>(m_client,
+                                                                           std::move(sendId));
+    }
+
     std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
                  javelin::jmap::OperationError>
     RemoteComposeCommandPort::loadWorkingCopy(const std::string_view composeSessionId) const

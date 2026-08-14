@@ -101,6 +101,7 @@ namespace
                     .appearance = {},
                     .attachments = {},
                     .undoSendDelaySeconds = 10,
+                    .undoSendUsesDialog = false,
                     .workspace = {
                         .formatVersion = 1,
                         .mainWindowState = QByteArrayLiteral("window-state"),
@@ -299,6 +300,7 @@ namespace
                  .appearance = std::nullopt,
                  .attachments = std::nullopt,
                  .undoSendDelaySeconds = std::nullopt,
+                 .undoSendUsesDialog = true,
                  .workspace = WorkspaceSettings{
                      .formatVersion = 1,
                      .mainWindowState = QByteArrayLiteral("updated-window-state"),
@@ -309,6 +311,7 @@ namespace
         REQUIRE(std::holds_alternative<SettingsUpdated>(settingsUpdate));
         CHECK(std::get<SettingsUpdated>(settingsUpdate).revision.value == 6);
         REQUIRE(handler.receivedSettingsUpdate.has_value());
+        REQUIRE(handler.receivedSettingsUpdate->update.undoSendUsesDialog == true);
         REQUIRE(handler.receivedSettingsUpdate->update.accounts.has_value());
         REQUIRE(handler.receivedSettingsUpdate->update.accounts->size() == 1);
         const auto& account = handler.receivedSettingsUpdate->update.accounts->front();
@@ -703,6 +706,7 @@ TEST_CASE("endpoint exposes settings, handshake, lifecycle and events through ty
                                             .appearance = std::nullopt,
                                             .attachments = std::nullopt,
                                             .undoSendDelaySeconds = std::nullopt,
+                                            .undoSendUsesDialog = std::nullopt,
                                             .workspace = std::nullopt}});
     CHECK(std::holds_alternative<SettingsUpdated>(update));
     REQUIRE(handler.receivedSettingsUpdate.has_value());
@@ -1098,6 +1102,24 @@ TEST_CASE("activation socket carries typed routes to the daemon", "[protocol][so
     REQUIRE(receivedMailto != nullptr);
     CHECK(receivedMailto->uri == QStringLiteral("mailto:alice@example.test?subject=Hello%20there"));
     CHECK(receivedMailto->activationToken == QStringLiteral("token-mailto"));
+
+    const auto undoDialogResult = SocketActivationClient::request(
+        options, ActivationRoute{ShowUndoSendDialogRoute{
+                     .sendId = QStringLiteral("send-1"),
+                     .title = QStringLiteral("Message scheduled"),
+                     .message = QStringLiteral("Send “Quarterly report”"),
+                     .deadlineEpochMilliseconds = 1'800'000'000'123,
+                 }});
+    REQUIRE(std::holds_alternative<std::optional<BoundaryError>>(undoDialogResult));
+    CHECK_FALSE(std::get<std::optional<BoundaryError>>(undoDialogResult).has_value());
+    const auto undoDialogRoute = handler.activatedRouteSnapshot();
+    REQUIRE(undoDialogRoute.has_value());
+    const auto* receivedUndoDialog = std::get_if<ShowUndoSendDialogRoute>(&*undoDialogRoute);
+    REQUIRE(receivedUndoDialog != nullptr);
+    CHECK(receivedUndoDialog->sendId == QStringLiteral("send-1"));
+    CHECK(receivedUndoDialog->title == QStringLiteral("Message scheduled"));
+    CHECK(receivedUndoDialog->message == QStringLiteral("Send “Quarterly report”"));
+    CHECK(receivedUndoDialog->deadlineEpochMilliseconds == 1'800'000'000'123);
 
     for (int attempt = 0; attempt < 16; ++attempt)
     {
