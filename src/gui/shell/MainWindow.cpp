@@ -1289,6 +1289,7 @@ namespace javelin::gui::shell
                 [this](const QString&)
                 {
                     refreshMessageListPreservingSelection();
+                    m_messageModel->refreshExpandedThreadMembers();
                     refreshSelectionFromModels();
                     updateEmptyStates();
                     updateMessageListHeader();

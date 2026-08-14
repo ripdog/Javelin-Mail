@@ -158,7 +158,9 @@ namespace javelin::gui::messages
                 parts.push_back(i18nc("@info accessible message tags", "Tags: %1",
                                       tagNames.join(QStringLiteral(", "))));
             }
-            if (!m_mailboxId.has_value() && !item.mailboxNames.empty())
+            const bool showMailboxContext =
+                !m_mailboxId.has_value() || row.kind == RowKind::ThreadMember;
+            if (showMailboxContext && !item.mailboxNames.empty())
             {
                 QStringList mailboxNames;
                 mailboxNames.reserve(static_cast<qsizetype>(item.mailboxNames.size()));
@@ -624,6 +626,22 @@ namespace javelin::gui::messages
         return containsThreadId(m_expandedThreadIds, threadId);
     }
 
+    void MessageListModel::refreshExpandedThreadMembers()
+    {
+        if (m_expandedThreadIds.empty())
+            return;
+
+        ++m_generation;
+        for (std::size_t threadIndex = 0; threadIndex < m_threads.size(); ++threadIndex)
+        {
+            auto& thread = m_threads[threadIndex];
+            if (!isThreadExpanded(thread.summary.threadId))
+                continue;
+            thread.membersLoading = false;
+            startThreadMembersLoad(threadIndex, true);
+        }
+    }
+
     std::optional<std::string>
     MessageListModel::summaryEmailIdForThread(const std::string_view threadId) const
     {
@@ -710,10 +728,12 @@ namespace javelin::gui::messages
         return std::nullopt;
     }
 
-    void MessageListModel::startThreadMembersLoad(const std::size_t requestedThreadIndex)
+    void MessageListModel::startThreadMembersLoad(const std::size_t requestedThreadIndex,
+                                                  const bool refreshLoaded)
     {
         auto& thread = m_threads[requestedThreadIndex];
-        if (thread.membersLoaded || thread.membersLoading || !m_accountId.has_value())
+        if ((!refreshLoaded && thread.membersLoaded) || thread.membersLoading ||
+            !m_accountId.has_value())
         {
             return;
         }
@@ -765,37 +785,71 @@ namespace javelin::gui::messages
                     return;
                 }
 
-                loadedThread.members.clear();
-                loadedThread.members.reserve(snapshot->items.size());
+                std::vector<javelin::jmap::cache::MessageListItem> refreshedMembers;
+                refreshedMembers.reserve(snapshot->items.size());
                 for (const auto& item : snapshot->items)
                 {
                     if (item.emailId != loadedThread.summary.emailId)
-                        loadedThread.members.push_back(item);
+                        refreshedMembers.push_back(item);
                 }
-                loadedThread.membersLoaded = true;
-                if (isThreadExpanded(threadId) && !loadedThread.members.empty())
+
+                const bool replaceVisibleMembers =
+                    loadedThread.membersLoaded && isThreadExpanded(threadId);
+                const auto summaryRow = visibleSummaryRowForThread(*resolvedThreadIndex);
+                if (replaceVisibleMembers && summaryRow.has_value() &&
+                    refreshedMembers.size() == loadedThread.members.size())
                 {
-                    const auto summaryRow = visibleSummaryRowForThread(*resolvedThreadIndex);
-                    if (summaryRow.has_value())
+                    loadedThread.members = std::move(refreshedMembers);
+                    if (!loadedThread.members.empty())
                     {
-                        const auto memberCount = static_cast<int>(loadedThread.members.size());
-                        beginInsertRows(QModelIndex{}, *summaryRow + 1, *summaryRow + memberCount);
-                        for (int memberRow = 0; memberRow < memberCount; ++memberRow)
-                        {
-                            m_rows.insert(m_rows.begin() + (*summaryRow + 1 + memberRow),
-                                          VisibleRow{
-                                              .kind = RowKind::ThreadMember,
-                                              .threadIndex = *resolvedThreadIndex,
-                                              .memberIndex = static_cast<std::size_t>(memberRow),
-                                          });
-                        }
-                        endInsertRows();
+                        const QModelIndex firstMember = index(*summaryRow + 1, 0);
+                        const QModelIndex lastMember =
+                            index(*summaryRow + static_cast<int>(loadedThread.members.size()), 0);
+                        Q_EMIT dataChanged(firstMember, lastMember);
                     }
                 }
-                if (const auto summaryRow = visibleSummaryRowForThread(*resolvedThreadIndex);
-                    summaryRow.has_value())
+                else
                 {
-                    const QModelIndex summaryIndex = index(*summaryRow, 0);
+                    if (replaceVisibleMembers && summaryRow.has_value() &&
+                        !loadedThread.members.empty())
+                    {
+                        const int oldMemberCount = static_cast<int>(loadedThread.members.size());
+                        beginRemoveRows(QModelIndex{}, *summaryRow + 1,
+                                        *summaryRow + oldMemberCount);
+                        m_rows.erase(m_rows.begin() + (*summaryRow + 1),
+                                     m_rows.begin() + (*summaryRow + 1 + oldMemberCount));
+                        endRemoveRows();
+                    }
+
+                    loadedThread.members = std::move(refreshedMembers);
+                    if (isThreadExpanded(threadId) && !loadedThread.members.empty())
+                    {
+                        const auto refreshedSummaryRow =
+                            visibleSummaryRowForThread(*resolvedThreadIndex);
+                        if (refreshedSummaryRow.has_value())
+                        {
+                            const int memberCount = static_cast<int>(loadedThread.members.size());
+                            beginInsertRows(QModelIndex{}, *refreshedSummaryRow + 1,
+                                            *refreshedSummaryRow + memberCount);
+                            for (int memberRow = 0; memberRow < memberCount; ++memberRow)
+                            {
+                                m_rows.insert(
+                                    m_rows.begin() + (*refreshedSummaryRow + 1 + memberRow),
+                                    VisibleRow{
+                                        .kind = RowKind::ThreadMember,
+                                        .threadIndex = *resolvedThreadIndex,
+                                        .memberIndex = static_cast<std::size_t>(memberRow),
+                                    });
+                            }
+                            endInsertRows();
+                        }
+                    }
+                }
+                loadedThread.membersLoaded = true;
+                if (const auto finalSummaryRow = visibleSummaryRowForThread(*resolvedThreadIndex);
+                    finalSummaryRow.has_value())
+                {
+                    const QModelIndex summaryIndex = index(*finalSummaryRow, 0);
                     Q_EMIT dataChanged(summaryIndex, summaryIndex,
                                        {IsExpandedRole, CanExpandRole, ThreadMessageCountRole,
                                         GlobalThreadMessageCountRole, Qt::AccessibleTextRole});

@@ -2,6 +2,8 @@
 
 #include "jmap/cache/MessageListReadSupport.h"
 
+#include <glaze/glaze.hpp>
+
 #include <QSqlError>
 #include <QSqlQuery>
 
@@ -53,6 +55,11 @@ namespace javelin::jmap::cache
                                 : std::optional{query.value(11).toString().toStdString()},
                     .email = query.value(12).toString().toStdString(),
                 };
+            }
+            if (!query.value(13).isNull())
+            {
+                static_cast<void>(
+                    glz::read_json(item.mailboxNames, query.value(13).toString().toStdString()));
             }
             return item;
         }
@@ -120,7 +127,14 @@ namespace javelin::jmap::cache
             "         WHERE a.account_id = :account_id AND a.email_id = e.email_id "
             "           AND a.field_name = 'from' "
             "         ORDER BY a.position LIMIT 1"
-            "       ) AS from_email "
+            "       ) AS from_email, "
+            "       (SELECT json_group_array(mailbox_name) FROM ("
+            "         SELECT mailbox.name AS mailbox_name FROM email_mailboxes membership "
+            "         INNER JOIN mailboxes mailbox ON mailbox.account_id=membership.account_id "
+            "              AND mailbox.mailbox_id=membership.mailbox_id "
+            "         WHERE membership.account_id=:account_id AND membership.email_id=e.email_id "
+            "         ORDER BY mailbox.sort_order,mailbox.name,mailbox.mailbox_id"
+            "       )) AS mailbox_names_json "
             "FROM thread_email_members thread_email "
             "INNER JOIN emails e ON e.account_id = thread_email.account_id "
             "     AND e.email_id = thread_email.email_id "
@@ -171,7 +185,7 @@ namespace javelin::jmap::cache
             "         WHERE a.account_id = :account_id AND a.email_id = e.email_id "
             "           AND a.field_name = 'from' "
             "         ORDER BY a.position LIMIT 1"
-            "       ) AS from_email ");
+            "       ) AS from_email, NULL AS mailbox_names_json ");
         const auto source =
             membershipSource == MailboxThreadMembershipSource::CachedMailbox
                 ? QStringLiteral(

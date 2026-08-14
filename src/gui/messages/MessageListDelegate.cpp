@@ -509,7 +509,7 @@ namespace javelin::gui::messages
             drawTagPills(painter, option, tagNames, tagColors, bottomContentLeft,
                          bottomContentRight, contentRect.bottom() - buttonMargin + buttonSize / 2);
 
-        if (index.data(MessageListModel::IsSearchResultRole).toBool())
+        if (index.data(MessageListModel::IsSearchResultRole).toBool() || isMemberRow)
         {
             const auto mailboxNames = index.data(MessageListModel::MailboxNamesRole)
                                           .toStringList()

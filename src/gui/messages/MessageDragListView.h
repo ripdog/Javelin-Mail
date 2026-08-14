@@ -4,6 +4,7 @@
 
 namespace javelin::gui::messages
 {
+    [[nodiscard]] qsizetype representedMessageCountForDrag(const QModelIndexList& indexes);
 
     class MessageDragListView final : public QListView
     {

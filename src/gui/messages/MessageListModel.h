@@ -66,6 +66,7 @@ namespace javelin::gui::messages
         [[nodiscard]] bool setThreadExpanded(std::string_view threadId, bool expanded);
         [[nodiscard]] bool toggleThreadExpanded(std::string_view threadId);
         [[nodiscard]] bool isThreadExpanded(std::string_view threadId) const;
+        void refreshExpandedThreadMembers();
         [[nodiscard]] std::optional<std::string>
         summaryEmailIdForThread(std::string_view threadId) const;
         [[nodiscard]] bool setEmailRead(std::string_view emailId);
@@ -94,7 +95,7 @@ namespace javelin::gui::messages
         itemForRow(const VisibleRow& row) const;
         [[nodiscard]] std::optional<std::size_t> findThreadIndex(std::string_view threadId) const;
         [[nodiscard]] std::optional<int> visibleSummaryRowForThread(std::size_t threadIndex) const;
-        void startThreadMembersLoad(std::size_t threadIndex);
+        void startThreadMembersLoad(std::size_t threadIndex, bool refreshLoaded = false);
         void retryPendingThreadMembersLoads();
         [[nodiscard]] int visibleBlockStartForThread(std::size_t threadIndex) const;
         [[nodiscard]] int visibleBlockSizeForThread(std::size_t threadIndex) const;
