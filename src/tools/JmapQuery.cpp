@@ -1,3 +1,5 @@
+#include "app/AccountCredentialStore.h"
+#include "app/SettingsRepository.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/MethodEnvelope.h"
@@ -29,39 +31,58 @@ namespace
 {
     struct ConfiguredAccount
     {
+        QString connectionId;
         QString displayName;
         QString loginEmail;
         std::string sessionUrl;
-        std::string apiKey;
         std::vector<std::string> cachedAccountIds;
     };
 
-    [[nodiscard]] std::vector<ConfiguredAccount> configuredAccounts()
+    [[nodiscard]] std::vector<ConfiguredAccount>
+    configuredAccounts(javelin::app::SettingsRepository& settings)
     {
-        QSettings settings{QStringLiteral("Javelin Mail"), QStringLiteral("javelinmail")};
-        settings.beginGroup(QStringLiteral("accounts"));
-        const int count = settings.beginReadArray(QStringLiteral("size"));
+        const auto loaded = settings.load();
+        if (const auto* error = std::get_if<javelin::app::SettingsRepositoryError>(&loaded))
+            throw std::runtime_error(error->detail.toStdString());
+        const auto& snapshot = std::get<javelin::protocol::SettingsSnapshot>(loaded);
         std::vector<ConfiguredAccount> result;
-        result.reserve(static_cast<std::size_t>(count));
-        for (int index = 0; index < count; ++index)
+        result.reserve(snapshot.accounts.size());
+        for (const auto& account : snapshot.accounts)
         {
-            settings.setArrayIndex(index);
-            const auto ids = settings.value(QStringLiteral("cachedAccountIds")).toStringList();
             std::vector<std::string> cachedAccountIds;
-            cachedAccountIds.reserve(static_cast<std::size_t>(ids.size()));
-            for (const auto& id : ids)
+            cachedAccountIds.reserve(account.cachedAccountIds.size());
+            for (const auto& id : account.cachedAccountIds)
                 cachedAccountIds.push_back(id.toStdString());
             result.push_back({
-                .displayName = settings.value(QStringLiteral("displayName")).toString(),
-                .loginEmail = settings.value(QStringLiteral("loginEmail")).toString(),
-                .sessionUrl = settings.value(QStringLiteral("sessionUrl")).toString().toStdString(),
-                .apiKey = settings.value(QStringLiteral("apiKey")).toString().toStdString(),
+                .connectionId = account.id,
+                .displayName = account.displayName,
+                .loginEmail = account.loginEmail,
+                .sessionUrl = account.sessionUrl.toStdString(),
                 .cachedAccountIds = std::move(cachedAccountIds),
             });
         }
-        settings.endArray();
-        settings.endGroup();
         return result;
+    }
+
+    [[nodiscard]] std::unique_ptr<QSettings> daemonSettings()
+    {
+        return std::make_unique<QSettings>(QSettings::NativeFormat, QSettings::UserScope,
+                                           QStringLiteral("Javelin Mail"),
+                                           QStringLiteral("javelinmail"));
+    }
+
+    [[nodiscard]] javelin::app::AccountCredentialSecrets
+    accountCredentials(javelin::app::AccountCredentialStore& store,
+                       const ConfiguredAccount& account)
+    {
+        const auto loaded = store.load(account.connectionId);
+        if (const auto* error = std::get_if<javelin::app::AccountCredentialStoreError>(&loaded))
+            throw std::runtime_error(error->detail.toStdString());
+        const auto& credentials =
+            std::get<std::optional<javelin::app::AccountCredentialSecrets>>(loaded);
+        if (!credentials.has_value() || !credentials->hasAccessToken())
+            throw std::runtime_error("The configured account needs to be signed in again");
+        return *credentials;
     }
 
     [[nodiscard]] const ConfiguredAccount&
@@ -78,7 +99,7 @@ namespace
             throw std::runtime_error("No configured account matches --account");
         if (account->cachedAccountIds.empty())
             throw std::runtime_error("The configured account has no cached JMAP account id");
-        if (account->sessionUrl.empty() || account->apiKey.empty())
+        if (account->sessionUrl.empty())
             throw std::runtime_error("The configured account has incomplete connection settings");
         return *account;
     }
@@ -124,6 +145,56 @@ namespace
         else
             std::cerr << "Unknown JMAP failure\n";
     }
+
+    int printLiveSession(QCoreApplication& application, const ConfiguredAccount& account,
+                         const javelin::app::AccountCredentialSecrets& credentials)
+    {
+        QNetworkAccessManager network;
+        javelin::jmap::api::QtNetworkTransport transport{network};
+        int exitCode = 1;
+        auto task = [&]() -> QCoro::Task<void>
+        {
+            const auto result = co_await transport.send({
+                .method = javelin::jmap::api::HttpMethod::Get,
+                .url = QUrl{QString::fromStdString(account.sessionUrl)},
+                .headers =
+                    {
+                        {.name = "Authorization",
+                         .value = QByteArrayLiteral("Bearer ") + credentials.accessToken.toUtf8()},
+                        {.name = "Accept", .value = "application/json"},
+                    },
+                .body = {},
+                .authentication =
+                    javelin::jmap::api::BearerAuthentication{
+                        .accountId = account.cachedAccountIds.front(),
+                        .accessToken = credentials.accessToken.toStdString(),
+                    },
+                .cancellation = {},
+                .dispatched = {},
+            });
+            if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
+            {
+                std::cerr << "Transport error: " << error->message << '\n';
+            }
+            else
+            {
+                const auto& response = std::get<javelin::jmap::api::HttpResponse>(result);
+                if (response.statusCode < 200 || response.statusCode >= 300)
+                {
+                    std::cerr << "Session request failed with HTTP " << response.statusCode << '\n';
+                }
+                else
+                {
+                    const auto json = response.body.toStdString();
+                    std::cout << glz::prettify_json(json) << '\n';
+                    exitCode = 0;
+                }
+            }
+        }();
+        QCoro::connect(std::move(task), &application, &QCoreApplication::quit);
+        static_cast<void>(application.exec());
+        return exitCode;
+    }
 } // namespace
 
 int main(int argc, char* argv[])
@@ -140,6 +211,8 @@ int main(int argc, char* argv[])
                       QStringLiteral("List configured account names and cached JMAP ids.")});
     parser.addOption({QStringLiteral("account"),
                       QStringLiteral("Configured display name or login."), QStringLiteral("name")});
+    parser.addOption(
+        {QStringLiteral("session"), QStringLiteral("Print the live JMAP Session document.")});
     parser.addOption({QStringLiteral("request"),
                       QStringLiteral("Read the complete JMAP request envelope from a file."),
                       QStringLiteral("path")});
@@ -154,7 +227,9 @@ int main(int argc, char* argv[])
 
     try
     {
-        const auto accounts = configuredAccounts();
+        auto credentialStore = javelin::app::makeKWalletAccountCredentialStore();
+        javelin::app::SettingsRepository settings{daemonSettings(), credentialStore.get()};
+        const auto accounts = configuredAccounts(settings);
         if (parser.isSet(QStringLiteral("list-accounts")))
         {
             for (const auto& account : accounts)
@@ -171,6 +246,13 @@ int main(int argc, char* argv[])
         if (accountName.isEmpty())
             throw std::runtime_error("--account is required unless --list-accounts is used");
         const auto& account = selectAccount(accounts, accountName);
+        const auto credentials = accountCredentials(*credentialStore, account);
+        if (parser.isSet(QStringLiteral("session")))
+        {
+            if (parser.isSet(QStringLiteral("json")) || parser.isSet(QStringLiteral("request")))
+                throw std::runtime_error("--session cannot be combined with --json or --request");
+            return printLiveSession(application, account, credentials);
+        }
         const auto parsedRequest = javelin::jmap::api::parseRequestEnvelope(requestJson(parser));
         if (!parsedRequest.ok())
             throw std::runtime_error(parsedRequest.error.value_or("Invalid JMAP request envelope"));
@@ -215,8 +297,11 @@ int main(int argc, char* argv[])
             .credentials = {.accountId = ownerAccountId,
                             .emailAddress = account.loginEmail.toStdString(),
                             .sessionUrl = account.sessionUrl,
-                            .token = {.accessToken = account.apiKey,
-                                      .refreshToken = std::nullopt,
+                            .token = {.accessToken = credentials.accessToken.toStdString(),
+                                      .refreshToken = credentials.refreshToken.isEmpty()
+                                                          ? std::nullopt
+                                                          : std::optional{credentials.refreshToken
+                                                                              .toStdString()},
                                       .expiry = std::nullopt}},
             .apiUrl = session->value().apiUrl,
             .transportPolicy = parser.isSet(QStringLiteral("websocket"))
