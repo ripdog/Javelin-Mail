@@ -191,7 +191,7 @@ namespace javelin::app
         return std::nullopt;
     }
 
-    std::optional<GuiBootstrapError> GuiDaemonSession::startDaemon(const GuiDaemonStartMode mode)
+    std::optional<GuiBootstrapError> GuiDaemonSession::startDaemon()
     {
         PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("daemon_start")};
         if (isReady())
@@ -200,7 +200,7 @@ namespace javelin::app
             return std::nullopt;
         }
 
-        if (const auto error = launchDaemon(mode))
+        if (const auto error = launchDaemon())
         {
             metrics.finish(QStringLiteral("error"));
             return error;
@@ -217,7 +217,7 @@ namespace javelin::app
         return result;
     }
 
-    std::optional<GuiBootstrapError> GuiDaemonSession::launchDaemon(const GuiDaemonStartMode mode)
+    std::optional<GuiBootstrapError> GuiDaemonSession::launchDaemon()
     {
         PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("daemon_launch")};
         if (!m_client->isConnected())
@@ -226,18 +226,8 @@ namespace javelin::app
                                         ? QDir{QCoreApplication::applicationDirPath()}.filePath(
                                               QStringLiteral("javelind"))
                                         : m_options.daemonExecutable;
-            if (mode == GuiDaemonStartMode::EnableAndStart)
+            if (canUseSystemdUserService())
             {
-                if (!canUseSystemdUserService())
-                {
-                    metrics.finish(QStringLiteral("unavailable"),
-                                   QStringLiteral("stage=systemd_user_service"));
-                    return detailError(
-                        GuiBootstrapErrorCode::DaemonStartFailed,
-                        QStringLiteral("the installed javelind systemd user service is not "
-                                       "available"));
-                }
-
                 const auto result = runSystemctl(
                     {QStringLiteral("--user"), QStringLiteral("--no-pager"),
                      QStringLiteral("enable"), QStringLiteral("--now"), systemdUnitName()},
@@ -604,7 +594,7 @@ namespace javelin::app
                     return transportError(*error);
                 }
 
-                if (const auto startError = launchDaemon(GuiDaemonStartMode::Once))
+                if (const auto startError = launchDaemon())
                     return startError;
             }
         }

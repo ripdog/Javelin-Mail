@@ -27,14 +27,15 @@
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
+#include <QDialog>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEvent>
+#include <QHBoxLayout>
 #include <QHash>
 #include <QIcon>
 #include <QLabel>
 #include <QLockFile>
-#include <QMainWindow>
 #include <QMessageBox>
 #include <QPointer>
 #include <QPushButton>
@@ -44,7 +45,6 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
-#include <QWidget>
 
 #include <cstdlib>
 #include <functional>
@@ -400,22 +400,29 @@ int main(int argc, char* argv[])
          .startTimeoutMilliseconds = 5000,
          .startDaemonIfMissing = false}};
 
-    QMainWindow recoveryWindow;
+    QDialog recoveryWindow;
     recoveryWindow.setWindowTitle(i18n("Welcome to Javelin Mail"));
     recoveryWindow.setWindowIcon(application.windowIcon());
-    auto* recoveryCentral = new QWidget(&recoveryWindow);
-    auto* recoveryLayout = new QVBoxLayout(recoveryCentral);
-    auto* recoveryStatus = new QLabel(recoveryCentral);
+    auto* recoveryLayout = new QVBoxLayout(&recoveryWindow);
+    auto* recoveryStatus = new QLabel(&recoveryWindow);
     recoveryStatus->setWordWrap(true);
-    auto* enableAndStartDaemon = new QPushButton(i18n("Enable background sync"), recoveryCentral);
-    auto* startDaemon = new QPushButton(i18n("Start Javelin now"), recoveryCentral);
-    auto* retry = new QPushButton(i18n("Retry daemon connection"), recoveryCentral);
+    auto* closeJavelin = new QPushButton(QIcon::fromTheme(QStringLiteral("application-exit")),
+                                         i18n("Close Javelin"), &recoveryWindow);
+    auto* retry = new QPushButton(QIcon::fromTheme(QStringLiteral("view-refresh")),
+                                  i18n("Retry daemon connection"), &recoveryWindow);
+    auto* startDaemon = new QPushButton(QIcon::fromTheme(QStringLiteral("media-playback-start")),
+                                        i18n("Start Javelin"), &recoveryWindow);
+    startDaemon->setDefault(true);
     recoveryLayout->addWidget(recoveryStatus);
-    recoveryLayout->addWidget(enableAndStartDaemon);
-    recoveryLayout->addWidget(startDaemon);
-    recoveryLayout->addWidget(retry);
-    recoveryWindow.setCentralWidget(recoveryCentral);
-    recoveryWindow.resize(520, 230);
+    recoveryLayout->addStretch();
+    auto* recoveryButtons = new QHBoxLayout;
+    recoveryButtons->addWidget(closeJavelin);
+    recoveryButtons->addStretch();
+    recoveryButtons->addWidget(retry);
+    recoveryButtons->addStretch();
+    recoveryButtons->addWidget(startDaemon);
+    recoveryLayout->addLayout(recoveryButtons);
+    recoveryWindow.resize(620, 180);
 
     std::unique_ptr<javelin::app::GuiServices> services;
     QPointer<javelin::gui::shell::MainWindow> mainWindow;
@@ -424,17 +431,31 @@ int main(int argc, char* argv[])
     QHash<QString, QPointer<javelin::gui::compose::UndoSendDialog>> undoSendDialogs;
     std::vector<javelin::protocol::OpenMailtoRoute> pendingMailtos;
 
-    const auto showRecovery = [&recoveryWindow, recoveryStatus, enableAndStartDaemon, startDaemon,
-                               retry, &session](const QString&, const bool offerDaemonStart)
+    const auto showRecovery = [&recoveryWindow, recoveryStatus, startDaemon, retry,
+                               &session](const QString&, const bool offerDaemonStart)
     {
-        recoveryStatus->setText(
-            offerDaemonStart
-                ? i18n("Javelin’s background sync service isn’t running yet. Start it once, or "
-                       "enable it so mail stays up to date whenever you sign in.")
-                : i18n("Javelin couldn’t open its background sync service. Please try again."));
-        enableAndStartDaemon->setVisible(offerDaemonStart && session.canUseSystemdUserService());
+        const bool canUseSystemdService = offerDaemonStart && session.canUseSystemdUserService();
+        if (canUseSystemdService)
+        {
+            recoveryStatus->setText(
+                i18n("Javelin’s background sync service isn’t running. Start the Javelin service "
+                     "to continue and keep mail up to date whenever you sign in."));
+            startDaemon->setText(i18n("Start Javelin service"));
+        }
+        else if (offerDaemonStart)
+        {
+            recoveryStatus->setText(
+                i18n("Javelin’s background process isn’t running. Start Javelin now to continue. "
+                     "Automatic startup through the systemd user service isn’t available in this "
+                     "installation."));
+            startDaemon->setText(i18n("Start Javelin"));
+        }
+        else
+        {
+            recoveryStatus->setText(
+                i18n("Javelin couldn’t open its background sync service. Please try again."));
+        }
         startDaemon->setVisible(offerDaemonStart);
-        enableAndStartDaemon->setEnabled(offerDaemonStart);
         startDaemon->setEnabled(offerDaemonStart);
         retry->setEnabled(true);
         recoveryWindow.show();
@@ -728,15 +749,14 @@ int main(int argc, char* argv[])
                error.code == javelin::app::GuiBootstrapErrorCode::DaemonStartFailed;
     };
 
-    const auto attemptDaemonStart = [&](const javelin::app::GuiDaemonStartMode mode)
+    const auto attemptDaemonStart = [&]
     {
-        enableAndStartDaemon->setEnabled(false);
         startDaemon->setEnabled(false);
         retry->setEnabled(false);
         recoveryStatus->setText(i18n("Starting Javelin…"));
         recoveryWindow.show();
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-        if (const auto error = session.startDaemon(mode))
+        if (const auto error = session.startDaemon())
             showRecovery(error->detail, canOfferDaemonStart(*error));
         else
         {
@@ -752,14 +772,18 @@ int main(int argc, char* argv[])
             restoreMainWindow({});
             return;
         }
-        attemptDaemonStart(javelin::app::GuiDaemonStartMode::Once);
+        attemptDaemonStart();
     };
 
-    QObject::connect(enableAndStartDaemon, &QPushButton::clicked, &recoveryWindow,
-                     [&attemptDaemonStart]
-                     { attemptDaemonStart(javelin::app::GuiDaemonStartMode::EnableAndStart); });
-    QObject::connect(startDaemon, &QPushButton::clicked, &recoveryWindow, [&attemptDaemonStart]
-                     { attemptDaemonStart(javelin::app::GuiDaemonStartMode::Once); });
+    QObject::connect(closeJavelin, &QPushButton::clicked, &recoveryWindow, &QDialog::reject);
+    QObject::connect(&recoveryWindow, &QDialog::rejected, &application,
+                     [&]
+                     {
+                         if (!session.isReady())
+                             application.quit();
+                     });
+    QObject::connect(startDaemon, &QPushButton::clicked, &recoveryWindow,
+                     [&attemptDaemonStart] { attemptDaemonStart(); });
 
     QObject::connect(retry, &QPushButton::clicked, &recoveryWindow,
                      [&]
