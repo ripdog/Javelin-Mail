@@ -128,6 +128,63 @@ TEST_CASE("work scheduler preserves tag deletion jobs across restart",
     CHECK(javelin::app::classify(job->kind) == javelin::app::WorkClass::Maintenance);
 }
 
+TEST_CASE("work scheduler preserves mail transfer jobs across restart",
+          "[app][work-scheduler][mail-transfer]")
+{
+    if (QCoreApplication::instance() == nullptr)
+    {
+        static int argc = 1;
+        static char name[] = "work-scheduler-mail-transfer-test";
+        static char* argv[]{name, nullptr};
+        static const auto application = std::make_unique<QCoreApplication>(argc, argv);
+        Q_UNUSED(application);
+    }
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("work-scheduler-mail-transfer-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+
+    {
+        javelin::app::WorkScheduler scheduler{connection, nullptr, std::chrono::milliseconds{0}};
+        REQUIRE_FALSE(scheduler
+                          .ensure({.jobId = "mail-transfer:operation-1",
+                                   .parentJobId = std::nullopt,
+                                   .accountId = "source-account",
+                                   .kind = javelin::app::WorkKind::MailTransfer,
+                                   .priority = javelin::app::WorkPriority::Foreground,
+                                   .title = QStringLiteral("Move 2 messages"),
+                                   .checkpointJson = QStringLiteral(
+                                       "{\"operationId\":\"operation-1\",\"canRetry\":false}")})
+                          .has_value());
+        REQUIRE_FALSE(
+            scheduler
+                .update("mail-transfer:operation-1", javelin::app::WorkStatus::WaitingForNetwork,
+                        {.completedUnits = 1,
+                         .totalUnits = 2,
+                         .completedBytes = 2048,
+                         .totalBytes = 4096,
+                         .detail = QStringLiteral("Waiting for network")},
+                        QStringLiteral("{\"operationId\":\"operation-1\",\"canRetry\":false}"))
+                .has_value());
+    }
+
+    javelin::app::WorkScheduler recovered{connection, nullptr, std::chrono::milliseconds{0}};
+    const auto result = recovered.find("mail-transfer:operation-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::app::WorkRecord>>(result));
+    const auto& job = std::get<std::optional<javelin::app::WorkRecord>>(result);
+    REQUIRE(job.has_value());
+    CHECK(job->kind == javelin::app::WorkKind::MailTransfer);
+    CHECK(job->status == javelin::app::WorkStatus::WaitingForNetwork);
+    CHECK(job->progress.completedUnits == 1);
+    CHECK(job->progress.totalUnits == std::optional<std::uint64_t>{2});
+    CHECK(javelin::app::classify(job->kind, job->priority) ==
+          javelin::app::WorkClass::ForegroundCommand);
+}
+
 TEST_CASE("work scheduler requeues configured failed work and preserves checkpoints",
           "[app][work-scheduler]")
 {

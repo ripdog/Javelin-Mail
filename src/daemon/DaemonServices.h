@@ -48,6 +48,7 @@ namespace javelin::app
     class MailCommandPort;
     class MailCommandService;
     class MailTransferCommandService;
+    class MailTransferWorkService;
     class SieveCommandPort;
     class SieveCommandService;
     class IdentityCommandPort;
@@ -288,6 +289,7 @@ namespace javelin::app
         std::unique_ptr<ContactApplicationService> m_contactApplicationService;
         std::unique_ptr<CalendarApplicationService> m_calendarApplicationService;
         std::unique_ptr<SieveApplicationService> m_sieveApplicationService;
+        std::unique_ptr<MailTransferWorkService> m_mailTransferWorkService;
         std::unique_ptr<MailTransferCommandService> m_mailTransferCommandService;
         std::unique_ptr<MailCommandService> m_mailCommandService;
         std::unique_ptr<SieveCommandService> m_sieveCommandService;

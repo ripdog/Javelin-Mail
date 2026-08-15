@@ -1,6 +1,7 @@
 #include "app/MailTransferCommandService.h"
 
 #include "app/MailTransferApplicationService.h"
+#include "app/MailTransferWorkService.h"
 #include "app/undo/MailTransferHistoryCoordinator.h"
 
 #include <KLocalizedString>
@@ -20,6 +21,11 @@ namespace javelin::app
           m_methodTransport(methodTransport), m_messageContentClient(messageContentClient),
           m_connectionProvider(connectionProvider), m_historyCoordinator(historyCoordinator)
     {
+    }
+
+    void MailTransferCommandService::setWorkService(MailTransferWorkService* workService)
+    {
+        m_workService = workService;
     }
 
     QCoro::Task<MailTransferExecutionResult>
@@ -57,10 +63,14 @@ namespace javelin::app
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
             co_return *error;
 
+        auto operationId = std::get<PreparedMailTransfer>(prepared).operationId;
+        if (m_workService != nullptr)
+            co_return co_await m_workService->advanceForeground(std::move(operationId));
+
         MailTransferExecutor executor{m_databaseConnection, m_resourceTransport,
                                       m_methodTransport,    m_messageContentClient,
                                       m_connectionProvider, &m_historyCoordinator};
-        co_return co_await executor.advance(std::get<PreparedMailTransfer>(prepared).operationId);
+        co_return co_await executor.advance(std::move(operationId));
     }
 
 } // namespace javelin::app

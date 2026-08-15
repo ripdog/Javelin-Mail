@@ -309,6 +309,36 @@ namespace javelin::gui::shell
                         return;
                     }
 
+                    if (summary.status == javelin::app::MailTransferStatus::Preparing ||
+                        summary.status == javelin::app::MailTransferStatus::Running)
+                    {
+                        Q_EMIT statusMessage(i18n("The transfer is continuing in the background."),
+                                             5000);
+                        return;
+                    }
+                    if (summary.status == javelin::app::MailTransferStatus::WaitingForNetwork)
+                    {
+                        Q_EMIT statusMessage(
+                            i18n("The transfer is waiting for network access and will resume "
+                                 "automatically."),
+                            10000);
+                        return;
+                    }
+                    if (summary.status == javelin::app::MailTransferStatus::WaitingForAuth)
+                    {
+                        Q_EMIT statusMessage(
+                            i18n("The transfer is waiting for sign-in and will resume "
+                                 "automatically."),
+                            10000);
+                        return;
+                    }
+                    if (summary.status == javelin::app::MailTransferStatus::WaitingForSpace)
+                    {
+                        Q_EMIT statusMessage(i18n("The transfer is waiting for storage space."),
+                                             10000);
+                        return;
+                    }
+
                     QString message;
                     javelin::jmap::OperationErrorCode code =
                         javelin::jmap::OperationErrorCode::Conflict;
@@ -340,8 +370,7 @@ namespace javelin::gui::shell
                     case javelin::app::MailTransferStatus::WaitingForNetwork:
                     case javelin::app::MailTransferStatus::WaitingForAuth:
                     case javelin::app::MailTransferStatus::WaitingForSpace:
-                        message = i18n("The transfer has not completed yet.");
-                        break;
+                        Q_UNREACHABLE();
                     case javelin::app::MailTransferStatus::Complete:
                         Q_UNREACHABLE();
                     }

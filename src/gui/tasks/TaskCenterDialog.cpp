@@ -10,6 +10,8 @@
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
@@ -31,10 +33,20 @@ namespace javelin::gui::tasks
             Retry,
         };
 
-        [[nodiscard]] RowAction actionForStatus(const javelin::app::WorkStatus status)
+        [[nodiscard]] RowAction actionForRecord(const javelin::app::WorkRecord& record)
         {
+            using javelin::app::WorkKind;
             using javelin::app::WorkStatus;
-            switch (status)
+            if (record.kind == WorkKind::MailTransfer)
+            {
+                if (record.status != WorkStatus::Failed)
+                    return RowAction::None;
+                const auto checkpoint =
+                    QJsonDocument::fromJson(record.checkpointJson.toUtf8()).object();
+                return checkpoint.value(QStringLiteral("canRetry")).toBool() ? RowAction::Retry
+                                                                             : RowAction::None;
+            }
+            switch (record.status)
             {
             case WorkStatus::Queued:
             case WorkStatus::Running:
@@ -92,7 +104,7 @@ namespace javelin::gui::tasks
                 const auto* record = m_model.recordAt(index.row());
                 if (record == nullptr)
                     return;
-                const auto action = actionForStatus(record->status);
+                const auto action = actionForRecord(*record);
                 if (action == RowAction::None)
                     return;
                 QStyleOptionButton button;
@@ -117,7 +129,7 @@ namespace javelin::gui::tasks
                 if (record == nullptr)
                     return false;
                 const std::string jobId = record->jobId;
-                switch (actionForStatus(record->status))
+                switch (actionForRecord(*record))
                 {
                 case RowAction::Pause:
                     static_cast<void>(m_taskPort.pause(jobId));

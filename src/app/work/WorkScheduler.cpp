@@ -37,6 +37,8 @@ namespace javelin::app
                 return WorkKind::CalendarRefresh;
             if (value == "tag_deletion")
                 return WorkKind::TagDeletion;
+            if (value == "mail_transfer")
+                return WorkKind::MailTransfer;
             return WorkKind::Maintenance;
         }
 
@@ -581,6 +583,7 @@ namespace javelin::app
         case WorkKind::VaultProjection:
         case WorkKind::TagDeletion:
         case WorkKind::Maintenance:
+        case WorkKind::MailTransfer:
             return WorkClass::Maintenance;
         }
         return WorkClass::Maintenance;

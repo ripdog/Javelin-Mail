@@ -3,6 +3,8 @@
 #include "app/MailTransferApplicationService.h"
 #include "app/MailTransferCommandService.h"
 #include "app/MailTransferRepository.h"
+#include "app/MailTransferWorkService.h"
+#include "app/WorkScheduler.h"
 #include "app/undo/HistoryRepository.h"
 #include "app/undo/MailTransferHistoryCoordinator.h"
 #include "app/undo/MailTransferHistoryService.h"
@@ -22,15 +24,19 @@
 #include <QCoroTask>
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QUuid>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -65,6 +71,19 @@ namespace
       private:
         std::unique_ptr<QCoreApplication> m_application;
     };
+
+    [[nodiscard]] bool spinUntil(const std::function<bool()>& predicate)
+    {
+        QElapsedTimer timer;
+        timer.start();
+        while (!predicate() && timer.elapsed() < 2000)
+        {
+            QCoreApplication::processEvents();
+            QThread::msleep(1);
+        }
+        QCoreApplication::processEvents();
+        return predicate();
+    }
 
     [[nodiscard]] javelin::jmap::cache::DatabaseConnection openDatabase(const QString& path)
     {
@@ -1326,6 +1345,270 @@ TEST_CASE("cross-account mail transfer command rejects same-account routing befo
     REQUIRE(count.exec(QStringLiteral("SELECT COUNT(*) FROM mail_transfer_operations")));
     REQUIRE(count.next());
     CHECK(count.value(0).toInt() == 0);
+}
+
+TEST_CASE("cross-account command publishes transfer progress through background work",
+          "[app][mail-transfer][work]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    javelin::app::undo::HistoryRepository historyRepository{fixture.database};
+    javelin::app::undo::UndoManager undoManager{historyRepository};
+    REQUIRE_FALSE(undoManager.load().has_value());
+    javelin::app::undo::MailTransferHistoryCoordinator historyCoordinator{fixture.database,
+                                                                          undoManager};
+    WorkScheduler scheduler{fixture.database, nullptr, std::chrono::milliseconds{0}};
+    bool completionPublished = false;
+    MailTransferWorkService workService{
+        fixture.database,
+        fixture.resourceTransport,
+        fixture.methodTransport,
+        *fixture.contentClient,
+        fixture.connections,
+        historyCoordinator,
+        scheduler,
+        [&](const MailTransferOperationRecord& operation)
+        {
+            completionPublished = true;
+            CHECK(operation.sourceAccountId == fixture.sourceAccountId);
+            CHECK(operation.destinationAccountId == fixture.destinationAccountId);
+            CHECK(operation.destinationMailboxId == "archive");
+        }};
+    MailTransferCommandService service{fixture.database,        fixture.resourceTransport,
+                                       fixture.methodTransport, *fixture.contentClient,
+                                       fixture.connections,     historyCoordinator};
+    service.setWorkService(&workService);
+
+    const auto result = QCoro::waitFor(service.transfer({
+        .sourceAccountId = fixture.sourceAccountId,
+        .sourceMailboxId = std::optional<std::string>{"inbox"},
+        .destinationAccountId = fixture.destinationAccountId,
+        .destinationMailboxId = "archive",
+        .operation = MailTransferOperation::Copy,
+        .selection = {SelectedEmail{.emailId = "email-1"}},
+    }));
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        FAIL(error->message.toStdString());
+    const auto& summary = std::get<MailTransferExecutionSummary>(result);
+    REQUIRE(summary.status == MailTransferStatus::Complete);
+
+    const auto job = scheduler.find("mail-transfer:" + summary.operationId);
+    const auto* record = std::get_if<std::optional<WorkRecord>>(&job);
+    REQUIRE(record != nullptr);
+    REQUIRE(record->has_value());
+    CHECK((*record)->kind == WorkKind::MailTransfer);
+    CHECK((*record)->status == WorkStatus::Complete);
+    CHECK((*record)->progress.completedUnits == 1);
+    CHECK((*record)->progress.totalUnits == std::optional<std::uint64_t>{1});
+    CHECK((*record)->progress.completedBytes == 2048);
+    CHECK((*record)->progress.totalBytes == std::optional<std::uint64_t>{2048});
+    CHECK((*record)->checkpointJson.contains(QString::fromStdString(summary.operationId)));
+    CHECK(completionPublished);
+}
+
+TEST_CASE("recoverable mail transfer resumes from background work after network recovery",
+          "[app][mail-transfer][work][recovery]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    const auto operationId = fixture.prepare(MailTransferOperation::Copy);
+    MailTransferRepository transfers{fixture.database};
+    REQUIRE_FALSE(transfers
+                      .updateStatus(operationId, MailTransferStatus::WaitingForNetwork,
+                                    QStringLiteral("network unavailable"))
+                      .has_value());
+
+    javelin::app::undo::HistoryRepository historyRepository{fixture.database};
+    javelin::app::undo::UndoManager undoManager{historyRepository};
+    REQUIRE_FALSE(undoManager.load().has_value());
+    javelin::app::undo::MailTransferHistoryCoordinator historyCoordinator{fixture.database,
+                                                                          undoManager};
+    WorkScheduler scheduler{fixture.database, nullptr, std::chrono::milliseconds{0}};
+    MailTransferWorkService workService{fixture.database,
+                                        fixture.resourceTransport,
+                                        fixture.methodTransport,
+                                        *fixture.contentClient,
+                                        fixture.connections,
+                                        historyCoordinator,
+                                        scheduler};
+    workService.restoreRecoverable();
+
+    const auto waitingJob = scheduler.find("mail-transfer:" + operationId);
+    const auto* waiting = std::get_if<std::optional<WorkRecord>>(&waitingJob);
+    REQUIRE(waiting != nullptr);
+    REQUIRE(waiting->has_value());
+    CHECK((*waiting)->kind == WorkKind::MailTransfer);
+    CHECK((*waiting)->status == WorkStatus::WaitingForNetwork);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == 0);
+    CHECK(fixture.methodTransport.importCalls == 0);
+
+    workService.networkBecameReachable();
+    REQUIRE(spinUntil(
+        [&] { return fixture.operation(operationId).status == MailTransferStatus::Complete; }));
+
+    const auto completedJob = scheduler.find("mail-transfer:" + operationId);
+    const auto* completed = std::get_if<std::optional<WorkRecord>>(&completedJob);
+    REQUIRE(completed != nullptr);
+    REQUIRE(completed->has_value());
+    CHECK((*completed)->status == WorkStatus::Complete);
+    CHECK((*completed)->progress.completedUnits == 1);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == 1);
+    CHECK(fixture.methodTransport.importCalls == 1);
+    REQUIRE(undoManager.entries().size() == 1);
+}
+
+TEST_CASE("unknown destination outcome is exposed but not automatically retried",
+          "[app][mail-transfer][work][recovery][unknown]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    const auto operationId = fixture.prepare(MailTransferOperation::Copy);
+    MailTransferRepository transfers{fixture.database};
+    const auto transferItem = fixture.item(operationId);
+    const auto transitioned = transfers.transitionItem(
+        transferItem.itemId, MailTransferItemPhase::Prepared,
+        MailTransferItemPhase::DestinationUnknown, QStringLiteral("destination outcome unknown"));
+    REQUIRE(std::holds_alternative<bool>(transitioned));
+    CHECK(std::get<bool>(transitioned));
+    REQUIRE_FALSE(transfers
+                      .updateStatus(operationId, MailTransferStatus::BlockedUnknown,
+                                    QStringLiteral("destination outcome unknown"))
+                      .has_value());
+
+    javelin::app::undo::HistoryRepository historyRepository{fixture.database};
+    javelin::app::undo::UndoManager undoManager{historyRepository};
+    REQUIRE_FALSE(undoManager.load().has_value());
+    javelin::app::undo::MailTransferHistoryCoordinator historyCoordinator{fixture.database,
+                                                                          undoManager};
+    WorkScheduler scheduler{fixture.database, nullptr, std::chrono::milliseconds{0}};
+    MailTransferWorkService workService{fixture.database,
+                                        fixture.resourceTransport,
+                                        fixture.methodTransport,
+                                        *fixture.contentClient,
+                                        fixture.connections,
+                                        historyCoordinator,
+                                        scheduler};
+    workService.restoreRecoverable();
+    QCoreApplication::processEvents();
+
+    const auto job = scheduler.find("mail-transfer:" + operationId);
+    const auto* record = std::get_if<std::optional<WorkRecord>>(&job);
+    REQUIRE(record != nullptr);
+    REQUIRE(record->has_value());
+    CHECK((*record)->status == WorkStatus::Failed);
+    CHECK((*record)->progress.detail.contains(QStringLiteral("reconciliation")));
+    CHECK(fixture.operation(operationId).status == MailTransferStatus::BlockedUnknown);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == 0);
+    CHECK(fixture.methodTransport.importCalls == 0);
+}
+
+TEST_CASE("completed transfer repairs missing Undo publication without network replay",
+          "[app][mail-transfer][work][recovery][history]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    const auto operationId = fixture.prepare(MailTransferOperation::Copy);
+    const auto execution = fixture.execute(operationId);
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&execution))
+        FAIL(error->message.toStdString());
+    REQUIRE(std::get<MailTransferExecutionSummary>(execution).status ==
+            MailTransferStatus::Complete);
+    REQUIRE_FALSE(fixture.operation(operationId).historyEntryId.has_value());
+    const int uploadCalls = fixture.resourceTransport.sendFromFileCalls;
+    const int importCalls = fixture.methodTransport.importCalls;
+
+    javelin::app::undo::HistoryRepository historyRepository{fixture.database};
+    javelin::app::undo::UndoManager undoManager{historyRepository};
+    REQUIRE_FALSE(undoManager.load().has_value());
+    REQUIRE(undoManager.entries().empty());
+    javelin::app::undo::MailTransferHistoryCoordinator historyCoordinator{fixture.database,
+                                                                          undoManager};
+    WorkScheduler scheduler{fixture.database, nullptr, std::chrono::milliseconds{0}};
+    MailTransferWorkService workService{fixture.database,
+                                        fixture.resourceTransport,
+                                        fixture.methodTransport,
+                                        *fixture.contentClient,
+                                        fixture.connections,
+                                        historyCoordinator,
+                                        scheduler};
+    workService.restoreRecoverable();
+
+    const auto repaired = fixture.operation(operationId);
+    REQUIRE(repaired.historyEntryId.has_value());
+    REQUIRE(undoManager.entries().size() == 1);
+    CHECK(undoManager.entries().front().entryId == *repaired.historyEntryId);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == uploadCalls);
+    CHECK(fixture.methodTransport.importCalls == importCalls);
+
+    const auto job = scheduler.find("mail-transfer:" + operationId);
+    const auto* record = std::get_if<std::optional<WorkRecord>>(&job);
+    REQUIRE(record != nullptr);
+    REQUIRE(record->has_value());
+    CHECK((*record)->status == WorkStatus::Complete);
+    CHECK((*record)->progress.completedUnits == 1);
+}
+
+TEST_CASE("mail transfer history repair retry remains local",
+          "[app][mail-transfer][work][recovery][history][retry]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    const auto operationId = fixture.prepare(MailTransferOperation::Copy);
+    const auto execution = fixture.execute(operationId);
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&execution))
+        FAIL(error->message.toStdString());
+    REQUIRE(std::get<MailTransferExecutionSummary>(execution).status ==
+            MailTransferStatus::Complete);
+    REQUIRE_FALSE(fixture.operation(operationId).historyEntryId.has_value());
+    const auto destination = fixture.destinationEmail("destination-email");
+    REQUIRE(destination.has_value());
+    const int uploadCalls = fixture.resourceTransport.sendFromFileCalls;
+    const int importCalls = fixture.methodTransport.importCalls;
+
+    javelin::jmap::cache::EmailRepository emails{fixture.database};
+    const std::vector<std::string> destinationIds{"destination-email"};
+    REQUIRE_FALSE(emails.removeMany(fixture.destinationAccountId, destinationIds).has_value());
+
+    javelin::app::undo::HistoryRepository historyRepository{fixture.database};
+    javelin::app::undo::UndoManager undoManager{historyRepository};
+    REQUIRE_FALSE(undoManager.load().has_value());
+    javelin::app::undo::MailTransferHistoryCoordinator historyCoordinator{fixture.database,
+                                                                          undoManager};
+    WorkScheduler scheduler{fixture.database, nullptr, std::chrono::milliseconds{0}};
+    MailTransferWorkService workService{fixture.database,
+                                        fixture.resourceTransport,
+                                        fixture.methodTransport,
+                                        *fixture.contentClient,
+                                        fixture.connections,
+                                        historyCoordinator,
+                                        scheduler};
+    workService.restoreRecoverable();
+
+    const auto failedJob = scheduler.find("mail-transfer:" + operationId);
+    const auto* failed = std::get_if<std::optional<WorkRecord>>(&failedJob);
+    REQUIRE(failed != nullptr);
+    REQUIRE(failed->has_value());
+    CHECK((*failed)->status == WorkStatus::Failed);
+    CHECK((*failed)->checkpointJson.contains(QStringLiteral("\"canRetry\":true")));
+    CHECK(undoManager.entries().empty());
+
+    REQUIRE_FALSE(emails.upsertMany(fixture.destinationAccountId, {*destination}).has_value());
+    REQUIRE_FALSE(scheduler.retry("mail-transfer:" + operationId).has_value());
+    REQUIRE(spinUntil([&] { return fixture.operation(operationId).historyEntryId.has_value(); }));
+
+    const auto repairedJob = scheduler.find("mail-transfer:" + operationId);
+    const auto* repaired = std::get_if<std::optional<WorkRecord>>(&repairedJob);
+    REQUIRE(repaired != nullptr);
+    REQUIRE(repaired->has_value());
+    CHECK((*repaired)->status == WorkStatus::Complete);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == uploadCalls);
+    CHECK(fixture.methodTransport.importCalls == importCalls);
+    REQUIRE(undoManager.entries().size() == 1);
 }
 
 TEST_CASE("cross-server copy streams exact raw MIME and completes only after import confirmation",

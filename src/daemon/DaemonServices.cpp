@@ -29,6 +29,7 @@
 #include "app/MailNotificationService.h"
 #include "app/MailQueryApplicationService.h"
 #include "app/MailTransferCommandService.h"
+#include "app/MailTransferWorkService.h"
 #include "app/MailboxMaintenanceRegistry.h"
 #include "app/MessageContentApplicationService.h"
 #include "app/MessageContentCommandService.h"
@@ -324,9 +325,63 @@ namespace javelin::app
                            "cache clear"
                         << QString::fromStdString(std::string{accountId}) << error->message;
             });
+        m_mailTransferWorkService = std::make_unique<MailTransferWorkService>(
+            m_databaseConnection, *m_transport, *m_methodTransport, *m_messageContentClient,
+            *m_accountRuntimeManager, *m_mailTransferHistoryCoordinator, *m_workScheduler,
+            [this](const MailTransferOperationRecord& operation)
+            {
+                m_mailQueryApplicationService->publishCacheChange({
+                    .accountId = QString::fromStdString(operation.destinationAccountId),
+                    .mailboxIds = {QString::fromStdString(operation.destinationMailboxId)},
+                    .queryWindows = {},
+                    .searchWindows = {},
+                    .messageContentEmailIds = {},
+                    .mailboxTreeChanged = false,
+                    .hasNewMail = false,
+                    .optimisticProjection = false,
+                    .contactsChanged = false,
+                    .identitiesChanged = false,
+                });
+                if (operation.operation != MailTransferOperation::Move)
+                    return;
+                QStringList sourceMailboxIds;
+                if (operation.sourceMailboxId.has_value())
+                    sourceMailboxIds.push_back(QString::fromStdString(*operation.sourceMailboxId));
+                m_mailQueryApplicationService->publishCacheChange({
+                    .accountId = QString::fromStdString(operation.sourceAccountId),
+                    .mailboxIds = std::move(sourceMailboxIds),
+                    .queryWindows = {},
+                    .searchWindows = {},
+                    .messageContentEmailIds = {},
+                    .mailboxTreeChanged = false,
+                    .hasNewMail = false,
+                    .optimisticProjection = false,
+                    .contactsChanged = false,
+                    .identitiesChanged = false,
+                });
+            },
+            m_accountRuntimeManager.get());
+        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::accountConfigured,
+                         m_mailTransferWorkService.get(), [this](const QString&)
+                         { m_mailTransferWorkService->restoreRecoverable(); });
+        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::sessionRefreshed,
+                         m_mailTransferWorkService.get(), [this](const QString&)
+                         { m_mailTransferWorkService->restoreRecoverable(); });
+        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::networkReachable,
+                         m_mailTransferWorkService.get(),
+                         &MailTransferWorkService::networkBecameReachable);
+        QObject::connect(m_errorCoordinator.get(),
+                         &ApplicationErrorCoordinator::authenticationPauseChanged,
+                         m_mailTransferWorkService.get(),
+                         [this](const QString&, const bool paused)
+                         {
+                             if (!paused)
+                                 m_mailTransferWorkService->authenticationBecameAvailable();
+                         });
         m_mailTransferCommandService = std::make_unique<MailTransferCommandService>(
             m_databaseConnection, *m_transport, *m_methodTransport, *m_messageContentClient,
             *m_accountRuntimeManager, *m_mailTransferHistoryCoordinator);
+        m_mailTransferCommandService->setWorkService(m_mailTransferWorkService.get());
         m_mailCommandService = std::make_unique<MailCommandService>(
             *m_mailMutationApplicationService, *m_mailTransferCommandService);
         m_sieveCommandService = std::make_unique<SieveCommandService>(*m_sieveApplicationService);

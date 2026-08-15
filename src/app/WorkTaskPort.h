@@ -27,6 +27,7 @@ namespace javelin::app
         CalendarRefresh,
         TagDeletion,
         Maintenance,
+        MailTransfer,
     };
 
     enum class WorkPriority : int
@@ -98,6 +99,8 @@ namespace javelin::app
             return "tag_deletion";
         case WorkKind::Maintenance:
             return "maintenance";
+        case WorkKind::MailTransfer:
+            return "mail_transfer";
         }
         return "maintenance";
     }

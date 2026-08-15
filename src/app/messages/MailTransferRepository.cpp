@@ -527,7 +527,8 @@ namespace javelin::app
                         QStringLiteral(" FROM mail_transfer_operations WHERE status IN "
                                        "('preparing','running','waiting_for_network',"
                                        "'waiting_for_auth','waiting_for_space','blocked_unknown',"
-                                       "'partial') ORDER BY created_at,operation_id")))
+                                       "'partial') OR (status='complete' AND history_entry_id IS "
+                                       "NULL) ORDER BY created_at,operation_id")))
         {
             return queryError(QStringLiteral("List recoverable mail transfers"), query);
         }

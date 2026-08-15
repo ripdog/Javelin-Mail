@@ -30,6 +30,7 @@ namespace javelin::app::undo
 namespace javelin::app
 {
     class AccountConnectionProvider;
+    class MailTransferWorkService;
 
     struct CrossAccountMailTransferIntent
     {
@@ -54,6 +55,7 @@ namespace javelin::app
 
         [[nodiscard]] QCoro::Task<MailTransferExecutionResult>
         transfer(CrossAccountMailTransferIntent intent);
+        void setWorkService(MailTransferWorkService* workService);
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
@@ -62,6 +64,7 @@ namespace javelin::app
         javelin::jmap::MessageContentClient& m_messageContentClient;
         const AccountConnectionProvider& m_connectionProvider;
         javelin::app::undo::MailTransferHistoryCoordinator& m_historyCoordinator;
+        MailTransferWorkService* m_workService = nullptr;
     };
 
 } // namespace javelin::app
