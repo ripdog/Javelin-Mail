@@ -57,6 +57,13 @@ namespace javelin::gui::shell
                                         : QString::fromStdString(account.name);
         }
 
+        [[nodiscard]] bool hasConfiguredDefaultCalendarDestination(
+            const javelin::protocol::CalendarDefaultDestination& destination)
+        {
+            return !destination.ownerAccountId.isEmpty() && !destination.accountId.isEmpty() &&
+                   !destination.calendarId.isEmpty();
+        }
+
         [[nodiscard]] QString displayCalendarAddress(const std::string_view address)
         {
             auto value = QString::fromUtf8(address.data(), static_cast<qsizetype>(address.size()));
@@ -1257,6 +1264,21 @@ namespace javelin::gui::shell
                     window != nullptr ? *window
                                       : std::optional<javelin::jmap::cache::CalendarWindow>{},
                     widget->palette().color(QPalette::Highlight));
+                const auto& configuredDestination =
+                    m_settings.workspaceSettings().defaultCalendarDestination;
+                if (hasConfiguredDefaultCalendarDestination(configuredDestination))
+                {
+                    for (auto& calendar : presentation.calendars)
+                    {
+                        calendar.defaultDestination =
+                            configuredDestination.ownerAccountId ==
+                                QString::fromStdString(calendar.ownerAccountId) &&
+                            configuredDestination.accountId ==
+                                QString::fromStdString(calendar.accountId) &&
+                            configuredDestination.calendarId ==
+                                QString::fromStdString(calendar.calendarId);
+                    }
+                }
                 calendarDisplays.insert(calendarDisplays.end(),
                                         std::make_move_iterator(presentation.calendars.begin()),
                                         std::make_move_iterator(presentation.calendars.end()));
@@ -1449,34 +1471,23 @@ namespace javelin::gui::shell
                                        }
                                    });
                 });
-        connect(
-            widget, &javelin::gui::calendar::MonthCalendarWidget::defaultCalendarChanged, widget,
-            [this, loadVisible, widget](const QString& displayId)
-            {
-                const auto separator = displayId.indexOf(QLatin1Char('\n'));
-                if (separator <= 0 || separator == displayId.size() - 1)
-                    return;
-                const auto accountId = displayId.first(separator).toStdString();
-                const auto account =
-                    std::ranges::find(m_calendarAccounts, accountId,
-                                      &javelin::jmap::cache::CalendarAccount::accountId);
-                if (account == m_calendarAccounts.end())
-                    return;
-                auto task = m_calendarCommandPort.setDefaultCalendar(
-                    account->ownerAccountId, accountId,
-                    displayId.sliced(separator + 1).toStdString());
-                QCoro::connect(std::move(task), widget,
-                               [this, loadVisible,
-                                widget](javelin::jmap::calendar::CalendarMutationResult result)
-                               {
-                                   if (const auto* error =
-                                           std::get_if<javelin::jmap::OperationError>(&result))
-                                   {
-                                       Q_EMIT operationFailed(*error);
-                                       loadVisible(widget->visibleStart(), widget->visibleEnd());
-                                   }
-                               });
-            });
+        connect(widget, &javelin::gui::calendar::MonthCalendarWidget::defaultCalendarChanged,
+                widget,
+                [this, loadVisible, widget](const QString& ownerAccountId, const QString& accountId,
+                                            const QString& calendarId)
+                {
+                    auto workspace = m_settings.workspaceSettings();
+                    workspace.defaultCalendarDestination = {
+                        .ownerAccountId = ownerAccountId,
+                        .accountId = accountId,
+                        .calendarId = calendarId,
+                    };
+                    if (const auto error = m_settings.updateWorkspace(std::move(workspace)))
+                    {
+                        Q_EMIT statusMessage(error->detail, 10000);
+                    }
+                    loadVisible(widget->visibleStart(), widget->visibleEnd());
+                });
         connect(
             widget, &javelin::gui::calendar::MonthCalendarWidget::calendarCreationRequested, widget,
             [this, widget](const QString& accountId, const QString& name, const QString& color)
@@ -1569,7 +1580,9 @@ namespace javelin::gui::shell
             [this, widget, refreshVisible](const QDateTime& start, const QDateTime& end)
             {
                 std::vector<javelin::jmap::calendar::Calendar> choices;
-                std::optional<std::size_t> destinationIndex;
+                std::vector<javelin::gui::calendar::NewEventCalendarCandidate> candidates;
+                const auto& configuredDestination =
+                    m_settings.workspaceSettings().defaultCalendarDestination;
                 for (const auto& account : m_calendarAccounts)
                 {
                     const auto calendarsResult = m_calendarReader.calendars(account.accountId);
@@ -1589,11 +1602,19 @@ namespace javelin::gui::shell
                                                .toStdString();
                         const auto writable =
                             choice.myRights.mayWriteAll || choice.myRights.mayWriteOwn;
-                        if (writable && (!destinationIndex.has_value() || choice.isDefault))
-                            destinationIndex = choices.size();
+                        candidates.push_back({
+                            .ownerAccountId = account.ownerAccountId,
+                            .accountId = account.accountId,
+                            .calendarId = choice.id,
+                            .writable = writable,
+                            .serverDefault = choice.isDefault,
+                        });
                         choices.push_back(std::move(choice));
                     }
                 }
+                const auto destinationIndex =
+                    javelin::gui::calendar::preferredNewEventCalendarIndex(candidates,
+                                                                           configuredDestination);
                 if (!destinationIndex.has_value())
                 {
                     Q_EMIT statusMessage(i18n("No writable calendar is available."), 5000);

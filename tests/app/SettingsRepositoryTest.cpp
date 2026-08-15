@@ -353,6 +353,9 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
         .formatVersion = 1,
         .mainWindowState = QByteArrayLiteral("workspace-state"),
         .composeRichTextDefault = false,
+        .defaultCalendarDestination = {.ownerAccountId = QStringLiteral("server-2"),
+                                       .accountId = QStringLiteral("account-2"),
+                                       .calendarId = QStringLiteral("calendar-default")},
         .calendarColorOverrides = {{.calendarId = QStringLiteral("calendar-2"),
                                     .color = QStringLiteral("#abcdef")}},
         .emailContextMenuLayout = {QStringLiteral("compose_reply"), QStringLiteral("separator"),
@@ -395,6 +398,11 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
     CHECK(reloaded->undoSendUsesDialog);
     CHECK(reloaded->workspace.mainWindowState == QByteArrayLiteral("workspace-state"));
     CHECK_FALSE(reloaded->workspace.composeRichTextDefault);
+    CHECK(reloaded->workspace.defaultCalendarDestination.ownerAccountId ==
+          QStringLiteral("server-2"));
+    CHECK(reloaded->workspace.defaultCalendarDestination.accountId == QStringLiteral("account-2"));
+    CHECK(reloaded->workspace.defaultCalendarDestination.calendarId ==
+          QStringLiteral("calendar-default"));
     REQUIRE(reloaded->workspace.calendarColorOverrides.size() == 1);
     CHECK(reloaded->workspace.calendarColorOverrides.front().calendarId ==
           QStringLiteral("calendar-2"));

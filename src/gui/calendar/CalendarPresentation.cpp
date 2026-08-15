@@ -8,6 +8,34 @@
 
 namespace javelin::gui::calendar
 {
+    std::optional<std::size_t> preferredNewEventCalendarIndex(
+        const std::span<const NewEventCalendarCandidate> candidates,
+        const javelin::protocol::CalendarDefaultDestination& configuredDestination)
+    {
+        const bool hasConfiguredDestination = !configuredDestination.ownerAccountId.isEmpty() &&
+                                              !configuredDestination.accountId.isEmpty() &&
+                                              !configuredDestination.calendarId.isEmpty();
+        std::optional<std::size_t> serverDefaultIndex;
+        std::optional<std::size_t> firstWritableIndex;
+        for (std::size_t index = 0; index < candidates.size(); ++index)
+        {
+            const auto& candidate = candidates[index];
+            if (!candidate.writable)
+                continue;
+            if (!firstWritableIndex.has_value())
+                firstWritableIndex = index;
+            if (!serverDefaultIndex.has_value() && candidate.serverDefault)
+                serverDefaultIndex = index;
+            if (hasConfiguredDestination &&
+                configuredDestination.ownerAccountId ==
+                    QString::fromStdString(candidate.ownerAccountId) &&
+                configuredDestination.accountId == QString::fromStdString(candidate.accountId) &&
+                configuredDestination.calendarId == QString::fromStdString(candidate.calendarId))
+                return index;
+        }
+        return serverDefaultIndex.has_value() ? serverDefaultIndex : firstWritableIndex;
+    }
+
     CalendarAccountPresentation buildCalendarAccountPresentation(
         const javelin::jmap::cache::CalendarAccount& account,
         const std::vector<javelin::jmap::calendar::Calendar>& calendars,
@@ -28,7 +56,9 @@ namespace javelin::gui::calendar
                 subscribedCalendars.insert(key);
             result.calendars.push_back({
                 .id = key,
+                .ownerAccountId = account.ownerAccountId,
                 .accountId = account.accountId,
+                .calendarId = calendar.id,
                 .accountName = QString::fromStdString(account.name),
                 .name = QString::fromStdString(calendar.name),
                 .color = color,

@@ -977,8 +977,14 @@ namespace javelin::gui::calendar
                 action->setChecked(calendar.defaultDestination);
                 action->setEnabled(calendar.writable);
                 destinationGroup->addAction(action);
-                connect(action, &QAction::triggered, this, [this, id = calendar.id]
-                        { Q_EMIT defaultCalendarChanged(QString::fromStdString(id)); });
+                connect(action, &QAction::triggered, this,
+                        [this, ownerAccountId = calendar.ownerAccountId,
+                         accountId = calendar.accountId, calendarId = calendar.calendarId]
+                        {
+                            Q_EMIT defaultCalendarChanged(QString::fromStdString(ownerAccountId),
+                                                          QString::fromStdString(accountId),
+                                                          QString::fromStdString(calendarId));
+                        });
             }
         }
         if (!m_calendars.empty())

@@ -53,6 +53,9 @@ namespace javelin::app
         constexpr auto workspaceFormatVersionKey = "formatVersion";
         constexpr auto workspaceWindowStateKey = "mainWindowState";
         constexpr auto workspaceComposeRichTextDefaultKey = "composeRichTextDefault";
+        constexpr auto workspaceDefaultCalendarOwnerAccountIdKey = "defaultCalendarOwnerAccountId";
+        constexpr auto workspaceDefaultCalendarAccountIdKey = "defaultCalendarAccountId";
+        constexpr auto workspaceDefaultCalendarIdKey = "defaultCalendarId";
         constexpr auto workspaceCalendarColorsKey = "calendarColorOverrides";
         constexpr auto workspaceCalendarIdKey = "calendarId";
         constexpr auto workspaceColorKey = "color";
@@ -232,6 +235,28 @@ namespace javelin::app
                 settings.value(settingKey(workspaceWindowStateKey)).toByteArray();
             workspace.composeRichTextDefault =
                 settings.value(settingKey(workspaceComposeRichTextDefaultKey), true).toBool();
+            workspace.defaultCalendarDestination.ownerAccountId =
+                settings.value(settingKey(workspaceDefaultCalendarOwnerAccountIdKey))
+                    .toString()
+                    .trimmed();
+            workspace.defaultCalendarDestination.accountId =
+                settings.value(settingKey(workspaceDefaultCalendarAccountIdKey))
+                    .toString()
+                    .trimmed();
+            workspace.defaultCalendarDestination.calendarId =
+                settings.value(settingKey(workspaceDefaultCalendarIdKey)).toString().trimmed();
+            const auto& destination = workspace.defaultCalendarDestination;
+            const bool hasAnyDestinationPart = !destination.ownerAccountId.isEmpty() ||
+                                               !destination.accountId.isEmpty() ||
+                                               !destination.calendarId.isEmpty();
+            if (hasAnyDestinationPart &&
+                (destination.ownerAccountId.isEmpty() || destination.accountId.isEmpty() ||
+                 destination.calendarId.isEmpty()))
+            {
+                settings.endGroup();
+                return invalidValue(settingKey(workspaceDefaultCalendarIdKey),
+                                    QStringLiteral("default calendar destination is incomplete"));
+            }
             workspace.emailContextMenuLayout = toVector(
                 settings.value(settingKey(workspaceEmailContextMenuLayoutKey)).toStringList());
             workspace.calendarEventContextMenuLayout =
@@ -321,6 +346,18 @@ namespace javelin::app
             if (snapshot.workspace.mainWindowState.size() > maximumWorkspaceBytes)
                 return invalidValue(settingKey(workspaceWindowStateKey),
                                     QStringLiteral("workspace state is too large"));
+            auto& destination = snapshot.workspace.defaultCalendarDestination;
+            destination.ownerAccountId = destination.ownerAccountId.trimmed();
+            destination.accountId = destination.accountId.trimmed();
+            destination.calendarId = destination.calendarId.trimmed();
+            const bool hasAnyDestinationPart = !destination.ownerAccountId.isEmpty() ||
+                                               !destination.accountId.isEmpty() ||
+                                               !destination.calendarId.isEmpty();
+            if (hasAnyDestinationPart &&
+                (destination.ownerAccountId.isEmpty() || destination.accountId.isEmpty() ||
+                 destination.calendarId.isEmpty()))
+                return invalidValue(settingKey(workspaceDefaultCalendarIdKey),
+                                    QStringLiteral("default calendar destination is incomplete"));
             for (auto& overrideValue : snapshot.workspace.calendarColorOverrides)
             {
                 overrideValue.calendarId = overrideValue.calendarId.trimmed();
@@ -769,6 +806,12 @@ namespace javelin::app
         settings.setValue(settingKey(workspaceWindowStateKey), snapshot.workspace.mainWindowState);
         settings.setValue(settingKey(workspaceComposeRichTextDefaultKey),
                           snapshot.workspace.composeRichTextDefault);
+        settings.setValue(settingKey(workspaceDefaultCalendarOwnerAccountIdKey),
+                          snapshot.workspace.defaultCalendarDestination.ownerAccountId);
+        settings.setValue(settingKey(workspaceDefaultCalendarAccountIdKey),
+                          snapshot.workspace.defaultCalendarDestination.accountId);
+        settings.setValue(settingKey(workspaceDefaultCalendarIdKey),
+                          snapshot.workspace.defaultCalendarDestination.calendarId);
         settings.setValue(settingKey(workspaceEmailContextMenuLayoutKey),
                           toStringList(snapshot.workspace.emailContextMenuLayout));
         settings.setValue(settingKey(workspaceCalendarEventContextMenuLayoutKey),

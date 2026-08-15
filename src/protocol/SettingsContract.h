@@ -67,11 +67,21 @@ namespace javelin::protocol
                                const CalendarColorOverride&) = default;
     };
 
+    struct CalendarDefaultDestination
+    {
+        QString ownerAccountId;
+        QString accountId;
+        QString calendarId;
+        friend bool operator==(const CalendarDefaultDestination&,
+                               const CalendarDefaultDestination&) = default;
+    };
+
     struct WorkspaceSettings
     {
         std::uint32_t formatVersion = 1;
         QByteArray mainWindowState;
         bool composeRichTextDefault = true;
+        CalendarDefaultDestination defaultCalendarDestination;
         std::vector<CalendarColorOverride> calendarColorOverrides;
         std::vector<QString> emailContextMenuLayout;
         std::vector<QString> calendarEventContextMenuLayout;

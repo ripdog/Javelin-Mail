@@ -324,6 +324,30 @@ namespace javelin::protocol
                         .field = QStringLiteral("update.workspace.mainWindowState"),
                         .detail = QStringLiteral("workspace state exceeds the protocol limit")};
                 }
+                const auto& destination = workspace.defaultCalendarDestination;
+                const bool hasDefaultDestination = !destination.ownerAccountId.isEmpty() ||
+                                                   !destination.accountId.isEmpty() ||
+                                                   !destination.calendarId.isEmpty();
+                if (hasDefaultDestination)
+                {
+                    if (auto error = requiredStringError(
+                            destination.ownerAccountId,
+                            QStringLiteral(
+                                "update.workspace.defaultCalendarDestination.ownerAccountId"),
+                            limits))
+                        return error;
+                    if (auto error = requiredStringError(
+                            destination.accountId,
+                            QStringLiteral("update.workspace.defaultCalendarDestination.accountId"),
+                            limits))
+                        return error;
+                    if (auto error = requiredStringError(
+                            destination.calendarId,
+                            QStringLiteral(
+                                "update.workspace.defaultCalendarDestination.calendarId"),
+                            limits))
+                        return error;
+                }
                 if (workspace.calendarColorOverrides.size() > limits.maximumCollectionItems)
                 {
                     return BoundaryError{
@@ -543,10 +567,17 @@ namespace javelin::protocol
                         size += sizeof(*value.update.undoSendDelaySeconds);
                     if (value.update.workspace.has_value())
                     {
-                        size += sizeof(value.update.workspace->formatVersion) +
-                                sizeof(value.update.workspace->composeRichTextDefault) +
-                                static_cast<std::size_t>(
-                                    value.update.workspace->mainWindowState.size());
+                        size +=
+                            sizeof(value.update.workspace->formatVersion) +
+                            sizeof(value.update.workspace->composeRichTextDefault) +
+                            static_cast<std::size_t>(
+                                value.update.workspace->mainWindowState.size()) +
+                            stringSize(
+                                value.update.workspace->defaultCalendarDestination.ownerAccountId) +
+                            stringSize(
+                                value.update.workspace->defaultCalendarDestination.accountId) +
+                            stringSize(
+                                value.update.workspace->defaultCalendarDestination.calendarId);
                         for (const auto& overrideValue :
                              value.update.workspace->calendarColorOverrides)
                             size += stringSize(overrideValue.calendarId) +

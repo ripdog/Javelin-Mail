@@ -425,6 +425,9 @@ namespace javelin::protocol
             return writer.dword(workspace.formatVersion) &&
                    writer.bytes(workspace.mainWindowState) &&
                    writer.boolean(workspace.composeRichTextDefault) &&
+                   writer.string(workspace.defaultCalendarDestination.ownerAccountId) &&
+                   writer.string(workspace.defaultCalendarDestination.accountId) &&
+                   writer.string(workspace.defaultCalendarDestination.calendarId) &&
                    writeVector(
                        writer, workspace.calendarColorOverrides, limits.maximumCollectionItems,
                        QStringLiteral("workspace.calendarColorOverrides"),
@@ -446,6 +449,9 @@ namespace javelin::protocol
             if (!reader.dword(workspace.formatVersion) ||
                 !reader.bytes(workspace.mainWindowState) ||
                 !reader.boolean(workspace.composeRichTextDefault) ||
+                !reader.string(workspace.defaultCalendarDestination.ownerAccountId) ||
+                !reader.string(workspace.defaultCalendarDestination.accountId) ||
+                !reader.string(workspace.defaultCalendarDestination.calendarId) ||
                 static_cast<std::size_t>(workspace.mainWindowState.size()) >
                     limits.maximumWorkspaceBytes)
                 return false;

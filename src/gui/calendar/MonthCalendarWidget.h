@@ -43,7 +43,9 @@ namespace javelin::gui::calendar
     struct CalendarDisplay
     {
         std::string id;
+        std::string ownerAccountId;
         std::string accountId;
+        std::string calendarId;
         QString accountName;
         QString name;
         QColor color;
@@ -128,7 +130,8 @@ namespace javelin::gui::calendar
                                          const QString& targetCalendarId);
         void emptyTimeActivated(const QDateTime& start, const QDateTime& end);
         void calendarSubscriptionChanged(const QString& calendarId, bool subscribed);
-        void defaultCalendarChanged(const QString& calendarId);
+        void defaultCalendarChanged(const QString& ownerAccountId, const QString& accountId,
+                                    const QString& calendarId);
         void calendarCreationRequested(const QString& accountId, const QString& name,
                                        const QString& color);
         void calendarDeletionRequested(const QString& calendarId);

@@ -3,10 +3,13 @@
 #include "gui/calendar/MonthCalendarWidget.h"
 #include "jmap/calendar/CalendarReader.h"
 #include "jmap/calendar/CalendarTypes.h"
+#include "protocol/SettingsContract.h"
 
 #include <QColor>
 
 #include <optional>
+#include <span>
+#include <string>
 #include <vector>
 
 namespace javelin::gui::calendar
@@ -16,6 +19,19 @@ namespace javelin::gui::calendar
         std::vector<CalendarDisplay> calendars;
         std::vector<MonthEvent> events;
     };
+
+    struct NewEventCalendarCandidate
+    {
+        std::string ownerAccountId;
+        std::string accountId;
+        std::string calendarId;
+        bool writable = false;
+        bool serverDefault = false;
+    };
+
+    [[nodiscard]] std::optional<std::size_t> preferredNewEventCalendarIndex(
+        std::span<const NewEventCalendarCandidate> candidates,
+        const javelin::protocol::CalendarDefaultDestination& configuredDestination);
 
     [[nodiscard]] CalendarAccountPresentation buildCalendarAccountPresentation(
         const javelin::jmap::cache::CalendarAccount& account,

@@ -109,6 +109,59 @@ TEST_CASE("calendar presentation includes events from subscribed calendars only"
     CHECK(presentation.events.front().eventId == "visible-event");
 }
 
+TEST_CASE("new event destination prefers the configured global calendar across accounts",
+          "[gui][calendar][default-destination]")
+{
+    const std::vector<javelin::gui::calendar::NewEventCalendarCandidate> candidates{
+        {.ownerAccountId = "server-1",
+         .accountId = "a1",
+         .calendarId = "personal",
+         .writable = true,
+         .serverDefault = true},
+        {.ownerAccountId = "server-2",
+         .accountId = "a1",
+         .calendarId = "work",
+         .writable = true,
+         .serverDefault = true},
+    };
+
+    const javelin::protocol::CalendarDefaultDestination configured{
+        .ownerAccountId = QStringLiteral("server-2"),
+        .accountId = QStringLiteral("a1"),
+        .calendarId = QStringLiteral("work"),
+    };
+    CHECK(javelin::gui::calendar::preferredNewEventCalendarIndex(candidates, configured) ==
+          std::optional<std::size_t>{1});
+
+    CHECK(javelin::gui::calendar::preferredNewEventCalendarIndex(candidates, {}) ==
+          std::optional<std::size_t>{0});
+}
+
+TEST_CASE("new event destination falls back when the configured calendar is not writable",
+          "[gui][calendar][default-destination]")
+{
+    const std::vector<javelin::gui::calendar::NewEventCalendarCandidate> candidates{
+        {.ownerAccountId = "server-1",
+         .accountId = "a1",
+         .calendarId = "personal",
+         .writable = true,
+         .serverDefault = true},
+        {.ownerAccountId = "server-2",
+         .accountId = "a2",
+         .calendarId = "locked",
+         .writable = false,
+         .serverDefault = false},
+    };
+    const javelin::protocol::CalendarDefaultDestination configured{
+        .ownerAccountId = QStringLiteral("server-2"),
+        .accountId = QStringLiteral("a2"),
+        .calendarId = QStringLiteral("locked"),
+    };
+
+    CHECK(javelin::gui::calendar::preferredNewEventCalendarIndex(candidates, configured) ==
+          std::optional<std::size_t>{0});
+}
+
 TEST_CASE("month calendar labels multi-day event segments coherently", "[gui][calendar]")
 {
     using javelin::gui::calendar::monthEventSegment;
