@@ -104,8 +104,8 @@ namespace
 
         QCoro::Task<RecreatedMailTransferSourceResult> recreateSourceFromHistory(
             QString historyEntryId, std::string accountId, std::string rawContentHash,
-            std::vector<std::string>, std::vector<std::string>,
-            std::optional<std::string>) override
+            std::vector<std::string>, std::vector<std::string>, std::vector<std::string>,
+            std::optional<std::string>, std::uint64_t) override
         {
             calls.push_back("recreate:" + accountId);
             recreateHistoryEntryId = std::move(historyEntryId);
@@ -122,6 +122,7 @@ namespace
             .currentSourceEmailId = std::optional<std::string>{"source-email"},
             .originalSourceMailboxIds = {"inbox"},
             .sourceKeywords = {"$seen", "project"},
+            .sourceMessageIds = {"message@example.test"},
             .sourceReceivedAt = std::optional<std::string>{"2026-08-15T00:00:00Z"},
             .sourceSize = 1234,
             .sourceRemovedMailboxIds = {"inbox"},

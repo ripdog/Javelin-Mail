@@ -1,0 +1,881 @@
+#include "app/undo/MailTransferHistoryService.h"
+
+#include "app/AccountConnectionProvider.h"
+#include "app/AccountConnectionSettings.h"
+#include "jmap/api/BlobUpload.h"
+#include "jmap/api/MailMethods.h"
+#include "jmap/api/MethodCaller.h"
+#include "jmap/api/RequestBuilder.h"
+#include "jmap/api/ResponseReader.h"
+#include "jmap/cache/AccountRepository.h"
+#include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailVault.h"
+#include "jmap/cache/MailboxWindowRepository.h"
+#include "jmap/cache/RawMessageSourceRepository.h"
+#include "jmap/cache/SearchWindowRepository.h"
+#include "jmap/cache/SessionRepository.h"
+
+#include <KLocalizedString>
+
+#include <QSqlError>
+#include <QSqlQuery>
+#include <QUuid>
+
+#include <algorithm>
+#include <ranges>
+#include <unordered_map>
+#include <utility>
+
+namespace javelin::app::undo
+{
+    namespace
+    {
+        using DatabaseError = javelin::jmap::cache::DatabaseError;
+        using OperationError = javelin::jmap::OperationError;
+        using OperationErrorCode = javelin::jmap::OperationErrorCode;
+
+        struct RecreationRecord
+        {
+            QString historyEntryId;
+            std::string contentHash;
+            std::string accountId;
+            std::string creationId;
+            std::optional<std::string> uploadedBlobId;
+            std::optional<std::string> preState;
+            std::optional<std::string> emailId;
+            QString phase;
+        };
+
+        struct AccountContext
+        {
+            javelin::jmap::cache::CachedAccount account;
+            javelin::jmap::api::Session session;
+            javelin::app::AccountConnectionSettings settings;
+            javelin::jmap::api::ApiRequestContext requestContext;
+            javelin::jmap::api::BlobUploadContext uploadContext;
+        };
+
+        [[nodiscard]] OperationError dbError(const QString& operation, const QSqlQuery& query)
+        {
+            return javelin::jmap::operationError(javelin::jmap::cache::databaseError(
+                operation, query.lastError(), javelin::jmap::cache::DatabaseErrorCode::QueryFailed));
+        }
+
+        [[nodiscard]] OperationError invalid(QString message)
+        {
+            return {.code = OperationErrorCode::PreconditionFailed, .message = std::move(message)};
+        }
+
+        [[nodiscard]] OperationError ambiguous(QString message)
+        {
+            return {
+                .code = OperationErrorCode::Conflict,
+                .message = std::move(message),
+                .httpStatus = std::nullopt,
+                .retryAfter = std::nullopt,
+                .protocolType = std::optional<std::string>{"ambiguousOutcome"},
+            };
+        }
+
+        [[nodiscard]] OperationError callerError(const javelin::jmap::api::MethodCallerResult& result)
+        {
+            if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
+                return javelin::jmap::operationError(*error);
+            if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&result))
+                return javelin::jmap::operationError(*error);
+            if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&result))
+                return javelin::jmap::operationError(*error);
+            return {.code = OperationErrorCode::ProtocolViolation,
+                    .message = i18n("The JMAP history request returned an invalid result.")};
+        }
+
+        [[nodiscard]] javelin::jmap::LiveConnectionSettings
+        liveSettings(const javelin::app::AccountConnectionSettings& settings)
+        {
+            return {
+                .sessionUrl = settings.sessionUrl,
+                .loginEmail = settings.loginEmail,
+                .apiKey = settings.apiKey,
+            };
+        }
+
+        [[nodiscard]] javelin::jmap::api::ApiRequestContext
+        requestContext(const javelin::app::AccountConnectionSettings& settings,
+                       const std::string& localAccountId,
+                       const javelin::jmap::api::Session& session)
+        {
+            return {
+                .credentials =
+                    {
+                        .accountId = localAccountId,
+                        .emailAddress = settings.loginEmail,
+                        .sessionUrl = settings.sessionUrl,
+                        .token = {.accessToken = settings.apiKey,
+                                  .refreshToken = std::nullopt,
+                                  .expiry = std::nullopt},
+                    },
+                .apiUrl = session.apiUrl,
+                .requestLimits = javelin::jmap::api::coreRequestLimits(session),
+            };
+        }
+
+        [[nodiscard]] std::unordered_map<std::string, bool>
+        enabledMap(const std::vector<std::string>& values)
+        {
+            std::unordered_map<std::string, bool> result;
+            result.reserve(values.size());
+            for (const auto& value : values)
+                result.emplace(value, true);
+            return result;
+        }
+
+        [[nodiscard]] bool containsAll(const std::vector<std::string>& values,
+                                       const std::vector<std::string>& required)
+        {
+            return std::ranges::all_of(required, [&](const auto& value)
+                                       { return std::ranges::contains(values, value); });
+        }
+
+        [[nodiscard]] std::vector<std::string> normalized(std::vector<std::string> values)
+        {
+            std::ranges::sort(values);
+            values.erase(std::unique(values.begin(), values.end()), values.end());
+            return values;
+        }
+
+        [[nodiscard]] const std::vector<std::string>& emailProperties()
+        {
+            static const std::vector<std::string> properties{
+                "id",         "blobId",        "threadId", "mailboxIds", "keywords",
+                "size",       "receivedAt",    "sentAt",   "messageId",  "inReplyTo",
+                "references", "hasAttachment", "subject",  "from",       "to",
+                "cc",         "bcc",           "replyTo",  "preview",
+            };
+            return properties;
+        }
+
+        [[nodiscard]] std::variant<std::optional<RecreationRecord>, OperationError>
+        findRecreation(javelin::jmap::cache::DatabaseConnection& database, const QString& entryId,
+                       const std::string& contentHash)
+        {
+            QSqlQuery query{database.database()};
+            query.prepare(QStringLiteral(
+                "SELECT history_entry_id,content_hash,account_id,creation_id,uploaded_blob_id,"
+                "pre_state,email_id,phase FROM mail_transfer_history_recreations WHERE "
+                "history_entry_id=:history_entry_id AND content_hash=:content_hash"));
+            query.bindValue(QStringLiteral(":history_entry_id"), entryId);
+            query.bindValue(QStringLiteral(":content_hash"), QString::fromStdString(contentHash));
+            if (!query.exec())
+                return dbError(QStringLiteral("Find mail transfer history recreation"), query);
+            if (!query.next())
+                return std::optional<RecreationRecord>{std::nullopt};
+            return std::optional<RecreationRecord>{RecreationRecord{
+                .historyEntryId = query.value(0).toString(),
+                .contentHash = query.value(1).toString().toStdString(),
+                .accountId = query.value(2).toString().toStdString(),
+                .creationId = query.value(3).toString().toStdString(),
+                .uploadedBlobId = query.value(4).isNull()
+                                      ? std::nullopt
+                                      : std::optional<std::string>{
+                                            query.value(4).toString().toStdString()},
+                .preState = query.value(5).isNull()
+                                ? std::nullopt
+                                : std::optional<std::string>{query.value(5).toString().toStdString()},
+                .emailId = query.value(6).isNull()
+                               ? std::nullopt
+                               : std::optional<std::string>{query.value(6).toString().toStdString()},
+                .phase = query.value(7).toString(),
+            }};
+        }
+
+        [[nodiscard]] std::optional<OperationError>
+        createRecreation(javelin::jmap::cache::DatabaseConnection& database,
+                         const RecreationRecord& record)
+        {
+            QSqlQuery query{database.database()};
+            query.prepare(QStringLiteral(
+                "INSERT OR IGNORE INTO mail_transfer_history_recreations("
+                "history_entry_id,content_hash,account_id,creation_id,phase) VALUES("
+                ":history_entry_id,:content_hash,:account_id,:creation_id,'prepared')"));
+            query.bindValue(QStringLiteral(":history_entry_id"), record.historyEntryId);
+            query.bindValue(QStringLiteral(":content_hash"),
+                            QString::fromStdString(record.contentHash));
+            query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(record.accountId));
+            query.bindValue(QStringLiteral(":creation_id"),
+                            QString::fromStdString(record.creationId));
+            if (!query.exec())
+                return dbError(QStringLiteral("Create mail transfer history recreation"), query);
+            return std::nullopt;
+        }
+
+        [[nodiscard]] std::optional<OperationError>
+        setUploaded(javelin::jmap::cache::DatabaseConnection& database, const RecreationRecord& record,
+                    const std::string& blobId)
+        {
+            QSqlQuery query{database.database()};
+            query.prepare(QStringLiteral(
+                "UPDATE mail_transfer_history_recreations SET uploaded_blob_id=:blob_id,"
+                "phase='uploaded',last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE "
+                "history_entry_id=:history_entry_id AND content_hash=:content_hash AND "
+                "phase='prepared'"));
+            query.bindValue(QStringLiteral(":blob_id"), QString::fromStdString(blobId));
+            query.bindValue(QStringLiteral(":history_entry_id"), record.historyEntryId);
+            query.bindValue(QStringLiteral(":content_hash"),
+                            QString::fromStdString(record.contentHash));
+            if (!query.exec())
+                return dbError(QStringLiteral("Record history source upload"), query);
+            if (query.numRowsAffected() != 1)
+                return invalid(i18n("The source recreation state changed while recording upload."));
+            return std::nullopt;
+        }
+
+        [[nodiscard]] std::optional<OperationError>
+        setCreating(javelin::jmap::cache::DatabaseConnection& database,
+                    const RecreationRecord& record, const std::string& preState)
+        {
+            QSqlQuery query{database.database()};
+            query.prepare(QStringLiteral(
+                "UPDATE mail_transfer_history_recreations SET pre_state=:pre_state,"
+                "phase='creating',last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE "
+                "history_entry_id=:history_entry_id AND content_hash=:content_hash AND "
+                "phase='uploaded'"));
+            query.bindValue(QStringLiteral(":pre_state"), QString::fromStdString(preState));
+            query.bindValue(QStringLiteral(":history_entry_id"), record.historyEntryId);
+            query.bindValue(QStringLiteral(":content_hash"),
+                            QString::fromStdString(record.contentHash));
+            if (!query.exec())
+                return dbError(QStringLiteral("Prepare history source import"), query);
+            if (query.numRowsAffected() != 1)
+                return invalid(i18n("The source recreation state changed before import."));
+            return std::nullopt;
+        }
+
+        [[nodiscard]] std::optional<OperationError>
+        setPhase(javelin::jmap::cache::DatabaseConnection& database, const RecreationRecord& record,
+                 const QString& expected, const QString& next, std::optional<QString> error = std::nullopt)
+        {
+            QSqlQuery query{database.database()};
+            query.prepare(QStringLiteral(
+                "UPDATE mail_transfer_history_recreations SET phase=:next,last_error=:last_error,"
+                "updated_at=CURRENT_TIMESTAMP WHERE history_entry_id=:history_entry_id AND "
+                "content_hash=:content_hash AND phase=:expected"));
+            query.bindValue(QStringLiteral(":next"), next);
+            query.bindValue(QStringLiteral(":last_error"),
+                            error.has_value() ? QVariant{*error} : QVariant{});
+            query.bindValue(QStringLiteral(":history_entry_id"), record.historyEntryId);
+            query.bindValue(QStringLiteral(":content_hash"),
+                            QString::fromStdString(record.contentHash));
+            query.bindValue(QStringLiteral(":expected"), expected);
+            if (!query.exec())
+                return dbError(QStringLiteral("Transition history source recreation"), query);
+            if (query.numRowsAffected() != 1)
+                return invalid(i18n("The source recreation state changed unexpectedly."));
+            return std::nullopt;
+        }
+
+        [[nodiscard]] std::optional<OperationError>
+        setComplete(javelin::jmap::cache::DatabaseConnection& database,
+                    const RecreationRecord& record, const QString& expected,
+                    const std::string& emailId)
+        {
+            QSqlQuery query{database.database()};
+            query.prepare(QStringLiteral(
+                "UPDATE mail_transfer_history_recreations SET email_id=:email_id,phase='complete',"
+                "last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE "
+                "history_entry_id=:history_entry_id AND content_hash=:content_hash AND "
+                "phase=:expected"));
+            query.bindValue(QStringLiteral(":email_id"), QString::fromStdString(emailId));
+            query.bindValue(QStringLiteral(":history_entry_id"), record.historyEntryId);
+            query.bindValue(QStringLiteral(":content_hash"),
+                            QString::fromStdString(record.contentHash));
+            query.bindValue(QStringLiteral(":expected"), expected);
+            if (!query.exec())
+                return dbError(QStringLiteral("Complete history source recreation"), query);
+            if (query.numRowsAffected() != 1)
+                return invalid(i18n("The source recreation state changed while completing import."));
+            return std::nullopt;
+        }
+
+        [[nodiscard]] std::variant<AccountContext, OperationError>
+        accountContext(javelin::jmap::cache::DatabaseConnection& database,
+                       const javelin::app::AccountConnectionProvider& connections,
+                       const std::string& accountId)
+        {
+            javelin::jmap::cache::AccountRepository accounts{database};
+            const auto accountResult = accounts.findById(accountId);
+            if (const auto* error = std::get_if<DatabaseError>(&accountResult))
+                return javelin::jmap::operationError(*error);
+            const auto& account =
+                std::get<std::optional<javelin::jmap::cache::CachedAccount>>(accountResult);
+            if (!account.has_value() || account->remoteAccountId.empty())
+                return invalid(i18n("The source mail account is no longer available."));
+
+            const auto settings = connections.connectionSettingsFor(accountId);
+            if (!settings.has_value())
+                return invalid(i18n("Connection settings are unavailable for the source account."));
+
+            javelin::jmap::cache::SessionRepository sessions{database};
+            const auto sessionResult = sessions.load(accountId);
+            if (const auto* error = std::get_if<DatabaseError>(&sessionResult))
+                return javelin::jmap::operationError(*error);
+            const auto& session =
+                std::get<std::optional<javelin::jmap::api::Session>>(sessionResult);
+            if (!session.has_value() || !session->accounts.contains(account->remoteAccountId))
+                return invalid(i18n("The source account is absent from its cached JMAP session."));
+
+            const auto upload =
+                javelin::jmap::api::blobUploadContext(*session, account->remoteAccountId);
+            if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&upload))
+                return javelin::jmap::operationError(*error);
+            auto apiContext = requestContext(*settings, accountId, *session);
+            if (!apiContext.requestLimits.has_value())
+                return invalid(i18n("The source server does not advertise usable JMAP limits."));
+            return AccountContext{
+                .account = *account,
+                .session = *session,
+                .settings = *settings,
+                .requestContext = std::move(apiContext),
+                .uploadContext = std::get<javelin::jmap::api::BlobUploadContext>(upload),
+            };
+        }
+
+        [[nodiscard]] std::optional<OperationError>
+        verifyHistoryPin(javelin::jmap::cache::DatabaseConnection& database,
+                         const QString& historyEntryId, const std::string& contentHash)
+        {
+            QSqlQuery query{database.database()};
+            query.prepare(QStringLiteral(
+                "SELECT EXISTS(SELECT 1 FROM mail_vault_pins WHERE owner_kind='history_entry' AND "
+                "owner_id=:owner_id AND content_hash=:content_hash)"));
+            query.bindValue(QStringLiteral(":owner_id"), historyEntryId);
+            query.bindValue(QStringLiteral(":content_hash"), QString::fromStdString(contentHash));
+            if (!query.exec() || !query.next())
+                return dbError(QStringLiteral("Verify history mail vault pin"), query);
+            if (!query.value(0).toBool())
+                return invalid(i18n("The raw message retained for this Undo entry is unavailable."));
+            return std::nullopt;
+        }
+
+        [[nodiscard]] OperationError rejectedImport(const javelin::jmap::api::SetError& error)
+        {
+            return {
+                .code = error.type == "forbidden" ? OperationErrorCode::PermissionDenied
+                                                    : OperationErrorCode::ServerFailure,
+                .message = error.description.has_value()
+                               ? QString::fromStdString(*error.description)
+                               : i18n("The source server rejected restoring this message (%1).",
+                                      QString::fromStdString(error.type)),
+                .protocolType = error.type,
+            };
+        }
+    } // namespace
+
+    MailTransferHistoryService::MailTransferHistoryService(
+        javelin::jmap::cache::DatabaseConnection& databaseConnection,
+        javelin::jmap::api::AbstractTransport& resourceTransport,
+        javelin::jmap::api::JmapMethodTransport& methodTransport,
+        const javelin::app::AccountConnectionProvider& connectionProvider)
+        : m_databaseConnection(databaseConnection), m_resourceTransport(resourceTransport),
+          m_methodTransport(methodTransport), m_connectionProvider(connectionProvider)
+    {
+    }
+
+    QCoro::Task<javelin::jmap::AuthoritativeEmailsResult>
+    MailTransferHistoryService::getAuthoritativeEmails(std::string accountId,
+                                                       std::vector<std::string> emailIds)
+    {
+        const auto settings = m_connectionProvider.connectionSettingsFor(accountId);
+        if (!settings.has_value())
+            co_return invalid(i18n("Connection settings are unavailable for this mail account."));
+        javelin::jmap::EmailMutationEngine engine{m_databaseConnection, m_methodTransport};
+        co_return co_await engine.getAuthoritative(liveSettings(*settings), std::move(accountId),
+                                                   std::move(emailIds));
+    }
+
+    QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
+    MailTransferHistoryService::applyExactEmailMutation(
+        std::string accountId, javelin::jmap::EmailMailboxMutation mutation)
+    {
+        const auto settings = m_connectionProvider.connectionSettingsFor(accountId);
+        if (!settings.has_value())
+            co_return invalid(i18n("Connection settings are unavailable for this mail account."));
+        if (!mutation.operationGroupId.has_value())
+        {
+            mutation.operationGroupId =
+                QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+        }
+        const auto operationGroupId = mutation.operationGroupId;
+        javelin::jmap::EmailMutationEngine engine{m_databaseConnection, m_methodTransport};
+        const auto queued = engine.queue(accountId, std::move(mutation));
+        if (const auto* error = std::get_if<OperationError>(&queued))
+            co_return *error;
+        co_return co_await engine.submitPending(liveSettings(*settings), std::move(accountId),
+                                                operationGroupId, 1);
+    }
+
+    QCoro::Task<RecreatedMailTransferSourceResult>
+    MailTransferHistoryService::recreateSourceFromHistory(
+        QString historyEntryId, std::string accountId, std::string rawContentHash,
+        std::vector<std::string> mailboxIds, std::vector<std::string> keywords,
+        std::vector<std::string> messageIds, std::optional<std::string> receivedAt,
+        const std::uint64_t sourceSize)
+    {
+        if (historyEntryId.isEmpty() || accountId.empty() || rawContentHash.empty() ||
+            mailboxIds.empty())
+            co_return invalid(i18n("The source recreation request is incomplete."));
+        if (const auto error = verifyHistoryPin(m_databaseConnection, historyEntryId, rawContentHash))
+            co_return *error;
+
+        auto contextResult = accountContext(m_databaseConnection, m_connectionProvider, accountId);
+        if (const auto* error = std::get_if<OperationError>(&contextResult))
+            co_return *error;
+        const auto context = std::get<AccountContext>(std::move(contextResult));
+
+        auto recordResult = findRecreation(m_databaseConnection, historyEntryId, rawContentHash);
+        if (const auto* error = std::get_if<OperationError>(&recordResult))
+            co_return *error;
+        auto record = std::get<std::optional<RecreationRecord>>(std::move(recordResult));
+        if (!record.has_value())
+        {
+            RecreationRecord created{
+                .historyEntryId = historyEntryId,
+                .contentHash = rawContentHash,
+                .accountId = accountId,
+                .creationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
+                .uploadedBlobId = std::nullopt,
+                .preState = std::nullopt,
+                .emailId = std::nullopt,
+                .phase = QStringLiteral("prepared"),
+            };
+            if (const auto error = createRecreation(m_databaseConnection, created))
+                co_return *error;
+            recordResult = findRecreation(m_databaseConnection, historyEntryId, rawContentHash);
+            if (const auto* error = std::get_if<OperationError>(&recordResult))
+                co_return *error;
+            record = std::get<std::optional<RecreationRecord>>(std::move(recordResult));
+            if (!record.has_value())
+                co_return invalid(i18n("The source recreation journal could not be created."));
+        }
+        if (record->accountId != accountId)
+            co_return invalid(i18n("The source recreation journal belongs to another account."));
+
+        javelin::jmap::api::MethodCaller caller{m_methodTransport};
+        for (int step = 0; step < 8; ++step)
+        {
+            if (record->phase == QStringLiteral("complete"))
+            {
+                if (!record->emailId.has_value())
+                    co_return invalid(i18n("The completed source recreation is missing its Email id."));
+                const auto emailRequest = javelin::jmap::api::emailGet({
+                    .accountId = context.account.remoteAccountId,
+                    .ids = std::vector<std::string>{*record->emailId},
+                    .idsReference = std::nullopt,
+                    .properties = emailProperties(),
+                });
+                if (!emailRequest.has_value())
+                    co_return invalid(i18n("Unable to encode recreated source Email/get request."));
+                javelin::jmap::api::RequestBuilder emailBuilder;
+                emailBuilder.useCore().useMail();
+                const auto emailHandle =
+                    emailBuilder.call(*emailRequest, "history-source-materialize");
+                auto emailCalled = co_await caller.call(context.requestContext, emailBuilder);
+                if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(emailCalled))
+                    co_return callerError(emailCalled);
+                const auto emailRead = javelin::jmap::api::ResponseReader{
+                    std::get<javelin::jmap::api::ResponseEnvelope>(emailCalled)}.require(emailHandle);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::api::ResponseReaderError>(&emailRead))
+                    co_return javelin::jmap::operationError(*error);
+                const auto& response = std::get<javelin::jmap::api::EmailGetResponse>(emailRead);
+                if (response.accountId != context.account.remoteAccountId ||
+                    response.list.size() != 1 || response.list.front().id != *record->emailId ||
+                    !response.notFound.empty())
+                    co_return invalid(i18n("The recreated source Email is not available after import."));
+
+                auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                    m_databaseConnection, QStringLiteral("Materialize recreated source Email"));
+                if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+                    co_return javelin::jmap::operationError(*error);
+                auto transaction =
+                    std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+                javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
+                if (const auto error = emails.upsertMany(transaction, accountId, response.list))
+                    co_return javelin::jmap::operationError(*error);
+                javelin::jmap::cache::MailboxWindowRepository mailboxWindows{m_databaseConnection};
+                for (const auto& mailboxId : response.list.front().mailboxIds)
+                    if (const auto error = mailboxWindows.invalidateMailbox(transaction, accountId,
+                                                                             mailboxId))
+                        co_return javelin::jmap::operationError(*error);
+                javelin::jmap::cache::SearchWindowRepository searchWindows{m_databaseConnection};
+                if (const auto error = searchWindows.invalidateAccount(transaction, accountId))
+                    co_return javelin::jmap::operationError(*error);
+                if (const auto error = transaction.commit())
+                    co_return javelin::jmap::operationError(*error);
+
+                co_return RecreatedMailTransferSource{
+                    .emailId = response.list.front().id,
+                    .blobId = response.list.front().blobId.empty()
+                                  ? std::nullopt
+                                  : std::optional<std::string>{response.list.front().blobId},
+                    .threadId = response.list.front().threadId.empty()
+                                    ? std::nullopt
+                                    : std::optional<std::string>{response.list.front().threadId},
+                    .size = response.list.front().size,
+                };
+            }
+
+            if (record->phase == QStringLiteral("creating"))
+            {
+                if (const auto error = setPhase(m_databaseConnection, *record,
+                                                QStringLiteral("creating"),
+                                                QStringLiteral("unknown"),
+                                                i18n("The application stopped while source "
+                                                     "recreation may have been dispatched.")))
+                    co_return *error;
+                record->phase = QStringLiteral("unknown");
+            }
+
+            if (record->phase == QStringLiteral("prepared"))
+            {
+                javelin::jmap::cache::RawMessageSourceRepository sources{m_databaseConnection};
+                const auto objectResult = sources.findVaultObject(rawContentHash);
+                if (const auto* error = std::get_if<DatabaseError>(&objectResult))
+                    co_return javelin::jmap::operationError(*error);
+                const auto& object =
+                    std::get<std::optional<javelin::jmap::cache::MailVaultObject>>(objectResult);
+                if (!object.has_value())
+                    co_return invalid(i18n("The retained raw source is missing from the mail vault."));
+                const auto vault = javelin::jmap::cache::MailVault::forDatabase(m_databaseConnection);
+                auto leaseResult = vault.acquireLease(*object);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::MailVaultError>(&leaseResult))
+                    co_return OperationError{.code = OperationErrorCode::LocalStorageFailure,
+                                             .message = error->message};
+                auto lease =
+                    std::get<javelin::jmap::cache::MailVaultLease>(std::move(leaseResult));
+                const auto pathResult = lease.filePath();
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::MailVaultError>(&pathResult))
+                    co_return OperationError{.code = OperationErrorCode::LocalStorageFailure,
+                                             .message = error->message};
+                const auto upload = co_await javelin::jmap::api::uploadBlobFromFile(
+                    m_resourceTransport, context.uploadContext, accountId,
+                    context.account.remoteAccountId, context.settings.apiKey,
+                    std::get<QString>(pathResult), "message/rfc822");
+                if (const auto* error =
+                        std::get_if<javelin::jmap::api::TransportError>(&upload))
+                    co_return javelin::jmap::operationError(*error);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::api::ProtocolError>(&upload))
+                    co_return javelin::jmap::operationError(*error);
+                const auto& uploaded = std::get<javelin::jmap::api::BlobUploadResponse>(upload);
+                if (uploaded.accountId != context.account.remoteAccountId)
+                    co_return invalid(i18n("The upload response returned the wrong account id."));
+                if (const auto error = setUploaded(m_databaseConnection, *record, uploaded.blobId))
+                    co_return *error;
+                record->uploadedBlobId = uploaded.blobId;
+                record->phase = QStringLiteral("uploaded");
+                continue;
+            }
+
+            if (record->phase == QStringLiteral("uploaded"))
+            {
+                if (!record->uploadedBlobId.has_value())
+                    co_return invalid(i18n("The source recreation is missing its uploaded blob."));
+                const auto stateRequest = javelin::jmap::api::emailGet({
+                    .accountId = context.account.remoteAccountId,
+                    .ids = std::vector<std::string>{},
+                    .idsReference = std::nullopt,
+                    .properties = std::vector<std::string>{"id"},
+                });
+                if (!stateRequest.has_value())
+                    co_return invalid(i18n("Unable to encode source Email state request."));
+                javelin::jmap::api::RequestBuilder stateBuilder;
+                stateBuilder.useCore().useMail();
+                const auto stateHandle = stateBuilder.call(*stateRequest, "history-source-state");
+                auto stateCalled = co_await caller.call(context.requestContext, stateBuilder);
+                if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(stateCalled))
+                    co_return callerError(stateCalled);
+                const auto stateRead = javelin::jmap::api::ResponseReader{
+                    std::get<javelin::jmap::api::ResponseEnvelope>(stateCalled)}.require(stateHandle);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::api::ResponseReaderError>(&stateRead))
+                    co_return javelin::jmap::operationError(*error);
+                const auto& state = std::get<javelin::jmap::api::EmailGetResponse>(stateRead);
+                if (state.accountId != context.account.remoteAccountId || state.state.empty())
+                    co_return invalid(i18n("The source Email state response is invalid."));
+                if (const auto error = setCreating(m_databaseConnection, *record, state.state))
+                    co_return *error;
+                record->preState = state.state;
+                record->phase = QStringLiteral("creating");
+
+                const auto importRequest = javelin::jmap::api::emailImport({
+                    .accountId = context.account.remoteAccountId,
+                    .ifInState = state.state,
+                    .emails =
+                        {{record->creationId,
+                          javelin::jmap::api::EmailImport{
+                              .blobId = *record->uploadedBlobId,
+                              .mailboxIds = enabledMap(mailboxIds),
+                              .keywords = enabledMap(keywords),
+                              .receivedAt = receivedAt,
+                          }}},
+                });
+                if (!importRequest.has_value())
+                    co_return invalid(i18n("Unable to encode source Email/import request."));
+                javelin::jmap::api::RequestBuilder importBuilder;
+                importBuilder.useCore().useMail();
+                const auto importHandle =
+                    importBuilder.call(*importRequest, "history-source-import");
+                bool dispatched = false;
+                auto importCalled = co_await caller.call(
+                    context.requestContext, importBuilder, {}, [&dispatched] { dispatched = true; });
+                if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(importCalled))
+                {
+                    const auto error = callerError(importCalled);
+                    if (dispatched)
+                    {
+                        if (const auto journalError = setPhase(
+                                m_databaseConnection, *record, QStringLiteral("creating"),
+                                QStringLiteral("unknown"), error.message))
+                            co_return *journalError;
+                        record->phase = QStringLiteral("unknown");
+                        co_return ambiguous(i18n("Source restoration may have succeeded, but its "
+                                                "server response was lost."));
+                    }
+                    if (const auto journalError = setPhase(
+                            m_databaseConnection, *record, QStringLiteral("creating"),
+                            QStringLiteral("uploaded"), error.message))
+                        co_return *journalError;
+                    record->phase = QStringLiteral("uploaded");
+                    co_return error;
+                }
+
+                const auto importRead = javelin::jmap::api::ResponseReader{
+                    std::get<javelin::jmap::api::ResponseEnvelope>(importCalled)}
+                                            .require(importHandle);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::api::ResponseReaderError>(&importRead))
+                {
+                    const auto operationError = javelin::jmap::operationError(*error);
+                    if (const auto journalError = setPhase(
+                            m_databaseConnection, *record, QStringLiteral("creating"),
+                            QStringLiteral("unknown"), operationError.message))
+                        co_return *journalError;
+                    record->phase = QStringLiteral("unknown");
+                    co_return ambiguous(i18n("Source restoration returned an unaccounted response."));
+                }
+                const auto& imported =
+                    std::get<javelin::jmap::api::EmailImportResponse>(importRead);
+                if (imported.accountId != context.account.remoteAccountId)
+                {
+                    if (const auto journalError = setPhase(
+                            m_databaseConnection, *record, QStringLiteral("creating"),
+                            QStringLiteral("unknown"), i18n("Email/import returned another account.")))
+                        co_return *journalError;
+                    record->phase = QStringLiteral("unknown");
+                    co_return ambiguous(i18n("Source restoration returned the wrong account id."));
+                }
+                const auto created = imported.created.find(record->creationId);
+                if (created != imported.created.end())
+                {
+                    if (const auto error = setComplete(m_databaseConnection, *record,
+                                                       QStringLiteral("creating"), created->second.id))
+                        co_return *error;
+                    record->emailId = created->second.id;
+                    record->phase = QStringLiteral("complete");
+                    continue;
+                }
+                const auto rejected = imported.notCreated.find(record->creationId);
+                if (rejected != imported.notCreated.end() && rejected->second.type == "alreadyExists" &&
+                    rejected->second.existingId.has_value())
+                {
+                    auto existing = co_await getAuthoritativeEmails(
+                        accountId, {*rejected->second.existingId});
+                    if (const auto* error = std::get_if<OperationError>(&existing))
+                        co_return *error;
+                    const auto& authoritative =
+                        std::get<javelin::jmap::AuthoritativeEmails>(existing);
+                    const auto found = std::ranges::find(
+                        authoritative.emails, *rejected->second.existingId,
+                        &javelin::jmap::domain::Email::id);
+                    if (found == authoritative.emails.end())
+                        co_return invalid(i18n("The server's existing source Email is inaccessible."));
+                    std::vector<std::string> missing;
+                    for (const auto& mailboxId : mailboxIds)
+                        if (!std::ranges::contains(found->mailboxIds, mailboxId))
+                            missing.push_back(mailboxId);
+                    if (!missing.empty())
+                    {
+                        auto applied = co_await applyExactEmailMutation(
+                            accountId,
+                            javelin::jmap::EmailMailboxMutation{
+                                .emailId = found->id,
+                                .addMailboxIds = std::move(missing),
+                                .removeMailboxIds = {},
+                                .addKeywords = {},
+                                .removeKeywords = {},
+                                .operationGroupId = QUuid::createUuid()
+                                                        .toString(QUuid::WithoutBraces)
+                                                        .toStdString(),
+                                .ifInState = authoritative.state,
+                                .authoritativeMailboxIds = found->mailboxIds,
+                                .authoritativeKeywords = found->keywords,
+                                .destroy = false,
+                            });
+                        if (const auto* error = std::get_if<OperationError>(&applied))
+                            co_return *error;
+                        const auto& summary =
+                            std::get<javelin::jmap::SubmittedEmailMutations>(applied);
+                        if (summary.updatedEmailCount != 1 || summary.failedEmailCount != 0)
+                            co_return invalid(i18n("The existing source Email could not be restored "
+                                                   "to its original mailboxes."));
+                    }
+                    if (const auto error = setComplete(m_databaseConnection, *record,
+                                                       QStringLiteral("creating"), found->id))
+                        co_return *error;
+                    record->emailId = found->id;
+                    record->phase = QStringLiteral("complete");
+                    continue;
+                }
+                if (rejected != imported.notCreated.end())
+                {
+                    const auto operationError = rejectedImport(rejected->second);
+                    if (const auto journalError = setPhase(
+                            m_databaseConnection, *record, QStringLiteral("creating"),
+                            QStringLiteral("uploaded"), operationError.message))
+                        co_return *journalError;
+                    record->phase = QStringLiteral("uploaded");
+                    co_return operationError;
+                }
+
+                if (const auto error = setPhase(m_databaseConnection, *record,
+                                                QStringLiteral("creating"),
+                                                QStringLiteral("unknown"),
+                                                i18n("Email/import did not account for creation.")))
+                    co_return *error;
+                record->phase = QStringLiteral("unknown");
+                co_return ambiguous(i18n("Source restoration returned an incomplete result."));
+            }
+
+            if (record->phase == QStringLiteral("unknown"))
+            {
+                if (!record->preState.has_value())
+                    co_return ambiguous(i18n("Source restoration is missing its reconciliation state."));
+                std::string sinceState = *record->preState;
+                std::vector<std::string> createdIds;
+                bool complete = false;
+                for (int page = 0; page < 4; ++page)
+                {
+                    const auto changesRequest = javelin::jmap::api::emailChanges({
+                        .accountId = context.account.remoteAccountId,
+                        .sinceState = sinceState,
+                        .maxChanges = std::optional<std::uint64_t>{100},
+                    });
+                    if (!changesRequest.has_value())
+                        co_return invalid(i18n("Unable to encode source Email/changes request."));
+                    javelin::jmap::api::RequestBuilder changesBuilder;
+                    changesBuilder.useCore().useMail();
+                    const auto changesHandle =
+                        changesBuilder.call(*changesRequest, "history-source-changes");
+                    auto called = co_await caller.call(context.requestContext, changesBuilder);
+                    if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(called))
+                        co_return callerError(called);
+                    const auto read = javelin::jmap::api::ResponseReader{
+                        std::get<javelin::jmap::api::ResponseEnvelope>(called)}.require(changesHandle);
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::api::ResponseReaderError>(&read))
+                        co_return javelin::jmap::operationError(*error);
+                    const auto& changes =
+                        std::get<javelin::jmap::api::EmailChangesResponse>(read);
+                    if (changes.accountId != context.account.remoteAccountId ||
+                        changes.oldState != sinceState || changes.newState.empty())
+                        co_return ambiguous(i18n("Source Email/changes could not be reconciled safely."));
+                    createdIds.insert(createdIds.end(), changes.created.begin(), changes.created.end());
+                    if (!changes.hasMoreChanges)
+                    {
+                        complete = true;
+                        break;
+                    }
+                    if (changes.newState == sinceState)
+                        co_return ambiguous(i18n("Source Email/changes did not advance its state."));
+                    sinceState = changes.newState;
+                }
+                if (!complete)
+                    co_return ambiguous(i18n("Too many source changes occurred to reconcile Undo."));
+
+                std::ranges::sort(createdIds);
+                createdIds.erase(std::unique(createdIds.begin(), createdIds.end()), createdIds.end());
+                if (createdIds.empty())
+                {
+                    if (const auto error = setPhase(m_databaseConnection, *record,
+                                                    QStringLiteral("unknown"),
+                                                    QStringLiteral("uploaded")))
+                        co_return *error;
+                    record->phase = QStringLiteral("uploaded");
+                    continue;
+                }
+                if (messageIds.empty() || !context.requestContext.requestLimits.has_value() ||
+                    createdIds.size() > static_cast<std::size_t>(
+                                            context.requestContext.requestLimits->maxObjectsInGet))
+                    co_return ambiguous(i18n("Source restoration may have created a message, but "
+                                            "it cannot be correlated uniquely."));
+
+                const auto candidatesRequest = javelin::jmap::api::emailGet({
+                    .accountId = context.account.remoteAccountId,
+                    .ids = createdIds,
+                    .idsReference = std::nullopt,
+                    .properties = emailProperties(),
+                });
+                if (!candidatesRequest.has_value())
+                    co_return invalid(i18n("Unable to encode source candidate Email/get request."));
+                javelin::jmap::api::RequestBuilder candidatesBuilder;
+                candidatesBuilder.useCore().useMail();
+                const auto candidatesHandle =
+                    candidatesBuilder.call(*candidatesRequest, "history-source-candidates");
+                auto called = co_await caller.call(context.requestContext, candidatesBuilder);
+                if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(called))
+                    co_return callerError(called);
+                const auto read = javelin::jmap::api::ResponseReader{
+                    std::get<javelin::jmap::api::ResponseEnvelope>(called)}.require(candidatesHandle);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::api::ResponseReaderError>(&read))
+                    co_return javelin::jmap::operationError(*error);
+                const auto& candidates = std::get<javelin::jmap::api::EmailGetResponse>(read);
+                if (candidates.accountId != context.account.remoteAccountId)
+                    co_return ambiguous(i18n("Source candidate Email/get returned another account."));
+
+                auto expectedMessageIds = normalized(messageIds);
+                const javelin::jmap::domain::Email* matched = nullptr;
+                for (const auto& candidate : candidates.list)
+                {
+                    auto candidateMessageIds = normalized(candidate.messageId);
+                    const bool receivedMatches = !receivedAt.has_value() ||
+                                                 candidate.receivedAt == *receivedAt;
+                    const bool matches = candidateMessageIds == expectedMessageIds &&
+                                         receivedMatches && candidate.size == sourceSize &&
+                                         containsAll(candidate.mailboxIds, mailboxIds);
+                    if (!matches)
+                        continue;
+                    if (matched != nullptr)
+                        co_return ambiguous(i18n("More than one source recreation candidate matches."));
+                    matched = &candidate;
+                }
+                if (matched == nullptr)
+                    co_return ambiguous(i18n("The source recreation candidate cannot be identified "
+                                            "uniquely enough to continue."));
+                if (const auto error = setComplete(m_databaseConnection, *record,
+                                                   QStringLiteral("unknown"), matched->id))
+                    co_return *error;
+                record->emailId = matched->id;
+                record->phase = QStringLiteral("complete");
+                continue;
+            }
+
+            co_return invalid(i18n("The source recreation journal has an invalid phase."));
+        }
+
+        co_return ambiguous(i18n("The source recreation did not reach a stable state."));
+    }
+
+} // namespace javelin::app::undo

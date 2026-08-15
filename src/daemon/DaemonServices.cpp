@@ -46,6 +46,8 @@
 #include "app/undo/DraftHistoryExecutor.h"
 #include "app/undo/HistoryRepository.h"
 #include "app/undo/MailHistoryExecutor.h"
+#include "app/undo/MailTransferHistoryExecutor.h"
+#include "app/undo/MailTransferHistoryService.h"
 #include "app/undo/SieveHistoryExecutor.h"
 #include "app/undo/UndoManager.h"
 
@@ -378,6 +380,14 @@ namespace javelin::app
         m_mailHistoryExecutor = std::make_unique<javelin::app::undo::MailHistoryExecutor>(
             *m_mailMutationApplicationService);
         m_undoManager->setExecutor(QStringLiteral("mail_patch"), m_mailHistoryExecutor.get());
+        m_mailTransferHistoryService =
+            std::make_unique<javelin::app::undo::MailTransferHistoryService>(
+                m_databaseConnection, *m_transport, *m_methodTransport, *m_accountRuntimeManager);
+        m_mailTransferHistoryExecutor =
+            std::make_unique<javelin::app::undo::MailTransferHistoryExecutor>(
+                *m_mailTransferHistoryService);
+        m_undoManager->setExecutor(QStringLiteral("mail_transfer"),
+                                   m_mailTransferHistoryExecutor.get());
         m_sieveHistoryExecutor =
             std::make_unique<javelin::app::undo::SieveHistoryExecutor>(*m_sieveApplicationService);
         m_undoManager->setExecutor(QStringLiteral("sieve"), m_sieveHistoryExecutor.get());

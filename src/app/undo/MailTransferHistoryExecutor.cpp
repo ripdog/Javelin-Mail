@@ -16,6 +16,8 @@ namespace javelin::app::undo
     {
         [[nodiscard]] HistoryExecutionOutcome outcomeFor(const javelin::jmap::OperationError& error)
         {
+            if (error.protocolType == std::optional<std::string>{"ambiguousOutcome"})
+                return HistoryExecutionOutcome::Unknown;
             using enum javelin::jmap::OperationErrorCode;
             if (error.code == Conflict || error.code == PreconditionFailed || error.code == NotFound)
                 return HistoryExecutionOutcome::Conflict;
@@ -228,7 +230,7 @@ namespace javelin::app::undo
                         auto recreated = co_await m_mail.recreateSourceFromHistory(
                             entry.entryId, history->sourceAccountId, *item.rawContentHash,
                             item.originalSourceMailboxIds, item.sourceKeywords,
-                            item.sourceReceivedAt);
+                            item.sourceMessageIds, item.sourceReceivedAt, item.sourceSize);
                         if (const auto* error =
                                 std::get_if<javelin::jmap::OperationError>(&recreated))
                             co_return errorResult(*error, *history, changed);

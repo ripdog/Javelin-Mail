@@ -460,6 +460,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/undo/MailTransferHistoryExecutor.cpp
     src/app/undo/MailTransferHistoryExecutor.h
     src/app/undo/MailTransferHistoryPort.h
+    src/app/undo/MailTransferHistoryService.cpp
+    src/app/undo/MailTransferHistoryService.h
     src/app/undo/SieveHistoryExecutor.cpp
     src/app/undo/SieveHistoryExecutor.h
     src/app/undo/SieveHistoryPort.h
@@ -1864,6 +1866,8 @@ add_library(javelin_daemon_core STATIC
     src/app/undo/MailTransferHistoryExecutor.cpp
     src/app/undo/MailTransferHistoryExecutor.h
     src/app/undo/MailTransferHistoryPort.h
+    src/app/undo/MailTransferHistoryService.cpp
+    src/app/undo/MailTransferHistoryService.h
     src/app/undo/SieveHistoryExecutor.cpp
     src/app/undo/SieveHistoryExecutor.h
     src/app/undo/SieveHistoryPort.h

@@ -39,7 +39,8 @@ namespace javelin::app::undo
         [[nodiscard]] virtual QCoro::Task<RecreatedMailTransferSourceResult> recreateSourceFromHistory(
             QString historyEntryId, std::string accountId, std::string rawContentHash,
             std::vector<std::string> mailboxIds, std::vector<std::string> keywords,
-            std::optional<std::string> receivedAt) = 0;
+            std::vector<std::string> messageIds, std::optional<std::string> receivedAt,
+            std::uint64_t sourceSize) = 0;
     };
 
 } // namespace javelin::app::undo

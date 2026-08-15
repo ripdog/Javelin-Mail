@@ -91,6 +91,7 @@ namespace javelin::app::undo
         std::optional<std::string> currentSourceEmailId;
         std::vector<std::string> originalSourceMailboxIds;
         std::vector<std::string> sourceKeywords;
+        std::vector<std::string> sourceMessageIds;
         std::optional<std::string> sourceReceivedAt;
         std::uint64_t sourceSize = 0;
         std::vector<std::string> sourceRemovedMailboxIds;

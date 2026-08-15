@@ -129,6 +129,26 @@ namespace javelin::jmap::cache::migrations
                                        "history_entry_id TEXT"),
                     },
             },
+            MigrationStep{
+                .version = 59,
+                .name = QStringLiteral("mail_transfer_history_recreation_journal"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "CREATE TABLE mail_transfer_history_recreations ("
+                            "history_entry_id TEXT NOT NULL REFERENCES operation_history(entry_id) "
+                            "ON DELETE CASCADE,content_hash TEXT NOT NULL,account_id TEXT NOT NULL,"
+                            "creation_id TEXT NOT NULL,uploaded_blob_id TEXT,pre_state TEXT,email_id "
+                            "TEXT,phase TEXT NOT NULL CHECK(phase IN "
+                            "('prepared','uploaded','creating','unknown','complete')),last_error TEXT,"
+                            "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT "
+                            "NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(history_entry_id,content_hash)) "
+                            "STRICT"),
+                        QStringLiteral(
+                            "CREATE INDEX idx_mail_transfer_history_recreations_phase ON "
+                            "mail_transfer_history_recreations(phase,updated_at)"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

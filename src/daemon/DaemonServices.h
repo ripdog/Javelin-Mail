@@ -100,6 +100,8 @@ namespace javelin::app::undo
     class CalendarPreferenceExecutor;
     class ContactHistoryExecutor;
     class MailHistoryExecutor;
+    class MailTransferHistoryExecutor;
+    class MailTransferHistoryService;
     class SieveHistoryExecutor;
     class UndoManager;
 } // namespace javelin::app::undo
@@ -292,6 +294,10 @@ namespace javelin::app
         std::unique_ptr<CommandDispatcher> m_commandDispatcher;
         std::unique_ptr<UndoCommandService> m_undoCommandService;
         std::unique_ptr<javelin::app::undo::MailHistoryExecutor> m_mailHistoryExecutor;
+        std::unique_ptr<javelin::app::undo::MailTransferHistoryService>
+            m_mailTransferHistoryService;
+        std::unique_ptr<javelin::app::undo::MailTransferHistoryExecutor>
+            m_mailTransferHistoryExecutor;
         std::unique_ptr<javelin::app::undo::DraftHistoryExecutor> m_draftHistoryExecutor;
         std::unique_ptr<javelin::app::undo::SieveHistoryExecutor> m_sieveHistoryExecutor;
         std::unique_ptr<javelin::app::undo::CalendarHistoryExecutor> m_calendarHistoryExecutor;
