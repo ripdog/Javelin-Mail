@@ -74,7 +74,6 @@ namespace javelin::jmap
         struct CachedAccountIdentity
         {
             std::string localAccountId;
-            std::string connectionId;
             std::string remoteAccountId;
         };
 
@@ -262,7 +261,6 @@ namespace javelin::jmap
 
             return CachedAccountIdentity{
                 .localAccountId = account->accountId,
-                .connectionId = account->connectionId,
                 .remoteAccountId = account->remoteAccountId,
             };
         }

@@ -122,11 +122,25 @@ namespace
             return value;
         }
 
-        void seedRepresentative(const std::string& threadId)
+        [[nodiscard]] std::string addCollidingAccount()
+        {
+            javelin::jmap::cache::SessionRepository sessions{database};
+            const auto stored =
+                sessions.replaceForConnection("connection-2", "account-1", session());
+            REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(stored));
+            const auto& accounts = std::get<javelin::jmap::cache::StoredSessionAccounts>(stored);
+            REQUIRE(accounts.ownerAccountId != "account-1");
+            return accounts.ownerAccountId;
+        }
+
+        void seedRepresentative(const std::string& threadId,
+                                const std::string_view accountId = "account-1")
         {
             QSqlQuery email{database.database()};
             email.prepare(QStringLiteral("INSERT INTO emails(account_id,email_id,thread_id) "
-                                         "VALUES('account-1',:email,:thread)"));
+                                         "VALUES(:account,:email,:thread)"));
+            email.bindValue(QStringLiteral(":account"),
+                            QString::fromStdString(std::string{accountId}));
             email.bindValue(QStringLiteral(":email"),
                             QString::fromStdString(std::string{"representative-"} + threadId));
             email.bindValue(QStringLiteral(":thread"), QString::fromStdString(threadId));
@@ -137,13 +151,19 @@ namespace
     class ConnectionProvider final : public javelin::app::AccountConnectionProvider
     {
       public:
+        explicit ConnectionProvider(std::string accountId = "account-1",
+                                    std::string connectionId = "connection-1")
+            : m_accountId(std::move(accountId)), m_connectionId(std::move(connectionId))
+        {
+        }
+
         [[nodiscard]] std::optional<javelin::app::AccountConnectionSettings>
         connectionSettingsFor(std::string_view ownerAccountId) const override
         {
-            if (ownerAccountId != "account-1")
+            if (ownerAccountId != m_accountId)
                 return std::nullopt;
             return javelin::app::AccountConnectionSettings{
-                .connectionId = "connection-1",
+                .connectionId = m_connectionId,
                 .revision = 1,
                 .displayName = "Test",
                 .sessionUrl = "https://example.test/session",
@@ -160,6 +180,10 @@ namespace
                 .registrationAccessToken = {},
             };
         }
+
+      private:
+        std::string m_accountId;
+        std::string m_connectionId;
     };
 
     [[nodiscard]] std::string threadArguments(const std::vector<std::string>& ids,
@@ -241,6 +265,7 @@ namespace
         {
             REQUIRE(request.envelope.methodCalls.size() == 1);
             const auto& method = request.envelope.methodCalls.front();
+            REQUIRE(method.arguments.contains("\"accountId\":\"account-1\""));
 
             std::vector<std::string> ids;
             for (std::size_t number = 1; number <= 5; ++number)
@@ -365,6 +390,48 @@ TEST_CASE("Thread materialization hydrates explicit bounded child Email batches"
     const auto& covered = std::get<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverage);
     REQUIRE(covered.has_value());
     CHECK(covered->childEmailsComplete);
+}
+
+TEST_CASE("Thread materialization uses the remote account id for a connection-qualified local key",
+          "[app][thread-materialization][account-identity]")
+{
+    ensureApplication();
+    Fixture fixture;
+    const auto localAccountId = fixture.addCollidingAccount();
+    fixture.seedRepresentative("thread-1", localAccountId);
+
+    RecordingTransport transport;
+    ConnectionProvider connections{localAccountId, "connection-2"};
+    javelin::app::ThreadMembershipMaterializationWorker worker{fixture.database, transport,
+                                                               connections};
+    const auto result = QCoro::waitFor(worker.materialize({
+        .accountId = localAccountId,
+        .threadIds = {"thread-1"},
+    }));
+
+    REQUIRE(std::holds_alternative<javelin::app::ThreadMaterializationSummary>(result));
+    const auto& summary = std::get<javelin::app::ThreadMaterializationSummary>(result);
+    CHECK(summary.completedThreadCount == 1);
+    CHECK(summary.completedEmailCount == 1);
+    REQUIRE(transport.batches.size() == 1);
+    REQUIRE(transport.emailBatches.size() == 1);
+
+    javelin::jmap::cache::ThreadRepository threads{fixture.database};
+    const auto membership = threads.findMembership(localAccountId, "thread-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(
+        membership));
+    const auto& record =
+        std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(membership);
+    REQUIRE(record.has_value());
+    CHECK(record->thread.emailIds ==
+          std::vector<std::string>{"representative-thread-1", "child-thread-1"});
+
+    QSqlQuery remoteNamedCache{fixture.database.database()};
+    remoteNamedCache.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM emails WHERE account_id='account-1' AND email_id='child-thread-1'"));
+    REQUIRE(remoteNamedCache.exec());
+    REQUIRE(remoteNamedCache.next());
+    CHECK(remoteNamedCache.value(0).toInt() == 0);
 }
 
 TEST_CASE("current Thread membership cardinality mismatch is repaired from the server",

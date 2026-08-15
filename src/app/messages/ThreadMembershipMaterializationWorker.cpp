@@ -8,6 +8,7 @@
 #include "jmap/api/RequestBuilder.h"
 #include "jmap/api/ResponseReader.h"
 #include "jmap/api/Session.h"
+#include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/ThreadRepository.h"
@@ -145,6 +146,20 @@ namespace javelin::app
                                            "materialization."));
         }
 
+        javelin::jmap::cache::AccountRepository accounts{m_databaseConnection};
+        const auto accountResult = accounts.findById(target.accountId);
+        if (const auto* databaseError =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&accountResult))
+            co_return javelin::jmap::operationError(*databaseError);
+        const auto& cachedAccount =
+            std::get<std::optional<javelin::jmap::cache::CachedAccount>>(accountResult);
+        if (!cachedAccount.has_value() || cachedAccount->remoteAccountId.empty())
+        {
+            co_return error(javelin::jmap::OperationErrorCode::NotFound,
+                            QStringLiteral("The mail account has no remote JMAP identity."));
+        }
+        const std::string remoteAccountId = cachedAccount->remoteAccountId;
+
         javelin::jmap::cache::SessionRepository sessions{m_databaseConnection};
         const auto loaded = sessions.load(target.accountId);
         if (const auto* databaseError = std::get_if<javelin::jmap::cache::DatabaseError>(&loaded))
@@ -185,12 +200,13 @@ namespace javelin::app
         ThreadMaterializationSummary summary;
         summary.threadIds.reserve(target.threadIds.size());
 
-        const auto fetchThreads = [&caller, &requestContext, &target](std::vector<std::string> ids)
+        const auto fetchThreads = [&caller, &requestContext,
+                                   &remoteAccountId](std::vector<std::string> ids)
             -> QCoro::Task<
                 std::variant<javelin::jmap::api::ThreadGetResponse, javelin::jmap::OperationError>>
         {
             const auto request = javelin::jmap::api::threadGet({
-                .accountId = target.accountId,
+                .accountId = remoteAccountId,
                 .ids = std::move(ids),
                 .idsReference = std::nullopt,
                 .properties = std::nullopt,
@@ -212,12 +228,12 @@ namespace javelin::app
                 co_return javelin::jmap::operationError(*readError);
             co_return std::get<javelin::jmap::api::ThreadGetResponse>(read);
         };
-        const auto threadBatchFitsRequestLimit = [&target,
+        const auto threadBatchFitsRequestLimit = [&remoteAccountId,
                                                   &limits](const std::vector<std::string>& ids)
             -> std::variant<bool, javelin::jmap::OperationError>
         {
             const auto request = javelin::jmap::api::threadGet({
-                .accountId = target.accountId,
+                .accountId = remoteAccountId,
                 .ids = ids,
                 .idsReference = std::nullopt,
                 .properties = std::nullopt,
@@ -311,7 +327,7 @@ namespace javelin::app
             if (const auto* fetchError = std::get_if<javelin::jmap::OperationError>(&fetched))
                 co_return *fetchError;
             auto response = std::get<javelin::jmap::api::ThreadGetResponse>(std::move(fetched));
-            if (const auto accountingError = validateAccounting(target.accountId, batch, response))
+            if (const auto accountingError = validateAccounting(remoteAccountId, batch, response))
                 co_return error(javelin::jmap::OperationErrorCode::ProtocolViolation,
                                 *accountingError);
             if (const auto commitError = commitThreads(response))
@@ -362,7 +378,7 @@ namespace javelin::app
                 while (true)
                 {
                     const auto request = javelin::jmap::api::emailGet({
-                        .accountId = target.accountId,
+                        .accountId = remoteAccountId,
                         .ids = missing,
                         .idsReference = std::nullopt,
                         .properties = emailSummaryProperties(),
@@ -398,7 +414,7 @@ namespace javelin::app
                     co_return javelin::jmap::operationError(*readError);
                 auto response = std::get<javelin::jmap::api::EmailGetResponse>(read);
                 if (const auto accountingError =
-                        validateAccounting(target.accountId, missing, response))
+                        validateAccounting(remoteAccountId, missing, response))
                     co_return error(javelin::jmap::OperationErrorCode::ProtocolViolation,
                                     *accountingError);
 
@@ -466,7 +482,7 @@ namespace javelin::app
                 auto threadResponse =
                     std::get<javelin::jmap::api::ThreadGetResponse>(std::move(fetched));
                 if (const auto accountingError =
-                        validateAccounting(target.accountId, reconciliationBatch, threadResponse))
+                        validateAccounting(remoteAccountId, reconciliationBatch, threadResponse))
                     co_return error(javelin::jmap::OperationErrorCode::ProtocolViolation,
                                     *accountingError);
                 if (const auto commitError = commitThreads(threadResponse))
