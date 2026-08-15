@@ -90,6 +90,7 @@ namespace javelin::app
         {
             AccountConnectionSettings settings;
             std::string accountId;
+            std::string remoteAccountId;
             std::vector<std::pair<std::string, std::string>> mailboxes;
             std::unordered_set<std::string> notificationMailboxIds;
             std::string apiUrl;

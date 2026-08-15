@@ -50,7 +50,7 @@ namespace javelin::jmap
         ~AccountBootstrapClient();
 
         [[nodiscard]] QCoro::Task<LiveRefreshResult>
-        bootstrap(LiveConnectionSettings settings,
+        bootstrap(LiveConnectionSettings settings, std::string connectionId,
                   std::function<void(const QString&)> progressCallback = {},
                   std::vector<std::string> mailboxIds = {});
 

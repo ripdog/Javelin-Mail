@@ -1,12 +1,14 @@
 #include "jmap/cache/SessionRepository.h"
 
+#include "jmap/cache/AccountRepository.h"
+
 #include <glaze/glaze.hpp>
 
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QUuid>
 
 #include <string>
-#include <unordered_set>
 
 namespace javelin::jmap::cache
 {
@@ -88,6 +90,56 @@ namespace javelin::jmap::cache
             };
         }
 
+        [[nodiscard]] DatabaseError invalidSessionIdentity(const QString& detail)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Store connection-qualified session: ") + detail,
+            };
+        }
+
+        [[nodiscard]] std::variant<std::string, DatabaseError>
+        localAccountId(QSqlDatabase& database, const std::string_view connectionId,
+                       const std::string_view remoteAccountId)
+        {
+            QSqlQuery existingLocator{database};
+            existingLocator.prepare(QStringLiteral(
+                "SELECT account_id FROM accounts WHERE connection_id=:connection_id AND "
+                "remote_account_id=:remote_account_id"));
+            existingLocator.bindValue(QStringLiteral(":connection_id"),
+                                      QString::fromStdString(std::string{connectionId}));
+            existingLocator.bindValue(QStringLiteral(":remote_account_id"),
+                                      QString::fromStdString(std::string{remoteAccountId}));
+            if (!existingLocator.exec())
+                return makeQueryError(QStringLiteral("Resolve cached account locator"),
+                                      existingLocator);
+            if (existingLocator.next())
+                return existingLocator.value(0).toString().toStdString();
+
+            QSqlQuery existingKey{database};
+            existingKey.prepare(
+                QStringLiteral("SELECT 1 FROM accounts WHERE account_id=:account_id"));
+            existingKey.bindValue(QStringLiteral(":account_id"),
+                                  QString::fromStdString(std::string{remoteAccountId}));
+            if (!existingKey.exec())
+                return makeQueryError(QStringLiteral("Inspect cached account key"), existingKey);
+            if (!existingKey.next())
+                return std::string{remoteAccountId};
+
+            for (;;)
+            {
+                const std::string candidate =
+                    QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+                existingKey.bindValue(QStringLiteral(":account_id"),
+                                      QString::fromStdString(candidate));
+                if (!existingKey.exec())
+                    return makeQueryError(QStringLiteral("Inspect generated cached account key"),
+                                          existingKey);
+                if (!existingKey.next())
+                    return candidate;
+            }
+        }
+
         [[nodiscard]] std::string
         serializeCoreCapability(const std::optional<javelin::jmap::api::CoreCapability>& capability)
         {
@@ -146,9 +198,11 @@ namespace javelin::jmap::cache
             };
         }
 
-        void bindAccount(QSqlQuery& query, const javelin::jmap::api::Account& account)
+        void bindAccount(QSqlQuery& query, const std::string_view localAccountId,
+                         const javelin::jmap::api::Account& account)
         {
-            query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(account.id));
+            query.bindValue(QStringLiteral(":account_id"),
+                            QString::fromStdString(std::string{localAccountId}));
             query.bindValue(QStringLiteral(":email_address"), QStringLiteral(""));
             query.bindValue(QStringLiteral(":session_url"), QStringLiteral(""));
             query.bindValue(QStringLiteral(":is_primary"), 0);
@@ -219,9 +273,31 @@ namespace javelin::jmap::cache
     SessionRepository::replace(const std::string_view ownerAccountId,
                                const javelin::jmap::api::Session& session)
     {
-        if (const auto error = m_connection.validate())
+        AccountRepository accounts{m_connection};
+        if (const auto error = accounts.claimLegacyConnection(
+                ownerAccountId, {QString::fromStdString(std::string{ownerAccountId})}))
         {
             return error;
+        }
+        const auto result = replaceForConnection(ownerAccountId, ownerAccountId, session);
+        if (const auto* error = std::get_if<DatabaseError>(&result))
+            return *error;
+        return std::nullopt;
+    }
+
+    SessionReplaceResult
+    SessionRepository::replaceForConnection(const std::string_view connectionId,
+                                            const std::string_view ownerRemoteAccountId,
+                                            const javelin::jmap::api::Session& session)
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        if (connectionId.empty() || ownerRemoteAccountId.empty())
+            return invalidSessionIdentity(QStringLiteral("connection and owner ids are required"));
+        if (!session.accounts.contains(std::string{ownerRemoteAccountId}))
+        {
+            return invalidSessionIdentity(
+                QStringLiteral("owner account is not present in the discovered session"));
         }
 
         const DatabaseWriteScope writeScope{m_connection};
@@ -235,11 +311,28 @@ namespace javelin::jmap::cache
             };
         }
 
+        StoredSessionAccounts storedAccounts;
+        storedAccounts.accountIdsByRemoteId.reserve(session.accounts.size());
+        for (const auto& [remoteAccountId, account] : session.accounts)
+        {
+            static_cast<void>(account);
+            const auto localIdResult = localAccountId(database, connectionId, remoteAccountId);
+            if (const auto* error = std::get_if<DatabaseError>(&localIdResult))
+            {
+                database.rollback();
+                return *error;
+            }
+            storedAccounts.accountIdsByRemoteId.emplace(remoteAccountId,
+                                                        std::get<std::string>(localIdResult));
+        }
+        storedAccounts.ownerAccountId =
+            storedAccounts.accountIdsByRemoteId.at(std::string{ownerRemoteAccountId});
+
         QSqlQuery deleteSession{database};
         deleteSession.prepare(
             QStringLiteral("DELETE FROM sessions WHERE account_id = :account_id"));
         deleteSession.bindValue(QStringLiteral(":account_id"),
-                                QString::fromStdString(std::string{ownerAccountId}));
+                                QString::fromStdString(storedAccounts.ownerAccountId));
         if (!deleteSession.exec())
         {
             database.rollback();
@@ -249,18 +342,21 @@ namespace javelin::jmap::cache
         QSqlQuery insertAccount{database};
         insertAccount.prepare(QStringLiteral(
             "INSERT INTO accounts ("
-            "account_id, email_address, session_url, is_primary, name, is_personal, "
-            "is_read_only, owner_account_id, "
+            "account_id, connection_id, remote_account_id, email_address, session_url, is_primary, "
+            "name, is_personal, is_read_only, owner_account_id, "
             "cap_mail, mail_may_create_top_level_mailbox, cap_submission, "
             "submission_max_delayed_send, cap_contacts, "
             "contacts_capabilities_json, cap_calendars, calendars_capabilities_json"
             ") VALUES ("
-            ":account_id, :email_address, :session_url, :is_primary, :name, :is_personal, "
-            ":is_read_only, :owner_account_id, :cap_mail, :mail_may_create_top_level_mailbox, "
+            ":account_id, :connection_id, :remote_account_id, :email_address, :session_url, "
+            ":is_primary, :name, :is_personal, :is_read_only, :owner_account_id, :cap_mail, "
+            ":mail_may_create_top_level_mailbox, "
             ":cap_submission, :submission_max_delayed_send, :cap_contacts, "
             ":contacts_capabilities_json, "
             ":cap_calendars, :calendars_capabilities_json"
             ") ON CONFLICT(account_id) DO UPDATE SET "
+            "connection_id = excluded.connection_id, "
+            "remote_account_id = excluded.remote_account_id, "
             "email_address = excluded.email_address, "
             "session_url = excluded.session_url, "
             "is_primary = excluded.is_primary, "
@@ -276,14 +372,13 @@ namespace javelin::jmap::cache
             "contacts_capabilities_json = excluded.contacts_capabilities_json, "
             "cap_calendars = excluded.cap_calendars, "
             "calendars_capabilities_json = excluded.calendars_capabilities_json"));
-        std::unordered_set<std::string> sessionAccountIds;
-        sessionAccountIds.reserve(session.accounts.size());
         for (const auto& [accountId, account] : session.accounts)
         {
-            sessionAccountIds.insert(accountId);
-            auto storedAccount = account;
-            storedAccount.id = accountId;
-            bindAccount(insertAccount, storedAccount);
+            bindAccount(insertAccount, storedAccounts.accountIdsByRemoteId.at(accountId), account);
+            insertAccount.bindValue(QStringLiteral(":connection_id"),
+                                    QString::fromStdString(std::string{connectionId}));
+            insertAccount.bindValue(QStringLiteral(":remote_account_id"),
+                                    QString::fromStdString(accountId));
             insertAccount.bindValue(QStringLiteral(":is_primary"),
                                     (session.primaryAccounts.mailAccountId == accountId ||
                                      session.primaryAccounts.submissionAccountId == accountId) ||
@@ -293,7 +388,7 @@ namespace javelin::jmap::cache
                                         ? 1
                                         : 0);
             insertAccount.bindValue(QStringLiteral(":owner_account_id"),
-                                    QString::fromStdString(std::string{ownerAccountId}));
+                                    QString::fromStdString(storedAccounts.ownerAccountId));
             if (!insertAccount.exec())
             {
                 database.rollback();
@@ -320,7 +415,7 @@ namespace javelin::jmap::cache
             ":primary_calendars_account_id, :websocket_url, "
             ":websocket_supports_push)"));
         insertSession.bindValue(QStringLiteral(":account_id"),
-                                QString::fromStdString(std::string{ownerAccountId}));
+                                QString::fromStdString(storedAccounts.ownerAccountId));
         insertSession.bindValue(QStringLiteral(":api_url"), QString::fromStdString(session.apiUrl));
         insertSession.bindValue(QStringLiteral(":download_url"),
                                 QString::fromStdString(session.downloadUrl));
@@ -392,7 +487,7 @@ namespace javelin::jmap::cache
             };
         }
 
-        return std::nullopt;
+        return storedAccounts;
     }
 
     std::variant<std::optional<javelin::jmap::api::Session>, DatabaseError>
@@ -402,6 +497,18 @@ namespace javelin::jmap::cache
         {
             return *error;
         }
+
+        std::string ownerLocalAccountId{ownerAccountId};
+        QSqlQuery ownerQuery{m_connection.database()};
+        ownerQuery.prepare(
+            QStringLiteral("SELECT COALESCE(owner_account_id,account_id) FROM accounts WHERE "
+                           "account_id=:account_id"));
+        ownerQuery.bindValue(QStringLiteral(":account_id"),
+                             QString::fromStdString(std::string{ownerAccountId}));
+        if (!ownerQuery.exec())
+            return makeQueryError(QStringLiteral("Resolve cached session owner"), ownerQuery);
+        if (ownerQuery.next())
+            ownerLocalAccountId = ownerQuery.value(0).toString().toStdString();
 
         QSqlQuery sessionQuery{m_connection.database()};
         sessionQuery.prepare(QStringLiteral(
@@ -413,7 +520,7 @@ namespace javelin::jmap::cache
             "websocket_supports_push "
             "FROM sessions WHERE account_id = :account_id"));
         sessionQuery.bindValue(QStringLiteral(":account_id"),
-                               QString::fromStdString(std::string{ownerAccountId}));
+                               QString::fromStdString(ownerLocalAccountId));
         if (!sessionQuery.exec())
         {
             return makeQueryError(QStringLiteral("Read cached session"), sessionQuery);
@@ -470,12 +577,13 @@ namespace javelin::jmap::cache
 
         QSqlQuery accountQuery{m_connection.database()};
         accountQuery.prepare(QStringLiteral(
-            "SELECT account_id, name, is_personal, is_read_only, cap_mail, "
-            "mail_may_create_top_level_mailbox, cap_submission, submission_max_delayed_send, "
-            "cap_contacts, contacts_capabilities_json, cap_calendars, calendars_capabilities_json "
-            "FROM accounts WHERE owner_account_id = :owner_account_id ORDER BY account_id"));
+            "SELECT COALESCE(remote_account_id,account_id), name, is_personal, is_read_only, "
+            "cap_mail, mail_may_create_top_level_mailbox, cap_submission, "
+            "submission_max_delayed_send, cap_contacts, contacts_capabilities_json, cap_calendars, "
+            "calendars_capabilities_json FROM accounts WHERE owner_account_id = "
+            ":owner_account_id ORDER BY account_id"));
         accountQuery.bindValue(QStringLiteral(":owner_account_id"),
-                               QString::fromStdString(std::string{ownerAccountId}));
+                               QString::fromStdString(ownerLocalAccountId));
         if (!accountQuery.exec())
         {
             return makeQueryError(QStringLiteral("Read cached accounts"), accountQuery);

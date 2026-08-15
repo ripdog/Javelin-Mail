@@ -907,10 +907,29 @@ namespace javelin::app
             return;
         }
 
+        const auto accountResult = m_accountRepository.findById(ownerAccountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&accountResult))
+        {
+            m_sessionRefreshesInFlight.erase(ownerAccountId);
+            qWarning().noquote() << "JMAP startup account identity lookup failed"
+                                 << QString::fromStdString(ownerAccountId) << error->message;
+            return;
+        }
+        const auto& account =
+            std::get<std::optional<javelin::jmap::cache::CachedAccount>>(accountResult);
+        if (!account.has_value() || account->remoteAccountId.empty())
+        {
+            m_sessionRefreshesInFlight.erase(ownerAccountId);
+            qWarning().noquote() << "JMAP startup account has no remote identity"
+                                 << QString::fromStdString(ownerAccountId);
+            return;
+        }
+
         m_workScheduler.beginForegroundWork();
         const auto appliedSettings = settings;
-        auto task =
-            m_sessionRefreshClient.refresh(toLiveConnectionSettings(settings), ownerAccountId);
+        auto task = m_sessionRefreshClient.refresh(toLiveConnectionSettings(settings),
+                                                   settings.connectionId, ownerAccountId,
+                                                   account->remoteAccountId);
         QCoro::connect(
             std::move(task), this,
             [this, ownerAccountId, appliedSettings](javelin::jmap::SessionRefreshResult result)
@@ -3028,8 +3047,8 @@ namespace javelin::app
     {
         const ForegroundWorkScope foreground{m_workScheduler};
         const auto liveSettings = toLiveConnectionSettings(intent.settings);
-        auto result = co_await m_accountBootstrapClient.bootstrap(liveSettings, {},
-                                                                  std::move(intent.mailboxIds));
+        auto result = co_await m_accountBootstrapClient.bootstrap(
+            liveSettings, intent.settings.connectionId, {}, std::move(intent.mailboxIds));
         co_return observeResult(m_errorCoordinator, intent.settings, {},
                                 QStringLiteral("Synchronize account"), std::move(result));
     }

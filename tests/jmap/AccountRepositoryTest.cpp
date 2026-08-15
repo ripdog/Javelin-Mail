@@ -129,6 +129,43 @@ TEST_CASE("account repository lists cached accounts with primary accounts first"
     CHECK(accounts.back().accountId == "account-2");
 }
 
+TEST_CASE("legacy cached accounts are claimed by their configured connection",
+          "[jmap][cache][account-identity]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection, QStringLiteral("u1"), QStringLiteral("Personal"), true);
+    seedAccount(databaseContext.connection, QStringLiteral("shared"), QStringLiteral("Shared"),
+                false, QStringLiteral("u1"));
+
+    javelin::jmap::cache::AccountRepository repository{databaseContext.connection};
+    REQUIRE_FALSE(
+        repository.claimLegacyConnection("connection-a", {QStringLiteral("u1")}).has_value());
+
+    const auto personalResult = repository.findByLocator({
+        .connectionId = "connection-a",
+        .remoteAccountId = "u1",
+    });
+    const auto sharedResult = repository.findByLocator({
+        .connectionId = "connection-a",
+        .remoteAccountId = "shared",
+    });
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::CachedAccount>>(personalResult));
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::CachedAccount>>(sharedResult));
+    const auto& personal =
+        std::get<std::optional<javelin::jmap::cache::CachedAccount>>(personalResult);
+    const auto& shared = std::get<std::optional<javelin::jmap::cache::CachedAccount>>(sharedResult);
+    REQUIRE(personal.has_value());
+    REQUIRE(shared.has_value());
+    CHECK(personal->accountId == "u1");
+    CHECK(shared->accountId == "shared");
+    CHECK(shared->ownerAccountId == "u1");
+}
+
 TEST_CASE("removing cached accounts cascades all account-owned data", "[jmap][cache]")
 {
     ApplicationGuard application;

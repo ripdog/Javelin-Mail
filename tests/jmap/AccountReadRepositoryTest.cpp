@@ -39,16 +39,23 @@ namespace
     void seedAccount(javelin::jmap::cache::DatabaseConnection& connection, const QString& accountId,
                      const QString& name, const bool isPrimary, const bool hasMailCapability = true,
                      const bool hasSubmissionCapability = false,
-                     const quint64 maxDelayedSendSeconds = 0, const QString& ownerAccountId = {})
+                     const quint64 maxDelayedSendSeconds = 0, const QString& ownerAccountId = {},
+                     const QString& connectionId = {}, const QString& remoteAccountId = {})
     {
         QSqlQuery query{connection.database()};
         query.prepare(QStringLiteral(
-            "INSERT INTO accounts (account_id, email_address, session_url, is_primary, name, "
-            "is_personal, is_read_only, cap_mail, cap_submission, submission_max_delayed_send, "
-            "owner_account_id) VALUES (:account_id, :email_address, :session_url, :is_primary, "
-            ":name, :is_personal, :is_read_only, :cap_mail, :cap_submission, "
-            ":submission_max_delayed_send, :owner_account_id)"));
+            "INSERT INTO accounts (account_id, connection_id, remote_account_id, email_address, "
+            "session_url, is_primary, name, is_personal, is_read_only, cap_mail, cap_submission, "
+            "submission_max_delayed_send, owner_account_id) VALUES (:account_id, :connection_id, "
+            ":remote_account_id, :email_address, :session_url, :is_primary, :name, :is_personal, "
+            ":is_read_only, :cap_mail, :cap_submission, :submission_max_delayed_send, "
+            ":owner_account_id)"));
         query.bindValue(QStringLiteral(":account_id"), accountId);
+        const QString effectiveOwner = ownerAccountId.isEmpty() ? accountId : ownerAccountId;
+        query.bindValue(QStringLiteral(":connection_id"),
+                        connectionId.isEmpty() ? effectiveOwner : connectionId);
+        query.bindValue(QStringLiteral(":remote_account_id"),
+                        remoteAccountId.isEmpty() ? accountId : remoteAccountId);
         query.bindValue(QStringLiteral(":email_address"),
                         QStringLiteral("%1@example.com").arg(accountId));
         query.bindValue(QStringLiteral(":session_url"),
@@ -60,8 +67,7 @@ namespace
         query.bindValue(QStringLiteral(":cap_mail"), hasMailCapability ? 1 : 0);
         query.bindValue(QStringLiteral(":cap_submission"), hasSubmissionCapability ? 1 : 0);
         query.bindValue(QStringLiteral(":submission_max_delayed_send"), maxDelayedSendSeconds);
-        query.bindValue(QStringLiteral(":owner_account_id"),
-                        ownerAccountId.isEmpty() ? accountId : ownerAccountId);
+        query.bindValue(QStringLiteral(":owner_account_id"), effectiveOwner);
         REQUIRE(query.exec());
     }
 
@@ -106,10 +112,14 @@ TEST_CASE("account read repository returns cached account metadata", "[jmap][cac
     const auto& accounts = std::get<std::vector<javelin::jmap::cache::CachedAccount>>(result);
     REQUIRE(accounts.size() == 3);
     CHECK(accounts.front().accountId == "personal");
+    CHECK(accounts.front().connectionId == "personal");
+    CHECK(accounts.front().remoteAccountId == "personal");
     CHECK(accounts.front().isPrimary);
     CHECK(accounts.front().hasMailCapability);
     CHECK(accounts.front().mayCreateTopLevelMailbox);
     CHECK(accounts.at(1).accountId == "directory");
+    CHECK(accounts.at(1).connectionId == "personal");
+    CHECK(accounts.at(1).remoteAccountId == "directory");
     CHECK_FALSE(accounts.at(1).hasMailCapability);
     CHECK(accounts.at(1).hasSubmissionCapability);
     CHECK(accounts.at(1).maxDelayedSendSeconds == 44236800U);
@@ -141,4 +151,61 @@ TEST_CASE("account read repository returns cached account metadata", "[jmap][cac
         std::holds_alternative<std::optional<javelin::jmap::cache::CachedAccount>>(missingResult));
     CHECK_FALSE(
         std::get<std::optional<javelin::jmap::cache::CachedAccount>>(missingResult).has_value());
+}
+
+TEST_CASE("account read repository namespaces duplicate remote account ids by connection",
+          "[jmap][cache][account-identity]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+    const QString databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3"));
+    auto writerResult = javelin::jmap::cache::DaemonDatabaseFactory{
+        javelin::jmap::cache::DatabaseConnectionOptions{
+            .connectionName = connectionName(),
+            .databasePath = databasePath,
+        }}.open();
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(writerResult));
+    auto writer = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(writerResult));
+
+    seedAccount(writer, QStringLiteral("local-account-a"), QStringLiteral("Server A"), true, true,
+                false, 0, QStringLiteral("local-account-a"), QStringLiteral("connection-a"),
+                QStringLiteral("u1"));
+    seedAccount(writer, QStringLiteral("local-account-b"), QStringLiteral("Server B"), true, true,
+                false, 0, QStringLiteral("local-account-b"), QStringLiteral("connection-b"),
+                QStringLiteral("u1"));
+    writer = {};
+
+    auto readerResult = javelin::jmap::cache::GuiDatabaseFactory{
+        javelin::jmap::cache::ReadOnlyThreadConnectionFactoryOptions{
+            .connectionNamePrefix = QStringLiteral("javelin-gui-read-collision"),
+            .databasePath = databasePath,
+        }}.openForCurrentThread("accounts-collision");
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::ReadOnlyDatabaseConnection>(readerResult));
+    auto readerConnection =
+        std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(std::move(readerResult));
+    const javelin::jmap::cache::AccountReadRepository repository{readerConnection};
+
+    const auto firstResult = repository.findByLocator({
+        .connectionId = "connection-a",
+        .remoteAccountId = "u1",
+    });
+    const auto secondResult = repository.findByLocator({
+        .connectionId = "connection-b",
+        .remoteAccountId = "u1",
+    });
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::CachedAccount>>(firstResult));
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::CachedAccount>>(secondResult));
+    const auto& first = std::get<std::optional<javelin::jmap::cache::CachedAccount>>(firstResult);
+    const auto& second = std::get<std::optional<javelin::jmap::cache::CachedAccount>>(secondResult);
+    REQUIRE(first.has_value());
+    REQUIRE(second.has_value());
+    CHECK(first->accountId == "local-account-a");
+    CHECK(second->accountId == "local-account-b");
+    CHECK(first->remoteAccountId == second->remoteAccountId);
+    CHECK(first->connectionId != second->connectionId);
 }

@@ -231,6 +231,100 @@ TEST_CASE("session repository replacement preserves cached mailboxes for retaine
     CHECK(countQuery.value(0).toInt() == 1);
 }
 
+TEST_CASE("session repository isolates duplicate remote account ids across connections",
+          "[jmap][cache][repository][account-identity]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository repository{databaseContext.connection};
+
+    auto firstSession = loadSessionFixture();
+    firstSession.username = "first@example.com";
+    firstSession.apiUrl = "https://first.example.com/jmap/api";
+    const auto firstResult = repository.replaceForConnection("connection-a", "u1", firstSession);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(firstResult));
+    const auto firstStored = std::get<javelin::jmap::cache::StoredSessionAccounts>(firstResult);
+    REQUIRE(firstStored.accountIdsByRemoteId.contains("u1"));
+    CHECK(firstStored.accountIdsByRemoteId.at("u1") == "u1");
+    CHECK(firstStored.ownerAccountId == "u1");
+
+    auto secondSession = loadSessionFixture();
+    secondSession.username = "second@example.com";
+    secondSession.apiUrl = "https://second.example.com/jmap/api";
+    const auto secondResult = repository.replaceForConnection("connection-b", "u1", secondSession);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(secondResult));
+    const auto secondStored = std::get<javelin::jmap::cache::StoredSessionAccounts>(secondResult);
+    REQUIRE(secondStored.accountIdsByRemoteId.contains("u1"));
+    CHECK(secondStored.accountIdsByRemoteId.at("u1") != "u1");
+    CHECK(secondStored.ownerAccountId == secondStored.accountIdsByRemoteId.at("u1"));
+    CHECK(secondStored.ownerAccountId != firstStored.ownerAccountId);
+
+    const auto firstLoad = repository.load(firstStored.ownerAccountId);
+    const auto secondLoad = repository.load(secondStored.ownerAccountId);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::api::Session>>(firstLoad));
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::api::Session>>(secondLoad));
+    REQUIRE(std::get<std::optional<javelin::jmap::api::Session>>(firstLoad).has_value());
+    REQUIRE(std::get<std::optional<javelin::jmap::api::Session>>(secondLoad).has_value());
+    const auto& loadedFirst = *std::get<std::optional<javelin::jmap::api::Session>>(firstLoad);
+    const auto& loadedSecond = *std::get<std::optional<javelin::jmap::api::Session>>(secondLoad);
+    CHECK(loadedFirst.username == "first@example.com");
+    CHECK(loadedSecond.username == "second@example.com");
+    REQUIRE(loadedFirst.accounts.contains("u1"));
+    REQUIRE(loadedSecond.accounts.contains("u1"));
+    CHECK(loadedFirst.accounts.at("u1").id == "u1");
+    CHECK(loadedSecond.accounts.at("u1").id == "u1");
+    CHECK(loadedFirst.primaryAccounts.mailAccountId == std::optional<std::string>{"u1"});
+    CHECK(loadedSecond.primaryAccounts.mailAccountId == std::optional<std::string>{"u1"});
+
+    const auto secondLoadViaOwnedAccount =
+        repository.load(secondStored.accountIdsByRemoteId.at("u1"));
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::api::Session>>(
+        secondLoadViaOwnedAccount));
+    REQUIRE(std::get<std::optional<javelin::jmap::api::Session>>(secondLoadViaOwnedAccount)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::api::Session>>(secondLoadViaOwnedAccount)
+              ->accounts.contains("u1"));
+}
+
+TEST_CASE("session repository keeps allocated local account keys stable across refresh",
+          "[jmap][cache][repository][account-identity]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository repository{databaseContext.connection};
+
+    auto occupyingSession = loadSessionFixture();
+    const auto occupied = repository.replaceForConnection("connection-a", "u1", occupyingSession);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(occupied));
+
+    auto session = loadSessionFixture();
+    const auto first = repository.replaceForConnection("connection-b", "u1", session);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(first));
+    const auto firstStored = std::get<javelin::jmap::cache::StoredSessionAccounts>(first);
+    REQUIRE(firstStored.accountIdsByRemoteId.contains("u1"));
+    const auto allocatedId = firstStored.accountIdsByRemoteId.at("u1");
+    REQUIRE(allocatedId != "u1");
+
+    session.state = "refreshed-state";
+    session.accounts.at("u1").name = "Refreshed";
+    const auto refreshed = repository.replaceForConnection("connection-b", "u1", session);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(refreshed));
+    const auto refreshedStored = std::get<javelin::jmap::cache::StoredSessionAccounts>(refreshed);
+    CHECK(refreshedStored.ownerAccountId == allocatedId);
+    CHECK(refreshedStored.accountIdsByRemoteId.at("u1") == allocatedId);
+
+    const auto loaded = repository.load(allocatedId);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::api::Session>>(loaded));
+    REQUIRE(std::get<std::optional<javelin::jmap::api::Session>>(loaded).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::api::Session>>(loaded)->state == "refreshed-state");
+    CHECK(std::get<std::optional<javelin::jmap::api::Session>>(loaded)->accounts.at("u1").name ==
+          "Refreshed");
+}
+
 TEST_CASE("session repository returns no value for missing owners", "[jmap][cache][repository]")
 {
     ApplicationGuard application;

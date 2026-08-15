@@ -237,8 +237,11 @@ namespace javelin::jmap::sync
     }
 
     QCoro::Task<MailboxStateRefreshResult>
-    MailboxStateRefreshExecutor::refresh(std::string accountId) const
+    MailboxStateRefreshExecutor::refresh(std::string accountId, std::string remoteAccountId) const
     {
+        if (remoteAccountId.empty())
+            remoteAccountId = accountId;
+
         javelin::jmap::cache::SyncStateRepository syncStateRepository{m_databaseConnection};
         const SyncPlanner syncPlanner{syncStateRepository};
         const auto key = mailboxSyncKey(accountId);
@@ -259,7 +262,7 @@ namespace javelin::jmap::sync
         if (plan.kind == SyncPlanKind::IncrementalChanges && plan.sinceState.has_value())
         {
             const auto changesResult = co_await fetchMailboxChangesAndMailboxes(
-                m_methodCaller, m_apiRequestContext, accountId, *plan.sinceState);
+                m_methodCaller, m_apiRequestContext, remoteAccountId, *plan.sinceState);
             const auto* incrementalFetch = std::get_if<IncrementalMailboxFetch>(&changesResult);
             if (incrementalFetch != nullptr && !incrementalFetch->changes.hasMoreChanges)
             {
@@ -310,8 +313,8 @@ namespace javelin::jmap::sync
             }
         }
 
-        const auto fetchedResult =
-            co_await fetchMailboxes(m_methodCaller, m_apiRequestContext, accountId, std::nullopt);
+        const auto fetchedResult = co_await fetchMailboxes(m_methodCaller, m_apiRequestContext,
+                                                           remoteAccountId, std::nullopt);
         if (const auto* error = std::get_if<OperationError>(&fetchedResult))
         {
             co_return *error;

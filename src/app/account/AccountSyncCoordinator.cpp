@@ -121,6 +121,8 @@ namespace javelin::app
             const auto updatedConfiguration = resolveConfiguration();
             if (updatedConfiguration.has_value() &&
                 updatedConfiguration->accountId == m_runContext->configuration.accountId &&
+                updatedConfiguration->remoteAccountId ==
+                    m_runContext->configuration.remoteAccountId &&
                 updatedConfiguration->apiUrl == m_runContext->configuration.apiUrl &&
                 updatedConfiguration->eventSourceUrl ==
                     m_runContext->configuration.eventSourceUrl &&
@@ -222,7 +224,9 @@ namespace javelin::app
     AccountSyncCoordinator::onStateChange(javelin::jmap::sync::StateChangeEvent event)
     {
         m_lastEventId = event.newState;
-        auto routed = routeStateChanges(std::move(event.changedStates), m_accountId);
+        const std::string primaryRemoteAccountId =
+            m_runContext != nullptr ? m_runContext->configuration.remoteAccountId : m_accountId;
+        auto routed = routeStateChanges(std::move(event.changedStates), primaryRemoteAccountId);
         for (auto& [type, state] : routed.mailStates)
             m_pendingStateChanges.insert_or_assign(std::move(type), std::move(state));
         const auto merge = [](auto& destination, auto source)
@@ -269,6 +273,25 @@ namespace javelin::app
             qInfo() << "Account sync is waiting for initial session discovery";
             return std::nullopt;
         }
+
+        const auto accountResult = m_accountRepository.findById(m_accountId);
+        const auto* cachedAccount =
+            std::get_if<std::optional<javelin::jmap::cache::CachedAccount>>(&accountResult);
+        if (cachedAccount == nullptr || !cachedAccount->has_value() ||
+            (*cachedAccount)->remoteAccountId.empty())
+        {
+            qWarning() << "Account sync configuration unavailable because the remote account "
+                          "identity could not be resolved";
+            return std::nullopt;
+        }
+        const std::string remoteAccountId = (*cachedAccount)->remoteAccountId;
+        if (!(*session)->accounts.contains(remoteAccountId))
+        {
+            qWarning() << "Account sync configuration unavailable because the remote mail account "
+                          "is not present in the cached session";
+            return std::nullopt;
+        }
+
         if (!(*session)->eventSourceUrl.has_value() &&
             (!(*session)->capabilities.websocket.has_value() ||
              !(*session)->capabilities.websocket->supportsPush))
@@ -333,6 +356,7 @@ namespace javelin::app
         return RunConfiguration{
             .settings = *m_settings,
             .accountId = m_accountId,
+            .remoteAccountId = std::move(remoteAccountId),
             .mailboxes = std::move(mailboxes),
             .notificationMailboxIds = std::move(notificationMailboxIds),
             .apiUrl = session->value().apiUrl,
@@ -354,7 +378,7 @@ namespace javelin::app
             .identities = runContext->configuration.identitiesCapable,
         });
         javelin::jmap::sync::StateChangeSubscription subscription{
-            .accountId = runContext->configuration.accountId,
+            .accountId = runContext->configuration.remoteAccountId,
             .lastState = m_lastEventId,
             .types = std::move(types),
             .groupwareAccountIds = runContext->configuration.groupwareAccountIds,
@@ -452,7 +476,8 @@ namespace javelin::app
                 m_databaseConnection, methodCaller, apiRequestContext};
             const auto deltaResult = co_await deltaExecutor.refresh(
                 runContext->configuration.accountId,
-                {.mailbox = demand.mailboxState, .email = demand.emailState});
+                {.mailbox = demand.mailboxState, .email = demand.emailState},
+                runContext->configuration.remoteAccountId);
             if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
                 runContext->cancellation.isCancelled())
             {
@@ -530,7 +555,7 @@ namespace javelin::app
                 continue;
             const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
                 runContext->configuration.accountId, mailboxId, {}, false,
-                !accountEmailStateRefreshed);
+                !accountEmailStateRefreshed, runContext->configuration.remoteAccountId);
             if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
                 runContext->cancellation.isCancelled())
             {
@@ -627,7 +652,8 @@ namespace javelin::app
 
         javelin::jmap::sync::MailboxStateRefreshExecutor executor{m_databaseConnection,
                                                                   methodCaller, apiRequestContext};
-        const auto refreshResult = co_await executor.refresh(runContext->configuration.accountId);
+        const auto refreshResult = co_await executor.refresh(
+            runContext->configuration.accountId, runContext->configuration.remoteAccountId);
         if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
             runContext->cancellation.isCancelled())
         {
@@ -831,6 +857,7 @@ namespace javelin::app
         const bool sameStream =
             m_runContext != nullptr &&
             m_runContext->configuration.accountId == nextConfiguration->accountId &&
+            m_runContext->configuration.remoteAccountId == nextConfiguration->remoteAccountId &&
             m_runContext->configuration.eventSourceUrl == nextConfiguration->eventSourceUrl &&
             m_runContext->configuration.websocket.has_value() ==
                 nextConfiguration->websocket.has_value() &&

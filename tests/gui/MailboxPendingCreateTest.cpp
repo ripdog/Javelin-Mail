@@ -13,6 +13,8 @@ namespace
         {
             return std::vector{javelin::jmap::cache::CachedAccount{
                 .accountId = "account-1",
+                .connectionId = "connection-1",
+                .remoteAccountId = "account-1",
                 .name = "Personal",
                 .isPersonal = true,
                 .isReadOnly = false,
@@ -20,6 +22,8 @@ namespace
                 .hasMailCapability = true,
                 .mayCreateTopLevelMailbox = true,
                 .ownerAccountId = "account-1",
+                .hasSubmissionCapability = false,
+                .maxDelayedSendSeconds = 0,
             }};
         }
 

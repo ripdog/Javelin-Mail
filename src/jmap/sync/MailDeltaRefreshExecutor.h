@@ -41,7 +41,8 @@ namespace javelin::jmap::sync
                                  javelin::jmap::api::ApiRequestContext apiRequestContext);
 
         [[nodiscard]] QCoro::Task<MailDeltaRefreshResult>
-        refresh(std::string accountId, MailDeltaRefreshRequest request) const;
+        refresh(std::string accountId, MailDeltaRefreshRequest request,
+                std::string remoteAccountId = {}) const;
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;

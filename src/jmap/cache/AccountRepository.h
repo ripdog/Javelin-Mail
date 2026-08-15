@@ -25,6 +25,8 @@ namespace javelin::jmap::cache
         findById(std::string_view accountId) const override;
         [[nodiscard]] std::optional<DatabaseError> removeMany(const QStringList& accountIds);
         [[nodiscard]] std::optional<DatabaseError>
+        claimLegacyConnection(std::string_view connectionId, const QStringList& knownAccountIds);
+        [[nodiscard]] std::optional<DatabaseError>
         removeConfiguredAccount(const QString& loginEmail, const QString& sessionUrl,
                                 const QStringList& knownAccountIds);
 

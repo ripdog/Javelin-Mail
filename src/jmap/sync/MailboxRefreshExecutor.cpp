@@ -319,7 +319,7 @@ namespace javelin::jmap::sync
         [[nodiscard]] QCoro::Task<std::variant<CollapsedMailboxFetch, OperationError>>
         fetchCollapsedMailboxThreads(javelin::jmap::api::MethodCaller& methodCaller,
                                      javelin::jmap::api::ApiRequestContext apiRequestContext,
-                                     std::string accountId, std::string mailboxId,
+                                     std::string remoteAccountId, std::string mailboxId,
                                      std::function<void(const QString&)> reportProgress)
         {
             const auto emitProgress = [&reportProgress](const QString& message)
@@ -340,7 +340,7 @@ namespace javelin::jmap::sync
             javelin::jmap::api::RequestBuilder builder;
             builder.useCore().useMail();
             const auto queryRequest = javelin::jmap::api::emailQuery({
-                .accountId = std::string{accountId},
+                .accountId = std::string{remoteAccountId},
                 .filter =
                     javelin::jmap::api::EmailQueryFilter{
                         .inMailbox = std::string{mailboxId},
@@ -368,8 +368,9 @@ namespace javelin::jmap::sync
             }
             const auto queryHandle = builder.call(*queryRequest, "mailbox-query");
 
-            const auto representativeRequest = javelin::jmap::api::emailGet(
-                javelin::jmap::api::getRequestFrom(std::string{accountId}, queryHandle, "/ids"));
+            const auto representativeRequest =
+                javelin::jmap::api::emailGet(javelin::jmap::api::getRequestFrom(
+                    std::string{remoteAccountId}, queryHandle, "/ids"));
             if (!representativeRequest.has_value())
             {
                 co_return OperationError{
@@ -406,7 +407,7 @@ namespace javelin::jmap::sync
             }
             const auto& parsedQuery = std::get<javelin::jmap::api::EmailQueryResponse>(queryResult);
             qCDebug(logMailboxSync).noquote()
-                << "query result" << QString::fromStdString(accountId)
+                << "query result" << QString::fromStdString(remoteAccountId)
                 << QString::fromStdString(mailboxId) << "state"
                 << QString::fromStdString(parsedQuery.queryState) << "ids"
                 << joinIds(parsedQuery.ids) << "total"
@@ -469,9 +470,9 @@ namespace javelin::jmap::sync
             javelin::jmap::cache::DatabaseConnection& databaseConnection,
             javelin::jmap::api::MethodCaller& methodCaller,
             javelin::jmap::api::ApiRequestContext apiRequestContext, std::string accountId,
-            std::string mailboxId, std::string sinceQueryState, std::string sinceEmailState,
-            std::optional<std::string> upToId, std::function<void(const QString&)> reportProgress,
-            const bool refreshAccountEmailState)
+            std::string remoteAccountId, std::string mailboxId, std::string sinceQueryState,
+            std::string sinceEmailState, std::optional<std::string> upToId,
+            std::function<void(const QString&)> reportProgress, const bool refreshAccountEmailState)
         {
             const auto emitProgress = [&reportProgress](const QString& message)
             {
@@ -485,7 +486,7 @@ namespace javelin::jmap::sync
             builder.useCore().useMail();
 
             const auto queryChangesRequest = javelin::jmap::api::emailQueryChanges({
-                .accountId = std::string{accountId},
+                .accountId = std::string{remoteAccountId},
                 .sinceQueryState = std::string{sinceQueryState},
                 .maxChanges = std::nullopt,
                 .upToId = std::move(upToId),
@@ -518,7 +519,7 @@ namespace javelin::jmap::sync
             if (refreshAccountEmailState)
             {
                 const auto emailChangesRequest = javelin::jmap::api::emailChanges({
-                    .accountId = std::string{accountId},
+                    .accountId = std::string{remoteAccountId},
                     .sinceState = std::string{sinceEmailState},
                     .maxChanges = std::nullopt,
                 });
@@ -577,7 +578,7 @@ namespace javelin::jmap::sync
                 std::get<javelin::jmap::api::EmailQueryChangesResponse>(queryChangesResult);
 
             javelin::jmap::api::EmailChangesResponse emailChanges{
-                .accountId = accountId,
+                .accountId = remoteAccountId,
                 .oldState = sinceEmailState,
                 .newState = sinceEmailState,
                 .hasMoreChanges = false,
@@ -694,7 +695,7 @@ namespace javelin::jmap::sync
             }
 
             const auto updatedEmailsRequest = javelin::jmap::api::emailGet({
-                .accountId = std::string{accountId},
+                .accountId = std::string{remoteAccountId},
                 .ids = existingIds,
                 .idsReference = std::nullopt,
                 .properties = std::nullopt,
@@ -803,8 +804,11 @@ namespace javelin::jmap::sync
     QCoro::Task<MailboxRefreshResult> MailboxRefreshExecutor::refreshCollapsedMailbox(
         std::string accountId, std::string mailboxId,
         std::function<void(const QString&)> reportProgress, const bool forceFullRefresh,
-        const bool refreshAccountEmailState) const
+        const bool refreshAccountEmailState, std::string remoteAccountId) const
     {
+        if (remoteAccountId.empty())
+            remoteAccountId = accountId;
+
         const auto emitProgress = [&reportProgress](const QString& message)
         {
             if (reportProgress)
@@ -922,9 +926,9 @@ namespace javelin::jmap::sync
         {
             emitProgress(QStringLiteral("Checking for mailbox deltas..."));
             const auto incrementalResult = co_await refreshCollapsedMailboxThreadsIncrementally(
-                m_databaseConnection, m_methodCaller, m_apiRequestContext, accountId, mailboxId,
-                *queryPlan.sinceState, *emailPlan.sinceState, cachedPrefixTail, reportProgress,
-                refreshAccountEmailState);
+                m_databaseConnection, m_methodCaller, m_apiRequestContext, accountId,
+                remoteAccountId, mailboxId, *queryPlan.sinceState, *emailPlan.sinceState,
+                cachedPrefixTail, reportProgress, refreshAccountEmailState);
             if (const auto* error = std::get_if<OperationError>(&incrementalResult))
             {
                 co_return *error;
@@ -1053,7 +1057,7 @@ namespace javelin::jmap::sync
 
             emitProgress(QStringLiteral("Refreshing mailbox window from the server..."));
             const auto fetchResult = co_await fetchCollapsedMailboxThreads(
-                m_methodCaller, m_apiRequestContext, accountId, mailboxId, reportProgress);
+                m_methodCaller, m_apiRequestContext, remoteAccountId, mailboxId, reportProgress);
             if (const auto* error = std::get_if<OperationError>(&fetchResult))
             {
                 co_return *error;

@@ -41,7 +41,9 @@ namespace javelin::jmap
         ~SessionRefreshClient();
 
         [[nodiscard]] QCoro::Task<SessionRefreshResult> refresh(LiveConnectionSettings settings,
-                                                                std::string ownerAccountId);
+                                                                std::string connectionId,
+                                                                std::string ownerAccountId,
+                                                                std::string ownerRemoteAccountId);
 
       private:
         std::unique_ptr<MailCapabilityContext> m_impl;

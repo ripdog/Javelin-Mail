@@ -104,13 +104,14 @@ namespace
         return context;
     }
 
-    void seedAccount(javelin::jmap::cache::DatabaseConnection& connection)
+    void seedAccount(javelin::jmap::cache::DatabaseConnection& connection,
+                     const QString& accountId = QStringLiteral("account-1"))
     {
         QSqlQuery query{connection.database()};
         query.prepare(QStringLiteral(
             "INSERT INTO accounts (account_id, email_address, session_url, is_primary) "
             "VALUES (:account_id, :email_address, :session_url, :is_primary)"));
-        query.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
+        query.bindValue(QStringLiteral(":account_id"), accountId);
         query.bindValue(QStringLiteral(":email_address"), QStringLiteral("alice@example.com"));
         query.bindValue(QStringLiteral(":session_url"),
                         QStringLiteral("https://mail.example.com/.well-known/jmap"));
@@ -146,10 +147,11 @@ namespace
         return *serialized;
     }
 
-    [[nodiscard]] std::string mailboxGetArguments(std::string state, std::string mailboxJson)
+    [[nodiscard]] std::string mailboxGetArguments(std::string state, std::string mailboxJson,
+                                                  std::string accountId = "account-1")
     {
-        return std::string{R"({"accountId":"account-1","state":")"} + std::move(state) +
-               R"(","list":[)" + std::move(mailboxJson) + R"(],"notFound":[]})";
+        return std::string{R"({"accountId":")"} + std::move(accountId) + R"(","state":")" +
+               std::move(state) + R"(","list":[)" + std::move(mailboxJson) + R"(],"notFound":[]})";
     }
 
     [[nodiscard]] std::string updatedMailboxFixture()
@@ -217,6 +219,55 @@ TEST_CASE("mailbox state refresh executor bootstraps mailbox metadata",
     REQUIRE(mailboxTree.size() == 1);
     CHECK(mailboxTree.front().id == "mbx-inbox");
     CHECK(mailboxTree.front().unreadEmails == 7);
+}
+
+TEST_CASE("mailbox state refresh uses remote account id while caching under local key",
+          "[jmap][sync][mailbox-state][account-identity]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection, QStringLiteral("local-account"));
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(serializeResponseEnvelope({
+            .methodResponses =
+                {
+                    javelin::jmap::api::MethodInvocation{
+                        .name = "Mailbox/get",
+                        .arguments = mailboxGetArguments(
+                            "mailbox-state-1",
+                            javelin::tests::loadFixture("jmap/entities/mailbox.json"), "u1"),
+                        .callId = "mailboxes",
+                    },
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "session-state-1",
+        })),
+    });
+
+    javelin::jmap::api::MethodCaller methodCaller{transport};
+    javelin::jmap::sync::MailboxStateRefreshExecutor executor{databaseContext.connection,
+                                                              methodCaller, makeRequestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("local-account", "u1"));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailboxStateRefreshSummary>(result));
+    REQUIRE(transport.requests.size() == 1);
+    CHECK(transport.requests.front().body.contains("\"accountId\":\"u1\""));
+    CHECK_FALSE(transport.requests.front().body.contains("\"accountId\":\"local-account\""));
+
+    javelin::jmap::cache::MailboxReadRepository mailboxReader{databaseContext.connection};
+    const auto localMailboxes = mailboxReader.listMailboxTree("local-account");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::MailboxTreeItem>>(localMailboxes));
+    CHECK(std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(localMailboxes).size() == 1);
+    const auto remoteNamedCache = mailboxReader.listMailboxTree("u1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailboxTreeItem>>(
+        remoteNamedCache));
+    CHECK(std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(remoteNamedCache).empty());
 }
 
 TEST_CASE("mailbox state refresh executor applies mailbox changes", "[jmap][sync][mailbox-state]")

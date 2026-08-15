@@ -302,9 +302,12 @@ namespace javelin::jmap::sync
     }
 
     QCoro::Task<MailDeltaRefreshResult>
-    MailDeltaRefreshExecutor::refresh(std::string accountId,
-                                      const MailDeltaRefreshRequest request) const
+    MailDeltaRefreshExecutor::refresh(std::string accountId, const MailDeltaRefreshRequest request,
+                                      std::string remoteAccountId) const
     {
+        if (remoteAccountId.empty())
+            remoteAccountId = accountId;
+
         MailDeltaRefreshSummary summary;
         javelin::jmap::cache::SyncStateRepository states{m_databaseConnection};
         std::optional<std::string> mailboxState;
@@ -365,14 +368,14 @@ namespace javelin::jmap::sync
                 : std::nullopt;
         if (mailboxState.has_value())
         {
-            if (const auto error =
-                    addMailboxDeltaCalls(builder, accountId, *mailboxState, maxChanges, handles))
+            if (const auto error = addMailboxDeltaCalls(builder, remoteAccountId, *mailboxState,
+                                                        maxChanges, handles))
                 co_return *error;
         }
         if (emailState.has_value())
         {
             if (const auto error =
-                    addEmailDeltaCalls(builder, accountId, *emailState, maxChanges, handles))
+                    addEmailDeltaCalls(builder, remoteAccountId, *emailState, maxChanges, handles))
                 co_return *error;
         }
 
@@ -398,10 +401,11 @@ namespace javelin::jmap::sync
         }
         auto parsed = std::get<ParsedDelta>(std::move(parsedResult));
         if ((parsed.mailboxChanges.has_value() &&
-             (parsed.mailboxChanges->accountId != accountId ||
+             (parsed.mailboxChanges->accountId != remoteAccountId ||
               parsed.mailboxChanges->oldState != *mailboxState)) ||
-            (parsed.emailChanges.has_value() && (parsed.emailChanges->accountId != accountId ||
-                                                 parsed.emailChanges->oldState != *emailState)))
+            (parsed.emailChanges.has_value() &&
+             (parsed.emailChanges->accountId != remoteAccountId ||
+              parsed.emailChanges->oldState != *emailState)))
         {
             co_return OperationError{
                 .code = OperationErrorCode::ServerFailure,
@@ -482,7 +486,7 @@ namespace javelin::jmap::sync
             if (!relevantUpdatedIds.empty())
             {
                 const auto updatedRequest = javelin::jmap::api::emailGet({
-                    .accountId = accountId,
+                    .accountId = remoteAccountId,
                     .ids = relevantUpdatedIds,
                     .idsReference = std::nullopt,
                     .properties = std::nullopt,

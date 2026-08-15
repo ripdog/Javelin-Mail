@@ -35,8 +35,11 @@ namespace javelin::jmap::cache
 
         QSqlQuery query{m_connection.database()};
         if (!query.exec(QStringLiteral(
-                "SELECT account_id, owner_account_id, name, is_personal, is_read_only, "
-                "is_primary, cap_mail, cap_submission, submission_max_delayed_send FROM accounts "
+                "SELECT account_id, owner_account_id, "
+                "COALESCE(connection_id,owner_account_id,account_id), "
+                "COALESCE(remote_account_id,account_id), name, is_personal, is_read_only, "
+                "is_primary, cap_mail, mail_may_create_top_level_mailbox, cap_submission, "
+                "submission_max_delayed_send FROM accounts "
                 "ORDER BY is_primary DESC, name, account_id")))
         {
             return makeQueryError(QStringLiteral("Read cached accounts"), query);
@@ -47,14 +50,17 @@ namespace javelin::jmap::cache
         {
             accounts.push_back(CachedAccount{
                 .accountId = query.value(0).toString().toStdString(),
-                .name = query.value(2).toString().toStdString(),
-                .isPersonal = query.value(3).toInt() != 0,
-                .isReadOnly = query.value(4).toInt() != 0,
-                .isPrimary = query.value(5).toInt() != 0,
-                .hasMailCapability = query.value(6).toInt() != 0,
+                .connectionId = query.value(2).toString().toStdString(),
+                .remoteAccountId = query.value(3).toString().toStdString(),
+                .name = query.value(4).toString().toStdString(),
+                .isPersonal = query.value(5).toInt() != 0,
+                .isReadOnly = query.value(6).toInt() != 0,
+                .isPrimary = query.value(7).toInt() != 0,
+                .hasMailCapability = query.value(8).toInt() != 0,
+                .mayCreateTopLevelMailbox = query.value(9).toInt() != 0,
                 .ownerAccountId = query.value(1).toString().toStdString(),
-                .hasSubmissionCapability = query.value(7).toInt() != 0,
-                .maxDelayedSendSeconds = query.value(8).toULongLong(),
+                .hasSubmissionCapability = query.value(10).toInt() != 0,
+                .maxDelayedSendSeconds = query.value(11).toULongLong(),
             });
         }
 
@@ -71,10 +77,12 @@ namespace javelin::jmap::cache
 
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
-            "SELECT account_id, owner_account_id, name, is_personal, is_read_only, is_primary, "
-            "cap_mail, cap_submission, submission_max_delayed_send FROM accounts "
-            "WHERE owner_account_id = :owner_account_id ORDER BY is_primary DESC, name, "
-            "account_id"));
+            "SELECT account_id, owner_account_id, "
+            "COALESCE(connection_id,owner_account_id,account_id), "
+            "COALESCE(remote_account_id,account_id), name, is_personal, is_read_only, is_primary, "
+            "cap_mail, mail_may_create_top_level_mailbox, cap_submission, "
+            "submission_max_delayed_send FROM accounts WHERE owner_account_id = :owner_account_id "
+            "ORDER BY is_primary DESC, name, account_id"));
         query.bindValue(QStringLiteral(":owner_account_id"),
                         QString::fromStdString(std::string{ownerAccountId}));
         if (!query.exec())
@@ -87,14 +95,17 @@ namespace javelin::jmap::cache
         {
             accounts.push_back(CachedAccount{
                 .accountId = query.value(0).toString().toStdString(),
-                .name = query.value(2).toString().toStdString(),
-                .isPersonal = query.value(3).toInt() != 0,
-                .isReadOnly = query.value(4).toInt() != 0,
-                .isPrimary = query.value(5).toInt() != 0,
-                .hasMailCapability = query.value(6).toInt() != 0,
+                .connectionId = query.value(2).toString().toStdString(),
+                .remoteAccountId = query.value(3).toString().toStdString(),
+                .name = query.value(4).toString().toStdString(),
+                .isPersonal = query.value(5).toInt() != 0,
+                .isReadOnly = query.value(6).toInt() != 0,
+                .isPrimary = query.value(7).toInt() != 0,
+                .hasMailCapability = query.value(8).toInt() != 0,
+                .mayCreateTopLevelMailbox = query.value(9).toInt() != 0,
                 .ownerAccountId = query.value(1).toString().toStdString(),
-                .hasSubmissionCapability = query.value(7).toInt() != 0,
-                .maxDelayedSendSeconds = query.value(8).toULongLong(),
+                .hasSubmissionCapability = query.value(10).toInt() != 0,
+                .maxDelayedSendSeconds = query.value(11).toULongLong(),
             });
         }
         return accounts;
@@ -108,9 +119,11 @@ namespace javelin::jmap::cache
 
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
-            "SELECT account_id, owner_account_id, name, is_personal, is_read_only, is_primary, "
-            "cap_mail, cap_submission, submission_max_delayed_send FROM accounts "
-            "WHERE account_id = :account_id"));
+            "SELECT account_id, owner_account_id, "
+            "COALESCE(connection_id,owner_account_id,account_id), "
+            "COALESCE(remote_account_id,account_id), name, is_personal, is_read_only, is_primary, "
+            "cap_mail, mail_may_create_top_level_mailbox, cap_submission, "
+            "submission_max_delayed_send FROM accounts WHERE account_id = :account_id"));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
         if (!query.exec())
@@ -119,15 +132,81 @@ namespace javelin::jmap::cache
             return std::optional<CachedAccount>{};
         return std::optional{CachedAccount{
             .accountId = query.value(0).toString().toStdString(),
-            .name = query.value(2).toString().toStdString(),
-            .isPersonal = query.value(3).toInt() != 0,
-            .isReadOnly = query.value(4).toInt() != 0,
-            .isPrimary = query.value(5).toInt() != 0,
-            .hasMailCapability = query.value(6).toInt() != 0,
+            .connectionId = query.value(2).toString().toStdString(),
+            .remoteAccountId = query.value(3).toString().toStdString(),
+            .name = query.value(4).toString().toStdString(),
+            .isPersonal = query.value(5).toInt() != 0,
+            .isReadOnly = query.value(6).toInt() != 0,
+            .isPrimary = query.value(7).toInt() != 0,
+            .hasMailCapability = query.value(8).toInt() != 0,
+            .mayCreateTopLevelMailbox = query.value(9).toInt() != 0,
             .ownerAccountId = query.value(1).toString().toStdString(),
-            .hasSubmissionCapability = query.value(7).toInt() != 0,
-            .maxDelayedSendSeconds = query.value(8).toULongLong(),
+            .hasSubmissionCapability = query.value(10).toInt() != 0,
+            .maxDelayedSendSeconds = query.value(11).toULongLong(),
         }};
+    }
+
+    std::optional<DatabaseError>
+    AccountRepository::claimLegacyConnection(const std::string_view connectionId,
+                                             const QStringList& knownAccountIds)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (connectionId.empty() || knownAccountIds.empty())
+            return std::nullopt;
+
+        const DatabaseWriteScope writeScope{m_connection};
+        auto& database = m_connection.database();
+        if (!database.transaction())
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Begin legacy account-identity claim: ") +
+                           database.lastError().text(),
+            };
+        }
+
+        QSqlQuery claimAccount{database};
+        claimAccount.prepare(QStringLiteral(
+            "UPDATE accounts SET connection_id=:connection_id,"
+            "remote_account_id=COALESCE(remote_account_id,account_id) WHERE account_id=:account_id "
+            "AND connection_id IS NULL"));
+        QSqlQuery claimOwned{database};
+        claimOwned.prepare(
+            QStringLiteral("UPDATE accounts SET connection_id=:connection_id,"
+                           "remote_account_id=COALESCE(remote_account_id,account_id) WHERE "
+                           "owner_account_id=:owner_account_id AND connection_id IS NULL"));
+        const QString connection = QString::fromStdString(std::string{connectionId});
+        for (const auto& accountId : knownAccountIds)
+        {
+            claimAccount.bindValue(QStringLiteral(":connection_id"), connection);
+            claimAccount.bindValue(QStringLiteral(":account_id"), accountId);
+            if (!claimAccount.exec())
+            {
+                database.rollback();
+                return makeQueryError(QStringLiteral("Claim legacy cached account"), claimAccount);
+            }
+
+            claimOwned.bindValue(QStringLiteral(":connection_id"), connection);
+            claimOwned.bindValue(QStringLiteral(":owner_account_id"), accountId);
+            if (!claimOwned.exec())
+            {
+                database.rollback();
+                return makeQueryError(QStringLiteral("Claim legacy session-owned accounts"),
+                                      claimOwned);
+            }
+        }
+
+        if (!database.commit())
+        {
+            database.rollback();
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Commit legacy account-identity claim: ") +
+                           database.lastError().text(),
+            };
+        }
+        return std::nullopt;
     }
 
     std::optional<DatabaseError> AccountRepository::removeMany(const QStringList& accountIds)

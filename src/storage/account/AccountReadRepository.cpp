@@ -23,15 +23,17 @@ namespace javelin::jmap::cache
         {
             return CachedAccount{
                 .accountId = query.value(0).toString().toStdString(),
-                .name = query.value(2).toString().toStdString(),
-                .isPersonal = query.value(3).toInt() != 0,
-                .isReadOnly = query.value(4).toInt() != 0,
-                .isPrimary = query.value(5).toInt() != 0,
-                .hasMailCapability = query.value(6).toInt() != 0,
-                .mayCreateTopLevelMailbox = query.value(7).toInt() != 0,
+                .connectionId = query.value(2).toString().toStdString(),
+                .remoteAccountId = query.value(3).toString().toStdString(),
+                .name = query.value(4).toString().toStdString(),
+                .isPersonal = query.value(5).toInt() != 0,
+                .isReadOnly = query.value(6).toInt() != 0,
+                .isPrimary = query.value(7).toInt() != 0,
+                .hasMailCapability = query.value(8).toInt() != 0,
+                .mayCreateTopLevelMailbox = query.value(9).toInt() != 0,
                 .ownerAccountId = query.value(1).toString().toStdString(),
-                .hasSubmissionCapability = query.value(8).toInt() != 0,
-                .maxDelayedSendSeconds = query.value(9).toULongLong(),
+                .hasSubmissionCapability = query.value(10).toInt() != 0,
+                .maxDelayedSendSeconds = query.value(11).toULongLong(),
             };
         }
 
@@ -43,7 +45,9 @@ namespace javelin::jmap::cache
             if (ownerAccountId.has_value())
             {
                 query.prepare(QStringLiteral(
-                    "SELECT account_id, owner_account_id, name, is_personal, is_read_only, "
+                    "SELECT account_id, owner_account_id, "
+                    "COALESCE(connection_id,owner_account_id,account_id), "
+                    "COALESCE(remote_account_id,account_id), name, is_personal, is_read_only, "
                     "is_primary, cap_mail, mail_may_create_top_level_mailbox, cap_submission, "
                     "submission_max_delayed_send FROM accounts WHERE owner_account_id = "
                     ":owner_account_id ORDER BY is_primary DESC, name, account_id"));
@@ -52,7 +56,9 @@ namespace javelin::jmap::cache
             else
             {
                 query.prepare(QStringLiteral(
-                    "SELECT account_id, owner_account_id, name, is_personal, is_read_only, "
+                    "SELECT account_id, owner_account_id, "
+                    "COALESCE(connection_id,owner_account_id,account_id), "
+                    "COALESCE(remote_account_id,account_id), name, is_personal, is_read_only, "
                     "is_primary, cap_mail, mail_may_create_top_level_mailbox, cap_submission, "
                     "submission_max_delayed_send FROM accounts ORDER BY is_primary DESC, name, "
                     "account_id"));
@@ -98,7 +104,9 @@ namespace javelin::jmap::cache
 
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
-            "SELECT account_id, owner_account_id, name, is_personal, is_read_only, is_primary, "
+            "SELECT account_id, owner_account_id, "
+            "COALESCE(connection_id,owner_account_id,account_id), "
+            "COALESCE(remote_account_id,account_id), name, is_personal, is_read_only, is_primary, "
             "cap_mail, mail_may_create_top_level_mailbox, cap_submission, "
             "submission_max_delayed_send FROM accounts WHERE account_id = :account_id"));
         query.bindValue(QStringLiteral(":account_id"),
@@ -108,6 +116,23 @@ namespace javelin::jmap::cache
         if (!query.next())
             return std::optional<CachedAccount>{};
         return std::optional{readAccount(query)};
+    }
+
+    std::variant<std::optional<CachedAccount>, DatabaseError>
+    AccountReader::findByLocator(const MailAccountLocator& locator) const
+    {
+        const auto accountsResult = listAll();
+        if (const auto* error = std::get_if<DatabaseError>(&accountsResult))
+            return *error;
+        for (const auto& account : std::get<std::vector<CachedAccount>>(accountsResult))
+        {
+            if (account.connectionId == locator.connectionId &&
+                account.remoteAccountId == locator.remoteAccountId)
+            {
+                return std::optional{account};
+            }
+        }
+        return std::optional<CachedAccount>{};
     }
 
 } // namespace javelin::jmap::cache

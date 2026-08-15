@@ -115,6 +115,8 @@ TEST_CASE("application errors are deduplicated and rearmed after recovery")
 
     StubAccountReader accountReader;
     accountReader.accounts.push_back({.accountId = "account-a",
+                                      .connectionId = "connection-a",
+                                      .remoteAccountId = "account-a",
                                       .name = "Personal mail",
                                       .isPrimary = true,
                                       .ownerAccountId = "account-a",

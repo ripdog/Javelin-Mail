@@ -1171,8 +1171,9 @@ namespace javelin::jmap
 
     MailboxMutationEngine::~MailboxMutationEngine() = default;
 
-    QCoro::Task<SessionRefreshResult> SessionRefreshClient::refresh(LiveConnectionSettings settings,
-                                                                    std::string ownerAccountId)
+    QCoro::Task<SessionRefreshResult>
+    SessionRefreshClient::refresh(LiveConnectionSettings settings, std::string connectionId,
+                                  std::string ownerAccountId, std::string ownerRemoteAccountId)
     {
         if (m_impl->databaseConnection == nullptr || m_impl->resourceTransport == nullptr)
         {
@@ -1185,10 +1186,12 @@ namespace javelin::jmap
         {
             co_return *validationError;
         }
-        if (ownerAccountId.empty())
+        if (connectionId.empty() || ownerAccountId.empty() || ownerRemoteAccountId.empty())
         {
             co_return OperationError{
-                .message = QStringLiteral("An owner account is required for session discovery."),
+                .message = QStringLiteral(
+                    "Connection, local account, and remote account ids are required for session "
+                    "discovery."),
             };
         }
 
@@ -1217,14 +1220,24 @@ namespace javelin::jmap
 
         const auto& session = std::get<javelin::jmap::api::Session>(discovered);
         javelin::jmap::cache::SessionRepository repository{*m_impl->databaseConnection};
-        if (const auto error = repository.replace(ownerAccountId, session))
+        const auto replaceResult =
+            repository.replaceForConnection(connectionId, ownerRemoteAccountId, session);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&replaceResult))
         {
             co_return javelin::jmap::operationError(*error);
+        }
+        const auto& stored = std::get<javelin::jmap::cache::StoredSessionAccounts>(replaceResult);
+        if (stored.ownerAccountId != ownerAccountId)
+        {
+            co_return OperationError{
+                .message = QStringLiteral(
+                    "The refreshed JMAP account resolved to a different local account identity."),
+            };
         }
 
         const bool websocketAdvertised = session.capabilities.websocket.has_value();
         co_return SessionRefreshSummary{
-            .ownerAccountId = std::move(ownerAccountId),
+            .ownerAccountId = stored.ownerAccountId,
             .resolvedSessionUrl = sessionClient.resolvedSessionUrl(),
             .websocketAdvertised = websocketAdvertised,
             .websocketPushSupported =
@@ -1233,7 +1246,7 @@ namespace javelin::jmap
     }
 
     QCoro::Task<LiveRefreshResult>
-    AccountBootstrapClient::bootstrap(LiveConnectionSettings settings,
+    AccountBootstrapClient::bootstrap(LiveConnectionSettings settings, std::string connectionId,
                                       std::function<void(const QString&)> progressCallback,
                                       std::vector<std::string> configuredMailboxIds)
     {
@@ -1262,11 +1275,17 @@ namespace javelin::jmap
         {
             co_return *validationError;
         }
+        if (connectionId.empty())
+        {
+            co_return OperationError{
+                .message = QStringLiteral("A configured connection id is required for bootstrap."),
+            };
+        }
 
         javelin::jmap::api::SessionClient sessionClient{*m_impl->resourceTransport};
 
         const javelin::jmap::auth::SessionRequestContext sessionRequestContext{
-            .credentials = buildAccountCredentials(settings, settings.loginEmail),
+            .credentials = buildAccountCredentials(settings, connectionId),
             .requiredCapabilities =
                 {
                     .mail = true,
@@ -1298,22 +1317,34 @@ namespace javelin::jmap
             };
         }
 
-        const auto& accountId = *session.primaryAccounts.mailAccountId;
+        const auto& remoteAccountId = *session.primaryAccounts.mailAccountId;
         javelin::jmap::cache::SessionRepository sessionRepository{*m_impl->databaseConnection};
         qInfo().noquote() << "Account bootstrap saving session and accounts"
-                          << QString::fromStdString(accountId)
+                          << QString::fromStdString(remoteAccountId)
                           << static_cast<qulonglong>(session.accounts.size());
-        if (const auto error = sessionRepository.replace(accountId, session))
+        const auto replaceResult =
+            sessionRepository.replaceForConnection(connectionId, remoteAccountId, session);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&replaceResult))
         {
             co_return javelin::jmap::operationError(*error);
         }
+        const auto& storedAccounts =
+            std::get<javelin::jmap::cache::StoredSessionAccounts>(replaceResult);
+        const auto localAccount = storedAccounts.accountIdsByRemoteId.find(remoteAccountId);
+        if (localAccount == storedAccounts.accountIdsByRemoteId.end())
+        {
+            co_return OperationError{
+                .message = QStringLiteral("The primary mail account was not stored locally."),
+            };
+        }
+        const std::string accountId = localAccount->second;
         reportProgress(QStringLiteral("Cached session. Fetching mailboxes..."));
-        const auto apiRequestContext = buildApiRequestContext(settings, accountId, session);
+        const auto apiRequestContext = buildApiRequestContext(settings, connectionId, session);
         qInfo().noquote() << "Account bootstrap mailbox request context ready"
                           << QString::fromStdString(apiRequestContext.apiUrl);
 
         javelin::jmap::api::MethodCaller methodCaller{*m_impl->methodTransport};
-        const auto mailboxRequest = javelin::jmap::api::mailboxGet({.accountId = accountId,
+        const auto mailboxRequest = javelin::jmap::api::mailboxGet({.accountId = remoteAccountId,
                                                                     .ids = std::nullopt,
                                                                     .idsReference = std::nullopt,
                                                                     .properties = std::nullopt});
@@ -1393,7 +1424,7 @@ namespace javelin::jmap
             {
                 reportProgress(QStringLiteral("Refreshing selected mailbox..."));
                 const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
-                    accountId, mailboxId, reportProgress, true);
+                    accountId, mailboxId, reportProgress, true, true, remoteAccountId);
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
                 {
                     co_return *error;

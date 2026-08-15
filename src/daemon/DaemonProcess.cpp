@@ -108,11 +108,23 @@ namespace javelin::app
         [[nodiscard]] std::vector<AccountSyncConfiguration>
         accountConfigurations(const SettingsSnapshot& snapshot,
                               AccountCredentialStore& credentialStore,
-                              javelin::jmap::cache::AccountReader& accountReader)
+                              javelin::jmap::cache::AccountRepository& accountRepository)
         {
             std::vector<AccountSyncConfiguration> result;
             for (const auto& account : snapshot.accounts)
             {
+                QStringList knownAccountIds;
+                knownAccountIds.reserve(static_cast<qsizetype>(account.cachedAccountIds.size()));
+                for (const auto& accountId : account.cachedAccountIds)
+                    knownAccountIds.push_back(accountId);
+                if (const auto error = accountRepository.claimLegacyConnection(
+                        account.id.toStdString(), knownAccountIds))
+                {
+                    qWarning().noquote() << "Could not claim cached JMAP accounts for connection"
+                                         << account.id << error->message;
+                    continue;
+                }
+
                 if (account.loginEmail.isEmpty() || !account.hasCredentials)
                     continue;
                 const auto loaded = credentialStore.load(account.id);
@@ -150,7 +162,7 @@ namespace javelin::app
                 };
                 for (const auto& accountId : account.cachedAccountIds)
                 {
-                    if (shouldConfigureMailAccount(accountReader, accountId))
+                    if (shouldConfigureMailAccount(accountRepository, accountId))
                         appendConfiguration(accountId);
                 }
                 if (account.cachedAccountIds.empty())

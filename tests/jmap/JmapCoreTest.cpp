@@ -12,6 +12,7 @@
 #include <QCoroTask>
 
 #include <QCoreApplication>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
@@ -118,7 +119,7 @@ TEST_CASE("SessionRefreshClient discovers and caches websocket capability",
             .loginEmail = "alice@example.com",
             .apiKey = "access-token",
         },
-        "u1"));
+        "connection-1", "u1", "u1"));
 
     REQUIRE(std::holds_alternative<javelin::jmap::SessionRefreshSummary>(result));
     const auto& summary = std::get<javelin::jmap::SessionRefreshSummary>(result);
@@ -179,11 +180,13 @@ TEST_CASE("AccountBootstrapClient does not invent an initial mailbox when none i
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
     javelin::jmap::AccountBootstrapClient bootstrap{database, transport, methodTransport};
 
-    const auto result = QCoro::waitFor(bootstrap.bootstrap({
-        .sessionUrl = "https://mail.example.com/.well-known/jmap",
-        .loginEmail = "alice@example.com",
-        .apiKey = "access-token",
-    }));
+    const auto result = QCoro::waitFor(bootstrap.bootstrap(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "connection-1"));
 
     REQUIRE(std::holds_alternative<javelin::jmap::LiveRefreshSummary>(result));
     const auto& summary = std::get<javelin::jmap::LiveRefreshSummary>(result);
@@ -192,6 +195,104 @@ TEST_CASE("AccountBootstrapClient does not invent an initial mailbox when none i
     REQUIRE(transport.requests.size() == 2);
     CHECK(transport.requests.back().body.contains("\"Mailbox/get\""));
     CHECK_FALSE(transport.requests.back().body.contains("\"Email/query\""));
+}
+
+TEST_CASE("AccountBootstrapClient isolates identical remote account ids across connections",
+          "[jmap][core][account-identity]")
+{
+    ensureApplication();
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto database = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+
+    const auto queueBootstrapResponses = [](FakeTransport& transport)
+    {
+        transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body = QByteArray::fromStdString(
+                javelin::tests::loadFixture("jmap/session/websocket_session.json")),
+        });
+        transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body = QByteArray::fromStdString(serializeResponseEnvelope({
+                .methodResponses =
+                    {
+                        {
+                            .name = "Mailbox/get",
+                            .arguments = javelin::tests::loadFixture(
+                                "jmap/method/mailbox_get_arguments.json"),
+                            .callId = "mailboxes",
+                        },
+                    },
+                .createdIds = std::nullopt,
+                .sessionState = "session-state-2",
+            })),
+        });
+    };
+
+    const javelin::jmap::LiveConnectionSettings settings{
+        .sessionUrl = "https://mail.example.com/.well-known/jmap",
+        .loginEmail = "alice@example.com",
+        .apiKey = "access-token",
+    };
+
+    FakeTransport firstTransport;
+    queueBootstrapResponses(firstTransport);
+    javelin::jmap::api::HttpJmapMethodTransport firstMethodTransport{firstTransport};
+    javelin::jmap::AccountBootstrapClient firstBootstrap{database, firstTransport,
+                                                         firstMethodTransport};
+    const auto firstResult = QCoro::waitFor(firstBootstrap.bootstrap(settings, "connection-a"));
+    REQUIRE(std::holds_alternative<javelin::jmap::LiveRefreshSummary>(firstResult));
+    const auto& firstSummary = std::get<javelin::jmap::LiveRefreshSummary>(firstResult);
+    CHECK(firstSummary.accountId == "u1");
+
+    FakeTransport secondTransport;
+    queueBootstrapResponses(secondTransport);
+    javelin::jmap::api::HttpJmapMethodTransport secondMethodTransport{secondTransport};
+    javelin::jmap::AccountBootstrapClient secondBootstrap{database, secondTransport,
+                                                          secondMethodTransport};
+    const auto secondResult = QCoro::waitFor(secondBootstrap.bootstrap(settings, "connection-b"));
+    REQUIRE(std::holds_alternative<javelin::jmap::LiveRefreshSummary>(secondResult));
+    const auto& secondSummary = std::get<javelin::jmap::LiveRefreshSummary>(secondResult);
+    CHECK(secondSummary.accountId != "u1");
+    CHECK(secondSummary.accountId != firstSummary.accountId);
+
+    REQUIRE(secondTransport.requests.size() == 2);
+    CHECK(secondTransport.requests.back().body.contains("\"Mailbox/get\""));
+    CHECK(secondTransport.requests.back().body.contains("\"accountId\":\"u1\""));
+    CHECK_FALSE(secondTransport.requests.back().body.contains(
+        QByteArray::fromStdString("\"accountId\":\"" + secondSummary.accountId + "\"")));
+    REQUIRE(secondTransport.requests.front().authentication.has_value());
+    CHECK(secondTransport.requests.front().authentication->accountId == "connection-b");
+
+    QSqlQuery accounts{database.database()};
+    REQUIRE(accounts.exec(
+        QStringLiteral("SELECT account_id,connection_id,remote_account_id FROM accounts WHERE "
+                       "remote_account_id='u1' ORDER BY connection_id")));
+    REQUIRE(accounts.next());
+    CHECK(accounts.value(0).toString() == QStringLiteral("u1"));
+    CHECK(accounts.value(1).toString() == QStringLiteral("connection-a"));
+    CHECK(accounts.value(2).toString() == QStringLiteral("u1"));
+    REQUIRE(accounts.next());
+    CHECK(accounts.value(0).toString() == QString::fromStdString(secondSummary.accountId));
+    CHECK(accounts.value(1).toString() == QStringLiteral("connection-b"));
+    CHECK(accounts.value(2).toString() == QStringLiteral("u1"));
+    CHECK_FALSE(accounts.next());
+
+    QSqlQuery secondMailboxes{database.database()};
+    secondMailboxes.prepare(
+        QStringLiteral("SELECT COUNT(*) FROM mailboxes WHERE account_id=:account_id"));
+    secondMailboxes.bindValue(QStringLiteral(":account_id"),
+                              QString::fromStdString(secondSummary.accountId));
+    REQUIRE(secondMailboxes.exec());
+    REQUIRE(secondMailboxes.next());
+    CHECK(secondMailboxes.value(0).toInt() > 0);
 }
 
 TEST_CASE("MailQueryMaterializer mailbox pages use one requested-page envelope",
@@ -224,7 +325,7 @@ TEST_CASE("MailQueryMaterializer mailbox pages use one requested-page envelope",
         .apiKey = "access-token",
     };
     REQUIRE(std::holds_alternative<javelin::jmap::SessionRefreshSummary>(
-        QCoro::waitFor(sessionRefresh.refresh(settings, "u1"))));
+        QCoro::waitFor(sessionRefresh.refresh(settings, "connection-1", "u1", "u1"))));
 
     const auto email = javelin::tests::loadFixture("jmap/entities/email.json");
     const auto emailGetArguments =
@@ -317,7 +418,7 @@ TEST_CASE("MailQueryMaterializer collapsed page materializes representatives wit
         .apiKey = "access-token",
     };
     REQUIRE(std::holds_alternative<javelin::jmap::SessionRefreshSummary>(
-        QCoro::waitFor(sessionRefresh.refresh(settings, "u1"))));
+        QCoro::waitFor(sessionRefresh.refresh(settings, "connection-1", "u1", "u1"))));
 
     const auto firstRepresentative = emailFixtureWithIdentity("eml-1", "thr-1");
     const auto secondRepresentative = emailFixtureWithIdentity("eml-4", "thr-2");

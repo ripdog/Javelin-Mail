@@ -10,4 +10,5 @@ namespace javelin::jmap::cache::migrations
     [[nodiscard]] std::vector<MigrationStep> migrationSteps14To28();
     [[nodiscard]] std::vector<MigrationStep> migrationSteps29To36();
     [[nodiscard]] std::vector<MigrationStep> migrationSteps37To51();
+    [[nodiscard]] std::vector<MigrationStep> migrationSteps52To60();
 } // namespace javelin::jmap::cache::migrations
