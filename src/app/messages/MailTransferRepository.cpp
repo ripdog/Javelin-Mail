@@ -755,4 +755,26 @@ namespace javelin::app
         return query.numRowsAffected() == 1;
     }
 
+    std::variant<bool, DatabaseError> MailTransferRepository::markSourceCleanupPrepared(
+        const std::string_view itemId, const MailTransferItemPhase expected,
+        const std::string_view sourceEmailState,
+        const std::vector<std::string>& removeMailboxIds, const bool destroy)
+    {
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "UPDATE mail_transfer_items SET source_email_state=:state,"
+            "source_remove_mailbox_ids_json=:remove_mailboxes,source_destroy=:destroy,"
+            "phase='removing_source',last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE "
+            "item_id=:id AND phase=:expected"));
+        query.bindValue(QStringLiteral(":state"),
+                        QString::fromStdString(std::string{sourceEmailState}));
+        query.bindValue(QStringLiteral(":remove_mailboxes"), serializeStrings(removeMailboxIds));
+        query.bindValue(QStringLiteral(":destroy"), destroy ? 1 : 0);
+        query.bindValue(QStringLiteral(":id"), QString::fromStdString(std::string{itemId}));
+        query.bindValue(QStringLiteral(":expected"), toString(expected));
+        if (!query.exec())
+            return queryError(QStringLiteral("Prepare mail transfer source cleanup"), query);
+        return query.numRowsAffected() == 1;
+    }
+
 } // namespace javelin::app

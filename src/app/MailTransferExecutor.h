@@ -33,6 +33,7 @@ namespace javelin::app
         std::size_t completeItemCount = 0;
         std::size_t destinationConfirmedItemCount = 0;
         std::size_t failedItemCount = 0;
+        std::size_t partialItemCount = 0;
         std::size_t unknownItemCount = 0;
     };
 

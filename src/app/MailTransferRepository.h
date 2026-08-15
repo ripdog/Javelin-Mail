@@ -162,6 +162,11 @@ namespace javelin::app
         [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
         markDestinationConfirmed(std::string_view itemId, MailTransferItemPhase expected,
                                  const MailTransferDestinationResult& destination);
+        [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
+        markSourceCleanupPrepared(std::string_view itemId, MailTransferItemPhase expected,
+                                  std::string_view sourceEmailState,
+                                  const std::vector<std::string>& removeMailboxIds,
+                                  bool destroy);
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_connection;

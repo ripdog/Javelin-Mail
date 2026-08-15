@@ -3,6 +3,8 @@
 #include "app/AccountConnectionProvider.h"
 #include "app/AccountConnectionSettings.h"
 #include "jmap/MessageContentClient.h"
+#include "jmap/sync/EmailMutationEngine.h"
+#include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/api/BlobUpload.h"
 #include "jmap/api/MailMethods.h"
 #include "jmap/api/MethodCaller.h"
@@ -255,6 +257,9 @@ namespace javelin::app
         javelin::jmap::cache::RawMessageSourceRepository sourceRepository{m_databaseConnection};
         const auto vault = javelin::jmap::cache::MailVault::forDatabase(m_databaseConnection);
         javelin::jmap::api::MethodCaller methodCaller{m_methodTransport};
+        javelin::jmap::EmailMutationEngine sourceMutationEngine{m_databaseConnection,
+                                                                m_methodTransport};
+        javelin::jmap::sync::EmailMutationJournal sourceMutationJournal{m_databaseConnection};
 
         for (auto& item : items)
         {
@@ -1012,6 +1017,371 @@ namespace javelin::app
             }
 
             if (item.phase == MailTransferItemPhase::DestinationConfirmed &&
+                operation.operation == MailTransferOperation::Move)
+            {
+                if (const auto error = requireTransition(
+                        repository.transitionItem(item.itemId,
+                                                  MailTransferItemPhase::DestinationConfirmed,
+                                                  MailTransferItemPhase::RemovingSource),
+                        i18n("The transfer state changed before source cleanup.")))
+                    co_return *error;
+                item.phase = MailTransferItemPhase::RemovingSource;
+            }
+
+            if (item.phase == MailTransferItemPhase::RemovingSource)
+            {
+                auto cleanupRecordsResult = sourceMutationJournal.listForOperationGroup(
+                    operation.sourceAccountId, operation.operationId);
+                if (const auto* error = std::get_if<DatabaseError>(&cleanupRecordsResult))
+                    co_return javelin::jmap::operationError(*error);
+                auto cleanupRecords =
+                    std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
+                        std::move(cleanupRecordsResult));
+                std::erase_if(cleanupRecords,
+                              [&item](const auto& record)
+                              { return record.patch.emailId != item.sourceEmailId; });
+
+                const auto hasStatus = [&cleanupRecords](const javelin::jmap::sync::MutationStatus status)
+                {
+                    return std::ranges::any_of(cleanupRecords, [status](const auto& record)
+                                               { return record.status == status; });
+                };
+                if (hasStatus(javelin::jmap::sync::MutationStatus::Unknown) ||
+                    hasStatus(javelin::jmap::sync::MutationStatus::InFlight))
+                {
+                    const QString message = i18n(
+                        "The source cleanup outcome is unknown and must be reconciled before this "
+                        "move can continue.");
+                    if (const auto error = requireTransition(
+                            repository.transitionItem(item.itemId,
+                                                      MailTransferItemPhase::RemovingSource,
+                                                      MailTransferItemPhase::SourceCleanupUnknown,
+                                                      message),
+                            i18n("The transfer state changed while recording unknown source "
+                                 "cleanup.")))
+                        co_return *error;
+                    item.phase = MailTransferItemPhase::SourceCleanupUnknown;
+                    item.lastError = message;
+                    continue;
+                }
+                if (hasStatus(javelin::jmap::sync::MutationStatus::Rejected))
+                {
+                    const QString message = i18n(
+                        "The destination was created, but the source server rejected cleanup. The "
+                        "source message was retained.");
+                    if (const auto error = requireTransition(
+                            repository.transitionItem(item.itemId,
+                                                      MailTransferItemPhase::RemovingSource,
+                                                      MailTransferItemPhase::PartialSourceRetained,
+                                                      message),
+                            i18n("The transfer state changed while recording rejected source "
+                                 "cleanup.")))
+                        co_return *error;
+                    if (const auto pinError = releaseSourcePin(repository, item.itemId))
+                        co_return *pinError;
+                    item.phase = MailTransferItemPhase::PartialSourceRetained;
+                    item.lastError = message;
+                    continue;
+                }
+                if (hasStatus(javelin::jmap::sync::MutationStatus::Accepted))
+                {
+                    if (const auto error = requireTransition(
+                            repository.transitionItem(item.itemId,
+                                                      MailTransferItemPhase::RemovingSource,
+                                                      MailTransferItemPhase::Complete),
+                            i18n("The transfer state changed while completing source cleanup.")))
+                        co_return *error;
+                    if (!item.sourceDestroy)
+                    {
+                        if (const auto pinError = releaseSourcePin(repository, item.itemId))
+                            co_return *pinError;
+                    }
+                    item.phase = MailTransferItemPhase::Complete;
+                    continue;
+                }
+
+                if (cleanupRecords.empty())
+                {
+                    auto authoritativeResult = co_await sourceMutationEngine.getAuthoritative(
+                        liveSettings(*sourceSettings), operation.sourceAccountId,
+                        {item.sourceEmailId});
+                    if (const auto* error = std::get_if<OperationError>(&authoritativeResult))
+                    {
+                        if (retryable(*error))
+                        {
+                            if (const auto databaseError = repository.updateStatus(
+                                    operation.operationId, waitStatus(*error), error->message))
+                                co_return javelin::jmap::operationError(*databaseError);
+                        }
+                        co_return *error;
+                    }
+                    const auto& authoritative =
+                        std::get<javelin::jmap::AuthoritativeEmails>(authoritativeResult);
+                    const bool missing =
+                        authoritative.emails.empty() && authoritative.notFound.size() == 1 &&
+                        authoritative.notFound.front() == item.sourceEmailId;
+                    if (missing)
+                    {
+                        if (const auto error = requireTransition(
+                                repository.markSourceCleanupPrepared(
+                                    item.itemId, MailTransferItemPhase::RemovingSource,
+                                    authoritative.state, {}, false),
+                                i18n("The transfer state changed while recording completed source "
+                                     "cleanup.")))
+                            co_return *error;
+                        item.sourceEmailState = authoritative.state;
+                        item.sourceRemoveMailboxIds.clear();
+                        item.sourceDestroy = false;
+                        if (const auto error = requireTransition(
+                                repository.transitionItem(item.itemId,
+                                                          MailTransferItemPhase::RemovingSource,
+                                                          MailTransferItemPhase::Complete),
+                                i18n("The transfer state changed while completing source cleanup.")))
+                            co_return *error;
+                        if (const auto pinError = releaseSourcePin(repository, item.itemId))
+                            co_return *pinError;
+                        item.phase = MailTransferItemPhase::Complete;
+                        continue;
+                    }
+                    if (authoritative.emails.size() != 1 ||
+                        authoritative.emails.front().id != item.sourceEmailId ||
+                        !authoritative.notFound.empty() || authoritative.state.empty())
+                    {
+                        co_return OperationError{
+                            .code = OperationErrorCode::ProtocolViolation,
+                            .message = i18n("The source Email/get response could not be accounted "
+                                           "for exactly."),
+                        };
+                    }
+
+                    const auto& currentEmail = authoritative.emails.front();
+                    if (currentEmail.mailboxIds.empty())
+                    {
+                        co_return OperationError{
+                            .code = OperationErrorCode::ProtocolViolation,
+                            .message = i18n("The source server returned an Email with no mailbox "
+                                           "membership."),
+                        };
+                    }
+                    std::vector<std::string> effectiveRemoveMailboxIds;
+                    effectiveRemoveMailboxIds.reserve(item.sourceRemoveMailboxIds.size());
+                    for (const auto& mailboxId : item.sourceRemoveMailboxIds)
+                    {
+                        if (std::ranges::contains(currentEmail.mailboxIds, mailboxId))
+                            effectiveRemoveMailboxIds.push_back(mailboxId);
+                    }
+                    std::ranges::sort(effectiveRemoveMailboxIds);
+                    effectiveRemoveMailboxIds.erase(
+                        std::unique(effectiveRemoveMailboxIds.begin(),
+                                    effectiveRemoveMailboxIds.end()),
+                        effectiveRemoveMailboxIds.end());
+                    const bool actualDestroy =
+                        !effectiveRemoveMailboxIds.empty() &&
+                        std::ranges::all_of(currentEmail.mailboxIds, [&](const auto& mailboxId)
+                                            {
+                                                return std::ranges::contains(
+                                                    effectiveRemoveMailboxIds, mailboxId);
+                                            });
+
+                    if (const auto error = requireTransition(
+                            repository.markSourceCleanupPrepared(
+                                item.itemId, MailTransferItemPhase::RemovingSource,
+                                authoritative.state, effectiveRemoveMailboxIds, actualDestroy),
+                            i18n("The transfer state changed while preparing source cleanup.")))
+                        co_return *error;
+                    item.sourceEmailState = authoritative.state;
+                    item.sourceRemoveMailboxIds = effectiveRemoveMailboxIds;
+                    item.sourceDestroy = actualDestroy;
+
+                    if (effectiveRemoveMailboxIds.empty())
+                    {
+                        if (const auto error = requireTransition(
+                                repository.transitionItem(item.itemId,
+                                                          MailTransferItemPhase::RemovingSource,
+                                                          MailTransferItemPhase::Complete),
+                                i18n("The transfer state changed while completing source cleanup.")))
+                            co_return *error;
+                        if (const auto pinError = releaseSourcePin(repository, item.itemId))
+                            co_return *pinError;
+                        item.phase = MailTransferItemPhase::Complete;
+                        continue;
+                    }
+
+                    const auto activeResult =
+                        sourceMutationJournal.listForEmail(operation.sourceAccountId,
+                                                           item.sourceEmailId);
+                    if (const auto* error = std::get_if<DatabaseError>(&activeResult))
+                        co_return javelin::jmap::operationError(*error);
+                    const auto& activeRecords =
+                        std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(activeResult);
+                    const bool hasForeignActiveMutation =
+                        std::ranges::any_of(activeRecords, [&](const auto& record)
+                                            {
+                                                const bool active =
+                                                    record.status ==
+                                                        javelin::jmap::sync::MutationStatus::Pending ||
+                                                    record.status ==
+                                                        javelin::jmap::sync::MutationStatus::InFlight ||
+                                                    record.status ==
+                                                        javelin::jmap::sync::MutationStatus::Unknown;
+                                                return active &&
+                                                       record.operationGroupId !=
+                                                           std::optional<std::string>{
+                                                               operation.operationId};
+                                            });
+                    if (hasForeignActiveMutation)
+                    {
+                        co_return conflictError(i18n(
+                            "Another unresolved change is already pending for the source message."));
+                    }
+
+                    auto queued = sourceMutationEngine.queue(
+                        operation.sourceAccountId,
+                        {
+                            .emailId = item.sourceEmailId,
+                            .addMailboxIds = {},
+                            .removeMailboxIds = actualDestroy
+                                                    ? std::vector<std::string>{}
+                                                    : effectiveRemoveMailboxIds,
+                            .addKeywords = {},
+                            .removeKeywords = {},
+                            .operationGroupId = operation.operationId,
+                            .ifInState = authoritative.state,
+                            .authoritativeMailboxIds = currentEmail.mailboxIds,
+                            .authoritativeKeywords = currentEmail.keywords,
+                            .destroy = actualDestroy,
+                        });
+                    if (const auto* error = std::get_if<OperationError>(&queued))
+                        co_return *error;
+
+                    cleanupRecordsResult = sourceMutationJournal.listForOperationGroup(
+                        operation.sourceAccountId, operation.operationId);
+                    if (const auto* error = std::get_if<DatabaseError>(&cleanupRecordsResult))
+                        co_return javelin::jmap::operationError(*error);
+                    cleanupRecords =
+                        std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
+                            std::move(cleanupRecordsResult));
+                    std::erase_if(cleanupRecords,
+                                  [&item](const auto& record)
+                                  { return record.patch.emailId != item.sourceEmailId; });
+                }
+
+                const bool pendingCleanup =
+                    std::ranges::any_of(cleanupRecords, [](const auto& record)
+                                        {
+                                            return record.status ==
+                                                   javelin::jmap::sync::MutationStatus::Pending;
+                                        });
+                if (pendingCleanup)
+                {
+                    auto submitted = co_await sourceMutationEngine.submitPending(
+                        liveSettings(*sourceSettings), operation.sourceAccountId,
+                        operation.operationId, 1);
+                    if (const auto* submitError = std::get_if<OperationError>(&submitted))
+                    {
+                        auto afterErrorResult = sourceMutationJournal.listForOperationGroup(
+                            operation.sourceAccountId, operation.operationId);
+                        if (const auto* error = std::get_if<DatabaseError>(&afterErrorResult))
+                            co_return javelin::jmap::operationError(*error);
+                        auto afterError =
+                            std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
+                                std::move(afterErrorResult));
+                        std::erase_if(afterError,
+                                      [&item](const auto& record)
+                                      { return record.patch.emailId != item.sourceEmailId; });
+                        const auto afterHasStatus =
+                            [&afterError](const javelin::jmap::sync::MutationStatus status)
+                        {
+                            return std::ranges::any_of(afterError, [status](const auto& record)
+                                                       { return record.status == status; });
+                        };
+                        if (afterHasStatus(javelin::jmap::sync::MutationStatus::Unknown) ||
+                            afterHasStatus(javelin::jmap::sync::MutationStatus::InFlight))
+                        {
+                            if (const auto error = requireTransition(
+                                    repository.transitionItem(
+                                        item.itemId, MailTransferItemPhase::RemovingSource,
+                                        MailTransferItemPhase::SourceCleanupUnknown,
+                                        submitError->message),
+                                    i18n("The transfer state changed while recording unknown "
+                                         "source cleanup.")))
+                                co_return *error;
+                            item.phase = MailTransferItemPhase::SourceCleanupUnknown;
+                            item.lastError = submitError->message;
+                            continue;
+                        }
+                        if (afterHasStatus(javelin::jmap::sync::MutationStatus::Rejected))
+                        {
+                            const QString message = i18n(
+                                "The destination was created, but source cleanup was rejected. "
+                                "The source message was retained.");
+                            if (const auto error = requireTransition(
+                                    repository.transitionItem(
+                                        item.itemId, MailTransferItemPhase::RemovingSource,
+                                        MailTransferItemPhase::PartialSourceRetained, message),
+                                    i18n("The transfer state changed while recording rejected "
+                                         "source cleanup.")))
+                                co_return *error;
+                            if (const auto pinError = releaseSourcePin(repository, item.itemId))
+                                co_return *pinError;
+                            item.phase = MailTransferItemPhase::PartialSourceRetained;
+                            item.lastError = message;
+                            continue;
+                        }
+                        if (afterHasStatus(javelin::jmap::sync::MutationStatus::Pending) &&
+                            retryable(*submitError))
+                        {
+                            if (const auto databaseError = repository.updateStatus(
+                                    operation.operationId, waitStatus(*submitError),
+                                    submitError->message))
+                                co_return javelin::jmap::operationError(*databaseError);
+                        }
+                        co_return *submitError;
+                    }
+
+                    const auto& submittedSummary =
+                        std::get<javelin::jmap::SubmittedEmailMutations>(submitted);
+                    const auto submittedItem =
+                        std::ranges::find(submittedSummary.items, item.sourceEmailId,
+                                          &javelin::jmap::SubmittedEmailMutations::Item::emailId);
+                    if (submittedItem == submittedSummary.items.end() || !submittedItem->accepted)
+                    {
+                        const QString message =
+                            submittedItem != submittedSummary.items.end() &&
+                                    submittedItem->error.has_value()
+                                ? QString::fromStdString(*submittedItem->error)
+                                : i18n("The destination was created, but source cleanup was "
+                                       "rejected. The source message was retained.");
+                        if (const auto error = requireTransition(
+                                repository.transitionItem(
+                                    item.itemId, MailTransferItemPhase::RemovingSource,
+                                    MailTransferItemPhase::PartialSourceRetained, message),
+                                i18n("The transfer state changed while recording rejected source "
+                                     "cleanup.")))
+                            co_return *error;
+                        if (const auto pinError = releaseSourcePin(repository, item.itemId))
+                            co_return *pinError;
+                        item.phase = MailTransferItemPhase::PartialSourceRetained;
+                        item.lastError = message;
+                        continue;
+                    }
+
+                    if (const auto error = requireTransition(
+                            repository.transitionItem(item.itemId,
+                                                      MailTransferItemPhase::RemovingSource,
+                                                      MailTransferItemPhase::Complete),
+                            i18n("The transfer state changed while completing source cleanup.")))
+                        co_return *error;
+                    if (!item.sourceDestroy)
+                    {
+                        if (const auto pinError = releaseSourcePin(repository, item.itemId))
+                            co_return *pinError;
+                    }
+                    item.phase = MailTransferItemPhase::Complete;
+                }
+            }
+
+            if (item.phase == MailTransferItemPhase::DestinationConfirmed &&
                 operation.operation == MailTransferOperation::Copy)
             {
                 if (const auto error = requireTransition(
@@ -1040,6 +1410,8 @@ namespace javelin::app
                 ++summary.destinationConfirmedItemCount;
             if (item.phase == MailTransferItemPhase::Failed)
                 ++summary.failedItemCount;
+            if (item.phase == MailTransferItemPhase::PartialSourceRetained)
+                ++summary.partialItemCount;
             if (item.phase == MailTransferItemPhase::DestinationUnknown ||
                 item.phase == MailTransferItemPhase::SourceCleanupUnknown)
                 ++summary.unknownItemCount;
@@ -1049,10 +1421,9 @@ namespace javelin::app
             summary.status = MailTransferStatus::BlockedUnknown;
         else if (summary.failedItemCount == items.size())
             summary.status = MailTransferStatus::Failed;
-        else if (summary.failedItemCount > 0)
+        else if (summary.failedItemCount > 0 || summary.partialItemCount > 0)
             summary.status = MailTransferStatus::Partial;
-        else if (operation.operation == MailTransferOperation::Copy &&
-                 summary.completeItemCount == items.size())
+        else if (summary.completeItemCount == items.size())
             summary.status = MailTransferStatus::Complete;
         else
             summary.status = MailTransferStatus::Running;

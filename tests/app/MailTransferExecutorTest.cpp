@@ -251,20 +251,140 @@ namespace
         DuplicateMembershipDispatchedFailure,
     };
 
+    enum class SourceCleanupBehavior
+    {
+        Success,
+        Reject,
+        DispatchedFailure,
+        NotFound,
+        ConcurrentNewMailbox,
+    };
+
     class RecordingMethodTransport final : public javelin::jmap::api::JmapMethodTransport
     {
       public:
         ImportBehavior behavior = ImportBehavior::Success;
+        SourceCleanupBehavior sourceCleanupBehavior = SourceCleanupBehavior::Success;
         int stateCalls = 0;
         int existingGetCalls = 0;
         int importCalls = 0;
         int setCalls = 0;
+        int sourceGetCalls = 0;
+        int sourceSetCalls = 0;
         std::string importArguments;
         std::string setArguments;
+        std::string sourceSetArguments;
+        std::vector<std::string> sourceAuthoritativeMailboxIds{"inbox"};
+        std::vector<std::string> callOrder;
 
         [[nodiscard]] QCoro::Task<JmapMethodTransportResult>
         call(JmapMethodRequest request) override
         {
+            if (request.apiUrl.find("source.example.test") != std::string::npos)
+            {
+                REQUIRE_FALSE(request.envelope.methodCalls.empty());
+                const auto& sourceMethod = request.envelope.methodCalls.front();
+                if (sourceMethod.name == "Email/get")
+                {
+                    REQUIRE(request.envelope.methodCalls.size() == 1);
+                    ++sourceGetCalls;
+                    callOrder.push_back("source-get");
+                    if (request.dispatched)
+                        request.dispatched();
+                    if (sourceCleanupBehavior == SourceCleanupBehavior::NotFound)
+                    {
+                        co_return ResponseEnvelope{
+                            .methodResponses = {{
+                                .name = "Email/get",
+                                .arguments =
+                                    R"({"accountId":"u1","state":"source-state-current","list":[],"notFound":["email-1"]})",
+                                .callId = sourceMethod.callId,
+                            }},
+                            .createdIds = std::nullopt,
+                            .sessionState = "session-state",
+                        };
+                    }
+
+                    auto mailboxIds = sourceAuthoritativeMailboxIds;
+                    if (sourceCleanupBehavior == SourceCleanupBehavior::ConcurrentNewMailbox)
+                        mailboxIds = {"inbox", "new-mailbox"};
+                    std::string mailboxJson{"{"};
+                    for (const auto& mailboxId : mailboxIds)
+                    {
+                        if (mailboxJson.size() > 1)
+                            mailboxJson += ',';
+                        mailboxJson += '"' + mailboxId + R"(":true)";
+                    }
+                    mailboxJson += '}';
+                    const auto response =
+                        std::string{R"({"accountId":"u1","state":"source-state-current","list":[{"id":"email-1","mailboxIds":)"} +
+                        mailboxJson +
+                        R"(,"keywords":{"$seen":true,"$flagged":true},"subject":"Transfer"}],"notFound":[]})";
+                    co_return ResponseEnvelope{
+                        .methodResponses = {{.name = "Email/get",
+                                             .arguments = response,
+                                             .callId = sourceMethod.callId}},
+                        .createdIds = std::nullopt,
+                        .sessionState = "session-state",
+                    };
+                }
+
+                REQUIRE(sourceMethod.name == "Email/set");
+                ++sourceSetCalls;
+                callOrder.push_back("source-set");
+                sourceSetArguments = sourceMethod.arguments;
+                if (request.dispatched)
+                    request.dispatched();
+                if (sourceCleanupBehavior == SourceCleanupBehavior::DispatchedFailure)
+                {
+                    co_return TransportError{
+                        .code = TransportErrorCode::NetworkFailure,
+                        .message = "connection lost after source cleanup dispatch",
+                        .httpStatus = std::nullopt,
+                        .networkError = std::nullopt,
+                        .retryAfter = std::nullopt,
+                    };
+                }
+
+                const bool destroys = sourceMethod.arguments.find("\"destroy\":[\"email-1\"]") !=
+                                      std::string::npos;
+                std::string sourceResponseArguments;
+                if (sourceCleanupBehavior == SourceCleanupBehavior::Reject)
+                {
+                    sourceResponseArguments = destroys
+                                       ? R"({"accountId":"u1","oldState":"source-state-current","newState":"source-state-current","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{"email-1":{"type":"forbidden","description":"Cleanup denied","properties":[]}}})"
+                                       : R"({"accountId":"u1","oldState":"source-state-current","newState":"source-state-current","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{"email-1":{"type":"forbidden","description":"Cleanup denied","properties":[]}},"notDestroyed":{}})";
+                }
+                else
+                {
+                    sourceResponseArguments = destroys
+                                       ? R"({"accountId":"u1","oldState":"source-state-current","newState":"source-state-next","created":{},"updated":{},"destroyed":["email-1"],"notCreated":{},"notUpdated":{},"notDestroyed":{}})"
+                                       : R"({"accountId":"u1","oldState":"source-state-current","newState":"source-state-next","created":{},"updated":{"email-1":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})";
+                }
+
+                std::vector<javelin::jmap::api::MethodInvocation> responses;
+                responses.push_back({
+                    .name = "Email/set",
+                    .arguments = std::move(sourceResponseArguments),
+                    .callId = sourceMethod.callId,
+                });
+                for (std::size_t index = 1; index < request.envelope.methodCalls.size(); ++index)
+                {
+                    const auto& extra = request.envelope.methodCalls[index];
+                    REQUIRE(extra.name == "Mailbox/get");
+                    responses.push_back({
+                        .name = "error",
+                        .arguments = R"({"type":"serverUnavailable"})",
+                        .callId = extra.callId,
+                    });
+                }
+                co_return ResponseEnvelope{
+                    .methodResponses = std::move(responses),
+                    .createdIds = std::nullopt,
+                    .sessionState = "session-state",
+                };
+            }
+
             REQUIRE(request.envelope.methodCalls.size() == 1);
             const auto& method = request.envelope.methodCalls.front();
             if (method.name == "Email/get")
@@ -274,6 +394,7 @@ namespace
                 if (method.arguments.find("existing-email") != std::string::npos)
                 {
                     ++existingGetCalls;
+                    callOrder.push_back("destination-existing-get");
                     const bool inTarget = behavior == ImportBehavior::AlreadyExistsInTarget;
                     const auto mailboxIds =
                         inTarget ? R"({"archive":true,"old-mailbox":true})"
@@ -292,6 +413,7 @@ namespace
                 }
 
                 ++stateCalls;
+                callOrder.push_back("destination-state-get");
                 co_return ResponseEnvelope{
                     .methodResponses = {{.name = "Email/get",
                                          .arguments =
@@ -305,6 +427,7 @@ namespace
             if (method.name == "Email/set")
             {
                 ++setCalls;
+                callOrder.push_back("destination-set");
                 setArguments = method.arguments;
                 if (request.dispatched)
                     request.dispatched();
@@ -332,6 +455,7 @@ namespace
 
             REQUIRE(method.name == "Email/import");
             ++importCalls;
+            callOrder.push_back("destination-import");
             importArguments = method.arguments;
             if (behavior == ImportBehavior::PreDispatchFailure)
             {
@@ -532,6 +656,35 @@ namespace
             return *value;
         }
 
+        void setSourceMailboxIds(std::vector<std::string> mailboxIds)
+        {
+            javelin::jmap::cache::EmailRepository emails{database};
+            const auto found = emails.find(sourceAccountId, "email-1");
+            REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(found));
+            auto current = std::get<std::optional<javelin::jmap::domain::Email>>(found);
+            REQUIRE(current.has_value());
+            current->mailboxIds = mailboxIds;
+            REQUIRE_FALSE(emails.upsertMany(sourceAccountId, {*current}).has_value());
+
+            std::vector<javelin::jmap::domain::Mailbox> sourceMailboxes;
+            sourceMailboxes.reserve(mailboxIds.size());
+            for (const auto& mailboxId : mailboxIds)
+                sourceMailboxes.push_back(mailbox(mailboxId, mailboxId));
+            javelin::jmap::cache::MailboxRepository mailboxes{database};
+            REQUIRE_FALSE(mailboxes.replaceAll(sourceAccountId, sourceMailboxes).has_value());
+            methodTransport.sourceAuthoritativeMailboxIds = std::move(mailboxIds);
+        }
+
+        [[nodiscard]] std::optional<std::vector<std::string>> sourceMailboxIds() const
+        {
+            javelin::jmap::cache::EmailRepository emails{
+                const_cast<javelin::jmap::cache::DatabaseConnection&>(database)};
+            const auto result = emails.find(sourceAccountId, "email-1");
+            REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(result));
+            const auto& current = std::get<std::optional<javelin::jmap::domain::Email>>(result);
+            return current.has_value() ? std::optional{current->mailboxIds} : std::nullopt;
+        }
+
         [[nodiscard]] int pinCount() const
         {
             QSqlQuery query{database.database()};
@@ -593,7 +746,7 @@ TEST_CASE("cross-server copy streams exact raw MIME and completes only after imp
     CHECK(fixture.sourceStillExists());
 }
 
-TEST_CASE("cross-server move stops after durable destination confirmation and keeps source pinned",
+TEST_CASE("cross-server move destroys the last source residency only after destination confirmation",
           "[app][mail-transfer][executor][move]")
 {
     ApplicationGuard application;
@@ -602,15 +755,160 @@ TEST_CASE("cross-server move stops after durable destination confirmation and ke
     const auto operationId = fixture.prepare(MailTransferOperation::Move);
 
     const auto result = fixture.execute(operationId);
-    REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(result));
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        FAIL(error->message.toStdString());
     const auto& summary = std::get<MailTransferExecutionSummary>(result);
-    CHECK(summary.status == MailTransferStatus::Running);
-    CHECK(summary.destinationConfirmedItemCount == 1);
+    CHECK(summary.status == MailTransferStatus::Complete);
+    CHECK(summary.completeItemCount == 1);
     const auto item = fixture.item(operationId);
-    CHECK(item.phase == MailTransferItemPhase::DestinationConfirmed);
+    CHECK(item.phase == MailTransferItemPhase::Complete);
     CHECK(item.sourceDestroy);
+    CHECK(item.sourceRemoveMailboxIds == std::vector<std::string>{"inbox"});
+    CHECK(item.sourceEmailState == std::optional<std::string>{"source-state-current"});
+    CHECK(fixture.methodTransport.sourceGetCalls == 1);
+    CHECK(fixture.methodTransport.sourceSetCalls == 1);
+    CHECK(fixture.methodTransport.sourceSetArguments.find("\"destroy\":[\"email-1\"]") !=
+          std::string::npos);
+    const auto importPosition = std::ranges::find(fixture.methodTransport.callOrder,
+                                                  std::string{"destination-import"});
+    const auto sourceGetPosition = std::ranges::find(fixture.methodTransport.callOrder,
+                                                     std::string{"source-get"});
+    const auto sourceSetPosition = std::ranges::find(fixture.methodTransport.callOrder,
+                                                     std::string{"source-set"});
+    REQUIRE(importPosition != fixture.methodTransport.callOrder.end());
+    REQUIRE(sourceGetPosition != fixture.methodTransport.callOrder.end());
+    REQUIRE(sourceSetPosition != fixture.methodTransport.callOrder.end());
+    CHECK(importPosition < sourceGetPosition);
+    CHECK(sourceGetPosition < sourceSetPosition);
     CHECK(fixture.pinCount() == 1);
+    CHECK_FALSE(fixture.sourceStillExists());
+}
+
+TEST_CASE("cross-server move removes only the selected source mailbox when other residency remains",
+          "[app][mail-transfer][executor][move]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    fixture.setSourceMailboxIds({"inbox", "important"});
+    const auto operationId = fixture.prepare(MailTransferOperation::Move);
+
+    const auto result = fixture.execute(operationId);
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        FAIL(error->message.toStdString());
+    CHECK(std::get<MailTransferExecutionSummary>(result).status == MailTransferStatus::Complete);
+    const auto item = fixture.item(operationId);
+    CHECK(item.phase == MailTransferItemPhase::Complete);
+    CHECK_FALSE(item.sourceDestroy);
+    CHECK(item.sourceRemoveMailboxIds == std::vector<std::string>{"inbox"});
+    CHECK(fixture.methodTransport.sourceSetCalls == 1);
+    CHECK(fixture.methodTransport.sourceSetArguments.find("mailboxIds/inbox") !=
+          std::string::npos);
+    CHECK(fixture.methodTransport.sourceSetArguments.find("\"destroy\"") == std::string::npos);
+    REQUIRE(fixture.sourceMailboxIds().has_value());
+    CHECK(*fixture.sourceMailboxIds() == std::vector<std::string>{"important"});
+    CHECK(fixture.pinCount() == 0);
+}
+
+TEST_CASE("concurrent new source residency downgrades planned destroy to mailbox removal",
+          "[app][mail-transfer][executor][move][concurrency]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    const auto operationId = fixture.prepare(MailTransferOperation::Move);
+    REQUIRE(fixture.item(operationId).sourceDestroy);
+    fixture.methodTransport.sourceCleanupBehavior = SourceCleanupBehavior::ConcurrentNewMailbox;
+
+    const auto result = fixture.execute(operationId);
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        FAIL(error->message.toStdString());
+    CHECK(std::get<MailTransferExecutionSummary>(result).status == MailTransferStatus::Complete);
+    const auto item = fixture.item(operationId);
+    CHECK(item.phase == MailTransferItemPhase::Complete);
+    CHECK_FALSE(item.sourceDestroy);
+    CHECK(item.sourceRemoveMailboxIds == std::vector<std::string>{"inbox"});
+    CHECK(fixture.methodTransport.sourceSetArguments.find("mailboxIds/inbox") !=
+          std::string::npos);
+    CHECK(fixture.methodTransport.sourceSetArguments.find("\"destroy\"") == std::string::npos);
+    REQUIRE(fixture.sourceMailboxIds().has_value());
+    CHECK(*fixture.sourceMailboxIds() == std::vector<std::string>{"new-mailbox"});
+    CHECK(fixture.pinCount() == 0);
+}
+
+TEST_CASE("definitive source cleanup rejection keeps confirmed destination and reports partial move",
+          "[app][mail-transfer][executor][move][source-rejection]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    fixture.methodTransport.sourceCleanupBehavior = SourceCleanupBehavior::Reject;
+    const auto operationId = fixture.prepare(MailTransferOperation::Move);
+
+    const auto result = fixture.execute(operationId);
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        FAIL(error->message.toStdString());
+    const auto& summary = std::get<MailTransferExecutionSummary>(result);
+    CHECK(summary.status == MailTransferStatus::Partial);
+    CHECK(summary.partialItemCount == 1);
+    const auto item = fixture.item(operationId);
+    CHECK(item.phase == MailTransferItemPhase::PartialSourceRetained);
+    CHECK(item.destinationEmailId == std::optional<std::string>{"destination-email"});
+    CHECK(fixture.methodTransport.sourceSetCalls == 1);
     CHECK(fixture.sourceStillExists());
+    CHECK(fixture.pinCount() == 0);
+}
+
+TEST_CASE("ambiguous source cleanup blocks move without retrying or compensating destination",
+          "[app][mail-transfer][executor][move][source-ambiguity]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    fixture.methodTransport.sourceCleanupBehavior = SourceCleanupBehavior::DispatchedFailure;
+    const auto operationId = fixture.prepare(MailTransferOperation::Move);
+
+    const auto first = fixture.execute(operationId);
+    REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(first));
+    CHECK(std::get<MailTransferExecutionSummary>(first).status ==
+          MailTransferStatus::BlockedUnknown);
+    const auto item = fixture.item(operationId);
+    CHECK(item.phase == MailTransferItemPhase::SourceCleanupUnknown);
+    CHECK(item.destinationEmailId == std::optional<std::string>{"destination-email"});
+    CHECK(fixture.pinCount() == 1);
+    const int sourceSetCount = fixture.methodTransport.sourceSetCalls;
+    const int importCount = fixture.methodTransport.importCalls;
+
+    fixture.methodTransport.sourceCleanupBehavior = SourceCleanupBehavior::Success;
+    const auto second = fixture.execute(operationId);
+    REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(second));
+    CHECK(std::get<MailTransferExecutionSummary>(second).status ==
+          MailTransferStatus::BlockedUnknown);
+    CHECK(fixture.methodTransport.sourceSetCalls == sourceSetCount);
+    CHECK(fixture.methodTransport.importCalls == importCount);
+    CHECK(fixture.pinCount() == 1);
+}
+
+TEST_CASE("source already absent completes move without claiming or repeating deletion",
+          "[app][mail-transfer][executor][move][source-reconcile]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    fixture.methodTransport.sourceCleanupBehavior = SourceCleanupBehavior::NotFound;
+    const auto operationId = fixture.prepare(MailTransferOperation::Move);
+
+    const auto result = fixture.execute(operationId);
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        FAIL(error->message.toStdString());
+    CHECK(std::get<MailTransferExecutionSummary>(result).status == MailTransferStatus::Complete);
+    const auto item = fixture.item(operationId);
+    CHECK(item.phase == MailTransferItemPhase::Complete);
+    CHECK_FALSE(item.sourceDestroy);
+    CHECK(item.sourceRemoveMailboxIds.empty());
+    CHECK(fixture.methodTransport.sourceGetCalls == 1);
+    CHECK(fixture.methodTransport.sourceSetCalls == 0);
+    CHECK(fixture.pinCount() == 0);
 }
 
 TEST_CASE("definitive Email import rejection fails item and never removes the source",
