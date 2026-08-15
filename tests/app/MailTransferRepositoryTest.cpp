@@ -83,6 +83,7 @@ namespace
             .rawContentHash = std::nullopt,
             .destinationCreationId = "creation-" + std::to_string(ordinal),
             .destinationUploadBlobId = std::nullopt,
+            .destinationPreState = std::nullopt,
             .destinationEmailId = std::nullopt,
             .destinationBlobId = std::nullopt,
             .destinationThreadId = std::nullopt,
@@ -224,8 +225,8 @@ TEST_CASE("mail transfer journal records every irreversible boundary with compar
                                                 MailTransferItemPhase::Uploading)));
     CHECK(requireBool(repository.markUploaded("item-1", MailTransferItemPhase::Uploading,
                                               "destination-upload-blob")));
-    CHECK(requireBool(repository.transitionItem("item-1", MailTransferItemPhase::Uploaded,
-                                                MailTransferItemPhase::CreatingDestination)));
+    CHECK(requireBool(repository.markDestinationDispatching(
+        "item-1", MailTransferItemPhase::Uploaded, "destination-state-before-import")));
 
     CHECK(requireBool(repository.markDestinationConfirmed(
         "item-1", MailTransferItemPhase::CreatingDestination,
@@ -253,6 +254,8 @@ TEST_CASE("mail transfer journal records every irreversible boundary with compar
     const auto& stored = items.front();
     CHECK(stored.rawContentHash == std::optional<std::string>{sourceObject.contentHash});
     CHECK(stored.destinationUploadBlobId == std::optional<std::string>{"destination-upload-blob"});
+    CHECK(stored.destinationPreState ==
+          std::optional<std::string>{"destination-state-before-import"});
     CHECK(stored.destinationEmailId == std::optional<std::string>{"destination-email"});
     CHECK(stored.destinationBlobId == std::optional<std::string>{"destination-blob"});
     CHECK(stored.destinationThreadId == std::optional<std::string>{"destination-thread"});

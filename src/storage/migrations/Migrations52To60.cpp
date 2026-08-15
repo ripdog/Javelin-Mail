@@ -90,6 +90,15 @@ namespace javelin::jmap::cache::migrations
                                        "mail_vault_pins(content_hash)"),
                     },
             },
+            MigrationStep{
+                .version = 55,
+                .name = QStringLiteral("mail_transfer_destination_pre_state"),
+                .statements =
+                    {
+                        QStringLiteral("ALTER TABLE mail_transfer_items ADD COLUMN "
+                                       "destination_pre_state TEXT"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

@@ -240,6 +240,7 @@ namespace javelin::app
                 .rawContentHash = std::nullopt,
                 .destinationCreationId = newId("mail-transfer-create"),
                 .destinationUploadBlobId = std::nullopt,
+                .destinationPreState = std::nullopt,
                 .destinationEmailId = std::nullopt,
                 .destinationBlobId = std::nullopt,
                 .destinationThreadId = std::nullopt,

@@ -92,6 +92,7 @@ namespace javelin::app
         std::optional<std::string> rawContentHash;
         std::string destinationCreationId;
         std::optional<std::string> destinationUploadBlobId;
+        std::optional<std::string> destinationPreState;
         std::optional<std::string> destinationEmailId;
         std::optional<std::string> destinationBlobId;
         std::optional<std::string> destinationThreadId;
@@ -150,6 +151,9 @@ namespace javelin::app
         [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
         markUploaded(std::string_view itemId, MailTransferItemPhase expected,
                      std::string_view destinationUploadBlobId);
+        [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
+        markDestinationDispatching(std::string_view itemId, MailTransferItemPhase expected,
+                                   std::string_view destinationPreState);
         [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
         markDestinationConfirmed(std::string_view itemId, MailTransferItemPhase expected,
                                  const MailTransferDestinationResult& destination);

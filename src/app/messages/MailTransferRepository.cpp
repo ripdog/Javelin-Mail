@@ -105,9 +105,10 @@ namespace javelin::app
                 "item_id,operation_id,ordinal,source_email_id,source_blob_id,source_email_state,"
                 "source_mailbox_ids_json,source_keywords_json,source_received_at,source_size,"
                 "source_remove_mailbox_ids_json,source_destroy,raw_content_hash,"
-                "destination_creation_id,destination_upload_blob_id,destination_email_id,"
-                "destination_blob_id,destination_thread_id,destination_size,reused_existing,"
-                "destination_prior_mailbox_ids_json,phase,last_error,created_at,updated_at");
+                "destination_creation_id,destination_upload_blob_id,destination_pre_state,"
+                "destination_email_id,destination_blob_id,destination_thread_id,destination_size,"
+                "reused_existing,destination_prior_mailbox_ids_json,phase,last_error,created_at,"
+                "updated_at");
         }
 
         [[nodiscard]] std::variant<MailTransferOperationRecord, DatabaseError>
@@ -142,7 +143,7 @@ namespace javelin::app
             const auto sourceMailboxIds = parseStrings(query.value(6));
             const auto sourceKeywords = parseStrings(query.value(7));
             const auto sourceRemoveMailboxIds = parseStrings(query.value(10));
-            const auto phase = mailTransferItemPhaseFromString(query.value(21).toString());
+            const auto phase = mailTransferItemPhaseFromString(query.value(22).toString());
             if (!sourceMailboxIds.has_value() || !sourceKeywords.has_value() ||
                 !sourceRemoveMailboxIds.has_value() || !phase.has_value())
             {
@@ -150,9 +151,9 @@ namespace javelin::app
             }
 
             std::optional<std::vector<std::string>> destinationPriorMailboxIds;
-            if (!query.value(20).isNull())
+            if (!query.value(21).isNull())
             {
-                destinationPriorMailboxIds = parseStrings(query.value(20));
+                destinationPriorMailboxIds = parseStrings(query.value(21));
                 if (!destinationPriorMailboxIds.has_value())
                     return corruptRecord(QStringLiteral("invalid destination mailbox snapshot"));
             }
@@ -173,19 +174,20 @@ namespace javelin::app
                 .rawContentHash = optionalString(query.value(12)),
                 .destinationCreationId = query.value(13).toString().toStdString(),
                 .destinationUploadBlobId = optionalString(query.value(14)),
-                .destinationEmailId = optionalString(query.value(15)),
-                .destinationBlobId = optionalString(query.value(16)),
-                .destinationThreadId = optionalString(query.value(17)),
+                .destinationPreState = optionalString(query.value(15)),
+                .destinationEmailId = optionalString(query.value(16)),
+                .destinationBlobId = optionalString(query.value(17)),
+                .destinationThreadId = optionalString(query.value(18)),
                 .destinationSize =
-                    query.value(18).isNull()
+                    query.value(19).isNull()
                         ? std::nullopt
-                        : std::optional<std::uint64_t>{query.value(18).toULongLong()},
-                .reusedExisting = query.value(19).toInt() != 0,
+                        : std::optional<std::uint64_t>{query.value(19).toULongLong()},
+                .reusedExisting = query.value(20).toInt() != 0,
                 .destinationPriorMailboxIds = std::move(destinationPriorMailboxIds),
                 .phase = *phase,
-                .lastError = optionalQString(query.value(22)),
-                .createdAt = timestamp(query.value(23)),
-                .updatedAt = timestamp(query.value(24)),
+                .lastError = optionalQString(query.value(23)),
+                .createdAt = timestamp(query.value(24)),
+                .updatedAt = timestamp(query.value(25)),
             };
         }
 
@@ -397,15 +399,16 @@ namespace javelin::app
             "source_mailbox_ids_json,source_keywords_json,source_received_at,source_size,"
             "source_remove_mailbox_ids_json,source_destroy,raw_content_hash,destination_creation_"
             "id,"
-            "destination_upload_blob_id,destination_email_id,destination_blob_id,"
-            "destination_thread_id,destination_size,reused_existing,"
+            "destination_upload_blob_id,destination_pre_state,destination_email_id,"
+            "destination_blob_id,destination_thread_id,destination_size,reused_existing,"
             "destination_prior_mailbox_ids_json,phase,last_error"
             ") VALUES(:item_id,:operation_id,:ordinal,:source_email_id,:source_blob_id,"
             ":source_email_state,:source_mailbox_ids_json,:source_keywords_json,:source_received_"
             "at,"
             ":source_size,:source_remove_mailbox_ids_json,:source_destroy,:raw_content_hash,"
-            ":destination_creation_id,:destination_upload_blob_id,:destination_email_id,"
-            ":destination_blob_id,:destination_thread_id,:destination_size,:reused_existing,"
+            ":destination_creation_id,:destination_upload_blob_id,:destination_pre_state,"
+            ":destination_email_id,:destination_blob_id,:destination_thread_id,:destination_size,"
+            ":reused_existing,"
             ":destination_prior_mailbox_ids_json,:phase,:last_error)"));
         for (const auto& item : items)
         {
@@ -443,6 +446,8 @@ namespace javelin::app
                                  QString::fromStdString(item.destinationCreationId));
             insertItem.bindValue(QStringLiteral(":destination_upload_blob_id"),
                                  optionalText(item.destinationUploadBlobId));
+            insertItem.bindValue(QStringLiteral(":destination_pre_state"),
+                                 optionalText(item.destinationPreState));
             insertItem.bindValue(QStringLiteral(":destination_email_id"),
                                  optionalText(item.destinationEmailId));
             insertItem.bindValue(QStringLiteral(":destination_blob_id"),
@@ -675,6 +680,25 @@ namespace javelin::app
         query.bindValue(QStringLiteral(":expected"), toString(expected));
         if (!query.exec())
             return queryError(QStringLiteral("Mark mail transfer upload complete"), query);
+        return query.numRowsAffected() == 1;
+    }
+
+    std::variant<bool, DatabaseError>
+    MailTransferRepository::markDestinationDispatching(const std::string_view itemId,
+                                                       const MailTransferItemPhase expected,
+                                                       const std::string_view destinationPreState)
+    {
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "UPDATE mail_transfer_items SET destination_pre_state=:state,"
+            "phase='creating_destination',last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE "
+            "item_id=:id AND phase=:expected"));
+        query.bindValue(QStringLiteral(":state"),
+                        QString::fromStdString(std::string{destinationPreState}));
+        query.bindValue(QStringLiteral(":id"), QString::fromStdString(std::string{itemId}));
+        query.bindValue(QStringLiteral(":expected"), toString(expected));
+        if (!query.exec())
+            return queryError(QStringLiteral("Mark mail transfer destination dispatching"), query);
         return query.numRowsAffected() == 1;
     }
 
