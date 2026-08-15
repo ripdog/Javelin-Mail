@@ -1,13 +1,15 @@
 #include "app/MailCommandService.h"
 
 #include "app/MailMutationApplicationService.h"
+#include "app/MailTransferCommandService.h"
 
 #include <utility>
 
 namespace javelin::app
 {
-    MailCommandService::MailCommandService(MailMutationApplicationService& service)
-        : m_service(service)
+    MailCommandService::MailCommandService(MailMutationApplicationService& service,
+                                           MailTransferCommandService& transferService)
+        : m_service(service), m_transferService(transferService)
     {
     }
 
@@ -15,6 +17,12 @@ namespace javelin::app
     MailCommandService::queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent)
     {
         co_return co_await m_service.queueMailboxSelectionMutation(std::move(intent));
+    }
+
+    QCoro::Task<MailTransferExecutionResult>
+    MailCommandService::transferAcrossAccounts(CrossAccountMailTransferIntent intent)
+    {
+        co_return co_await m_transferService.transfer(std::move(intent));
     }
 
     QCoro::Task<QueuedMessageSelectionMutationResult>

@@ -5,14 +5,18 @@
 namespace javelin::app
 {
     class MailMutationApplicationService;
+    class MailTransferCommandService;
 
     class MailCommandService final : public MailCommandPort
     {
       public:
-        explicit MailCommandService(MailMutationApplicationService& service);
+        MailCommandService(MailMutationApplicationService& service,
+                           MailTransferCommandService& transferService);
 
         [[nodiscard]] QCoro::Task<QueuedMailboxSelectionMutationResult>
         queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent) override;
+        [[nodiscard]] QCoro::Task<MailTransferExecutionResult>
+        transferAcrossAccounts(CrossAccountMailTransferIntent intent) override;
         [[nodiscard]] QCoro::Task<QueuedMessageSelectionMutationResult>
         queueDestroyMessages(std::string accountId, std::optional<std::string> sourceMailboxId,
                              MessageSelection selection) override;
@@ -45,6 +49,7 @@ namespace javelin::app
 
       private:
         MailMutationApplicationService& m_service;
+        MailTransferCommandService& m_transferService;
     };
 
 } // namespace javelin::app

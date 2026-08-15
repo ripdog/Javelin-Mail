@@ -188,6 +188,8 @@ namespace javelin::app
         explicit RemoteMailCommandPort(RemoteActionClient& client);
         [[nodiscard]] QCoro::Task<QueuedMailboxSelectionMutationResult>
         queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent) override;
+        [[nodiscard]] QCoro::Task<MailTransferExecutionResult>
+        transferAcrossAccounts(CrossAccountMailTransferIntent intent) override;
         [[nodiscard]] QCoro::Task<QueuedMessageSelectionMutationResult>
         queueDestroyMessages(std::string accountId, std::optional<std::string> sourceMailboxId,
                              MessageSelection selection) override;

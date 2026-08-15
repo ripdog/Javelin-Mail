@@ -1251,6 +1251,82 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
     CHECK(std::holds_alternative<javelin::protocol::CommandAccepted>(reusedAfterAcknowledgement));
 }
 
+TEST_CASE("daemon dispatches typed cross-account mail transfer action asynchronously",
+          "[app][daemon][ipc][mail-transfer]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+
+    auto locationResult = javelin::app::CacheLocationProvider{cacheRoot}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(locationResult));
+    javelin::app::DaemonServices services{
+        std::get<javelin::app::CacheLocation>(std::move(locationResult))};
+
+    struct EventSink final : javelin::protocol::BoundaryEventSink
+    {
+        void onBoundaryEvent(const javelin::protocol::BoundaryEvent& event) override
+        {
+            if (const auto* completed =
+                    std::get_if<javelin::protocol::OperationCompleted>(&event))
+                completions.push_back(*completed);
+        }
+        std::vector<javelin::protocol::OperationCompleted> completions;
+    } eventSink;
+
+    javelin::app::DaemonRemoteActionDispatcher dispatcher{
+        services,
+        eventSink,
+        [] { return javelin::protocol::InvalidationEpoch{.value = 1}; },
+        []() -> std::optional<javelin::protocol::BoundaryError> { return std::nullopt; },
+        [](javelin::app::AccountAuthenticationResult result) { return result; },
+        [](javelin::app::AccountConnectionSettings settings)
+            -> std::variant<javelin::app::AccountConnectionSettings, QString> { return settings; },
+        [](javelin::app::OAuthRevocationRequest request)
+            -> std::variant<javelin::app::OAuthRevocationRequest, QString> { return request; }};
+
+    const javelin::app::CrossAccountMailTransferIntent intent{
+        .sourceAccountId = "same-local-account",
+        .sourceMailboxId = std::optional<std::string>{"inbox"},
+        .destinationAccountId = "same-local-account",
+        .destinationMailboxId = "archive",
+        .operation = javelin::app::MailTransferOperation::Move,
+        .selection = {javelin::app::SelectedEmail{.emailId = "email-1"}},
+    };
+    const auto reply = dispatcher.dispatch({
+        .id = {.value = QUuid::createUuid()},
+        .command =
+            javelin::protocol::RemoteActionCommand{
+                .action = javelin::protocol::actions::MailTransferAcrossAccounts::id,
+                .payload = actionPayload<javelin::protocol::actions::MailTransferAcrossAccounts>(
+                    intent),
+            },
+    });
+    const auto* accepted = std::get_if<javelin::protocol::CommandAccepted>(&reply);
+    REQUIRE(accepted != nullptr);
+    REQUIRE(accepted->operation.has_value());
+    CHECK_FALSE(accepted->immediateResult.has_value());
+
+    for (int attempt = 0; attempt < 100 && eventSink.completions.empty(); ++attempt)
+    {
+        QCoreApplication::processEvents();
+        QThread::msleep(1);
+    }
+    REQUIRE(eventSink.completions.size() == 1);
+    CHECK(eventSink.completions.front().operation == *accepted->operation);
+    const auto decoded = javelin::app::remote::decodeVersionedValue<
+        javelin::protocol::actions::MailTransferAcrossAccounts::resultSchemaVersion,
+        javelin::app::MailTransferExecutionResult>(eventSink.completions.front().result);
+    const auto* value = std::get_if<javelin::app::MailTransferExecutionResult>(&decoded);
+    REQUIRE(value != nullptr);
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(*value));
+    CHECK(std::get<javelin::jmap::OperationError>(*value).code ==
+          javelin::jmap::OperationErrorCode::InvalidRequest);
+}
+
 TEST_CASE("daemon action boundary rejects unknown actions and oversized payloads",
           "[app][daemon][ipc][protocol]")
 {

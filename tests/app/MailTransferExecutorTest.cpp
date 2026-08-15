@@ -1,4 +1,5 @@
 #include "app/MailTransferApplicationService.h"
+#include "app/MailTransferCommandService.h"
 #include "app/MailTransferExecutor.h"
 #include "app/MailTransferRepository.h"
 #include "app/AccountConnectionProvider.h"
@@ -1239,6 +1240,78 @@ namespace
         }
     };
 } // namespace
+
+TEST_CASE("cross-account mail transfer command executes daemon-owned transfer and publishes history",
+          "[app][mail-transfer][command]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    javelin::app::undo::HistoryRepository historyRepository{fixture.database};
+    javelin::app::undo::UndoManager undoManager{historyRepository};
+    REQUIRE_FALSE(undoManager.load().has_value());
+    javelin::app::undo::MailTransferHistoryCoordinator historyCoordinator{fixture.database,
+                                                                          undoManager};
+    MailTransferCommandService service{fixture.database, fixture.resourceTransport,
+                                       fixture.methodTransport, *fixture.contentClient,
+                                       fixture.connections, historyCoordinator};
+
+    const auto result = QCoro::waitFor(service.transfer({
+        .sourceAccountId = fixture.sourceAccountId,
+        .sourceMailboxId = std::optional<std::string>{"inbox"},
+        .destinationAccountId = fixture.destinationAccountId,
+        .destinationMailboxId = "archive",
+        .operation = MailTransferOperation::Copy,
+        .selection = {SelectedEmail{.emailId = "email-1"}},
+    }));
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        FAIL(error->message.toStdString());
+    const auto& summary = std::get<MailTransferExecutionSummary>(result);
+    CHECK(summary.status == MailTransferStatus::Complete);
+    CHECK(summary.completeItemCount == 1);
+    REQUIRE(summary.historyEntryId.has_value());
+    REQUIRE(undoManager.entries().size() == 1);
+    CHECK(undoManager.entries().front().entryId == *summary.historyEntryId);
+    CHECK(undoManager.entries().front().commandKind == QStringLiteral("mail_transfer"));
+    CHECK(fixture.methodTransport.importCalls == 1);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == 1);
+}
+
+TEST_CASE("cross-account mail transfer command rejects same-account routing before admission",
+          "[app][mail-transfer][command]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    javelin::app::undo::HistoryRepository historyRepository{fixture.database};
+    javelin::app::undo::UndoManager undoManager{historyRepository};
+    REQUIRE_FALSE(undoManager.load().has_value());
+    javelin::app::undo::MailTransferHistoryCoordinator historyCoordinator{fixture.database,
+                                                                          undoManager};
+    MailTransferCommandService service{fixture.database, fixture.resourceTransport,
+                                       fixture.methodTransport, *fixture.contentClient,
+                                       fixture.connections, historyCoordinator};
+
+    const auto result = QCoro::waitFor(service.transfer({
+        .sourceAccountId = fixture.sourceAccountId,
+        .sourceMailboxId = std::optional<std::string>{"inbox"},
+        .destinationAccountId = fixture.sourceAccountId,
+        .destinationMailboxId = "inbox",
+        .operation = MailTransferOperation::Move,
+        .selection = {SelectedEmail{.emailId = "email-1"}},
+    }));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+    CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+          javelin::jmap::OperationErrorCode::InvalidRequest);
+    CHECK(fixture.methodTransport.importCalls == 0);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == 0);
+    CHECK(undoManager.entries().empty());
+
+    QSqlQuery count{fixture.database.database()};
+    REQUIRE(count.exec(QStringLiteral("SELECT COUNT(*) FROM mail_transfer_operations")));
+    REQUIRE(count.next());
+    CHECK(count.value(0).toInt() == 0);
+}
 
 TEST_CASE("cross-server copy streams exact raw MIME and completes only after import confirmation",
           "[app][mail-transfer][executor]")

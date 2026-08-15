@@ -27,6 +27,7 @@
 #include "app/MailIndexService.h"
 #include "app/MailMutationApplicationService.h"
 #include "app/MailNotificationService.h"
+#include "app/MailTransferCommandService.h"
 #include "app/MailQueryApplicationService.h"
 #include "app/MailboxMaintenanceRegistry.h"
 #include "app/MessageContentApplicationService.h"
@@ -46,6 +47,7 @@
 #include "app/undo/DraftHistoryExecutor.h"
 #include "app/undo/HistoryRepository.h"
 #include "app/undo/MailHistoryExecutor.h"
+#include "app/undo/MailTransferHistoryCoordinator.h"
 #include "app/undo/MailTransferHistoryExecutor.h"
 #include "app/undo/MailTransferHistoryService.h"
 #include "app/undo/SieveHistoryExecutor.h"
@@ -157,6 +159,9 @@ namespace javelin::app
         m_deferredSendRepository = std::make_unique<DeferredSendRepository>(m_databaseConnection);
         if (const auto historyError = m_undoManager->load())
             throw std::runtime_error(historyError->message.toStdString());
+        m_mailTransferHistoryCoordinator =
+            std::make_unique<javelin::app::undo::MailTransferHistoryCoordinator>(
+                m_databaseConnection, *m_undoManager);
         m_networkAccessManager = std::make_unique<QNetworkAccessManager>();
         m_stateChangeNetworkAccessManager = std::make_unique<QNetworkAccessManager>();
         m_onboardingService = std::make_unique<javelin::jmap::auth::AccountOnboardingService>(
@@ -319,8 +324,11 @@ namespace javelin::app
                            "cache clear"
                         << QString::fromStdString(std::string{accountId}) << error->message;
             });
-        m_mailCommandService =
-            std::make_unique<MailCommandService>(*m_mailMutationApplicationService);
+        m_mailTransferCommandService = std::make_unique<MailTransferCommandService>(
+            m_databaseConnection, *m_transport, *m_methodTransport, *m_messageContentClient,
+            *m_accountRuntimeManager, *m_mailTransferHistoryCoordinator);
+        m_mailCommandService = std::make_unique<MailCommandService>(
+            *m_mailMutationApplicationService, *m_mailTransferCommandService);
         m_sieveCommandService = std::make_unique<SieveCommandService>(*m_sieveApplicationService);
         m_identityCommandService = std::make_unique<IdentityCommandService>(
             *m_identityService, *m_accountRepository, *m_accountRuntimeManager, *m_errorCoordinator,

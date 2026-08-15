@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/MailApplicationTypes.h"
+#include "app/MailTransferCommandService.h"
 #include "app/MailboxSelectionMutation.h"
 #include "app/MessageSelection.h"
 #include "jmap/sync/EmailMutationEngine.h"
@@ -91,6 +92,8 @@ namespace javelin::app
 
         [[nodiscard]] virtual QCoro::Task<QueuedMailboxSelectionMutationResult>
         queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent) = 0;
+        [[nodiscard]] virtual QCoro::Task<MailTransferExecutionResult>
+        transferAcrossAccounts(CrossAccountMailTransferIntent intent) = 0;
         [[nodiscard]] virtual QCoro::Task<QueuedMessageSelectionMutationResult>
         queueDestroyMessages(std::string accountId, std::optional<std::string> sourceMailboxId,
                              MessageSelection selection) = 0;

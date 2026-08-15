@@ -47,6 +47,7 @@ namespace javelin::app
     class ComposeCommandService;
     class MailCommandPort;
     class MailCommandService;
+    class MailTransferCommandService;
     class SieveCommandPort;
     class SieveCommandService;
     class IdentityCommandPort;
@@ -100,6 +101,7 @@ namespace javelin::app::undo
     class CalendarPreferenceExecutor;
     class ContactHistoryExecutor;
     class MailHistoryExecutor;
+    class MailTransferHistoryCoordinator;
     class MailTransferHistoryExecutor;
     class MailTransferHistoryService;
     class SieveHistoryExecutor;
@@ -226,6 +228,8 @@ namespace javelin::app
         std::unique_ptr<MailboxMaintenanceRegistry> m_mailboxMaintenanceRegistry;
         std::unique_ptr<javelin::app::undo::HistoryRepository> m_historyRepository;
         std::unique_ptr<javelin::app::undo::UndoManager> m_undoManager;
+        std::unique_ptr<javelin::app::undo::MailTransferHistoryCoordinator>
+            m_mailTransferHistoryCoordinator;
         std::unique_ptr<DeferredSendRepository> m_deferredSendRepository;
         std::unique_ptr<QNetworkAccessManager> m_networkAccessManager;
         std::unique_ptr<QNetworkAccessManager> m_stateChangeNetworkAccessManager;
@@ -284,6 +288,7 @@ namespace javelin::app
         std::unique_ptr<ContactApplicationService> m_contactApplicationService;
         std::unique_ptr<CalendarApplicationService> m_calendarApplicationService;
         std::unique_ptr<SieveApplicationService> m_sieveApplicationService;
+        std::unique_ptr<MailTransferCommandService> m_mailTransferCommandService;
         std::unique_ptr<MailCommandService> m_mailCommandService;
         std::unique_ptr<SieveCommandService> m_sieveCommandService;
         std::unique_ptr<IdentityCommandService> m_identityCommandService;

@@ -1,11 +1,14 @@
 #include "app/RemoteCodec.h"
 #include "app/DeveloperDiagnostics.h"
 #include "app/DeveloperMaintenance.h"
+#include "app/MailTransferCommandService.h"
 #include "app/RemoteActionTypes.h"
 #include "jmap/calendar/CalendarTypes.h"
 #include "jmap/identity/IdentityCommandTypes.h"
 #include "jmap/submission/ComposeTypes.h"
 #include "jmap/sync/MailboxMutationEngine.h"
+#include "protocol/actions/ActionCatalog.h"
+#include "protocol/actions/MailActions.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -81,6 +84,77 @@ TEST_CASE("remote codec aggregate fields are keyed by name rather than source or
     REQUIRE(value != nullptr);
     CHECK(value->sequence == 7);
     CHECK(value->label == QStringLiteral("named"));
+}
+
+TEST_CASE("remote codec round-trips cross-account mail transfer action payloads",
+          "[app][remote-codec][mail-transfer]")
+{
+    using Action = javelin::protocol::actions::MailTransferAcrossAccounts;
+    const javelin::app::CrossAccountMailTransferIntent intent{
+        .sourceAccountId = "local-source",
+        .sourceMailboxId = std::optional<std::string>{"inbox"},
+        .destinationAccountId = "local-destination",
+        .destinationMailboxId = "archive",
+        .operation = javelin::app::MailTransferOperation::Move,
+        .selection = {javelin::app::SelectedEmail{.emailId = "email-1"},
+                      javelin::app::SelectedCollapsedThread{.threadId = "thread-2"}},
+    };
+    const auto encoded =
+        javelin::app::remote::encodeVersioned<Action::requestSchemaVersion>(intent);
+    const auto* payload = std::get_if<QByteArray>(&encoded);
+    REQUIRE(payload != nullptr);
+    const auto decoded = javelin::app::remote::decodeVersionedValue<
+        Action::requestSchemaVersion, javelin::app::CrossAccountMailTransferIntent>(*payload);
+    const auto* value = std::get_if<javelin::app::CrossAccountMailTransferIntent>(&decoded);
+    REQUIRE(value != nullptr);
+    CHECK(value->sourceAccountId == intent.sourceAccountId);
+    CHECK(value->sourceMailboxId == intent.sourceMailboxId);
+    CHECK(value->destinationAccountId == intent.destinationAccountId);
+    CHECK(value->destinationMailboxId == intent.destinationMailboxId);
+    CHECK(value->operation == intent.operation);
+    REQUIRE(value->selection.size() == 2);
+    REQUIRE(std::holds_alternative<javelin::app::SelectedEmail>(value->selection.at(0)));
+    CHECK(std::get<javelin::app::SelectedEmail>(value->selection.at(0)).emailId == "email-1");
+    REQUIRE(std::holds_alternative<javelin::app::SelectedCollapsedThread>(value->selection.at(1)));
+    CHECK(std::get<javelin::app::SelectedCollapsedThread>(value->selection.at(1)).threadId ==
+          "thread-2");
+
+    javelin::app::MailTransferExecutionResult result = javelin::app::MailTransferExecutionSummary{
+        .operationId = "transfer-operation",
+        .status = javelin::app::MailTransferStatus::Partial,
+        .completeItemCount = 3,
+        .destinationConfirmedItemCount = 1,
+        .failedItemCount = 1,
+        .partialItemCount = 1,
+        .unknownItemCount = 0,
+        .historyEntryId = std::optional<QString>{QStringLiteral("history-1")},
+    };
+    const auto resultEncoded =
+        javelin::app::remote::encodeVersioned<Action::resultSchemaVersion>(result);
+    const auto* resultPayload = std::get_if<QByteArray>(&resultEncoded);
+    REQUIRE(resultPayload != nullptr);
+    const auto resultDecoded = javelin::app::remote::decodeVersionedValue<
+        Action::resultSchemaVersion, javelin::app::MailTransferExecutionResult>(*resultPayload);
+    const auto* decodedResult = std::get_if<javelin::app::MailTransferExecutionResult>(&resultDecoded);
+    REQUIRE(decodedResult != nullptr);
+    REQUIRE(std::holds_alternative<javelin::app::MailTransferExecutionSummary>(*decodedResult));
+    const auto& summary = std::get<javelin::app::MailTransferExecutionSummary>(*decodedResult);
+    CHECK(summary.operationId == "transfer-operation");
+    CHECK(summary.status == javelin::app::MailTransferStatus::Partial);
+    CHECK(summary.completeItemCount == 3);
+    CHECK(summary.destinationConfirmedItemCount == 1);
+    CHECK(summary.failedItemCount == 1);
+    CHECK(summary.partialItemCount == 1);
+    CHECK(summary.unknownItemCount == 0);
+    CHECK(summary.historyEntryId ==
+          std::optional<QString>{QStringLiteral("history-1")});
+
+    const auto metadata = javelin::protocol::actions::findActionMetadata(Action::id);
+    REQUIRE(metadata.has_value());
+    CHECK(metadata->id.value == 94);
+    CHECK(metadata->name == "MailTransferAcrossAccounts");
+    CHECK(metadata->admission == javelin::protocol::actions::AdmissionSemantics::Asynchronous);
+    CHECK(metadata->replay == javelin::protocol::actions::ReplayPolicy::Never);
 }
 
 TEST_CASE("remote codec rejects unsupported action schema versions", "[app][remote-codec][schema]")

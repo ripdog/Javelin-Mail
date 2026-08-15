@@ -119,6 +119,11 @@ namespace javelin::protocol::actions
         Descriptor<88, ActionDomain::Mail, AdmissionSemantics::Immediate, ReplayPolicy::Reexecute,
                    detail::messageWindow, std::tuple<javelin::app::ThreadMaterializationIntent>,
                    std::monostate>;
+    using MailTransferAcrossAccounts =
+        Descriptor<94, ActionDomain::Mail, AdmissionSemantics::Asynchronous, ReplayPolicy::Never,
+                   detail::mailMutation,
+                   std::tuple<javelin::app::CrossAccountMailTransferIntent>,
+                   javelin::app::MailTransferExecutionResult>;
 
     using MailActionTypes =
         std::tuple<RegisteredAction<MailQueueMailboxMutation, "MailQueueMailboxMutation">,
@@ -142,5 +147,6 @@ namespace javelin::protocol::actions
                    RegisteredAction<MailCreateMailbox, "MailCreateMailbox">,
                    RegisteredAction<MailDestroyMailbox, "MailDestroyMailbox">,
                    RegisteredAction<MailQueueSetSelectionFlagged, "MailQueueSetSelectionFlagged">,
-                   RegisteredAction<ThreadEnsure, "ThreadEnsure">>;
+                   RegisteredAction<ThreadEnsure, "ThreadEnsure">,
+                   RegisteredAction<MailTransferAcrossAccounts, "MailTransferAcrossAccounts">>;
 } // namespace javelin::protocol::actions

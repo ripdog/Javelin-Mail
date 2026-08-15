@@ -432,6 +432,13 @@ namespace javelin::app
                                                                           std::move(intent));
     }
 
+    QCoro::Task<MailTransferExecutionResult>
+    RemoteMailCommandPort::transferAcrossAccounts(CrossAccountMailTransferIntent intent)
+    {
+        return call<javelin::protocol::actions::MailTransferAcrossAccounts>(m_client,
+                                                                            std::move(intent));
+    }
+
     QCoro::Task<QueuedMessageSelectionMutationResult>
     RemoteMailCommandPort::queueDestroyMessages(std::string accountId,
                                                 std::optional<std::string> sourceMailboxId,

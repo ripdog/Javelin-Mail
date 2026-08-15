@@ -414,6 +414,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/MailTransferPlanning.h
     src/app/messages/MailTransferApplicationService.cpp
     src/app/MailTransferApplicationService.h
+    src/app/messages/MailTransferCommandService.cpp
+    src/app/MailTransferCommandService.h
     src/app/messages/MailTransferExecutor.cpp
     src/app/MailTransferExecutor.h
     src/app/compose/DeferredSendService.cpp
@@ -1823,6 +1825,8 @@ add_library(javelin_daemon_core STATIC
     src/app/MailTransferPlanning.h
     src/app/messages/MailTransferApplicationService.cpp
     src/app/MailTransferApplicationService.h
+    src/app/messages/MailTransferCommandService.cpp
+    src/app/MailTransferCommandService.h
     src/app/messages/MailTransferExecutor.cpp
     src/app/MailTransferExecutor.h
     src/app/compose/DeferredSendService.cpp

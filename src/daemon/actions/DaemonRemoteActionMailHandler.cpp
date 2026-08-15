@@ -23,6 +23,15 @@ namespace javelin::app
                         id, m_services.mailCommandPort().queueMailboxSelectionMutation(
                                 std::move(intent)));
                 });
+        case actions::MailTransferAcrossAccounts::id.value:
+            return dispatchDecoded<actions::MailTransferAcrossAccounts>(
+                id, command,
+                [this, &id](CrossAccountMailTransferIntent intent)
+                {
+                    return launchAction<actions::MailTransferAcrossAccounts>(
+                        id, m_services.mailCommandPort().transferAcrossAccounts(
+                                std::move(intent)));
+                });
         case actions::MailQueueDestroy::id.value:
             return dispatchDecoded<actions::MailQueueDestroy>(
                 id, command,
