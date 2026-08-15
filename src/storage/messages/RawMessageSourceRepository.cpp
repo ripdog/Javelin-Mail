@@ -300,6 +300,61 @@ namespace javelin::jmap::cache
         return std::optional<std::string>{legacyQuery.value(0).toString().toStdString()};
     }
 
+    std::variant<std::optional<RawMessageSourceReference>, DatabaseError>
+    RawMessageSourceRepository::findReference(const std::string_view accountId,
+                                              const std::string_view emailId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT r.blob_id,o.content_hash,o.relative_path,o.size FROM mail_vault_email_refs r "
+            "JOIN mail_vault_objects o ON o.content_hash=r.content_hash WHERE "
+            "r.account_id=:account_id AND r.email_id=:email_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":email_id"), QString::fromStdString(std::string{emailId}));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Read raw message source reference"), query);
+        if (!query.next())
+            return std::optional<RawMessageSourceReference>{};
+
+        return std::optional<RawMessageSourceReference>{RawMessageSourceReference{
+            .emailId = std::string{emailId},
+            .blobId = query.value(0).toString().toStdString(),
+            .object =
+                {
+                    .contentHash = query.value(1).toString().toStdString(),
+                    .relativePath = query.value(2).toString(),
+                    .size = query.value(3).toULongLong(),
+                },
+        }};
+    }
+
+    std::variant<std::optional<MailVaultObject>, DatabaseError>
+    RawMessageSourceRepository::findVaultObject(const std::string_view contentHash) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT content_hash,relative_path,size FROM mail_vault_objects WHERE "
+            "content_hash=:content_hash"));
+        query.bindValue(QStringLiteral(":content_hash"),
+                        QString::fromStdString(std::string{contentHash}));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Read mail vault object"), query);
+        if (!query.next())
+            return std::optional<MailVaultObject>{};
+        return std::optional<MailVaultObject>{MailVaultObject{
+            .contentHash = query.value(0).toString().toStdString(),
+            .relativePath = query.value(1).toString(),
+            .size = query.value(2).toULongLong(),
+        }};
+    }
+
     std::variant<std::optional<RawMessageSource>, DatabaseError>
     RawMessageSourceRepository::find(const std::string_view accountId,
                                      const std::string_view emailId) const
@@ -385,6 +440,8 @@ namespace javelin::jmap::cache
             QStringLiteral("SELECT o.content_hash,o.relative_path,o.size FROM mail_vault_objects o "
                            "WHERE NOT EXISTS(SELECT 1 FROM mail_vault_projection_jobs p WHERE "
                            "p.content_hash=o.content_hash AND p.status='pending') AND "
+                           "NOT EXISTS(SELECT 1 FROM mail_vault_pins pin WHERE "
+                           "pin.content_hash=o.content_hash) AND "
                            "(NOT EXISTS(SELECT 1 FROM mail_vault_email_refs r WHERE "
                            "r.content_hash=o.content_hash) "
                            "OR NOT EXISTS(SELECT 1 FROM mail_vault_email_refs r WHERE "

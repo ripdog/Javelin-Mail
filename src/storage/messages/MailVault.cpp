@@ -358,6 +358,14 @@ namespace javelin::jmap::cache
         return m_state->object;
     }
 
+    std::variant<QString, MailVaultError> MailVaultLease::filePath() const
+    {
+        if (!isValid())
+            return error(QStringLiteral("Open mail vault object"),
+                         QStringLiteral("The vault lease is no longer active."));
+        return m_state->path;
+    }
+
     std::variant<QByteArray, MailVaultError> MailVaultLease::read() const
     {
         if (!isValid())

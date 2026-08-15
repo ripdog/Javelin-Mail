@@ -39,6 +39,7 @@ namespace javelin::jmap::cache
 
         [[nodiscard]] bool isValid() const;
         [[nodiscard]] const MailVaultObject& object() const;
+        [[nodiscard]] std::variant<QString, MailVaultError> filePath() const;
         [[nodiscard]] std::variant<QByteArray, MailVaultError> read() const;
 
       private:

@@ -118,8 +118,28 @@ TEST_CASE("mail vault stores one immutable object and projects effective mailbox
     REQUIRE(std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(loaded).has_value());
     CHECK(std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(loaded)->payload ==
           payload);
+    const auto referenceResult = sources.findReference("account-1", "email-1");
+    REQUIRE(std::holds_alternative<
+            std::optional<javelin::jmap::cache::RawMessageSourceReference>>(referenceResult));
+    const auto& reference =
+        std::get<std::optional<javelin::jmap::cache::RawMessageSourceReference>>(referenceResult);
+    REQUIRE(reference.has_value());
+    CHECK(reference->blobId == first.blobId);
+    CHECK(reference->object.size == static_cast<std::uint64_t>(payload.size()));
+    const auto byHash = sources.findVaultObject(reference->object.contentHash);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailVaultObject>>(byHash));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::MailVaultObject>>(byHash).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::MailVaultObject>>(byHash)->relativePath ==
+          reference->object.relativePath);
 
     const auto vault = javelin::jmap::cache::MailVault::forDatabase(context.connection);
+    auto sourceLeaseResult = vault.acquireLease(reference->object);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::MailVaultLease>(sourceLeaseResult));
+    auto sourceLease =
+        std::get<javelin::jmap::cache::MailVaultLease>(std::move(sourceLeaseResult));
+    const auto leasedPathResult = sourceLease.filePath();
+    REQUIRE(std::holds_alternative<QString>(leasedPathResult));
+    CHECK(QFileInfo::exists(std::get<QString>(leasedPathResult)));
     const auto inboxPath =
         QDir(vault.rootPath())
             .filePath(QStringLiteral("accounts/account-1/mailboxes/inbox/messages/email-1.eml"));
@@ -323,6 +343,18 @@ TEST_CASE("mail vault eviction removes projections and respects active leases",
     CHECK(QFileInfo::exists(projectionPath));
 
     lease = {};
+    QSqlQuery pin{context.connection.database()};
+    pin.prepare(QStringLiteral(
+        "INSERT INTO mail_vault_pins(owner_kind,owner_id,content_hash) "
+        "VALUES('test','pin-1',:hash)"));
+    pin.bindValue(QStringLiteral(":hash"), QString::fromStdString(object.contentHash));
+    REQUIRE(pin.exec());
+    const auto persistentlyBlocked = sources.evictUnretained(10);
+    REQUIRE(std::holds_alternative<std::size_t>(persistentlyBlocked));
+    CHECK(std::get<std::size_t>(persistentlyBlocked) == 0);
+
+    REQUIRE(pin.exec(QStringLiteral("DELETE FROM mail_vault_pins WHERE owner_kind='test' AND "
+                                    "owner_id='pin-1'")));
     const auto evicted = sources.evictUnretained(10);
     REQUIRE(std::holds_alternative<std::size_t>(evicted));
     CHECK(std::get<std::size_t>(evicted) == 1);

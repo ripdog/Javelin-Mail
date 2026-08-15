@@ -571,6 +571,13 @@ namespace javelin::app
                                             const MailTransferItemPhase expected,
                                             const std::string_view rawContentHash)
     {
+        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Pin mail transfer source"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction =
+            std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "UPDATE mail_transfer_items SET raw_content_hash=:hash,phase='source_ready',"
@@ -581,7 +588,76 @@ namespace javelin::app
         query.bindValue(QStringLiteral(":expected"), toString(expected));
         if (!query.exec())
             return queryError(QStringLiteral("Mark mail transfer source ready"), query);
-        return query.numRowsAffected() == 1;
+        if (query.numRowsAffected() != 1)
+        {
+            transaction.rollback();
+            return false;
+        }
+
+        QSqlQuery pin{m_connection.database()};
+        pin.prepare(QStringLiteral(
+            "INSERT INTO mail_vault_pins(owner_kind,owner_id,content_hash) "
+            "VALUES('mail_transfer_item',:owner_id,:content_hash)"));
+        pin.bindValue(QStringLiteral(":owner_id"), QString::fromStdString(std::string{itemId}));
+        pin.bindValue(QStringLiteral(":content_hash"),
+                      QString::fromStdString(std::string{rawContentHash}));
+        if (!pin.exec())
+            return queryError(QStringLiteral("Pin mail transfer source object"), pin);
+        if (const auto error = transaction.commit())
+            return *error;
+        return true;
+    }
+
+    std::optional<DatabaseError>
+    MailTransferRepository::releaseSourcePin(const std::string_view itemId)
+    {
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "DELETE FROM mail_vault_pins WHERE owner_kind='mail_transfer_item' AND owner_id=:id"));
+        query.bindValue(QStringLiteral(":id"), QString::fromStdString(std::string{itemId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Release mail transfer source pin"), query);
+        return std::nullopt;
+    }
+
+    std::variant<bool, DatabaseError>
+    MailTransferRepository::reassignSourcePin(const std::string_view itemId,
+                                              const std::string_view ownerKind,
+                                              const std::string_view ownerId)
+    {
+        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Reassign mail transfer source pin"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction =
+            std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+
+        QSqlQuery insert{m_connection.database()};
+        insert.prepare(QStringLiteral(
+            "INSERT INTO mail_vault_pins(owner_kind,owner_id,content_hash) "
+            "SELECT :owner_kind,:owner_id,content_hash FROM mail_vault_pins WHERE "
+            "owner_kind='mail_transfer_item' AND owner_id=:item_id"));
+        insert.bindValue(QStringLiteral(":owner_kind"),
+                         QString::fromStdString(std::string{ownerKind}));
+        insert.bindValue(QStringLiteral(":owner_id"), QString::fromStdString(std::string{ownerId}));
+        insert.bindValue(QStringLiteral(":item_id"), QString::fromStdString(std::string{itemId}));
+        if (!insert.exec())
+            return queryError(QStringLiteral("Create reassigned mail vault pin"), insert);
+        if (insert.numRowsAffected() != 1)
+        {
+            transaction.rollback();
+            return false;
+        }
+
+        QSqlQuery remove{m_connection.database()};
+        remove.prepare(QStringLiteral(
+            "DELETE FROM mail_vault_pins WHERE owner_kind='mail_transfer_item' AND owner_id=:id"));
+        remove.bindValue(QStringLiteral(":id"), QString::fromStdString(std::string{itemId}));
+        if (!remove.exec())
+            return queryError(QStringLiteral("Remove original mail transfer source pin"), remove);
+        if (const auto error = transaction.commit())
+            return *error;
+        return true;
     }
 
     std::variant<bool, DatabaseError>

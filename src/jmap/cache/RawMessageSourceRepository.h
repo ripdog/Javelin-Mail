@@ -1,5 +1,6 @@
 #pragma once
 
+#include "jmap/cache/MailVault.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
 #include <QByteArray>
@@ -12,13 +13,18 @@
 namespace javelin::jmap::cache
 {
 
-    struct MailVaultObject;
-
     struct RawMessageSource
     {
         std::string emailId;
         std::string blobId;
         QByteArray payload;
+    };
+
+    struct RawMessageSourceReference
+    {
+        std::string emailId;
+        std::string blobId;
+        MailVaultObject object;
     };
 
     class RawMessageSourceRepository
@@ -39,6 +45,10 @@ namespace javelin::jmap::cache
                                                           std::string_view emailId);
         [[nodiscard]] std::variant<std::optional<RawMessageSource>, DatabaseError>
         find(std::string_view accountId, std::string_view emailId) const;
+        [[nodiscard]] std::variant<std::optional<RawMessageSourceReference>, DatabaseError>
+        findReference(std::string_view accountId, std::string_view emailId) const;
+        [[nodiscard]] std::variant<std::optional<MailVaultObject>, DatabaseError>
+        findVaultObject(std::string_view contentHash) const;
         [[nodiscard]] std::variant<std::optional<std::string>, DatabaseError>
         findBlobId(std::string_view accountId, std::string_view emailId) const;
         [[nodiscard]] std::variant<std::size_t, DatabaseError>

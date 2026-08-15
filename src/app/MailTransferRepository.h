@@ -142,6 +142,11 @@ namespace javelin::app
         [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
         markSourceReady(std::string_view itemId, MailTransferItemPhase expected,
                         std::string_view rawContentHash);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        releaseSourcePin(std::string_view itemId);
+        [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
+        reassignSourcePin(std::string_view itemId, std::string_view ownerKind,
+                          std::string_view ownerId);
         [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
         markUploaded(std::string_view itemId, MailTransferItemPhase expected,
                      std::string_view destinationUploadBlobId);

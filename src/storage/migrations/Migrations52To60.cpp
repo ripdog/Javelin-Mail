@@ -75,6 +75,21 @@ namespace javelin::jmap::cache::migrations
                                        "mail_transfer_items(operation_id,phase,ordinal)"),
                     },
             },
+            MigrationStep{
+                .version = 54,
+                .name = QStringLiteral("mail_vault_pins"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "CREATE TABLE mail_vault_pins ("
+                            "owner_kind TEXT NOT NULL,owner_id TEXT NOT NULL,content_hash TEXT NOT "
+                            "NULL REFERENCES mail_vault_objects(content_hash) ON DELETE CASCADE,"
+                            "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                            "PRIMARY KEY(owner_kind,owner_id,content_hash)) STRICT"),
+                        QStringLiteral("CREATE INDEX idx_mail_vault_pins_hash ON "
+                                       "mail_vault_pins(content_hash)"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

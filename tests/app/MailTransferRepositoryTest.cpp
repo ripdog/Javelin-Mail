@@ -1,6 +1,8 @@
 #include "app/MailTransferRepository.h"
+#include "jmap/cache/MailVault.h"
 
 #include <QCoreApplication>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QUuid>
 
@@ -94,6 +96,35 @@ namespace
         };
     }
 
+    [[nodiscard]] javelin::jmap::cache::MailVaultObject
+    seedVaultObject(javelin::jmap::cache::DatabaseConnection& database,
+                    const QByteArray& payload = QByteArrayLiteral("transfer source"))
+    {
+        const auto vault = javelin::jmap::cache::MailVault::forDatabase(database);
+        const auto installed = vault.install(payload);
+        if (const auto* error = std::get_if<javelin::jmap::cache::MailVaultError>(&installed))
+            FAIL(error->message.toStdString());
+        const auto object = std::get<javelin::jmap::cache::MailVaultObject>(installed);
+        QSqlQuery insert{database.database()};
+        insert.prepare(QStringLiteral(
+            "INSERT INTO mail_vault_objects(content_hash,relative_path,size) "
+            "VALUES(:hash,:path,:size)"));
+        insert.bindValue(QStringLiteral(":hash"), QString::fromStdString(object.contentHash));
+        insert.bindValue(QStringLiteral(":path"), object.relativePath);
+        insert.bindValue(QStringLiteral(":size"), static_cast<qulonglong>(object.size));
+        REQUIRE(insert.exec());
+        return object;
+    }
+
+    [[nodiscard]] int scalar(javelin::jmap::cache::DatabaseConnection& database,
+                             const QString& statement)
+    {
+        QSqlQuery query{database.database()};
+        REQUIRE(query.exec(statement));
+        REQUIRE(query.next());
+        return query.value(0).toInt();
+    }
+
     [[nodiscard]] bool requireBool(std::variant<bool, DatabaseError> result)
     {
         if (const auto* error = std::get_if<DatabaseError>(&result))
@@ -178,13 +209,17 @@ TEST_CASE("mail transfer journal records every irreversible boundary with compar
     const auto transfer = operation();
     REQUIRE_FALSE(repository.create(transfer, {item(transfer.operationId, "item-1", 0, "email-a")})
                       .has_value());
+    const auto sourceObject = seedVaultObject(database);
 
     CHECK(requireBool(repository.transitionItem("item-1", MailTransferItemPhase::Prepared,
                                                 MailTransferItemPhase::AcquiringSource)));
     CHECK_FALSE(requireBool(repository.transitionItem("item-1", MailTransferItemPhase::Prepared,
                                                       MailTransferItemPhase::AcquiringSource)));
     CHECK(requireBool(repository.markSourceReady("item-1", MailTransferItemPhase::AcquiringSource,
-                                                 "sha256-source")));
+                                                 sourceObject.contentHash)));
+    CHECK(scalar(database, QStringLiteral(
+                              "SELECT COUNT(*) FROM mail_vault_pins WHERE "
+                              "owner_kind='mail_transfer_item' AND owner_id='item-1'")) == 1);
     CHECK(requireBool(repository.transitionItem("item-1", MailTransferItemPhase::SourceReady,
                                                 MailTransferItemPhase::Uploading)));
     CHECK(requireBool(repository.markUploaded("item-1", MailTransferItemPhase::Uploading,
@@ -216,7 +251,7 @@ TEST_CASE("mail transfer journal records every irreversible boundary with compar
     const auto items = requireItems(repository.listItems(transfer.operationId));
     REQUIRE(items.size() == 1);
     const auto& stored = items.front();
-    CHECK(stored.rawContentHash == std::optional<std::string>{"sha256-source"});
+    CHECK(stored.rawContentHash == std::optional<std::string>{sourceObject.contentHash});
     CHECK(stored.destinationUploadBlobId == std::optional<std::string>{"destination-upload-blob"});
     CHECK(stored.destinationEmailId == std::optional<std::string>{"destination-email"});
     CHECK(stored.destinationBlobId == std::optional<std::string>{"destination-blob"});
@@ -226,6 +261,46 @@ TEST_CASE("mail transfer journal records every irreversible boundary with compar
     CHECK(stored.destinationPriorMailboxIds ==
           std::optional<std::vector<std::string>>{{"old-mailbox"}});
     CHECK(stored.phase == MailTransferItemPhase::DestinationConfirmed);
+}
+
+TEST_CASE("mail transfer source pin is atomic and can be retained by history",
+          "[app][mail-transfer][repository][vault]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto database = openDatabase(directory.filePath(QStringLiteral("transfer.sqlite3")));
+    MailTransferRepository repository{database};
+
+    const auto transfer = operation();
+    REQUIRE_FALSE(repository.create(transfer, {item(transfer.operationId, "item-1", 0, "email-a")})
+                      .has_value());
+    REQUIRE(requireBool(repository.transitionItem("item-1", MailTransferItemPhase::Prepared,
+                                                  MailTransferItemPhase::AcquiringSource)));
+
+    const auto rejected = repository.markSourceReady(
+        "item-1", MailTransferItemPhase::AcquiringSource, "missing-vault-object");
+    REQUIRE(std::holds_alternative<DatabaseError>(rejected));
+    auto afterRejectedPin = requireItems(repository.listItems(transfer.operationId));
+    REQUIRE(afterRejectedPin.size() == 1);
+    CHECK(afterRejectedPin.front().phase == MailTransferItemPhase::AcquiringSource);
+    CHECK_FALSE(afterRejectedPin.front().rawContentHash.has_value());
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_pins")) == 0);
+
+    const auto sourceObject = seedVaultObject(database);
+    REQUIRE(requireBool(repository.markSourceReady(
+        "item-1", MailTransferItemPhase::AcquiringSource, sourceObject.contentHash)));
+    REQUIRE(requireBool(
+        repository.reassignSourcePin("item-1", "operation_history", "history-entry-1")));
+    CHECK(scalar(database, QStringLiteral(
+                              "SELECT COUNT(*) FROM mail_vault_pins WHERE "
+                              "owner_kind='mail_transfer_item' AND owner_id='item-1'")) == 0);
+    CHECK(scalar(database, QStringLiteral(
+                              "SELECT COUNT(*) FROM mail_vault_pins WHERE "
+                              "owner_kind='operation_history' AND owner_id='history-entry-1'")) == 1);
+    REQUIRE_FALSE(repository.releaseSourcePin("item-1").has_value());
+    CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_pins")) == 1);
 }
 
 TEST_CASE("mail transfer journal survives restart and exposes recoverable operations",
