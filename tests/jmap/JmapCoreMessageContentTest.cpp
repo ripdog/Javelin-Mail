@@ -228,19 +228,22 @@ namespace
         REQUIRE(query.exec());
     }
 
-    void seedMailbox(javelin::jmap::cache::DatabaseConnection& connection)
+    void seedMailbox(javelin::jmap::cache::DatabaseConnection& connection,
+                     const std::string_view accountId = "u1")
     {
         const auto parsed = javelin::jmap::domain::parseMailbox(
             javelin::tests::loadFixture("jmap/entities/mailbox.json"));
         REQUIRE(parsed.ok());
         REQUIRE(parsed.value.has_value());
         javelin::jmap::cache::MailboxRepository mailboxes{connection};
-        REQUIRE_FALSE(mailboxes.replaceAll("u1", {*parsed.value}).has_value());
+        REQUIRE_FALSE(mailboxes.replaceAll(accountId, {*parsed.value}).has_value());
         javelin::jmap::cache::SyncStateRepository states{connection};
-        REQUIRE_FALSE(states
-                          .upsert({.accountId = "u1", .objectType = "Mailbox", .queryKey = {}},
-                                  "mailbox-state-1")
-                          .has_value());
+        REQUIRE_FALSE(
+            states
+                .upsert(
+                    {.accountId = std::string{accountId}, .objectType = "Mailbox", .queryKey = {}},
+                    "mailbox-state-1")
+                .has_value());
     }
 
     void seedDeletableMailbox(javelin::jmap::cache::DatabaseConnection& connection,
@@ -2176,8 +2179,15 @@ TEST_CASE("MailboxMutationEngine hides a mailbox with optimistic set semantics",
     Q_UNUSED(application);
     auto databaseContext = makeDatabaseContext();
     javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
-    REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
-    seedMailbox(databaseContext.connection);
+    const auto session = loadSessionFixture();
+    const auto firstStored = sessions.replaceForConnection("connection-a", "u1", session);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(firstStored));
+    const auto secondStored = sessions.replaceForConnection("connection-b", "u1", session);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(secondStored));
+    const auto localAccountId =
+        std::get<javelin::jmap::cache::StoredSessionAccounts>(secondStored).ownerAccountId;
+    REQUIRE(localAccountId != "u1");
+    seedMailbox(databaseContext.connection, localAccountId);
 
     FakeTransport transport;
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
@@ -2192,16 +2202,19 @@ TEST_CASE("MailboxMutationEngine hides a mailbox with optimistic set semantics",
         {.sessionUrl = "https://mail.example.com/.well-known/jmap",
          .loginEmail = "alice@example.com",
          .apiKey = "access-token"},
-        "u1", "mbx-inbox", false, [&projected] { projected = true; }));
+        localAccountId, "mbx-inbox", false, [&projected] { projected = true; }));
 
     REQUIRE(std::holds_alternative<javelin::jmap::MailboxSubscriptionChange>(result));
     CHECK(projected);
     REQUIRE(transport.requests.size() == 1);
     CHECK(transport.requests.front().body.contains(
         QByteArrayLiteral("\"ifInState\":\"mailbox-state-1\"")));
+    CHECK(transport.requests.front().body.contains(QByteArrayLiteral("\"accountId\":\"u1\"")));
+    CHECK_FALSE(transport.requests.front().body.contains(
+        QByteArray::fromStdString("\"accountId\":\"" + localAccountId + "\"")));
     CHECK(transport.requests.front().body.contains(QByteArrayLiteral("\"isSubscribed\":false")));
     javelin::jmap::cache::MailboxRepository mailboxes{databaseContext.connection};
-    const auto mailbox = mailboxes.find("u1", "mbx-inbox");
+    const auto mailbox = mailboxes.find(localAccountId, "mbx-inbox");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Mailbox>>(mailbox));
     REQUIRE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailbox).has_value());
     CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailbox)->isSubscribed);

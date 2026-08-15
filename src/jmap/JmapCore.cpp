@@ -634,7 +634,7 @@ namespace javelin::jmap
         submitMailboxSubscriptionMutation(
             javelin::jmap::api::JmapMethodTransport& transport,
             const LiveConnectionSettings& settings, const std::string& accountId,
-            const javelin::jmap::api::Session& session,
+            std::string remoteAccountId, const javelin::jmap::api::Session& session,
             javelin::jmap::sync::MailboxMutationJournal& journal,
             const javelin::jmap::sync::MailboxSubscriptionMutationRecord& mutation)
         {
@@ -643,7 +643,7 @@ namespace javelin::jmap
                 co_return operationError(*error);
 
             const auto request = javelin::jmap::api::mailboxSet({
-                .accountId = accountId,
+                .accountId = remoteAccountId,
                 .ifInState = mutation.baseState,
                 .create = {},
                 .update = {{mutation.mailboxId, {.isSubscribed = mutation.afterSubscribed}}},
@@ -709,7 +709,7 @@ namespace javelin::jmap
                 co_return callError;
             }
             auto response = std::get<javelin::jmap::api::MailboxSetResponse>(std::move(parsed));
-            if (response.accountId != accountId)
+            if (response.accountId != remoteAccountId)
             {
                 if (const auto error =
                         journal.transition(mutation, javelin::jmap::sync::MutationStatus::Unknown))
@@ -758,7 +758,7 @@ namespace javelin::jmap
         submitMailboxCreateMutation(
             javelin::jmap::api::JmapMethodTransport& transport,
             const LiveConnectionSettings& settings, const std::string& accountId,
-            const javelin::jmap::api::Session& session,
+            std::string remoteAccountId, const javelin::jmap::api::Session& session,
             javelin::jmap::sync::MailboxMutationJournal& journal,
             const javelin::jmap::sync::MailboxCreateMutationRecord& mutation)
         {
@@ -767,7 +767,7 @@ namespace javelin::jmap
                 co_return operationError(*error);
 
             const auto request = javelin::jmap::api::mailboxSet({
-                .accountId = accountId,
+                .accountId = remoteAccountId,
                 .ifInState = mutation.baseState,
                 .create = {{mutation.creationId,
                             {.name = mutation.name,
@@ -794,7 +794,7 @@ namespace javelin::jmap
             const auto createdIdPath =
                 "/" + javelin::jmap::api::patchPath("created", mutation.creationId) + "/id";
             const auto getRequest = javelin::jmap::api::mailboxGet(
-                javelin::jmap::api::getRequestFrom(accountId, setHandle, createdIdPath));
+                javelin::jmap::api::getRequestFrom(remoteAccountId, setHandle, createdIdPath));
             if (!getRequest.has_value())
             {
                 if (const auto error = journal.reject(mutation))
@@ -853,7 +853,7 @@ namespace javelin::jmap
                 co_return callError;
             }
             auto response = std::get<javelin::jmap::api::MailboxSetResponse>(std::move(parsedSet));
-            if (response.accountId != accountId)
+            if (response.accountId != remoteAccountId)
             {
                 if (const auto error =
                         journal.transition(mutation, javelin::jmap::sync::MutationStatus::Unknown))
@@ -896,7 +896,7 @@ namespace javelin::jmap
                 co_return operationError(*error);
             }
             auto fetched = std::get<javelin::jmap::api::MailboxGetResponse>(std::move(parsedGet));
-            if (fetched.accountId != accountId)
+            if (fetched.accountId != remoteAccountId)
             {
                 if (const auto error =
                         journal.transition(mutation, javelin::jmap::sync::MutationStatus::Unknown))
@@ -938,7 +938,7 @@ namespace javelin::jmap
         submitMailboxDestroyMutation(
             javelin::jmap::api::JmapMethodTransport& transport,
             const LiveConnectionSettings& settings, const std::string& accountId,
-            const javelin::jmap::api::Session& session,
+            std::string remoteAccountId, const javelin::jmap::api::Session& session,
             javelin::jmap::sync::MailboxMutationJournal& journal,
             const javelin::jmap::sync::MailboxDestroyMutationRecord& mutation)
         {
@@ -947,7 +947,7 @@ namespace javelin::jmap
                 co_return operationError(*error);
 
             const auto request = javelin::jmap::api::mailboxSet({
-                .accountId = accountId,
+                .accountId = remoteAccountId,
                 .ifInState = mutation.baseState,
                 .create = {},
                 .update = {},
@@ -1013,7 +1013,7 @@ namespace javelin::jmap
                 co_return callError;
             }
             auto response = std::get<javelin::jmap::api::MailboxSetResponse>(std::move(parsed));
-            if (response.accountId != accountId)
+            if (response.accountId != remoteAccountId)
             {
                 if (const auto error =
                         journal.transition(mutation, javelin::jmap::sync::MutationStatus::Unknown))
@@ -1068,12 +1068,12 @@ namespace javelin::jmap
             std::variant<javelin::jmap::api::MailboxGetResponse, OperationError>>
         fetchMailboxForReconciliation(javelin::jmap::api::JmapMethodTransport& transport,
                                       const LiveConnectionSettings& settings,
-                                      const std::string& accountId,
+                                      const std::string& accountId, std::string remoteAccountId,
                                       const javelin::jmap::api::Session& session,
                                       const std::string& mailboxId)
         {
             const auto request = javelin::jmap::api::mailboxGet({
-                .accountId = accountId,
+                .accountId = remoteAccountId,
                 .ids = std::vector<std::string>{mailboxId},
                 .idsReference = std::nullopt,
                 .properties = std::nullopt,
@@ -1110,10 +1110,11 @@ namespace javelin::jmap
         fetchAllMailboxesForReconciliation(javelin::jmap::api::JmapMethodTransport& transport,
                                            const LiveConnectionSettings& settings,
                                            const std::string& accountId,
+                                           std::string remoteAccountId,
                                            const javelin::jmap::api::Session& session)
         {
             const auto request = javelin::jmap::api::mailboxGet({
-                .accountId = accountId,
+                .accountId = remoteAccountId,
                 .ids = std::nullopt,
                 .idsReference = std::nullopt,
                 .properties = std::nullopt,
@@ -2737,7 +2738,13 @@ namespace javelin::jmap
         }
         if (const auto validationError = validateLoginSettings(settings, true))
             co_return *validationError;
-        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        const auto identityResult =
+            resolveCachedAccountIdentity(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<OperationError>(&identityResult))
+            co_return *error;
+        const auto& identity = std::get<CachedAccountIdentity>(identityResult);
+        const auto sessionResult =
+            loadCachedSession(*m_impl->databaseConnection, identity.localAccountId);
         if (const auto* error = std::get_if<OperationError>(&sessionResult))
             co_return *error;
         const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
@@ -2748,7 +2755,7 @@ namespace javelin::jmap
                 .message = QStringLiteral("This server does not support JMAP Mail."),
             };
         }
-        const auto account = session.accounts.find(accountId);
+        const auto account = session.accounts.find(identity.remoteAccountId);
         if (account == session.accounts.end() || !account->second.accountCapabilities.mail)
         {
             co_return OperationError{
@@ -2823,7 +2830,8 @@ namespace javelin::jmap
             projectionCommitted();
 
         auto result = co_await submitMailboxSubscriptionMutation(
-            *m_impl->methodTransport, settings, accountId, session, journal, mutation);
+            *m_impl->methodTransport, settings, accountId, identity.remoteAccountId, session,
+            journal, mutation);
         if (const auto* error = std::get_if<OperationError>(&result))
             co_return *error;
         co_return MailboxSubscriptionChange{
@@ -2845,7 +2853,13 @@ namespace javelin::jmap
         }
         if (const auto validationError = validateLoginSettings(settings, true))
             co_return *validationError;
-        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        const auto identityResult =
+            resolveCachedAccountIdentity(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<OperationError>(&identityResult))
+            co_return *error;
+        const auto& identity = std::get<CachedAccountIdentity>(identityResult);
+        const auto sessionResult =
+            loadCachedSession(*m_impl->databaseConnection, identity.localAccountId);
         if (const auto* error = std::get_if<OperationError>(&sessionResult))
             co_return *error;
         const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
@@ -2882,11 +2896,12 @@ namespace javelin::jmap
         if (mutation.status == javelin::jmap::sync::MutationStatus::Unknown)
         {
             auto fetched = co_await fetchMailboxForReconciliation(
-                *m_impl->methodTransport, settings, accountId, session, mutation.mailboxId);
+                *m_impl->methodTransport, settings, accountId, identity.remoteAccountId, session,
+                mutation.mailboxId);
             if (const auto* error = std::get_if<OperationError>(&fetched))
                 co_return *error;
             auto response = std::get<javelin::jmap::api::MailboxGetResponse>(std::move(fetched));
-            if (response.accountId != accountId)
+            if (response.accountId != identity.remoteAccountId)
             {
                 co_return OperationError{
                     .code = OperationErrorCode::ProtocolViolation,
@@ -2934,7 +2949,8 @@ namespace javelin::jmap
         }
 
         auto submitted = co_await submitMailboxSubscriptionMutation(
-            *m_impl->methodTransport, settings, accountId, session, journal, mutation);
+            *m_impl->methodTransport, settings, accountId, identity.remoteAccountId, session,
+            journal, mutation);
         if (const auto* error = std::get_if<OperationError>(&submitted))
             co_return *error;
         co_return MailboxSubscriptionChange{
@@ -2964,7 +2980,13 @@ namespace javelin::jmap
             };
         }
 
-        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        const auto identityResult =
+            resolveCachedAccountIdentity(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<OperationError>(&identityResult))
+            co_return *error;
+        const auto& identity = std::get<CachedAccountIdentity>(identityResult);
+        const auto sessionResult =
+            loadCachedSession(*m_impl->databaseConnection, identity.localAccountId);
         if (const auto* error = std::get_if<OperationError>(&sessionResult))
             co_return *error;
         const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
@@ -2975,7 +2997,7 @@ namespace javelin::jmap
                 .message = QStringLiteral("This server does not support JMAP Mail."),
             };
         }
-        const auto account = session.accounts.find(accountId);
+        const auto account = session.accounts.find(identity.remoteAccountId);
         if (account == session.accounts.end() || !account->second.accountCapabilities.mail)
         {
             co_return OperationError{
@@ -3055,7 +3077,8 @@ namespace javelin::jmap
             projectionCommitted();
 
         auto result = co_await submitMailboxCreateMutation(*m_impl->methodTransport, settings,
-                                                           accountId, session, journal, mutation);
+                                                           accountId, identity.remoteAccountId,
+                                                           session, journal, mutation);
         if (const auto* error = std::get_if<OperationError>(&result))
             co_return *error;
         auto mailbox = std::get<javelin::jmap::domain::Mailbox>(std::move(result));
@@ -3077,7 +3100,13 @@ namespace javelin::jmap
         }
         if (const auto validationError = validateLoginSettings(settings, true))
             co_return *validationError;
-        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        const auto identityResult =
+            resolveCachedAccountIdentity(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<OperationError>(&identityResult))
+            co_return *error;
+        const auto& identity = std::get<CachedAccountIdentity>(identityResult);
+        const auto sessionResult =
+            loadCachedSession(*m_impl->databaseConnection, identity.localAccountId);
         if (const auto* error = std::get_if<OperationError>(&sessionResult))
             co_return *error;
         const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
@@ -3114,11 +3143,11 @@ namespace javelin::jmap
         if (mutation.status == javelin::jmap::sync::MutationStatus::Unknown)
         {
             auto fetched = co_await fetchAllMailboxesForReconciliation(
-                *m_impl->methodTransport, settings, accountId, session);
+                *m_impl->methodTransport, settings, accountId, identity.remoteAccountId, session);
             if (const auto* error = std::get_if<OperationError>(&fetched))
                 co_return *error;
             auto response = std::get<javelin::jmap::api::MailboxGetResponse>(std::move(fetched));
-            if (response.accountId != accountId)
+            if (response.accountId != identity.remoteAccountId)
             {
                 co_return OperationError{
                     .code = OperationErrorCode::ProtocolViolation,
@@ -3158,8 +3187,9 @@ namespace javelin::jmap
             mutation.baseState = response.state;
         }
 
-        auto submitted = co_await submitMailboxCreateMutation(
-            *m_impl->methodTransport, settings, accountId, session, journal, mutation);
+        auto submitted = co_await submitMailboxCreateMutation(*m_impl->methodTransport, settings,
+                                                              accountId, identity.remoteAccountId,
+                                                              session, journal, mutation);
         if (const auto* error = std::get_if<OperationError>(&submitted))
             co_return *error;
         auto mailbox = std::get<javelin::jmap::domain::Mailbox>(std::move(submitted));
@@ -3182,7 +3212,13 @@ namespace javelin::jmap
         }
         if (const auto validationError = validateLoginSettings(settings, true))
             co_return *validationError;
-        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        const auto identityResult =
+            resolveCachedAccountIdentity(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<OperationError>(&identityResult))
+            co_return *error;
+        const auto& identity = std::get<CachedAccountIdentity>(identityResult);
+        const auto sessionResult =
+            loadCachedSession(*m_impl->databaseConnection, identity.localAccountId);
         if (const auto* error = std::get_if<OperationError>(&sessionResult))
             co_return *error;
         const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
@@ -3193,7 +3229,7 @@ namespace javelin::jmap
                 .message = QStringLiteral("This server does not support JMAP Mail."),
             };
         }
-        const auto account = session.accounts.find(accountId);
+        const auto account = session.accounts.find(identity.remoteAccountId);
         if (account == session.accounts.end() || !account->second.accountCapabilities.mail)
         {
             co_return OperationError{
@@ -3283,7 +3319,8 @@ namespace javelin::jmap
             projectionCommitted();
 
         auto result = co_await submitMailboxDestroyMutation(*m_impl->methodTransport, settings,
-                                                            accountId, session, journal, mutation);
+                                                            accountId, identity.remoteAccountId,
+                                                            session, journal, mutation);
         if (const auto* error = std::get_if<OperationError>(&result))
             co_return *error;
         co_return MailboxDestroyChange{.accountId = std::move(accountId),
@@ -3301,7 +3338,13 @@ namespace javelin::jmap
         }
         if (const auto validationError = validateLoginSettings(settings, true))
             co_return *validationError;
-        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        const auto identityResult =
+            resolveCachedAccountIdentity(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<OperationError>(&identityResult))
+            co_return *error;
+        const auto& identity = std::get<CachedAccountIdentity>(identityResult);
+        const auto sessionResult =
+            loadCachedSession(*m_impl->databaseConnection, identity.localAccountId);
         if (const auto* error = std::get_if<OperationError>(&sessionResult))
             co_return *error;
         const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
@@ -3337,11 +3380,12 @@ namespace javelin::jmap
         if (mutation.status == javelin::jmap::sync::MutationStatus::Unknown)
         {
             auto fetched = co_await fetchMailboxForReconciliation(
-                *m_impl->methodTransport, settings, accountId, session, mutation.mailboxId);
+                *m_impl->methodTransport, settings, accountId, identity.remoteAccountId, session,
+                mutation.mailboxId);
             if (const auto* error = std::get_if<OperationError>(&fetched))
                 co_return *error;
             auto response = std::get<javelin::jmap::api::MailboxGetResponse>(std::move(fetched));
-            if (response.accountId != accountId)
+            if (response.accountId != identity.remoteAccountId)
             {
                 co_return OperationError{
                     .code = OperationErrorCode::ProtocolViolation,
@@ -3375,8 +3419,9 @@ namespace javelin::jmap
             mutation.status = javelin::jmap::sync::MutationStatus::Pending;
         }
 
-        auto submitted = co_await submitMailboxDestroyMutation(
-            *m_impl->methodTransport, settings, accountId, session, journal, mutation);
+        auto submitted = co_await submitMailboxDestroyMutation(*m_impl->methodTransport, settings,
+                                                               accountId, identity.remoteAccountId,
+                                                               session, journal, mutation);
         if (const auto* error = std::get_if<OperationError>(&submitted))
             co_return *error;
         co_return MailboxDestroyChange{.accountId = std::move(accountId),
