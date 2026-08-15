@@ -13,8 +13,11 @@
 #include "jmap/api/ResponseReader.h"
 #include "jmap/api/Session.h"
 #include "jmap/cache/AccountRepository.h"
+#include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailVault.h"
+#include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
+#include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
 
 #include <KLocalizedString>
@@ -144,6 +147,17 @@ namespace javelin::app
             if (const auto error = repository.releaseSourcePin(itemId))
                 return javelin::jmap::operationError(*error);
             return std::nullopt;
+        }
+
+        [[nodiscard]] const std::vector<std::string>& destinationEmailProperties()
+        {
+            static const std::vector<std::string> properties{
+                "id",         "blobId",        "threadId", "mailboxIds", "keywords",
+                "size",       "receivedAt",    "sentAt",   "messageId",  "inReplyTo",
+                "references", "hasAttachment", "subject",  "from",       "to",
+                "cc",         "bcc",           "replyTo",  "preview",
+            };
+            return properties;
         }
 
         [[nodiscard]] std::unordered_map<std::string, bool>
@@ -1259,6 +1273,120 @@ namespace javelin::app
                         continue;
                     }
                 }
+            }
+
+            if (item.phase == MailTransferItemPhase::DestinationConfirmed)
+            {
+                if (!item.destinationEmailId.has_value())
+                    co_return stateError(i18n("The confirmed transfer has no destination Email id."));
+
+                const auto destinationEmailRequest = javelin::jmap::api::emailGet({
+                    .accountId = destinationAccount.remoteAccountId,
+                    .ids = std::vector<std::string>{*item.destinationEmailId},
+                    .idsReference = std::nullopt,
+                    .properties = destinationEmailProperties(),
+                });
+                if (!destinationEmailRequest.has_value())
+                    co_return stateError(
+                        i18n("Unable to encode the confirmed destination Email/get request."));
+                javelin::jmap::api::RequestBuilder destinationEmailBuilder;
+                destinationEmailBuilder.useCore().useMail();
+                const auto destinationEmailHandle = destinationEmailBuilder.call(
+                    *destinationEmailRequest, "mail-transfer-destination-materialize");
+                auto destinationEmailCalled =
+                    co_await methodCaller.call(destinationRequestContext, destinationEmailBuilder);
+                if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(
+                        destinationEmailCalled))
+                {
+                    const auto error = callerError(destinationEmailCalled);
+                    if (retryable(error))
+                    {
+                        if (const auto databaseError = repository.updateStatus(
+                                operation.operationId, waitStatus(error), error.message))
+                            co_return javelin::jmap::operationError(*databaseError);
+                        co_return error;
+                    }
+                    if (const auto transitionError = requireTransition(
+                            repository.transitionItem(
+                                item.itemId, MailTransferItemPhase::DestinationConfirmed,
+                                MailTransferItemPhase::DestinationUnknown, error.message),
+                            i18n("The transfer state changed while validating the confirmed "
+                                 "destination.")))
+                        co_return *transitionError;
+                    item.phase = MailTransferItemPhase::DestinationUnknown;
+                    item.lastError = error.message;
+                    continue;
+                }
+
+                const auto destinationEmailRead = javelin::jmap::api::ResponseReader{
+                    std::get<javelin::jmap::api::ResponseEnvelope>(destinationEmailCalled)}
+                                                      .require(destinationEmailHandle);
+                if (const auto* readError =
+                        std::get_if<javelin::jmap::api::ResponseReaderError>(&destinationEmailRead))
+                {
+                    const auto error = javelin::jmap::operationError(*readError);
+                    if (const auto transitionError = requireTransition(
+                            repository.transitionItem(
+                                item.itemId, MailTransferItemPhase::DestinationConfirmed,
+                                MailTransferItemPhase::DestinationUnknown, error.message),
+                            i18n("The transfer state changed while validating the confirmed "
+                                 "destination.")))
+                        co_return *transitionError;
+                    item.phase = MailTransferItemPhase::DestinationUnknown;
+                    item.lastError = error.message;
+                    continue;
+                }
+
+                const auto& destinationEmailResponse =
+                    std::get<javelin::jmap::api::EmailGetResponse>(destinationEmailRead);
+                const bool validDestination =
+                    destinationEmailResponse.accountId == destinationAccount.remoteAccountId &&
+                    destinationEmailResponse.list.size() == 1 &&
+                    destinationEmailResponse.list.front().id == *item.destinationEmailId &&
+                    destinationEmailResponse.notFound.empty();
+                if (!validDestination ||
+                    !std::ranges::contains(destinationEmailResponse.list.front().mailboxIds,
+                                           operation.destinationMailboxId))
+                {
+                    const QString message = i18n(
+                        "The confirmed destination message could not be verified in the selected "
+                        "mailbox.");
+                    if (const auto transitionError = requireTransition(
+                            repository.transitionItem(
+                                item.itemId, MailTransferItemPhase::DestinationConfirmed,
+                                MailTransferItemPhase::DestinationUnknown, message),
+                            i18n("The transfer state changed while validating the confirmed "
+                                 "destination.")))
+                        co_return *transitionError;
+                    item.phase = MailTransferItemPhase::DestinationUnknown;
+                    item.lastError = message;
+                    continue;
+                }
+
+                auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                    m_databaseConnection, QStringLiteral("Materialize mail transfer destination"));
+                if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+                    co_return javelin::jmap::operationError(*error);
+                auto transaction =
+                    std::get<javelin::jmap::cache::DatabaseTransaction>(
+                        std::move(transactionResult));
+                javelin::jmap::cache::EmailRepository destinationEmails{m_databaseConnection};
+                if (const auto error = destinationEmails.upsertMany(
+                        transaction, operation.destinationAccountId,
+                        destinationEmailResponse.list))
+                    co_return javelin::jmap::operationError(*error);
+                javelin::jmap::cache::MailboxWindowRepository mailboxWindows{
+                    m_databaseConnection};
+                if (const auto error = mailboxWindows.invalidateMailbox(
+                        transaction, operation.destinationAccountId,
+                        operation.destinationMailboxId))
+                    co_return javelin::jmap::operationError(*error);
+                javelin::jmap::cache::SearchWindowRepository searchWindows{m_databaseConnection};
+                if (const auto error =
+                        searchWindows.invalidateAccount(transaction, operation.destinationAccountId))
+                    co_return javelin::jmap::operationError(*error);
+                if (const auto error = transaction.commit())
+                    co_return javelin::jmap::operationError(*error);
             }
 
             if (item.phase == MailTransferItemPhase::DestinationConfirmed &&

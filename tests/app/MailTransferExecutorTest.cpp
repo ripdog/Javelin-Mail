@@ -8,7 +8,9 @@
 #include "jmap/api/Transport.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxRepository.h"
+#include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
+#include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 
@@ -267,6 +269,7 @@ namespace
         SourceCleanupBehavior sourceCleanupBehavior = SourceCleanupBehavior::Success;
         int stateCalls = 0;
         int existingGetCalls = 0;
+        int materializeCalls = 0;
         int importCalls = 0;
         int setCalls = 0;
         int sourceGetCalls = 0;
@@ -275,6 +278,8 @@ namespace
         std::string setArguments;
         std::string sourceSetArguments;
         std::string existingState{"destination-state-existing"};
+        bool existingMembershipApplied = false;
+        bool materializeNotFound = false;
         std::vector<std::string> sourceAuthoritativeMailboxIds{"inbox"};
         std::vector<std::string> callOrder;
 
@@ -396,7 +401,8 @@ namespace
                 {
                     ++existingGetCalls;
                     callOrder.push_back("destination-existing-get");
-                    const bool inTarget = behavior == ImportBehavior::AlreadyExistsInTarget;
+                    const bool inTarget = behavior == ImportBehavior::AlreadyExistsInTarget ||
+                                          existingMembershipApplied;
                     const auto mailboxIds =
                         inTarget ? R"({"archive":true,"old-mailbox":true})"
                                  : R"({"old-mailbox":true})";
@@ -409,6 +415,35 @@ namespace
                         .methodResponses = {{.name = "Email/get",
                                              .arguments = response,
                                              .callId = method.callId}},
+                        .createdIds = std::nullopt,
+                        .sessionState = "session-state",
+                    };
+                }
+
+                if (method.arguments.find("destination-email") != std::string::npos)
+                {
+                    ++materializeCalls;
+                    callOrder.push_back("destination-materialize");
+                    if (materializeNotFound)
+                    {
+                        co_return ResponseEnvelope{
+                            .methodResponses = {{
+                                .name = "Email/get",
+                                .arguments =
+                                    R"({"accountId":"u1","state":"destination-state-3","list":[],"notFound":["destination-email"]})",
+                                .callId = method.callId,
+                            }},
+                            .createdIds = std::nullopt,
+                            .sessionState = "session-state",
+                        };
+                    }
+                    co_return ResponseEnvelope{
+                        .methodResponses = {{
+                            .name = "Email/get",
+                            .arguments =
+                                R"({"accountId":"u1","state":"destination-state-2","list":[{"id":"destination-email","blobId":"destination-blob","threadId":"destination-thread","mailboxIds":{"archive":true},"keywords":{"$seen":true,"$flagged":true},"size":37,"receivedAt":"2026-08-15T08:00:00Z","hasAttachment":false,"subject":"Transfer","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Preview"}],"notFound":[]})",
+                            .callId = method.callId,
+                        }},
                         .createdIds = std::nullopt,
                         .sessionState = "session-state",
                     };
@@ -443,6 +478,7 @@ namespace
                         .retryAfter = std::nullopt,
                     };
                 }
+                existingMembershipApplied = true;
                 co_return ResponseEnvelope{
                     .methodResponses = {{
                         .name = "Email/set",
@@ -687,6 +723,16 @@ namespace
             return current.has_value() ? std::optional{current->mailboxIds} : std::nullopt;
         }
 
+        [[nodiscard]] std::optional<javelin::jmap::domain::Email>
+        destinationEmail(std::string_view emailId) const
+        {
+            javelin::jmap::cache::EmailRepository emails{
+                const_cast<javelin::jmap::cache::DatabaseConnection&>(database)};
+            const auto result = emails.find(destinationAccountId, emailId);
+            REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(result));
+            return std::get<std::optional<javelin::jmap::domain::Email>>(result);
+        }
+
         [[nodiscard]] int pinCount() const
         {
             QSqlQuery query{database.database()};
@@ -718,6 +764,7 @@ namespace
         bool copyDispatchedFailure = false;
         std::vector<std::string> sourceAuthoritativeMailboxIds{"inbox"};
         int copyCalls = 0;
+        int materializeCalls = 0;
         int sourceGetCalls = 0;
         int sourceSetCalls = 0;
         std::string copyArguments;
@@ -734,6 +781,20 @@ namespace
                 REQUIRE(request.envelope.methodCalls.size() == 1);
                 if (request.dispatched)
                     request.dispatched();
+                if (method.arguments.find("destination-email") != std::string::npos)
+                {
+                    ++materializeCalls;
+                    co_return ResponseEnvelope{
+                        .methodResponses = {{
+                            .name = "Email/get",
+                            .arguments =
+                                R"({"accountId":"u2","state":"destination-state-2","list":[{"id":"destination-email","blobId":"destination-blob","threadId":"destination-thread","mailboxIds":{"archive":true},"keywords":{"$seen":true,"$flagged":true},"size":41,"receivedAt":"2026-08-15T08:00:00Z","hasAttachment":false,"subject":"Transfer","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Preview"}],"notFound":[]})",
+                            .callId = method.callId,
+                        }},
+                        .createdIds = std::nullopt,
+                        .sessionState = "session-state",
+                    };
+                }
                 if (method.arguments.find("email-1") == std::string::npos)
                 {
                     co_return ResponseEnvelope{
@@ -1014,6 +1075,37 @@ TEST_CASE("cross-server copy streams exact raw MIME and completes only after imp
     Q_UNUSED(application);
     Fixture fixture;
     const auto operationId = fixture.prepare(MailTransferOperation::Copy);
+    javelin::jmap::cache::MailboxWindowRepository mailboxWindows{fixture.database};
+    REQUIRE_FALSE(mailboxWindows
+                      .replace({.accountId = fixture.destinationAccountId,
+                                .mailboxId = "archive",
+                                .queryKey = "archive-window",
+                                .requestedOffset = 0,
+                                .requestedLimit = 50,
+                                .position = 0,
+                                .returnedLimit = 0,
+                                .total = 0,
+                                .queryState = "destination-query-state",
+                                .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
+                                .materialization =
+                                    javelin::jmap::cache::QueryWindowMaterialization::Complete,
+                                .emailIds = {}})
+                      .has_value());
+    javelin::jmap::cache::SearchWindowRepository searchWindows{fixture.database};
+    REQUIRE_FALSE(searchWindows
+                      .replace({.accountId = fixture.destinationAccountId,
+                                .queryKey = "search-window",
+                                .offset = 0,
+                                .limit = 50,
+                                .position = 0,
+                                .returnedLimit = 0,
+                                .total = 0,
+                                .queryState = "destination-search-state",
+                                .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
+                                .materialization =
+                                    javelin::jmap::cache::QueryWindowMaterialization::Complete,
+                                .emailIds = {}})
+                      .has_value());
 
     const auto result = fixture.execute(operationId);
     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
@@ -1038,6 +1130,28 @@ TEST_CASE("cross-server copy streams exact raw MIME and completes only after imp
     CHECK(item.destinationEmailId == std::optional<std::string>{"destination-email"});
     CHECK(item.destinationBlobId == std::optional<std::string>{"destination-blob"});
     CHECK(item.destinationThreadId == std::optional<std::string>{"destination-thread"});
+    CHECK(fixture.methodTransport.materializeCalls == 1);
+    const auto cachedDestination = fixture.destinationEmail("destination-email");
+    REQUIRE(cachedDestination.has_value());
+    CHECK(cachedDestination->threadId == "destination-thread");
+    CHECK(cachedDestination->mailboxIds == std::vector<std::string>{"archive"});
+    CHECK(cachedDestination->keywords == std::vector<std::string>{"$flagged", "$seen"});
+    const auto mailboxWindow =
+        mailboxWindows.find(fixture.destinationAccountId, "archive-window", 0, 50);
+    REQUIRE(std::holds_alternative<
+            std::optional<javelin::jmap::cache::MailboxWindowRecord>>(mailboxWindow));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(mailboxWindow)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(mailboxWindow)
+              ->coverage == javelin::jmap::cache::QueryWindowCoverage::Stale);
+    const auto searchWindow =
+        searchWindows.find(fixture.destinationAccountId, "search-window", 0, 50);
+    REQUIRE(std::holds_alternative<
+            std::optional<javelin::jmap::cache::SearchWindowRecord>>(searchWindow));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::SearchWindowRecord>>(searchWindow)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SearchWindowRecord>>(searchWindow)->coverage ==
+          javelin::jmap::cache::QueryWindowCoverage::Stale);
     CHECK(fixture.pinCount() == 0);
     CHECK(fixture.sourceStillExists());
 }
@@ -1078,6 +1192,30 @@ TEST_CASE("cross-server move destroys the last source residency only after desti
     CHECK(sourceGetPosition < sourceSetPosition);
     CHECK(fixture.pinCount() == 1);
     CHECK_FALSE(fixture.sourceStillExists());
+}
+
+TEST_CASE("move keeps source when confirmed destination cannot be materialized",
+          "[app][mail-transfer][executor][move][destination-cache]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    fixture.methodTransport.materializeNotFound = true;
+    const auto operationId = fixture.prepare(MailTransferOperation::Move);
+
+    const auto result = fixture.execute(operationId);
+    REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(result));
+    CHECK(std::get<MailTransferExecutionSummary>(result).status ==
+          MailTransferStatus::BlockedUnknown);
+    const auto item = fixture.item(operationId);
+    CHECK(item.phase == MailTransferItemPhase::DestinationUnknown);
+    CHECK(item.destinationEmailId == std::optional<std::string>{"destination-email"});
+    CHECK(fixture.methodTransport.materializeCalls == 1);
+    CHECK(fixture.methodTransport.sourceGetCalls == 0);
+    CHECK(fixture.methodTransport.sourceSetCalls == 0);
+    CHECK(fixture.sourceStillExists());
+    CHECK_FALSE(fixture.destinationEmail("destination-email").has_value());
+    CHECK(fixture.pinCount() == 1);
 }
 
 TEST_CASE("cross-server move removes only the selected source mailbox when other residency remains",
@@ -1296,7 +1434,7 @@ TEST_CASE("already-existing destination in target mailbox is reused without chan
         FAIL(error->message.toStdString());
     REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(result));
     CHECK(std::get<MailTransferExecutionSummary>(result).status == MailTransferStatus::Complete);
-    CHECK(fixture.methodTransport.existingGetCalls == 1);
+    CHECK(fixture.methodTransport.existingGetCalls == 2);
     CHECK(fixture.methodTransport.setCalls == 0);
     const auto item = fixture.item(operationId);
     CHECK(item.phase == MailTransferItemPhase::Complete);
@@ -1324,7 +1462,7 @@ TEST_CASE("already-existing destination outside target gains only target mailbox
         FAIL(error->message.toStdString());
     REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(result));
     CHECK(std::get<MailTransferExecutionSummary>(result).status == MailTransferStatus::Complete);
-    CHECK(fixture.methodTransport.existingGetCalls == 1);
+    CHECK(fixture.methodTransport.existingGetCalls == 2);
     CHECK(fixture.methodTransport.setCalls == 1);
     CHECK(fixture.methodTransport.setArguments.find("mailboxIds/archive") != std::string::npos);
     CHECK(fixture.methodTransport.setArguments.find("keywords") == std::string::npos);
