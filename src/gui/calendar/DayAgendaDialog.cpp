@@ -7,6 +7,7 @@
 #include <QAccessible>
 #include <QAccessibleWidget>
 #include <QButtonGroup>
+#include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QFont>
 #include <QFontMetrics>
@@ -20,6 +21,7 @@
 #include <QScrollBar>
 #include <QShortcut>
 #include <QShowEvent>
+#include <QSignalBlocker>
 #include <QSplitter>
 #include <QTimer>
 #include <QToolButton>
@@ -518,6 +520,23 @@ namespace javelin::gui::calendar
                                ? QString{}
                                : i18nc("calendar event detail", "%1: %2", prefix, value));
         }
+
+        [[nodiscard]] bool hasCalendarResponse(const QString& participationStatus)
+        {
+            return !participationStatus.isEmpty() &&
+                   participationStatus != QStringLiteral("needs-action");
+        }
+
+        [[nodiscard]] QString calendarResponseLabel(const QString& participationStatus)
+        {
+            if (participationStatus == QStringLiteral("accepted"))
+                return i18nc("calendar RSVP status", "accepted");
+            if (participationStatus == QStringLiteral("tentative"))
+                return i18nc("calendar RSVP status", "tentative");
+            if (participationStatus == QStringLiteral("declined"))
+                return i18nc("calendar RSVP status", "declined");
+            return participationStatus;
+        }
     } // namespace
 
     DayAgendaDialog::DayAgendaDialog(QWidget* parent) : QDialog(parent)
@@ -609,10 +628,14 @@ namespace javelin::gui::calendar
             detailsLayout->addWidget(label);
         }
         m_responseLabel = new QLabel(i18n("Your response"), details);
+        m_responseLabel->setObjectName(QStringLiteral("dayAgendaResponseLabel"));
         auto responseLabelFont = m_responseLabel->font();
         responseLabelFont.setBold(true);
         m_responseLabel->setFont(responseLabelFont);
         detailsLayout->addWidget(m_responseLabel);
+        m_changeResponse = new QCheckBox(i18n("Change response"), details);
+        m_changeResponse->setObjectName(QStringLiteral("dayAgendaChangeResponse"));
+        detailsLayout->addWidget(m_changeResponse);
         auto* responseRow = new QHBoxLayout;
         m_responseButtons = new QButtonGroup(this);
         m_responseButtons->setExclusive(true);
@@ -696,6 +719,15 @@ namespace javelin::gui::calendar
         connectResponse(m_accept, QStringLiteral("accepted"));
         connectResponse(m_tentative, QStringLiteral("tentative"));
         connectResponse(m_decline, QStringLiteral("declined"));
+        connect(m_changeResponse, &QCheckBox::toggled, this,
+                [this]
+                {
+                    if (!m_selectedEvent)
+                        return;
+                    const auto* selected = eventForKey(*m_selectedEvent);
+                    if (selected != nullptr)
+                        updateDetails(*selected);
+                });
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         rebuildTabOrder();
 
@@ -713,12 +745,20 @@ namespace javelin::gui::calendar
                                  std::optional<DayAgendaEventKey> selectedEvent)
     {
         const auto dayChanged = date != m_date;
+        const bool selectionChanged =
+            selectedEvent && (!m_selectedEvent || *m_selectedEvent != *selectedEvent);
         m_date = date;
         m_events = std::move(events);
         if (selectedEvent)
             m_selectedEvent = std::move(selectedEvent);
         else if (dayChanged)
             m_selectedEvent.reset();
+        if (selectionChanged)
+        {
+            const QSignalBlocker blocker{m_changeResponse};
+            m_changeResponse->setChecked(false);
+            m_displayedParticipationStatus.clear();
+        }
         updateDatePresentation();
         rebuildEvents();
         if (m_selectedEvent && eventForKey(*m_selectedEvent) != nullptr)
@@ -833,7 +873,14 @@ namespace javelin::gui::calendar
         const auto* selected = eventForKey(key);
         if (selected == nullptr)
             return;
+        const bool selectionChanged = !m_selectedEvent || *m_selectedEvent != key;
         m_selectedEvent = key;
+        if (selectionChanged)
+        {
+            const QSignalBlocker blocker{m_changeResponse};
+            m_changeResponse->setChecked(false);
+            m_displayedParticipationStatus.clear();
+        }
         CalendarEventButton* controllingButton = nullptr;
         for (auto* button : m_eventButtons)
         {
@@ -868,6 +915,12 @@ namespace javelin::gui::calendar
             label->hide();
         }
         m_responseLabel->hide();
+        {
+            const QSignalBlocker blocker{m_changeResponse};
+            m_changeResponse->setChecked(false);
+        }
+        m_changeResponse->hide();
+        m_displayedParticipationStatus.clear();
         m_accept->hide();
         m_tentative->hide();
         m_decline->hide();
@@ -910,11 +963,27 @@ namespace javelin::gui::calendar
         m_detailsDescription->setVisible(!event.description.isEmpty());
         m_detailsDescription->setText(event.description);
 
+        const bool hasResponded =
+            event.rsvpAllowed && hasCalendarResponse(event.participationStatus);
+        if (m_displayedParticipationStatus != event.participationStatus)
+        {
+            const QSignalBlocker blocker{m_changeResponse};
+            m_changeResponse->setChecked(false);
+            m_displayedParticipationStatus = event.participationStatus;
+        }
+        const bool changingResponse = hasResponded && m_changeResponse->isChecked();
+        const bool showResponseButtons = event.rsvpAllowed && (!hasResponded || changingResponse);
         m_responseLabel->setVisible(event.rsvpAllowed);
+        m_responseLabel->setText(
+            hasResponded
+                ? i18n("Your response: %1", calendarResponseLabel(event.participationStatus))
+                : i18n("Your response"));
+        m_changeResponse->setVisible(hasResponded);
+        m_changeResponse->setEnabled(hasResponded && !event.responseMutationPending);
         for (auto* button : {m_accept, m_tentative, m_decline})
         {
-            button->setVisible(event.rsvpAllowed);
-            button->setEnabled(event.rsvpAllowed && !event.responseMutationPending);
+            button->setVisible(showResponseButtons);
+            button->setEnabled(showResponseButtons && !event.responseMutationPending);
         }
         if (event.rsvpAllowed)
         {
@@ -952,9 +1021,9 @@ namespace javelin::gui::calendar
         if (event.rsvpAllowed)
         {
             accessibleDetails.push_back(
-                i18n("Your response: %1", event.participationStatus.isEmpty()
-                                              ? i18n("No response")
-                                              : event.participationStatus));
+                hasResponded
+                    ? i18n("Your response: %1", calendarResponseLabel(event.participationStatus))
+                    : i18n("Your response: No response"));
             if (event.recurring)
                 accessibleDetails.push_back(
                     event.rsvpRecurrenceId.isEmpty()
@@ -989,6 +1058,11 @@ namespace javelin::gui::calendar
         }
         QWidget::setTabOrder(previous, m_detailsScroll);
         previous = m_detailsScroll;
+        if (m_changeResponse->isVisible())
+        {
+            QWidget::setTabOrder(previous, m_changeResponse);
+            previous = m_changeResponse;
+        }
         for (auto* button : {m_accept, m_tentative, m_decline})
         {
             if (!button->isVisible())

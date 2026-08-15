@@ -12,6 +12,7 @@ namespace javelin::gui::calendar
         bool duplicable = false;
         bool movable = false;
         bool rsvp = false;
+        bool responsePending = false;
     };
 
     [[nodiscard]] const QString& calendarEventContextMenuSeparatorId();

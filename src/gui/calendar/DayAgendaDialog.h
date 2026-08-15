@@ -11,6 +11,7 @@
 #include <vector>
 
 class QButtonGroup;
+class QCheckBox;
 class QLabel;
 class QPushButton;
 class QScrollArea;
@@ -110,6 +111,7 @@ namespace javelin::gui::calendar
         QLabel* m_detailsAttendees = nullptr;
         QLabel* m_detailsDescription = nullptr;
         QLabel* m_responseLabel = nullptr;
+        QCheckBox* m_changeResponse = nullptr;
         QLabel* m_responseSeriesNote = nullptr;
         QLabel* m_responseError = nullptr;
         QButtonGroup* m_responseButtons = nullptr;
@@ -119,6 +121,7 @@ namespace javelin::gui::calendar
         QPushButton* m_edit = nullptr;
         QPushButton* m_close = nullptr;
         std::vector<CalendarEventButton*> m_eventButtons;
+        QString m_displayedParticipationStatus;
         bool m_initialScrollPending = true;
     };
 } // namespace javelin::gui::calendar

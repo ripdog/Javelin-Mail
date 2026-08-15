@@ -105,7 +105,7 @@ namespace javelin::gui::calendar
                           if (id == QStringLiteral("calendar_event_accept") ||
                               id == QStringLiteral("calendar_event_tentative") ||
                               id == QStringLiteral("calendar_event_decline"))
-                              return !availability.rsvp;
+                              return !availability.rsvp || !availability.responsePending;
                           return false;
                       });
         return normalizeCalendarEventContextMenuLayout(layout);

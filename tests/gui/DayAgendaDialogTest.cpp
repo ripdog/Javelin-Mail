@@ -3,6 +3,7 @@
 
 #include <QAccessible>
 #include <QApplication>
+#include <QCheckBox>
 #include <QFontMetrics>
 #include <QImage>
 #include <QLabel>
@@ -212,10 +213,26 @@ TEST_CASE("day agenda RSVP controls preserve confirmed state and surface failure
     auto* accept = dialog.findChild<QPushButton*>(QStringLiteral("dayAgendaRsvpAccept"));
     auto* tentative = dialog.findChild<QPushButton*>(QStringLiteral("dayAgendaRsvpTentative"));
     auto* decline = dialog.findChild<QPushButton*>(QStringLiteral("dayAgendaRsvpDecline"));
+    auto* changeResponse = dialog.findChild<QCheckBox*>(QStringLiteral("dayAgendaChangeResponse"));
+    auto* responseLabel = dialog.findChild<QLabel*>(QStringLiteral("dayAgendaResponseLabel"));
     REQUIRE(accept != nullptr);
     REQUIRE(tentative != nullptr);
     REQUIRE(decline != nullptr);
+    REQUIRE(changeResponse != nullptr);
+    REQUIRE(responseLabel != nullptr);
+    CHECK_FALSE(accept->isVisible());
+    CHECK_FALSE(tentative->isVisible());
+    CHECK_FALSE(decline->isVisible());
+    CHECK(changeResponse->isVisible());
+    CHECK_FALSE(changeResponse->isChecked());
+    CHECK(responseLabel->text() == QStringLiteral("Your response: tentative"));
+
+    changeResponse->click();
+    settleGui();
+    CHECK(changeResponse->isChecked());
     CHECK(accept->isVisible());
+    CHECK(tentative->isVisible());
+    CHECK(decline->isVisible());
     CHECK(tentative->isChecked());
     CHECK_FALSE(accept->isChecked());
     CHECK_FALSE(decline->isChecked());
@@ -249,6 +266,15 @@ TEST_CASE("day agenda RSVP controls preserve confirmed state and surface failure
     CHECK(error->isVisible());
     CHECK(error->text() == QStringLiteral("Server rejected the response."));
     CHECK(error->textInteractionFlags().testFlag(Qt::TextSelectableByKeyboard));
+    CHECK(changeResponse->isChecked());
+
+    selected.participationStatus = QStringLiteral("accepted");
+    dialog.setDay(QDate{2026, 8, 10}, {selected}, selected.key);
+    settleGui();
+    CHECK_FALSE(changeResponse->isChecked());
+    CHECK(changeResponse->isVisible());
+    CHECK_FALSE(accept->isVisible());
+    CHECK(responseLabel->text() == QStringLiteral("Your response: accepted"));
 
     const auto labels = dialog.findChildren<QLabel*>();
     CHECK(std::ranges::any_of(labels, [](const QLabel* label)

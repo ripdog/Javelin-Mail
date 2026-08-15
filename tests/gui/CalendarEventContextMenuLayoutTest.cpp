@@ -59,11 +59,27 @@ TEST_CASE("calendar event context filtering distinguishes owned invitations and 
     CHECK(std::ranges::contains(owned, QStringLiteral("calendar_event_delete")));
     CHECK_FALSE(std::ranges::contains(owned, QStringLiteral("calendar_event_accept")));
 
-    const auto invitation = visibleCalendarEventContextMenuLayout(
-        {}, {.editable = false, .duplicable = true, .movable = false, .rsvp = true});
+    const auto invitation = visibleCalendarEventContextMenuLayout({}, {.editable = false,
+                                                                       .duplicable = true,
+                                                                       .movable = false,
+                                                                       .rsvp = true,
+                                                                       .responsePending = true});
     CHECK_FALSE(std::ranges::contains(invitation, QStringLiteral("calendar_event_edit")));
     CHECK(std::ranges::contains(invitation, QStringLiteral("calendar_event_accept")));
     CHECK_FALSE(std::ranges::contains(invitation, QStringLiteral("calendar_event_delete")));
+
+    const auto answeredInvitation =
+        visibleCalendarEventContextMenuLayout({}, {.editable = false,
+                                                   .duplicable = true,
+                                                   .movable = false,
+                                                   .rsvp = true,
+                                                   .responsePending = false});
+    CHECK_FALSE(std::ranges::contains(answeredInvitation, QStringLiteral("calendar_event_accept")));
+    CHECK_FALSE(
+        std::ranges::contains(answeredInvitation, QStringLiteral("calendar_event_tentative")));
+    CHECK_FALSE(
+        std::ranges::contains(answeredInvitation, QStringLiteral("calendar_event_decline")));
+    CHECK(std::ranges::contains(answeredInvitation, QStringLiteral("calendar_event_copy_details")));
 
     const auto readOnly = visibleCalendarEventContextMenuLayout(
         {}, {.editable = false, .duplicable = false, .movable = false, .rsvp = false});

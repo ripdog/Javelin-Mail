@@ -708,6 +708,11 @@ namespace javelin::gui::shell
         }
         const auto participantAddress =
             selfCalendarAddress(*actionEvent, identities, configuredAddress);
+        const auto participant =
+            javelin::jmap::calendar::participantIndexForAddress(*actionEvent, participantAddress);
+        const bool responsePending =
+            participant &&
+            actionEvent->attendees[*participant].participationStatus == "needs-action";
         const bool editable = canEditEvent(*actionEvent, *calendars, participantAddress);
         const bool rsvp = !editable && canRsvp(*actionEvent, *calendars, participantAddress);
         const bool canDuplicate =
@@ -774,7 +779,8 @@ namespace javelin::gui::shell
                  m_configuredEventContextMenuLayout(), {.editable = editable,
                                                         .duplicable = canDuplicate,
                                                         .movable = editable,
-                                                        .rsvp = rsvp}))
+                                                        .rsvp = rsvp,
+                                                        .responsePending = responsePending}))
         {
             if (id == javelin::gui::calendar::calendarEventContextMenuSeparatorId())
             {
