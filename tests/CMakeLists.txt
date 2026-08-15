@@ -251,6 +251,7 @@ add_executable(javelin_daemon_app_tests
     app/MailTransferRepositoryTest.cpp
     app/MailTransferPlanningTest.cpp
     app/MailTransferApplicationServiceTest.cpp
+    app/MailTransferExecutorTest.cpp
     app/MailboxSelectionMutationTest.cpp
     app/MailboxSessionTest.cpp
     app/MailboxSyncCoverageTest.cpp
