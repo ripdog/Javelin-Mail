@@ -310,6 +310,9 @@ mixed-residency selection can target a mailbox already containing only part of t
 Search selections use the same per-Email rule and never acquire an implied source mailbox.
 Ordinary Delete always targets Trash from those real residencies; only the distinct permanent-delete
 command may destroy Email objects, regardless of which mailbox tab happens to expose a row.
+Cross-account and cross-server Move/Copy operations extend these semantics through the durable workflow in
+[CROSS_SERVER_MAIL_TRANSFER_IMPLEMENTATION_PLAN.md](CROSS_SERVER_MAIL_TRANSFER_IMPLEMENTATION_PLAN.md);
+same-account membership mutation remains the fast path.
 
 Mailbox and search tabs use application-layer sessions that own query-window reads, request
 generations, observation lifetimes, incremental list loading, stale recovery, and prefetch. The GUI
