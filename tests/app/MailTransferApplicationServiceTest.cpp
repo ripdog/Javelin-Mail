@@ -237,6 +237,7 @@ TEST_CASE("mail transfer preparation journals a cross-server collision safely",
     REQUIRE(std::holds_alternative<std::optional<MailTransferOperationRecord>>(operationResult));
     const auto& operation = std::get<std::optional<MailTransferOperationRecord>>(operationResult);
     REQUIRE(operation.has_value());
+    CHECK(operation->operationGroupId == std::optional<std::string>{summary.operationId});
     CHECK(operation->sourceAccountId == sourceLocal);
     CHECK(operation->destinationAccountId == destinationLocal);
     CHECK(operation->status == MailTransferStatus::Preparing);

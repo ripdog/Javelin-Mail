@@ -263,7 +263,7 @@ namespace javelin::app
         if (const auto error = repository.create(
                 {
                     .operationId = operationId,
-                    .operationGroupId = std::nullopt,
+                    .operationGroupId = operationId,
                     .sourceAccountId = request.intent.sourceAccountId,
                     .sourceMailboxId = request.intent.sourceMailboxId,
                     .destinationAccountId = request.intent.destinationAccountId,
