@@ -274,6 +274,7 @@ namespace
         std::string importArguments;
         std::string setArguments;
         std::string sourceSetArguments;
+        std::string existingState{"destination-state-existing"};
         std::vector<std::string> sourceAuthoritativeMailboxIds{"inbox"};
         std::vector<std::string> callOrder;
 
@@ -400,7 +401,8 @@ namespace
                         inTarget ? R"({"archive":true,"old-mailbox":true})"
                                  : R"({"old-mailbox":true})";
                     const auto response =
-                        std::string{R"({"accountId":"u1","state":"destination-state-existing","list":[{"id":"existing-email","blobId":"existing-blob","threadId":"existing-thread","mailboxIds":)"} +
+                        std::string{R"({"accountId":"u1","state":")"} + existingState +
+                        R"(","list":[{"id":"existing-email","blobId":"existing-blob","threadId":"existing-thread","mailboxIds":)" +
                         mailboxIds +
                         R"(,"keywords":{"destination-tag":true},"size":91,"receivedAt":"2026-08-14T00:00:00Z"}],"notFound":[]})";
                     co_return ResponseEnvelope{
@@ -1363,15 +1365,50 @@ TEST_CASE("lost duplicate mailbox update response keeps durable reconciliation e
     CHECK(fixture.sourceStillExists());
     const int setCount = fixture.methodTransport.setCalls;
     const int importCount = fixture.methodTransport.importCalls;
+    const int uploadCount = fixture.resourceTransport.sendFromFileCalls;
 
-    fixture.methodTransport.behavior = ImportBehavior::Success;
+    fixture.methodTransport.behavior = ImportBehavior::AlreadyExistsNeedsMembership;
+    const auto second = fixture.execute(operationId);
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&second))
+        FAIL(error->message.toStdString());
+    CHECK(std::get<MailTransferExecutionSummary>(second).status == MailTransferStatus::Complete);
+    CHECK(fixture.methodTransport.setCalls == setCount + 1);
+    CHECK(fixture.methodTransport.importCalls == importCount + 1);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == uploadCount);
+    CHECK(fixture.item(operationId).phase == MailTransferItemPhase::Complete);
+    CHECK_FALSE(fixture.sourceStillExists());
+    CHECK(fixture.pinCount() == 1);
+}
+
+TEST_CASE("advanced destination state keeps ambiguous duplicate mailbox update blocked",
+          "[app][mail-transfer][executor][duplicate][ambiguity]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    fixture.methodTransport.behavior = ImportBehavior::DuplicateMembershipDispatchedFailure;
+    const auto operationId = fixture.prepare(MailTransferOperation::Move);
+
+    const auto first = fixture.execute(operationId);
+    REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(first));
+    CHECK(std::get<MailTransferExecutionSummary>(first).status ==
+          MailTransferStatus::BlockedUnknown);
+    const int setCount = fixture.methodTransport.setCalls;
+    const int importCount = fixture.methodTransport.importCalls;
+    const int uploadCount = fixture.resourceTransport.sendFromFileCalls;
+
+    fixture.methodTransport.behavior = ImportBehavior::AlreadyExistsNeedsMembership;
+    fixture.methodTransport.existingState = "destination-state-later";
     const auto second = fixture.execute(operationId);
     REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(second));
     CHECK(std::get<MailTransferExecutionSummary>(second).status ==
           MailTransferStatus::BlockedUnknown);
+    CHECK(fixture.item(operationId).phase == MailTransferItemPhase::DestinationUnknown);
     CHECK(fixture.methodTransport.setCalls == setCount);
     CHECK(fixture.methodTransport.importCalls == importCount);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == uploadCount);
     CHECK(fixture.sourceStillExists());
+    CHECK(fixture.pinCount() == 1);
 }
 
 TEST_CASE("same-session copy uses Email copy without MIME download or upload",

@@ -272,6 +272,150 @@ namespace javelin::app
 
         for (auto& item : items)
         {
+            if (item.phase == MailTransferItemPhase::DestinationUnknown)
+            {
+                const bool canReconcileExisting =
+                    item.reusedExisting && item.destinationEmailId.has_value() &&
+                    item.destinationPreState.has_value() &&
+                    item.destinationPriorMailboxIds.has_value();
+                if (!canReconcileExisting)
+                    continue;
+
+                const auto existingRequest = javelin::jmap::api::emailGet({
+                    .accountId = destinationAccount.remoteAccountId,
+                    .ids = std::vector<std::string>{*item.destinationEmailId},
+                    .idsReference = std::nullopt,
+                    .properties = std::vector<std::string>{
+                        "id", "blobId", "threadId", "mailboxIds", "keywords", "size",
+                        "receivedAt"},
+                });
+                if (!existingRequest.has_value())
+                    co_return stateError(
+                        i18n("Unable to encode the destination reconciliation Email/get request."));
+                javelin::jmap::api::RequestBuilder existingBuilder;
+                existingBuilder.useCore().useMail();
+                const auto existingHandle =
+                    existingBuilder.call(*existingRequest, "mail-transfer-existing-reconcile");
+                auto existingCalled =
+                    co_await methodCaller.call(destinationRequestContext, existingBuilder);
+                if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(existingCalled))
+                {
+                    const auto error = callerError(existingCalled);
+                    if (retryable(error))
+                    {
+                        if (const auto databaseError = repository.updateStatus(
+                                operation.operationId, waitStatus(error), error.message))
+                            co_return javelin::jmap::operationError(*databaseError);
+                        co_return error;
+                    }
+                    if (const auto transitionError = requireTransition(
+                            repository.transitionItem(
+                                item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                MailTransferItemPhase::DestinationUnknown, error.message),
+                            i18n("The transfer state changed while reconciling the destination.")))
+                        co_return *transitionError;
+                    item.lastError = error.message;
+                    continue;
+                }
+
+                const auto existingRead = javelin::jmap::api::ResponseReader{
+                    std::get<javelin::jmap::api::ResponseEnvelope>(existingCalled)}
+                                              .require(existingHandle);
+                if (const auto* readError =
+                        std::get_if<javelin::jmap::api::ResponseReaderError>(&existingRead))
+                {
+                    const auto error = javelin::jmap::operationError(*readError);
+                    if (const auto transitionError = requireTransition(
+                            repository.transitionItem(
+                                item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                MailTransferItemPhase::DestinationUnknown, error.message),
+                            i18n("The transfer state changed while reconciling the destination.")))
+                        co_return *transitionError;
+                    item.lastError = error.message;
+                    continue;
+                }
+
+                const auto& existingResponse =
+                    std::get<javelin::jmap::api::EmailGetResponse>(existingRead);
+                const bool validExisting =
+                    existingResponse.accountId == destinationAccount.remoteAccountId &&
+                    !existingResponse.state.empty() && existingResponse.list.size() == 1 &&
+                    existingResponse.list.front().id == *item.destinationEmailId &&
+                    existingResponse.notFound.empty();
+                if (!validExisting)
+                {
+                    const QString message = i18n(
+                        "The existing destination message can no longer be reconciled exactly.");
+                    if (const auto transitionError = requireTransition(
+                            repository.transitionItem(
+                                item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                MailTransferItemPhase::DestinationUnknown, message),
+                            i18n("The transfer state changed while reconciling the destination.")))
+                        co_return *transitionError;
+                    item.lastError = message;
+                    continue;
+                }
+
+                const auto& existingEmail = existingResponse.list.front();
+                auto currentMailboxIds = existingEmail.mailboxIds;
+                std::ranges::sort(currentMailboxIds);
+                auto priorMailboxIds = *item.destinationPriorMailboxIds;
+                std::ranges::sort(priorMailboxIds);
+                if (std::ranges::contains(currentMailboxIds, operation.destinationMailboxId))
+                {
+                    if (const auto error = requireTransition(
+                            repository.markDestinationConfirmed(
+                                item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                {
+                                    .emailId = existingEmail.id,
+                                    .blobId = existingEmail.blobId.empty()
+                                                  ? std::nullopt
+                                                  : std::optional<std::string>{existingEmail.blobId},
+                                    .threadId = existingEmail.threadId.empty()
+                                                    ? std::nullopt
+                                                    : std::optional<std::string>{
+                                                          existingEmail.threadId},
+                                    .size = existingEmail.size,
+                                    .reusedExisting = true,
+                                    .priorMailboxIds = priorMailboxIds,
+                                }),
+                            i18n("The transfer state changed while confirming reconciled "
+                                 "destination membership.")))
+                        co_return *error;
+                    item.destinationBlobId = existingEmail.blobId;
+                    item.destinationThreadId = existingEmail.threadId;
+                    item.destinationSize = existingEmail.size;
+                    item.phase = MailTransferItemPhase::DestinationConfirmed;
+                }
+                else if (existingResponse.state == *item.destinationPreState &&
+                         currentMailboxIds == priorMailboxIds)
+                {
+                    if (const auto error = requireTransition(
+                            repository.transitionItem(item.itemId,
+                                                      MailTransferItemPhase::DestinationUnknown,
+                                                      MailTransferItemPhase::Uploaded),
+                            i18n("The transfer state changed while retrying a proven-absent "
+                                 "destination membership update.")))
+                        co_return *error;
+                    item.phase = MailTransferItemPhase::Uploaded;
+                    item.lastError = std::nullopt;
+                }
+                else
+                {
+                    const QString message = i18n(
+                        "The destination changed while an earlier mailbox update was ambiguous. "
+                        "Javelin cannot safely retry it automatically.");
+                    if (const auto transitionError = requireTransition(
+                            repository.transitionItem(
+                                item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                MailTransferItemPhase::DestinationUnknown, message),
+                            i18n("The transfer state changed while reconciling the destination.")))
+                        co_return *transitionError;
+                    item.lastError = message;
+                    continue;
+                }
+            }
+
             if (item.phase == MailTransferItemPhase::Complete ||
                 item.phase == MailTransferItemPhase::Failed ||
                 item.phase == MailTransferItemPhase::Cancelled ||
