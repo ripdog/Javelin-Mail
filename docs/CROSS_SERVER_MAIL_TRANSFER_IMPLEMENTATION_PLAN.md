@@ -9,6 +9,12 @@ The feature extends the existing **Move to** and **Copy to** actions and mailbox
 It deliberately preserves the current same-account mailbox-membership path rather than replacing it
 with a slower generic transfer mechanism.
 
+Cross-server transfer and mail export both need exact scope enumeration, complete raw RFC 5322
+materialization, file-backed MailVault access, and bounded long-running work. Those facilities must be
+implemented as shared daemon infrastructure rather than hidden inside the transfer coordinator. Mail
+export remains a separate application workflow with its own persistence and filesystem semantics; see
+[MAIL_EXPORT_IMPLEMENTATION_PLAN.md](MAIL_EXPORT_IMPLEMENTATION_PLAN.md).
+
 The central safety rule is:
 
 > A cross-account move is a confirmed copy followed by source cleanup. Javelin must never remove the
@@ -32,6 +38,8 @@ an exceptional corner case to hide with rollback.
   actions.
 - Expose destinations consistently through context menus, toolbar drop-down menus, and drag and drop.
 - Keep credentials, JMAP method construction, and writable cache access in the daemon/JMAP layers.
+- Build exact mail-scope enumeration and raw-source materialization as reusable infrastructure for
+  transfer, export, offline storage, and other future raw-message consumers.
 
 ## Non-goals
 
@@ -43,6 +51,9 @@ an exceptional corner case to hide with rollback.
   make a failed move appear atomic.
 - Do not make generic mail transfer responsible for migrating an active local compose session. Active
   drafts need an explicit compose-aware policy described below.
+- Do not make the transfer journal double as a mail-export journal. Export consumes the same raw-mail
+  source infrastructure but has different destination, checkpoint, overwrite, cancellation, and
+  completion semantics.
 
 ## Existing behavior to preserve
 
@@ -278,10 +289,42 @@ An upload is procedural and does not create an Email object. An ambiguous/repeat
 an unreferenced server blob, but retrying the upload itself must not be confused with retrying
 `Email/import`.
 
-## Phase 3: Source snapshot and raw-message acquisition
+## Phase 3: Shared mail-scope resolution and raw-message materialization
 
-After `MessageSelection` has been fully materialized, resolve the exact Email set and capture, per
-Email:
+Do not implement the expensive source side as transfer-private helpers. Introduce focused daemon
+infrastructure that can be consumed by both this workflow and
+[mail export](MAIL_EXPORT_IMPLEMENTATION_PLAN.md):
+
+```text
+MailScopeResolver
+    selection/mailbox/account scope
+        -> stable exact Email manifest
+
+RawMailMaterializer
+    Email manifest item + captured blob identity
+        -> matching raw RFC 5322 MailVault object
+        -> file-backed lease/path
+```
+
+`MailScopeResolver` owns complete enumeration and exact identity, not transfer policy. It must be able
+to resolve a `MessageSelection` now and be extendable to mailbox/account export without making either
+caller depend on GUI rows or bounded visible query windows. Whole-Thread selection still requires
+complete authoritative Thread materialization before its manifest is final.
+
+`RawMailMaterializer` owns reuse of a matching vault object, bounded download of a requested captured
+blob identity when raw source is absent, file-backed leases, eviction protection, and
+waiting-for-network/auth/space behavior. It must not silently substitute a newer blob when a durable
+consumer asks for an older captured revision. It also must not know whether the consumer intends to
+upload the bytes to another server, write an `.eml`, append mboxrd, index the message, or retain it
+for offline use.
+
+The existing single-message `requestMessageSource()`/`MessageSourceDownload` path returns a
+`QByteArray` to the GUI and is suitable for today's **View Message Source** action, not for bulk
+transfer/export. Do not build the shared service on that API. Introduce a daemon-side file-backed
+source handle and migrate the viewer later only if doing so remains behaviorally simple.
+
+For transfer, after `MessageSelection` has been fully materialized, resolve the exact Email set and
+capture, per Email:
 
 - source Email id;
 - source mailbox memberships;
@@ -295,16 +338,16 @@ Email:
 The cleanup plan must be derived before destination work starts so later UI/cache changes cannot
 reinterpret what the original command meant.
 
-For a cross-server transfer, use an already-current MailVault raw source when available. Otherwise
-reuse the existing message-source download path to stream `message/rfc822` into the vault. Do not
-fetch body parts and reconstruct MIME.
+For a cross-server transfer, ask `RawMailMaterializer` for an already-current MailVault raw source
+when available. Otherwise it reuses the existing bounded message-source download mechanism to stream
+`message/rfc822` into the vault. Do not fetch body parts and reconstruct MIME.
 
 Do not obtain that source through an API that materializes the vault object as a `QByteArray`.
-Introduce a file-backed MailVault lease/path abstraction so the resource transport can stream the
-stored object directly. Acquiring a lease must pin the content against eviction for the lifetime of
-the active transfer, including across a restart when the transfer journal says the source is ready.
-Release the operation pin only after the item is terminal or transfer ownership has been handed to
-an Undo history pin.
+Introduce a file-backed MailVault lease/path abstraction so resource transports and filesystem
+consumers can stream the stored object directly. A transfer lease must pin the content against
+eviction for the lifetime of the active transfer, including across a restart when the transfer
+journal says the source is ready. Release the operation pin only after the item is terminal or
+transfer ownership has been handed to an Undo history pin.
 
 A source raw object should be content-addressed through the existing MailVault and shared between
 multiple transfer items when deduplication naturally applies. If the vault cannot reserve enough
@@ -813,17 +856,24 @@ with the destination connection must not incorrectly mark the source connection 
 
 1. Land the connection-qualified account identity migration and collision fixture.
 2. Add `Email/copy`, `Email/import`, structured `existingId`, and file-stream upload primitives.
-3. Add the durable transfer journal/repository and recovery state machine with no GUI caller yet.
-4. Add source snapshot/raw acquisition and destination copy/import with ambiguity reconciliation.
-5. Add exact Move source cleanup, partial-outcome policy, and bounded batching/work scheduling.
-6. Add destination cache materialization and invalidation.
-7. Add typed Undo/Redo payloads and history-owned MailVault retention.
-8. Expose the typed transfer command over JVIP.
-9. Refactor destination presentation and add other-account context/toolbar submenus.
-10. Replace the drag payload and enable cross-account Move/Copy drops.
-11. Add work/progress and partial-result presentation.
-12. Run focused production-path tests throughout, then the normal full build/test suite and a separate
+3. Add shared exact mail-scope enumeration, raw-message materialization, and file-backed MailVault
+   lease primitives. Keep them independent of transfer/export policy.
+4. Add the durable transfer journal/repository and recovery state machine with no GUI caller yet.
+5. Add transfer source snapshot plus destination copy/import with ambiguity reconciliation, consuming
+   the shared source services rather than a transfer-private download path.
+6. Add exact Move source cleanup, partial-outcome policy, and bounded batching/work scheduling.
+7. Add destination cache materialization and invalidation.
+8. Add typed Undo/Redo payloads and history-owned MailVault retention.
+9. Expose the typed transfer command over JVIP.
+10. Refactor destination presentation and add other-account context/toolbar submenus.
+11. Replace the drag payload and enable cross-account Move/Copy drops.
+12. Add work/progress and partial-result presentation.
+13. Run focused production-path tests throughout, then the normal full build/test suite and a separate
     regression review before merging.
+
+The separate mail-export work may proceed in parallel once step 3 is stable and account identity is
+available. Export is not a transfer completion dependency; it consumes the shared foundation without
+joining the transfer journal or state machine.
 
 ## Acceptance invariants
 
@@ -848,5 +898,7 @@ The feature is not complete unless all of the following hold:
     its blob.
 14. Context menus, toolbar menus, and drag/drop use the same connection-qualified destination and
     transfer semantics.
-15. The GUI never receives credentials, performs upload/import/copy calls, or writes transfer/cache
+15. Exact scope enumeration and raw-message materialization are reusable daemon services, not
+    transfer-journal implementation details, and bulk consumers never require full MIME in GUI RAM.
+16. The GUI never receives credentials, performs upload/import/copy calls, or writes transfer/cache
     state directly.

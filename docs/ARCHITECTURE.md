@@ -14,7 +14,8 @@ release validation are tracked in
 in the focused documents for [optimistic consistency](OPTIMISTIC_CONSISTENCY.md),
 [offline mail](OFFLINE_MAIL_ARCHITECTURE.md), [query windows](QUERY_WINDOWS.md),
 [database access](DATABASE_ACCESS.md), [Undo/Redo](UNDO_REDO.md),
-[email signatures](EMAIL_SIGNATURES_DESIGN.md), and [message rendering](RENDERING.md). The planned
+[email signatures](EMAIL_SIGNATURES_DESIGN.md), [message rendering](RENDERING.md), and
+[mail export](MAIL_EXPORT_IMPLEMENTATION_PLAN.md). The planned
 split between foreground collapsed-query materialization and bounded background thread hydration is
 specified in [THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md).
 The long-term, behavior-preserving module and ownership cleanup is tracked in
@@ -312,7 +313,10 @@ Ordinary Delete always targets Trash from those real residencies; only the disti
 command may destroy Email objects, regardless of which mailbox tab happens to expose a row.
 Cross-account and cross-server Move/Copy operations extend these semantics through the durable workflow in
 [CROSS_SERVER_MAIL_TRANSFER_IMPLEMENTATION_PLAN.md](CROSS_SERVER_MAIL_TRANSFER_IMPLEMENTATION_PLAN.md);
-same-account membership mutation remains the fast path.
+same-account membership mutation remains the fast path. Cross-server transfer and
+[mail export](MAIL_EXPORT_IMPLEMENTATION_PLAN.md) share daemon-owned exact scope enumeration,
+raw-RFC-5322 materialization, and file-backed MailVault leases, but retain separate workflow journals
+and destination/failure semantics.
 
 Mailbox and search tabs use application-layer sessions that own query-window reads, request
 generations, observation lifetimes, incremental list loading, stale recovery, and prefetch. The GUI

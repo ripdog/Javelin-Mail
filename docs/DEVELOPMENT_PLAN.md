@@ -147,9 +147,13 @@ See [COMPOSE_AND_SEND_PLAN.md](COMPOSE_AND_SEND_PLAN.md) and [UNDO_REDO.md](UNDO
 - Continue profiling very large mailboxes, sparse jumps, local/server search merging, MIME parsing,
   and vault eviction.
 - Preserve foreground priority and the post-foreground quiet period for all new background jobs.
+- Build cross-server Move/Copy and portable mail export on one shared exact-scope/raw-RFC-5322
+  materialization layer rather than duplicating mailbox enumeration or whole-message download paths.
 
 See [OFFLINE_MAIL_ARCHITECTURE.md](OFFLINE_MAIL_ARCHITECTURE.md),
-[QUERY_WINDOWS.md](QUERY_WINDOWS.md), and [MAILBOX_REFRESH_PLAN.md](MAILBOX_REFRESH_PLAN.md).
+[QUERY_WINDOWS.md](QUERY_WINDOWS.md), [MAILBOX_REFRESH_PLAN.md](MAILBOX_REFRESH_PLAN.md),
+[CROSS_SERVER_MAIL_TRANSFER_IMPLEMENTATION_PLAN.md](CROSS_SERVER_MAIL_TRANSFER_IMPLEMENTATION_PLAN.md),
+and [MAIL_EXPORT_IMPLEMENTATION_PLAN.md](MAIL_EXPORT_IMPLEMENTATION_PLAN.md).
 
 ### 5. Packaging, platform support, and profile security
 

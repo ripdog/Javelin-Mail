@@ -29,8 +29,12 @@
 ## Vault and recovery
 
 Raw messages are SHA-256-addressed under `objects/sha256`. Per-account, per-mailbox `messages`
-directories contain hard links named by Email id, making the mirror directly usable without an
-export operation. Network downloads stream into a bounded-memory incoming file inside the vault,
+directories contain hard links named by Email id, making the mirror directly inspectable without an
+export operation. That projection is an internal cache layout, not Javelin's public export format;
+user-owned `.eml`/mbox output follows
+[MAIL_EXPORT_IMPLEMENTATION_PLAN.md](MAIL_EXPORT_IMPLEMENTATION_PLAN.md) and consumes the same raw
+objects through file-backed leases. Network downloads stream into a bounded-memory incoming file
+inside the vault,
 are hashed incrementally, and are promoted to their content-addressed path with an atomic
 same-filesystem rename. Stale partial incoming downloads are discarded during daemon startup before
 network work begins. SQLite then records the object and Email reference and appends filesystem
