@@ -1,5 +1,6 @@
 #include "jmap/api/MethodCaller.h"
 #include "FixtureReader.h"
+#include "jmap/api/BlobUpload.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/Transport.h"
@@ -60,6 +61,15 @@ namespace
             auto result = std::move(queuedResults.front());
             queuedResults.erase(queuedResults.begin());
             co_return result;
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::api::TransportResult>
+        sendFromFile(javelin::jmap::api::HttpRequest request, QString filePath) override
+        {
+            QFile file{filePath};
+            REQUIRE(file.open(QIODevice::ReadOnly));
+            request.body = file.readAll();
+            co_return co_await send(std::move(request));
         }
     };
 
@@ -385,6 +395,155 @@ TEST_CASE("refreshing HTTP file transport retries unauthorized downloads",
     QFile file{path};
     REQUIRE(file.open(QIODevice::ReadOnly));
     CHECK(file.readAll() == QByteArrayLiteral("streamed body"));
+}
+
+TEST_CASE("blob upload streams a file to the expanded JMAP upload URL",
+          "[jmap][transport][upload][file]")
+{
+    ensureApplication();
+
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("message.eml"));
+    QFile source{path};
+    REQUIRE(source.open(QIODevice::WriteOnly));
+    const QByteArray payload = QByteArrayLiteral("From: sender@example.com\r\n\r\nraw message");
+    REQUIRE(source.write(payload) == payload.size());
+    source.close();
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 201,
+        .body =
+            R"({"accountId":"destination/account","blobId":"blob-1","type":"message/rfc822","size":40})",
+    });
+
+    javelin::jmap::api::Session session;
+    session.uploadUrl = "https://mail.example.com/upload/{accountId}";
+    session.capabilities.core = true;
+    session.capabilities.coreDetails.emplace();
+    session.capabilities.coreDetails->maxSizeUpload = 1024;
+    javelin::jmap::api::Account destination;
+    destination.id = "destination/account";
+    session.accounts.emplace(destination.id, destination);
+
+    const auto contextResult =
+        javelin::jmap::api::blobUploadContext(session, "destination/account");
+    REQUIRE(std::holds_alternative<javelin::jmap::api::BlobUploadContext>(contextResult));
+    const auto result = QCoro::waitFor(javelin::jmap::api::uploadBlobFromFile(
+        transport, std::get<javelin::jmap::api::BlobUploadContext>(contextResult), "auth-account",
+        "destination/account", "access-token", path, "message/rfc822"));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::BlobUploadResponse>(result));
+    const auto& response = std::get<javelin::jmap::api::BlobUploadResponse>(result);
+    CHECK(response.accountId == "destination/account");
+    CHECK(response.blobId == "blob-1");
+    CHECK(response.type == "message/rfc822");
+    CHECK(response.size == 40);
+    REQUIRE(transport.requests.size() == 1);
+    CHECK(transport.requests.front().url.toEncoded().contains("destination%2Faccount"));
+    CHECK(transport.requests.front().body == payload);
+    REQUIRE(transport.requests.front().authentication.has_value());
+    CHECK(transport.requests.front().authentication->accountId == "auth-account");
+    CHECK(transport.requests.front().headers.back().value == "message/rfc822");
+}
+
+TEST_CASE("blob upload rejects a file above the advertised JMAP upload limit before dispatch",
+          "[jmap][transport][upload][file]")
+{
+    ensureApplication();
+
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("message.eml"));
+    QFile source{path};
+    REQUIRE(source.open(QIODevice::WriteOnly));
+    REQUIRE(source.write(QByteArrayLiteral("too large")) == 9);
+    source.close();
+
+    FakeTransport transport;
+    javelin::jmap::api::Session session;
+    session.uploadUrl = "https://mail.example.com/upload/{accountId}";
+    session.capabilities.core = true;
+    session.capabilities.coreDetails.emplace();
+    session.capabilities.coreDetails->maxSizeUpload = 8;
+    javelin::jmap::api::Account destination;
+    destination.id = "destination-account";
+    session.accounts.emplace(destination.id, destination);
+
+    const auto contextResult =
+        javelin::jmap::api::blobUploadContext(session, "destination-account");
+    REQUIRE(std::holds_alternative<javelin::jmap::api::BlobUploadContext>(contextResult));
+    const auto result = QCoro::waitFor(javelin::jmap::api::uploadBlobFromFile(
+        transport, std::get<javelin::jmap::api::BlobUploadContext>(contextResult), "auth-account",
+        "destination-account", "access-token", path, "message/rfc822"));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::ProtocolError>(result));
+    CHECK(std::get<javelin::jmap::api::ProtocolError>(result).code ==
+          javelin::jmap::api::ProtocolErrorCode::InvalidRequest);
+    CHECK(transport.requests.empty());
+}
+
+TEST_CASE("refreshing HTTP file upload retries unauthorized requests from the same source file",
+          "[jmap][transport][auth][file]")
+{
+    ensureApplication();
+
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("upload.eml"));
+    QFile source{path};
+    REQUIRE(source.open(QIODevice::WriteOnly));
+    REQUIRE(source.write(QByteArrayLiteral("From: sender@example.com\r\n\r\nstreamed upload")) > 0);
+    source.close();
+
+    FakeTransport rawTransport;
+    rawTransport.queuedResults.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::HttpFailure,
+        .message = "Unauthorized",
+        .httpStatus = 401,
+    });
+    rawTransport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 201,
+        .body = "{\"blobId\":\"blob-1\"}",
+    });
+    javelin::jmap::api::RefreshingTransport transport{rawTransport};
+    int refreshCalls = 0;
+    transport.setRefreshHandler(
+        [&](std::string, std::string) -> QCoro::Task<std::optional<std::string>>
+        {
+            ++refreshCalls;
+            co_return std::string{"refreshed-token"};
+        });
+    int dispatchCalls = 0;
+
+    const auto result = QCoro::waitFor(transport.sendFromFile(
+        {
+            .method = javelin::jmap::api::HttpMethod::Post,
+            .url = QUrl{QStringLiteral("https://mail.example.com/upload/u1")},
+            .headers = {{.name = "Authorization", .value = "Bearer access-token"},
+                        {.name = "Content-Type", .value = "message/rfc822"}},
+            .body = {},
+            .authentication =
+                javelin::jmap::api::BearerAuthentication{
+                    .accountId = "u1",
+                    .accessToken = "access-token",
+                },
+            .cancellation = {},
+            .dispatched = [&dispatchCalls] { ++dispatchCalls; },
+        },
+        path));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::HttpResponse>(result));
+    CHECK(std::get<javelin::jmap::api::HttpResponse>(result).statusCode == 201);
+    CHECK(refreshCalls == 1);
+    CHECK(dispatchCalls == 1);
+    REQUIRE(rawTransport.requests.size() == 2);
+    CHECK(rawTransport.requests[0].body == rawTransport.requests[1].body);
+    CHECK(rawTransport.requests[0].body.contains("streamed upload"));
+    REQUIRE(rawTransport.requests[1].authentication.has_value());
+    CHECK(rawTransport.requests[1].authentication->accessToken == "refreshed-token");
+    CHECK(rawTransport.requests[1].headers.front().value == "Bearer refreshed-token");
 }
 
 TEST_CASE("refreshing HTTP transport resolves current tokens for stale request scopes",

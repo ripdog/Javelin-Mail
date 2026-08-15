@@ -703,6 +703,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/ThemeController.h
     src/jmap/api/Error.cpp
     src/jmap/api/Error.h
+    src/jmap/api/BlobUpload.cpp
+    src/jmap/api/BlobUpload.h
     src/jmap/api/ContactsMethods.cpp
     src/jmap/api/ContactsMethods.h
     src/jmap/api/CalendarMethods.cpp
@@ -1019,6 +1021,8 @@ add_library(javelin_jmap STATIC
     src/jmap/api/ContactsMethods.h
     src/jmap/api/Error.cpp
     src/jmap/api/Error.h
+    src/jmap/api/BlobUpload.cpp
+    src/jmap/api/BlobUpload.h
     src/jmap/api/MailMethods.cpp
     src/jmap/api/MailMethods.h
     src/jmap/api/MethodCaller.cpp

@@ -123,6 +123,20 @@ namespace javelin::jmap::api
 
     } // namespace
 
+    QCoro::Task<TransportResult> AbstractTransport::sendFromFile(HttpRequest request,
+                                                                 QString filePath)
+    {
+        static_cast<void>(request);
+        static_cast<void>(filePath);
+        co_return TransportError{
+            .code = TransportErrorCode::LocalIoFailure,
+            .message = "This HTTP transport does not support file-backed request bodies",
+            .httpStatus = std::nullopt,
+            .networkError = std::nullopt,
+            .retryAfter = std::nullopt,
+        };
+    }
+
     QCoro::Task<FileTransportResult> AbstractTransport::sendToFile(HttpRequest request,
                                                                    QString filePath)
     {
@@ -203,6 +217,47 @@ namespace javelin::jmap::api
         replaceBearerToken(retryRequest, *refreshedAccessToken);
         retryRequest.dispatched = {};
         co_return co_await m_transport.send(std::move(retryRequest));
+    }
+
+    QCoro::Task<TransportResult> RefreshingTransport::sendFromFile(HttpRequest request,
+                                                                   QString filePath)
+    {
+        if (request.authentication.has_value() && m_accessTokenProvider)
+        {
+            const auto currentAccessToken =
+                m_accessTokenProvider(request.authentication->accountId);
+            if (currentAccessToken.has_value() &&
+                *currentAccessToken != request.authentication->accessToken)
+            {
+                replaceBearerToken(request, *currentAccessToken);
+            }
+        }
+
+        auto retryRequest = request;
+        auto result = co_await m_transport.sendFromFile(std::move(request), filePath);
+        if (!isUnauthorized(result) || !retryRequest.authentication.has_value() ||
+            !m_refreshHandler)
+        {
+            co_return result;
+        }
+
+        const auto rejectedAccessToken = retryRequest.authentication->accessToken;
+        auto refreshedAccessToken =
+            co_await m_refreshHandler(retryRequest.authentication->accountId, rejectedAccessToken);
+        if (!refreshedAccessToken.has_value() || *refreshedAccessToken == rejectedAccessToken)
+            co_return result;
+        if (retryRequest.cancellation.isCancellationRequested())
+        {
+            co_return TransportError{
+                .code = TransportErrorCode::Cancelled,
+                .message = "HTTP request cancelled while refreshing authentication",
+                .httpStatus = std::nullopt,
+            };
+        }
+
+        replaceBearerToken(retryRequest, *refreshedAccessToken);
+        retryRequest.dispatched = {};
+        co_return co_await m_transport.sendFromFile(std::move(retryRequest), std::move(filePath));
     }
 
     QCoro::Task<FileTransportResult> RefreshingTransport::sendToFile(HttpRequest request,
@@ -356,6 +411,109 @@ namespace javelin::jmap::api
                 // connection.
                 m_networkAccessManager.clearConnectionCache();
             }
+            co_return mapReplyError(*reply);
+        }
+
+        const auto statusCodeAttribute = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+        const int statusCode = statusCodeAttribute.isValid() ? statusCodeAttribute.toInt() : 0;
+        const QByteArray responseBody = reply->readAll();
+        qCInfo(logTransport).noquote() << "success" << statusCode;
+        if (statusCode >= 400)
+        {
+            qCWarning(logTransport).noquote() << "HTTP failure" << request.url.toString()
+                                              << statusCode << summarizeBody(responseBody);
+            co_return TransportError{
+                .code = TransportErrorCode::HttpFailure,
+                .message = reply->errorString().toStdString(),
+                .httpStatus = statusCode,
+                .networkError = static_cast<int>(reply->error()),
+                .retryAfter = retryAfter(*reply),
+            };
+        }
+
+        co_return HttpResponse{
+            .statusCode = statusCode,
+            .body = responseBody,
+        };
+    }
+
+    QCoro::Task<TransportResult> QtNetworkTransport::sendFromFile(HttpRequest request,
+                                                                  QString filePath)
+    {
+        if (request.cancellation.isCancellationRequested())
+        {
+            co_return TransportError{
+                .code = TransportErrorCode::Cancelled,
+                .message = "HTTP request cancelled before dispatch",
+                .httpStatus = std::nullopt,
+            };
+        }
+        if (request.method != HttpMethod::Post)
+        {
+            co_return TransportError{
+                .code = TransportErrorCode::LocalIoFailure,
+                .message = "File-backed HTTP request bodies require POST",
+                .httpStatus = std::nullopt,
+            };
+        }
+
+        QFile file{filePath};
+        if (!file.open(QIODevice::ReadOnly))
+            co_return localIoError(QStringLiteral("Open streamed HTTP request"), file);
+
+        QNetworkRequest networkRequest{request.url};
+        networkRequest.setTransferTimeout(requestTimeoutMs);
+        networkRequest.setHeader(QNetworkRequest::ContentLengthHeader, file.size());
+        for (const HttpHeader& header : request.headers)
+            networkRequest.setRawHeader(header.name, header.value);
+
+        qCDebug(logTransport).noquote()
+            << "request" << request.url.toString() << "POST streamed request body" << file.size();
+
+        QNetworkReply* reply = m_networkAccessManager.post(networkRequest, &file);
+        m_activeReplies.emplace_back(reply);
+        const auto unregisterReply = qScopeGuard(
+            [this, reply]()
+            {
+                std::erase_if(m_activeReplies, [reply](const QPointer<QNetworkReply>& active)
+                              { return active.isNull() || active.data() == reply; });
+            });
+        static_cast<void>(unregisterReply);
+        if (request.dispatched)
+            request.dispatched();
+
+        const auto cancellationRegistration = request.cancellation.registerCallback(
+            [reply = QPointer<QNetworkReply>{reply}]()
+            {
+                if (reply.isNull())
+                    return;
+                auto* activeReply = reply.data();
+                QMetaObject::invokeMethod(
+                    activeReply,
+                    [reply]()
+                    {
+                        if (auto* queuedReply = reply.data())
+                            queuedReply->abort();
+                    },
+                    Qt::QueuedConnection);
+            });
+        static_cast<void>(cancellationRegistration);
+        co_await qCoro(reply).waitForFinished();
+
+        const auto deleteReply = qScopeGuard(
+            [reply]()
+            {
+                if (reply != nullptr)
+                    reply->deleteLater();
+            });
+        static_cast<void>(deleteReply);
+
+        if (reply->error() != QNetworkReply::NoError)
+        {
+            qCWarning(logTransport).noquote() << "network failure" << request.url.toString()
+                                              << reply->error() << reply->errorString();
+            if (reply->error() == QNetworkReply::TimeoutError)
+                m_networkAccessManager.clearConnectionCache();
             co_return mapReplyError(*reply);
         }
 

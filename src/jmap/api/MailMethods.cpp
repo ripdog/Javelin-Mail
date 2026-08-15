@@ -117,6 +117,7 @@ namespace
         std::string type;
         std::optional<std::string> description;
         std::vector<std::string> properties;
+        std::optional<std::string> existingId;
     };
 
     struct RawIdentitySetResponse
@@ -317,6 +318,59 @@ namespace
         std::optional<std::unordered_map<std::string, glz::generic>> notCreated;
         std::optional<std::unordered_map<std::string, glz::generic>> notUpdated;
         std::optional<std::unordered_map<std::string, glz::generic>> notDestroyed;
+    };
+
+    struct RawEmailCopyCreate
+    {
+        std::string id;
+        std::optional<std::unordered_map<std::string, bool>> mailboxIds;
+        std::optional<std::unordered_map<std::string, bool>> keywords;
+        std::optional<std::string> receivedAt;
+    };
+
+    struct RawEmailCopyRequest
+    {
+        std::string fromAccountId;
+        std::optional<std::string> ifFromInState;
+        std::string accountId;
+        std::optional<std::string> ifInState;
+        std::unordered_map<std::string, RawEmailCopyCreate> create;
+        bool onSuccessDestroyOriginal = false;
+        std::optional<std::string> destroyFromIfInState;
+    };
+
+    struct RawEmailCopyResponse
+    {
+        std::string fromAccountId;
+        std::string accountId;
+        std::optional<std::string> oldState;
+        std::string newState;
+        std::optional<std::unordered_map<std::string, RawEmailSetCreated>> created;
+        std::optional<std::unordered_map<std::string, RawIdentitySetError>> notCreated;
+    };
+
+    struct RawEmailImport
+    {
+        std::string blobId;
+        std::unordered_map<std::string, bool> mailboxIds;
+        std::unordered_map<std::string, bool> keywords;
+        std::optional<std::string> receivedAt;
+    };
+
+    struct RawEmailImportRequest
+    {
+        std::string accountId;
+        std::optional<std::string> ifInState;
+        std::unordered_map<std::string, RawEmailImport> emails;
+    };
+
+    struct RawEmailImportResponse
+    {
+        std::string accountId;
+        std::optional<std::string> oldState;
+        std::string newState;
+        std::optional<std::unordered_map<std::string, RawEmailSetCreated>> created;
+        std::optional<std::unordered_map<std::string, RawIdentitySetError>> notCreated;
     };
 
     struct RawEnvelopeAddress
@@ -524,7 +578,8 @@ template <> struct glz::meta<RawIdentitySetError>
     using T = RawIdentitySetError;
 
     static constexpr auto value =
-        glz::object("type", &T::type, "description", &T::description, "properties", &T::properties);
+        glz::object("type", &T::type, "description", &T::description, "properties", &T::properties,
+                    "existingId", &T::existingId);
 };
 
 template <> struct glz::meta<RawIdentitySetResponse>
@@ -698,6 +753,60 @@ template <> struct glz::meta<RawEmailSetResponse>
         "accountId", &T::accountId, "oldState", &T::oldState, "newState", &T::newState, "created",
         &T::created, "updated", &T::updated, "destroyed", &T::destroyed, "notCreated",
         &T::notCreated, "notUpdated", &T::notUpdated, "notDestroyed", &T::notDestroyed);
+};
+
+template <> struct glz::meta<RawEmailCopyCreate>
+{
+    using T = RawEmailCopyCreate;
+
+    static constexpr auto value =
+        glz::object("id", &T::id, "mailboxIds", &T::mailboxIds, "keywords", &T::keywords,
+                    "receivedAt", &T::receivedAt);
+};
+
+template <> struct glz::meta<RawEmailCopyRequest>
+{
+    using T = RawEmailCopyRequest;
+
+    static constexpr auto value = glz::object(
+        "fromAccountId", &T::fromAccountId, "ifFromInState", &T::ifFromInState, "accountId",
+        &T::accountId, "ifInState", &T::ifInState, "create", &T::create, "onSuccessDestroyOriginal",
+        &T::onSuccessDestroyOriginal, "destroyFromIfInState", &T::destroyFromIfInState);
+};
+
+template <> struct glz::meta<RawEmailCopyResponse>
+{
+    using T = RawEmailCopyResponse;
+
+    static constexpr auto value = glz::object(
+        "fromAccountId", &T::fromAccountId, "accountId", &T::accountId, "oldState", &T::oldState,
+        "newState", &T::newState, "created", &T::created, "notCreated", &T::notCreated);
+};
+
+template <> struct glz::meta<RawEmailImport>
+{
+    using T = RawEmailImport;
+
+    static constexpr auto value =
+        glz::object("blobId", &T::blobId, "mailboxIds", &T::mailboxIds, "keywords", &T::keywords,
+                    "receivedAt", &T::receivedAt);
+};
+
+template <> struct glz::meta<RawEmailImportRequest>
+{
+    using T = RawEmailImportRequest;
+
+    static constexpr auto value =
+        glz::object("accountId", &T::accountId, "ifInState", &T::ifInState, "emails", &T::emails);
+};
+
+template <> struct glz::meta<RawEmailImportResponse>
+{
+    using T = RawEmailImportResponse;
+
+    static constexpr auto value =
+        glz::object("accountId", &T::accountId, "oldState", &T::oldState, "newState", &T::newState,
+                    "created", &T::created, "notCreated", &T::notCreated);
 };
 
 template <> struct glz::meta<RawEnvelopeAddress>
@@ -937,6 +1046,44 @@ namespace javelin::jmap::api
                 .cid = part.cid,
                 .subParts = std::move(subParts),
             };
+        }
+
+        [[nodiscard]] std::unordered_map<std::string, EmailSetCreated> convertEmailCreated(
+            const std::optional<std::unordered_map<std::string, RawEmailSetCreated>>& rawCreated)
+        {
+            std::unordered_map<std::string, EmailSetCreated> created;
+            if (!rawCreated.has_value())
+                return created;
+            created.reserve(rawCreated->size());
+            for (const auto& [creationId, value] : *rawCreated)
+            {
+                created.emplace(creationId, EmailSetCreated{
+                                                .id = value.id,
+                                                .blobId = value.blobId,
+                                                .threadId = value.threadId,
+                                                .size = value.size,
+                                            });
+            }
+            return created;
+        }
+
+        [[nodiscard]] std::unordered_map<std::string, SetError> convertSetErrors(
+            const std::optional<std::unordered_map<std::string, RawIdentitySetError>>& rawErrors)
+        {
+            std::unordered_map<std::string, SetError> errors;
+            if (!rawErrors.has_value())
+                return errors;
+            errors.reserve(rawErrors->size());
+            for (const auto& [id, error] : *rawErrors)
+            {
+                errors.emplace(id, SetError{
+                                       .type = error.type,
+                                       .description = error.description,
+                                       .properties = error.properties,
+                                       .existingId = error.existingId,
+                                   });
+            }
+            return errors;
         }
 
     } // namespace
@@ -1219,6 +1366,52 @@ namespace javelin::jmap::api
         });
     }
 
+    std::optional<std::string> serializeEmailCopyRequest(const EmailCopyRequest& request)
+    {
+        std::unordered_map<std::string, RawEmailCopyCreate> create;
+        create.reserve(request.create.size());
+        for (const auto& [creationId, value] : request.create)
+        {
+            create.emplace(creationId, RawEmailCopyCreate{
+                                           .id = value.id,
+                                           .mailboxIds = value.mailboxIds,
+                                           .keywords = value.keywords,
+                                           .receivedAt = value.receivedAt,
+                                       });
+        }
+
+        return serializeMethod(RawEmailCopyRequest{
+            .fromAccountId = request.fromAccountId,
+            .ifFromInState = request.ifFromInState,
+            .accountId = request.accountId,
+            .ifInState = request.ifInState,
+            .create = std::move(create),
+            .onSuccessDestroyOriginal = request.onSuccessDestroyOriginal,
+            .destroyFromIfInState = request.destroyFromIfInState,
+        });
+    }
+
+    std::optional<std::string> serializeEmailImportRequest(const EmailImportRequest& request)
+    {
+        std::unordered_map<std::string, RawEmailImport> emails;
+        emails.reserve(request.emails.size());
+        for (const auto& [creationId, value] : request.emails)
+        {
+            emails.emplace(creationId, RawEmailImport{
+                                           .blobId = value.blobId,
+                                           .mailboxIds = value.mailboxIds,
+                                           .keywords = value.keywords,
+                                           .receivedAt = value.receivedAt,
+                                       });
+        }
+
+        return serializeMethod(RawEmailImportRequest{
+            .accountId = request.accountId,
+            .ifInState = request.ifInState,
+            .emails = std::move(emails),
+        });
+    }
+
     std::optional<std::string>
     serializeEmailSubmissionSetRequest(const EmailSubmissionSetRequest& request)
     {
@@ -1372,6 +1565,7 @@ namespace javelin::jmap::api
                                                        .type = std::move(error.type),
                                                        .description = std::move(error.description),
                                                        .properties = std::move(error.properties),
+                                                       .existingId = std::move(error.existingId),
                                                    });
             }
         };
@@ -1457,7 +1651,8 @@ namespace javelin::jmap::api
                 std::move(creationId),
                 MailboxSetError{.type = std::move(rejected.type),
                                 .description = std::move(rejected.description),
-                                .properties = std::move(rejected.properties)});
+                                .properties = std::move(rejected.properties),
+                                .existingId = std::nullopt});
         }
         for (auto& [mailboxId, rejected] : parsed.value->notUpdated.value_or(
                  std::unordered_map<std::string, RawMailboxSetError>{}))
@@ -1466,7 +1661,8 @@ namespace javelin::jmap::api
                 std::move(mailboxId),
                 MailboxSetError{.type = std::move(rejected.type),
                                 .description = std::move(rejected.description),
-                                .properties = std::move(rejected.properties)});
+                                .properties = std::move(rejected.properties),
+                                .existingId = std::nullopt});
         }
         for (auto& [mailboxId, rejected] : parsed.value->notDestroyed.value_or(
                  std::unordered_map<std::string, RawMailboxSetError>{}))
@@ -1475,7 +1671,8 @@ namespace javelin::jmap::api
                 std::move(mailboxId),
                 MailboxSetError{.type = std::move(rejected.type),
                                 .description = std::move(rejected.description),
-                                .properties = std::move(rejected.properties)});
+                                .properties = std::move(rejected.properties),
+                                .existingId = std::nullopt});
         }
         return {.value = std::move(response), .error = std::nullopt};
     }
@@ -1723,6 +1920,55 @@ namespace javelin::jmap::api
         };
     }
 
+    ParsedEnvelope<EmailCopyResponse> parseEmailCopyResponse(std::string_view json)
+    {
+        const auto parsed = parseMethod<RawEmailCopyResponse>(json);
+        if (!parsed.ok())
+        {
+            return {
+                .value = std::nullopt,
+                .error = parsed.error,
+            };
+        }
+
+        return {
+            .value =
+                EmailCopyResponse{
+                    .fromAccountId = std::move(parsed.value->fromAccountId),
+                    .accountId = std::move(parsed.value->accountId),
+                    .oldState = std::move(parsed.value->oldState),
+                    .newState = std::move(parsed.value->newState),
+                    .created = convertEmailCreated(parsed.value->created),
+                    .notCreated = convertSetErrors(parsed.value->notCreated),
+                },
+            .error = std::nullopt,
+        };
+    }
+
+    ParsedEnvelope<EmailImportResponse> parseEmailImportResponse(std::string_view json)
+    {
+        const auto parsed = parseMethod<RawEmailImportResponse>(json);
+        if (!parsed.ok())
+        {
+            return {
+                .value = std::nullopt,
+                .error = parsed.error,
+            };
+        }
+
+        return {
+            .value =
+                EmailImportResponse{
+                    .accountId = std::move(parsed.value->accountId),
+                    .oldState = std::move(parsed.value->oldState),
+                    .newState = std::move(parsed.value->newState),
+                    .created = convertEmailCreated(parsed.value->created),
+                    .notCreated = convertSetErrors(parsed.value->notCreated),
+                },
+            .error = std::nullopt,
+        };
+    }
+
     ParsedEnvelope<EmailSubmissionSetResponse>
     parseEmailSubmissionSetResponse(std::string_view json)
     {
@@ -1753,6 +1999,7 @@ namespace javelin::jmap::api
                                                .type = error.type,
                                                .description = error.description,
                                                .properties = error.properties,
+                                               .existingId = error.existingId,
                                            });
         }
 
@@ -2022,6 +2269,30 @@ namespace javelin::jmap::api
 
         return MethodRequest<EmailSetResponse>{
             .name = "Email/set",
+            .arguments = *arguments,
+        };
+    }
+
+    std::optional<MethodRequest<EmailCopyResponse>> emailCopy(const EmailCopyRequest& request)
+    {
+        const auto arguments = serializeEmailCopyRequest(request);
+        if (!arguments.has_value())
+            return std::nullopt;
+
+        return MethodRequest<EmailCopyResponse>{
+            .name = "Email/copy",
+            .arguments = *arguments,
+        };
+    }
+
+    std::optional<MethodRequest<EmailImportResponse>> emailImport(const EmailImportRequest& request)
+    {
+        const auto arguments = serializeEmailImportRequest(request);
+        if (!arguments.has_value())
+            return std::nullopt;
+
+        return MethodRequest<EmailImportResponse>{
+            .name = "Email/import",
             .arguments = *arguments,
         };
     }

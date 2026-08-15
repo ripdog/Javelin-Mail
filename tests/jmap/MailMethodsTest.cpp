@@ -773,3 +773,131 @@ TEST_CASE("email set responses accept nullable oldState and null updated maps",
     CHECK(result.value->updated.empty());
     CHECK(result.value->notUpdated.empty());
 }
+
+TEST_CASE("email copy requests serialize RFC 8620 copy arguments", "[jmap][method][mail]")
+{
+    const auto json = javelin::jmap::api::serializeEmailCopyRequest({
+        .fromAccountId = "source-account",
+        .ifFromInState = "source-state",
+        .accountId = "destination-account",
+        .ifInState = "destination-state",
+        .create = {{"copy-1",
+                    javelin::jmap::api::EmailCopyCreate{
+                        .id = "eml-1",
+                        .mailboxIds = std::unordered_map<std::string, bool>{{"archive", true}},
+                        .keywords = std::unordered_map<std::string, bool>{{"$seen", true}},
+                        .receivedAt = "2026-08-15T08:00:00Z",
+                    }}},
+        .onSuccessDestroyOriginal = false,
+        .destroyFromIfInState = std::nullopt,
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(json->find(R"("fromAccountId":"source-account")") != std::string::npos);
+    CHECK(json->find(R"("ifFromInState":"source-state")") != std::string::npos);
+    CHECK(json->find(R"("accountId":"destination-account")") != std::string::npos);
+    CHECK(json->find(R"("ifInState":"destination-state")") != std::string::npos);
+    CHECK(json->find(R"("id":"eml-1")") != std::string::npos);
+    CHECK(json->find(R"("mailboxIds":{"archive":true})") != std::string::npos);
+    CHECK(json->find(R"("keywords":{"$seen":true})") != std::string::npos);
+    CHECK(json->find(R"("receivedAt":"2026-08-15T08:00:00Z")") != std::string::npos);
+    CHECK(json->find(R"("onSuccessDestroyOriginal":false)") != std::string::npos);
+    CHECK(json->find("destroyFromIfInState") == std::string::npos);
+
+    const auto method = javelin::jmap::api::emailCopy({
+        .fromAccountId = "source-account",
+        .ifFromInState = std::nullopt,
+        .accountId = "destination-account",
+        .ifInState = std::nullopt,
+        .create = {{"copy-1",
+                    javelin::jmap::api::EmailCopyCreate{
+                        .id = "eml-1",
+                        .mailboxIds = std::nullopt,
+                        .keywords = std::nullopt,
+                        .receivedAt = std::nullopt,
+                    }}},
+        .onSuccessDestroyOriginal = false,
+        .destroyFromIfInState = std::nullopt,
+    });
+    REQUIRE(method.has_value());
+    CHECK(method->name == "Email/copy");
+}
+
+TEST_CASE("email copy responses preserve created metadata and duplicate existingId",
+          "[jmap][method][mail]")
+{
+    const auto result = javelin::jmap::api::parseEmailCopyResponse(
+        R"({"fromAccountId":"source-account","accountId":"destination-account","oldState":null,"newState":"new-2","created":{"copy-1":{"id":"eml-2","blobId":"blob-2","threadId":"thread-2","size":1234}},"notCreated":{"copy-2":{"type":"alreadyExists","description":"duplicate","existingId":"eml-existing"}}})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->fromAccountId == "source-account");
+    CHECK(result.value->accountId == "destination-account");
+    CHECK_FALSE(result.value->oldState.has_value());
+    CHECK(result.value->newState == "new-2");
+    REQUIRE(result.value->created.contains("copy-1"));
+    CHECK(result.value->created.at("copy-1").id == "eml-2");
+    CHECK(result.value->created.at("copy-1").blobId == "blob-2");
+    CHECK(result.value->created.at("copy-1").threadId == "thread-2");
+    CHECK(result.value->created.at("copy-1").size == 1234);
+    REQUIRE(result.value->notCreated.contains("copy-2"));
+    CHECK(result.value->notCreated.at("copy-2").type == "alreadyExists");
+    CHECK(result.value->notCreated.at("copy-2").existingId ==
+          std::optional<std::string>{"eml-existing"});
+}
+
+TEST_CASE("email import requests serialize uploaded blobs and destination state",
+          "[jmap][method][mail]")
+{
+    const auto json = javelin::jmap::api::serializeEmailImportRequest({
+        .accountId = "destination-account",
+        .ifInState = "email-state-7",
+        .emails = {{"import-1",
+                    javelin::jmap::api::EmailImport{
+                        .blobId = "uploaded-blob",
+                        .mailboxIds = {{"inbox", true}},
+                        .keywords = {{"$seen", true}, {"custom", true}},
+                        .receivedAt = "2026-08-15T08:00:00Z",
+                    }}},
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(json->find(R"("accountId":"destination-account")") != std::string::npos);
+    CHECK(json->find(R"("ifInState":"email-state-7")") != std::string::npos);
+    CHECK(json->find(R"("emails":{)") != std::string::npos);
+    CHECK(json->find(R"("blobId":"uploaded-blob")") != std::string::npos);
+    CHECK(json->find(R"("mailboxIds":{"inbox":true})") != std::string::npos);
+    CHECK(json->find(R"("$seen":true)") != std::string::npos);
+    CHECK(json->find(R"("custom":true)") != std::string::npos);
+
+    const auto method = javelin::jmap::api::emailImport({
+        .accountId = "destination-account",
+        .ifInState = std::nullopt,
+        .emails = {{"import-1",
+                    javelin::jmap::api::EmailImport{
+                        .blobId = "uploaded-blob",
+                        .mailboxIds = {{"inbox", true}},
+                        .keywords = {},
+                        .receivedAt = std::nullopt,
+                    }}},
+    });
+    REQUIRE(method.has_value());
+    CHECK(method->name == "Email/import");
+}
+
+TEST_CASE("email import responses preserve alreadyExists existingId", "[jmap][method][mail]")
+{
+    const auto result = javelin::jmap::api::parseEmailImportResponse(
+        R"({"accountId":"destination-account","oldState":"old-7","newState":"new-8","created":null,"notCreated":{"import-1":{"type":"alreadyExists","existingId":"eml-existing"}}})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->accountId == "destination-account");
+    CHECK(result.value->oldState == std::optional<std::string>{"old-7"});
+    CHECK(result.value->newState == "new-8");
+    CHECK(result.value->created.empty());
+    REQUIRE(result.value->notCreated.contains("import-1"));
+    CHECK(result.value->notCreated.at("import-1").type == "alreadyExists");
+    CHECK(result.value->notCreated.at("import-1").existingId ==
+          std::optional<std::string>{"eml-existing"});
+}
