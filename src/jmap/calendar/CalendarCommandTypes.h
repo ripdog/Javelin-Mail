@@ -71,6 +71,7 @@ namespace javelin::jmap::calendar
     {
         std::string accountId;
         std::string eventId;
+        std::optional<LocalDateTime> recurrenceId = std::nullopt;
         std::string participationStatus;
         std::optional<std::string> ifInState;
         std::optional<CalendarRangeMaterialization> materialization;

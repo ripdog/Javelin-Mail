@@ -4,6 +4,7 @@
 #include <glaze/glaze.hpp>
 
 #include <algorithm>
+#include <array>
 #include <utility>
 
 namespace javelin::jmap::api::detail
@@ -173,16 +174,6 @@ namespace javelin::jmap::api::detail
         bool operator==(const RawRecurrenceRule&) const = default;
     };
 
-    struct RawOverride
-    {
-        bool excluded = false;
-        std::optional<std::string> start;
-        std::optional<std::string> duration;
-        std::optional<std::string> title;
-
-        bool operator==(const RawOverride&) const = default;
-    };
-
     struct RawParticipant
     {
         std::string type;
@@ -230,7 +221,7 @@ namespace javelin::jmap::api::detail
         std::optional<std::string> utcStart;
         std::optional<std::string> utcEnd;
         std::optional<RawRecurrenceRule> recurrenceRule;
-        std::unordered_map<std::string, RawOverride> recurrenceOverrides;
+        std::unordered_map<std::string, glz::raw_json> recurrenceOverrides;
         std::unordered_map<std::string, RawParticipant> participants;
     };
 
@@ -250,10 +241,37 @@ namespace javelin::jmap::api::detail
         bool useDefaultAlerts = false;
         std::optional<std::unordered_map<std::string, RawAlert>> alerts;
         std::optional<RawRecurrenceRule> recurrenceRule;
-        std::optional<std::unordered_map<std::string, RawOverride>> recurrenceOverrides;
+        std::optional<std::unordered_map<std::string, glz::raw_json>> recurrenceOverrides;
         std::optional<std::unordered_map<std::string, RawParticipant>> participants;
 
-        bool operator==(const RawEventWrite&) const = default;
+        bool operator==(const RawEventWrite& other) const
+        {
+            const auto recurrenceOverridesEqual = [](const auto& left, const auto& right)
+            {
+                if (left.has_value() != right.has_value())
+                    return false;
+                if (!left)
+                    return true;
+                if (left->size() != right->size())
+                    return false;
+                for (const auto& [id, patch] : *left)
+                {
+                    const auto found = right->find(id);
+                    if (found == right->end() || found->second.str != patch.str)
+                        return false;
+                }
+                return true;
+            };
+            return type == other.type && uid == other.uid && calendarIds == other.calendarIds &&
+                   title == other.title && description == other.description &&
+                   locations == other.locations && start == other.start &&
+                   duration == other.duration && timeZone == other.timeZone &&
+                   showWithoutTime == other.showWithoutTime && isDraft == other.isDraft &&
+                   useDefaultAlerts == other.useDefaultAlerts && alerts == other.alerts &&
+                   recurrenceRule == other.recurrenceRule &&
+                   recurrenceOverridesEqual(recurrenceOverrides, other.recurrenceOverrides) &&
+                   participants == other.participants;
+        }
     };
 
     struct RawEventGetResponse
@@ -447,8 +465,6 @@ JAVELIN_GLZ_META(RawRecurrenceRule, "@type", &T::type, "frequency", &T::frequenc
                  &T::byMonth, "byYearDay", &T::byYearDay, "byWeekNo", &T::byWeekNo, "byHour",
                  &T::byHour, "byMinute", &T::byMinute, "bySecond", &T::bySecond, "bySetPosition",
                  &T::bySetPosition, "count", &T::count, "until", &T::until);
-JAVELIN_GLZ_META(RawOverride, "excluded", &T::excluded, "start", &T::start, "duration",
-                 &T::duration, "title", &T::title);
 JAVELIN_GLZ_META(RawParticipant, "@type", &T::type, "name", &T::name, "email", &T::email,
                  "calendarAddress", &T::calendarAddress, "participationStatus",
                  &T::participationStatus, "roles", &T::roles, "expectReply", &T::expectReply,
@@ -660,6 +676,182 @@ namespace javelin::jmap::api
             return values.empty() ? std::nullopt : std::optional{values};
         }
 
+        detail::RawParticipant rawParticipant(const calendar::Attendee& attendee)
+        {
+            auto roles = attendee.roles;
+            std::erase_if(roles, [](const auto& role) { return !role.second; });
+            if (attendee.isOwner)
+                roles.insert_or_assign("owner", true);
+            else
+                roles.erase("owner");
+            if (attendee.isAttendee)
+                roles.insert_or_assign("attendee", true);
+            else
+                roles.erase("attendee");
+            return {.type = "Participant",
+                    .name = attendee.name,
+                    .email = attendee.email,
+                    .calendarAddress = attendee.calendarAddress,
+                    .participationStatus = attendee.participationStatus,
+                    .roles = std::move(roles),
+                    .expectReply = attendee.expectReply,
+                    .scheduleSequence = attendee.scheduleSequence,
+                    .scheduleUpdated = attendee.scheduleUpdated
+                                           ? std::optional{attendee.scheduleUpdated->value}
+                                           : std::nullopt};
+        }
+
+        calendar::Attendee attendee(const std::string& id,
+                                    const detail::RawParticipant& participant)
+        {
+            auto additionalRoles = participant.roles;
+            additionalRoles.erase("owner");
+            additionalRoles.erase("attendee");
+            return {
+                .id = id,
+                .name = participant.name,
+                .email = participant.email,
+                .calendarAddress = participant.calendarAddress,
+                .participationStatus = participant.participationStatus,
+                .isOwner = participant.roles.contains("owner") && participant.roles.at("owner"),
+                .isAttendee =
+                    participant.roles.contains("attendee") && participant.roles.at("attendee"),
+                .roles = std::move(additionalRoles),
+                .expectReply = participant.expectReply,
+                .scheduleSequence = participant.scheduleSequence,
+                .scheduleUpdated =
+                    participant.scheduleUpdated
+                        ? std::optional<calendar::UtcInstant>{{.value =
+                                                                   *participant.scheduleUpdated}}
+                        : std::nullopt};
+        }
+
+        std::optional<std::vector<std::string>> patchSegments(const std::string_view path)
+        {
+            std::vector<std::string> result;
+            std::size_t start = 0;
+            while (true)
+            {
+                const auto slash = path.find('/', start);
+                const auto encoded = path.substr(
+                    start, slash == std::string_view::npos ? path.size() - start : slash - start);
+                std::string decoded;
+                decoded.reserve(encoded.size());
+                for (std::size_t index = 0; index < encoded.size(); ++index)
+                {
+                    if (encoded[index] != '~')
+                    {
+                        decoded.push_back(encoded[index]);
+                        continue;
+                    }
+                    if (index + 1 >= encoded.size() ||
+                        (encoded[index + 1] != '0' && encoded[index + 1] != '1'))
+                        return std::nullopt;
+                    decoded.push_back(encoded[index + 1] == '0' ? '~' : '/');
+                    ++index;
+                }
+                result.push_back(std::move(decoded));
+                if (slash == std::string_view::npos)
+                    break;
+                start = slash + 1;
+            }
+            return result;
+        }
+
+        std::optional<glz::raw_json>
+        rawRecurrenceOverride(const calendar::RecurrenceOverride& value)
+        {
+            glz::generic patch;
+            patch.data = glz::generic::object_t{};
+            auto& object = patch.get_object();
+            if (value.excluded)
+            {
+                object["excluded"] = true;
+            }
+            else
+            {
+                if (value.start)
+                    object["start"] = value.start->value;
+                if (value.duration)
+                    object["duration"] = value.duration->value;
+                if (value.title)
+                    object["title"] = *value.title;
+
+                for (const auto& [participantId, participant] : value.participantOverrides)
+                {
+                    auto effective = participant;
+                    if (const auto status =
+                            value.participantParticipationStatus.find(participantId);
+                        status != value.participantParticipationStatus.end())
+                        effective.participationStatus = status->second;
+                    const auto serialized = serialize(rawParticipant(effective));
+                    if (!serialized)
+                        return std::nullopt;
+                    glz::generic participantValue;
+                    if (glz::read_json(participantValue, *serialized))
+                        return std::nullopt;
+                    object[patchPath("participants", participantId)] = std::move(participantValue);
+                }
+                for (const auto& [participantId, status] : value.participantParticipationStatus)
+                {
+                    if (value.participantOverrides.contains(participantId))
+                        continue;
+                    const std::array<std::string_view, 3> path{"participants", participantId,
+                                                               "participationStatus"};
+                    object[patchPath(path)] = status;
+                }
+            }
+            std::string json;
+            if (glz::write_json(patch, json))
+                return std::nullopt;
+            return glz::raw_json{std::move(json)};
+        }
+
+        std::optional<calendar::RecurrenceOverride> recurrenceOverride(const glz::raw_json& raw)
+        {
+            glz::generic patch;
+            if (glz::read_json(patch, raw.str) || !patch.is_object())
+                return std::nullopt;
+            calendar::RecurrenceOverride result;
+            const auto& object = patch.get_object();
+            if (const auto found = object.find("excluded");
+                found != object.end() && found->second.is_boolean())
+                result.excluded = found->second.get_boolean();
+            if (const auto found = object.find("start");
+                found != object.end() && found->second.is_string())
+                result.start = calendar::LocalDateTime{.value = found->second.get_string()};
+            if (const auto found = object.find("duration");
+                found != object.end() && found->second.is_string())
+                result.duration = calendar::Duration{.value = found->second.get_string()};
+            if (const auto found = object.find("title");
+                found != object.end() && found->second.is_string())
+                result.title = found->second.get_string();
+
+            for (const auto& [path, patchValue] : object)
+            {
+                const auto segments = patchSegments(path);
+                if (!segments || segments->empty() || segments->front() != "participants")
+                    continue;
+                if (segments->size() == 2 && patchValue.is_object())
+                {
+                    std::string json;
+                    if (glz::write_json(patchValue, json))
+                        return std::nullopt;
+                    detail::RawParticipant participant;
+                    if (glz::read<glz::opts{.error_on_unknown_keys = false}>(participant, json))
+                        return std::nullopt;
+                    result.participantOverrides.insert_or_assign(
+                        (*segments)[1], attendee((*segments)[1], participant));
+                    continue;
+                }
+                if (segments->size() == 3 && (*segments)[2] == "participationStatus" &&
+                    patchValue.is_string())
+                    result.participantParticipationStatus.insert_or_assign((*segments)[1],
+                                                                           patchValue.get_string());
+            }
+            return result;
+        }
+
         bool isImportedAllDayEvent(const detail::RawEvent& value)
         {
             if (value.showWithoutTime)
@@ -766,43 +958,12 @@ namespace javelin::jmap::api
             }
             for (const auto& [id, valueOverride] : value.recurrenceOverrides)
             {
-                raw.recurrenceOverrides.emplace(
-                    id, detail::RawOverride{
-                            .excluded = valueOverride.excluded,
-                            .start = valueOverride.start ? std::optional{valueOverride.start->value}
-                                                         : std::nullopt,
-                            .duration = valueOverride.duration
-                                            ? std::optional{valueOverride.duration->value}
-                                            : std::nullopt,
-                            .title = valueOverride.title});
+                const auto encoded = rawRecurrenceOverride(valueOverride);
+                if (encoded)
+                    raw.recurrenceOverrides.emplace(id, *encoded);
             }
-            for (const auto& attendee : value.attendees)
-            {
-                auto roles = attendee.roles;
-                std::erase_if(roles, [](const auto& role) { return !role.second; });
-                if (attendee.isOwner)
-                    roles.insert_or_assign("owner", true);
-                else
-                    roles.erase("owner");
-                if (attendee.isAttendee)
-                    roles.insert_or_assign("attendee", true);
-                else
-                    roles.erase("attendee");
-                raw.participants.emplace(
-                    attendee.id,
-                    detail::RawParticipant{.type = "Participant",
-                                           .name = attendee.name,
-                                           .email = attendee.email,
-                                           .calendarAddress = attendee.calendarAddress,
-                                           .participationStatus = attendee.participationStatus,
-                                           .roles = std::move(roles),
-                                           .expectReply = attendee.expectReply,
-                                           .scheduleSequence = attendee.scheduleSequence,
-                                           .scheduleUpdated =
-                                               attendee.scheduleUpdated
-                                                   ? std::optional{attendee.scheduleUpdated->value}
-                                                   : std::nullopt});
-            }
+            for (const auto& participant : value.attendees)
+                raw.participants.emplace(participant.id, rawParticipant(participant));
             return raw;
         }
 
@@ -948,45 +1109,12 @@ namespace javelin::jmap::api
             }
             for (const auto& [id, rawOverride] : raw.recurrenceOverrides)
             {
-                value.recurrenceOverrides.emplace(
-                    id,
-                    calendar::RecurrenceOverride{
-                        .excluded = rawOverride.excluded,
-                        .start =
-                            rawOverride.start
-                                ? std::optional<calendar::LocalDateTime>{{.value =
-                                                                              *rawOverride.start}}
-                                : std::nullopt,
-                        .duration =
-                            rawOverride.duration
-                                ? std::optional<calendar::Duration>{{.value =
-                                                                         *rawOverride.duration}}
-                                : std::nullopt,
-                        .title = rawOverride.title});
+                const auto parsed = recurrenceOverride(rawOverride);
+                if (parsed)
+                    value.recurrenceOverrides.emplace(id, *parsed);
             }
             for (const auto& [id, participant] : raw.participants)
-            {
-                auto additionalRoles = participant.roles;
-                additionalRoles.erase("owner");
-                additionalRoles.erase("attendee");
-                value.attendees.push_back(calendar::Attendee{
-                    .id = id,
-                    .name = participant.name,
-                    .email = participant.email,
-                    .calendarAddress = participant.calendarAddress,
-                    .participationStatus = participant.participationStatus,
-                    .isOwner = participant.roles.contains("owner") && participant.roles.at("owner"),
-                    .isAttendee =
-                        participant.roles.contains("attendee") && participant.roles.at("attendee"),
-                    .roles = std::move(additionalRoles),
-                    .expectReply = participant.expectReply,
-                    .scheduleSequence = participant.scheduleSequence,
-                    .scheduleUpdated =
-                        participant.scheduleUpdated
-                            ? std::optional<calendar::UtcInstant>{{.value = *participant
-                                                                                 .scheduleUpdated}}
-                            : std::nullopt});
-            }
+                value.attendees.push_back(attendee(id, participant));
             return value;
         }
 

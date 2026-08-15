@@ -20,7 +20,7 @@ namespace javelin::jmap::cache
         appendSteps(steps, migrations::migrationSteps1To13());
         appendSteps(steps, migrations::migrationSteps14To28());
         appendSteps(steps, migrations::migrationSteps29To36());
-        appendSteps(steps, migrations::migrationSteps37To50());
+        appendSteps(steps, migrations::migrationSteps37To51());
         return MigrationRunner{std::move(steps)};
     }
 

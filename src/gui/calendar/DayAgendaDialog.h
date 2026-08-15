@@ -44,6 +44,7 @@ namespace javelin::gui::calendar
         bool recurring = false;
         bool editable = false;
         bool rsvpAllowed = false;
+        QString rsvpRecurrenceId{};
         QString participationStatus;
         bool responseMutationPending = false;
         QString responseError;
@@ -70,7 +71,8 @@ namespace javelin::gui::calendar
         void dayChanged(QDate date);
         void newEventRequested(QDateTime start, QDateTime end);
         void editRequested(QString accountId, QString eventId, QString recurrenceId);
-        void responseRequested(QString accountId, QString eventId, QString participationStatus);
+        void responseRequested(QString accountId, QString eventId, QString recurrenceId,
+                               QString participationStatus);
         void eventContextMenuRequested(QPoint globalPosition, QString accountId, QString eventId,
                                        QString recurrenceId);
 

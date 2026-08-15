@@ -1,6 +1,8 @@
 #pragma once
 
+#include "app/CalendarInvitationAccountSource.h"
 #include "jmap/cache/CalendarInvitationRepository.h"
+#include "jmap/sync/StateChangeSource.h"
 
 #include <QObject>
 #include <QTimer>
@@ -10,12 +12,6 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-
-namespace javelin::app
-{
-    class AccountRuntimeManager;
-    class CalendarApplicationService;
-} // namespace javelin::app
 
 namespace javelin::jmap::calendar
 {
@@ -38,14 +34,17 @@ namespace javelin::app
         CalendarInvitationService(javelin::jmap::cache::DatabaseConnection& connection,
                                   javelin::jmap::calendar::CalendarProtocolClient& protocolClient,
                                   javelin::jmap::calendar::CalendarReader& reader,
-                                  AccountRuntimeManager& accountRuntime,
-                                  CalendarApplicationService& calendarApplication,
+                                  CalendarInvitationAccountSource& accountSource,
                                   QObject* parent = nullptr);
 
         void start();
         void deliveryAccepted(const QString& invitationKey);
         void deliveryFailed(const QString& invitationKey);
         void requestDispatch();
+        void calendarCacheCommitted();
+        void accountChanged(const QString& ownerAccountId);
+        void calendarStateChanged(const QString& ownerAccountId,
+                                  const javelin::jmap::sync::AccountTypeStateMap& changedStates);
 
       Q_SIGNALS:
         void invitationReady(const QString& invitationKey, const QString& calendarAccountId,
@@ -60,6 +59,7 @@ namespace javelin::app
         {
             std::string accountId;
             std::string eventId;
+            std::optional<javelin::jmap::calendar::LocalDateTime> recurrenceId;
         };
 
         void scheduleOwner(std::string ownerAccountId);
@@ -71,8 +71,7 @@ namespace javelin::app
         javelin::jmap::cache::DatabaseConnection& m_connection;
         javelin::jmap::calendar::CalendarProtocolClient& m_protocolClient;
         javelin::jmap::calendar::CalendarReader& m_reader;
-        AccountRuntimeManager& m_accountRuntime;
-        CalendarApplicationService& m_calendarApplication;
+        CalendarInvitationAccountSource& m_accountSource;
         javelin::jmap::cache::CalendarInvitationRepository m_repository;
         QTimer m_syncTimer;
         QTimer m_dispatchRetryTimer;

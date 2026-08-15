@@ -1174,6 +1174,67 @@ TEST_CASE("calendar invitation responses use participant identities and RSVP rig
         CHECK(accepted->attendees[1].participationStatus == "accepted");
     }
 
+    SECTION("occurrence RSVP changes only the recurring instance")
+    {
+        auto recurring = invitation;
+        recurring.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
+        recurring.attendees[1].participationStatus = "accepted";
+        recurring.recurrenceOverrides["2026-07-20T09:00:00"]
+            .participantParticipationStatus.insert_or_assign("me", "needs-action");
+        REQUIRE_FALSE(calendars
+                          .applyEventDelta("a1", "calendar-state-1", "event-rsvp-recurring",
+                                           {.value = "Pacific/Auckland"}, {recurring},
+                                           {{.accountId = "a1",
+                                             .id = "event-1::2026-07-20T09:00:00",
+                                             .eventId = "event-1",
+                                             .recurrenceId =
+                                                 javelin::jmap::calendar::LocalDateTime{
+                                                     .value = "2026-07-20T09:00:00"},
+                                             .localStart = {.value = "2026-07-20T09:00:00"},
+                                             .localEnd = {.value = "2026-07-20T10:00:00"},
+                                             .utcStart = std::nullopt,
+                                             .utcEnd = std::nullopt,
+                                             .allDay = false}},
+                                           {})
+                          .has_value());
+        transport.results.push_back(identityResponse("mailto:alice@example.test"));
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "CalendarEvent/set",
+                  .arguments =
+                      R"({"accountId":"a1","oldState":"event-rsvp-recurring","newState":"event-rsvp-recurring-2","created":{},"updated":{"event-1":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+                  .callId = "calendar-event-set"}},
+            .createdIds = std::nullopt,
+            .sessionState = "session-rsvp-occurrence",
+        });
+
+        const auto result = QCoro::waitFor(mutation.respond(
+            settings, "a1",
+            {.accountId = "a1",
+             .eventId = "event-1",
+             .recurrenceId = javelin::jmap::calendar::LocalDateTime{.value = "2026-07-20T09:00:00"},
+             .participationStatus = "declined",
+             .ifInState = std::nullopt,
+             .materialization = std::nullopt}));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
+        REQUIRE(transport.requests.size() == 2);
+        const auto& arguments = transport.requests[1].envelope.methodCalls.front().arguments;
+        CHECK(arguments.find("recurrenceOverrides/2026-07-20T09:00:00/") != std::string::npos);
+        CHECK(arguments.find("participants~1me~1participationStatus") != std::string::npos);
+        CHECK(arguments.find(R"(:"declined")") != std::string::npos);
+        const auto cached = calendars.findEvent("a1", "event-1");
+        REQUIRE(
+            std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached));
+        REQUIRE(
+            std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached).has_value());
+        const auto& updated =
+            *std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached);
+        CHECK(updated.attendees[1].participationStatus == "accepted");
+        CHECK(updated.recurrenceOverrides.at("2026-07-20T09:00:00")
+                  .participantParticipationStatus.at("me") == "declined");
+    }
+
     SECTION("definitive RSVP rejection restores the invitation")
     {
         transport.results.push_back(identityResponse("mailto:alice@example.test"));

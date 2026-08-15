@@ -150,6 +150,57 @@ TEST_CASE("removed editable attendees do not remove hidden participant records")
     CHECK(result.front().id == "resource");
 }
 
+TEST_CASE("effective recurring occurrences apply participant overrides")
+{
+    javelin::jmap::calendar::CalendarEvent base;
+    base.id = "series";
+    base.start = {.value = "2026-09-01T09:00:00"};
+    base.duration = {.value = "PT1H"};
+    base.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
+    base.attendees = {attendee("me", "alice@example.test")};
+    base.attendees.front().participationStatus = "accepted";
+    auto alias = attendee("alias", "alias@example.test");
+    alias.participationStatus = "needs-action";
+    auto& occurrence = base.recurrenceOverrides["2026-09-08T09:00:00"];
+    occurrence.participantParticipationStatus.insert_or_assign("me", "needs-action");
+    occurrence.participantOverrides.insert_or_assign("alias", alias);
+
+    const auto effective =
+        javelin::jmap::calendar::effectiveOccurrenceEvent(base, {.value = "2026-09-08T09:00:00"});
+
+    REQUIRE(effective.has_value());
+    CHECK(effective->recurrenceId ==
+          javelin::jmap::calendar::LocalDateTime{.value = "2026-09-08T09:00:00"});
+    REQUIRE(effective->attendees.size() == 2);
+    CHECK(effective->attendees.front().participationStatus == "needs-action");
+    CHECK(effective->attendees.back().id == "alias");
+    CHECK(effective->attendees.back().participationStatus == "needs-action");
+    CHECK_FALSE(effective->recurrenceRule.has_value());
+    CHECK(effective->recurrenceOverrides.empty());
+}
+
+TEST_CASE("occurrence RSVP changes only the participant status override")
+{
+    javelin::jmap::calendar::CalendarEvent base;
+    base.id = "series";
+    base.attendees = {attendee("me", "alice@example.test")};
+    base.attendees.front().participationStatus = "accepted";
+    base.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
+    base.recurrenceOverrides["2026-09-08T09:00:00"].participantParticipationStatus.insert_or_assign(
+        "me", "needs-action");
+
+    const auto accepted = javelin::jmap::calendar::setOccurrenceParticipationStatus(
+        base, {.value = "2026-09-08T09:00:00"}, "me", "accepted");
+    CHECK_FALSE(accepted.recurrenceOverrides.contains("2026-09-08T09:00:00"));
+    CHECK(accepted.attendees.front().participationStatus == "accepted");
+
+    const auto declined = javelin::jmap::calendar::setOccurrenceParticipationStatus(
+        base, {.value = "2026-09-08T09:00:00"}, "me", "declined");
+    CHECK(declined.recurrenceOverrides.at("2026-09-08T09:00:00")
+              .participantParticipationStatus.at("me") == "declined");
+    CHECK(declined.attendees.front().participationStatus == "accepted");
+}
+
 TEST_CASE("occurrence edits create an override without changing the base event")
 {
     javelin::jmap::calendar::CalendarEvent base;
@@ -159,10 +210,13 @@ TEST_CASE("occurrence edits create an override without changing the base event")
     base.duration = {.value = "PT1H"};
     base.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
     base.recurrenceOverrides.emplace(
-        "2026-07-14T09:00:00", javelin::jmap::calendar::RecurrenceOverride{.excluded = false,
-                                                                           .start = std::nullopt,
-                                                                           .duration = std::nullopt,
-                                                                           .title = "Old title"});
+        "2026-07-14T09:00:00",
+        javelin::jmap::calendar::RecurrenceOverride{.excluded = false,
+                                                    .start = std::nullopt,
+                                                    .duration = std::nullopt,
+                                                    .title = "Old title",
+                                                    .participantOverrides = {},
+                                                    .participantParticipationStatus = {}});
     auto edited = base;
     edited.title = "Moved meeting";
     edited.start = {.value = "2026-07-14T10:30:00"};
@@ -193,7 +247,9 @@ TEST_CASE("deleting one occurrence preserves its existing override as an exclusi
             .excluded = false,
             .start = javelin::jmap::calendar::LocalDateTime{.value = "2026-07-14T10:00:00"},
             .duration = std::nullopt,
-            .title = "Changed"});
+            .title = "Changed",
+            .participantOverrides = {},
+            .participantParticipationStatus = {}});
 
     const auto result =
         javelin::jmap::calendar::excludeOccurrence(base, {.value = "2026-07-14T09:00:00"});

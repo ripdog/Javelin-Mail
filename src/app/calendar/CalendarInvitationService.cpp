@@ -1,7 +1,5 @@
 #include "app/CalendarInvitationService.h"
 
-#include "app/AccountRuntimeManager.h"
-#include "app/CalendarApplicationService.h"
 #include "jmap/api/CalendarMethods.h"
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/RequestBuilder.h"
@@ -20,6 +18,7 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QLocale>
+#include <QRegularExpression>
 #include <QTimeZone>
 
 #include <algorithm>
@@ -312,6 +311,106 @@ namespace javelin::app
             co_return ids;
         }
 
+        [[nodiscard]] QDateTime expandedWindowEnd(QDateTime start, const std::string_view duration)
+        {
+            static const QRegularExpression pattern{QStringLiteral(
+                R"(^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$)")};
+            const auto match = pattern.match(QString::fromStdString(std::string{duration}));
+            if (!match.hasMatch())
+                return start.addYears(1);
+            auto end = start;
+            end = end.addYears(match.captured(1).toInt());
+            end = end.addMonths(match.captured(2).toInt());
+            end = end.addDays(match.captured(3).toInt() * 7 + match.captured(4).toInt());
+            end = end.addSecs(match.captured(5).toLongLong() * 3600 +
+                              match.captured(6).toLongLong() * 60 + match.captured(7).toLongLong());
+            return end > start ? end : start.addYears(1);
+        }
+
+        QCoro::Task<CallResult<std::optional<javelin::jmap::calendar::CalendarEvent>>>
+        nextExpandedOccurrence(javelin::jmap::calendar::CalendarProtocolClient& protocolClient,
+                               const javelin::jmap::LiveConnectionSettings& settings,
+                               const javelin::jmap::api::Session& session,
+                               const std::string& accountId,
+                               const javelin::jmap::calendar::CalendarEvent& event,
+                               const javelin::jmap::calendar::TimeZoneId& zone,
+                               const std::string_view windowDuration)
+        {
+            auto cursor = QDateTime::currentDateTime();
+            const auto maxDate = [&]() -> QDateTime
+            {
+                const auto account = session.accounts.find(accountId);
+                if (account == session.accounts.end() ||
+                    !account->second.accountCapabilities.calendars)
+                    return cursor.addYears(128);
+                const auto value = QString::fromStdString(
+                    account->second.accountCapabilities.calendars->maxDateTime);
+                const auto parsed = QDateTime::fromString(value, Qt::ISODate);
+                return parsed.isValid() ? parsed.toLocalTime() : cursor.addYears(128);
+            }();
+
+            for (int window = 0; window < 128 && cursor < maxDate; ++window)
+            {
+                auto end = expandedWindowEnd(cursor, windowDuration);
+                if (end > maxDate)
+                    end = maxDate;
+                const javelin::jmap::calendar::LocalDateTime after{
+                    .value =
+                        cursor.toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss")).toStdString()};
+                const javelin::jmap::calendar::LocalDateTime before{
+                    .value = end.toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss")).toStdString()};
+                const javelin::jmap::api::CalendarEventQueryRequest queryRequest{
+                    .accountId = accountId,
+                    .filter = {.inCalendar = std::nullopt,
+                               .after = after,
+                               .before = before,
+                               .text = std::nullopt,
+                               .uid = event.uid},
+                    .expandRecurrences = true,
+                    .timeZone = zone,
+                    .position = 0,
+                    .limit = 1,
+                    .calculateTotal = false};
+                const auto method = javelin::jmap::api::calendarEventQuery(queryRequest);
+                if (!method)
+                    co_return CallFailure{
+                        .message = QStringLiteral("Unable to serialize next occurrence query")};
+                auto queried = co_await call(protocolClient, settings, session, accountId, *method,
+                                             "calendar-invitation-next-occurrence");
+                if (const auto* failure = std::get_if<CallFailure>(&queried))
+                    co_return *failure;
+                auto query =
+                    std::get<javelin::jmap::api::CalendarEventQueryResponse>(std::move(queried));
+                if (!query.ids.empty())
+                {
+                    const std::vector<std::string> occurrenceIds{query.ids.front()};
+                    auto loaded = co_await getEvents(protocolClient, settings, session, accountId,
+                                                     occurrenceIds, zone);
+                    if (const auto* failure = std::get_if<CallFailure>(&loaded))
+                        co_return *failure;
+                    auto response =
+                        std::get<javelin::jmap::api::CalendarEventGetResponse>(std::move(loaded));
+                    if (!response.list.empty())
+                        co_return std::make_optional(response.list.front());
+                }
+                if (end <= cursor)
+                    break;
+                cursor = end;
+            }
+            co_return std::optional<javelin::jmap::calendar::CalendarEvent>{};
+        }
+
+        [[nodiscard]] std::string invitationScopeKey(
+            const std::string_view eventId,
+            const std::optional<javelin::jmap::calendar::LocalDateTime>& recurrenceId)
+        {
+            std::string key{eventId};
+            key.push_back('\0');
+            if (recurrenceId)
+                key += recurrenceId->value;
+            return key;
+        }
+
         [[nodiscard]] const javelin::jmap::calendar::Attendee*
         selfParticipant(const javelin::jmap::calendar::CalendarEvent& event,
                         const std::vector<javelin::jmap::calendar::ParticipantIdentity>& identities)
@@ -377,29 +476,51 @@ namespace javelin::app
 
         [[nodiscard]] std::optional<javelin::jmap::cache::CalendarInvitationProjection>
         pendingProjection(
-            const javelin::jmap::calendar::CalendarEvent& event,
+            const javelin::jmap::calendar::CalendarEvent& baseEvent,
+            const javelin::jmap::calendar::CalendarEvent& effectiveEvent,
+            std::optional<javelin::jmap::calendar::LocalDateTime> recurrenceId,
             const std::vector<javelin::jmap::calendar::ParticipantIdentity>& identities,
             const std::unordered_map<std::string, javelin::jmap::calendar::Calendar>& calendars,
             std::optional<std::string> sourceNotificationId, bool enqueueDesktopNotification,
             bool knownFutureFromQuery)
         {
-            if (event.id.empty() || event.isDraft || event.isOrigin ||
-                event.status == std::optional<std::string>{"cancelled"})
+            if (baseEvent.id.empty() || baseEvent.isDraft || baseEvent.isOrigin ||
+                baseEvent.status == std::optional<std::string>{"cancelled"})
                 return std::nullopt;
-            const auto* participant = selfParticipant(event, identities);
+            const auto* participant = selfParticipant(effectiveEvent, identities);
             if (participant == nullptr || participant->isOwner ||
                 participant->participationStatus != "needs-action")
                 return std::nullopt;
-            if (!rsvpAllowed(event, calendars))
+            if (!rsvpAllowed(baseEvent, calendars))
                 return std::nullopt;
-            if (!knownFutureFromQuery && !hasCurrentOrFutureOccurrence(event))
+            if (!knownFutureFromQuery && !hasCurrentOrFutureOccurrence(effectiveEvent))
                 return std::nullopt;
             return javelin::jmap::cache::CalendarInvitationProjection{
-                .eventId = event.id,
+                .eventId = baseEvent.id,
+                .recurrenceId = recurrenceId,
                 .selfParticipantId = participant->id,
                 .sourceNotificationId = std::move(sourceNotificationId),
+                .displayRecurrenceId = recurrenceId,
+                .displayStart =
+                    recurrenceId
+                        ? std::optional<javelin::jmap::calendar::LocalDateTime>{effectiveEvent
+                                                                                    .start}
+                        : std::nullopt,
+                .displayUtcStart = recurrenceId ? effectiveEvent.utcStart : std::nullopt,
                 .enqueueDesktopNotification = enqueueDesktopNotification,
             };
+        }
+
+        [[nodiscard]] bool
+        occurrenceOverridesParticipant(const javelin::jmap::calendar::CalendarEvent& baseEvent,
+                                       const javelin::jmap::calendar::LocalDateTime& recurrenceId,
+                                       const javelin::jmap::calendar::Attendee& participant)
+        {
+            const auto occurrence = baseEvent.recurrenceOverrides.find(recurrenceId.value);
+            if (occurrence == baseEvent.recurrenceOverrides.end())
+                return false;
+            return occurrence->second.participantOverrides.contains(participant.id) ||
+                   occurrence->second.participantParticipationStatus.contains(participant.id);
         }
 
         [[nodiscard]] QString notificationBody(
@@ -426,11 +547,10 @@ namespace javelin::app
     CalendarInvitationService::CalendarInvitationService(
         javelin::jmap::cache::DatabaseConnection& connection,
         javelin::jmap::calendar::CalendarProtocolClient& protocolClient,
-        javelin::jmap::calendar::CalendarReader& reader, AccountRuntimeManager& accountRuntime,
-        CalendarApplicationService& calendarApplication, QObject* parent)
+        javelin::jmap::calendar::CalendarReader& reader,
+        CalendarInvitationAccountSource& accountSource, QObject* parent)
         : QObject(parent), m_connection(connection), m_protocolClient(protocolClient),
-          m_reader(reader), m_accountRuntime(accountRuntime),
-          m_calendarApplication(calendarApplication), m_repository(connection)
+          m_reader(reader), m_accountSource(accountSource), m_repository(connection)
     {
         m_syncTimer.setSingleShot(true);
         m_syncTimer.setInterval(150);
@@ -440,29 +560,6 @@ namespace javelin::app
         m_dispatchRetryTimer.setInterval(60000);
         connect(&m_dispatchRetryTimer, &QTimer::timeout, this,
                 &CalendarInvitationService::dispatchPending);
-        connect(&m_accountRuntime, &AccountRuntimeManager::sessionRefreshed, this,
-                [this](const QString& ownerAccountId)
-                { scheduleOwner(ownerAccountId.toStdString()); });
-        connect(&m_accountRuntime, &AccountRuntimeManager::accountConfigured, this,
-                [this](const QString& ownerAccountId)
-                { scheduleOwner(ownerAccountId.toStdString()); });
-        connect(&m_accountRuntime, &AccountRuntimeManager::calendarStateChanged, this,
-                [this](const QString& ownerAccountId,
-                       const javelin::jmap::sync::AccountTypeStateMap& changedStates)
-                {
-                    const bool relevant = std::ranges::any_of(
-                        changedStates,
-                        [](const auto& account)
-                        {
-                            return account.second.contains("Calendar") ||
-                                   account.second.contains("CalendarEvent") ||
-                                   account.second.contains("CalendarEventNotification");
-                        });
-                    if (relevant)
-                        scheduleOwner(ownerAccountId.toStdString());
-                });
-        connect(&m_calendarApplication, &CalendarApplicationService::calendarCacheCommitted, this,
-                [this](const CalendarCacheChange&) { refreshPresentationState(); });
     }
 
     void CalendarInvitationService::start()
@@ -472,7 +569,7 @@ namespace javelin::app
         m_started = true;
         if (const auto error = m_repository.recoverDispatches())
             qWarning().noquote() << "Recover calendar invitation dispatches:" << error->message;
-        for (const auto& ownerAccountId : m_accountRuntime.configuredAccountIds())
+        for (const auto& ownerAccountId : m_accountSource.configuredAccountIds())
             scheduleOwner(ownerAccountId);
         dispatchPending();
         refreshPresentationState();
@@ -511,8 +608,8 @@ namespace javelin::app
 
     QCoro::Task<void> CalendarInvitationService::synchronizeOwner(std::string ownerAccountId)
     {
-        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
-        if (!configuration)
+        const auto connectionSettings = m_accountSource.connectionSettingsFor(ownerAccountId);
+        if (!connectionSettings)
             co_return;
         javelin::jmap::cache::SessionRepository sessions{m_connection};
         const auto loadedSession = sessions.load(ownerAccountId);
@@ -524,7 +621,7 @@ namespace javelin::app
         const auto& session = std::get<std::optional<javelin::jmap::api::Session>>(loadedSession);
         if (!session || !session->capabilities.calendars)
             co_return;
-        const auto settings = liveSettings(configuration->second.settings);
+        const auto settings = liveSettings(*connectionSettings);
         const javelin::jmap::calendar::TimeZoneId zone{
             .value = QTimeZone::systemTimeZoneId().toStdString()};
         const javelin::jmap::calendar::LocalDateTime nowLocal{
@@ -602,6 +699,7 @@ namespace javelin::app
 
             std::vector<std::string> notificationIds;
             std::vector<std::string> deletedNotificationIds;
+            std::unordered_set<std::string> newlyCreatedNotificationIds;
             std::string notificationState;
             bool fullNotificationReconciliation = baseline;
             if (!baseline)
@@ -636,6 +734,8 @@ namespace javelin::app
                             std::move(changesResponse));
                     notificationIds.insert(notificationIds.end(), changes.created.begin(),
                                            changes.created.end());
+                    newlyCreatedNotificationIds.insert(changes.created.begin(),
+                                                       changes.created.end());
                     notificationIds.insert(notificationIds.end(), changes.updated.begin(),
                                            changes.updated.end());
                     deletedNotificationIds.insert(deletedNotificationIds.end(),
@@ -695,7 +795,9 @@ namespace javelin::app
             notificationState = notifications.state;
 
             std::vector<std::string> eventIds;
-            std::unordered_map<std::string, std::string> createdSourceByEvent;
+            std::unordered_map<std::string, std::string> createdSourceByScope;
+            std::unordered_map<std::string, javelin::jmap::calendar::CalendarEvent>
+                createdSnapshotByScope;
             std::unordered_set<std::string> createdEventIds;
             for (const auto& notification : notifications.list)
             {
@@ -709,8 +811,10 @@ namespace javelin::app
                 if (notification.type ==
                     javelin::jmap::calendar::CalendarEventNotificationType::Created)
                 {
-                    createdSourceByEvent.insert_or_assign(notification.calendarEventId,
-                                                          notification.id);
+                    const auto key = invitationScopeKey(notification.calendarEventId,
+                                                        notification.event.recurrenceId);
+                    createdSourceByScope.insert_or_assign(key, notification.id);
+                    createdSnapshotByScope.insert_or_assign(key, notification.event);
                     createdEventIds.insert(notification.calendarEventId);
                 }
             }
@@ -766,16 +870,81 @@ namespace javelin::app
             std::vector<javelin::jmap::cache::CalendarInvitationProjection> pending;
             for (const auto& event : events.list)
             {
-                const auto source = createdSourceByEvent.find(event.id);
-                const auto projection =
-                    pendingProjection(event, identityGet.list, calendars,
-                                      source == createdSourceByEvent.end()
+                const auto seriesKey = invitationScopeKey(event.id, std::nullopt);
+                const auto seriesSource = createdSourceByScope.find(seriesKey);
+                const auto seriesIsNew = seriesSource != createdSourceByScope.end() &&
+                                         newlyCreatedNotificationIds.contains(seriesSource->second);
+                auto seriesProjection =
+                    pendingProjection(event, event, std::nullopt, identityGet.list, calendars,
+                                      seriesSource == createdSourceByScope.end()
                                           ? std::nullopt
-                                          : std::optional<std::string>{source->second},
-                                      baseline || createdEventIds.contains(event.id),
-                                      knownFutureIds.contains(event.id));
-                if (projection)
-                    pending.push_back(*projection);
+                                          : std::optional<std::string>{seriesSource->second},
+                                      baseline || seriesIsNew, knownFutureIds.contains(event.id));
+                if (seriesProjection)
+                {
+                    seriesProjection->displayStart = event.start;
+                    seriesProjection->displayUtcStart = event.utcStart;
+                    if (event.recurrenceRule)
+                    {
+                        seriesProjection->displayRecurrenceId = event.start;
+                        const auto expanded = co_await nextExpandedOccurrence(
+                            m_protocolClient, settings, *session, accountId, event, zone,
+                            account.accountCapabilities.calendars->maxExpandedQueryDuration);
+                        if (const auto* failure = std::get_if<CallFailure>(&expanded))
+                        {
+                            qWarning().noquote()
+                                << "Resolve next invitation occurrence:" << failure->message;
+                        }
+                        else if (const auto& occurrence = std::get<
+                                     std::optional<javelin::jmap::calendar::CalendarEvent>>(
+                                     expanded))
+                        {
+                            seriesProjection->displayStart = occurrence->start;
+                            seriesProjection->displayUtcStart = occurrence->utcStart;
+                            seriesProjection->displayRecurrenceId =
+                                occurrence->recurrenceId
+                                    ? occurrence->recurrenceId
+                                    : std::optional<javelin::jmap::calendar::LocalDateTime>{
+                                          occurrence->start};
+                        }
+                    }
+                    pending.push_back(std::move(*seriesProjection));
+                    continue;
+                }
+
+                for (const auto& [recurrenceValue, occurrenceOverride] : event.recurrenceOverrides)
+                {
+                    Q_UNUSED(occurrenceOverride);
+                    const javelin::jmap::calendar::LocalDateTime recurrenceId{.value =
+                                                                                  recurrenceValue};
+                    const auto effective =
+                        javelin::jmap::calendar::effectiveOccurrenceEvent(event, recurrenceId);
+                    if (!effective)
+                        continue;
+                    const auto* participant = selfParticipant(*effective, identityGet.list);
+                    if (participant == nullptr ||
+                        !occurrenceOverridesParticipant(event, recurrenceId, *participant))
+                        continue;
+                    const auto scopeKey = invitationScopeKey(event.id, recurrenceId);
+                    const auto source = createdSourceByScope.find(scopeKey);
+                    const auto isNew = source != createdSourceByScope.end() &&
+                                       newlyCreatedNotificationIds.contains(source->second);
+                    auto projection = pendingProjection(
+                        event, *effective, recurrenceId, identityGet.list, calendars,
+                        source == createdSourceByScope.end()
+                            ? std::nullopt
+                            : std::optional<std::string>{source->second},
+                        baseline || isNew, false);
+                    if (!projection)
+                        continue;
+                    if (const auto snapshot = createdSnapshotByScope.find(scopeKey);
+                        snapshot != createdSnapshotByScope.end())
+                    {
+                        projection->displayStart = snapshot->second.start;
+                        projection->displayUtcStart = snapshot->second.utcStart;
+                    }
+                    pending.push_back(std::move(*projection));
+                }
             }
             std::vector<std::string> destroyedEventIds;
             for (const auto& eventId : events.notFound)
@@ -821,6 +990,33 @@ namespace javelin::app
             m_dispatchRetryTimer.start(0);
     }
 
+    void CalendarInvitationService::calendarCacheCommitted()
+    {
+        refreshPresentationState();
+    }
+
+    void CalendarInvitationService::accountChanged(const QString& ownerAccountId)
+    {
+        scheduleOwner(ownerAccountId.toStdString());
+    }
+
+    void CalendarInvitationService::calendarStateChanged(
+        const QString& ownerAccountId,
+        const javelin::jmap::sync::AccountTypeStateMap& changedStates)
+    {
+        const bool relevant =
+            std::ranges::any_of(changedStates,
+                                [](const auto& account)
+                                {
+                                    return account.second.contains("Calendar") ||
+                                           account.second.contains("CalendarEvent") ||
+                                           account.second.contains("CalendarEventNotification") ||
+                                           account.second.contains("ParticipantIdentity");
+                                });
+        if (relevant)
+            scheduleOwner(ownerAccountId.toStdString());
+    }
+
     void CalendarInvitationService::dispatchPending()
     {
         const auto claimed = m_repository.claimPendingDispatches();
@@ -836,8 +1032,9 @@ namespace javelin::app
         {
             const auto key = QString::fromStdString(invitation.invitationKey);
             m_liveInvitations.insert_or_assign(
-                invitation.invitationKey,
-                LiveInvitation{.accountId = invitation.accountId, .eventId = invitation.eventId});
+                invitation.invitationKey, LiveInvitation{.accountId = invitation.accountId,
+                                                         .eventId = invitation.eventId,
+                                                         .recurrenceId = invitation.recurrenceId});
             const auto start = QString::fromStdString(invitation.start.value);
             auto navigationDate =
                 start.size() >= 10 ? QDate::fromString(start.left(10), Qt::ISODate) : QDate{};
@@ -845,13 +1042,14 @@ namespace javelin::app
                 (invitation.recurring && navigationDate < QDate::currentDate()))
                 navigationDate = QDate::currentDate();
             const auto navigationDateText = navigationDate.toString(Qt::ISODate);
-            Q_EMIT invitationReady(key, QString::fromStdString(invitation.accountId),
-                                   QString::fromStdString(invitation.eventId),
-                                   invitation.recurrenceId
-                                       ? QString::fromStdString(invitation.recurrenceId->value)
-                                       : QString{},
-                                   navigationDateText, QString::fromStdString(invitation.title),
-                                   notificationBody(invitation));
+            Q_EMIT invitationReady(
+                key, QString::fromStdString(invitation.accountId),
+                QString::fromStdString(invitation.eventId),
+                invitation.displayRecurrenceId
+                    ? QString::fromStdString(invitation.displayRecurrenceId->value)
+                    : QString{},
+                navigationDateText, QString::fromStdString(invitation.title),
+                notificationBody(invitation));
         }
     }
 
@@ -878,13 +1076,15 @@ namespace javelin::app
             qWarning().noquote() << "Refresh pending invitation presentation:" << error->message;
             return;
         }
-        std::unordered_set<std::string> pendingPairs;
+        std::unordered_set<std::string> pendingScopes;
         for (const auto& invitation :
              std::get<std::vector<javelin::jmap::calendar::PendingCalendarInvitation>>(pending))
-            pendingPairs.insert(invitation.accountId + '\0' + invitation.eventId);
+            pendingScopes.insert(invitationScopeKey(
+                invitation.accountId + '\0' + invitation.eventId, invitation.recurrenceId));
         for (auto it = m_liveInvitations.begin(); it != m_liveInvitations.end();)
         {
-            if (pendingPairs.contains(it->second.accountId + '\0' + it->second.eventId))
+            if (pendingScopes.contains(invitationScopeKey(
+                    it->second.accountId + '\0' + it->second.eventId, it->second.recurrenceId)))
             {
                 ++it;
                 continue;

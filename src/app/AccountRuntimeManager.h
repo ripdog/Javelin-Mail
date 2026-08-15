@@ -1,8 +1,8 @@
 #pragma once
 
-#include "app/AccountConnectionProvider.h"
 #include "app/AccountConnectionSettings.h"
 #include "app/AccountRefreshApplicationPorts.h"
+#include "app/CalendarInvitationAccountSource.h"
 #include "app/MailApplicationTypes.h"
 #include "app/account/AccountSyncCoordinator.h"
 #include "storage/sqlite/DatabaseConnection.h"
@@ -59,7 +59,7 @@ namespace javelin::app
         const AccountSyncConfiguration& second;
     };
 
-    class AccountRuntimeManager final : public QObject, public AccountConnectionProvider
+    class AccountRuntimeManager final : public QObject, public CalendarInvitationAccountSource
     {
         Q_OBJECT
 
@@ -87,7 +87,7 @@ namespace javelin::app
         [[nodiscard]] std::optional<AccountSyncConfigurationView>
         configurationFor(std::string_view accountId) const;
         [[nodiscard]] bool requestAccountSynchronization(std::string_view accountId);
-        [[nodiscard]] std::vector<std::string> configuredAccountIds() const;
+        [[nodiscard]] std::vector<std::string> configuredAccountIds() const override;
         void refreshAccountConfiguration(std::string_view accountId);
         [[nodiscard]] QCoro::Task<javelin::jmap::LiveRefreshResult>
         bootstrapAccount(AccountBootstrapIntent intent);

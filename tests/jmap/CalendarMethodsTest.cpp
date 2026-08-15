@@ -305,6 +305,28 @@ TEST_CASE("calendar event documents preserve recurrence and attendees", "[jmap][
     CHECK(serialized->find(R"("chair":true)") != std::string::npos);
 }
 
+TEST_CASE("calendar event documents preserve recurrence participant patches",
+          "[jmap][calendar][recurrence][invitation]")
+{
+    const auto parsed = javelin::jmap::api::parseCalendarEventGetResponse(
+        R"({"accountId":"a1","state":"e4","list":[{"@type":"Event","id":"e1","uid":"uid-1","calendarIds":{"work":true},"title":"Planning","start":"2026-09-01T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":false,"recurrenceRule":{"@type":"RecurrenceRule","frequency":"weekly"},"recurrenceOverrides":{"2026-09-08T09:00:00":{"participants/self/participationStatus":"needs-action","participants/alias":{"@type":"Participant","name":"Alias","calendarAddress":"mailto:alias@example.test","participationStatus":"needs-action","roles":{"attendee":true}}}},"participants":{"self":{"@type":"Participant","name":"Alice","calendarAddress":"mailto:alice@example.test","participationStatus":"accepted","roles":{"attendee":true}}}}],"notFound":[]})");
+
+    REQUIRE(parsed.ok());
+    const auto& event = parsed.value->list.front();
+    const auto& occurrence = event.recurrenceOverrides.at("2026-09-08T09:00:00");
+    CHECK(occurrence.participantParticipationStatus.at("self") == "needs-action");
+    REQUIRE(occurrence.participantOverrides.contains("alias"));
+    CHECK(occurrence.participantOverrides.at("alias").calendarAddress ==
+          "mailto:alias@example.test");
+    CHECK(occurrence.participantOverrides.at("alias").participationStatus == "needs-action");
+
+    const auto serialized = javelin::jmap::api::serializeCalendarEventDocument(event);
+    REQUIRE(serialized.has_value());
+    CHECK(serialized->find(R"("participants/self/participationStatus":"needs-action")") !=
+          std::string::npos);
+    CHECK(serialized->find(R"("participants/alias":)") != std::string::npos);
+}
+
 TEST_CASE("calendar scheduling serializes participant sets and RSVP patches",
           "[jmap][calendar][scheduling]")
 {
@@ -616,12 +638,17 @@ TEST_CASE("calendar set serializes occurrence edits as base-series overrides",
             .excluded = false,
             .start = javelin::jmap::calendar::LocalDateTime{.value = "2026-07-20T10:30:00"},
             .duration = javelin::jmap::calendar::Duration{.value = "PT30M"},
-            .title = "Moved planning"});
+            .title = "Moved planning",
+            .participantOverrides = {},
+            .participantParticipationStatus = {}});
     series.recurrenceOverrides.emplace(
-        "2026-07-27T09:00:00", javelin::jmap::calendar::RecurrenceOverride{.excluded = true,
-                                                                           .start = std::nullopt,
-                                                                           .duration = std::nullopt,
-                                                                           .title = std::nullopt});
+        "2026-07-27T09:00:00",
+        javelin::jmap::calendar::RecurrenceOverride{.excluded = true,
+                                                    .start = std::nullopt,
+                                                    .duration = std::nullopt,
+                                                    .title = std::nullopt,
+                                                    .participantOverrides = {},
+                                                    .participantParticipationStatus = {}});
 
     auto previous = series;
     previous.recurrenceOverrides.clear();

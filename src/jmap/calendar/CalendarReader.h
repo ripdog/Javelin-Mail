@@ -35,6 +35,7 @@ namespace javelin::jmap::calendar
         LocalDateTime displayTime;
         std::optional<UtcInstant> displayUtc;
         std::optional<LocalDateTime> recurrenceId;
+        std::optional<LocalDateTime> displayRecurrenceId;
         bool allDay = false;
         bool recurring = false;
         std::string selfParticipantId;

@@ -41,15 +41,39 @@ namespace javelin::jmap::cache
             return value ? QVariant{QString::fromStdString(*value)} : QVariant{};
         }
 
-        [[nodiscard]] std::string invitationKey(const std::string_view accountId,
-                                                const std::string_view eventId)
+        [[nodiscard]] std::string
+        invitationKey(const std::string_view accountId, const std::string_view eventId,
+                      const std::optional<calendar::LocalDateTime>& recurrenceId = std::nullopt)
         {
             QByteArray input{accountId.data(), static_cast<qsizetype>(accountId.size())};
             input.push_back('\0');
             input.append(eventId.data(), static_cast<qsizetype>(eventId.size()));
+            if (recurrenceId)
+            {
+                input.push_back('\0');
+                input.append(recurrenceId->value.data(),
+                             static_cast<qsizetype>(recurrenceId->value.size()));
+            }
             return QCryptographicHash::hash(input, QCryptographicHash::Sha256)
                 .toHex()
                 .toStdString();
+        }
+
+        [[nodiscard]] QString
+        recurrenceValue(const std::optional<calendar::LocalDateTime>& recurrenceId)
+        {
+            return recurrenceId ? QString::fromStdString(recurrenceId->value) : QStringLiteral("");
+        }
+
+        [[nodiscard]] std::string
+        scopeKey(const std::string_view eventId,
+                 const std::optional<calendar::LocalDateTime>& recurrenceId)
+        {
+            std::string key{eventId};
+            key.push_back('\0');
+            if (recurrenceId)
+                key += recurrenceId->value;
+            return key;
         }
 
         [[nodiscard]] std::string organizerName(const calendar::CalendarEvent& event)
@@ -245,35 +269,104 @@ namespace javelin::jmap::cache
             return queryError(QStringLiteral("Store calendar notification state"), storeState);
         }
 
-        std::unordered_map<std::string, const CalendarInvitationProjection*> pendingByEvent;
-        pendingByEvent.reserve(reconciliation.pendingInvitations.size());
-        for (const auto& pending : reconciliation.pendingInvitations)
-            pendingByEvent.insert_or_assign(pending.eventId, &pending);
+        std::unordered_set<std::string> projectedScopes;
+        projectedScopes.reserve(reconciliation.pendingInvitations.size());
 
         QSqlQuery upsertPending{database};
         upsertPending.prepare(QStringLiteral(
-            "INSERT INTO calendar_pending_invitations(account_id,event_id,self_participant_id,"
-            "source_notification_id) VALUES(:account,:event,:participant,:source) ON "
-            "CONFLICT(account_id,event_id) DO UPDATE SET self_participant_id="
-            "excluded.self_participant_id,source_notification_id=COALESCE("
-            "excluded.source_notification_id,calendar_pending_invitations.source_notification_id),"
-            "last_seen_at=CURRENT_TIMESTAMP"));
+            "INSERT INTO calendar_pending_invitations(account_id,event_id,recurrence_id,"
+            "self_participant_id,source_notification_id,display_recurrence_id,display_start,"
+            "display_utc_start) VALUES(:account,:event,:recurrence,:participant,:source,"
+            ":display_recurrence,:display_start,:display_utc) ON CONFLICT(account_id,event_id,"
+            "recurrence_id) DO UPDATE SET self_participant_id=excluded.self_participant_id,"
+            "source_notification_id=COALESCE(excluded.source_notification_id,"
+            "calendar_pending_invitations.source_notification_id),display_recurrence_id="
+            "excluded.display_recurrence_id,display_start=excluded.display_start,display_utc_start="
+            "excluded.display_utc_start,last_seen_at=CURRENT_TIMESTAMP"));
         QSqlQuery ensureOutbox{database};
         ensureOutbox.prepare(QStringLiteral(
             "INSERT INTO calendar_invitation_outbox(invitation_key,account_id,event_id,"
-            "self_participant_id,source_notification_id,status) VALUES(:key,:account,:event,"
-            ":participant,:source,:status) ON CONFLICT(account_id,event_id) DO UPDATE SET "
-            "self_participant_id=excluded.self_participant_id,source_notification_id=COALESCE("
-            "excluded.source_notification_id,calendar_invitation_outbox.source_notification_id)"));
+            "recurrence_id,self_participant_id,source_notification_id,status) VALUES(:key,:account,"
+            ":event,:recurrence,:participant,:source,:status) ON CONFLICT(account_id,event_id,"
+            "recurrence_id) DO UPDATE SET self_participant_id=excluded.self_participant_id,"
+            "source_notification_id=COALESCE(excluded.source_notification_id,"
+            "calendar_invitation_outbox.source_notification_id)"));
+        for (const auto& projection : reconciliation.pendingInvitations)
+        {
+            projectedScopes.insert(scopeKey(projection.eventId, projection.recurrenceId));
+            upsertPending.bindValue(QStringLiteral(":account"),
+                                    QString::fromStdString(reconciliation.accountId));
+            upsertPending.bindValue(QStringLiteral(":event"),
+                                    QString::fromStdString(projection.eventId));
+            upsertPending.bindValue(QStringLiteral(":recurrence"),
+                                    recurrenceValue(projection.recurrenceId));
+            upsertPending.bindValue(QStringLiteral(":participant"),
+                                    QString::fromStdString(projection.selfParticipantId));
+            upsertPending.bindValue(QStringLiteral(":source"),
+                                    optionalVariant(projection.sourceNotificationId));
+            upsertPending.bindValue(
+                QStringLiteral(":display_recurrence"),
+                projection.displayRecurrenceId
+                    ? QVariant{QString::fromStdString(projection.displayRecurrenceId->value)}
+                    : QVariant{});
+            upsertPending.bindValue(QStringLiteral(":display_start"),
+                                    projection.displayStart ? QVariant{QString::fromStdString(
+                                                                  projection.displayStart->value)}
+                                                            : QVariant{});
+            upsertPending.bindValue(
+                QStringLiteral(":display_utc"),
+                projection.displayUtcStart
+                    ? QVariant{QString::fromStdString(projection.displayUtcStart->value)}
+                    : QVariant{});
+            if (!upsertPending.exec())
+            {
+                transaction.rollback();
+                return queryError(QStringLiteral("Project pending calendar invitation"),
+                                  upsertPending);
+            }
+
+            ensureOutbox.bindValue(
+                QStringLiteral(":key"),
+                QString::fromStdString(invitationKey(reconciliation.accountId, projection.eventId,
+                                                     projection.recurrenceId)));
+            ensureOutbox.bindValue(QStringLiteral(":account"),
+                                   QString::fromStdString(reconciliation.accountId));
+            ensureOutbox.bindValue(QStringLiteral(":event"),
+                                   QString::fromStdString(projection.eventId));
+            ensureOutbox.bindValue(QStringLiteral(":recurrence"),
+                                   recurrenceValue(projection.recurrenceId));
+            ensureOutbox.bindValue(QStringLiteral(":participant"),
+                                   QString::fromStdString(projection.selfParticipantId));
+            ensureOutbox.bindValue(QStringLiteral(":source"),
+                                   optionalVariant(projection.sourceNotificationId));
+            ensureOutbox.bindValue(QStringLiteral(":status"), projection.enqueueDesktopNotification
+                                                                  ? QStringLiteral("pending")
+                                                                  : QStringLiteral("resolved"));
+            if (!ensureOutbox.exec())
+            {
+                transaction.rollback();
+                return queryError(QStringLiteral("Create calendar invitation outbox"),
+                                  ensureOutbox);
+            }
+        }
+
+        QSqlQuery pendingScopes{database};
+        pendingScopes.prepare(QStringLiteral(
+            "SELECT recurrence_id FROM calendar_pending_invitations WHERE account_id=:account AND "
+            "event_id=:event"));
         QSqlQuery removePending{database};
-        removePending.prepare(
-            QStringLiteral("DELETE FROM calendar_pending_invitations WHERE account_id=:account AND "
-                           "event_id=:event"));
+        removePending.prepare(QStringLiteral("DELETE FROM calendar_pending_invitations WHERE "
+                                             "account_id=:account AND event_id=:event "
+                                             "AND recurrence_id=:recurrence"));
+        QSqlQuery outboxScopes{database};
+        outboxScopes.prepare(QStringLiteral(
+            "SELECT recurrence_id,invitation_key FROM calendar_invitation_outbox WHERE "
+            "account_id=:account AND event_id=:event"));
         QSqlQuery resolveOutbox{database};
-        resolveOutbox.prepare(QStringLiteral(
-            "UPDATE calendar_invitation_outbox SET status='resolved',resolved_at="
-            "COALESCE(resolved_at,CURRENT_TIMESTAMP) WHERE account_id=:account AND event_id=:event "
-            "AND status<>'resolved'"));
+        resolveOutbox.prepare(
+            QStringLiteral("UPDATE calendar_invitation_outbox SET status='resolved',resolved_at="
+                           "COALESCE(resolved_at,CURRENT_TIMESTAMP) WHERE invitation_key=:key AND "
+                           "status<>'resolved'"));
         NotificationDispatchRepository dispatches{m_connection};
 
         std::unordered_set<std::string> considered{reconciliation.consideredEventIds.begin(),
@@ -282,71 +375,65 @@ namespace javelin::jmap::cache
                           reconciliation.destroyedEventIds.end());
         for (const auto& eventId : considered)
         {
-            const auto pending = pendingByEvent.find(eventId);
-            if (pending != pendingByEvent.end())
+            pendingScopes.bindValue(QStringLiteral(":account"),
+                                    QString::fromStdString(reconciliation.accountId));
+            pendingScopes.bindValue(QStringLiteral(":event"), QString::fromStdString(eventId));
+            if (!pendingScopes.exec())
             {
-                const auto& projection = *pending->second;
-                upsertPending.bindValue(QStringLiteral(":account"),
+                transaction.rollback();
+                return queryError(QStringLiteral("Read pending invitation scopes"), pendingScopes);
+            }
+            while (pendingScopes.next())
+            {
+                const auto recurrence = pendingScopes.value(0).toString();
+                auto key = eventId;
+                key.push_back('\0');
+                key += recurrence.toStdString();
+                if (projectedScopes.contains(key))
+                    continue;
+                removePending.bindValue(QStringLiteral(":account"),
                                         QString::fromStdString(reconciliation.accountId));
-                upsertPending.bindValue(QStringLiteral(":event"), QString::fromStdString(eventId));
-                upsertPending.bindValue(QStringLiteral(":participant"),
-                                        QString::fromStdString(projection.selfParticipantId));
-                upsertPending.bindValue(QStringLiteral(":source"),
-                                        optionalVariant(projection.sourceNotificationId));
-                if (!upsertPending.exec())
+                removePending.bindValue(QStringLiteral(":event"), QString::fromStdString(eventId));
+                removePending.bindValue(QStringLiteral(":recurrence"), recurrence);
+                if (!removePending.exec())
                 {
                     transaction.rollback();
-                    return queryError(QStringLiteral("Project pending calendar invitation"),
-                                      upsertPending);
+                    return queryError(QStringLiteral("Resolve pending calendar invitation"),
+                                      removePending);
                 }
-                ensureOutbox.bindValue(
-                    QStringLiteral(":key"),
-                    QString::fromStdString(invitationKey(reconciliation.accountId, eventId)));
-                ensureOutbox.bindValue(QStringLiteral(":account"),
-                                       QString::fromStdString(reconciliation.accountId));
-                ensureOutbox.bindValue(QStringLiteral(":event"), QString::fromStdString(eventId));
-                ensureOutbox.bindValue(QStringLiteral(":participant"),
-                                       QString::fromStdString(projection.selfParticipantId));
-                ensureOutbox.bindValue(QStringLiteral(":source"),
-                                       optionalVariant(projection.sourceNotificationId));
-                ensureOutbox.bindValue(QStringLiteral(":status"),
-                                       projection.enqueueDesktopNotification
-                                           ? QStringLiteral("pending")
-                                           : QStringLiteral("resolved"));
-                if (!ensureOutbox.exec())
-                {
-                    transaction.rollback();
-                    return queryError(QStringLiteral("Create calendar invitation outbox"),
-                                      ensureOutbox);
-                }
-                continue;
             }
 
-            removePending.bindValue(QStringLiteral(":account"),
-                                    QString::fromStdString(reconciliation.accountId));
-            removePending.bindValue(QStringLiteral(":event"), QString::fromStdString(eventId));
-            if (!removePending.exec())
+            outboxScopes.bindValue(QStringLiteral(":account"),
+                                   QString::fromStdString(reconciliation.accountId));
+            outboxScopes.bindValue(QStringLiteral(":event"), QString::fromStdString(eventId));
+            if (!outboxScopes.exec())
             {
                 transaction.rollback();
-                return queryError(QStringLiteral("Resolve pending calendar invitation"),
-                                  removePending);
+                return queryError(QStringLiteral("Read calendar invitation outbox scopes"),
+                                  outboxScopes);
             }
-            resolveOutbox.bindValue(QStringLiteral(":account"),
-                                    QString::fromStdString(reconciliation.accountId));
-            resolveOutbox.bindValue(QStringLiteral(":event"), QString::fromStdString(eventId));
-            if (!resolveOutbox.exec())
+            while (outboxScopes.next())
             {
-                transaction.rollback();
-                return queryError(QStringLiteral("Resolve calendar invitation outbox"),
-                                  resolveOutbox);
-            }
-            const auto release =
-                dispatches.release(transaction, NotificationDispatchKind::Invitation,
-                                   invitationKey(reconciliation.accountId, eventId));
-            if (release)
-            {
-                transaction.rollback();
-                return release;
+                const auto recurrence = outboxScopes.value(0).toString();
+                auto key = eventId;
+                key.push_back('\0');
+                key += recurrence.toStdString();
+                if (projectedScopes.contains(key))
+                    continue;
+                const auto invitation = outboxScopes.value(1).toString().toStdString();
+                resolveOutbox.bindValue(QStringLiteral(":key"), QString::fromStdString(invitation));
+                if (!resolveOutbox.exec())
+                {
+                    transaction.rollback();
+                    return queryError(QStringLiteral("Resolve calendar invitation outbox"),
+                                      resolveOutbox);
+                }
+                if (const auto release = dispatches.release(
+                        transaction, NotificationDispatchKind::Invitation, invitation))
+                {
+                    transaction.rollback();
+                    return release;
+                }
             }
         }
 
@@ -362,8 +449,8 @@ namespace javelin::jmap::cache
             return *error;
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
-            "SELECT event_id FROM calendar_pending_invitations WHERE account_id=:account ORDER BY "
-            "event_id"));
+            "SELECT DISTINCT event_id FROM calendar_pending_invitations WHERE account_id=:account "
+            "ORDER BY event_id"));
         query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
         if (!query.exec())
             return queryError(QStringLiteral("List pending calendar invitation events"), query);
@@ -384,7 +471,8 @@ namespace javelin::jmap::cache
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "SELECT o.invitation_key,a.owner_account_id,o.account_id,o.event_id,"
-            "o.self_participant_id,o.source_notification_id,e.document_json,"
+            "o.self_participant_id,o.source_notification_id,e.document_json,p.recurrence_id,"
+            "p.display_recurrence_id,p.display_start,p.display_utc_start,"
             "(SELECT c.local_start FROM calendar_occurrences c WHERE c.account_id=o.account_id "
             "AND c.event_id=o.event_id AND substr(c.local_start,1,10)>=:today ORDER BY "
             "c.local_start LIMIT 1),"
@@ -395,9 +483,10 @@ namespace javelin::jmap::cache
             "AND c.event_id=o.event_id AND substr(c.local_start,1,10)>=:today ORDER BY "
             "c.local_start LIMIT 1) FROM calendar_invitation_outbox o JOIN "
             "calendar_pending_invitations p ON p.account_id=o.account_id AND "
-            "p.event_id=o.event_id JOIN calendar_events e ON e.account_id=o.account_id AND "
-            "e.event_id=o.event_id JOIN accounts a ON a.account_id=o.account_id WHERE "
-            "o.status='pending' ORDER BY o.created_at,o.invitation_key"));
+            "p.event_id=o.event_id AND p.recurrence_id=o.recurrence_id JOIN calendar_events e ON "
+            "e.account_id=o.account_id AND e.event_id=o.event_id JOIN accounts a ON "
+            "a.account_id=o.account_id WHERE o.status='pending' ORDER BY "
+            "o.created_at,o.invitation_key"));
         query.bindValue(QStringLiteral(":today"), QDate::currentDate().toString(Qt::ISODate));
         if (!query.exec())
             return queryError(QStringLiteral("Read calendar invitation outbox"), query);
@@ -427,18 +516,36 @@ namespace javelin::jmap::cache
                     .message = QStringLiteral("Parse calendar invitation event document")};
             }
             const auto& event = *parsed.value;
-            const auto displayStart =
-                query.value(7).isNull()
-                    ? event.start
-                    : calendar::LocalDateTime{.value = query.value(7).toString().toStdString()};
-            const auto displayUtc = query.value(8).isNull()
-                                        ? event.utcStart
-                                        : std::optional<calendar::UtcInstant>{
-                                              {.value = query.value(8).toString().toStdString()}};
-            const auto recurrenceId = query.value(9).isNull()
+            const auto recurrenceId = query.value(7).toString().isEmpty()
                                           ? std::nullopt
                                           : std::optional<calendar::LocalDateTime>{
-                                                {.value = query.value(9).toString().toStdString()}};
+                                                {.value = query.value(7).toString().toStdString()}};
+            const auto displayStart =
+                !query.value(9).isNull()
+                    ? calendar::LocalDateTime{.value = query.value(9).toString().toStdString()}
+                : !query.value(11).isNull()
+                    ? calendar::LocalDateTime{.value = query.value(11).toString().toStdString()}
+                    : event.start;
+            const auto displayUtc =
+                !query.value(10).isNull()
+                    ? std::optional<calendar::UtcInstant>{{.value = query.value(10)
+                                                                        .toString()
+                                                                        .toStdString()}}
+                : !query.value(12).isNull()
+                    ? std::optional<calendar::UtcInstant>{{.value = query.value(12)
+                                                                        .toString()
+                                                                        .toStdString()}}
+                    : event.utcStart;
+            const auto displayRecurrenceId =
+                !query.value(8).isNull()
+                    ? std::optional<calendar::LocalDateTime>{{.value = query.value(8)
+                                                                           .toString()
+                                                                           .toStdString()}}
+                : !query.value(13).isNull()
+                    ? std::optional<calendar::LocalDateTime>{{.value = query.value(13)
+                                                                           .toString()
+                                                                           .toStdString()}}
+                    : recurrenceId;
             result.push_back(CalendarInvitationDispatchCandidate{
                 .invitationKey = key,
                 .ownerAccountId =
@@ -456,6 +563,7 @@ namespace javelin::jmap::cache
                 .start = displayStart,
                 .utcStart = displayUtc,
                 .recurrenceId = recurrenceId,
+                .displayRecurrenceId = displayRecurrenceId,
                 .allDay = event.showWithoutTime,
                 .recurring = event.recurrenceRule.has_value(),
             });
@@ -539,10 +647,16 @@ namespace javelin::jmap::cache
         resolve.bindValue(QStringLiteral(":event"), QString::fromStdString(std::string{eventId}));
         if (!resolve.exec())
             return queryError(QStringLiteral("Resolve calendar invitation notification"), resolve);
-        NotificationDispatchRepository dispatches{m_connection};
-        if (const auto error = dispatches.release(transaction, NotificationDispatchKind::Invitation,
-                                                  invitationKey(accountId, eventId)))
-            return error;
+        QSqlQuery release{m_connection.database()};
+        release.prepare(QStringLiteral(
+            "DELETE FROM notification_dispatch_claims WHERE kind='invitation' AND claim_key IN "
+            "(SELECT invitation_key FROM calendar_invitation_outbox WHERE account_id=:account AND "
+            "event_id=:event)"));
+        release.bindValue(QStringLiteral(":account"),
+                          QString::fromStdString(std::string{accountId}));
+        release.bindValue(QStringLiteral(":event"), QString::fromStdString(std::string{eventId}));
+        if (!release.exec())
+            return queryError(QStringLiteral("Release calendar invitation dispatches"), release);
         return transaction.commit();
     }
 } // namespace javelin::jmap::cache

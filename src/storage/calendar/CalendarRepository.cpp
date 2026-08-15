@@ -1,6 +1,7 @@
 #include "jmap/cache/CalendarRepository.h"
 
 #include "jmap/api/CalendarMethods.h"
+#include "jmap/calendar/CalendarEventEditing.h"
 
 #include <QSqlError>
 #include <QSqlQuery>
@@ -1151,34 +1152,34 @@ namespace javelin::jmap::cache
             "(:account,:event,:calendar)"));
         QSqlQuery invitationOutbox{database};
         invitationOutbox.prepare(QStringLiteral(
-            "SELECT self_participant_id FROM calendar_invitation_outbox WHERE account_id=:account "
-            "AND event_id=:event"));
+            "SELECT recurrence_id,self_participant_id,invitation_key,source_notification_id FROM "
+            "calendar_invitation_outbox WHERE account_id=:account AND event_id=:event"));
         QSqlQuery calendarRights{database};
         calendarRights.prepare(QStringLiteral("SELECT rights_json FROM calendars WHERE "
                                               "account_id=:account AND calendar_id=:calendar"));
         QSqlQuery restorePendingInvitation{database};
         restorePendingInvitation.prepare(QStringLiteral(
-            "INSERT INTO calendar_pending_invitations(account_id,event_id,self_participant_id,"
-            "source_notification_id) SELECT account_id,event_id,self_participant_id,"
-            "source_notification_id FROM calendar_invitation_outbox WHERE account_id=:account "
-            "AND event_id=:event ON CONFLICT(account_id,event_id) DO UPDATE SET "
+            "INSERT INTO calendar_pending_invitations(account_id,event_id,recurrence_id,"
+            "self_participant_id,source_notification_id,display_recurrence_id,display_start) "
+            "VALUES(:account,:event,:recurrence,:participant,:source,:display_recurrence,"
+            ":display_start) ON CONFLICT(account_id,event_id,recurrence_id) DO UPDATE SET "
             "self_participant_id=excluded.self_participant_id,source_notification_id=COALESCE("
             "excluded.source_notification_id,calendar_pending_invitations.source_notification_id),"
-            "last_seen_at=CURRENT_TIMESTAMP"));
+            "display_recurrence_id=excluded.display_recurrence_id,display_start="
+            "excluded.display_start,last_seen_at=CURRENT_TIMESTAMP"));
         QSqlQuery removePendingInvitation{database};
         removePendingInvitation.prepare(
             QStringLiteral("DELETE FROM calendar_pending_invitations WHERE account_id=:account AND "
-                           "event_id=:event"));
+                           "event_id=:event "
+                           "AND recurrence_id=:recurrence"));
         QSqlQuery resolveInvitation{database};
-        resolveInvitation.prepare(QStringLiteral(
-            "UPDATE calendar_invitation_outbox SET status='resolved',resolved_at="
-            "COALESCE(resolved_at,CURRENT_TIMESTAMP) WHERE account_id=:account AND event_id=:event "
-            "AND status<>'resolved'"));
+        resolveInvitation.prepare(
+            QStringLiteral("UPDATE calendar_invitation_outbox SET status='resolved',resolved_at="
+                           "COALESCE(resolved_at,CURRENT_TIMESTAMP) WHERE invitation_key=:key AND "
+                           "status<>'resolved'"));
         QSqlQuery releaseInvitation{database};
         releaseInvitation.prepare(QStringLiteral(
-            "DELETE FROM notification_dispatch_claims WHERE kind='invitation' AND claim_key IN "
-            "(SELECT invitation_key FROM calendar_invitation_outbox WHERE account_id=:account AND "
-            "event_id=:event)"));
+            "DELETE FROM notification_dispatch_claims WHERE kind='invitation' AND claim_key=:key"));
         for (const auto& event : events)
         {
             const auto document = api::serializeCalendarEventDocument(event);
@@ -1225,72 +1226,107 @@ namespace javelin::jmap::cache
             invitationOutbox.bindValue(QStringLiteral(":event"), QString::fromStdString(event.id));
             if (!exec(invitationOutbox, failure, QStringLiteral("Read calendar invitation outbox")))
                 return failure;
-            if (!invitationOutbox.next())
-                continue;
-
-            const auto selfParticipantId = invitationOutbox.value(0).toString().toStdString();
-            const auto participant =
-                std::ranges::find(event.attendees, selfParticipantId, &calendar::Attendee::id);
-            bool pendingInvitation = !event.isDraft && !event.isOrigin &&
-                                     event.status != std::optional<std::string>{"cancelled"} &&
-                                     participant != event.attendees.end() &&
-                                     !participant->isOwner &&
-                                     participant->participationStatus == "needs-action";
-            bool hasCalendarMembership = false;
-            if (pendingInvitation)
+            while (invitationOutbox.next())
             {
-                for (const auto& [calendarId, present] : event.calendarIds)
+                const auto recurrenceText = invitationOutbox.value(0).toString();
+                const auto recurrenceId = recurrenceText.isEmpty()
+                                              ? std::optional<calendar::LocalDateTime>{}
+                                              : std::optional<calendar::LocalDateTime>{
+                                                    {.value = recurrenceText.toStdString()}};
+                const auto selfParticipantId = invitationOutbox.value(1).toString().toStdString();
+                const auto invitationKey = invitationOutbox.value(2).toString();
+                const auto sourceNotification = invitationOutbox.value(3);
+
+                std::optional<calendar::CalendarEvent> effectiveOccurrence;
+                const calendar::CalendarEvent* effectiveEvent = &event;
+                if (recurrenceId)
                 {
-                    if (!present)
-                        continue;
-                    hasCalendarMembership = true;
-                    calendarRights.bindValue(QStringLiteral(":account"),
-                                             QString::fromStdString(std::string{accountId}));
-                    calendarRights.bindValue(QStringLiteral(":calendar"),
-                                             QString::fromStdString(calendarId));
-                    if (!exec(calendarRights, failure,
-                              QStringLiteral("Read invitation calendar rights")))
-                        return failure;
-                    if (!calendarRights.next() || (calendarRights.value(0).toUInt() & 32U) == 0U)
-                    {
-                        pendingInvitation = false;
-                        break;
-                    }
+                    effectiveOccurrence = calendar::effectiveOccurrenceEvent(event, *recurrenceId);
+                    if (effectiveOccurrence)
+                        effectiveEvent = &*effectiveOccurrence;
+                    else
+                        effectiveEvent = nullptr;
                 }
-                pendingInvitation = pendingInvitation && hasCalendarMembership;
-            }
 
-            if (pendingInvitation)
-            {
-                restorePendingInvitation.bindValue(QStringLiteral(":account"),
-                                                   QString::fromStdString(std::string{accountId}));
-                restorePendingInvitation.bindValue(QStringLiteral(":event"),
-                                                   QString::fromStdString(event.id));
-                if (!exec(restorePendingInvitation, failure,
-                          QStringLiteral("Restore pending calendar invitation")))
+                bool pendingInvitation = effectiveEvent != nullptr && !event.isDraft &&
+                                         !event.isOrigin &&
+                                         event.status != std::optional<std::string>{"cancelled"};
+                if (pendingInvitation)
+                {
+                    const auto participant = std::ranges::find(
+                        effectiveEvent->attendees, selfParticipantId, &calendar::Attendee::id);
+                    pendingInvitation = participant != effectiveEvent->attendees.end() &&
+                                        !participant->isOwner &&
+                                        participant->participationStatus == "needs-action";
+                }
+
+                bool hasCalendarMembership = false;
+                if (pendingInvitation)
+                {
+                    for (const auto& [calendarId, present] : event.calendarIds)
+                    {
+                        if (!present)
+                            continue;
+                        hasCalendarMembership = true;
+                        calendarRights.bindValue(QStringLiteral(":account"),
+                                                 QString::fromStdString(std::string{accountId}));
+                        calendarRights.bindValue(QStringLiteral(":calendar"),
+                                                 QString::fromStdString(calendarId));
+                        if (!exec(calendarRights, failure,
+                                  QStringLiteral("Read invitation calendar rights")))
+                            return failure;
+                        if (!calendarRights.next() ||
+                            (calendarRights.value(0).toUInt() & 32U) == 0U)
+                        {
+                            pendingInvitation = false;
+                            break;
+                        }
+                    }
+                    pendingInvitation = pendingInvitation && hasCalendarMembership;
+                }
+
+                if (pendingInvitation)
+                {
+                    restorePendingInvitation.bindValue(
+                        QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+                    restorePendingInvitation.bindValue(QStringLiteral(":event"),
+                                                       QString::fromStdString(event.id));
+                    restorePendingInvitation.bindValue(QStringLiteral(":recurrence"),
+                                                       recurrenceText);
+                    restorePendingInvitation.bindValue(QStringLiteral(":participant"),
+                                                       QString::fromStdString(selfParticipantId));
+                    restorePendingInvitation.bindValue(QStringLiteral(":source"),
+                                                       sourceNotification);
+                    restorePendingInvitation.bindValue(QStringLiteral(":display_recurrence"),
+                                                       recurrenceId ? QVariant{recurrenceText}
+                                                                    : QVariant{});
+                    restorePendingInvitation.bindValue(
+                        QStringLiteral(":display_start"),
+                        recurrenceId ? QVariant{QString::fromStdString(effectiveEvent->start.value)}
+                                     : QVariant{});
+                    if (!exec(restorePendingInvitation, failure,
+                              QStringLiteral("Restore pending calendar invitation")))
+                        return failure;
+                    continue;
+                }
+
+                removePendingInvitation.bindValue(QStringLiteral(":account"),
+                                                  QString::fromStdString(std::string{accountId}));
+                removePendingInvitation.bindValue(QStringLiteral(":event"),
+                                                  QString::fromStdString(event.id));
+                removePendingInvitation.bindValue(QStringLiteral(":recurrence"), recurrenceText);
+                if (!exec(removePendingInvitation, failure,
+                          QStringLiteral("Project answered calendar invitation")))
                     return failure;
-                continue;
+                resolveInvitation.bindValue(QStringLiteral(":key"), invitationKey);
+                if (!exec(resolveInvitation, failure,
+                          QStringLiteral("Resolve calendar invitation outbox")))
+                    return failure;
+                releaseInvitation.bindValue(QStringLiteral(":key"), invitationKey);
+                if (!exec(releaseInvitation, failure,
+                          QStringLiteral("Release calendar invitation dispatch")))
+                    return failure;
             }
-
-            removePendingInvitation.bindValue(QStringLiteral(":account"),
-                                              QString::fromStdString(std::string{accountId}));
-            removePendingInvitation.bindValue(QStringLiteral(":event"),
-                                              QString::fromStdString(event.id));
-            if (!exec(removePendingInvitation, failure,
-                      QStringLiteral("Project answered calendar invitation")))
-                return failure;
-            resolveInvitation.bindValue(QStringLiteral(":account"),
-                                        QString::fromStdString(std::string{accountId}));
-            resolveInvitation.bindValue(QStringLiteral(":event"), QString::fromStdString(event.id));
-            if (!exec(resolveInvitation, failure,
-                      QStringLiteral("Resolve calendar invitation outbox")))
-                return failure;
-            releaseInvitation.bindValue(QStringLiteral(":account"),
-                                        QString::fromStdString(std::string{accountId}));
-            releaseInvitation.bindValue(QStringLiteral(":event"), QString::fromStdString(event.id));
-            if (!exec(releaseInvitation, failure,
-                      QStringLiteral("Release calendar invitation dispatch")))
-                return failure;
         }
 
         QSqlQuery removeOccurrences{database};

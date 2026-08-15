@@ -3,6 +3,7 @@
 #include "jmap/cache/CalendarInvitationRepository.h"
 #include "jmap/cache/CalendarNotificationRepository.h"
 #include "jmap/calendar/CalendarCacheReader.h"
+#include "jmap/calendar/CalendarEventEditing.h"
 #include "jmap/calendar/CalendarMutationJournal.h"
 
 #include <QCoreApplication>
@@ -876,7 +877,8 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
             firstClaim);
     REQUIRE(candidates.size() == 1);
     CHECK(candidates.front().start.value == "2099-08-20T10:00:00");
-    CHECK(candidates.front().recurrenceId ==
+    CHECK_FALSE(candidates.front().recurrenceId.has_value());
+    CHECK(candidates.front().displayRecurrenceId ==
           std::optional<javelin::jmap::calendar::LocalDateTime>{{.value = "2099-08-20T10:00:00"}});
     const auto invitationKey = candidates.front().invitationKey;
     const auto duplicateClaim = invitations.claimPendingDispatches();
@@ -935,6 +937,72 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
     CHECK(std::get<std::vector<javelin::jmap::cache::CalendarInvitationDispatchCandidate>>(
               restoredClaim)
               .empty());
+
+    auto occurrenceInvitations = invitation;
+    occurrenceInvitations.attendees[1].participationStatus = "accepted";
+    occurrenceInvitations.recurrenceOverrides["2099-08-20T10:00:00"]
+        .participantParticipationStatus.insert_or_assign("self", "needs-action");
+    occurrenceInvitations.recurrenceOverrides["2099-08-27T10:00:00"]
+        .participantParticipationStatus.insert_or_assign("self", "needs-action");
+    REQUIRE_FALSE(
+        invitations
+            .reconcile(
+                {.accountId = "a1",
+                 .notificationState = "n2",
+                 .eventState = "e4",
+                 .replaceNotifications = false,
+                 .notifications = {},
+                 .deletedNotificationIds = {},
+                 .events = {occurrenceInvitations},
+                 .nonRecurringOccurrences = {},
+                 .destroyedEventIds = {},
+                 .consideredEventIds = {"invite-1"},
+                 .pendingInvitations =
+                     {{.eventId = "invite-1",
+                       .recurrenceId =
+                           javelin::jmap::calendar::LocalDateTime{.value = "2099-08-20T10:00:00"},
+                       .selfParticipantId = "self",
+                       .displayRecurrenceId =
+                           javelin::jmap::calendar::LocalDateTime{.value = "2099-08-20T10:00:00"},
+                       .displayStart =
+                           javelin::jmap::calendar::LocalDateTime{.value = "2099-08-20T10:00:00"},
+                       .enqueueDesktopNotification = true},
+                      {.eventId = "invite-1",
+                       .recurrenceId =
+                           javelin::jmap::calendar::LocalDateTime{.value = "2099-08-27T10:00:00"},
+                       .selfParticipantId = "self",
+                       .displayRecurrenceId =
+                           javelin::jmap::calendar::LocalDateTime{.value = "2099-08-27T10:00:00"},
+                       .displayStart =
+                           javelin::jmap::calendar::LocalDateTime{.value = "2099-08-27T10:00:00"},
+                       .enqueueDesktopNotification = true}}})
+            .has_value());
+    QSqlQuery twoOccurrences{connection.database()};
+    REQUIRE(twoOccurrences.exec(QStringLiteral(
+        "SELECT count(*),count(DISTINCT invitation_key) FROM calendar_invitation_outbox WHERE "
+        "account_id='a1' AND event_id='invite-1' AND recurrence_id<>'' AND status='pending'")));
+    REQUIRE(twoOccurrences.next());
+    CHECK(twoOccurrences.value(0).toInt() == 2);
+    CHECK(twoOccurrences.value(1).toInt() == 2);
+
+    auto oneAccepted = javelin::jmap::calendar::setOccurrenceParticipationStatus(
+        occurrenceInvitations, {.value = "2099-08-20T10:00:00"}, "self", "accepted");
+    auto occurrenceTransaction = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Answer one recurring invitation"));
+    REQUIRE(
+        std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(occurrenceTransaction));
+    auto occurrenceProjection =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(occurrenceTransaction));
+    REQUIRE_FALSE(calendars.projectEvents(occurrenceProjection, "a1", "e5", {oneAccepted}, {}, {})
+                      .has_value());
+    REQUIRE_FALSE(occurrenceProjection.commit().has_value());
+    QSqlQuery oneRemaining{connection.database()};
+    REQUIRE(oneRemaining.exec(QStringLiteral(
+        "SELECT recurrence_id FROM calendar_pending_invitations WHERE account_id='a1' AND "
+        "event_id='invite-1' ORDER BY recurrence_id")));
+    REQUIRE(oneRemaining.next());
+    CHECK(oneRemaining.value(0).toString() == QStringLiteral("2099-08-27T10:00:00"));
+    CHECK_FALSE(oneRemaining.next());
 
     auto cancelled = invitation;
     cancelled.status = "cancelled";

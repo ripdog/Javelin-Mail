@@ -16,8 +16,12 @@ namespace javelin::jmap::cache
     struct CalendarInvitationProjection
     {
         std::string eventId;
+        std::optional<calendar::LocalDateTime> recurrenceId = std::nullopt;
         std::string selfParticipantId;
-        std::optional<std::string> sourceNotificationId;
+        std::optional<std::string> sourceNotificationId = std::nullopt;
+        std::optional<calendar::LocalDateTime> displayRecurrenceId = std::nullopt;
+        std::optional<calendar::LocalDateTime> displayStart = std::nullopt;
+        std::optional<calendar::UtcInstant> displayUtcStart = std::nullopt;
         bool enqueueDesktopNotification = false;
     };
 
@@ -50,6 +54,7 @@ namespace javelin::jmap::cache
         calendar::LocalDateTime start;
         std::optional<calendar::UtcInstant> utcStart;
         std::optional<calendar::LocalDateTime> recurrenceId;
+        std::optional<calendar::LocalDateTime> displayRecurrenceId;
         bool allDay = false;
         bool recurring = false;
     };

@@ -215,6 +215,47 @@ namespace javelin::jmap::calendar
         return result;
     }
 
+    std::optional<CalendarEvent> effectiveOccurrenceEvent(const CalendarEvent& baseEvent,
+                                                          const LocalDateTime& recurrenceId)
+    {
+        auto result = baseEvent;
+        result.baseEventId = baseEvent.id;
+        result.recurrenceId = recurrenceId;
+        result.start = recurrenceId;
+        result.utcStart.reset();
+        result.utcEnd.reset();
+        result.recurrenceRule.reset();
+        result.recurrenceOverrides.clear();
+        const auto found = baseEvent.recurrenceOverrides.find(recurrenceId.value);
+        if (found == baseEvent.recurrenceOverrides.end())
+            return result;
+        const auto& occurrence = found->second;
+        if (occurrence.excluded)
+            return std::nullopt;
+        if (occurrence.start)
+            result.start = *occurrence.start;
+        if (occurrence.duration)
+            result.duration = *occurrence.duration;
+        if (occurrence.title)
+            result.title = *occurrence.title;
+        for (const auto& [participantId, participant] : occurrence.participantOverrides)
+        {
+            const auto existing = std::ranges::find(result.attendees, participantId, &Attendee::id);
+            if (existing == result.attendees.end())
+                result.attendees.push_back(participant);
+            else
+                *existing = participant;
+        }
+        for (const auto& [participantId, status] : occurrence.participantParticipationStatus)
+        {
+            const auto participant =
+                std::ranges::find(result.attendees, participantId, &Attendee::id);
+            if (participant != result.attendees.end())
+                participant->participationStatus = status;
+        }
+        return result;
+    }
+
     CalendarEvent applyOccurrenceEdit(const CalendarEvent& baseEvent,
                                       const LocalDateTime& recurrenceId,
                                       const CalendarEvent& editedOccurrence)
@@ -231,7 +272,42 @@ namespace javelin::jmap::calendar
         occurrence.title = editedOccurrence.title == baseEvent.title
                                ? std::nullopt
                                : std::optional{editedOccurrence.title};
-        if (!occurrence.start && !occurrence.duration && !occurrence.title)
+        if (!occurrence.start && !occurrence.duration && !occurrence.title &&
+            occurrence.participantOverrides.empty() &&
+            occurrence.participantParticipationStatus.empty())
+            result.recurrenceOverrides.erase(recurrenceId.value);
+        return result;
+    }
+
+    CalendarEvent setOccurrenceParticipationStatus(const CalendarEvent& baseEvent,
+                                                   const LocalDateTime& recurrenceId,
+                                                   const std::string_view participantId,
+                                                   std::string participationStatus)
+    {
+        auto result = baseEvent;
+        auto& occurrence = result.recurrenceOverrides[recurrenceId.value];
+        occurrence.excluded = false;
+        const auto participantOverride =
+            occurrence.participantOverrides.find(std::string{participantId});
+        if (participantOverride != occurrence.participantOverrides.end())
+        {
+            participantOverride->second.participationStatus = std::move(participationStatus);
+            occurrence.participantParticipationStatus.erase(std::string{participantId});
+            return result;
+        }
+
+        const auto baseParticipant =
+            std::ranges::find(baseEvent.attendees, participantId, &Attendee::id);
+        if (baseParticipant != baseEvent.attendees.end() &&
+            baseParticipant->participationStatus == participationStatus)
+            occurrence.participantParticipationStatus.erase(std::string{participantId});
+        else
+            occurrence.participantParticipationStatus.insert_or_assign(
+                std::string{participantId}, std::move(participationStatus));
+
+        if (!occurrence.start && !occurrence.duration && !occurrence.title &&
+            occurrence.participantOverrides.empty() &&
+            occurrence.participantParticipationStatus.empty())
             result.recurrenceOverrides.erase(recurrenceId.value);
         return result;
     }

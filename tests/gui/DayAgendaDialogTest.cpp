@@ -222,12 +222,19 @@ TEST_CASE("day agenda RSVP controls preserve confirmed state and surface failure
     CHECK(accept->isEnabled());
 
     QString requestedStatus;
+    QString requestedRecurrenceId;
     QObject::connect(&dialog, &javelin::gui::calendar::DayAgendaDialog::responseRequested, &dialog,
-                     [&requestedStatus](const QString&, const QString&, const QString& status)
-                     { requestedStatus = status; });
+                     [&requestedStatus, &requestedRecurrenceId](const QString&, const QString&,
+                                                                const QString& recurrenceId,
+                                                                const QString& status)
+                     {
+                         requestedRecurrenceId = recurrenceId;
+                         requestedStatus = status;
+                     });
     accept->click();
     settleGui();
     CHECK(requestedStatus == QStringLiteral("accepted"));
+    CHECK(requestedRecurrenceId.isEmpty());
     CHECK_FALSE(accept->isEnabled());
     CHECK_FALSE(tentative->isEnabled());
     CHECK_FALSE(decline->isEnabled());
@@ -246,6 +253,44 @@ TEST_CASE("day agenda RSVP controls preserve confirmed state and surface failure
     const auto labels = dialog.findChildren<QLabel*>();
     CHECK(std::ranges::any_of(labels, [](const QLabel* label)
                               { return label->text().contains(QStringLiteral("entire series")); }));
+    dialog.close();
+}
+
+TEST_CASE("day agenda occurrence RSVP stays scoped to the selected instance",
+          "[gui][calendar][agenda][invitation][recurrence]")
+{
+    javelin::gui::calendar::DayAgendaDialog dialog;
+    auto selected = event(QStringLiteral("recurring-invitation"), QTime{11, 0}, QTime{12, 0},
+                          QStringLiteral("Occurrence invitation"), false);
+    selected.recurring = true;
+    selected.rsvpAllowed = true;
+    selected.rsvpRecurrenceId = QStringLiteral("2026-08-10T11:00:00");
+    selected.participationStatus = QStringLiteral("needs-action");
+    dialog.setDay(QDate{2026, 8, 10}, {selected}, selected.key);
+    dialog.show();
+    settleGui();
+
+    const auto labels = dialog.findChildren<QLabel*>();
+    CHECK(std::ranges::any_of(
+        labels, [](const QLabel* label)
+        { return label->text().contains(QStringLiteral("only to this occurrence")); }));
+
+    auto* accept = dialog.findChild<QPushButton*>(QStringLiteral("dayAgendaRsvpAccept"));
+    REQUIRE(accept != nullptr);
+    QString requestedRecurrenceId;
+    QString requestedStatus;
+    QObject::connect(&dialog, &javelin::gui::calendar::DayAgendaDialog::responseRequested, &dialog,
+                     [&requestedRecurrenceId, &requestedStatus](const QString&, const QString&,
+                                                                const QString& recurrenceId,
+                                                                const QString& status)
+                     {
+                         requestedRecurrenceId = recurrenceId;
+                         requestedStatus = status;
+                     });
+    accept->click();
+    settleGui();
+    CHECK(requestedRecurrenceId == QStringLiteral("2026-08-10T11:00:00"));
+    CHECK(requestedStatus == QStringLiteral("accepted"));
     dialog.close();
 }
 

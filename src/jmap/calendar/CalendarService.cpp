@@ -829,7 +829,8 @@ namespace javelin::jmap::calendar
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "SELECT p.account_id,p.event_id,p.self_participant_id,e.document_json,"
-            "COALESCE(a.owner_account_id,a.account_id),"
+            "COALESCE(a.owner_account_id,a.account_id),p.recurrence_id,p.display_recurrence_id,"
+            "p.display_start,p.display_utc_start,"
             "(SELECT o.local_start FROM calendar_occurrences o WHERE o.account_id=p.account_id "
             "AND o.event_id=p.event_id AND substr(o.local_start,1,10)>=:today ORDER BY "
             "o.local_start LIMIT 1),"
@@ -840,7 +841,8 @@ namespace javelin::jmap::calendar
             "AND o.event_id=p.event_id AND substr(o.local_start,1,10)>=:today ORDER BY "
             "o.local_start LIMIT 1) FROM calendar_pending_invitations p JOIN calendar_events e ON "
             "e.account_id=p.account_id AND e.event_id=p.event_id JOIN accounts a ON "
-            "a.account_id=p.account_id ORDER BY p.discovered_at,p.account_id,p.event_id"));
+            "a.account_id=p.account_id ORDER BY p.discovered_at,p.account_id,p.event_id,"
+            "p.recurrence_id"));
         query.bindValue(QStringLiteral(":today"), QDate::currentDate().toString(Qt::ISODate));
         if (!query.exec())
             return error(OperationErrorCode::LocalStorageFailure,
@@ -859,26 +861,43 @@ namespace javelin::jmap::calendar
                 return error(OperationErrorCode::LocalStorageFailure,
                              QStringLiteral("Parse pending calendar invitation"));
             const auto& event = *parsed.value;
+            const auto recurrenceText = query.value(5).toString();
+            const auto recurrenceId =
+                recurrenceText.isEmpty()
+                    ? std::optional<LocalDateTime>{}
+                    : std::optional<LocalDateTime>{{.value = recurrenceText.toStdString()}};
+            std::optional<CalendarEvent> effectiveOccurrence;
+            const CalendarEvent* effectiveEvent = &event;
+            if (recurrenceId)
+            {
+                effectiveOccurrence = effectiveOccurrenceEvent(event, *recurrenceId);
+                if (!effectiveOccurrence)
+                    continue;
+                effectiveEvent = &*effectiveOccurrence;
+            }
             const auto selfParticipantId = query.value(2).toString().toStdString();
             const auto attendee =
-                std::ranges::find(event.attendees, selfParticipantId, &Attendee::id);
-            const auto organizer = [&event]() -> std::string
+                std::ranges::find(effectiveEvent->attendees, selfParticipantId, &Attendee::id);
+            const auto organizer = [effectiveEvent]() -> std::string
             {
-                if (event.organizerCalendarAddress)
+                if (effectiveEvent->organizerCalendarAddress)
                 {
                     const auto participant = std::ranges::find_if(
-                        event.attendees,
-                        [&event](const Attendee& value)
+                        effectiveEvent->attendees,
+                        [effectiveEvent](const Attendee& value)
                         {
-                            return value.calendarAddress == *event.organizerCalendarAddress ||
+                            return value.calendarAddress ==
+                                       *effectiveEvent->organizerCalendarAddress ||
                                    value.isOwner;
                         });
-                    if (participant != event.attendees.end() && !participant->name.empty())
+                    if (participant != effectiveEvent->attendees.end() &&
+                        !participant->name.empty())
                         return participant->name;
-                    return *event.organizerCalendarAddress;
+                    return *effectiveEvent->organizerCalendarAddress;
                 }
-                const auto owner = std::ranges::find(event.attendees, true, &Attendee::isOwner);
-                return owner == event.attendees.end() ? std::string{} : owner->name;
+                const auto owner =
+                    std::ranges::find(effectiveEvent->attendees, true, &Attendee::isOwner);
+                return owner == effectiveEvent->attendees.end() ? std::string{} : owner->name;
             }();
 
             auto calendarsIt = calendarsByAccount.find(accountId);
@@ -907,30 +926,39 @@ namespace javelin::jmap::calendar
             rsvpAllowed = rsvpAllowed && hasMembership;
 
             const auto displayTime =
-                query.value(5).isNull()
-                    ? event.start
-                    : LocalDateTime{.value = query.value(5).toString().toStdString()};
+                !query.value(7).isNull()
+                    ? LocalDateTime{.value = query.value(7).toString().toStdString()}
+                : !query.value(9).isNull()
+                    ? LocalDateTime{.value = query.value(9).toString().toStdString()}
+                    : effectiveEvent->start;
             const auto displayUtc =
-                query.value(6).isNull()
-                    ? event.utcStart
-                    : std::optional<UtcInstant>{{.value = query.value(6).toString().toStdString()}};
+                !query.value(8).isNull()
+                    ? std::optional<UtcInstant>{{.value = query.value(8).toString().toStdString()}}
+                : !query.value(10).isNull()
+                    ? std::optional<UtcInstant>{{.value = query.value(10).toString().toStdString()}}
+                    : effectiveEvent->utcStart;
+            const auto displayRecurrenceId =
+                !query.value(6).isNull()
+                    ? std::optional<LocalDateTime>{{.value =
+                                                        query.value(6).toString().toStdString()}}
+                : !query.value(11).isNull()
+                    ? std::optional<LocalDateTime>{{.value =
+                                                        query.value(11).toString().toStdString()}}
+                    : recurrenceId;
             result.push_back(PendingCalendarInvitation{
                 .ownerAccountId = query.value(4).toString().toStdString(),
                 .accountId = accountId,
                 .eventId = query.value(1).toString().toStdString(),
-                .title = event.title,
+                .title = effectiveEvent->title,
                 .organizer = organizer,
                 .displayTime = displayTime,
                 .displayUtc = displayUtc,
-                .recurrenceId = query.value(7).isNull()
-                                    ? std::nullopt
-                                    : std::optional<LocalDateTime>{{.value = query.value(7)
-                                                                                 .toString()
-                                                                                 .toStdString()}},
-                .allDay = event.showWithoutTime,
+                .recurrenceId = recurrenceId,
+                .displayRecurrenceId = displayRecurrenceId,
+                .allDay = effectiveEvent->showWithoutTime,
                 .recurring = event.recurrenceRule.has_value(),
                 .selfParticipantId = selfParticipantId,
-                .participationStatus = attendee == event.attendees.end()
+                .participationStatus = attendee == effectiveEvent->attendees.end()
                                            ? std::string{}
                                            : attendee->participationStatus,
                 .rsvpAllowed = rsvpAllowed,
@@ -2713,9 +2741,6 @@ namespace javelin::jmap::calendar
                 OperationErrorCode::InvalidRequest,
                 QStringLiteral(
                     "This event is organized by this account and does not need an RSVP."));
-        if (previous->attendees.empty())
-            co_return error(OperationErrorCode::InvalidRequest,
-                            QStringLiteral("This invitation has no participants to RSVP as."));
         std::vector<std::string> initialCalendarIds;
         for (const auto& [calendarId, present] : previous->calendarIds)
             if (present)
@@ -2782,20 +2807,44 @@ namespace javelin::jmap::calendar
         for (const auto& [calendarId, present] : previous->calendarIds)
             if (present)
                 calendarIds.push_back(calendarId);
-        const auto participantIndex = matchingParticipantIndex(*previous, identities);
+        std::optional<CalendarEvent> occurrence;
+        const CalendarEvent* responseEvent = &*previous;
+        if (command.recurrenceId)
+        {
+            if (!previous->recurrenceRule &&
+                !previous->recurrenceOverrides.contains(command.recurrenceId->value))
+                co_return error(OperationErrorCode::InvalidRequest,
+                                QStringLiteral("This event has no matching recurring occurrence."));
+            occurrence = effectiveOccurrenceEvent(*previous, *command.recurrenceId);
+            if (!occurrence)
+                co_return error(OperationErrorCode::NotFound,
+                                QStringLiteral("This recurring occurrence no longer exists."));
+            responseEvent = &*occurrence;
+        }
+        if (responseEvent->attendees.empty())
+            co_return error(OperationErrorCode::InvalidRequest,
+                            QStringLiteral("This invitation has no participants to RSVP as."));
+        const auto participantIndex = matchingParticipantIndex(*responseEvent, identities);
         if (!participantIndex)
             co_return error(
                 OperationErrorCode::InvalidRequest,
                 QStringLiteral(
                     "This invitation does not contain one of your calendar identities."));
 
-        auto updated = *previous;
-        if (updated.attendees[*participantIndex].participationStatus == command.participationStatus)
+        if (responseEvent->attendees[*participantIndex].participationStatus ==
+            command.participationStatus)
             co_return CommittedMutation{.accountId = std::move(command.accountId),
                                         .newState = *command.ifInState,
                                         .createdId = std::nullopt,
                                         .receipt = {}};
-        updated.attendees[*participantIndex].participationStatus = command.participationStatus;
+        auto updated =
+            command.recurrenceId
+                ? setOccurrenceParticipationStatus(*previous, *command.recurrenceId,
+                                                   responseEvent->attendees[*participantIndex].id,
+                                                   command.participationStatus)
+                : *previous;
+        if (!command.recurrenceId)
+            updated.attendees[*participantIndex].participationStatus = command.participationStatus;
         api::CalendarEventSetRequest request{
             .accountId = command.accountId,
             .ifInState = command.ifInState,

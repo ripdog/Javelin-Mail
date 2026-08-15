@@ -2,7 +2,7 @@
 
 namespace javelin::jmap::cache::migrations
 {
-    std::vector<MigrationStep> migrationSteps37To50()
+    std::vector<MigrationStep> migrationSteps37To51()
     {
         return {
             MigrationStep{
@@ -295,6 +295,62 @@ namespace javelin::jmap::cache::migrations
                         QStringLiteral(
                             "CREATE INDEX idx_calendar_participant_identities_address ON "
                             "calendar_participant_identities(account_id,calendar_address)"),
+                    },
+            },
+            MigrationStep{
+                .version = 51,
+                .name = QStringLiteral("calendar_invitation_occurrences"),
+                .statements =
+                    {
+                        QStringLiteral("ALTER TABLE calendar_pending_invitations RENAME TO "
+                                       "calendar_pending_invitations_v50"),
+                        QStringLiteral(
+                            "CREATE TABLE calendar_pending_invitations (account_id TEXT NOT NULL,"
+                            "event_id TEXT NOT NULL,recurrence_id TEXT NOT NULL DEFAULT '',"
+                            "self_participant_id TEXT NOT NULL,source_notification_id TEXT,"
+                            "display_recurrence_id TEXT,display_start TEXT,display_utc_start TEXT,"
+                            "discovered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,last_seen_at "
+                            "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY "
+                            "KEY(account_id,event_id,"
+                            "recurrence_id),FOREIGN KEY(account_id,event_id) REFERENCES "
+                            "calendar_events(account_id,event_id) ON DELETE CASCADE) STRICT"),
+                        QStringLiteral(
+                            "INSERT INTO calendar_pending_invitations(account_id,event_id,"
+                            "recurrence_id,self_participant_id,source_notification_id,discovered_"
+                            "at,"
+                            "last_seen_at) SELECT account_id,event_id,'',self_participant_id,"
+                            "source_notification_id,discovered_at,last_seen_at FROM "
+                            "calendar_pending_invitations_v50"),
+                        QStringLiteral("DROP TABLE calendar_pending_invitations_v50"),
+                        QStringLiteral(
+                            "CREATE INDEX idx_calendar_pending_invitations_discovered ON "
+                            "calendar_pending_invitations(discovered_at,account_id,event_id,"
+                            "recurrence_id)"),
+                        QStringLiteral("ALTER TABLE calendar_invitation_outbox RENAME TO "
+                                       "calendar_invitation_outbox_v50"),
+                        QStringLiteral(
+                            "CREATE TABLE calendar_invitation_outbox (invitation_key TEXT PRIMARY "
+                            "KEY,account_id TEXT NOT NULL REFERENCES accounts(account_id) ON "
+                            "DELETE "
+                            "CASCADE,event_id TEXT NOT NULL,recurrence_id TEXT NOT NULL DEFAULT '',"
+                            "self_participant_id TEXT NOT NULL,source_notification_id TEXT,"
+                            "discovered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,status TEXT NOT "
+                            "NULL DEFAULT 'pending' CHECK(status IN "
+                            "('pending','delivered','resolved')),created_at TEXT NOT NULL DEFAULT "
+                            "CURRENT_TIMESTAMP,delivered_at TEXT,resolved_at "
+                            "TEXT,UNIQUE(account_id,"
+                            "event_id,recurrence_id)) STRICT"),
+                        QStringLiteral(
+                            "INSERT INTO calendar_invitation_outbox(invitation_key,account_id,"
+                            "event_id,recurrence_id,self_participant_id,source_notification_id,"
+                            "discovered_at,status,created_at,delivered_at,resolved_at) SELECT "
+                            "invitation_key,account_id,event_id,'',self_participant_id,"
+                            "source_notification_id,discovered_at,status,created_at,delivered_at,"
+                            "resolved_at FROM calendar_invitation_outbox_v50"),
+                        QStringLiteral("DROP TABLE calendar_invitation_outbox_v50"),
+                        QStringLiteral(
+                            "CREATE INDEX idx_calendar_invitation_outbox_status ON "
+                            "calendar_invitation_outbox(status,created_at,invitation_key)"),
                     },
             },
         };

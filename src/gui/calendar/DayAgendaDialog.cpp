@@ -689,7 +689,8 @@ namespace javelin::gui::calendar
                         found->responseMutationPending = true;
                         found->responseError.clear();
                         updateDetails(*found);
-                        Q_EMIT responseRequested(found->key.accountId, found->key.eventId, status);
+                        Q_EMIT responseRequested(found->key.accountId, found->key.eventId,
+                                                 found->rsvpRecurrenceId, status);
                     });
         };
         connectResponse(m_accept, QStringLiteral("accepted"));
@@ -924,9 +925,12 @@ namespace javelin::gui::calendar
             m_responseButtons->setExclusive(true);
         }
         m_responseSeriesNote->setVisible(event.rsvpAllowed && event.recurring);
-        m_responseSeriesNote->setText(event.rsvpAllowed && event.recurring
-                                          ? i18n("Your response applies to the entire series.")
-                                          : QString{});
+        m_responseSeriesNote->setText(
+            event.rsvpAllowed && event.recurring
+                ? (event.rsvpRecurrenceId.isEmpty()
+                       ? i18n("Your response applies to the entire series.")
+                       : i18n("Your response applies only to this occurrence."))
+                : QString{});
         m_responseError->setVisible(event.rsvpAllowed && !event.responseError.isEmpty());
         m_responseError->setText(event.responseError);
 
@@ -952,7 +956,10 @@ namespace javelin::gui::calendar
                                               ? i18n("No response")
                                               : event.participationStatus));
             if (event.recurring)
-                accessibleDetails.push_back(i18n("The response applies to the entire series."));
+                accessibleDetails.push_back(
+                    event.rsvpRecurrenceId.isEmpty()
+                        ? i18n("The response applies to the entire series.")
+                        : i18n("The response applies only to this occurrence."));
             if (!event.responseError.isEmpty())
                 accessibleDetails.push_back(event.responseError);
         }

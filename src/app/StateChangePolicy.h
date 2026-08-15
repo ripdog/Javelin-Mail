@@ -39,6 +39,7 @@ namespace javelin::app
             types.emplace_back("Calendar");
             types.emplace_back("CalendarEvent");
             types.emplace_back("CalendarEventNotification");
+            types.emplace_back("ParticipantIdentity");
         }
         if (capabilities.contacts)
         {
@@ -57,7 +58,7 @@ namespace javelin::app
     [[nodiscard]] inline bool shouldDeferForActiveMutation(const std::string_view dataType)
     {
         return dataType != "AddressBook" && dataType != "ContactCard" &&
-               dataType != "CalendarEventNotification";
+               dataType != "CalendarEventNotification" && dataType != "ParticipantIdentity";
     }
 
     [[nodiscard]] inline bool
@@ -108,7 +109,7 @@ namespace javelin::app
             for (auto& [type, state] : states)
             {
                 if (type == "Calendar" || type == "CalendarEvent" ||
-                    type == "CalendarEventNotification")
+                    type == "CalendarEventNotification" || type == "ParticipantIdentity")
                 {
                     routed.calendarStates[accountId].insert_or_assign(std::move(type),
                                                                       std::move(state));

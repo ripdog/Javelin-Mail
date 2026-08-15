@@ -234,6 +234,7 @@ add_executable(javelin_daemon_app_tests
     app/CacheInvalidationPublisherTest.cpp
     app/CacheLocationProviderTest.cpp
     app/CalendarHistoryExecutorTest.cpp
+    app/CalendarInvitationServiceTest.cpp
     app/CalendarPreferenceExecutorTest.cpp
     app/CommandDispatcherTest.cpp
     app/ContactCommandPreparationTest.cpp

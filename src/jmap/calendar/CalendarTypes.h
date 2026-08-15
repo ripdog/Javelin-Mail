@@ -179,6 +179,8 @@ namespace javelin::jmap::calendar
         std::optional<LocalDateTime> start;
         std::optional<Duration> duration;
         std::optional<std::string> title;
+        std::unordered_map<std::string, Attendee> participantOverrides;
+        std::unordered_map<std::string, std::string> participantParticipationStatus;
 
         bool operator==(const RecurrenceOverride&) const = default;
     };

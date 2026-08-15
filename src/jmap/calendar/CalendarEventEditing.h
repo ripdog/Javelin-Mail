@@ -29,9 +29,15 @@ namespace javelin::jmap::calendar
     reconcileEditableAttendees(const std::vector<Attendee>& existing,
                                std::span<const std::string> requestedAddresses);
 
+    [[nodiscard]] std::optional<CalendarEvent>
+    effectiveOccurrenceEvent(const CalendarEvent& baseEvent, const LocalDateTime& recurrenceId);
     [[nodiscard]] CalendarEvent applyOccurrenceEdit(const CalendarEvent& baseEvent,
                                                     const LocalDateTime& recurrenceId,
                                                     const CalendarEvent& editedOccurrence);
+    [[nodiscard]] CalendarEvent setOccurrenceParticipationStatus(const CalendarEvent& baseEvent,
+                                                                 const LocalDateTime& recurrenceId,
+                                                                 std::string_view participantId,
+                                                                 std::string participationStatus);
     [[nodiscard]] CalendarEvent excludeOccurrence(const CalendarEvent& baseEvent,
                                                   const LocalDateTime& recurrenceId);
     [[nodiscard]] CalendarEvent acknowledgeAlert(CalendarEvent event, Alert alert,

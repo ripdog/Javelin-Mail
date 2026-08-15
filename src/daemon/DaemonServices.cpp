@@ -429,11 +429,24 @@ namespace javelin::app
             m_databaseConnection, *m_calendarApplicationService);
         m_calendarInvitationService = std::make_unique<CalendarInvitationService>(
             m_databaseConnection, *m_calendarProtocolClient, *m_calendarReader,
-            *m_accountRuntimeManager, *m_calendarApplicationService);
+            *m_accountRuntimeManager);
+        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::sessionRefreshed,
+                         m_calendarInvitationService.get(),
+                         &CalendarInvitationService::accountChanged);
+        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::accountConfigured,
+                         m_calendarInvitationService.get(),
+                         &CalendarInvitationService::accountChanged);
+        QObject::connect(
+            m_accountRuntimeManager.get(), &AccountRuntimeManager::calendarStateChanged,
+            m_calendarInvitationService.get(), &CalendarInvitationService::calendarStateChanged);
         QObject::connect(m_calendarApplicationService.get(),
                          &CalendarApplicationService::calendarCacheCommitted,
                          m_calendarNotificationService.get(), [this](const CalendarCacheChange&)
                          { m_calendarNotificationService->requestScan(); });
+        QObject::connect(m_calendarApplicationService.get(),
+                         &CalendarApplicationService::calendarCacheCommitted,
+                         m_calendarInvitationService.get(), [this](const CalendarCacheChange&)
+                         { m_calendarInvitationService->calendarCacheCommitted(); });
     }
 
     DaemonServices::~DaemonServices() = default;
