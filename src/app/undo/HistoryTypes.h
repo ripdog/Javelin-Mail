@@ -80,6 +80,42 @@ namespace javelin::app::undo
         auto operator<=>(const MailPatchHistory&) const = default;
     };
 
+    enum class MailTransferHistoryOperation
+    {
+        Copy,
+        Move,
+    };
+
+    struct MailTransferItemHistory
+    {
+        std::optional<std::string> currentSourceEmailId;
+        std::vector<std::string> originalSourceMailboxIds;
+        std::vector<std::string> sourceKeywords;
+        std::optional<std::string> sourceReceivedAt;
+        std::uint64_t sourceSize = 0;
+        std::vector<std::string> sourceRemovedMailboxIds;
+        bool sourceDestroyed = false;
+        std::optional<std::string> rawContentHash;
+        std::optional<std::string> currentDestinationEmailId;
+        bool destinationReusedExisting = false;
+        std::vector<std::string> destinationPriorMailboxIds;
+        std::vector<std::string> destinationMailboxIds;
+        std::vector<std::string> destinationKeywords;
+
+        auto operator<=>(const MailTransferItemHistory&) const = default;
+    };
+
+    struct MailTransferHistory
+    {
+        std::string sourceAccountId;
+        std::string destinationAccountId;
+        std::string destinationMailboxId;
+        MailTransferHistoryOperation operation = MailTransferHistoryOperation::Copy;
+        std::vector<MailTransferItemHistory> items;
+
+        auto operator<=>(const MailTransferHistory&) const = default;
+    };
+
     struct DraftHistory
     {
         std::string connectionId;
@@ -196,7 +232,7 @@ namespace javelin::app::undo
     };
 
     using HistoryPayload =
-        std::variant<MailPatchHistory, DraftHistory, SieveHistory, DeferredSendHistory,
+        std::variant<MailPatchHistory, MailTransferHistory, DraftHistory, SieveHistory, DeferredSendHistory,
                      CalendarEventHistory, CalendarPreferenceHistory, ContactCardHistory,
                      AddressBookHistory, ContactGroupHistory, ImpossibleHistory>;
 

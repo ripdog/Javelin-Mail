@@ -108,6 +108,27 @@ namespace javelin::jmap::cache::migrations
                                        "source_message_ids_json TEXT NOT NULL DEFAULT '[]'"),
                     },
             },
+            MigrationStep{
+                .version = 57,
+                .name = QStringLiteral("history_mail_vault_pin_cleanup"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "CREATE TRIGGER operation_history_release_mail_vault_pins "
+                            "AFTER DELETE ON operation_history BEGIN "
+                            "DELETE FROM mail_vault_pins WHERE owner_kind='history_entry' AND "
+                            "owner_id=OLD.entry_id; END"),
+                    },
+            },
+            MigrationStep{
+                .version = 58,
+                .name = QStringLiteral("mail_transfer_history_marker"),
+                .statements =
+                    {
+                        QStringLiteral("ALTER TABLE mail_transfer_operations ADD COLUMN "
+                                       "history_entry_id TEXT"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

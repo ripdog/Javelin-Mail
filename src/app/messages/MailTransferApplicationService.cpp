@@ -273,6 +273,7 @@ namespace javelin::app
                     .status = MailTransferStatus::Preparing,
                     .title = title,
                     .lastError = std::nullopt,
+                    .historyEntryId = std::nullopt,
                     .createdAt = {},
                     .updatedAt = {},
                 },

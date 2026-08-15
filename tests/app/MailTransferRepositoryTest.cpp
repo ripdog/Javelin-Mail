@@ -59,6 +59,7 @@ namespace
             .status = MailTransferStatus::Preparing,
             .title = QStringLiteral("Move 2 messages"),
             .lastError = std::nullopt,
+            .historyEntryId = std::nullopt,
             .createdAt = {},
             .updatedAt = {},
         };
@@ -300,6 +301,11 @@ TEST_CASE("mail transfer source pin is atomic and can be retained by history",
     CHECK(scalar(database, QStringLiteral(
                               "SELECT COUNT(*) FROM mail_vault_pins WHERE "
                               "owner_kind='mail_transfer_item' AND owner_id='item-1'")) == 0);
+    CHECK(scalar(database, QStringLiteral(
+                              "SELECT COUNT(*) FROM mail_vault_pins WHERE "
+                              "owner_kind='operation_history' AND owner_id='history-entry-1'")) == 1);
+    REQUIRE(requireBool(
+        repository.reassignSourcePin("item-1", "operation_history", "history-entry-1")));
     CHECK(scalar(database, QStringLiteral(
                               "SELECT COUNT(*) FROM mail_vault_pins WHERE "
                               "owner_kind='operation_history' AND owner_id='history-entry-1'")) == 1);

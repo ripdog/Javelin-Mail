@@ -36,6 +36,11 @@ namespace javelin::app::undo
                       CommandOrigin origin = CommandOrigin::User);
         [[nodiscard]] std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
         commitNormal(HistoryEntry entry);
+        [[nodiscard]] std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
+        recordNormal(QString label, HistoryDomain domain, HistoryPayload payload,
+                     std::optional<QString> operationGroupId = std::nullopt,
+                     std::optional<QDateTime> expiresAt = std::nullopt,
+                     CommandOrigin origin = CommandOrigin::User);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         discardNormal(const QString& entryId);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>

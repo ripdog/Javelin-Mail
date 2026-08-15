@@ -2,6 +2,9 @@
 #include "app/MailTransferExecutor.h"
 #include "app/MailTransferRepository.h"
 #include "app/AccountConnectionProvider.h"
+#include "app/undo/HistoryRepository.h"
+#include "app/undo/MailTransferHistoryCoordinator.h"
+#include "app/undo/UndoManager.h"
 #include "jmap/MessageContentClient.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Session.h"
@@ -1740,6 +1743,102 @@ TEST_CASE("advanced destination state keeps ambiguous duplicate mailbox update b
     CHECK(fixture.resourceTransport.sendFromFileCalls == uploadCount);
     CHECK(fixture.sourceStillExists());
     CHECK(fixture.pinCount() == 1);
+}
+
+TEST_CASE("completed destructive move publishes one durable transfer history entry and hands off MIME",
+          "[app][mail-transfer][history]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    const auto operationId = fixture.prepare(MailTransferOperation::Move);
+    javelin::app::undo::HistoryRepository historyRepository{fixture.database};
+    javelin::app::undo::UndoManager undoManager{historyRepository};
+    REQUIRE_FALSE(undoManager.load().has_value());
+    javelin::app::undo::MailTransferHistoryCoordinator coordinator{fixture.database, undoManager};
+    MailTransferExecutor executor{fixture.database, fixture.resourceTransport, fixture.methodTransport,
+                                  *fixture.contentClient, fixture.connections, &coordinator};
+    const auto executed = QCoro::waitFor(executor.advance(operationId));
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&executed))
+        FAIL(error->message.toStdString());
+    REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(executed));
+    const auto& executionSummary = std::get<MailTransferExecutionSummary>(executed);
+    CHECK(executionSummary.status == MailTransferStatus::Complete);
+    const auto historyEntryId = executionSummary.historyEntryId;
+    CHECK(fixture.pinCount() == 1);
+    REQUIRE(historyEntryId.has_value());
+    REQUIRE(undoManager.entries().size() == 1);
+    const auto& entry = undoManager.entries().front();
+    CHECK(entry.entryId == *historyEntryId);
+    CHECK(entry.commandKind == QStringLiteral("mail_transfer"));
+    CHECK(entry.status == javelin::app::undo::HistoryEntryStatus::Ready);
+    REQUIRE(std::holds_alternative<javelin::app::undo::MailTransferHistory>(entry.payload));
+    const auto& history = std::get<javelin::app::undo::MailTransferHistory>(entry.payload);
+    CHECK(history.operation == javelin::app::undo::MailTransferHistoryOperation::Move);
+    CHECK(history.sourceAccountId == fixture.sourceAccountId);
+    CHECK(history.destinationAccountId == fixture.destinationAccountId);
+    CHECK(history.destinationMailboxId == "archive");
+    REQUIRE(history.items.size() == 1);
+    const auto& historyItem = history.items.front();
+    CHECK_FALSE(historyItem.currentSourceEmailId.has_value());
+    CHECK(historyItem.originalSourceMailboxIds == std::vector<std::string>{"inbox"});
+    CHECK(historyItem.sourceDestroyed);
+    REQUIRE(historyItem.rawContentHash.has_value());
+    CHECK(historyItem.currentDestinationEmailId ==
+          std::optional<std::string>{"destination-email"});
+    CHECK(historyItem.destinationMailboxIds == std::vector<std::string>{"archive"});
+    CHECK(historyItem.destinationKeywords == std::vector<std::string>{"$flagged", "$seen"});
+
+    QSqlQuery pins{fixture.database.database()};
+    pins.prepare(QStringLiteral(
+        "SELECT owner_kind,owner_id FROM mail_vault_pins WHERE content_hash=:hash"));
+    pins.bindValue(QStringLiteral(":hash"),
+                   QString::fromStdString(*historyItem.rawContentHash));
+    REQUIRE(pins.exec());
+    REQUIRE(pins.next());
+    CHECK(pins.value(0).toString() == QStringLiteral("history_entry"));
+    CHECK(pins.value(1).toString() == *historyEntryId);
+    CHECK_FALSE(pins.next());
+
+    const auto storedOperation = fixture.operation(operationId);
+    CHECK(storedOperation.historyEntryId == historyEntryId);
+
+    const auto repeated = coordinator.finalizeCompleted(operationId);
+    REQUIRE(std::holds_alternative<std::optional<QString>>(repeated));
+    CHECK(std::get<std::optional<QString>>(repeated) == historyEntryId);
+    CHECK(undoManager.entries().size() == 1);
+}
+
+TEST_CASE("forgotten transfer history releases MIME and is never resurrected",
+          "[app][mail-transfer][history][retention]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    const auto operationId = fixture.prepare(MailTransferOperation::Move);
+    const auto executed = fixture.execute(operationId);
+    REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(executed));
+
+    javelin::app::undo::HistoryRepository historyRepository{fixture.database};
+    javelin::app::undo::UndoManager undoManager{historyRepository};
+    REQUIRE_FALSE(undoManager.load().has_value());
+    javelin::app::undo::MailTransferHistoryCoordinator coordinator{fixture.database, undoManager};
+    const auto finalized = coordinator.finalizeCompleted(operationId);
+    REQUIRE(std::holds_alternative<std::optional<QString>>(finalized));
+    const auto historyEntryId = std::get<std::optional<QString>>(finalized);
+    REQUIRE(historyEntryId.has_value());
+    CHECK(fixture.pinCount() == 1);
+
+    REQUIRE_FALSE(undoManager.forget(*historyEntryId).has_value());
+    CHECK(undoManager.entries().empty());
+    CHECK(fixture.pinCount() == 0);
+    CHECK(fixture.operation(operationId).historyEntryId == historyEntryId);
+
+    const auto repeated = coordinator.finalizeCompleted(operationId);
+    REQUIRE(std::holds_alternative<std::optional<QString>>(repeated));
+    CHECK_FALSE(std::get<std::optional<QString>>(repeated).has_value());
+    CHECK(undoManager.entries().empty());
+    CHECK(fixture.pinCount() == 0);
 }
 
 TEST_CASE("same-session copy uses Email copy without MIME download or upload",

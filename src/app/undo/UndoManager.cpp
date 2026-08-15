@@ -116,6 +116,46 @@ namespace javelin::app::undo
         return std::get<HistoryEntry>(std::move(result));
     }
 
+    std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
+    UndoManager::recordNormal(QString label, const HistoryDomain domain, HistoryPayload payload,
+                              std::optional<QString> operationGroupId,
+                              std::optional<QDateTime> expiresAt, const CommandOrigin origin)
+    {
+        if (origin != CommandOrigin::User)
+        {
+            return javelin::jmap::cache::DatabaseError{
+                .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Only user operations may create normal history."),
+            };
+        }
+
+        HistoryEntry entry{
+            .entryId = QUuid::createUuid().toString(QUuid::WithoutBraces),
+            .stack = HistoryStack::Undo,
+            .stackOrder = 0,
+            .label = std::move(label),
+            .domain = domain,
+            .commandKind = payloadCommandKind(payload),
+            .payloadVersion = 1,
+            .payload = std::move(payload),
+            .status = HistoryEntryStatus::Ready,
+            .operationGroupId = std::move(operationGroupId),
+            .expiresAt = std::move(expiresAt),
+            .explanation = std::nullopt,
+            .failureJson = std::nullopt,
+            .createdAt = {},
+            .updatedAt = {},
+        };
+        auto result = m_repository.pushUndoClearingRedo(std::move(entry));
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+            return *error;
+        if (const auto error = prune())
+            return *error;
+        if (const auto error = reload())
+            return *error;
+        return std::get<HistoryEntry>(std::move(result));
+    }
+
     std::optional<javelin::jmap::cache::DatabaseError>
     UndoManager::discardNormal(const QString& entryId)
     {

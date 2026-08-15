@@ -71,6 +71,7 @@ namespace javelin::app
         MailTransferStatus status = MailTransferStatus::Preparing;
         QString title;
         std::optional<QString> lastError;
+        std::optional<QString> historyEntryId;
         QDateTime createdAt;
         QDateTime updatedAt;
     };
@@ -138,6 +139,8 @@ namespace javelin::app
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         updateStatus(std::string_view operationId, MailTransferStatus status,
                      std::optional<QString> error = std::nullopt);
+        [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
+        markHistoryPublished(std::string_view operationId, QString historyEntryId);
         [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
         transitionItem(std::string_view itemId, MailTransferItemPhase expected,
                        MailTransferItemPhase next, std::optional<QString> error = std::nullopt);

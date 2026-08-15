@@ -6,13 +6,20 @@
 
 #include <QCoroTask>
 
+#include <QString>
+
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <variant>
 
 namespace javelin::app
 {
     class AccountConnectionProvider;
+}
+namespace javelin::app::undo
+{
+    class MailTransferHistoryCoordinator;
 }
 namespace javelin::jmap
 {
@@ -35,6 +42,7 @@ namespace javelin::app
         std::size_t failedItemCount = 0;
         std::size_t partialItemCount = 0;
         std::size_t unknownItemCount = 0;
+        std::optional<QString> historyEntryId;
     };
 
     using MailTransferExecutionResult =
@@ -47,7 +55,9 @@ namespace javelin::app
                              javelin::jmap::api::AbstractTransport& resourceTransport,
                              javelin::jmap::api::JmapMethodTransport& methodTransport,
                              javelin::jmap::MessageContentClient& messageContentClient,
-                             const AccountConnectionProvider& connectionProvider);
+                             const AccountConnectionProvider& connectionProvider,
+                             javelin::app::undo::MailTransferHistoryCoordinator* historyCoordinator =
+                                 nullptr);
 
         [[nodiscard]] QCoro::Task<MailTransferExecutionResult>
         advance(std::string operationId);
@@ -58,6 +68,7 @@ namespace javelin::app
         javelin::jmap::api::JmapMethodTransport& m_methodTransport;
         javelin::jmap::MessageContentClient& m_messageContentClient;
         const AccountConnectionProvider& m_connectionProvider;
+        javelin::app::undo::MailTransferHistoryCoordinator* m_historyCoordinator = nullptr;
     };
 
 } // namespace javelin::app

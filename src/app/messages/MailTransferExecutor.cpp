@@ -2,6 +2,7 @@
 
 #include "app/AccountConnectionProvider.h"
 #include "app/AccountConnectionSettings.h"
+#include "app/undo/MailTransferHistoryCoordinator.h"
 #include "jmap/MessageContentClient.h"
 #include "jmap/sync/EmailMutationEngine.h"
 #include "jmap/sync/EmailMutationJournal.h"
@@ -190,10 +191,11 @@ namespace javelin::app
         javelin::jmap::api::AbstractTransport& resourceTransport,
         javelin::jmap::api::JmapMethodTransport& methodTransport,
         javelin::jmap::MessageContentClient& messageContentClient,
-        const AccountConnectionProvider& connectionProvider)
+        const AccountConnectionProvider& connectionProvider,
+        javelin::app::undo::MailTransferHistoryCoordinator* historyCoordinator)
         : m_databaseConnection(databaseConnection), m_resourceTransport(resourceTransport),
           m_methodTransport(methodTransport), m_messageContentClient(messageContentClient),
-          m_connectionProvider(connectionProvider)
+          m_connectionProvider(connectionProvider), m_historyCoordinator(historyCoordinator)
     {
     }
 
@@ -2101,7 +2103,10 @@ namespace javelin::app
             co_return javelin::jmap::operationError(*error);
         items = std::get<std::vector<MailTransferItemRecord>>(std::move(itemsResult));
 
-        MailTransferExecutionSummary summary{.operationId = operation.operationId};
+        MailTransferExecutionSummary summary{
+            .operationId = operation.operationId,
+            .historyEntryId = std::nullopt,
+        };
         for (const auto& item : items)
         {
             if (item.phase == MailTransferItemPhase::Complete)
@@ -2130,6 +2135,13 @@ namespace javelin::app
 
         if (const auto error = repository.updateStatus(operation.operationId, summary.status))
             co_return javelin::jmap::operationError(*error);
+        if (summary.status == MailTransferStatus::Complete && m_historyCoordinator != nullptr)
+        {
+            auto historyResult = m_historyCoordinator->finalizeCompleted(operation.operationId);
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&historyResult))
+                co_return *error;
+            summary.historyEntryId = std::get<std::optional<QString>>(std::move(historyResult));
+        }
         co_return summary;
     }
 

@@ -96,7 +96,7 @@ namespace javelin::app
             return QStringLiteral(
                 "operation_id,operation_group_id,source_account_id,source_mailbox_id,"
                 "destination_account_id,destination_mailbox_id,operation,topology,status,title,"
-                "last_error,created_at,updated_at");
+                "last_error,created_at,updated_at,history_entry_id");
         }
 
         [[nodiscard]] QString itemColumns()
@@ -132,6 +132,7 @@ namespace javelin::app
                 .status = *status,
                 .title = query.value(9).toString(),
                 .lastError = optionalQString(query.value(10)),
+                .historyEntryId = optionalQString(query.value(13)),
                 .createdAt = timestamp(query.value(11)),
                 .updatedAt = timestamp(query.value(12)),
             };
@@ -371,10 +372,10 @@ namespace javelin::app
             "INSERT INTO mail_transfer_operations("
             "operation_id,operation_group_id,source_account_id,source_mailbox_id,"
             "destination_account_id,destination_mailbox_id,operation,topology,status,title,last_"
-            "error"
+            "error,history_entry_id"
             ") VALUES(:operation_id,:operation_group_id,:source_account_id,:source_mailbox_id,"
             ":destination_account_id,:destination_mailbox_id,:operation,:topology,:status,:title,"
-            ":last_error)"));
+            ":last_error,:history_entry_id)"));
         insertOperation.bindValue(QStringLiteral(":operation_id"),
                                   QString::fromStdString(operation.operationId));
         insertOperation.bindValue(QStringLiteral(":operation_group_id"),
@@ -392,6 +393,8 @@ namespace javelin::app
         insertOperation.bindValue(QStringLiteral(":status"), toString(operation.status));
         insertOperation.bindValue(QStringLiteral(":title"), operation.title);
         insertOperation.bindValue(QStringLiteral(":last_error"), optionalText(operation.lastError));
+        insertOperation.bindValue(QStringLiteral(":history_entry_id"),
+                                  optionalText(operation.historyEntryId));
         if (!insertOperation.exec())
             return queryError(QStringLiteral("Insert mail transfer operation"), insertOperation);
 
@@ -559,6 +562,22 @@ namespace javelin::app
         return std::nullopt;
     }
 
+    std::variant<bool, DatabaseError>
+    MailTransferRepository::markHistoryPublished(const std::string_view operationId,
+                                                  QString historyEntryId)
+    {
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "UPDATE mail_transfer_operations SET history_entry_id=:history_entry_id,"
+            "updated_at=CURRENT_TIMESTAMP WHERE operation_id=:id AND "
+            "(history_entry_id IS NULL OR history_entry_id=:history_entry_id)"));
+        query.bindValue(QStringLiteral(":history_entry_id"), historyEntryId);
+        query.bindValue(QStringLiteral(":id"), QString::fromStdString(std::string{operationId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Mark mail transfer history published"), query);
+        return query.numRowsAffected() == 1;
+    }
+
     std::variant<bool, DatabaseError> MailTransferRepository::transitionItem(
         const std::string_view itemId, const MailTransferItemPhase expected,
         const MailTransferItemPhase next, std::optional<QString> error)
@@ -644,7 +663,7 @@ namespace javelin::app
 
         QSqlQuery insert{m_connection.database()};
         insert.prepare(QStringLiteral(
-            "INSERT INTO mail_vault_pins(owner_kind,owner_id,content_hash) "
+            "INSERT OR IGNORE INTO mail_vault_pins(owner_kind,owner_id,content_hash) "
             "SELECT :owner_kind,:owner_id,content_hash FROM mail_vault_pins WHERE "
             "owner_kind='mail_transfer_item' AND owner_id=:item_id"));
         insert.bindValue(QStringLiteral(":owner_kind"),
@@ -653,7 +672,19 @@ namespace javelin::app
         insert.bindValue(QStringLiteral(":item_id"), QString::fromStdString(std::string{itemId}));
         if (!insert.exec())
             return queryError(QStringLiteral("Create reassigned mail vault pin"), insert);
-        if (insert.numRowsAffected() != 1)
+
+        QSqlQuery verify{m_connection.database()};
+        verify.prepare(QStringLiteral(
+            "SELECT EXISTS(SELECT 1 FROM mail_vault_pins pin JOIN mail_transfer_items item "
+            "ON item.item_id=:item_id AND pin.content_hash=item.raw_content_hash WHERE "
+            "pin.owner_kind=:owner_kind AND pin.owner_id=:owner_id)"));
+        verify.bindValue(QStringLiteral(":owner_kind"),
+                         QString::fromStdString(std::string{ownerKind}));
+        verify.bindValue(QStringLiteral(":owner_id"), QString::fromStdString(std::string{ownerId}));
+        verify.bindValue(QStringLiteral(":item_id"), QString::fromStdString(std::string{itemId}));
+        if (!verify.exec() || !verify.next())
+            return queryError(QStringLiteral("Verify reassigned mail vault pin"), verify);
+        if (!verify.value(0).toBool())
         {
             transaction.rollback();
             return false;
