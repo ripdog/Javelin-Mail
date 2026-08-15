@@ -63,13 +63,17 @@ namespace
         {
             return {{
                 .accountId = "account-1",
+                .connectionId = "connection-1",
+                .remoteAccountId = "u1",
                 .name = "Test Account",
                 .isPersonal = true,
                 .isReadOnly = false,
                 .isPrimary = true,
                 .hasMailCapability = true,
+                .mayCreateTopLevelMailbox = true,
                 .ownerAccountId = "account-1",
                 .hasSubmissionCapability = true,
+                .maxDelayedSendSeconds = 0,
             }};
         }
     };
@@ -145,21 +149,29 @@ namespace
         {
             return {
                 {.accountId = "account-1",
+                 .connectionId = "connection-1",
+                 .remoteAccountId = "u1",
                  .name = "Account One",
                  .isPersonal = true,
                  .isReadOnly = false,
                  .isPrimary = true,
                  .hasMailCapability = true,
+                 .mayCreateTopLevelMailbox = true,
                  .ownerAccountId = "account-1",
-                 .hasSubmissionCapability = true},
+                 .hasSubmissionCapability = true,
+                 .maxDelayedSendSeconds = 0},
                 {.accountId = "account-2",
+                 .connectionId = "connection-2",
+                 .remoteAccountId = "u2",
                  .name = "Account Two",
                  .isPersonal = true,
                  .isReadOnly = false,
                  .isPrimary = false,
                  .hasMailCapability = true,
+                 .mayCreateTopLevelMailbox = true,
                  .ownerAccountId = "account-2",
-                 .hasSubmissionCapability = true},
+                 .hasSubmissionCapability = true,
+                 .maxDelayedSendSeconds = 0},
             };
         }
     };

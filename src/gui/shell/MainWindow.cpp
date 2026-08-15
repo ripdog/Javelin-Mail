@@ -1438,27 +1438,19 @@ namespace javelin::gui::shell
             });
 
         connect(m_mailboxModel, &javelin::gui::mailboxes::MailboxTreeModel::emailsDropped, this,
-                [this](const QString& sourceAccountId, const QString& destinationAccountId,
-                       const QString& destinationMailboxId, const QStringList& emailIds)
+                [this](const javelin::gui::messages::MessageDragPayload& payload,
+                       const QString& destinationAccountId, const QString& destinationMailboxId,
+                       const Qt::DropAction action)
                 {
-                    Q_UNUSED(emailIds);
-                    const auto sourceAccount = activeAccountId();
-                    const auto sourceMailboxId = activeMailboxId();
-                    if (!sourceAccount.has_value() || !sourceMailboxId.has_value() ||
-                        sourceAccountId.toStdString() != *sourceAccount ||
-                        sourceAccountId != destinationAccountId)
-                    {
-                        m_statusBar->showMessage(
-                            i18n("Messages can only be moved within their account."), 5000);
+                    if (action != Qt::MoveAction && action != Qt::CopyAction)
                         return;
-                    }
-
-                    auto selection = m_messageCommandController->selectedActionItems();
+                    const bool copy = action == Qt::CopyAction;
                     m_messageCommandController->queueTransfer(
-                        sourceAccountId.toStdString(), *sourceMailboxId,
+                        payload.sourceAccountId, payload.sourceMailboxId,
                         destinationAccountId.toStdString(), destinationMailboxId.toStdString(),
-                        std::move(selection), MessageTransferOperation::Move,
-                        i18n("Queued move."));
+                        payload.selection,
+                        copy ? MessageTransferOperation::Copy : MessageTransferOperation::Move,
+                        copy ? i18n("Queued copy.") : i18n("Queued move."));
                 });
 
         auto* messagePane = new QWidget(this);

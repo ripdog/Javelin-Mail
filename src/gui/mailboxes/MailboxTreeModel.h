@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gui/messages/MessageDragPayload.h"
 #include "jmap/cache/AccountReadRepository.h"
 #include "jmap/cache/MailboxReadRepository.h"
 
@@ -117,8 +118,9 @@ namespace javelin::gui::mailboxes
         void setConnectionStatus(QStringView accountId, ConnectionStatus status);
 
       Q_SIGNALS:
-        void emailsDropped(const QString& sourceAccountId, const QString& destinationAccountId,
-                           const QString& destinationMailboxId, const QStringList& emailIds);
+        void emailsDropped(const javelin::gui::messages::MessageDragPayload& payload,
+                           const QString& destinationAccountId,
+                           const QString& destinationMailboxId, Qt::DropAction action);
 
       private:
         // Each node represents either an account (mailboxId empty, children = mailboxes)
@@ -142,6 +144,7 @@ namespace javelin::gui::mailboxes
             bool checked = false;
             bool subscribed = true;
             bool pendingCreate = false;
+            bool mayAddItems = false;
             MailboxPreferenceState preferences;
             Node* parent = nullptr;
             std::vector<std::unique_ptr<Node>> children;

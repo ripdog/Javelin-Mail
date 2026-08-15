@@ -603,6 +603,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messages/MessageListDelegate.h
     src/gui/messages/MessageDragListView.cpp
     src/gui/messages/MessageDragListView.h
+    src/gui/messages/MessageDragPayload.cpp
+    src/gui/messages/MessageDragPayload.h
     src/gui/messages/MessageActionSelection.cpp
     src/gui/messages/MessageActionSelection.h
     src/gui/messages/MessageSelectionRestoration.cpp
@@ -1441,6 +1443,8 @@ add_library(javelin_gui STATIC
     src/gui/messages/MessageListDelegate.h
     src/gui/messages/MessageDragListView.cpp
     src/gui/messages/MessageDragListView.h
+    src/gui/messages/MessageDragPayload.cpp
+    src/gui/messages/MessageDragPayload.h
     src/gui/messages/MessageActionSelection.cpp
     src/gui/messages/MessageActionSelection.h
     src/gui/messages/MessageSelectionRestoration.cpp

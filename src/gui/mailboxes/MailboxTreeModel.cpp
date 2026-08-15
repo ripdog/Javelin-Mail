@@ -2,11 +2,11 @@
 
 #include "app/MailboxTreeCacheRead.h"
 #include "gui/mailboxes/MailboxPresentation.h"
+#include "gui/messages/MessageDragPayload.h"
 
 #include <KLocalizedString>
 
 #include <QApplication>
-#include <QDataStream>
 #include <QFutureWatcher>
 #include <QIcon>
 #include <QMimeData>
@@ -22,8 +22,6 @@ namespace javelin::gui::mailboxes
 {
     namespace
     {
-        constexpr auto emailDragMimeType = "application/x-javelin-mail-email-ids";
-
         [[nodiscard]] std::vector<javelin::jmap::cache::MailboxTreeItem>
         presentedMailboxes(const std::vector<javelin::jmap::cache::MailboxTreeItem>& mailboxes,
                            const bool includeHidden)
@@ -450,7 +448,8 @@ namespace javelin::gui::mailboxes
             }
             else
             {
-                result |= Qt::ItemIsDropEnabled;
+                if (node->mayAddItems)
+                    result |= Qt::ItemIsDropEnabled;
                 if (m_options.checkable && index.column() == 0)
                     result |= Qt::ItemIsUserCheckable;
             }
@@ -460,7 +459,7 @@ namespace javelin::gui::mailboxes
 
     QStringList MailboxTreeModel::mimeTypes() const
     {
-        return {QString::fromLatin1(emailDragMimeType)};
+        return {QString::fromLatin1(javelin::gui::messages::messageDragMimeType)};
     }
 
     bool MailboxTreeModel::canDropMimeData(const QMimeData* data, const Qt::DropAction action,
@@ -470,9 +469,13 @@ namespace javelin::gui::mailboxes
         Q_UNUSED(row);
         Q_UNUSED(column);
         const auto* node = nodeForIndex(parentIndex);
-        return action == Qt::MoveAction && data != nullptr &&
-               data->hasFormat(QString::fromLatin1(emailDragMimeType)) && node != nullptr &&
-               !node->mailboxId.empty();
+        if ((action != Qt::MoveAction && action != Qt::CopyAction) || data == nullptr ||
+            !data->hasFormat(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)) ||
+            node == nullptr || node->mailboxId.empty() || !node->mayAddItems)
+            return false;
+        return javelin::gui::messages::decodeMessageDragPayload(
+                   data->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)))
+            .has_value();
     }
 
     bool MailboxTreeModel::dropMimeData(const QMimeData* data, const Qt::DropAction action,
@@ -484,26 +487,20 @@ namespace javelin::gui::mailboxes
             return false;
         }
 
-        QString sourceAccountId;
-        QStringList emailIds;
-        auto payload = data->data(QString::fromLatin1(emailDragMimeType));
-        QDataStream stream{&payload, QIODeviceBase::ReadOnly};
-        stream >> sourceAccountId >> emailIds;
+        const auto payload = javelin::gui::messages::decodeMessageDragPayload(
+            data->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)));
         const auto* node = nodeForIndex(parentIndex);
-        if (stream.status() != QDataStream::Ok || sourceAccountId.isEmpty() || emailIds.isEmpty() ||
-            node == nullptr)
-        {
+        if (!payload.has_value() || node == nullptr)
             return false;
-        }
 
-        Q_EMIT emailsDropped(sourceAccountId, QString::fromStdString(node->accountId),
-                             QString::fromStdString(node->mailboxId), emailIds);
+        Q_EMIT emailsDropped(*payload, QString::fromStdString(node->accountId),
+                             QString::fromStdString(node->mailboxId), action);
         return true;
     }
 
     Qt::DropActions MailboxTreeModel::supportedDropActions() const
     {
-        return Qt::MoveAction;
+        return Qt::CopyAction | Qt::MoveAction;
     }
 
     void MailboxTreeModel::refresh()
@@ -833,6 +830,7 @@ namespace javelin::gui::mailboxes
                         QString::fromStdString(item.mailbox.id));
                     node->subscribed = item.mailbox.isSubscribed;
                     node->pendingCreate = item.mailbox.pendingCreate;
+                    node->mayAddItems = item.mailbox.myRights.mayAddItems;
                     node->preferences = preferencesFor(item.mailbox);
                     node->parent = parent;
                     for (const auto& child : item.children)

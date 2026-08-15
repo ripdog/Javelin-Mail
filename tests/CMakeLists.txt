@@ -392,6 +392,7 @@ add_executable(javelin_gui_widget_tests
     gui/MessageBannerWidgetTest.cpp
     gui/MessageDragListViewTest.cpp
     gui/MailboxPreferenceStateTest.cpp
+    gui/MailboxMessageDropTest.cpp
     gui/MailboxPendingCreateTest.cpp
     gui/MailboxPropertiesDialogTest.cpp
     gui/SendingIdentitiesDialogTest.cpp

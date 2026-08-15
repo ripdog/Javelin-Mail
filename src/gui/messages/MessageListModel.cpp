@@ -2,10 +2,11 @@
 
 #include "app/MessageListCacheRead.h"
 #include "app/MessageSubject.h"
+#include "gui/messages/MessageActionSelection.h"
+#include "gui/messages/MessageDragPayload.h"
 
 #include <KLocalizedString>
 
-#include <QDataStream>
 #include <QDateTime>
 #include <QFutureWatcher>
 #include <QLocale>
@@ -21,8 +22,6 @@ namespace javelin::gui::messages
 {
     namespace
     {
-        constexpr auto emailDragMimeType = "application/x-javelin-mail-email-ids";
-
         [[nodiscard]] bool containsThreadId(const std::vector<std::string>& threadIds,
                                             const std::string_view threadId)
         {
@@ -310,41 +309,31 @@ namespace javelin::gui::messages
 
     QStringList MessageListModel::mimeTypes() const
     {
-        return {QString::fromLatin1(emailDragMimeType)};
+        return {QString::fromLatin1(messageDragMimeType)};
     }
 
     QMimeData* MessageListModel::mimeData(const QModelIndexList& indexes) const
     {
         if (!m_accountId.has_value())
-        {
             return nullptr;
-        }
-
-        QStringList emailIds;
-        for (const auto& index : indexes)
-        {
-            const auto emailId = data(index, EmailIdRole).toString();
-            if (!emailId.isEmpty() && !emailIds.contains(emailId))
-            {
-                emailIds.push_back(emailId);
-            }
-        }
-        if (emailIds.isEmpty())
-        {
+        auto selection = messageSelectionForAction(indexes, {});
+        if (selection.empty())
             return nullptr;
-        }
-
-        QByteArray payload;
-        QDataStream stream{&payload, QIODeviceBase::WriteOnly};
-        stream << QString::fromStdString(*m_accountId) << emailIds;
+        const auto payload = encodeMessageDragPayload({
+            .sourceAccountId = *m_accountId,
+            .sourceMailboxId = m_mailboxId,
+            .selection = std::move(selection),
+        });
+        if (payload.isEmpty())
+            return nullptr;
         auto* mimeData = new QMimeData;
-        mimeData->setData(QString::fromLatin1(emailDragMimeType), payload);
+        mimeData->setData(QString::fromLatin1(messageDragMimeType), payload);
         return mimeData;
     }
 
     Qt::DropActions MessageListModel::supportedDragActions() const
     {
-        return Qt::MoveAction;
+        return Qt::CopyAction | Qt::MoveAction;
     }
 
     void MessageListModel::setItems(std::optional<std::string> accountId,

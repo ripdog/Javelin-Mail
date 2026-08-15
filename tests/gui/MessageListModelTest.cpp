@@ -1,3 +1,4 @@
+#include "gui/messages/MessageDragPayload.h"
 #include "gui/messages/MessageListModel.h"
 #include "gui/messages/MessageSelectionRestoration.h"
 #include "jmap/cache/ThreadRepository.h"
@@ -9,6 +10,7 @@
 #include <QDateTime>
 #include <QElapsedTimer>
 #include <QLocale>
+#include <QMimeData>
 #include <QSqlQuery>
 #include <QString>
 #include <QTemporaryDir>
@@ -384,6 +386,57 @@ TEST_CASE("expanded Thread members expose tags and refresh after metadata change
                 .toStringList()
                 .isEmpty();
         }));
+}
+
+TEST_CASE("message list drag payload preserves collapsed Thread intent and source mailbox",
+          "[gui][messages][model][drag]")
+{
+    javelin::gui::messages::MessageListModel model{QString{}};
+    auto conversation = item("email-1", "thread-1");
+    conversation.mailboxThreadMessageCount = 3;
+    conversation.globalThreadMessageCount = 3;
+    model.setItems(std::optional<std::string>{"account-1"},
+                   std::optional<std::string>{"mailbox-1"},
+                   {std::move(conversation), item("email-2", "thread-2")});
+
+    REQUIRE(model.rowCount() == 2);
+    std::unique_ptr<QMimeData> mime{model.mimeData({model.index(0), model.index(1)})};
+    REQUIRE(mime != nullptr);
+    CHECK(mime->hasFormat(
+        QString::fromLatin1(javelin::gui::messages::messageDragMimeType)));
+    const auto decoded = javelin::gui::messages::decodeMessageDragPayload(
+        mime->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)));
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->sourceAccountId == "account-1");
+    CHECK(decoded->sourceMailboxId == std::optional<std::string>{"mailbox-1"});
+    REQUIRE(decoded->selection.size() == 2);
+    REQUIRE(std::holds_alternative<javelin::app::SelectedCollapsedThread>(
+        decoded->selection.at(0)));
+    CHECK(std::get<javelin::app::SelectedCollapsedThread>(decoded->selection.at(0)).threadId ==
+          "thread-1");
+    REQUIRE(std::holds_alternative<javelin::app::SelectedCollapsedThread>(
+        decoded->selection.at(1)));
+    CHECK(std::get<javelin::app::SelectedCollapsedThread>(decoded->selection.at(1)).threadId ==
+          "thread-2");
+    CHECK(model.supportedDragActions().testFlag(Qt::MoveAction));
+    CHECK(model.supportedDragActions().testFlag(Qt::CopyAction));
+}
+
+TEST_CASE("message list drag payload records search selection without a source mailbox",
+          "[gui][messages][model][drag]")
+{
+    javelin::gui::messages::MessageListModel model{QString{}};
+    model.setItems(std::optional<std::string>{"account-1"}, std::nullopt,
+                   {item("email-1", "thread-1")});
+    std::unique_ptr<QMimeData> mime{model.mimeData({model.index(0)})};
+    REQUIRE(mime != nullptr);
+    const auto decoded = javelin::gui::messages::decodeMessageDragPayload(
+        mime->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)));
+    REQUIRE(decoded.has_value());
+    CHECK_FALSE(decoded->sourceMailboxId.has_value());
+    REQUIRE(decoded->selection.size() == 1);
+    CHECK(std::get<javelin::app::SelectedCollapsedThread>(decoded->selection.front()).threadId ==
+          "thread-1");
 }
 
 TEST_CASE("message list model displays a placeholder for missing subjects",
