@@ -4,6 +4,7 @@
 #include "app/AccountConnectionProvider.h"
 #include "app/undo/HistoryRepository.h"
 #include "app/undo/MailTransferHistoryCoordinator.h"
+#include "app/undo/MailTransferHistoryService.h"
 #include "app/undo/UndoManager.h"
 #include "jmap/MessageContentClient.h"
 #include "jmap/api/JmapMethodTransport.h"
@@ -330,9 +331,9 @@ namespace
                     }
                     mailboxJson += '}';
                     const auto response =
-                        std::string{R"({"accountId":"u1","state":"source-state-current","list":[{"id":"email-1","mailboxIds":)"} +
+                        std::string{R"({"accountId":"u1","state":"source-state-current","list":[{"id":"email-1","blobId":"blob-1","threadId":"thread-1","mailboxIds":)"} +
                         mailboxJson +
-                        R"(,"keywords":{"$seen":true,"$flagged":true},"subject":"Transfer"}],"notFound":[]})";
+                        R"(,"keywords":{"$seen":true,"$flagged":true},"size":2048,"receivedAt":"2026-08-15T08:00:00Z","messageId":["mail-transfer@example.test"],"inReplyTo":[],"references":[],"hasAttachment":false,"subject":"Transfer","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Preview"}],"notFound":[]})";
                     co_return ResponseEnvelope{
                         .methodResponses = {{.name = "Email/get",
                                              .arguments = response,
@@ -768,6 +769,31 @@ namespace
             const auto& value = std::get<std::optional<MailTransferOperationRecord>>(result);
             REQUIRE(value.has_value());
             return *value;
+        }
+
+        [[nodiscard]] QString createTransferHistoryEntry(QString entryId)
+        {
+            javelin::app::undo::HistoryRepository repository{database};
+            javelin::app::undo::HistoryEntry entry;
+            entry.entryId = entryId;
+            entry.stack = javelin::app::undo::HistoryStack::Redo;
+            entry.label = QStringLiteral("Redo transfer");
+            entry.domain = javelin::app::undo::HistoryDomain::Mail;
+            entry.commandKind = QStringLiteral("mail_transfer");
+            entry.payloadVersion = 1;
+            entry.payload = javelin::app::undo::MailTransferHistory{
+                .sourceAccountId = sourceAccountId,
+                .destinationAccountId = destinationAccountId,
+                .destinationMailboxId = "archive",
+                .operation = javelin::app::undo::MailTransferHistoryOperation::Move,
+                .items = {},
+            };
+            entry.status = javelin::app::undo::HistoryEntryStatus::Ready;
+            const auto pushed = repository.pushUndoClearingRedo(std::move(entry));
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&pushed))
+                FAIL(error->message.toStdString());
+            return entryId;
         }
 
         void setSourceMailboxIds(std::vector<std::string> mailboxIds)
@@ -1839,6 +1865,228 @@ TEST_CASE("forgotten transfer history releases MIME and is never resurrected",
     CHECK_FALSE(std::get<std::optional<QString>>(repeated).has_value());
     CHECK(undoManager.entries().empty());
     CHECK(fixture.pinCount() == 0);
+}
+
+TEST_CASE("history Redo can retain current source MIME before destructive existing-destination cleanup",
+          "[app][mail-transfer][history][redo][retention]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    const auto historyEntryId =
+        fixture.createTransferHistoryEntry(QStringLiteral("history-redo-retain"));
+    javelin::app::undo::MailTransferHistoryService service{
+        fixture.database, fixture.resourceTransport, fixture.methodTransport, fixture.connections};
+
+    const auto retained = QCoro::waitFor(service.retainSourceForHistory(
+        historyEntryId, fixture.sourceAccountId, "email-1"));
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&retained))
+        FAIL(error->message.toStdString());
+    const auto hash = std::get<std::string>(retained);
+    REQUIRE_FALSE(hash.empty());
+
+    QSqlQuery pin{fixture.database.database()};
+    pin.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM mail_vault_pins WHERE owner_kind='history_entry' AND "
+        "owner_id=:owner_id AND content_hash=:content_hash"));
+    pin.bindValue(QStringLiteral(":owner_id"), historyEntryId);
+    pin.bindValue(QStringLiteral(":content_hash"), QString::fromStdString(hash));
+    REQUIRE(pin.exec());
+    REQUIRE(pin.next());
+    CHECK(pin.value(0).toInt() == 1);
+
+    const auto repeated = QCoro::waitFor(service.retainSourceForHistory(
+        historyEntryId, fixture.sourceAccountId, "email-1"));
+    REQUIRE(std::holds_alternative<std::string>(repeated));
+    CHECK(std::get<std::string>(repeated) == hash);
+    REQUIRE(pin.exec());
+    REQUIRE(pin.next());
+    CHECK(pin.value(0).toInt() == 1);
+}
+
+TEST_CASE("history Redo reuses one durable forward transfer for the same generation",
+          "[app][mail-transfer][history][redo]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    const auto historyEntryId =
+        fixture.createTransferHistoryEntry(QStringLiteral("history-redo-copy"));
+    javelin::app::undo::MailTransferHistoryService service{
+        fixture.database, fixture.resourceTransport, fixture.methodTransport, fixture.connections};
+    javelin::app::undo::MailTransferItemHistory historyItem{
+        .currentSourceEmailId = std::optional<std::string>{"email-1"},
+        .originalSourceMailboxIds = {"inbox"},
+        .sourceKeywords = {"$seen", "$flagged"},
+        .sourceMessageIds = {"mail-transfer@example.test"},
+        .sourceReceivedAt = std::optional<std::string>{"2026-08-15T08:00:00Z"},
+        .sourceSize = 2048,
+        .sourceRemovedMailboxIds = {"inbox"},
+        .sourceDestroyed = false,
+        .rawContentHash = std::nullopt,
+        .currentDestinationEmailId = std::nullopt,
+        .destinationReusedExisting = false,
+        .destinationPriorMailboxIds = {},
+        .destinationMailboxIds = {},
+        .destinationKeywords = {},
+        .redoGeneration = 1,
+    };
+
+    const auto first = QCoro::waitFor(service.redoMissingDestination(
+        historyEntryId, javelin::app::undo::MailTransferHistoryOperation::Copy,
+        fixture.sourceAccountId, fixture.destinationAccountId, "archive", historyItem));
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&first))
+        FAIL(error->message.toStdString());
+    const auto& firstItem = std::get<javelin::app::undo::MailTransferItemHistory>(first);
+    CHECK(firstItem.currentDestinationEmailId ==
+          std::optional<std::string>{"destination-email"});
+    CHECK(firstItem.currentSourceEmailId == std::optional<std::string>{"email-1"});
+    CHECK_FALSE(firstItem.sourceDestroyed);
+    const int uploadCount = fixture.resourceTransport.sendFromFileCalls;
+    const int importCount = fixture.methodTransport.importCalls;
+    CHECK(uploadCount == 1);
+    CHECK(importCount == 1);
+
+    const auto second = QCoro::waitFor(service.redoMissingDestination(
+        historyEntryId, javelin::app::undo::MailTransferHistoryOperation::Copy,
+        fixture.sourceAccountId, fixture.destinationAccountId, "archive", historyItem));
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&second))
+        FAIL(error->message.toStdString());
+    CHECK(std::get<javelin::app::undo::MailTransferItemHistory>(second)
+              .currentDestinationEmailId == firstItem.currentDestinationEmailId);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == uploadCount);
+    CHECK(fixture.methodTransport.importCalls == importCount);
+
+    QSqlQuery redoCount{fixture.database.database()};
+    redoCount.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM mail_transfer_history_redos WHERE history_entry_id=:entry_id AND "
+        "redo_generation=1"));
+    redoCount.bindValue(QStringLiteral(":entry_id"), historyEntryId);
+    REQUIRE(redoCount.exec());
+    REQUIRE(redoCount.next());
+    CHECK(redoCount.value(0).toInt() == 1);
+}
+
+TEST_CASE("history Redo forward transfer preserves later source mailbox via exact cleanup",
+          "[app][mail-transfer][history][redo][move]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    fixture.setSourceMailboxIds({"inbox", "new-mailbox"});
+    const auto historyEntryId =
+        fixture.createTransferHistoryEntry(QStringLiteral("history-redo-move"));
+    javelin::app::undo::MailTransferHistoryService service{
+        fixture.database, fixture.resourceTransport, fixture.methodTransport, fixture.connections};
+    javelin::app::undo::MailTransferItemHistory historyItem{
+        .currentSourceEmailId = std::optional<std::string>{"email-1"},
+        .originalSourceMailboxIds = {"inbox", "new-mailbox"},
+        .sourceKeywords = {"$seen", "$flagged"},
+        .sourceMessageIds = {"mail-transfer@example.test"},
+        .sourceReceivedAt = std::optional<std::string>{"2026-08-15T08:00:00Z"},
+        .sourceSize = 2048,
+        .sourceRemovedMailboxIds = {"inbox"},
+        .sourceDestroyed = false,
+        .rawContentHash = std::nullopt,
+        .currentDestinationEmailId = std::nullopt,
+        .destinationReusedExisting = false,
+        .destinationPriorMailboxIds = {},
+        .destinationMailboxIds = {},
+        .destinationKeywords = {},
+        .redoGeneration = 1,
+    };
+
+    const auto result = QCoro::waitFor(service.redoMissingDestination(
+        historyEntryId, javelin::app::undo::MailTransferHistoryOperation::Move,
+        fixture.sourceAccountId, fixture.destinationAccountId, "archive", historyItem));
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        FAIL(error->message.toStdString());
+    const auto& redone = std::get<javelin::app::undo::MailTransferItemHistory>(result);
+    CHECK_FALSE(redone.sourceDestroyed);
+    CHECK(redone.currentSourceEmailId == std::optional<std::string>{"email-1"});
+    CHECK(redone.sourceRemovedMailboxIds == std::vector<std::string>{"inbox"});
+    CHECK(redone.originalSourceMailboxIds ==
+          std::vector<std::string>{"inbox", "new-mailbox"});
+    REQUIRE(fixture.sourceMailboxIds().has_value());
+    CHECK(*fixture.sourceMailboxIds() == std::vector<std::string>{"new-mailbox"});
+    CHECK(fixture.methodTransport.sourceSetArguments.find("mailboxIds/inbox") !=
+          std::string::npos);
+    CHECK(fixture.methodTransport.sourceSetArguments.find("\"destroy\"") == std::string::npos);
+    const int importCount = fixture.methodTransport.importCalls;
+    const int sourceSetCount = fixture.methodTransport.sourceSetCalls;
+    const int uploadCount = fixture.resourceTransport.sendFromFileCalls;
+    const auto repeated = QCoro::waitFor(service.redoMissingDestination(
+        historyEntryId, javelin::app::undo::MailTransferHistoryOperation::Move,
+        fixture.sourceAccountId, fixture.destinationAccountId, "archive", historyItem));
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&repeated))
+        FAIL(error->message.toStdString());
+    CHECK(fixture.methodTransport.importCalls == importCount);
+    CHECK(fixture.methodTransport.sourceSetCalls == sourceSetCount);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == uploadCount);
+}
+
+TEST_CASE("history Redo destructive forward move hands current MIME back to existing history",
+          "[app][mail-transfer][history][redo][move][destroy]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    const auto historyEntryId =
+        fixture.createTransferHistoryEntry(QStringLiteral("history-redo-destroy"));
+    javelin::app::undo::MailTransferHistoryService service{
+        fixture.database, fixture.resourceTransport, fixture.methodTransport, fixture.connections};
+    javelin::app::undo::MailTransferItemHistory historyItem{
+        .currentSourceEmailId = std::optional<std::string>{"email-1"},
+        .originalSourceMailboxIds = {"inbox"},
+        .sourceKeywords = {"$seen", "$flagged"},
+        .sourceMessageIds = {"mail-transfer@example.test"},
+        .sourceReceivedAt = std::optional<std::string>{"2026-08-15T08:00:00Z"},
+        .sourceSize = 2048,
+        .sourceRemovedMailboxIds = {"inbox"},
+        .sourceDestroyed = false,
+        .rawContentHash = std::nullopt,
+        .currentDestinationEmailId = std::nullopt,
+        .destinationReusedExisting = false,
+        .destinationPriorMailboxIds = {},
+        .destinationMailboxIds = {},
+        .destinationKeywords = {},
+        .redoGeneration = 1,
+    };
+
+    const auto result = QCoro::waitFor(service.redoMissingDestination(
+        historyEntryId, javelin::app::undo::MailTransferHistoryOperation::Move,
+        fixture.sourceAccountId, fixture.destinationAccountId, "archive", historyItem));
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        FAIL(error->message.toStdString());
+    const auto& redone = std::get<javelin::app::undo::MailTransferItemHistory>(result);
+    CHECK(redone.sourceDestroyed);
+    CHECK_FALSE(redone.currentSourceEmailId.has_value());
+    REQUIRE(redone.rawContentHash.has_value());
+    CHECK_FALSE(fixture.sourceStillExists());
+
+    QSqlQuery pin{fixture.database.database()};
+    pin.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM mail_vault_pins WHERE owner_kind='history_entry' AND "
+        "owner_id=:owner_id AND content_hash=:content_hash"));
+    pin.bindValue(QStringLiteral(":owner_id"), historyEntryId);
+    pin.bindValue(QStringLiteral(":content_hash"),
+                  QString::fromStdString(*redone.rawContentHash));
+    REQUIRE(pin.exec());
+    REQUIRE(pin.next());
+    CHECK(pin.value(0).toInt() == 1);
+
+    const int importCount = fixture.methodTransport.importCalls;
+    const int sourceSetCount = fixture.methodTransport.sourceSetCalls;
+    const int uploadCount = fixture.resourceTransport.sendFromFileCalls;
+    const auto repeated = QCoro::waitFor(service.redoMissingDestination(
+        historyEntryId, javelin::app::undo::MailTransferHistoryOperation::Move,
+        fixture.sourceAccountId, fixture.destinationAccountId, "archive", historyItem));
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&repeated))
+        FAIL(error->message.toStdString());
+    CHECK(std::get<javelin::app::undo::MailTransferItemHistory>(repeated).sourceDestroyed);
+    CHECK(fixture.methodTransport.importCalls == importCount);
+    CHECK(fixture.methodTransport.sourceSetCalls == sourceSetCount);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == uploadCount);
 }
 
 TEST_CASE("same-session copy uses Email copy without MIME download or upload",

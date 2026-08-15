@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/undo/HistoryTypes.h"
 #include "jmap/EmailMutation.h"
 #include "jmap/OperationError.h"
 #include "jmap/sync/EmailMutationEngine.h"
@@ -24,6 +25,11 @@ namespace javelin::app::undo
     using RecreatedMailTransferSourceResult =
         std::variant<RecreatedMailTransferSource, javelin::jmap::OperationError>;
 
+    using RetainedMailTransferSourceResult =
+        std::variant<std::string, javelin::jmap::OperationError>;
+    using RedoneMailTransferItemResult =
+        std::variant<MailTransferItemHistory, javelin::jmap::OperationError>;
+
     class MailTransferHistoryPort
     {
       public:
@@ -41,6 +47,14 @@ namespace javelin::app::undo
             std::vector<std::string> mailboxIds, std::vector<std::string> keywords,
             std::vector<std::string> messageIds, std::optional<std::string> receivedAt,
             std::uint64_t sourceSize) = 0;
+
+        [[nodiscard]] virtual QCoro::Task<RetainedMailTransferSourceResult> retainSourceForHistory(
+            QString historyEntryId, std::string accountId, std::string emailId) = 0;
+
+        [[nodiscard]] virtual QCoro::Task<RedoneMailTransferItemResult> redoMissingDestination(
+            QString historyEntryId, MailTransferHistoryOperation operation,
+            std::string sourceAccountId, std::string destinationAccountId,
+            std::string destinationMailboxId, MailTransferItemHistory item) = 0;
     };
 
 } // namespace javelin::app::undo

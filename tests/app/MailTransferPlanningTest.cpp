@@ -239,6 +239,85 @@ TEST_CASE("mail transfer planning rejects missing write rights instead of weaken
         destination)));
 }
 
+TEST_CASE("exact redo cleanup removes only requested source membership and preserves later filing",
+          "[app][mail-transfer][planning][redo]")
+{
+    const auto source = account("source-local", "connection-a", "u1");
+    const auto destination = account("destination-local", "connection-b", "u1");
+    const auto message = email("email-1", {"inbox", "new-mailbox"}, {});
+    const std::vector overrides{MailTransferSourceCleanupOverride{
+        .emailId = message.id,
+        .removeMailboxIds = {"inbox"},
+    }};
+    const auto plan = requirePlan(planMailTransfer(
+        {.sourceAccountId = source.accountId,
+         .sourceMailboxId = std::nullopt,
+         .destinationAccountId = destination.accountId,
+         .destinationMailboxId = "archive",
+         .operation = MailTransferOperation::Move},
+        {message.id}, {message}, {mailbox("inbox", "Inbox"), mailbox("new-mailbox", "New")},
+        {mailbox("archive", "Archive")}, source, destination, overrides));
+
+    REQUIRE(plan.items.size() == 1);
+    CHECK(plan.items.front().sourceRemoveMailboxIds == std::vector<std::string>{"inbox"});
+    CHECK_FALSE(plan.items.front().sourceDestroy);
+}
+
+TEST_CASE("exact redo cleanup becomes destroy only when requested memberships cover current source",
+          "[app][mail-transfer][planning][redo]")
+{
+    const auto source = account("source-local", "connection-a", "u1");
+    const auto destination = account("destination-local", "connection-b", "u1");
+    const auto message = email("email-1", {"inbox"}, {});
+    const std::vector overrides{MailTransferSourceCleanupOverride{
+        .emailId = message.id,
+        .removeMailboxIds = {"inbox"},
+    }};
+    const auto plan = requirePlan(planMailTransfer(
+        {.sourceAccountId = source.accountId,
+         .sourceMailboxId = std::nullopt,
+         .destinationAccountId = destination.accountId,
+         .destinationMailboxId = "archive",
+         .operation = MailTransferOperation::Move},
+        {message.id}, {message}, {mailbox("inbox", "Inbox")}, {mailbox("archive", "Archive")},
+        source, destination, overrides));
+    CHECK(plan.items.front().sourceDestroy);
+}
+
+TEST_CASE("exact redo cleanup rejects missing membership and unrelated override",
+          "[app][mail-transfer][planning][redo]")
+{
+    const auto source = account("source-local", "connection-a", "u1");
+    const auto destination = account("destination-local", "connection-b", "u1");
+    const auto message = email("email-1", {"inbox"}, {});
+
+    const std::vector missing{MailTransferSourceCleanupOverride{
+        .emailId = message.id,
+        .removeMailboxIds = {"gone"},
+    }};
+    CHECK(std::holds_alternative<QString>(planMailTransfer(
+        {.sourceAccountId = source.accountId,
+         .sourceMailboxId = std::nullopt,
+         .destinationAccountId = destination.accountId,
+         .destinationMailboxId = "archive",
+         .operation = MailTransferOperation::Move},
+        {message.id}, {message}, {mailbox("inbox", "Inbox"), mailbox("gone", "Gone")},
+        {mailbox("archive", "Archive")}, source, destination, missing)));
+
+    const std::vector unrelated{
+        MailTransferSourceCleanupOverride{.emailId = message.id, .removeMailboxIds = {"inbox"}},
+        MailTransferSourceCleanupOverride{.emailId = "other-email", .removeMailboxIds = {"inbox"}},
+    };
+    CHECK(std::holds_alternative<QString>(planMailTransfer(
+        {.sourceAccountId = source.accountId,
+         .sourceMailboxId = std::nullopt,
+         .destinationAccountId = destination.accountId,
+         .destinationMailboxId = "archive",
+         .operation = MailTransferOperation::Move},
+        {message.id}, {message}, {mailbox("inbox", "Inbox")}, {mailbox("archive", "Archive")},
+        source, destination, unrelated)));
+}
+
 TEST_CASE("mail transfer planning deduplicates exact email ids and rejects same-account routing",
           "[app][mail-transfer][planning]")
 {

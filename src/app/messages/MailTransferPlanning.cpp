@@ -57,7 +57,8 @@ namespace javelin::app
         const std::vector<javelin::jmap::cache::MailboxTreeItem>& sourceMailboxes,
         const std::vector<javelin::jmap::cache::MailboxTreeItem>& destinationMailboxes,
         const javelin::jmap::cache::CachedAccount& sourceAccount,
-        const javelin::jmap::cache::CachedAccount& destinationAccount)
+        const javelin::jmap::cache::CachedAccount& destinationAccount,
+        const std::span<const MailTransferSourceCleanupOverride> cleanupOverrides)
     {
         if (intent.sourceAccountId.empty() || intent.destinationAccountId.empty() ||
             intent.destinationMailboxId.empty())
@@ -77,6 +78,16 @@ namespace javelin::app
 
         const auto sourceById = indexMailboxes(sourceMailboxes);
         const auto destinationById = indexMailboxes(destinationMailboxes);
+        std::unordered_map<std::string_view, const MailTransferSourceCleanupOverride*> cleanupByEmail;
+        cleanupByEmail.reserve(cleanupOverrides.size());
+        for (const auto& cleanup : cleanupOverrides)
+        {
+            if (cleanup.emailId.empty() ||
+                !cleanupByEmail.emplace(cleanup.emailId, &cleanup).second)
+                return i18n("The exact source cleanup plan is invalid.");
+        }
+        if (!cleanupOverrides.empty() && intent.operation != MailTransferOperation::Move)
+            return i18n("Exact source cleanup is only valid for Move operations.");
         const auto* destination = findMailbox(destinationById, intent.destinationMailboxId);
         if (destination == nullptr)
             return mailboxUnavailable(intent.destinationMailboxId);
@@ -131,8 +142,25 @@ namespace javelin::app
             std::vector<std::string> removeMailboxIds;
             if (intent.operation == MailTransferOperation::Move)
             {
-                if (intent.sourceMailboxId.has_value() &&
-                    std::ranges::contains(email.mailboxIds, *intent.sourceMailboxId))
+                if (!cleanupOverrides.empty())
+                {
+                    const auto cleanup = cleanupByEmail.find(email.id);
+                    if (cleanup == cleanupByEmail.end())
+                        return i18n("The exact source cleanup plan does not cover every message.");
+                    removeMailboxIds = cleanup->second->removeMailboxIds;
+                    std::ranges::sort(removeMailboxIds);
+                    removeMailboxIds.erase(
+                        std::unique(removeMailboxIds.begin(), removeMailboxIds.end()),
+                        removeMailboxIds.end());
+                    if (removeMailboxIds.empty() ||
+                        std::ranges::any_of(removeMailboxIds, [&](const auto& mailboxId)
+                                            { return !std::ranges::contains(email.mailboxIds,
+                                                                            mailboxId); }))
+                        return i18n("A message no longer has the mailbox memberships required by "
+                                    "the exact source cleanup plan.");
+                }
+                else if (intent.sourceMailboxId.has_value() &&
+                         std::ranges::contains(email.mailboxIds, *intent.sourceMailboxId))
                 {
                     removeMailboxIds.push_back(*intent.sourceMailboxId);
                 }
@@ -153,7 +181,9 @@ namespace javelin::app
 
             const bool destroysSource =
                 intent.operation == MailTransferOperation::Move &&
-                removeMailboxIds.size() == email.mailboxIds.size();
+                removeMailboxIds.size() == email.mailboxIds.size() &&
+                std::ranges::all_of(email.mailboxIds, [&](const auto& mailboxId)
+                                    { return std::ranges::contains(removeMailboxIds, mailboxId); });
             plan.items.push_back({
                 .sourceEmailId = email.id,
                 .sourceBlobId = email.blobId,
@@ -169,6 +199,8 @@ namespace javelin::app
 
         if (plan.items.empty())
             return i18n("No messages were selected for transfer.");
+        if (!cleanupOverrides.empty() && cleanupByEmail.size() != plan.items.size())
+            return i18n("The exact source cleanup plan contains an unrelated message.");
         return plan;
     }
 

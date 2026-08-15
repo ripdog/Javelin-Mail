@@ -2,6 +2,11 @@
 
 #include "app/AccountConnectionProvider.h"
 #include "app/AccountConnectionSettings.h"
+#include "app/MailTransferApplicationService.h"
+#include "app/MailTransferExecutor.h"
+#include "app/MailTransferRepository.h"
+#include "app/MessageSelection.h"
+#include "jmap/MessageContentClient.h"
 #include "jmap/api/BlobUpload.h"
 #include "jmap/api/MailMethods.h"
 #include "jmap/api/MethodCaller.h"
@@ -46,12 +51,16 @@ namespace javelin::app::undo
             QString phase;
         };
 
-        struct AccountContext
+        struct ReadAccountContext
         {
             javelin::jmap::cache::CachedAccount account;
             javelin::jmap::api::Session session;
             javelin::app::AccountConnectionSettings settings;
             javelin::jmap::api::ApiRequestContext requestContext;
+        };
+
+        struct AccountContext : ReadAccountContext
+        {
             javelin::jmap::api::BlobUploadContext uploadContext;
         };
 
@@ -296,10 +305,10 @@ namespace javelin::app::undo
             return std::nullopt;
         }
 
-        [[nodiscard]] std::variant<AccountContext, OperationError>
-        accountContext(javelin::jmap::cache::DatabaseConnection& database,
-                       const javelin::app::AccountConnectionProvider& connections,
-                       const std::string& accountId)
+        [[nodiscard]] std::variant<ReadAccountContext, OperationError>
+        readAccountContext(javelin::jmap::cache::DatabaseConnection& database,
+                           const javelin::app::AccountConnectionProvider& connections,
+                           const std::string& accountId)
         {
             javelin::jmap::cache::AccountRepository accounts{database};
             const auto accountResult = accounts.findById(accountId);
@@ -323,19 +332,33 @@ namespace javelin::app::undo
             if (!session.has_value() || !session->accounts.contains(account->remoteAccountId))
                 return invalid(i18n("The source account is absent from its cached JMAP session."));
 
-            const auto upload =
-                javelin::jmap::api::blobUploadContext(*session, account->remoteAccountId);
-            if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&upload))
-                return javelin::jmap::operationError(*error);
             auto apiContext = requestContext(*settings, accountId, *session);
             if (!apiContext.requestLimits.has_value())
-                return invalid(i18n("The source server does not advertise usable JMAP limits."));
-            return AccountContext{
+                return invalid(i18n("The mail server does not advertise usable JMAP limits."));
+            return ReadAccountContext{
                 .account = *account,
                 .session = *session,
                 .settings = *settings,
                 .requestContext = std::move(apiContext),
-                .uploadContext = std::get<javelin::jmap::api::BlobUploadContext>(upload),
+            };
+        }
+
+        [[nodiscard]] std::variant<AccountContext, OperationError>
+        accountContext(javelin::jmap::cache::DatabaseConnection& database,
+                       const javelin::app::AccountConnectionProvider& connections,
+                       const std::string& accountId)
+        {
+            auto baseResult = readAccountContext(database, connections, accountId);
+            if (const auto* error = std::get_if<OperationError>(&baseResult))
+                return *error;
+            auto base = std::get<ReadAccountContext>(std::move(baseResult));
+            const auto upload =
+                javelin::jmap::api::blobUploadContext(base.session, base.account.remoteAccountId);
+            if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&upload))
+                return javelin::jmap::operationError(*error);
+            return AccountContext{
+                std::move(base),
+                std::get<javelin::jmap::api::BlobUploadContext>(upload),
             };
         }
 
@@ -353,6 +376,76 @@ namespace javelin::app::undo
                 return dbError(QStringLiteral("Verify history mail vault pin"), query);
             if (!query.value(0).toBool())
                 return invalid(i18n("The raw message retained for this Undo entry is unavailable."));
+            return std::nullopt;
+        }
+
+        [[nodiscard]] std::variant<std::optional<std::string>, OperationError>
+        findRedoOperation(javelin::jmap::cache::DatabaseConnection& database,
+                          const QString& historyEntryId, const std::uint64_t redoGeneration,
+                          const std::string& sourceEmailId,
+                          const std::string& destinationAccountId,
+                          const std::string& destinationMailboxId,
+                          const MailTransferHistoryOperation operation)
+        {
+            QSqlQuery query{database.database()};
+            query.prepare(QStringLiteral(
+                "SELECT transfer_operation_id FROM mail_transfer_history_redos WHERE "
+                "history_entry_id=:history_entry_id AND redo_generation=:redo_generation AND "
+                "source_email_id=:source_email_id AND destination_account_id=:destination_account_id "
+                "AND destination_mailbox_id=:destination_mailbox_id AND operation=:operation"));
+            query.bindValue(QStringLiteral(":history_entry_id"), historyEntryId);
+            query.bindValue(QStringLiteral(":redo_generation"),
+                            static_cast<qulonglong>(redoGeneration));
+            query.bindValue(QStringLiteral(":source_email_id"),
+                            QString::fromStdString(sourceEmailId));
+            query.bindValue(QStringLiteral(":destination_account_id"),
+                            QString::fromStdString(destinationAccountId));
+            query.bindValue(QStringLiteral(":destination_mailbox_id"),
+                            QString::fromStdString(destinationMailboxId));
+            query.bindValue(QStringLiteral(":operation"),
+                            operation == MailTransferHistoryOperation::Move
+                                ? QStringLiteral("move")
+                                : QStringLiteral("copy"));
+            if (!query.exec())
+                return dbError(QStringLiteral("Find mail transfer history redo"), query);
+            if (!query.next())
+                return std::optional<std::string>{std::nullopt};
+            return std::optional<std::string>{query.value(0).toString().toStdString()};
+        }
+
+        [[nodiscard]] std::optional<OperationError>
+        recordRedoOperation(javelin::jmap::cache::DatabaseConnection& database,
+                            const QString& historyEntryId, const std::uint64_t redoGeneration,
+                            const std::string& sourceEmailId,
+                            const std::string& destinationAccountId,
+                            const std::string& destinationMailboxId,
+                            const MailTransferHistoryOperation operation,
+                            const std::string& transferOperationId)
+        {
+            QSqlQuery query{database.database()};
+            query.prepare(QStringLiteral(
+                "INSERT OR IGNORE INTO mail_transfer_history_redos("
+                "history_entry_id,redo_generation,source_email_id,destination_account_id,"
+                "destination_mailbox_id,operation,transfer_operation_id) VALUES("
+                ":history_entry_id,:redo_generation,:source_email_id,:destination_account_id,"
+                ":destination_mailbox_id,:operation,:transfer_operation_id)"));
+            query.bindValue(QStringLiteral(":history_entry_id"), historyEntryId);
+            query.bindValue(QStringLiteral(":redo_generation"),
+                            static_cast<qulonglong>(redoGeneration));
+            query.bindValue(QStringLiteral(":source_email_id"),
+                            QString::fromStdString(sourceEmailId));
+            query.bindValue(QStringLiteral(":destination_account_id"),
+                            QString::fromStdString(destinationAccountId));
+            query.bindValue(QStringLiteral(":destination_mailbox_id"),
+                            QString::fromStdString(destinationMailboxId));
+            query.bindValue(QStringLiteral(":operation"),
+                            operation == MailTransferHistoryOperation::Move
+                                ? QStringLiteral("move")
+                                : QStringLiteral("copy"));
+            query.bindValue(QStringLiteral(":transfer_operation_id"),
+                            QString::fromStdString(transferOperationId));
+            if (!query.exec())
+                return dbError(QStringLiteral("Record mail transfer history redo"), query);
             return std::nullopt;
         }
 
@@ -384,12 +477,41 @@ namespace javelin::app::undo
     MailTransferHistoryService::getAuthoritativeEmails(std::string accountId,
                                                        std::vector<std::string> emailIds)
     {
-        const auto settings = m_connectionProvider.connectionSettingsFor(accountId);
-        if (!settings.has_value())
-            co_return invalid(i18n("Connection settings are unavailable for this mail account."));
-        javelin::jmap::EmailMutationEngine engine{m_databaseConnection, m_methodTransport};
-        co_return co_await engine.getAuthoritative(liveSettings(*settings), std::move(accountId),
-                                                   std::move(emailIds));
+        auto contextResult =
+            readAccountContext(m_databaseConnection, m_connectionProvider, accountId);
+        if (const auto* error = std::get_if<OperationError>(&contextResult))
+            co_return *error;
+        const auto context = std::get<ReadAccountContext>(std::move(contextResult));
+
+        const auto request = javelin::jmap::api::emailGet({
+            .accountId = context.account.remoteAccountId,
+            .ids = std::move(emailIds),
+            .idsReference = std::nullopt,
+            .properties = emailProperties(),
+        });
+        if (!request.has_value())
+            co_return invalid(i18n("Unable to encode authoritative Email/get request."));
+        javelin::jmap::api::RequestBuilder builder;
+        builder.useCore().useMail();
+        const auto handle = builder.call(*request, "mail-transfer-history-email-get");
+        javelin::jmap::api::MethodCaller caller{m_methodTransport};
+        auto called = co_await caller.call(context.requestContext, builder);
+        if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(called))
+            co_return callerError(called);
+        const auto read = javelin::jmap::api::ResponseReader{
+            std::get<javelin::jmap::api::ResponseEnvelope>(called)}.require(handle);
+        if (const auto* error =
+                std::get_if<javelin::jmap::api::ResponseReaderError>(&read))
+            co_return javelin::jmap::operationError(*error);
+        const auto& response = std::get<javelin::jmap::api::EmailGetResponse>(read);
+        if (response.accountId != context.account.remoteAccountId || response.state.empty())
+            co_return invalid(i18n("The server returned invalid authoritative Email state."));
+        co_return javelin::jmap::AuthoritativeEmails{
+            .accountId = std::move(accountId),
+            .state = response.state,
+            .emails = response.list,
+            .notFound = response.notFound,
+        };
     }
 
     QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
@@ -876,6 +998,240 @@ namespace javelin::app::undo
         }
 
         co_return ambiguous(i18n("The source recreation did not reach a stable state."));
+    }
+
+    QCoro::Task<RetainedMailTransferSourceResult>
+    MailTransferHistoryService::retainSourceForHistory(QString historyEntryId,
+                                                       std::string accountId,
+                                                       std::string emailId)
+    {
+        if (historyEntryId.isEmpty() || accountId.empty() || emailId.empty())
+            co_return invalid(i18n("The source retention request is incomplete."));
+        const auto settings = m_connectionProvider.connectionSettingsFor(accountId);
+        if (!settings.has_value())
+            co_return invalid(i18n("Connection settings are unavailable for this mail account."));
+
+        javelin::jmap::MessageContentClient content{m_databaseConnection, m_resourceTransport};
+        auto refreshed = co_await content.refresh(liveSettings(*settings), accountId, emailId);
+        if (const auto* error = std::get_if<OperationError>(&refreshed))
+            co_return *error;
+        if (const auto* unavailable =
+                std::get_if<javelin::jmap::MessageContentUnavailable>(&refreshed))
+        {
+            co_return OperationError{
+                .code = OperationErrorCode::NotFound,
+                .message = unavailable->message,
+            };
+        }
+
+        javelin::jmap::cache::RawMessageSourceRepository sources{m_databaseConnection};
+        auto referenceResult = sources.findReference(accountId, emailId);
+        if (const auto* error = std::get_if<DatabaseError>(&referenceResult))
+            co_return javelin::jmap::operationError(*error);
+        const auto& reference = std::get<
+            std::optional<javelin::jmap::cache::RawMessageSourceReference>>(referenceResult);
+        if (!reference.has_value())
+            co_return invalid(i18n("The exact raw source is unavailable after message refresh."));
+
+        QSqlQuery pin{m_databaseConnection.database()};
+        pin.prepare(QStringLiteral(
+            "INSERT OR IGNORE INTO mail_vault_pins(owner_kind,owner_id,content_hash) VALUES("
+            "'history_entry',:owner_id,:content_hash)"));
+        pin.bindValue(QStringLiteral(":owner_id"), historyEntryId);
+        pin.bindValue(QStringLiteral(":content_hash"),
+                      QString::fromStdString(reference->object.contentHash));
+        if (!pin.exec())
+            co_return dbError(QStringLiteral("Retain source MIME for transfer history"), pin);
+        if (const auto error =
+                verifyHistoryPin(m_databaseConnection, historyEntryId,
+                                 reference->object.contentHash))
+            co_return *error;
+        co_return reference->object.contentHash;
+    }
+
+    QCoro::Task<RedoneMailTransferItemResult>
+    MailTransferHistoryService::redoMissingDestination(
+        QString historyEntryId, const MailTransferHistoryOperation operation,
+        std::string sourceAccountId, std::string destinationAccountId,
+        std::string destinationMailboxId, MailTransferItemHistory item)
+    {
+        if (historyEntryId.isEmpty() || sourceAccountId.empty() || destinationAccountId.empty() ||
+            destinationMailboxId.empty() || !item.currentSourceEmailId.has_value())
+            co_return invalid(i18n("The mail transfer Redo request is incomplete."));
+        const std::string sourceEmailId = *item.currentSourceEmailId;
+
+        auto redoResult = findRedoOperation(m_databaseConnection, historyEntryId,
+                                            item.redoGeneration, sourceEmailId,
+                                            destinationAccountId, destinationMailboxId, operation);
+        if (const auto* error = std::get_if<OperationError>(&redoResult))
+            co_return *error;
+        auto redoOperationId = std::get<std::optional<std::string>>(std::move(redoResult));
+        if (!redoOperationId.has_value())
+        {
+            // Only a new generation needs source preflight. Once a durable Redo transfer exists,
+            // retries must resume that journal even if its Move has already removed the source.
+            auto sourceResult = co_await getAuthoritativeEmails(sourceAccountId, {sourceEmailId});
+            if (const auto* error = std::get_if<OperationError>(&sourceResult))
+                co_return *error;
+            const auto& source = std::get<javelin::jmap::AuthoritativeEmails>(sourceResult);
+            const auto sourceFound = std::ranges::find(source.emails, sourceEmailId,
+                                                       &javelin::jmap::domain::Email::id);
+            if (sourceFound == source.emails.end())
+                co_return invalid(i18n("The source message is no longer available for Redo."));
+            if (operation == MailTransferHistoryOperation::Move &&
+                !containsAll(sourceFound->mailboxIds, item.sourceRemovedMailboxIds))
+            {
+                co_return invalid(i18n("The source message no longer has the mailbox memberships "
+                                       "required to repeat this move."));
+            }
+            auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                m_databaseConnection, QStringLiteral("Refresh mail transfer Redo source"));
+            if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+                co_return javelin::jmap::operationError(*error);
+            auto transaction =
+                std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+            javelin::jmap::cache::EmailRepository sourceEmails{m_databaseConnection};
+            if (const auto error =
+                    sourceEmails.upsertMany(transaction, sourceAccountId, {*sourceFound}))
+                co_return javelin::jmap::operationError(*error);
+            javelin::jmap::cache::MailboxWindowRepository mailboxWindows{m_databaseConnection};
+            for (const auto& mailboxId : sourceFound->mailboxIds)
+                if (const auto error = mailboxWindows.invalidateMailbox(
+                        transaction, sourceAccountId, mailboxId))
+                    co_return javelin::jmap::operationError(*error);
+            javelin::jmap::cache::SearchWindowRepository searchWindows{m_databaseConnection};
+            if (const auto error = searchWindows.invalidateAccount(transaction, sourceAccountId))
+                co_return javelin::jmap::operationError(*error);
+            if (const auto error = transaction.commit())
+                co_return javelin::jmap::operationError(*error);
+
+            javelin::app::MailTransferApplicationService preparation{m_databaseConnection};
+            std::vector<javelin::app::MailTransferSourceCleanupOverride> cleanupOverrides;
+            if (operation == MailTransferHistoryOperation::Move)
+            {
+                cleanupOverrides.push_back({
+                    .emailId = sourceEmailId,
+                    .removeMailboxIds = item.sourceRemovedMailboxIds,
+                });
+            }
+            auto prepared = co_await preparation.prepare({
+                .intent =
+                    {
+                        .sourceAccountId = sourceAccountId,
+                        .sourceMailboxId = std::nullopt,
+                        .destinationAccountId = destinationAccountId,
+                        .destinationMailboxId = destinationMailboxId,
+                        .operation = operation == MailTransferHistoryOperation::Move
+                                         ? javelin::app::MailTransferOperation::Move
+                                         : javelin::app::MailTransferOperation::Copy,
+                    },
+                .selection = {javelin::app::SelectedEmail{.emailId = sourceEmailId}},
+                .sourceCleanupOverrides = std::move(cleanupOverrides),
+            });
+            if (const auto* error = std::get_if<OperationError>(&prepared))
+                co_return *error;
+            redoOperationId =
+                std::get<javelin::app::PreparedMailTransfer>(prepared).operationId;
+            if (const auto error = recordRedoOperation(
+                    m_databaseConnection, historyEntryId, item.redoGeneration, sourceEmailId,
+                    destinationAccountId, destinationMailboxId, operation, *redoOperationId))
+                co_return *error;
+            auto persistedRedo = findRedoOperation(
+                m_databaseConnection, historyEntryId, item.redoGeneration, sourceEmailId,
+                destinationAccountId, destinationMailboxId, operation);
+            if (const auto* error = std::get_if<OperationError>(&persistedRedo))
+                co_return *error;
+            const auto& persistedOperationId =
+                std::get<std::optional<std::string>>(persistedRedo);
+            if (!persistedOperationId.has_value())
+                co_return invalid(i18n("The durable Redo transfer mapping could not be created."));
+            redoOperationId = *persistedOperationId;
+            // Mark this transfer as belonging to the existing history entry. There is deliberately
+            // no history coordinator on the executor below, so Redo cannot publish a second entry.
+            javelin::app::MailTransferRepository transfers{m_databaseConnection};
+            const auto marked = transfers.markHistoryPublished(*redoOperationId, historyEntryId);
+            if (const auto* error = std::get_if<DatabaseError>(&marked))
+                co_return javelin::jmap::operationError(*error);
+            if (!std::get<bool>(marked))
+                co_return invalid(i18n("The Redo transfer history marker changed unexpectedly."));
+        }
+
+        javelin::jmap::MessageContentClient content{m_databaseConnection, m_resourceTransport};
+        javelin::app::MailTransferExecutor executor{
+            m_databaseConnection, m_resourceTransport, m_methodTransport, content,
+            m_connectionProvider, nullptr};
+        auto executed = co_await executor.advance(*redoOperationId);
+        if (const auto* error = std::get_if<OperationError>(&executed))
+            co_return *error;
+        const auto& summary = std::get<javelin::app::MailTransferExecutionSummary>(executed);
+        if (summary.status == javelin::app::MailTransferStatus::BlockedUnknown)
+            co_return ambiguous(i18n("The repeated mail transfer has an unknown server outcome."));
+        if (summary.status == javelin::app::MailTransferStatus::Partial)
+        {
+            co_return OperationError{
+                .code = OperationErrorCode::Conflict,
+                .message = i18n("The repeated mail transfer completed only partially."),
+                .protocolType = std::optional<std::string>{"partialOutcome"},
+            };
+        }
+        if (summary.status != javelin::app::MailTransferStatus::Complete)
+            co_return invalid(i18n("The repeated mail transfer did not reach a complete state."));
+
+        javelin::app::MailTransferRepository transfers{m_databaseConnection};
+        const auto itemsResult = transfers.listItems(*redoOperationId);
+        if (const auto* error = std::get_if<DatabaseError>(&itemsResult))
+            co_return javelin::jmap::operationError(*error);
+        const auto& transferItems =
+            std::get<std::vector<javelin::app::MailTransferItemRecord>>(itemsResult);
+        if (transferItems.size() != 1 ||
+            transferItems.front().phase != javelin::app::MailTransferItemPhase::Complete ||
+            !transferItems.front().destinationEmailId.has_value())
+            co_return invalid(i18n("The repeated transfer journal is incomplete."));
+        const auto& transferItem = transferItems.front();
+
+        if (transferItem.sourceDestroy)
+        {
+            if (!transferItem.rawContentHash.has_value())
+                co_return invalid(i18n("The repeated destructive move did not retain its raw source."));
+            const auto reassigned = transfers.reassignSourcePin(
+                transferItem.itemId, "history_entry", historyEntryId.toStdString());
+            if (const auto* error = std::get_if<DatabaseError>(&reassigned))
+                co_return javelin::jmap::operationError(*error);
+            if (!std::get<bool>(reassigned))
+                co_return invalid(i18n("The repeated move could not retain its source for Undo."));
+        }
+
+        javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
+        const auto destinationResult =
+            emails.find(destinationAccountId, *transferItem.destinationEmailId);
+        if (const auto* error = std::get_if<DatabaseError>(&destinationResult))
+            co_return javelin::jmap::operationError(*error);
+        const auto& destination =
+            std::get<std::optional<javelin::jmap::domain::Email>>(destinationResult);
+        if (!destination.has_value())
+            co_return invalid(i18n("The repeated transfer destination is not materialized locally."));
+
+        co_return MailTransferItemHistory{
+            .currentSourceEmailId = transferItem.sourceDestroy
+                                        ? std::nullopt
+                                        : std::optional<std::string>{transferItem.sourceEmailId},
+            .originalSourceMailboxIds = transferItem.sourceMailboxIds,
+            .sourceKeywords = transferItem.sourceKeywords,
+            .sourceMessageIds = transferItem.sourceMessageIds,
+            .sourceReceivedAt = transferItem.sourceReceivedAt,
+            .sourceSize = transferItem.sourceSize,
+            .sourceRemovedMailboxIds = transferItem.sourceRemoveMailboxIds,
+            .sourceDestroyed = transferItem.sourceDestroy,
+            .rawContentHash = transferItem.sourceDestroy ? transferItem.rawContentHash
+                                                         : item.rawContentHash,
+            .currentDestinationEmailId = transferItem.destinationEmailId,
+            .destinationReusedExisting = transferItem.reusedExisting,
+            .destinationPriorMailboxIds =
+                transferItem.destinationPriorMailboxIds.value_or(std::vector<std::string>{}),
+            .destinationMailboxIds = destination->mailboxIds,
+            .destinationKeywords = destination->keywords,
+            .redoGeneration = item.redoGeneration,
+        };
     }
 
 } // namespace javelin::app::undo

@@ -20,6 +20,7 @@ namespace javelin::app
     {
         MailTransferIntent intent;
         MessageSelection selection;
+        std::vector<MailTransferSourceCleanupOverride> sourceCleanupOverrides = {};
     };
 
     struct PreparedMailTransfer

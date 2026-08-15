@@ -102,6 +102,7 @@ namespace javelin::app::undo
         std::vector<std::string> destinationPriorMailboxIds;
         std::vector<std::string> destinationMailboxIds;
         std::vector<std::string> destinationKeywords;
+        std::uint64_t redoGeneration = 0;
 
         auto operator<=>(const MailTransferItemHistory&) const = default;
     };

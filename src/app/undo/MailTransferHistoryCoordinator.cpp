@@ -147,6 +147,7 @@ namespace javelin::app::undo
                         item.destinationPriorMailboxIds.value_or(std::vector<std::string>{}),
                     .destinationMailboxIds = destination->mailboxIds,
                     .destinationKeywords = destination->keywords,
+                    .redoGeneration = 0,
                 });
             }
 

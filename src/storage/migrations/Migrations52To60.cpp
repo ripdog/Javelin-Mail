@@ -149,6 +149,27 @@ namespace javelin::jmap::cache::migrations
                             "mail_transfer_history_recreations(phase,updated_at)"),
                     },
             },
+            MigrationStep{
+                .version = 60,
+                .name = QStringLiteral("mail_transfer_history_redo_journal"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "CREATE TABLE mail_transfer_history_redos ("
+                            "history_entry_id TEXT NOT NULL REFERENCES operation_history(entry_id) "
+                            "ON DELETE CASCADE,redo_generation INTEGER NOT NULL,source_email_id TEXT "
+                            "NOT NULL,destination_account_id TEXT NOT NULL,destination_mailbox_id TEXT "
+                            "NOT NULL,operation TEXT NOT NULL CHECK(operation IN ('copy','move')),"
+                            "transfer_operation_id TEXT NOT NULL REFERENCES mail_transfer_operations("
+                            "operation_id) ON DELETE CASCADE,created_at TEXT NOT NULL DEFAULT "
+                            "CURRENT_TIMESTAMP,PRIMARY KEY(history_entry_id,redo_generation,"
+                            "source_email_id,destination_account_id,destination_mailbox_id,operation)) "
+                            "STRICT"),
+                        QStringLiteral(
+                            "CREATE UNIQUE INDEX idx_mail_transfer_history_redos_operation ON "
+                            "mail_transfer_history_redos(transfer_operation_id)"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

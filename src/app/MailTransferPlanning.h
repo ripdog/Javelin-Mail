@@ -8,6 +8,7 @@
 #include <QString>
 
 #include <optional>
+#include <span>
 #include <string>
 #include <variant>
 #include <vector>
@@ -21,6 +22,12 @@ namespace javelin::app
         std::string destinationAccountId; // Stable local/cache account key.
         std::string destinationMailboxId;
         MailTransferOperation operation = MailTransferOperation::Copy;
+    };
+
+    struct MailTransferSourceCleanupOverride
+    {
+        std::string emailId;
+        std::vector<std::string> removeMailboxIds;
     };
 
     struct PlannedMailTransferItem
@@ -50,6 +57,7 @@ namespace javelin::app
         const std::vector<javelin::jmap::cache::MailboxTreeItem>& sourceMailboxes,
         const std::vector<javelin::jmap::cache::MailboxTreeItem>& destinationMailboxes,
         const javelin::jmap::cache::CachedAccount& sourceAccount,
-        const javelin::jmap::cache::CachedAccount& destinationAccount);
+        const javelin::jmap::cache::CachedAccount& destinationAccount,
+        std::span<const MailTransferSourceCleanupOverride> cleanupOverrides = {});
 
 } // namespace javelin::app

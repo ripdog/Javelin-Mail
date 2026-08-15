@@ -18,6 +18,8 @@ namespace javelin::app::undo
         {
             if (error.protocolType == std::optional<std::string>{"ambiguousOutcome"})
                 return HistoryExecutionOutcome::Unknown;
+            if (error.protocolType == std::optional<std::string>{"partialOutcome"})
+                return HistoryExecutionOutcome::PartialFailure;
             using enum javelin::jmap::OperationErrorCode;
             if (error.code == Conflict || error.code == PreconditionFailed || error.code == NotFound)
                 return HistoryExecutionOutcome::Conflict;
@@ -83,6 +85,32 @@ namespace javelin::app::undo
         {
             return std::ranges::all_of(required, [&](const auto& value)
                                        { return std::ranges::contains(values, value); });
+        }
+
+        void snapshotSource(MailTransferItemHistory& item,
+                            const javelin::jmap::domain::Email& source)
+        {
+            item.originalSourceMailboxIds = source.mailboxIds;
+            item.sourceKeywords = source.keywords;
+            item.sourceMessageIds = source.messageId;
+            item.sourceReceivedAt = source.receivedAt.empty()
+                                        ? std::nullopt
+                                        : std::optional<std::string>{source.receivedAt};
+            item.sourceSize = source.size;
+        }
+
+        [[nodiscard]] std::vector<std::string>
+        withAdded(std::vector<std::string> values, const std::string& addition)
+        {
+            if (!std::ranges::contains(values, addition))
+                values.push_back(addition);
+            return normalized(std::move(values));
+        }
+
+        [[nodiscard]] bool removesAll(const std::vector<std::string>& current,
+                                      const std::vector<std::string>& removals)
+        {
+            return !current.empty() && containsAll(removals, current);
         }
 
         [[nodiscard]] std::vector<std::string>
@@ -183,9 +211,151 @@ namespace javelin::app::undo
         }
         if (direction == HistoryExecutionDirection::Redo)
         {
-            co_return failure(HistoryExecutionOutcome::DefinitiveFailure,
-                              i18n("Redo for cross-account mail transfer is not available yet."),
-                              *history);
+            bool changed = false;
+            for (auto& item : history->items)
+            {
+                if (!item.currentSourceEmailId.has_value())
+                {
+                    co_return failure(
+                        changed ? HistoryExecutionOutcome::PartialFailure
+                                : HistoryExecutionOutcome::Conflict,
+                        i18n("The source message is no longer available to repeat this transfer."),
+                        *history);
+                }
+                const std::string sourceEmailId = *item.currentSourceEmailId;
+                auto sourceResult = co_await m_mail.getAuthoritativeEmails(
+                    history->sourceAccountId, {sourceEmailId});
+                if (const auto* error =
+                        std::get_if<javelin::jmap::OperationError>(&sourceResult))
+                    co_return errorResult(*error, *history, changed);
+                const auto& source =
+                    std::get<javelin::jmap::AuthoritativeEmails>(sourceResult);
+                const auto* currentSource = oneEmail(source, sourceEmailId);
+                if (currentSource == nullptr)
+                {
+                    co_return failure(
+                        changed ? HistoryExecutionOutcome::PartialFailure
+                                : HistoryExecutionOutcome::Conflict,
+                        i18n("The source message is no longer available to repeat this transfer."),
+                        *history);
+                }
+                if (history->operation == MailTransferHistoryOperation::Move &&
+                    (item.sourceRemovedMailboxIds.empty() ||
+                     !containsAll(currentSource->mailboxIds, item.sourceRemovedMailboxIds)))
+                {
+                    co_return failure(
+                        changed ? HistoryExecutionOutcome::PartialFailure
+                                : HistoryExecutionOutcome::Conflict,
+                        i18n("The source message no longer has the mailbox state required to repeat "
+                             "this move."),
+                        *history);
+                }
+
+                const javelin::jmap::domain::Email* currentDestination = nullptr;
+                std::optional<javelin::jmap::AuthoritativeEmails> destination;
+                if (item.currentDestinationEmailId.has_value())
+                {
+                    auto destinationResult = co_await m_mail.getAuthoritativeEmails(
+                        history->destinationAccountId, {*item.currentDestinationEmailId});
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::OperationError>(&destinationResult))
+                        co_return errorResult(*error, *history, changed);
+                    destination =
+                        std::get<javelin::jmap::AuthoritativeEmails>(std::move(destinationResult));
+                    currentDestination = oneEmail(*destination, *item.currentDestinationEmailId);
+                    if (currentDestination == nullptr)
+                        item.currentDestinationEmailId = std::nullopt;
+                }
+
+                if (!item.currentDestinationEmailId.has_value())
+                {
+                    auto redone = co_await m_mail.redoMissingDestination(
+                        entry.entryId, history->operation, history->sourceAccountId,
+                        history->destinationAccountId, history->destinationMailboxId, item);
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::OperationError>(&redone))
+                        co_return errorResult(*error, *history, changed);
+                    item = std::get<MailTransferItemHistory>(std::move(redone));
+                    changed = true;
+                    continue;
+                }
+
+                if (currentDestination == nullptr || !destination.has_value())
+                {
+                    co_return failure(
+                        changed ? HistoryExecutionOutcome::PartialFailure
+                                : HistoryExecutionOutcome::Conflict,
+                        i18n("The destination message could not be resolved for Redo."), *history);
+                }
+
+                const auto priorDestinationMailboxes = currentDestination->mailboxIds;
+                const auto destinationKeywords = currentDestination->keywords;
+                const bool targetPresent = std::ranges::contains(
+                    currentDestination->mailboxIds, history->destinationMailboxId);
+                if (!targetPresent)
+                {
+                    auto applied = co_await m_mail.applyExactEmailMutation(
+                        history->destinationAccountId,
+                        mutation(currentDestination->id, {history->destinationMailboxId}, {}, false,
+                                 *destination, *currentDestination));
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::OperationError>(&applied))
+                        co_return errorResult(*error, *history, changed);
+                    if (!acceptedExactlyOne(
+                            std::get<javelin::jmap::SubmittedEmailMutations>(applied)))
+                    {
+                        co_return rejection(i18n("The destination server rejected restoring the "
+                                                 "transfer mailbox membership."),
+                                            *history, changed);
+                    }
+                    changed = true;
+                }
+                item.destinationPriorMailboxIds = priorDestinationMailboxes;
+                item.destinationMailboxIds =
+                    withAdded(priorDestinationMailboxes, history->destinationMailboxId);
+                item.destinationKeywords = destinationKeywords;
+
+                snapshotSource(item, *currentSource);
+                if (history->operation == MailTransferHistoryOperation::Copy)
+                {
+                    item.sourceDestroyed = false;
+                    item.currentSourceEmailId = sourceEmailId;
+                    continue;
+                }
+
+                const bool actualDestroy =
+                    removesAll(currentSource->mailboxIds, item.sourceRemovedMailboxIds);
+                if (actualDestroy)
+                {
+                    auto retained = co_await m_mail.retainSourceForHistory(
+                        entry.entryId, history->sourceAccountId, sourceEmailId);
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::OperationError>(&retained))
+                        co_return errorResult(*error, *history, changed);
+                    item.rawContentHash = std::get<std::string>(std::move(retained));
+                }
+
+                auto applied = co_await m_mail.applyExactEmailMutation(
+                    history->sourceAccountId,
+                    mutation(sourceEmailId, {},
+                             actualDestroy ? std::vector<std::string>{}
+                                           : item.sourceRemovedMailboxIds,
+                             actualDestroy, source, *currentSource));
+                if (const auto* error =
+                        std::get_if<javelin::jmap::OperationError>(&applied))
+                    co_return errorResult(*error, *history, changed);
+                if (!acceptedExactlyOne(std::get<javelin::jmap::SubmittedEmailMutations>(applied)))
+                {
+                    co_return rejection(i18n("The source server rejected repeating the move."),
+                                        *history, changed);
+                }
+                item.sourceDestroyed = actualDestroy;
+                item.currentSourceEmailId = actualDestroy
+                                                ? std::nullopt
+                                                : std::optional<std::string>{sourceEmailId};
+                changed = true;
+            }
+            co_return success(*history);
         }
 
         bool changed = false;
@@ -286,7 +456,10 @@ namespace javelin::app::undo
             }
 
             if (!item.currentDestinationEmailId.has_value())
+            {
+                ++item.redoGeneration;
                 continue;
+            }
             auto destinationResult = co_await m_mail.getAuthoritativeEmails(
                 history->destinationAccountId, {*item.currentDestinationEmailId});
             if (const auto* error =
@@ -299,19 +472,27 @@ namespace javelin::app::undo
             if (currentDestination == nullptr)
             {
                 item.currentDestinationEmailId = std::nullopt;
+                ++item.redoGeneration;
                 continue;
             }
 
             const bool targetPresent = std::ranges::contains(
                 currentDestination->mailboxIds, history->destinationMailboxId);
             if (!targetPresent)
+            {
+                ++item.redoGeneration;
                 continue;
+            }
+
+            if (std::ranges::contains(item.destinationPriorMailboxIds,
+                                      history->destinationMailboxId))
+            {
+                ++item.redoGeneration;
+                continue;
+            }
 
             if (item.destinationReusedExisting)
             {
-                if (std::ranges::contains(item.destinationPriorMailboxIds,
-                                          history->destinationMailboxId))
-                    continue;
                 if (currentDestination->mailboxIds.size() <= 1)
                 {
                     co_return failure(
@@ -333,6 +514,7 @@ namespace javelin::app::undo
                                              "transfer mailbox membership."),
                                         *history, changed);
                 changed = true;
+                ++item.redoGeneration;
                 continue;
             }
 
@@ -350,6 +532,7 @@ namespace javelin::app::undo
                                              "transfer mailbox membership."),
                                         *history, changed);
                 changed = true;
+                ++item.redoGeneration;
                 continue;
             }
 
@@ -375,6 +558,7 @@ namespace javelin::app::undo
                                     *history, changed);
             item.currentDestinationEmailId = std::nullopt;
             changed = true;
+            ++item.redoGeneration;
         }
 
         co_return success(*history);

@@ -182,7 +182,7 @@ namespace javelin::app
             request.intent, emailIds, emails,
             std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(sourceMailboxResult),
             std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(destinationMailboxResult),
-            sourceAccount, destinationAccount);
+            sourceAccount, destinationAccount, request.sourceCleanupOverrides);
         if (const auto* error = std::get_if<QString>(&planResult))
             co_return invalidState(*error);
         auto plan = std::get<PlannedMailTransfer>(std::move(planResult));

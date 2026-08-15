@@ -36,6 +36,12 @@ namespace javelin::app::undo
             std::vector<std::string> mailboxIds, std::vector<std::string> keywords,
             std::vector<std::string> messageIds, std::optional<std::string> receivedAt,
             std::uint64_t sourceSize) override;
+        [[nodiscard]] QCoro::Task<RetainedMailTransferSourceResult> retainSourceForHistory(
+            QString historyEntryId, std::string accountId, std::string emailId) override;
+        [[nodiscard]] QCoro::Task<RedoneMailTransferItemResult> redoMissingDestination(
+            QString historyEntryId, MailTransferHistoryOperation operation,
+            std::string sourceAccountId, std::string destinationAccountId,
+            std::string destinationMailboxId, MailTransferItemHistory item) override;
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
