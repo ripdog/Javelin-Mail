@@ -1336,6 +1336,8 @@ javelin_enable_static_analysis(javelin_translation)
 javelin_enable_sanitizers(javelin_translation)
 
 add_library(javelin_gui STATIC
+    src/gui/shell/MessageTransferDestinationPresentation.cpp
+    src/gui/shell/MessageTransferDestinationPresentation.h
     src/gui/compose/AddressSuggestionStore.cpp
     src/gui/compose/AddressSuggestionStore.h
     src/gui/messageview/InlineMessageSchemeHandler.cpp

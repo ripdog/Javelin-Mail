@@ -22,6 +22,7 @@
 #include <QPushButton>
 
 #include <ranges>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -55,9 +56,12 @@ namespace javelin::gui::shell
 
     MessageCommandController::MessageCommandController(
         javelin::app::MailCommandPort& mailCommandPort,
-        javelin::jmap::cache::MailboxReader& mailboxReader, QListView& messageView,
+        javelin::jmap::cache::AccountReader& accountReader,
+        javelin::jmap::cache::MailboxReader& mailboxReader,
+        MessageTransferAccountDisplayName accountDisplayName, QListView& messageView,
         QWidget* dialogParent, QObject* parent)
-        : QObject(parent), m_mailCommandPort(mailCommandPort), m_mailboxReader(mailboxReader),
+        : QObject(parent), m_mailCommandPort(mailCommandPort), m_accountReader(accountReader),
+          m_mailboxReader(mailboxReader), m_accountDisplayName(std::move(accountDisplayName)),
           m_messageView(messageView), m_dialogParent(dialogParent)
     {
     }
@@ -173,57 +177,73 @@ namespace javelin::gui::shell
         QMenu* moveMenu, QMenu* copyMenu, std::string accountId,
         std::optional<std::string> sourceMailboxId, javelin::app::MessageSelection selection)
     {
-        const auto mailboxesResult = m_mailboxReader.listMailboxTree(accountId);
-        const auto* mailboxes =
-            std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxesResult);
-        if (mailboxes == nullptr)
-        {
+        std::unordered_map<std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>>
+            mailboxesByAccount;
+        const auto currentMailboxes = m_mailboxReader.listMailboxTree(accountId);
+        const auto* current =
+            std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&currentMailboxes);
+        if (current == nullptr)
             return;
+        mailboxesByAccount.emplace(accountId, *current);
+
+        std::vector<javelin::jmap::cache::CachedAccount> accounts;
+        const auto accountsResult = m_accountReader.listAll();
+        if (const auto* loaded =
+                std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult))
+        {
+            accounts = *loaded;
+            for (const auto& account : accounts)
+            {
+                if (account.accountId == accountId || !account.hasMailCapability ||
+                    account.isReadOnly)
+                    continue;
+                const auto mailboxResult = m_mailboxReader.listMailboxTree(account.accountId);
+                if (const auto* mailboxes =
+                        std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(
+                            &mailboxResult))
+                    mailboxesByAccount.emplace(account.accountId, *mailboxes);
+            }
         }
 
-        const auto presentation =
-            javelin::gui::mailboxes::buildMailboxPresentation(accountId, *mailboxes);
-        const auto addDestinations = [this, &accountId, &sourceMailboxId, &selection,
-                                      &presentation](QMenu* menu,
-                                                     const MessageTransferOperation operation,
-                                                     const QString& successMessage)
+        const auto presentation = buildMessageTransferDestinationPresentation(
+            accountId, accounts, mailboxesByAccount, m_accountDisplayName);
+        const auto addRows = [this, &accountId, &sourceMailboxId, &selection](
+                                 QMenu& menu,
+                                 const std::vector<MessageTransferDestinationRow>& rows,
+                                 const MessageTransferOperation operation,
+                                 const QString& successMessage)
+        {
+            const auto iconColor = menu.palette().color(QPalette::Active, QPalette::Text);
+            for (const auto& row : rows)
+            {
+                if (row.separatorBefore && !menu.actions().empty())
+                    menu.addSeparator();
+                const QString indentation(static_cast<qsizetype>(row.depth), QChar{u'\u2003'});
+                auto* action = menu.addAction(
+                    javelin::gui::mailboxes::mailboxPresentationIcon(row.role, iconColor),
+                    indentation + QString::fromStdString(row.mailboxName));
+                connect(action, &QAction::triggered, this,
+                        [this, sourceAccountId = accountId, sourceMailboxId,
+                         destinationAccountId = row.accountId,
+                         destinationMailboxId = row.mailboxId, selection, operation, successMessage]
+                        {
+                            queueTransfer(sourceAccountId, sourceMailboxId, destinationAccountId,
+                                          destinationMailboxId, selection, operation, successMessage);
+                        });
+            }
+        };
+        const auto addDestinations = [&](QMenu* menu, const MessageTransferOperation operation,
+                                         const QString& successMessage)
         {
             if (menu == nullptr)
                 return;
-
-            bool displayedSpecialUse = false;
-            bool insertedUserSeparator = false;
-            const auto iconColor = menu->palette().color(QPalette::Active, QPalette::Text);
-            for (const auto& row :
-                 javelin::gui::mailboxes::flattenMailboxPresentation(presentation))
+            addRows(*menu, presentation.currentAccountRows, operation, successMessage);
+            if (!presentation.otherAccounts.empty() && !menu->actions().empty())
+                menu->addSeparator();
+            for (const auto& account : presentation.otherAccounts)
             {
-                const auto& destination = *row.node;
-                if (!destination.mailbox.myRights.mayAddItems)
-                    continue;
-                if (destination.group == javelin::gui::mailboxes::MailboxPresentationGroup::User &&
-                    displayedSpecialUse && !insertedUserSeparator)
-                {
-                    menu->addSeparator();
-                    insertedUserSeparator = true;
-                }
-
-                const QString indentation(static_cast<qsizetype>(row.depth), QChar{u'\u2003'});
-                auto* action =
-                    menu->addAction(javelin::gui::mailboxes::mailboxPresentationIcon(
-                                        destination.mailbox.role, iconColor),
-                                    indentation + QString::fromStdString(destination.mailbox.name));
-                connect(action, &QAction::triggered, this,
-                        [this, accountId, sourceMailboxId,
-                         destinationMailboxId = destination.mailbox.id, selection, operation,
-                         successMessage]
-                        {
-                            queueTransfer(accountId, sourceMailboxId, destinationMailboxId,
-                                          selection, operation, successMessage);
-                        });
-                displayedSpecialUse =
-                    displayedSpecialUse ||
-                    destination.group ==
-                        javelin::gui::mailboxes::MailboxPresentationGroup::SpecialUse;
+                auto* accountMenu = menu->addMenu(account.label);
+                addRows(*accountMenu, account.rows, operation, successMessage);
             }
         };
 
@@ -234,20 +254,101 @@ namespace javelin::gui::shell
         addDestinations(copyMenu, MessageTransferOperation::Copy, i18n("Queued copy."));
     }
 
-    void MessageCommandController::queueTransfer(std::string accountId,
-                                                 std::optional<std::string> sourceMailboxId,
-                                                 std::string destinationMailboxId,
-                                                 javelin::app::MessageSelection selection,
-                                                 const MessageTransferOperation operation,
-                                                 QString successMessage)
+    void MessageCommandController::queueTransfer(
+        std::string sourceAccountId, std::optional<std::string> sourceMailboxId,
+        std::string destinationAccountId, std::string destinationMailboxId,
+        javelin::app::MessageSelection selection, const MessageTransferOperation operation,
+        QString successMessage)
     {
         const bool move = operation == MessageTransferOperation::Move;
         qCInfo(logMessageCommands).noquote()
             << (move ? "move requested" : "copy requested") << selection.size()
-            << "selection item(s) to" << QString::fromStdString(destinationMailboxId);
+            << "selection item(s) from" << QString::fromStdString(sourceAccountId) << "to"
+            << QString::fromStdString(destinationAccountId) << '/'
+            << QString::fromStdString(destinationMailboxId);
+
+        if (sourceAccountId != destinationAccountId)
+        {
+            auto task = m_mailCommandPort.transferAcrossAccounts({
+                .sourceAccountId = sourceAccountId,
+                .sourceMailboxId = sourceMailboxId,
+                .destinationAccountId = destinationAccountId,
+                .destinationMailboxId = destinationMailboxId,
+                .operation = move ? javelin::app::MailTransferOperation::Move
+                                  : javelin::app::MailTransferOperation::Copy,
+                .selection = std::move(selection),
+            });
+            QCoro::connect(
+                std::move(task), this,
+                [this, sourceAccountId = std::move(sourceAccountId),
+                 destinationAccountId = std::move(destinationAccountId), move](
+                    javelin::app::MailTransferExecutionResult result)
+                {
+                    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                    {
+                        Q_EMIT operationFailed(*error);
+                        return;
+                    }
+                    const auto& summary = std::get<javelin::app::MailTransferExecutionSummary>(result);
+                    if (summary.status == javelin::app::MailTransferStatus::Complete)
+                    {
+                        Q_EMIT mailboxMembershipChanged(
+                            QString::fromStdString(destinationAccountId));
+                        if (move)
+                            Q_EMIT mailboxMembershipChanged(QString::fromStdString(sourceAccountId));
+                        Q_EMIT statusMessage(
+                            move ? i18np("Moved one message.", "Moved %1 messages.",
+                                         summary.completeItemCount)
+                                 : i18np("Copied one message.", "Copied %1 messages.",
+                                         summary.completeItemCount),
+                            5000);
+                        return;
+                    }
+
+                    QString message;
+                    javelin::jmap::OperationErrorCode code =
+                        javelin::jmap::OperationErrorCode::Conflict;
+                    switch (summary.status)
+                    {
+                    case javelin::app::MailTransferStatus::BlockedUnknown:
+                        message = i18n(
+                            "The transfer outcome could not be confirmed for %1 message(s). Javelin "
+                            "will not retry those messages automatically.",
+                            summary.unknownItemCount);
+                        break;
+                    case javelin::app::MailTransferStatus::Partial:
+                        message = i18n(
+                            "The transfer completed partially: %1 complete, %2 retained at the "
+                            "source, and %3 failed.",
+                            summary.completeItemCount, summary.partialItemCount,
+                            summary.failedItemCount);
+                        break;
+                    case javelin::app::MailTransferStatus::Failed:
+                        code = javelin::jmap::OperationErrorCode::ServerFailure;
+                        message = i18n("The transfer failed for %1 message(s).",
+                                       summary.failedItemCount);
+                        break;
+                    case javelin::app::MailTransferStatus::Cancelled:
+                        message = i18n("The transfer was cancelled.");
+                        break;
+                    case javelin::app::MailTransferStatus::Preparing:
+                    case javelin::app::MailTransferStatus::Running:
+                    case javelin::app::MailTransferStatus::WaitingForNetwork:
+                    case javelin::app::MailTransferStatus::WaitingForAuth:
+                    case javelin::app::MailTransferStatus::WaitingForSpace:
+                        message = i18n("The transfer has not completed yet.");
+                        break;
+                    case javelin::app::MailTransferStatus::Complete:
+                        Q_UNREACHABLE();
+                    }
+                    Q_EMIT operationFailed({.code = code, .message = std::move(message)});
+                });
+            return;
+        }
+
         auto task = m_mailCommandPort.queueMailboxSelectionMutation(
             javelin::app::MailboxSelectionMutationIntent{
-                .accountId = accountId,
+                .accountId = sourceAccountId,
                 .selection = std::move(selection),
                 .operation = move ? javelin::app::MailboxSelectionOperation::Move
                                   : javelin::app::MailboxSelectionOperation::Copy,
@@ -256,7 +357,7 @@ namespace javelin::gui::shell
             });
         QCoro::connect(
             std::move(task), this,
-            [this, accountId = std::move(accountId), move,
+            [this, accountId = std::move(sourceAccountId), move,
              successMessage = std::move(successMessage)](
                 javelin::app::QueuedMailboxSelectionMutationResult result)
             {
@@ -656,8 +757,10 @@ namespace javelin::gui::shell
             Q_EMIT statusMessage(i18n("No Trash mailbox is available."), 5000);
             return;
         }
-        queueTransfer(std::move(accountId), std::move(sourceMailboxId), trashMailbox->id,
-                      std::move(selection), MessageTransferOperation::Move, i18n("Queued delete."));
+        const auto destinationAccountId = accountId;
+        queueTransfer(std::move(accountId), std::move(sourceMailboxId), destinationAccountId,
+                      trashMailbox->id, std::move(selection), MessageTransferOperation::Move,
+                      i18n("Queued delete."));
     }
 
     void MessageCommandController::queueDestroy(std::string accountId,

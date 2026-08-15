@@ -950,10 +950,14 @@ namespace javelin::gui::shell
 
         m_moveAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-move")),
                                    i18nc("@action", "&Move to…"), this);
+        m_moveMenu = new QMenu(this);
+        m_moveAction->setMenu(m_moveMenu);
         actionCollection()->addAction(QStringLiteral("move_email"), m_moveAction);
 
         m_copyAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
                                    i18nc("@action", "&Copy to…"), this);
+        m_copyMenu = new QMenu(this);
+        m_copyAction->setMenu(m_copyMenu);
         actionCollection()->addAction(QStringLiteral("copy_email"), m_copyAction);
 
         m_viewSourceAction = new QAction(QIcon::fromTheme(QStringLiteral("document-open")),
@@ -1372,7 +1376,10 @@ namespace javelin::gui::shell
         m_messageView->viewport()->installEventFilter(this);
 
         m_messageCommandController = new MessageCommandController(
-            m_mailCommandPort, m_mailboxReader, *m_messageView, this, this);
+            m_mailCommandPort, m_accountReader, m_mailboxReader,
+            [this](const QStringView accountId)
+            { return m_settings.accountForCachedId(accountId).displayName; },
+            *m_messageView, this, this);
         connect(m_messageCommandController, &MessageCommandController::statusMessage, this,
                 [this](const QString& message, const int durationMilliseconds)
                 { m_statusBar->showMessage(message, durationMilliseconds); });
@@ -1449,8 +1456,9 @@ namespace javelin::gui::shell
                     auto selection = m_messageCommandController->selectedActionItems();
                     m_messageCommandController->queueTransfer(
                         sourceAccountId.toStdString(), *sourceMailboxId,
-                        destinationMailboxId.toStdString(), std::move(selection),
-                        MessageTransferOperation::Move, i18n("Queued move."));
+                        destinationAccountId.toStdString(), destinationMailboxId.toStdString(),
+                        std::move(selection), MessageTransferOperation::Move,
+                        i18n("Queued move."));
                 });
 
         auto* messagePane = new QWidget(this);

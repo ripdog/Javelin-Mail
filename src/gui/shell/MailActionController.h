@@ -85,6 +85,7 @@ namespace javelin::gui::shell
         [[nodiscard]] bool selectedMessagesAreJunk() const;
         void createTag(bool applyToSelection);
         void showTagManager();
+        void rebuildTransferMenu(QMenu& menu, bool move);
         [[nodiscard]] std::optional<std::string> activeAccountId() const;
         [[nodiscard]] std::optional<std::string> activeMailboxId() const;
         [[nodiscard]] bool activeTabIsSearch() const;

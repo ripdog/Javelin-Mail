@@ -142,20 +142,16 @@ namespace javelin::gui::shell
                     m_commandController.permanentlyDeleteSelection(activeAccountId(),
                                                                    activeMailboxId());
                 });
-        connect(&m_actions.move, &QAction::triggered, this,
-                [this]
-                {
-                    m_commandController.showTransferMenu(MessageTransferOperation::Move,
-                                                         activeAccountId(), activeMailboxId(),
-                                                         activeTabIsSearch());
-                });
-        connect(&m_actions.copy, &QAction::triggered, this,
-                [this]
-                {
-                    m_commandController.showTransferMenu(MessageTransferOperation::Copy,
-                                                         activeAccountId(), activeMailboxId(),
-                                                         activeTabIsSearch());
-                });
+        if (auto* moveMenu = m_actions.move.menu(); moveMenu != nullptr)
+        {
+            connect(moveMenu, &QMenu::aboutToShow, this,
+                    [this, moveMenu] { rebuildTransferMenu(*moveMenu, true); });
+        }
+        if (auto* copyMenu = m_actions.copy.menu(); copyMenu != nullptr)
+        {
+            connect(copyMenu, &QMenu::aboutToShow, this,
+                    [this, copyMenu] { rebuildTransferMenu(*copyMenu, false); });
+        }
         connect(&m_tagsMenu, &QMenu::aboutToShow, this, &MailActionController::rebuildTagsMenu);
     }
 
@@ -226,6 +222,40 @@ namespace javelin::gui::shell
         m_actions.move.setEnabled(actions.move);
         m_actions.copy.setEnabled(actions.copy);
         m_actions.viewSource.setEnabled(actions.viewSource);
+    }
+
+    void MailActionController::rebuildTransferMenu(QMenu& menu, const bool move)
+    {
+        menu.clear();
+        const auto accountId = activeAccountId();
+        const auto sourceMailboxId = activeTabIsSearch() ? std::optional<std::string>{std::nullopt}
+                                                         : activeMailboxId();
+        if (!accountId.has_value() || (!sourceMailboxId.has_value() && !activeTabIsSearch()))
+        {
+            auto* unavailable = menu.addAction(i18n("No transfer destinations available"));
+            unavailable->setEnabled(false);
+            return;
+        }
+
+        const auto selection = m_commandController.selectedActionItems();
+        if (selection.empty())
+        {
+            auto* unavailable = menu.addAction(i18n("No messages selected"));
+            unavailable->setEnabled(false);
+            return;
+        }
+
+        if (move)
+            m_commandController.populateDestinationMenus(&menu, nullptr, *accountId,
+                                                         sourceMailboxId, selection);
+        else
+            m_commandController.populateDestinationMenus(nullptr, &menu, *accountId,
+                                                         sourceMailboxId, selection);
+        if (menu.actions().empty())
+        {
+            auto* unavailable = menu.addAction(i18n("No writable mailboxes available"));
+            unavailable->setEnabled(false);
+        }
     }
 
     void MailActionController::configureContextMenu(

@@ -2,6 +2,7 @@
 
 #include "app/MailApplicationPorts.h"
 #include "app/MessageSelection.h"
+#include "gui/shell/MessageTransferDestinationPresentation.h"
 #include "jmap/OperationError.h"
 
 #include <QModelIndex>
@@ -19,6 +20,7 @@ class QWidget;
 
 namespace javelin::jmap::cache
 {
+    class AccountReader;
     class MailboxReader;
 }
 
@@ -44,7 +46,9 @@ namespace javelin::gui::shell
 
       public:
         MessageCommandController(javelin::app::MailCommandPort& mailCommandPort,
+                                 javelin::jmap::cache::AccountReader& accountReader,
                                  javelin::jmap::cache::MailboxReader& mailboxReader,
+                                 MessageTransferAccountDisplayName accountDisplayName,
                                  QListView& messageView, QWidget* dialogParent,
                                  QObject* parent = nullptr);
 
@@ -63,8 +67,9 @@ namespace javelin::gui::shell
         void populateDestinationMenus(QMenu* moveMenu, QMenu* copyMenu, std::string accountId,
                                       std::optional<std::string> sourceMailboxId,
                                       javelin::app::MessageSelection selection);
-        void queueTransfer(std::string accountId, std::optional<std::string> sourceMailboxId,
-                           std::string destinationMailboxId,
+        void queueTransfer(std::string sourceAccountId,
+                           std::optional<std::string> sourceMailboxId,
+                           std::string destinationAccountId, std::string destinationMailboxId,
                            javelin::app::MessageSelection selection,
                            MessageTransferOperation operation, QString successMessage);
         void markEmailRead(std::string accountId, std::string emailId);
@@ -105,7 +110,9 @@ namespace javelin::gui::shell
         confirmPermanentDelete(const javelin::app::MessageSelection& selection) const;
 
         javelin::app::MailCommandPort& m_mailCommandPort;
+        javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::MailboxReader& m_mailboxReader;
+        MessageTransferAccountDisplayName m_accountDisplayName;
         QListView& m_messageView;
         QPointer<QWidget> m_dialogParent;
     };

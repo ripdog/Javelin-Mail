@@ -379,6 +379,8 @@ namespace javelin::gui::shell
         QAction* m_junkAction = nullptr;
         QAction* m_tagsAction = nullptr;
         QMenu* m_tagsMenu = nullptr;
+        QMenu* m_moveMenu = nullptr;
+        QMenu* m_copyMenu = nullptr;
         QAction* m_deleteAction = nullptr;
         QAction* m_permanentDeleteAction = nullptr;
         QAction* m_moveAction = nullptr;
