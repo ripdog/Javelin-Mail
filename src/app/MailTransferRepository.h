@@ -155,6 +155,11 @@ namespace javelin::app
         markDestinationDispatching(std::string_view itemId, MailTransferItemPhase expected,
                                    std::string_view destinationPreState);
         [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
+        markExistingDestinationCandidate(std::string_view itemId, MailTransferItemPhase expected,
+                                         std::string_view destinationEmailId,
+                                         std::string_view destinationPreState,
+                                         const std::vector<std::string>& priorMailboxIds);
+        [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
         markDestinationConfirmed(std::string_view itemId, MailTransferItemPhase expected,
                                  const MailTransferDestinationResult& destination);
 

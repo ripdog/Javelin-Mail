@@ -702,6 +702,29 @@ namespace javelin::app
         return query.numRowsAffected() == 1;
     }
 
+    std::variant<bool, DatabaseError> MailTransferRepository::markExistingDestinationCandidate(
+        const std::string_view itemId, const MailTransferItemPhase expected,
+        const std::string_view destinationEmailId, const std::string_view destinationPreState,
+        const std::vector<std::string>& priorMailboxIds)
+    {
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "UPDATE mail_transfer_items SET destination_email_id=:email_id,"
+            "destination_pre_state=:state,reused_existing=1,"
+            "destination_prior_mailbox_ids_json=:prior_mailboxes,last_error=NULL,"
+            "updated_at=CURRENT_TIMESTAMP WHERE item_id=:id AND phase=:expected"));
+        query.bindValue(QStringLiteral(":email_id"),
+                        QString::fromStdString(std::string{destinationEmailId}));
+        query.bindValue(QStringLiteral(":state"),
+                        QString::fromStdString(std::string{destinationPreState}));
+        query.bindValue(QStringLiteral(":prior_mailboxes"), serializeStrings(priorMailboxIds));
+        query.bindValue(QStringLiteral(":id"), QString::fromStdString(std::string{itemId}));
+        query.bindValue(QStringLiteral(":expected"), toString(expected));
+        if (!query.exec())
+            return queryError(QStringLiteral("Record existing mail transfer destination"), query);
+        return query.numRowsAffected() == 1;
+    }
+
     std::variant<bool, DatabaseError> MailTransferRepository::markDestinationConfirmed(
         const std::string_view itemId, const MailTransferItemPhase expected,
         const MailTransferDestinationResult& destination)

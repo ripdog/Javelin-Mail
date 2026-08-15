@@ -6,6 +6,7 @@
 #include "jmap/api/BlobUpload.h"
 #include "jmap/api/MailMethods.h"
 #include "jmap/api/MethodCaller.h"
+#include "jmap/api/PatchObject.h"
 #include "jmap/api/RequestBuilder.h"
 #include "jmap/api/ResponseReader.h"
 #include "jmap/api/Session.h"
@@ -17,6 +18,7 @@
 #include <KLocalizedString>
 
 #include <algorithm>
+#include <ranges>
 #include <unordered_map>
 #include <utility>
 
@@ -668,23 +670,307 @@ namespace javelin::app
                         rejected->second.type == "alreadyExists" &&
                         rejected->second.existingId.has_value())
                     {
-                        const QString message = i18n(
-                            "The destination already contains an equivalent message (%1). Its "
-                            "mailbox membership must be reconciled before this transfer can "
-                            "continue.",
-                            QString::fromStdString(*rejected->second.existingId));
-                        if (const auto transitionError = requireTransition(
-                                repository.transitionItem(
+                        const std::string existingId = *rejected->second.existingId;
+                        const auto existingRequest = javelin::jmap::api::emailGet({
+                            .accountId = destinationAccount.remoteAccountId,
+                            .ids = std::vector<std::string>{existingId},
+                            .idsReference = std::nullopt,
+                            .properties = std::vector<std::string>{
+                                "id", "blobId", "threadId", "mailboxIds", "keywords", "size",
+                                "receivedAt"},
+                        });
+                        if (!existingRequest.has_value())
+                            co_return stateError(
+                                i18n("Unable to encode the existing destination Email/get request."));
+                        javelin::jmap::api::RequestBuilder existingBuilder;
+                        existingBuilder.useCore().useMail();
+                        const auto existingHandle =
+                            existingBuilder.call(*existingRequest, "mail-transfer-existing");
+                        auto existingCalled =
+                            co_await methodCaller.call(destinationRequestContext, existingBuilder);
+                        if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(
+                                existingCalled))
+                        {
+                            const auto error = callerError(existingCalled);
+                            if (retryable(error))
+                            {
+                                if (const auto transitionError = requireTransition(
+                                        repository.transitionItem(
+                                            item.itemId,
+                                            MailTransferItemPhase::CreatingDestination,
+                                            MailTransferItemPhase::Uploaded, error.message),
+                                        i18n("The transfer state changed while retrying duplicate "
+                                             "destination lookup.")))
+                                    co_return *transitionError;
+                                item.phase = MailTransferItemPhase::Uploaded;
+                                if (const auto databaseError = repository.updateStatus(
+                                        operation.operationId, waitStatus(error), error.message))
+                                    co_return javelin::jmap::operationError(*databaseError);
+                                co_return error;
+                            }
+                            if (const auto transitionError = requireTransition(
+                                    repository.transitionItem(
+                                        item.itemId, MailTransferItemPhase::CreatingDestination,
+                                        MailTransferItemPhase::Failed, error.message),
+                                    i18n("The transfer state changed while failing duplicate "
+                                         "destination lookup.")))
+                                co_return *transitionError;
+                            if (const auto pinError = releaseSourcePin(repository, item.itemId))
+                                co_return *pinError;
+                            item.phase = MailTransferItemPhase::Failed;
+                            item.lastError = error.message;
+                            continue;
+                        }
+
+                        const auto existingRead = javelin::jmap::api::ResponseReader{
+                            std::get<javelin::jmap::api::ResponseEnvelope>(existingCalled)}
+                                                      .require(existingHandle);
+                        if (const auto* readError =
+                                std::get_if<javelin::jmap::api::ResponseReaderError>(&existingRead))
+                        {
+                            const auto error = javelin::jmap::operationError(*readError);
+                            if (const auto transitionError = requireTransition(
+                                    repository.transitionItem(
+                                        item.itemId, MailTransferItemPhase::CreatingDestination,
+                                        MailTransferItemPhase::Failed, error.message),
+                                    i18n("The transfer state changed while failing duplicate "
+                                         "destination lookup.")))
+                                co_return *transitionError;
+                            if (const auto pinError = releaseSourcePin(repository, item.itemId))
+                                co_return *pinError;
+                            item.phase = MailTransferItemPhase::Failed;
+                            item.lastError = error.message;
+                            continue;
+                        }
+
+                        const auto& existingResponse =
+                            std::get<javelin::jmap::api::EmailGetResponse>(existingRead);
+                        const bool validExisting =
+                            existingResponse.accountId == destinationAccount.remoteAccountId &&
+                            !existingResponse.state.empty() && existingResponse.list.size() == 1 &&
+                            existingResponse.list.front().id == existingId &&
+                            existingResponse.notFound.empty();
+                        if (!validExisting)
+                        {
+                            const QString message = i18n(
+                                "The destination reported an existing equivalent message, but it "
+                                "could not be verified authoritatively.");
+                            if (const auto transitionError = requireTransition(
+                                    repository.transitionItem(
+                                        item.itemId, MailTransferItemPhase::CreatingDestination,
+                                        MailTransferItemPhase::Failed, message),
+                                    i18n("The transfer state changed while failing duplicate "
+                                         "destination verification.")))
+                                co_return *transitionError;
+                            if (const auto pinError = releaseSourcePin(repository, item.itemId))
+                                co_return *pinError;
+                            item.phase = MailTransferItemPhase::Failed;
+                            item.lastError = message;
+                            continue;
+                        }
+
+                        const auto& existingEmail = existingResponse.list.front();
+                        auto priorMailboxIds = existingEmail.mailboxIds;
+                        std::ranges::sort(priorMailboxIds);
+                        if (const auto candidateError = requireTransition(
+                                repository.markExistingDestinationCandidate(
                                     item.itemId, MailTransferItemPhase::CreatingDestination,
-                                    MailTransferItemPhase::DestinationUnknown, message),
-                                i18n("The transfer state changed while recording duplicate "
-                                     "destination reconciliation.")))
-                            co_return *transitionError;
-                        item.phase = MailTransferItemPhase::DestinationUnknown;
-                        item.lastError = message;
-                        continue;
+                                    existingId, existingResponse.state, priorMailboxIds),
+                                i18n("The transfer state changed while recording the existing "
+                                     "destination message.")))
+                            co_return *candidateError;
+                        item.destinationEmailId = existingId;
+                        item.destinationPreState = existingResponse.state;
+                        item.destinationPriorMailboxIds = priorMailboxIds;
+                        item.reusedExisting = true;
+
+                        if (!std::ranges::contains(priorMailboxIds,
+                                                   operation.destinationMailboxId))
+                        {
+                            javelin::jmap::api::EmailSetUpdate update;
+                            update.patch.emplace(
+                                javelin::jmap::api::patchPath(
+                                    "mailboxIds", operation.destinationMailboxId),
+                                true);
+                            const auto setRequest = javelin::jmap::api::emailSet({
+                                .accountId = destinationAccount.remoteAccountId,
+                                .ifInState = existingResponse.state,
+                                .create = {},
+                                .update = {{existingId, std::move(update)}},
+                                .destroy = {},
+                            });
+                            if (!setRequest.has_value())
+                                co_return stateError(
+                                    i18n("Unable to encode the destination Email/set request."));
+                            javelin::jmap::api::RequestBuilder setBuilder;
+                            setBuilder.useCore().useMail();
+                            const auto setHandle =
+                                setBuilder.call(*setRequest, "mail-transfer-existing-mailbox");
+                            bool setDispatched = false;
+                            auto setCalled = co_await methodCaller.call(
+                                destinationRequestContext, setBuilder, {},
+                                [&setDispatched] { setDispatched = true; });
+                            if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(
+                                    setCalled))
+                            {
+                                const auto error = callerError(setCalled);
+                                if (setDispatched)
+                                {
+                                    if (const auto transitionError = requireTransition(
+                                            repository.transitionItem(
+                                                item.itemId,
+                                                MailTransferItemPhase::CreatingDestination,
+                                                MailTransferItemPhase::DestinationUnknown,
+                                                error.message),
+                                            i18n("The transfer state changed while recording an "
+                                                 "unknown duplicate membership outcome.")))
+                                        co_return *transitionError;
+                                    item.phase = MailTransferItemPhase::DestinationUnknown;
+                                    item.lastError = error.message;
+                                    continue;
+                                }
+                                if (retryable(error))
+                                {
+                                    if (const auto transitionError = requireTransition(
+                                            repository.transitionItem(
+                                                item.itemId,
+                                                MailTransferItemPhase::CreatingDestination,
+                                                MailTransferItemPhase::Uploaded, error.message),
+                                            i18n("The transfer state changed after a pre-dispatch "
+                                                 "duplicate membership failure.")))
+                                        co_return *transitionError;
+                                    item.phase = MailTransferItemPhase::Uploaded;
+                                    if (const auto databaseError = repository.updateStatus(
+                                            operation.operationId, waitStatus(error), error.message))
+                                        co_return javelin::jmap::operationError(*databaseError);
+                                    co_return error;
+                                }
+                                if (const auto transitionError = requireTransition(
+                                        repository.transitionItem(
+                                            item.itemId,
+                                            MailTransferItemPhase::CreatingDestination,
+                                            MailTransferItemPhase::Failed, error.message),
+                                        i18n("The transfer state changed while failing duplicate "
+                                             "membership update.")))
+                                    co_return *transitionError;
+                                if (const auto pinError =
+                                        releaseSourcePin(repository, item.itemId))
+                                    co_return *pinError;
+                                item.phase = MailTransferItemPhase::Failed;
+                                item.lastError = error.message;
+                                continue;
+                            }
+
+                            const auto setRead = javelin::jmap::api::ResponseReader{
+                                std::get<javelin::jmap::api::ResponseEnvelope>(setCalled)}
+                                                     .require(setHandle);
+                            if (const auto* readError =
+                                    std::get_if<javelin::jmap::api::ResponseReaderError>(&setRead))
+                            {
+                                const auto error = javelin::jmap::operationError(*readError);
+                                if (const auto transitionError = requireTransition(
+                                        repository.transitionItem(
+                                            item.itemId,
+                                            MailTransferItemPhase::CreatingDestination,
+                                            MailTransferItemPhase::DestinationUnknown,
+                                            error.message),
+                                        i18n("The transfer state changed while recording an "
+                                             "unknown duplicate membership response.")))
+                                    co_return *transitionError;
+                                item.phase = MailTransferItemPhase::DestinationUnknown;
+                                item.lastError = error.message;
+                                continue;
+                            }
+
+                            const auto& setResponse =
+                                std::get<javelin::jmap::api::EmailSetResponse>(setRead);
+                            if (setResponse.accountId != destinationAccount.remoteAccountId)
+                            {
+                                const QString message =
+                                    i18n("Email/set returned the wrong destination account id.");
+                                if (const auto transitionError = requireTransition(
+                                        repository.transitionItem(
+                                            item.itemId,
+                                            MailTransferItemPhase::CreatingDestination,
+                                            MailTransferItemPhase::DestinationUnknown, message),
+                                        i18n("The transfer state changed while recording an "
+                                             "unknown duplicate membership response.")))
+                                    co_return *transitionError;
+                                item.phase = MailTransferItemPhase::DestinationUnknown;
+                                item.lastError = message;
+                                continue;
+                            }
+                            if (!std::ranges::contains(setResponse.updated, existingId))
+                            {
+                                if (std::ranges::contains(setResponse.notUpdated, existingId))
+                                {
+                                    const QString message = i18n(
+                                        "The destination rejected adding the existing message to "
+                                        "the selected mailbox.");
+                                    if (const auto transitionError = requireTransition(
+                                            repository.transitionItem(
+                                                item.itemId,
+                                                MailTransferItemPhase::CreatingDestination,
+                                                MailTransferItemPhase::Failed, message),
+                                            i18n("The transfer state changed while recording "
+                                                 "duplicate membership rejection.")))
+                                        co_return *transitionError;
+                                    if (const auto pinError =
+                                            releaseSourcePin(repository, item.itemId))
+                                        co_return *pinError;
+                                    item.phase = MailTransferItemPhase::Failed;
+                                    item.lastError = message;
+                                    continue;
+                                }
+
+                                const QString message = i18n(
+                                    "Email/set did not account for the existing destination "
+                                    "message membership update.");
+                                if (const auto transitionError = requireTransition(
+                                        repository.transitionItem(
+                                            item.itemId,
+                                            MailTransferItemPhase::CreatingDestination,
+                                            MailTransferItemPhase::DestinationUnknown, message),
+                                        i18n("The transfer state changed while recording an "
+                                             "unknown duplicate membership response.")))
+                                    co_return *transitionError;
+                                item.phase = MailTransferItemPhase::DestinationUnknown;
+                                item.lastError = message;
+                                continue;
+                            }
+                        }
+
+                        if (item.phase == MailTransferItemPhase::CreatingDestination)
+                        {
+                            if (const auto confirmedError = requireTransition(
+                                    repository.markDestinationConfirmed(
+                                        item.itemId,
+                                        MailTransferItemPhase::CreatingDestination,
+                                        {
+                                            .emailId = existingEmail.id,
+                                            .blobId = existingEmail.blobId.empty()
+                                                          ? std::nullopt
+                                                          : std::optional<std::string>{
+                                                                existingEmail.blobId},
+                                            .threadId = existingEmail.threadId.empty()
+                                                            ? std::nullopt
+                                                            : std::optional<std::string>{
+                                                                  existingEmail.threadId},
+                                            .size = existingEmail.size,
+                                            .reusedExisting = true,
+                                            .priorMailboxIds = priorMailboxIds,
+                                        }),
+                                    i18n("The transfer state changed while confirming the "
+                                         "existing destination message.")))
+                                co_return *confirmedError;
+                            item.destinationBlobId = existingEmail.blobId;
+                            item.destinationThreadId = existingEmail.threadId;
+                            item.destinationSize = existingEmail.size;
+                            item.phase = MailTransferItemPhase::DestinationConfirmed;
+                        }
                     }
-                    if (rejected != importResponse.notCreated.end())
+                    if (item.phase == MailTransferItemPhase::CreatingDestination &&
+                        rejected != importResponse.notCreated.end())
                     {
                         const QString message = rejected->second.description.has_value()
                                                     ? QString::fromStdString(
@@ -707,18 +993,21 @@ namespace javelin::app
                         continue;
                     }
 
-                    const QString message = i18n(
-                        "Email/import did not account for the requested destination creation.");
-                    if (const auto transitionError = requireTransition(
-                            repository.transitionItem(
-                                item.itemId, MailTransferItemPhase::CreatingDestination,
-                                MailTransferItemPhase::DestinationUnknown, message),
-                            i18n("The transfer state changed while recording an unknown "
-                                 "destination response.")))
-                        co_return *transitionError;
-                    item.phase = MailTransferItemPhase::DestinationUnknown;
-                    item.lastError = message;
-                    continue;
+                    if (item.phase == MailTransferItemPhase::CreatingDestination)
+                    {
+                        const QString message = i18n(
+                            "Email/import did not account for the requested destination creation.");
+                        if (const auto transitionError = requireTransition(
+                                repository.transitionItem(
+                                    item.itemId, MailTransferItemPhase::CreatingDestination,
+                                    MailTransferItemPhase::DestinationUnknown, message),
+                                i18n("The transfer state changed while recording an unknown "
+                                     "destination response.")))
+                            co_return *transitionError;
+                        item.phase = MailTransferItemPhase::DestinationUnknown;
+                        item.lastError = message;
+                        continue;
+                    }
                 }
             }
 

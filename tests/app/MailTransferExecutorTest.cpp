@@ -246,6 +246,9 @@ namespace
         Reject,
         DispatchedFailure,
         PreDispatchFailure,
+        AlreadyExistsInTarget,
+        AlreadyExistsNeedsMembership,
+        DuplicateMembershipDispatchedFailure,
     };
 
     class RecordingMethodTransport final : public javelin::jmap::api::JmapMethodTransport
@@ -253,8 +256,11 @@ namespace
       public:
         ImportBehavior behavior = ImportBehavior::Success;
         int stateCalls = 0;
+        int existingGetCalls = 0;
         int importCalls = 0;
+        int setCalls = 0;
         std::string importArguments;
+        std::string setArguments;
 
         [[nodiscard]] QCoro::Task<JmapMethodTransportResult>
         call(JmapMethodRequest request) override
@@ -263,14 +269,62 @@ namespace
             const auto& method = request.envelope.methodCalls.front();
             if (method.name == "Email/get")
             {
-                ++stateCalls;
                 if (request.dispatched)
                     request.dispatched();
+                if (method.arguments.find("existing-email") != std::string::npos)
+                {
+                    ++existingGetCalls;
+                    const bool inTarget = behavior == ImportBehavior::AlreadyExistsInTarget;
+                    const auto mailboxIds =
+                        inTarget ? R"({"archive":true,"old-mailbox":true})"
+                                 : R"({"old-mailbox":true})";
+                    const auto response =
+                        std::string{R"({"accountId":"u1","state":"destination-state-existing","list":[{"id":"existing-email","blobId":"existing-blob","threadId":"existing-thread","mailboxIds":)"} +
+                        mailboxIds +
+                        R"(,"keywords":{"destination-tag":true},"size":91,"receivedAt":"2026-08-14T00:00:00Z"}],"notFound":[]})";
+                    co_return ResponseEnvelope{
+                        .methodResponses = {{.name = "Email/get",
+                                             .arguments = response,
+                                             .callId = method.callId}},
+                        .createdIds = std::nullopt,
+                        .sessionState = "session-state",
+                    };
+                }
+
+                ++stateCalls;
                 co_return ResponseEnvelope{
                     .methodResponses = {{.name = "Email/get",
                                          .arguments =
                                              R"({"accountId":"u1","state":"destination-state-1","list":[],"notFound":[]})",
                                          .callId = method.callId}},
+                    .createdIds = std::nullopt,
+                    .sessionState = "session-state",
+                };
+            }
+
+            if (method.name == "Email/set")
+            {
+                ++setCalls;
+                setArguments = method.arguments;
+                if (request.dispatched)
+                    request.dispatched();
+                if (behavior == ImportBehavior::DuplicateMembershipDispatchedFailure)
+                {
+                    co_return TransportError{
+                        .code = TransportErrorCode::NetworkFailure,
+                        .message = "connection lost after duplicate membership dispatch",
+                        .httpStatus = std::nullopt,
+                        .networkError = std::nullopt,
+                        .retryAfter = std::nullopt,
+                    };
+                }
+                co_return ResponseEnvelope{
+                    .methodResponses = {{
+                        .name = "Email/set",
+                        .arguments =
+                            R"({"accountId":"u1","oldState":"destination-state-existing","newState":"destination-state-membership","created":{},"updated":{"existing-email":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+                        .callId = method.callId,
+                    }},
                     .createdIds = std::nullopt,
                     .sessionState = "session-state",
                 };
@@ -311,6 +365,22 @@ namespace
             {
                 const auto response = QStringLiteral(
                                           R"({"accountId":"u1","oldState":"destination-state-1","newState":"destination-state-1","created":{},"notCreated":{"%1":{"type":"overQuota","description":"Mailbox quota exceeded","properties":[]}}})")
+                                          .arg(creationId)
+                                          .toStdString();
+                co_return ResponseEnvelope{
+                    .methodResponses = {{.name = "Email/import",
+                                         .arguments = response,
+                                         .callId = method.callId}},
+                    .createdIds = std::nullopt,
+                    .sessionState = "session-state",
+                };
+            }
+            if (behavior == ImportBehavior::AlreadyExistsInTarget ||
+                behavior == ImportBehavior::AlreadyExistsNeedsMembership ||
+                behavior == ImportBehavior::DuplicateMembershipDispatchedFailure)
+            {
+                const auto response = QStringLiteral(
+                                          R"({"accountId":"u1","oldState":"destination-state-1","newState":"destination-state-1","created":{},"notCreated":{"%1":{"type":"alreadyExists","existingId":"existing-email","properties":[]}}})")
                                           .arg(creationId)
                                           .toStdString();
                 co_return ResponseEnvelope{
@@ -616,4 +686,98 @@ TEST_CASE("failure before Email import dispatch returns to uploaded phase and re
     CHECK(fixture.resourceTransport.sendFromFileCalls == 1);
     CHECK(fixture.methodTransport.importCalls == 2);
     CHECK(fixture.pinCount() == 0);
+}
+
+TEST_CASE("already-existing destination in target mailbox is reused without changing its state",
+          "[app][mail-transfer][executor][duplicate]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    fixture.methodTransport.behavior = ImportBehavior::AlreadyExistsInTarget;
+    const auto operationId = fixture.prepare(MailTransferOperation::Copy);
+
+    const auto result = fixture.execute(operationId);
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        FAIL(error->message.toStdString());
+    REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(result));
+    CHECK(std::get<MailTransferExecutionSummary>(result).status == MailTransferStatus::Complete);
+    CHECK(fixture.methodTransport.existingGetCalls == 1);
+    CHECK(fixture.methodTransport.setCalls == 0);
+    const auto item = fixture.item(operationId);
+    CHECK(item.phase == MailTransferItemPhase::Complete);
+    CHECK(item.reusedExisting);
+    CHECK(item.destinationEmailId == std::optional<std::string>{"existing-email"});
+    CHECK(item.destinationBlobId == std::optional<std::string>{"existing-blob"});
+    CHECK(item.destinationThreadId == std::optional<std::string>{"existing-thread"});
+    CHECK(item.destinationPriorMailboxIds ==
+          std::optional<std::vector<std::string>>{{"archive", "old-mailbox"}});
+    CHECK(fixture.pinCount() == 0);
+    CHECK(fixture.sourceStillExists());
+}
+
+TEST_CASE("already-existing destination outside target gains only target mailbox membership",
+          "[app][mail-transfer][executor][duplicate]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    fixture.methodTransport.behavior = ImportBehavior::AlreadyExistsNeedsMembership;
+    const auto operationId = fixture.prepare(MailTransferOperation::Copy);
+
+    const auto result = fixture.execute(operationId);
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        FAIL(error->message.toStdString());
+    REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(result));
+    CHECK(std::get<MailTransferExecutionSummary>(result).status == MailTransferStatus::Complete);
+    CHECK(fixture.methodTransport.existingGetCalls == 1);
+    CHECK(fixture.methodTransport.setCalls == 1);
+    CHECK(fixture.methodTransport.setArguments.find("mailboxIds/archive") != std::string::npos);
+    CHECK(fixture.methodTransport.setArguments.find("keywords") == std::string::npos);
+    CHECK(fixture.methodTransport.setArguments.find(
+              "\"ifInState\":\"destination-state-existing\"") != std::string::npos);
+    const auto item = fixture.item(operationId);
+    CHECK(item.phase == MailTransferItemPhase::Complete);
+    CHECK(item.reusedExisting);
+    CHECK(item.destinationEmailId == std::optional<std::string>{"existing-email"});
+    CHECK(item.destinationPriorMailboxIds ==
+          std::optional<std::vector<std::string>>{{"old-mailbox"}});
+    CHECK(fixture.pinCount() == 0);
+    CHECK(fixture.sourceStillExists());
+}
+
+TEST_CASE("lost duplicate mailbox update response keeps durable reconciliation evidence",
+          "[app][mail-transfer][executor][duplicate][ambiguity]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    fixture.methodTransport.behavior = ImportBehavior::DuplicateMembershipDispatchedFailure;
+    const auto operationId = fixture.prepare(MailTransferOperation::Move);
+
+    const auto first = fixture.execute(operationId);
+    REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(first));
+    CHECK(std::get<MailTransferExecutionSummary>(first).status ==
+          MailTransferStatus::BlockedUnknown);
+    const auto item = fixture.item(operationId);
+    CHECK(item.phase == MailTransferItemPhase::DestinationUnknown);
+    CHECK(item.reusedExisting);
+    CHECK(item.destinationEmailId == std::optional<std::string>{"existing-email"});
+    CHECK(item.destinationPreState ==
+          std::optional<std::string>{"destination-state-existing"});
+    CHECK(item.destinationPriorMailboxIds ==
+          std::optional<std::vector<std::string>>{{"old-mailbox"}});
+    CHECK(fixture.pinCount() == 1);
+    CHECK(fixture.sourceStillExists());
+    const int setCount = fixture.methodTransport.setCalls;
+    const int importCount = fixture.methodTransport.importCalls;
+
+    fixture.methodTransport.behavior = ImportBehavior::Success;
+    const auto second = fixture.execute(operationId);
+    REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(second));
+    CHECK(std::get<MailTransferExecutionSummary>(second).status ==
+          MailTransferStatus::BlockedUnknown);
+    CHECK(fixture.methodTransport.setCalls == setCount);
+    CHECK(fixture.methodTransport.importCalls == importCount);
+    CHECK(fixture.sourceStillExists());
 }
