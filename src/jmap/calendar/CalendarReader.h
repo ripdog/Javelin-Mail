@@ -55,6 +55,9 @@ namespace javelin::jmap::calendar
         [[nodiscard]] virtual CalendarLoadResult
         loadCached(std::string_view accountId, const VisibleInterval& interval,
                    const TimeZoneId& displayTimeZone) const = 0;
+        [[nodiscard]] virtual CalendarLoadResult
+        loadRangeSnapshot(std::string_view accountId, const VisibleInterval& interval,
+                          const TimeZoneId& displayTimeZone) const = 0;
         [[nodiscard]] virtual CalendarAccountsResult accounts() const = 0;
         [[nodiscard]] virtual CalendarListResult calendars(std::string_view accountId) const = 0;
         [[nodiscard]] virtual ParticipantIdentityListResult

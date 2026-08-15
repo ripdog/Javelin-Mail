@@ -96,6 +96,10 @@ namespace javelin::jmap::cache
         loadWindow(std::string_view accountId, const calendar::LocalDateTime& start,
                    const calendar::LocalDateTime& end,
                    const calendar::TimeZoneId& displayTimeZone) const;
+        [[nodiscard]] std::variant<CalendarWindow, DatabaseError>
+        loadRangeSnapshot(std::string_view accountId, const calendar::LocalDateTime& start,
+                          const calendar::LocalDateTime& end,
+                          const calendar::TimeZoneId& displayTimeZone) const;
 
       private:
         DatabaseConnection& m_connection;

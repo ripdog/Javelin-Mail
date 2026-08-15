@@ -1486,4 +1486,82 @@ namespace javelin::jmap::cache
         }
         return std::optional<CalendarWindow>{std::move(result)};
     }
+
+    std::variant<CalendarWindow, DatabaseError> CalendarRepository::loadRangeSnapshot(
+        const std::string_view accountId, const calendar::LocalDateTime& start,
+        const calendar::LocalDateTime& end, const calendar::TimeZoneId& displayTimeZone) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        std::string eventState;
+        auto state = stateToken(accountId, "CalendarEvent");
+        if (const auto* stateError = std::get_if<DatabaseError>(&state))
+            return *stateError;
+        if (const auto& value = std::get<std::optional<std::string>>(state); value.has_value())
+            eventState = *value;
+
+        CalendarWindow result{
+            .accountId = std::string{accountId},
+            .start = start,
+            .end = end,
+            .displayTimeZone = displayTimeZone,
+            .queryState = {},
+            .eventState = std::move(eventState),
+            .events = {},
+            .occurrences = {},
+        };
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT o.occurrence_id,o.event_id,o.recurrence_id,o.start_utc,o.end_utc,o.local_start,"
+            "o.local_end,o.is_all_day,e.document_json FROM calendar_occurrences o JOIN "
+            "calendar_events e ON e.account_id=o.account_id AND e.event_id=o.event_id WHERE "
+            "o.account_id=:account AND o.local_start < :end AND o.local_end > :start ORDER BY "
+            "o.local_start,o.local_end,o.occurrence_id"));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":start"), QString::fromStdString(start.value));
+        query.bindValue(QStringLiteral(":end"), QString::fromStdString(end.value));
+        if (!query.exec())
+            return queryError(QStringLiteral("Load calendar range snapshot"), query);
+
+        std::unordered_set<std::string> loadedEvents;
+        while (query.next())
+        {
+            const auto eventId = query.value(1).toString().toStdString();
+            result.occurrences.push_back(calendar::Occurrence{
+                .accountId = std::string{accountId},
+                .id = query.value(0).toString().toStdString(),
+                .eventId = eventId,
+                .recurrenceId =
+                    query.value(2).isNull()
+                        ? std::nullopt
+                        : std::optional<calendar::LocalDateTime>{{.value = query.value(2)
+                                                                               .toString()
+                                                                               .toStdString()}},
+                .localStart = {.value = query.value(5).toString().toStdString()},
+                .localEnd = {.value = query.value(6).toString().toStdString()},
+                .utcStart =
+                    query.value(3).isNull()
+                        ? std::nullopt
+                        : std::optional<calendar::UtcInstant>{{.value = query.value(3)
+                                                                            .toString()
+                                                                            .toStdString()}},
+                .utcEnd = query.value(4).isNull()
+                              ? std::nullopt
+                              : std::optional<calendar::UtcInstant>{{.value = query.value(4)
+                                                                                  .toString()
+                                                                                  .toStdString()}},
+                .allDay = query.value(7).toInt() != 0});
+            if (!loadedEvents.insert(eventId).second)
+                continue;
+            const auto parsed =
+                api::parseCalendarEventDocument(accountId, query.value(8).toString().toStdString());
+            if (!parsed.ok() || !parsed.value.has_value())
+                return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                     .message = QStringLiteral("Parse cached calendar event")};
+            result.events.push_back(*parsed.value);
+        }
+        return result;
+    }
 } // namespace javelin::jmap::cache

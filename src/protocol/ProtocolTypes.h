@@ -35,7 +35,7 @@ namespace javelin::protocol
     struct ProtocolVersion
     {
         std::uint16_t major = 5;
-        std::uint16_t minor = 11;
+        std::uint16_t minor = 12;
         friend bool operator==(const ProtocolVersion&, const ProtocolVersion&) = default;
     };
 

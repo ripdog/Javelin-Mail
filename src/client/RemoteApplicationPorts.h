@@ -46,6 +46,9 @@ namespace javelin::app
         loadCached(std::string_view accountId,
                    const javelin::jmap::calendar::VisibleInterval& interval,
                    const javelin::jmap::calendar::TimeZoneId& displayTimeZone) const override;
+        [[nodiscard]] javelin::jmap::calendar::CalendarLoadResult loadRangeSnapshot(
+            std::string_view accountId, const javelin::jmap::calendar::VisibleInterval& interval,
+            const javelin::jmap::calendar::TimeZoneId& displayTimeZone) const override;
         [[nodiscard]] javelin::jmap::calendar::CalendarAccountsResult accounts() const override;
         [[nodiscard]] javelin::jmap::calendar::CalendarListResult
         calendars(std::string_view accountId) const override;

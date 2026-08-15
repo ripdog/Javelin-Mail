@@ -53,6 +53,17 @@ namespace javelin::app
                     return acceptValue<actions::CalendarReadParticipantIdentities>(
                         id, m_services.calendarReader().participantIdentities(accountId));
                 });
+        case actions::CalendarReadRangeSnapshot::id.value:
+            return dispatchDecoded<actions::CalendarReadRangeSnapshot>(
+                id, command,
+                [this, &id](const std::string& accountId,
+                            const javelin::jmap::calendar::VisibleInterval& interval,
+                            const javelin::jmap::calendar::TimeZoneId& timeZone)
+                {
+                    return acceptValue<actions::CalendarReadRangeSnapshot>(
+                        id, m_services.calendarReader().loadRangeSnapshot(accountId, interval,
+                                                                          timeZone));
+                });
         case actions::CalendarRequestRange::id.value:
             return dispatchDecoded<actions::CalendarRequestRange>(
                 id, command,

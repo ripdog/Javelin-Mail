@@ -778,6 +778,20 @@ namespace javelin::jmap::calendar
         return std::get<std::optional<cache::CalendarWindow>>(std::move(loaded));
     }
 
+    CalendarLoadResult
+    CalendarCacheReader::loadRangeSnapshot(const std::string_view accountId,
+                                           const VisibleInterval& interval,
+                                           const TimeZoneId& displayTimeZone) const
+    {
+        cache::CalendarRepository repository{m_connection};
+        auto loaded =
+            repository.loadRangeSnapshot(accountId, interval.start, interval.end, displayTimeZone);
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&loaded))
+            return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        return std::optional<cache::CalendarWindow>{
+            std::get<cache::CalendarWindow>(std::move(loaded))};
+    }
+
     CalendarAccountsResult CalendarCacheReader::accounts() const
     {
         cache::CalendarRepository repository{m_connection};
@@ -3092,7 +3106,8 @@ namespace javelin::jmap::calendar
             materializedEvents.has_value() &&
             materializedQuery->ids.size() ==
                 materializedQuery->total.value_or(materializedQuery->ids.size()) &&
-            materializedEvents->notFound.empty())
+            materializedEvents->notFound.empty() &&
+            materializedEvents->list.size() == materializedQuery->ids.size())
         {
             auto cached = repository.loadWindow(request.accountId, materialization->interval.start,
                                                 materialization->interval.end,
@@ -3127,6 +3142,17 @@ namespace javelin::jmap::calendar
                         .utcEnd = expanded.utcEnd,
                         .allDay = expanded.showWithoutTime,
                     });
+                }
+                if (occurrences.size() != materializedEvents->list.size())
+                {
+                    qCWarning(logCalendarService)
+                        << "Accepted calendar edit returned unmappable materialized occurrences; "
+                           "retaining the existing range until refresh";
+                    std::get<CommittedMutation>(accepted).receipt.incompleteMaterialization = true;
+                    if (projectionCommitted)
+                        projectionCommitted();
+                    m_syncEngine.invalidateRefresh(ownerAccountId);
+                    co_return accepted;
                 }
                 (*window)->queryState = materializedQuery->queryState;
                 (*window)->eventState = response.newState;

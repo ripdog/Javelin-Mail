@@ -464,6 +464,82 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
     CHECK(count.value(0).toInt() == 12);
 }
 
+TEST_CASE("calendar range snapshots do not depend on query-window membership",
+          "[jmap][calendar][cache]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-range-snapshot"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    const javelin::jmap::calendar::Calendar work{
+        .accountId = "a1",
+        .id = "work",
+        .name = "Work",
+        .description = std::nullopt,
+        .color = "#2457a6",
+        .sortOrder = 0,
+        .isSubscribed = true,
+        .isVisible = true,
+        .isDefault = true,
+        .timeZone = std::nullopt,
+        .defaultAlertsWithTime = {},
+        .defaultAlertsWithoutTime = {},
+        .myRights = {.mayReadFreeBusy = true,
+                     .mayReadItems = true,
+                     .mayWriteAll = true,
+                     .mayWriteOwn = true,
+                     .mayUpdatePrivate = true,
+                     .mayRSVP = true,
+                     .mayShare = false,
+                     .mayDelete = true},
+    };
+    REQUIRE_FALSE(repository.replaceCalendars("a1", "calendar-1", {work}).has_value());
+    const javelin::jmap::calendar::TimeZoneId zone{.value = "Pacific/Auckland"};
+    const javelin::jmap::cache::CalendarWindow window{
+        .accountId = "a1",
+        .start = {.value = "2026-08-01T00:00:00"},
+        .end = {.value = "2026-09-01T00:00:00"},
+        .displayTimeZone = zone,
+        .queryState = "query-1",
+        .eventState = "event-1",
+        .events = {event("e1", "2026-08-15T09:00:00"), event("e2", "2026-08-15T11:00:00")},
+        .occurrences = {occurrence("e1", "2026-08-15T09:00:00"),
+                        occurrence("e2", "2026-08-15T11:00:00")},
+    };
+    REQUIRE_FALSE(repository.reconcileWindow(window).has_value());
+
+    QSqlQuery clearMembership{connection.database()};
+    REQUIRE(clearMembership.exec(QStringLiteral("DELETE FROM calendar_window_occurrences")));
+
+    const auto exact = repository.loadWindow("a1", window.start, window.end, zone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(exact));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(exact).has_value());
+    CHECK(
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(exact)->occurrences.empty());
+
+    const auto snapshot = repository.loadRangeSnapshot("a1", {.value = "2026-08-15T00:00:00"},
+                                                       {.value = "2026-08-16T00:00:00"}, zone);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::CalendarWindow>(snapshot));
+    const auto& range = std::get<javelin::jmap::cache::CalendarWindow>(snapshot);
+    REQUIRE(range.events.size() == 2);
+    REQUIRE(range.occurrences.size() == 2);
+    CHECK(range.events[0].id == "e1");
+    CHECK(range.events[1].id == "e2");
+    CHECK(range.occurrences[0].eventId == "e1");
+    CHECK(range.occurrences[1].eventId == "e2");
+    CHECK(range.eventState == "event-1");
+}
+
 TEST_CASE("calendar reminders are claimed once and can be snoozed or dismissed",
           "[jmap][calendar][notification]")
 {

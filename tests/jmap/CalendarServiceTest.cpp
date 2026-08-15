@@ -1042,6 +1042,138 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
           std::optional<std::string>{"calendar-default-resolved"});
 }
 
+TEST_CASE("calendar mutation materialization never drops an unmappable cached event",
+          "[jmap][calendar][service]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-mutation-materialization"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", session()).has_value());
+
+    javelin::jmap::cache::CalendarRepository calendars{connection};
+    const javelin::jmap::calendar::Calendar work{
+        .accountId = "a1",
+        .id = "work",
+        .name = "Work",
+        .description = std::nullopt,
+        .color = std::nullopt,
+        .sortOrder = 0,
+        .isSubscribed = true,
+        .isVisible = true,
+        .isDefault = true,
+        .timeZone = std::nullopt,
+        .defaultAlertsWithTime = {},
+        .defaultAlertsWithoutTime = {},
+        .myRights = {.mayReadFreeBusy = true,
+                     .mayReadItems = true,
+                     .mayWriteAll = true,
+                     .mayWriteOwn = true,
+                     .mayUpdatePrivate = true,
+                     .mayRSVP = true,
+                     .mayShare = false,
+                     .mayDelete = false},
+    };
+    REQUIRE_FALSE(calendars.replaceCalendars("a1", "calendar-state", {work}).has_value());
+    auto first = event();
+    first.title = "First";
+    auto second = event();
+    second.id = "event-2";
+    second.uid = "uid-2";
+    second.title = "Second";
+    second.start = {.value = "2026-07-13T11:00:00"};
+    const javelin::jmap::calendar::VisibleInterval interval{
+        .start = {.value = "2026-06-29T00:00:00"},
+        .end = {.value = "2026-08-10T00:00:00"},
+    };
+    const javelin::jmap::calendar::TimeZoneId zone{.value = "Pacific/Auckland"};
+    REQUIRE_FALSE(calendars
+                      .reconcileWindow({
+                          .accountId = "a1",
+                          .start = interval.start,
+                          .end = interval.end,
+                          .displayTimeZone = zone,
+                          .queryState = "query-state",
+                          .eventState = "event-state",
+                          .events = {first, second},
+                          .occurrences =
+                              {
+                                  {.accountId = "a1",
+                                   .id = "event-1",
+                                   .eventId = "event-1",
+                                   .recurrenceId = std::nullopt,
+                                   .localStart = first.start,
+                                   .localEnd = {.value = "2026-07-13T10:00:00"},
+                                   .utcStart = std::nullopt,
+                                   .utcEnd = std::nullopt,
+                                   .allDay = false},
+                                  {.accountId = "a1",
+                                   .id = "event-2",
+                                   .eventId = "event-2",
+                                   .recurrenceId = std::nullopt,
+                                   .localStart = second.start,
+                                   .localEnd = {.value = "2026-07-13T12:00:00"},
+                                   .utcStart = std::nullopt,
+                                   .utcEnd = std::nullopt,
+                                   .allDay = false},
+                              },
+                      })
+                      .has_value());
+
+    FakeMethodTransport transport;
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/set",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"event-state","newState":"event-state-2","created":{},"updated":{"event-1":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+              .callId = "calendar-event-set"},
+             {.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"query-state-2","canCalculateChanges":false,"position":0,"ids":["event-1","ghost"],"total":2})",
+              .callId = "calendar-event-materialization-query"},
+             {.name = "CalendarEvent/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"event-state-2","list":[{"@type":"Event","id":"event-1","uid":"uid-1","calendarIds":{"work":true},"title":"First updated","start":"2026-07-13T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true},{"@type":"Event","id":"ghost","uid":"ghost-uid","calendarIds":{"work":true},"title":"Ghost","start":"2026-07-13T13:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true}],"notFound":[]})",
+              .callId = "calendar-event-materialization-get"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-materialized",
+    });
+    javelin::jmap::calendar::CalendarCacheReader reader{connection};
+    javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
+    javelin::jmap::calendar::CalendarSyncEngine sync{connection, protocol};
+    javelin::jmap::calendar::CalendarMutationEngine mutation{connection, protocol, sync, reader};
+    first.title = "First updated";
+
+    const auto result = QCoro::waitFor(
+        mutation.update({.sessionUrl = "https://example.test/.well-known/jmap",
+                         .loginEmail = "alice@example.test",
+                         .apiKey = "secret"},
+                        "a1",
+                        {.accountId = "a1",
+                         .event = first,
+                         .operationGroupId = std::nullopt,
+                         .ifInState = std::nullopt,
+                         .materialization = javelin::jmap::calendar::CalendarRangeMaterialization{
+                             .interval = interval, .displayTimeZone = zone}}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
+    CHECK(std::get<javelin::jmap::calendar::CommittedMutation>(result)
+              .receipt.incompleteMaterialization);
+    const auto cached = calendars.loadWindow("a1", interval.start, interval.end, zone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(cached));
+    const auto& window = std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(cached);
+    REQUIRE(window.has_value());
+    CHECK(window->events.size() == 2);
+    CHECK(window->occurrences.size() == 2);
+    CHECK(std::ranges::find(window->events, "event-2",
+                            &javelin::jmap::calendar::CalendarEvent::id) != window->events.end());
+}
+
 TEST_CASE("calendar invitation responses use participant identities and RSVP rights",
           "[jmap][calendar][service][scheduling]")
 {

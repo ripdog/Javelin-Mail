@@ -17,6 +17,9 @@ namespace javelin::jmap::calendar
         [[nodiscard]] CalendarLoadResult
         loadCached(std::string_view accountId, const VisibleInterval& interval,
                    const TimeZoneId& displayTimeZone) const override;
+        [[nodiscard]] CalendarLoadResult
+        loadRangeSnapshot(std::string_view accountId, const VisibleInterval& interval,
+                          const TimeZoneId& displayTimeZone) const override;
         [[nodiscard]] CalendarAccountsResult accounts() const override;
         [[nodiscard]] CalendarListResult calendars(std::string_view accountId) const override;
         [[nodiscard]] ParticipantIdentityListResult

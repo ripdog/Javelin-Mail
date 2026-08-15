@@ -386,10 +386,9 @@ namespace javelin::gui::shell
             }
 
             const javelin::jmap::calendar::VisibleInterval interval{
-                .start = {.value = widget.visibleStart().toString(Qt::ISODate).toStdString() +
-                                   "T00:00:00"},
+                .start = {.value = date.toString(Qt::ISODate).toStdString() + "T00:00:00"},
                 .end = {.value =
-                            widget.visibleEnd().toString(Qt::ISODate).toStdString() + "T00:00:00"}};
+                            date.addDays(1).toString(Qt::ISODate).toStdString() + "T00:00:00"}};
             const javelin::jmap::calendar::TimeZoneId timeZone{
                 .value = QTimeZone::systemTimeZoneId().toStdString()};
 
@@ -404,7 +403,7 @@ namespace javelin::gui::shell
                     std::get_if<std::vector<javelin::jmap::calendar::ParticipantIdentity>>(
                         &identitiesResult);
                 const auto loaded =
-                    calendarReader.loadCached(account.accountId, interval, timeZone);
+                    calendarReader.loadRangeSnapshot(account.accountId, interval, timeZone);
                 const auto* window =
                     std::get_if<std::optional<javelin::jmap::cache::CalendarWindow>>(&loaded);
                 const auto configuredAddress =
