@@ -410,6 +410,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/DeferredSendRepository.h
     src/app/messages/MailTransferRepository.cpp
     src/app/MailTransferRepository.h
+    src/app/messages/MailTransferPlanning.cpp
+    src/app/MailTransferPlanning.h
     src/app/compose/DeferredSendService.cpp
     src/app/DeferredSendService.h
     src/app/DeveloperDiagnostics.h
@@ -1806,6 +1808,8 @@ add_library(javelin_daemon_core STATIC
     src/app/DeferredSendRepository.h
     src/app/messages/MailTransferRepository.cpp
     src/app/MailTransferRepository.h
+    src/app/messages/MailTransferPlanning.cpp
+    src/app/MailTransferPlanning.h
     src/app/compose/DeferredSendService.cpp
     src/app/DeferredSendService.h
     src/app/contacts/ContactCommandPreparation.cpp
