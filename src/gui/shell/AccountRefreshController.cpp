@@ -4,6 +4,7 @@
 #include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/GuiSettings.h"
 #include "jmap/cache/AccountReadRepository.h"
+#include "jmap/cache/MailboxReadRepository.h"
 
 #include <QCoroTask>
 
@@ -11,6 +12,7 @@
 
 #include <QDebug>
 
+#include <algorithm>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -20,9 +22,10 @@ namespace javelin::gui::shell
     AccountRefreshController::AccountRefreshController(
         javelin::gui::settings::GuiSettings& settings,
         javelin::app::AccountRefreshPort& commandPort,
-        javelin::jmap::cache::AccountReader& accountReader, QObject* parent)
+        javelin::jmap::cache::AccountReader& accountReader,
+        javelin::jmap::cache::MailboxReader& mailboxReader, QObject* parent)
         : QObject(parent), m_settings(settings), m_commandPort(commandPort),
-          m_accountReader(accountReader)
+          m_accountReader(accountReader), m_mailboxReader(mailboxReader)
     {
     }
 
@@ -49,6 +52,7 @@ namespace javelin::gui::shell
             return;
         }
 
+        const bool initialAccountBootstrap = settings.cachedAccountIds.isEmpty();
         m_refreshInFlight = true;
         Q_EMIT busyChanged(true);
         Q_EMIT statusMessage(i18n("Refreshing mail from server..."), 0);
@@ -66,7 +70,8 @@ namespace javelin::gui::shell
             javelin::gui::settings::toAccountBootstrapIntent(settings, std::move(mailboxIds)));
         QCoro::connect(
             std::move(task), this,
-            [this, settings = std::move(settings)](javelin::jmap::LiveRefreshResult result)
+            [this, settings = std::move(settings),
+             initialAccountBootstrap](javelin::jmap::LiveRefreshResult result)
             {
                 m_refreshInFlight = false;
                 Q_EMIT busyChanged(false);
@@ -82,6 +87,37 @@ namespace javelin::gui::shell
                 if (const auto error = m_settings.saveResolvedSessionUrl(
                         settings.id, QString::fromStdString(summary.resolvedSessionUrl)))
                     Q_EMIT userInterventionRequired(error->detail);
+
+                if (initialAccountBootstrap)
+                {
+                    const auto mailboxResult = m_mailboxReader.listMailboxTree(summary.accountId);
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxResult))
+                    {
+                        qWarning().noquote()
+                            << "Could not inspect Inbox for initial notification settings"
+                            << error->message;
+                        Q_EMIT userInterventionRequired(
+                            i18n("Could not configure the default Inbox notifications."));
+                        return;
+                    }
+                    const auto& mailboxes =
+                        std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(mailboxResult);
+                    const auto inbox =
+                        std::ranges::find(mailboxes, std::optional<std::string>{"inbox"},
+                                          &javelin::jmap::cache::MailboxTreeItem::role);
+                    if (inbox != mailboxes.end())
+                    {
+                        if (const auto error = m_settings.ensureNotificationMailboxSelected(
+                                QString::fromStdString(summary.accountId),
+                                QString::fromStdString(inbox->id)))
+                        {
+                            Q_EMIT userInterventionRequired(error->detail);
+                            return;
+                        }
+                    }
+                }
+
                 const auto ownedAccounts = m_accountReader.listOwnedBy(summary.accountId);
                 if (const auto* accounts =
                         std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(

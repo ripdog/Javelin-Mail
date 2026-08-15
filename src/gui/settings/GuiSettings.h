@@ -53,6 +53,8 @@ namespace javelin::gui::settings
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
         associateCachedAccount(const QString& configuredAccountId, const QString& cachedAccountId);
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
+        ensureNotificationMailboxSelected(const QString& accountId, const QString& mailboxId);
+        [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
         saveResolvedSessionUrl(const QString& configuredAccountId, const QString& sessionUrl);
         [[nodiscard]] QMetaObject::Connection connectChanged(QObject* context,
                                                              std::function<void()> callback);

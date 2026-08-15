@@ -10,6 +10,7 @@
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/QueryWindowReadRepository.h"
+#include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/sync/EmailMutationEngine.h"
 #include "jmap/sync/MutationJournal.h"
@@ -220,6 +221,50 @@ namespace
                           .has_value());
     }
 
+    void seedComposeSource(javelin::jmap::cache::DatabaseConnection& connection,
+                           const std::string& accountId, const std::string& emailId,
+                           const QByteArray& contentType, const QByteArray& body)
+    {
+        javelin::jmap::domain::Email email{
+            .id = emailId,
+            .blobId = emailId + "-blob",
+            .threadId = emailId + "-thread",
+            .mailboxIds = {},
+            .keywords = {},
+            .size = static_cast<std::uint64_t>(body.size()),
+            .receivedAt = "2026-08-15T00:00:00Z",
+            .sentAt = std::nullopt,
+            .messageId = {"<" + emailId + "@example.test>"},
+            .inReplyTo = {},
+            .references = {},
+            .hasAttachment = false,
+            .subject = "Source message",
+            .from = {{.name = "Alice", .email = "alice@example.test"}},
+            .to = {{.name = "Sender", .email = "sender@example.test"}},
+            .cc = {},
+            .bcc = {},
+            .replyTo = {},
+            .preview = std::nullopt,
+        };
+        javelin::jmap::cache::EmailRepository emails{connection};
+        REQUIRE_FALSE(emails.upsertMany(accountId, {email}).has_value());
+
+        QByteArray source = QByteArrayLiteral("From: Alice <alice@example.test>\r\n"
+                                              "To: Sender <sender@example.test>\r\n"
+                                              "Subject: Source message\r\n"
+                                              "MIME-Version: 1.0\r\n"
+                                              "Content-Type: ");
+        source += contentType;
+        source += QByteArrayLiteral("; charset=utf-8\r\n\r\n");
+        source += body;
+        javelin::jmap::cache::RawMessageSourceRepository sources{connection};
+        REQUIRE_FALSE(
+            sources
+                .upsert(accountId,
+                        {.emailId = email.id, .blobId = email.blobId, .payload = std::move(source)})
+                .has_value());
+    }
+
     [[nodiscard]] javelin::jmap::api::HttpResponse draftCreatedResponse()
     {
         return {
@@ -350,6 +395,115 @@ TEST_CASE("new compose sessions use the requested editor mode", "[jmap][submissi
     CHECK(snapshot.subject == std::optional<std::string>{"Mail link subject"});
     CHECK(snapshot.plainTextBody == "Mail link body");
     CHECK(snapshot.htmlBody == "<p>Mail link body</p>");
+    CHECK(transport.requests.empty());
+}
+
+TEST_CASE("reply and forward compose mode follows an HTML source instead of the global default",
+          "[jmap][submission][compose][reply][forward][html]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("compose-html-source-mode-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    seedAccount(connection, "account-2", "https://account-2.example.test/jmap", "identity-2",
+                "sender@example.test");
+    seedComposeSource(connection, "account-2", "source-html", QByteArrayLiteral("text/html"),
+                      QByteArrayLiteral("<p>Original <strong>HTML</strong> body</p>"));
+
+    FakeTransport transport;
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    ComposeCapabilities capabilities{connection, transport, methodTransport};
+
+    for (const auto mode : {javelin::jmap::submission::ComposeMode::Reply,
+                            javelin::jmap::submission::ComposeMode::ReplyAll,
+                            javelin::jmap::submission::ComposeMode::Forward})
+    {
+        const auto result = QCoro::waitFor(capabilities.service.open(
+            {
+                .sessionUrl = "https://account-2.example.test/.well-known/jmap",
+                .loginEmail = "shared-login@example.test",
+                .apiKey = "account-2-secret",
+            },
+            {
+                .accountId = "account-2",
+                .mode = mode,
+                .initialEditorMode = javelin::jmap::submission::BodyEditorMode::PlainText,
+                .referenceEmailId = "source-html",
+                .draftEmailId = std::nullopt,
+                .initialTo = {},
+                .initialCc = {},
+                .initialBcc = {},
+                .initialSubject = std::nullopt,
+                .initialBody = std::nullopt,
+                .useExistingWorkingCopy = true,
+                .composeSessionId = std::nullopt,
+            }));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::submission::DraftSnapshot>(result));
+        const auto& snapshot = std::get<javelin::jmap::submission::DraftSnapshot>(result);
+        CHECK(snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RichText);
+        CHECK(snapshot.htmlBody.find("<strong>HTML</strong>") != std::string::npos);
+    }
+    CHECK(transport.requests.empty());
+}
+
+TEST_CASE(
+    "reply and forward compose mode follows a plain-text source instead of the global default",
+    "[jmap][submission][compose][reply][forward][plain-text]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("compose-plain-source-mode-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    seedAccount(connection, "account-2", "https://account-2.example.test/jmap", "identity-2",
+                "sender@example.test");
+    seedComposeSource(connection, "account-2", "source-plain", QByteArrayLiteral("text/plain"),
+                      QByteArrayLiteral("Original plain-text body"));
+
+    FakeTransport transport;
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    ComposeCapabilities capabilities{connection, transport, methodTransport};
+
+    for (const auto mode : {javelin::jmap::submission::ComposeMode::Reply,
+                            javelin::jmap::submission::ComposeMode::ReplyAll,
+                            javelin::jmap::submission::ComposeMode::Forward})
+    {
+        const auto result = QCoro::waitFor(capabilities.service.open(
+            {
+                .sessionUrl = "https://account-2.example.test/.well-known/jmap",
+                .loginEmail = "shared-login@example.test",
+                .apiKey = "account-2-secret",
+            },
+            {
+                .accountId = "account-2",
+                .mode = mode,
+                .initialEditorMode = javelin::jmap::submission::BodyEditorMode::RichText,
+                .referenceEmailId = "source-plain",
+                .draftEmailId = std::nullopt,
+                .initialTo = {},
+                .initialCc = {},
+                .initialBcc = {},
+                .initialSubject = std::nullopt,
+                .initialBody = std::nullopt,
+                .useExistingWorkingCopy = true,
+                .composeSessionId = std::nullopt,
+            }));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::submission::DraftSnapshot>(result));
+        const auto& snapshot = std::get<javelin::jmap::submission::DraftSnapshot>(result);
+        CHECK(snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::PlainText);
+        CHECK(snapshot.plainTextBody.find("Original plain-text body") != std::string::npos);
+    }
     CHECK(transport.requests.empty());
 }
 

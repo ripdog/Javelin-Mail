@@ -184,6 +184,35 @@ namespace javelin::gui::settings
     }
 
     std::optional<javelin::protocol::BoundaryError>
+    GuiSettings::ensureNotificationMailboxSelected(const QString& accountId,
+                                                   const QString& mailboxId)
+    {
+        if (accountId.isEmpty() || mailboxId.isEmpty())
+            return std::nullopt;
+
+        auto selections = snapshot().notificationMailboxSelections;
+        auto selection = std::ranges::find(selections, accountId,
+                                           &javelin::protocol::MailboxSelectionSettings::accountId);
+        if (selection == selections.end())
+        {
+            selections.push_back({.accountId = accountId, .mailboxIds = {mailboxId}});
+            std::ranges::sort(selections, {},
+                              &javelin::protocol::MailboxSelectionSettings::accountId);
+        }
+        else
+        {
+            if (std::ranges::contains(selection->mailboxIds, mailboxId))
+                return std::nullopt;
+            selection->mailboxIds.push_back(mailboxId);
+            std::ranges::sort(selection->mailboxIds);
+        }
+
+        javelin::protocol::SettingsUpdate update;
+        update.notificationMailboxSelections = std::move(selections);
+        return this->update(std::move(update));
+    }
+
+    std::optional<javelin::protocol::BoundaryError>
     GuiSettings::saveResolvedSessionUrl(const QString& configuredAccountId,
                                         const QString& sessionUrl)
     {

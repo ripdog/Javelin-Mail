@@ -81,6 +81,38 @@ TEST_CASE("GUI settings keep absent mailbox selections empty", "[gui][settings][
     CHECK(settings.notificationMailboxIds(QStringLiteral("account-1")).isEmpty());
 }
 
+TEST_CASE("GUI settings add an Inbox notification selection without changing sync settings",
+          "[gui][settings][mailbox][notifications]")
+{
+    javelin::protocol::SettingsSnapshot snapshot;
+    snapshot.revision = {.value = 11};
+    snapshot.syncedMailboxSelections = {
+        {.accountId = QStringLiteral("account-1"), .mailboxIds = {QStringLiteral("archive")}},
+    };
+    snapshot.notificationMailboxSelections = {
+        {.accountId = QStringLiteral("account-2"), .mailboxIds = {QStringLiteral("other-inbox")}},
+    };
+    javelin::gui::settings::GuiSettings settings{std::move(snapshot)};
+
+    REQUIRE_FALSE(
+        settings
+            .ensureNotificationMailboxSelected(QStringLiteral("account-1"), QStringLiteral("inbox"))
+            .has_value());
+    CHECK(settings.notificationMailboxIds(QStringLiteral("account-1")) ==
+          QStringList{QStringLiteral("inbox")});
+    CHECK(settings.syncedMailboxIds(QStringLiteral("account-1")) ==
+          QStringList{QStringLiteral("archive")});
+    CHECK(settings.notificationMailboxIds(QStringLiteral("account-2")) ==
+          QStringList{QStringLiteral("other-inbox")});
+    CHECK(settings.snapshot().revision.value == 12);
+
+    REQUIRE_FALSE(
+        settings
+            .ensureNotificationMailboxSelected(QStringLiteral("account-1"), QStringLiteral("inbox"))
+            .has_value());
+    CHECK(settings.snapshot().revision.value == 12);
+}
+
 TEST_CASE("compose format preference persists through workspace settings",
           "[gui][settings][compose]")
 {

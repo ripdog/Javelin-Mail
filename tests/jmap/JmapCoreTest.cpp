@@ -189,7 +189,9 @@ TEST_CASE("AccountBootstrapClient does not invent an initial mailbox when none i
     const auto& summary = std::get<javelin::jmap::LiveRefreshSummary>(result);
     CHECK_FALSE(summary.selectedMailboxId.has_value());
     CHECK(summary.emailCount == 0);
-    CHECK(transport.requests.size() == 2);
+    REQUIRE(transport.requests.size() == 2);
+    CHECK(transport.requests.back().body.contains("\"Mailbox/get\""));
+    CHECK_FALSE(transport.requests.back().body.contains("\"Email/query\""));
 }
 
 TEST_CASE("MailQueryMaterializer mailbox pages use one requested-page envelope",

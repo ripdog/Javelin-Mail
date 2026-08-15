@@ -352,8 +352,8 @@ namespace javelin::gui::shell
                 [this](QWidget*, QWidget*) { updateUndoRedoActions(); });
         qApp->installEventFilter(this);
         updateUndoRedoActions();
-        m_accountRefreshController =
-            new AccountRefreshController(m_settings, m_accountRefreshPort, m_accountReader, this);
+        m_accountRefreshController = new AccountRefreshController(
+            m_settings, m_accountRefreshPort, m_accountReader, m_mailboxReader, this);
         m_authenticationPromptCoordinator = new AuthenticationPromptCoordinator(
             m_settings, m_onboardingPort, *m_accountRefreshController, *this, this);
         connect(m_accountRefreshController, &AccountRefreshController::busyChanged, this,

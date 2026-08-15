@@ -1065,6 +1065,8 @@ namespace javelin::jmap::submission
         const auto htmlBody = messageSnapshot->htmlBody.has_value()
                                   ? messageSnapshot->htmlBody->value
                                   : htmlFromText(plainBody);
+        snapshot.editorMode = messageSnapshot->htmlBody.has_value() ? BodyEditorMode::RichText
+                                                                    : BodyEditorMode::PlainText;
 
         switch (request.mode)
         {
@@ -1127,8 +1129,6 @@ namespace javelin::jmap::submission
         case ComposeMode::EditDraft:
             snapshot.draftEmailId = sourceEmailId;
             snapshot.mode = ComposeMode::EditDraft;
-            snapshot.editorMode = messageSnapshot->htmlBody.has_value() ? BodyEditorMode::RichText
-                                                                        : BodyEditorMode::PlainText;
             snapshot.to = messageSnapshot->email.to;
             snapshot.cc = messageSnapshot->email.cc;
             snapshot.bcc = messageSnapshot->email.bcc;
