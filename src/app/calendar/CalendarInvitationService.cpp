@@ -700,6 +700,7 @@ namespace javelin::app
             std::vector<std::string> notificationIds;
             std::vector<std::string> deletedNotificationIds;
             std::unordered_set<std::string> newlyCreatedNotificationIds;
+            std::unordered_set<std::string> knownNotificationIds;
             std::string notificationState;
             bool fullNotificationReconciliation = baseline;
             if (!baseline)
@@ -752,6 +753,19 @@ namespace javelin::app
 
             if (fullNotificationReconciliation)
             {
+                if (!baseline)
+                {
+                    const auto known = m_repository.notificationIds(accountId);
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::cache::DatabaseError>(&known))
+                    {
+                        qWarning().noquote()
+                            << "Read known calendar event notifications:" << error->message;
+                        continue;
+                    }
+                    const auto& values = std::get<std::vector<std::string>>(known);
+                    knownNotificationIds.insert(values.begin(), values.end());
+                }
                 auto queried =
                     co_await queryIds<javelin::jmap::api::CalendarEventNotificationQueryResponse>(
                         m_protocolClient, settings, *session, accountId,
@@ -786,6 +800,16 @@ namespace javelin::app
             }
             auto notifications = std::get<javelin::jmap::api::CalendarEventNotificationGetResponse>(
                 std::move(notificationsResponse));
+            if (fullNotificationReconciliation && !baseline)
+            {
+                for (const auto& notification : notifications.list)
+                {
+                    if (notification.type ==
+                            javelin::jmap::calendar::CalendarEventNotificationType::Created &&
+                        !knownNotificationIds.contains(notification.id))
+                        newlyCreatedNotificationIds.insert(notification.id);
+                }
+            }
             if (!fullNotificationReconciliation && notifications.state != notificationState)
             {
                 qWarning() << "CalendarEventNotification state moved during reconciliation";

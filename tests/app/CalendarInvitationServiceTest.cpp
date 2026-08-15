@@ -234,6 +234,65 @@ TEST_CASE("calendar invitation service discovers an occurrence-only invitation",
     CHECK(transport.results.empty());
 }
 
+TEST_CASE("calendar invitation full reconciliation alerts for an unseen created notification",
+          "[app][calendar][invitation][service][reconciliation]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-invitation-service-reconciliation"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("owner", calendarSession()).has_value());
+    QSqlQuery seed{connection.database()};
+    REQUIRE(seed.exec(
+        QStringLiteral("INSERT INTO calendar_state_tokens(account_id,data_type,state) VALUES "
+                       "('calendar-account','CalendarEventNotification','n0')")));
+    REQUIRE(seed.exec(QStringLiteral(
+        "INSERT INTO calendar_event_notifications(account_id,notification_id,type,is_deleted) "
+        "VALUES('calendar-account','notification-old','created',0)")));
+
+    FakeMethodTransport transport;
+    transport.results = {
+        response(
+            "Calendar/get",
+            R"({"accountId":"calendar-account","state":"c1","list":[{"id":"work","name":"Work","isSubscribed":true,"isVisible":true,"isDefault":true,"myRights":{"mayReadItems":true,"mayRSVP":true}}],"notFound":[]})",
+            "calendar-invitation-calendars"),
+        response(
+            "ParticipantIdentity/get",
+            R"({"accountId":"calendar-account","state":"p1","list":[{"id":"self","name":"Alice","calendarAddress":"mailto:alice@example.test","isDefault":true}],"notFound":[]})",
+            "calendar-invitation-identities"),
+        response("error", R"({"type":"cannotCalculateChanges","description":"state too old"})",
+                 "calendar-invitation-notification-changes"),
+        response(
+            "CalendarEventNotification/query",
+            R"({"accountId":"calendar-account","queryState":"nq2","canCalculateChanges":false,"position":0,"ids":["notification-new"],"total":1})",
+            "calendar-invitation-query"),
+        response(
+            "CalendarEventNotification/get",
+            R"({"accountId":"calendar-account","state":"n2","list":[{"id":"notification-new","created":"2026-08-15T03:00:00Z","changedBy":{"name":"Organizer"},"type":"created","calendarEventId":"event-new","isDraft":false,"event":{"@type":"Event","id":"event-new","uid":"event-new-uid","calendarIds":{"work":true},"title":"Recovered invitation","start":"2026-09-01T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","isDraft":false,"isOrigin":false,"participants":{"self":{"@type":"Participant","name":"Alice","calendarAddress":"mailto:alice@example.test","participationStatus":"needs-action","roles":{"attendee":true}}}}}],"notFound":[]})",
+            "calendar-invitation-notification-get"),
+        response(
+            "CalendarEvent/get",
+            R"({"accountId":"calendar-account","state":"e2","list":[{"@type":"Event","id":"event-new","uid":"event-new-uid","calendarIds":{"work":true},"title":"Recovered invitation","start":"2026-09-01T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","isDraft":false,"isOrigin":false,"participants":{"organizer":{"@type":"Participant","name":"Organizer","calendarAddress":"mailto:organizer@example.test","participationStatus":"accepted","roles":{"owner":true,"attendee":true}},"self":{"@type":"Participant","name":"Alice","calendarAddress":"mailto:alice@example.test","participationStatus":"needs-action","roles":{"attendee":true}}}}],"notFound":[]})",
+            "calendar-invitation-event-get"),
+    };
+
+    javelin::jmap::calendar::CalendarCacheReader reader{connection};
+    javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
+    FakeAccountSource accounts;
+    javelin::app::CalendarInvitationService service{connection, protocol, reader, accounts};
+
+    const auto signal = runUntilInvitation(service);
+    REQUIRE(signal.has_value());
+    CHECK(signal->eventId == QStringLiteral("event-new"));
+    CHECK(signal->title == QStringLiteral("Recovered invitation"));
+    CHECK(transport.results.empty());
+}
+
 TEST_CASE("calendar invitation service resolves the next recurring occurrence for presentation",
           "[app][calendar][invitation][service][recurrence]")
 {

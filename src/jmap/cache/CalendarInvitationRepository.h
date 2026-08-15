@@ -71,6 +71,8 @@ namespace javelin::jmap::cache
         reconcile(const CalendarInvitationReconciliation& reconciliation);
         [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
         pendingEventIds(std::string_view accountId) const;
+        [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
+        notificationIds(std::string_view accountId) const;
         [[nodiscard]] std::variant<std::vector<CalendarInvitationDispatchCandidate>, DatabaseError>
         claimPendingDispatches();
         [[nodiscard]] std::optional<DatabaseError> markDelivered(std::string_view invitationKey,

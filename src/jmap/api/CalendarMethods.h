@@ -172,7 +172,7 @@ namespace javelin::jmap::api
         std::string oldState;
         std::string newState;
         std::unordered_map<std::string, SetResult> created;
-        std::unordered_map<std::string, SetResult> updated;
+        std::unordered_map<std::string, std::optional<SetResult>> updated;
         std::vector<std::string> destroyed;
         std::unordered_map<std::string, CalendarSetError> notCreated;
         std::unordered_map<std::string, CalendarSetError> notUpdated;

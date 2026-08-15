@@ -381,7 +381,7 @@ namespace javelin::jmap::api::detail
         std::string oldState;
         std::string newState;
         std::unordered_map<std::string, RawCalendarSetResult> created;
-        std::unordered_map<std::string, RawCalendarSetResult> updated;
+        std::unordered_map<std::string, std::optional<RawCalendarSetResult>> updated;
         std::vector<std::string> destroyed;
         std::unordered_map<std::string, RawSetError> notCreated;
         std::unordered_map<std::string, RawSetError> notUpdated;
@@ -1456,9 +1456,16 @@ namespace javelin::jmap::api
                                    CalendarSetResponse::SetResult{.id = std::move(value.id),
                                                                   .isDefault = value.isDefault});
         for (auto& [id, value] : raw.value->updated)
+        {
+            if (!value)
+            {
+                result.updated.emplace(std::move(id), std::nullopt);
+                continue;
+            }
             result.updated.emplace(std::move(id),
-                                   CalendarSetResponse::SetResult{.id = std::move(value.id),
-                                                                  .isDefault = value.isDefault});
+                                   CalendarSetResponse::SetResult{.id = std::move(value->id),
+                                                                  .isDefault = value->isDefault});
+        }
         for (auto& [id, value] : raw.value->notCreated)
             result.notCreated.emplace(std::move(id), setError(value));
         for (auto& [id, value] : raw.value->notUpdated)

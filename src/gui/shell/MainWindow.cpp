@@ -628,6 +628,7 @@ namespace javelin::gui::shell
             }
             m_mailboxModel->setConnectionStatus(accountId, modelStatus);
             m_authenticationPromptCoordinator->updateAccountStatus(accountId, status);
+            m_calendarTabController->accountsChanged();
         };
         connect(&m_mailEvents, &javelin::app::MailApplicationEventsPort::accountStatusChanged, this,
                 applyAccountStatus);

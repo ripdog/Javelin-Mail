@@ -3,6 +3,7 @@
 #include "app/CalendarApplicationPorts.h"
 #include "gui/shell/TabWorkspace.h"
 #include "jmap/OperationError.h"
+#include "jmap/cache/CalendarRepository.h"
 
 #include <QDate>
 #include <QList>
@@ -75,6 +76,7 @@ namespace javelin::gui::shell
         [[nodiscard]] bool
         available(std::optional<std::string_view> accountId = std::nullopt) const;
         [[nodiscard]] bool refresh(const TabState* tab);
+        void accountsChanged();
         [[nodiscard]] bool close(TabState& tab);
         [[nodiscard]] QWidget* contentWidgetForTab(const TabState* tab) const;
         [[nodiscard]] QMenu* calendarMenuForTab(const TabState* tab) const;
@@ -93,6 +95,8 @@ namespace javelin::gui::shell
       private:
         [[nodiscard]] javelin::gui::calendar::MonthCalendarWidget*
         widgetForTab(const TabState* tab) const;
+        [[nodiscard]] bool
+        refreshAccountSnapshot(javelin::gui::calendar::MonthCalendarWidget& widget);
         void showEventContextMenu(javelin::gui::calendar::MonthCalendarWidget& widget,
                                   const QPoint& globalPosition, const QString& accountId,
                                   const QString& eventId, const QString& recurrenceId);
@@ -106,6 +110,7 @@ namespace javelin::gui::shell
         javelin::app::CalendarCommandPort& m_calendarCommandPort;
         QStackedWidget& m_contentStack;
         std::vector<TabState>& m_tabs;
+        std::vector<javelin::jmap::cache::CalendarAccount> m_calendarAccounts;
         QMenu* m_eventContextMenu = nullptr;
         std::function<std::vector<QString>()> m_configuredEventContextMenuLayout;
         std::function<void(const QList<QAction*>&)> m_replaceEventContextMenuActionList;

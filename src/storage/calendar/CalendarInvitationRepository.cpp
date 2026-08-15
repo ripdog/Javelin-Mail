@@ -460,6 +460,24 @@ namespace javelin::jmap::cache
         return result;
     }
 
+    std::variant<std::vector<std::string>, DatabaseError>
+    CalendarInvitationRepository::notificationIds(const std::string_view accountId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT notification_id FROM calendar_event_notifications WHERE account_id=:account "
+            "ORDER BY notification_id"));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("List calendar event notification ids"), query);
+        std::vector<std::string> result;
+        while (query.next())
+            result.push_back(query.value(0).toString().toStdString());
+        return result;
+    }
+
     std::variant<std::vector<CalendarInvitationDispatchCandidate>, DatabaseError>
     CalendarInvitationRepository::claimPendingDispatches()
     {

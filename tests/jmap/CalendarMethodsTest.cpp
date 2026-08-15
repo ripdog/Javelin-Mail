@@ -218,8 +218,19 @@ TEST_CASE("calendar set changes the server default through the draft argument", 
     const auto response = javelin::jmap::api::parseCalendarSetResponse(
         R"({"accountId":"a1","oldState":"calendar-state-1","newState":"calendar-state-2","updated":{"work":{"isDefault":false},"personal":{"isDefault":true}},"notUpdated":{}})");
     REQUIRE(response.ok());
-    CHECK(response.value->updated.at("work").isDefault == std::optional<bool>{false});
-    CHECK(response.value->updated.at("personal").isDefault == std::optional<bool>{true});
+    REQUIRE(response.value->updated.at("work").has_value());
+    REQUIRE(response.value->updated.at("personal").has_value());
+    CHECK(response.value->updated.at("work")->isDefault == std::optional<bool>{false});
+    CHECK(response.value->updated.at("personal")->isDefault == std::optional<bool>{true});
+}
+
+TEST_CASE("calendar set accepts null updated results", "[jmap][calendar]")
+{
+    const auto response = javelin::jmap::api::parseCalendarSetResponse(
+        R"({"accountId":"a1","oldState":"c1","newState":"c2","updated":{"work":null},"notUpdated":{}})");
+    REQUIRE(response.ok());
+    REQUIRE(response.value->updated.contains("work"));
+    CHECK_FALSE(response.value->updated.at("work").has_value());
 }
 
 TEST_CASE("calendar set serializes an exact subscription update", "[jmap][calendar]")

@@ -4,6 +4,7 @@
 #include "jmap/calendar/CalendarSyncEngine.h"
 
 #include "jmap/api/JmapMethodTransport.h"
+#include "jmap/cache/CalendarInvitationRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/calendar/CalendarMutationJournal.h"
 #include "jmap/sync/ConsistencyDomain.h"
@@ -751,9 +752,28 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
               .callId = "calendar-event-set"}},
         .createdIds = std::nullopt,
         .sessionState = "session-scheduling-failure"});
+    javelin::jmap::cache::CalendarInvitationRepository invitations{connection};
+    REQUIRE_FALSE(
+        invitations
+            .replaceParticipantIdentities("a1", {{.id = "identity-1",
+                                                  .name = "Alice",
+                                                  .calendarAddress = "mailto:alice@example.test",
+                                                  .isDefault = true}})
+            .has_value());
     auto scheduledEvent = event();
     scheduledEvent.id.clear();
     scheduledEvent.uid.clear();
+    scheduledEvent.attendees.push_back({.id = "attendee-1",
+                                        .name = "Bob",
+                                        .email = "bob@example.test",
+                                        .calendarAddress = "mailto:bob@example.test",
+                                        .participationStatus = "needs-action",
+                                        .isOwner = false,
+                                        .isAttendee = true,
+                                        .roles = {},
+                                        .expectReply = true,
+                                        .scheduleSequence = 0,
+                                        .scheduleUpdated = std::nullopt});
 
     const auto scheduling = QCoro::waitFor(mutation.create(settings, "a1",
                                                            {.accountId = "a1",
@@ -767,6 +787,9 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     const auto& createArguments = transport.requests.back().envelope.methodCalls.front().arguments;
     CHECK(createArguments.find(R"("uid":")") != std::string::npos);
     CHECK(createArguments.find(R"("uid":"")") == std::string::npos);
+    CHECK(createArguments.find(R"("calendarAddress":"mailto:alice@example.test")") !=
+          std::string::npos);
+    CHECK(createArguments.find(R"("roles":{"attendee":true,"owner":true})") != std::string::npos);
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(scheduling));
     CHECK(std::get<javelin::jmap::OperationError>(scheduling).code ==
           javelin::jmap::OperationErrorCode::SchedulingUnsupported);

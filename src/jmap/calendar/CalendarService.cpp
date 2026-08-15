@@ -1720,14 +1720,14 @@ namespace javelin::jmap::calendar
         {
             const auto& response = std::get<api::CalendarSetResponse>(read);
             const auto selectedUpdate = response.updated.find(calendarId);
-            accepted = selectedUpdate != response.updated.end() &&
-                       selectedUpdate->second.isDefault.value_or(false);
+            accepted = selectedUpdate != response.updated.end() && selectedUpdate->second &&
+                       selectedUpdate->second->isDefault.value_or(false);
             if (accepted)
             {
                 acceptedState = response.newState;
                 for (const auto& [id, update] : response.updated)
-                    if (update.isDefault.has_value())
-                        defaults.emplace(id, *update.isDefault);
+                    if (update && update->isDefault.has_value())
+                        defaults.emplace(id, *update->isDefault);
             }
         }
         if (!accepted)
@@ -2614,6 +2614,65 @@ namespace javelin::jmap::calendar
                                    CreateEventCommand command,
                                    std::function<void()> projectionCommitted)
     {
+        const bool scheduled =
+            std::ranges::any_of(command.event.attendees, [](const Attendee& participant)
+                                { return participant.isAttendee && !participant.isOwner; });
+        const bool hasOwner =
+            std::ranges::any_of(command.event.attendees,
+                                [](const Attendee& participant) { return participant.isOwner; });
+        if (scheduled && !hasOwner)
+        {
+            CalendarCacheReader reader{m_connection};
+            const auto identitiesResult = reader.participantIdentities(command.accountId);
+            if (const auto* readError = std::get_if<OperationError>(&identitiesResult))
+                co_return *readError;
+            const auto& identities = std::get<std::vector<ParticipantIdentity>>(identitiesResult);
+            if (identities.empty())
+            {
+                co_return error(
+                    OperationErrorCode::SchedulingUnsupported,
+                    QStringLiteral(
+                        "This calendar account has no participant identity for scheduling."));
+            }
+            const auto preferred =
+                std::ranges::find(identities, true, &ParticipantIdentity::isDefault);
+            const auto& identity = preferred != identities.end() ? *preferred : identities.front();
+            auto owner = std::ranges::find(command.event.attendees, identity.calendarAddress,
+                                           &Attendee::calendarAddress);
+            if (owner == command.event.attendees.end())
+            {
+                std::unordered_set<std::string> participantIds;
+                for (const auto& participant : command.event.attendees)
+                    participantIds.insert(participant.id);
+                std::string participantId = "owner";
+                for (std::size_t suffix = 2; participantIds.contains(participantId); ++suffix)
+                    participantId = "owner-" + std::to_string(suffix);
+                std::optional<std::string> email;
+                constexpr std::string_view mailtoPrefix = "mailto:";
+                if (identity.calendarAddress.starts_with(mailtoPrefix))
+                    email = identity.calendarAddress.substr(mailtoPrefix.size());
+                command.event.attendees.push_back({
+                    .id = std::move(participantId),
+                    .name = identity.name,
+                    .email = std::move(email),
+                    .calendarAddress = identity.calendarAddress,
+                    .participationStatus = "accepted",
+                    .isOwner = true,
+                    .isAttendee = true,
+                    .roles = {},
+                    .expectReply = false,
+                    .scheduleSequence = 0,
+                    .scheduleUpdated = std::nullopt,
+                });
+            }
+            else
+            {
+                owner->isOwner = true;
+                owner->isAttendee = true;
+                owner->participationStatus = "accepted";
+                owner->expectReply = false;
+            }
+        }
         if (!command.ifInState)
         {
             const auto state = currentEventState(m_connection, command.accountId);
