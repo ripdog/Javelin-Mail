@@ -22,7 +22,7 @@ namespace javelin::jmap::cache
 {
     class AccountReader;
     class MailboxReader;
-}
+} // namespace javelin::jmap::cache
 
 namespace javelin::gui::shell
 {
@@ -67,8 +67,7 @@ namespace javelin::gui::shell
         void populateDestinationMenus(QMenu* moveMenu, QMenu* copyMenu, std::string accountId,
                                       std::optional<std::string> sourceMailboxId,
                                       javelin::app::MessageSelection selection);
-        void queueTransfer(std::string sourceAccountId,
-                           std::optional<std::string> sourceMailboxId,
+        void queueTransfer(std::string sourceAccountId, std::optional<std::string> sourceMailboxId,
                            std::string destinationAccountId, std::string destinationMailboxId,
                            javelin::app::MessageSelection selection,
                            MessageTransferOperation operation, QString successMessage);

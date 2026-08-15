@@ -135,7 +135,8 @@ TEST_CASE("remote codec round-trips cross-account mail transfer action payloads"
     REQUIRE(resultPayload != nullptr);
     const auto resultDecoded = javelin::app::remote::decodeVersionedValue<
         Action::resultSchemaVersion, javelin::app::MailTransferExecutionResult>(*resultPayload);
-    const auto* decodedResult = std::get_if<javelin::app::MailTransferExecutionResult>(&resultDecoded);
+    const auto* decodedResult =
+        std::get_if<javelin::app::MailTransferExecutionResult>(&resultDecoded);
     REQUIRE(decodedResult != nullptr);
     REQUIRE(std::holds_alternative<javelin::app::MailTransferExecutionSummary>(*decodedResult));
     const auto& summary = std::get<javelin::app::MailTransferExecutionSummary>(*decodedResult);
@@ -146,8 +147,7 @@ TEST_CASE("remote codec round-trips cross-account mail transfer action payloads"
     CHECK(summary.failedItemCount == 1);
     CHECK(summary.partialItemCount == 1);
     CHECK(summary.unknownItemCount == 0);
-    CHECK(summary.historyEntryId ==
-          std::optional<QString>{QStringLiteral("history-1")});
+    CHECK(summary.historyEntryId == std::optional<QString>{QStringLiteral("history-1")});
 
     const auto metadata = javelin::protocol::actions::findActionMetadata(Action::id);
     REQUIRE(metadata.has_value());

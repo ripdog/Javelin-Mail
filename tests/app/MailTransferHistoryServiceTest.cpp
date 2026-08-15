@@ -1,6 +1,6 @@
+#include "app/undo/MailTransferHistoryService.h"
 #include "app/AccountConnectionProvider.h"
 #include "app/undo/HistoryRepository.h"
-#include "app/undo/MailTransferHistoryService.h"
 #include "app/undo/HistoryTypes.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Session.h"
@@ -82,16 +82,17 @@ namespace
             .capabilities =
                 {
                     .core = true,
-                    .coreDetails = javelin::jmap::api::CoreCapability{
-                        .maxSizeUpload = 64 * 1024 * 1024,
-                        .maxConcurrentUpload = 2,
-                        .maxSizeRequest = 1024 * 1024,
-                        .maxConcurrentRequests = 4,
-                        .maxCallsInRequest = 8,
-                        .maxObjectsInGet = 256,
-                        .maxObjectsInSet = 128,
-                        .collationAlgorithms = {},
-                    },
+                    .coreDetails =
+                        javelin::jmap::api::CoreCapability{
+                            .maxSizeUpload = 64 * 1024 * 1024,
+                            .maxConcurrentUpload = 2,
+                            .maxSizeRequest = 1024 * 1024,
+                            .maxConcurrentRequests = 4,
+                            .maxCallsInRequest = 8,
+                            .maxObjectsInGet = 256,
+                            .maxObjectsInSet = 128,
+                            .collationAlgorithms = {},
+                        },
                     .mail = true,
                     .submission = false,
                     .contacts = false,
@@ -106,23 +107,23 @@ namespace
                                 .calendarsAccountId = std::nullopt,
                                 .sieveAccountId = std::nullopt},
         };
-        value.accounts.emplace(
-            "u1", javelin::jmap::api::Account{
-                      .id = "u1",
-                      .name = "Source",
-                      .isPersonal = true,
-                      .isReadOnly = false,
-                      .accountCapabilities =
-                          {
-                              .mail = true,
-                              .mailDetails = javelin::jmap::api::MailAccountCapability{
-                                  .mayCreateTopLevelMailbox = true},
-                              .submission = std::nullopt,
-                              .contacts = std::nullopt,
-                              .calendars = std::nullopt,
-                              .sieve = false,
-                          },
-                  });
+        value.accounts.emplace("u1", javelin::jmap::api::Account{
+                                         .id = "u1",
+                                         .name = "Source",
+                                         .isPersonal = true,
+                                         .isReadOnly = false,
+                                         .accountCapabilities =
+                                             {
+                                                 .mail = true,
+                                                 .mailDetails =
+                                                     javelin::jmap::api::MailAccountCapability{
+                                                         .mayCreateTopLevelMailbox = true},
+                                                 .submission = std::nullopt,
+                                                 .contacts = std::nullopt,
+                                                 .calendars = std::nullopt,
+                                                 .sieve = false,
+                                             },
+                                     });
         return value;
     }
 
@@ -156,8 +157,8 @@ namespace
             };
         }
 
-        QCoro::Task<javelin::jmap::api::TransportResult>
-        sendFromFile(HttpRequest request, QString filePath) override
+        QCoro::Task<javelin::jmap::api::TransportResult> sendFromFile(HttpRequest request,
+                                                                      QString filePath) override
         {
             ++uploads;
             if (request.dispatched)
@@ -223,14 +224,15 @@ namespace
                     ++candidateCalls;
                 else
                     ++materializeCalls;
-                const bool matching = requestedId != QStringLiteral("candidate-email") ||
-                                      candidateMatches;
+                const bool matching =
+                    requestedId != QStringLiteral("candidate-email") || candidateMatches;
                 const QString messageId = matching ? QStringLiteral("restore@example.test")
                                                    : QStringLiteral("other@example.test");
-                const auto response = QStringLiteral(
-                                          R"({"accountId":"u1","state":"source-after-state","list":[{"id":"%1","blobId":"restored-blob","threadId":"restored-thread","mailboxIds":{"inbox":true,"important":true},"keywords":{"$seen":true,"project":true},"size":58,"receivedAt":"2026-08-15T00:00:00Z","messageId":["%2"],"inReplyTo":[],"references":[],"hasAttachment":false,"subject":"Restore","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Restored"}],"notFound":[]})")
-                                          .arg(requestedId, messageId)
-                                          .toStdString();
+                const auto response =
+                    QStringLiteral(
+                        R"({"accountId":"u1","state":"source-after-state","list":[{"id":"%1","blobId":"restored-blob","threadId":"restored-thread","mailboxIds":{"inbox":true,"important":true},"keywords":{"$seen":true,"project":true},"size":58,"receivedAt":"2026-08-15T00:00:00Z","messageId":["%2"],"inReplyTo":[],"references":[],"hasAttachment":false,"subject":"Restore","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Restored"}],"notFound":[]})")
+                        .arg(requestedId, messageId)
+                        .toStdString();
                 co_return ResponseEnvelope{
                     .methodResponses = {{.name = "Email/get",
                                          .arguments = response,
@@ -252,7 +254,8 @@ namespace
                 }
                 created += ']';
                 const auto response =
-                    std::string{R"({"accountId":"u1","oldState":"source-pre-state","newState":"source-after-state","hasMoreChanges":false,"created":)"} +
+                    std::string{
+                        R"({"accountId":"u1","oldState":"source-pre-state","newState":"source-after-state","hasMoreChanges":false,"created":)"} +
                     created + R"(,"updated":[],"destroyed":[]})";
                 if (request.dispatched)
                     request.dispatched();
@@ -284,10 +287,11 @@ namespace
             const auto emails = arguments.value(QStringLiteral("emails")).toObject();
             REQUIRE(emails.size() == 1);
             const auto creationId = emails.begin().key();
-            const auto response = QStringLiteral(
-                                      R"({"accountId":"u1","oldState":"source-pre-state","newState":"source-after-state","created":{"%1":{"id":"restored-email","blobId":"restored-blob","threadId":"restored-thread","size":58}},"notCreated":{}})")
-                                      .arg(creationId)
-                                      .toStdString();
+            const auto response =
+                QStringLiteral(
+                    R"({"accountId":"u1","oldState":"source-pre-state","newState":"source-after-state","created":{"%1":{"id":"restored-email","blobId":"restored-blob","threadId":"restored-thread","size":58}},"notCreated":{}})")
+                    .arg(creationId)
+                    .toStdString();
             co_return ResponseEnvelope{
                 .methodResponses = {{.name = "Email/import",
                                      .arguments = response,
@@ -312,11 +316,12 @@ namespace
         std::string contentHash;
 
         Fixture()
-            : database(openDatabase([this]
-                                    {
-                                        REQUIRE(directory.isValid());
-                                        return directory.filePath(QStringLiteral("cache.sqlite3"));
-                                    }()))
+            : database(openDatabase(
+                  [this]
+                  {
+                      REQUIRE(directory.isValid());
+                      return directory.filePath(QStringLiteral("cache.sqlite3"));
+                  }()))
         {
             javelin::jmap::cache::SessionRepository sessions{database};
             const auto stored = sessions.replaceForConnection("connection-a", "u1", session());
@@ -361,17 +366,16 @@ namespace
             REQUIRE(std::holds_alternative<HistoryEntry>(history.pushUndoClearingRedo(entry)));
 
             javelin::jmap::cache::RawMessageSourceRepository sources{database};
-            REQUIRE_FALSE(sources
-                              .upsert(accountId,
-                                      {.emailId = "old-source",
-                                       .blobId = "old-blob",
-                                       .payload = raw})
-                              .has_value());
+            REQUIRE_FALSE(
+                sources
+                    .upsert(accountId,
+                            {.emailId = "old-source", .blobId = "old-blob", .payload = raw})
+                    .has_value());
             const auto reference = sources.findReference(accountId, "old-source");
             REQUIRE(std::holds_alternative<
                     std::optional<javelin::jmap::cache::RawMessageSourceReference>>(reference));
-            const auto& found = std::get<
-                std::optional<javelin::jmap::cache::RawMessageSourceReference>>(reference);
+            const auto& found =
+                std::get<std::optional<javelin::jmap::cache::RawMessageSourceReference>>(reference);
             REQUIRE(found.has_value());
             contentHash = found->object.contentHash;
 
@@ -414,7 +418,7 @@ namespace
             return std::get<std::optional<javelin::jmap::domain::Email>>(found).has_value();
         }
     };
-}
+} // namespace
 
 TEST_CASE("history source recreation streams retained MIME and materializes restored Email",
           "[app][undo][mail-transfer][history-service]")

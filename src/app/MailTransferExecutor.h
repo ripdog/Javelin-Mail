@@ -29,7 +29,7 @@ namespace javelin::jmap::api
 {
     class AbstractTransport;
     class JmapMethodTransport;
-}
+} // namespace javelin::jmap::api
 
 namespace javelin::app
 {
@@ -51,16 +51,15 @@ namespace javelin::app
     class MailTransferExecutor
     {
       public:
-        MailTransferExecutor(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                             javelin::jmap::api::AbstractTransport& resourceTransport,
-                             javelin::jmap::api::JmapMethodTransport& methodTransport,
-                             javelin::jmap::MessageContentClient& messageContentClient,
-                             const AccountConnectionProvider& connectionProvider,
-                             javelin::app::undo::MailTransferHistoryCoordinator* historyCoordinator =
-                                 nullptr);
+        MailTransferExecutor(
+            javelin::jmap::cache::DatabaseConnection& databaseConnection,
+            javelin::jmap::api::AbstractTransport& resourceTransport,
+            javelin::jmap::api::JmapMethodTransport& methodTransport,
+            javelin::jmap::MessageContentClient& messageContentClient,
+            const AccountConnectionProvider& connectionProvider,
+            javelin::app::undo::MailTransferHistoryCoordinator* historyCoordinator = nullptr);
 
-        [[nodiscard]] QCoro::Task<MailTransferExecutionResult>
-        advance(std::string operationId);
+        [[nodiscard]] QCoro::Task<MailTransferExecutionResult> advance(std::string operationId);
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;

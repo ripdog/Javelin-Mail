@@ -42,8 +42,7 @@ namespace javelin::app
                        const std::string& localAccountId)
         {
             const auto result = accounts.findById(localAccountId);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
                 return javelin::jmap::operationError(*error);
             const auto& account =
                 std::get<std::optional<javelin::jmap::cache::CachedAccount>>(result);
@@ -140,7 +139,8 @@ namespace javelin::app
         auto sourceAccountResult = requireAccount(accounts, request.intent.sourceAccountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&sourceAccountResult))
             co_return *error;
-        auto destinationAccountResult = requireAccount(accounts, request.intent.destinationAccountId);
+        auto destinationAccountResult =
+            requireAccount(accounts, request.intent.destinationAccountId);
         if (const auto* error =
                 std::get_if<javelin::jmap::OperationError>(&destinationAccountResult))
             co_return *error;
@@ -150,7 +150,8 @@ namespace javelin::app
             std::get<javelin::jmap::cache::CachedAccount>(destinationAccountResult);
 
         javelin::jmap::cache::MailboxReadRepository mailboxReader{m_databaseConnection};
-        const auto sourceMailboxResult = mailboxReader.listMailboxTree(request.intent.sourceAccountId);
+        const auto sourceMailboxResult =
+            mailboxReader.listMailboxTree(request.intent.sourceAccountId);
         if (const auto* error =
                 std::get_if<javelin::jmap::cache::DatabaseError>(&sourceMailboxResult))
             co_return javelin::jmap::operationError(*error);
@@ -166,14 +167,13 @@ namespace javelin::app
         for (const auto& emailId : emailIds)
         {
             const auto emailResult = emailRepository.find(request.intent.sourceAccountId, emailId);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
                 co_return javelin::jmap::operationError(*error);
             const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
             if (!email.has_value())
             {
                 co_return invalidState(i18n("Message %1 is not available in the local cache.",
-                                          QString::fromStdString(emailId)));
+                                            QString::fromStdString(emailId)));
             }
             emails.push_back(*email);
         }
@@ -206,9 +206,8 @@ namespace javelin::app
         }
 
         javelin::jmap::cache::SyncStateRepository syncStates{m_databaseConnection};
-        const auto stateResult = syncStates.find({.accountId = request.intent.sourceAccountId,
-                                                  .objectType = "Email",
-                                                  .queryKey = {}});
+        const auto stateResult = syncStates.find(
+            {.accountId = request.intent.sourceAccountId, .objectType = "Email", .queryKey = {}});
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&stateResult))
             co_return javelin::jmap::operationError(*error);
         const auto& emailState =

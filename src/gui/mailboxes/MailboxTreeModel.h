@@ -119,8 +119,8 @@ namespace javelin::gui::mailboxes
 
       Q_SIGNALS:
         void emailsDropped(const javelin::gui::messages::MessageDragPayload& payload,
-                           const QString& destinationAccountId,
-                           const QString& destinationMailboxId, Qt::DropAction action);
+                           const QString& destinationAccountId, const QString& destinationMailboxId,
+                           Qt::DropAction action);
 
       private:
         // Each node represents either an account (mailboxId empty, children = mailboxes)

@@ -118,7 +118,7 @@ namespace
     };
 
     [[nodiscard]] QModelIndex accountIndex(const javelin::gui::mailboxes::MailboxTreeModel& model,
-                                            const QString& accountId)
+                                           const QString& accountId)
     {
         for (int row = 0; row < model.rowCount(); ++row)
         {
@@ -134,7 +134,7 @@ namespace
     }
 
     [[nodiscard]] QModelIndex mailboxIndex(const javelin::gui::mailboxes::MailboxTreeModel& model,
-                                            const QModelIndex& account, const QString& mailboxId)
+                                           const QModelIndex& account, const QString& mailboxId)
     {
         for (int row = 0; row < model.rowCount(account); ++row)
         {
@@ -149,14 +149,14 @@ namespace
     [[nodiscard]] std::unique_ptr<QMimeData> mimeData()
     {
         auto mime = std::make_unique<QMimeData>();
-        mime->setData(QString::fromLatin1(javelin::gui::messages::messageDragMimeType),
-                      javelin::gui::messages::encodeMessageDragPayload({
-                          .sourceAccountId = "source-account",
-                          .sourceMailboxId = std::optional<std::string>{"inbox"},
-                          .selection =
-                              {javelin::app::SelectedCollapsedThread{.threadId = "thread-1"},
-                               javelin::app::SelectedEmail{.emailId = "email-2"}},
-                      }));
+        mime->setData(
+            QString::fromLatin1(javelin::gui::messages::messageDragMimeType),
+            javelin::gui::messages::encodeMessageDragPayload({
+                .sourceAccountId = "source-account",
+                .sourceMailboxId = std::optional<std::string>{"inbox"},
+                .selection = {javelin::app::SelectedCollapsedThread{.threadId = "thread-1"},
+                              javelin::app::SelectedEmail{.emailId = "email-2"}},
+            }));
         return mime;
     }
 } // namespace
@@ -200,17 +200,16 @@ TEST_CASE("mailbox drop emits stable selection and Qt copy action across account
     QString emittedAccount;
     QString emittedMailbox;
     Qt::DropAction emittedAction = Qt::IgnoreAction;
-    QObject::connect(
-        &model, &javelin::gui::mailboxes::MailboxTreeModel::emailsDropped, &model,
-        [&](const javelin::gui::messages::MessageDragPayload& payload,
-            const QString& destinationAccountId, const QString& destinationMailboxId,
-            const Qt::DropAction action)
-        {
-            emittedPayload = payload;
-            emittedAccount = destinationAccountId;
-            emittedMailbox = destinationMailboxId;
-            emittedAction = action;
-        });
+    QObject::connect(&model, &javelin::gui::mailboxes::MailboxTreeModel::emailsDropped, &model,
+                     [&](const javelin::gui::messages::MessageDragPayload& payload,
+                         const QString& destinationAccountId, const QString& destinationMailboxId,
+                         const Qt::DropAction action)
+                     {
+                         emittedPayload = payload;
+                         emittedAccount = destinationAccountId;
+                         emittedMailbox = destinationMailboxId;
+                         emittedAction = action;
+                     });
 
     const auto mime = mimeData();
     REQUIRE(model.dropMimeData(mime.get(), Qt::CopyAction, -1, 0, archive));
@@ -218,8 +217,9 @@ TEST_CASE("mailbox drop emits stable selection and Qt copy action across account
     CHECK(emittedPayload->sourceAccountId == "source-account");
     CHECK(emittedPayload->sourceMailboxId == std::optional<std::string>{"inbox"});
     REQUIRE(emittedPayload->selection.size() == 2);
-    CHECK(std::get<javelin::app::SelectedCollapsedThread>(emittedPayload->selection.at(0)).threadId ==
-          "thread-1");
+    CHECK(
+        std::get<javelin::app::SelectedCollapsedThread>(emittedPayload->selection.at(0)).threadId ==
+        "thread-1");
     CHECK(std::get<javelin::app::SelectedEmail>(emittedPayload->selection.at(1)).emailId ==
           "email-2");
     CHECK(emittedAccount == QStringLiteral("destination-account"));
@@ -227,8 +227,7 @@ TEST_CASE("mailbox drop emits stable selection and Qt copy action across account
     CHECK(emittedAction == Qt::CopyAction);
 }
 
-TEST_CASE("mailbox drop rejects malformed transfer payload",
-          "[gui][mailbox][drag][mail-transfer]")
+TEST_CASE("mailbox drop rejects malformed transfer payload", "[gui][mailbox][drag][mail-transfer]")
 {
     AccountReader accounts;
     MailboxReader mailboxes;

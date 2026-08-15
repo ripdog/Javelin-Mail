@@ -233,10 +233,10 @@ namespace javelin::app::undo
         auto operator<=>(const ImpossibleHistory&) const = default;
     };
 
-    using HistoryPayload =
-        std::variant<MailPatchHistory, MailTransferHistory, DraftHistory, SieveHistory, DeferredSendHistory,
-                     CalendarEventHistory, CalendarPreferenceHistory, ContactCardHistory,
-                     AddressBookHistory, ContactGroupHistory, ImpossibleHistory>;
+    using HistoryPayload = std::variant<MailPatchHistory, MailTransferHistory, DraftHistory,
+                                        SieveHistory, DeferredSendHistory, CalendarEventHistory,
+                                        CalendarPreferenceHistory, ContactCardHistory,
+                                        AddressBookHistory, ContactGroupHistory, ImpossibleHistory>;
 
     struct HistoryEntry
     {

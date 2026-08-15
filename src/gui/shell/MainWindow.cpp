@@ -1376,10 +1376,9 @@ namespace javelin::gui::shell
         m_messageView->viewport()->installEventFilter(this);
 
         m_messageCommandController = new MessageCommandController(
-            m_mailCommandPort, m_accountReader, m_mailboxReader,
-            [this](const QStringView accountId)
-            { return m_settings.accountForCachedId(accountId).displayName; },
-            *m_messageView, this, this);
+            m_mailCommandPort, m_accountReader, m_mailboxReader, [this](const QStringView accountId)
+            { return m_settings.accountForCachedId(accountId).displayName; }, *m_messageView, this,
+            this);
         connect(m_messageCommandController, &MessageCommandController::statusMessage, this,
                 [this](const QString& message, const int durationMilliseconds)
                 { m_statusBar->showMessage(message, durationMilliseconds); });

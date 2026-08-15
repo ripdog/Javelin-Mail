@@ -63,8 +63,9 @@ namespace
     }
 } // namespace
 
-TEST_CASE("transfer destination presentation keeps current account inline and other accounts grouped",
-          "[gui][mail-transfer][destination]")
+TEST_CASE(
+    "transfer destination presentation keeps current account inline and other accounts grouped",
+    "[gui][mail-transfer][destination]")
 {
     const std::vector accounts{
         account("local-a", "connection-a", "u1", "Source server"),
@@ -72,27 +73,21 @@ TEST_CASE("transfer destination presentation keeps current account inline and ot
         account("local-readonly", "connection-c", "u3", "Read only", true, true),
         account("local-calendar", "connection-d", "u4", "Calendar only", false, false),
     };
-    const std::unordered_map<
-        std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>> mailboxes{
-        {"local-a",
-         {mailbox("inbox", "Inbox", std::string{"inbox"}),
-          mailbox("locked", "Locked", std::nullopt, false),
-          mailbox("projects", "Projects")}},
-        {"local-b",
-         {mailbox("archive", "Archive", std::string{"archive"}),
-          mailbox("parent", "Parent"),
-          mailbox("child", "Child", std::nullopt, true, std::string{"parent"})}},
-        {"local-readonly", {mailbox("readonly", "Read only")}},
-        {"local-calendar", {mailbox("calendar-mailbox", "Impossible")}},
-    };
+    const std::unordered_map<std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>>
+        mailboxes{
+            {"local-a",
+             {mailbox("inbox", "Inbox", std::string{"inbox"}),
+              mailbox("locked", "Locked", std::nullopt, false), mailbox("projects", "Projects")}},
+            {"local-b",
+             {mailbox("archive", "Archive", std::string{"archive"}), mailbox("parent", "Parent"),
+              mailbox("child", "Child", std::nullopt, true, std::string{"parent"})}},
+            {"local-readonly", {mailbox("readonly", "Read only")}},
+            {"local-calendar", {mailbox("calendar-mailbox", "Impossible")}},
+        };
 
-    const auto presentation =
-        javelin::gui::shell::buildMessageTransferDestinationPresentation(
-            "local-a", accounts, mailboxes,
-            [](const QStringView accountId)
-            {
-                return accountId == QStringLiteral("local-b") ? QStringLiteral("Work") : QString{};
-            });
+    const auto presentation = javelin::gui::shell::buildMessageTransferDestinationPresentation(
+        "local-a", accounts, mailboxes, [](const QStringView accountId)
+        { return accountId == QStringLiteral("local-b") ? QStringLiteral("Work") : QString{}; });
 
     REQUIRE(presentation.currentAccountRows.size() == 2);
     CHECK(presentation.currentAccountRows.at(0).accountId == "local-a");
@@ -122,22 +117,21 @@ TEST_CASE("transfer destination presentation disambiguates duplicate configured 
         account("account-b", "connection-b", "u2", "Personal B"),
         account("account-c-123456789", "connection-c", "u2", "Personal B"),
     };
-    const std::unordered_map<
-        std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>> mailboxes{
-        {"source", {mailbox("inbox", "Inbox")}},
-        {"account-a", {mailbox("a", "A")}},
-        {"account-b", {mailbox("b", "B")}},
-        {"account-c-123456789", {mailbox("c", "C")}},
-    };
+    const std::unordered_map<std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>>
+        mailboxes{
+            {"source", {mailbox("inbox", "Inbox")}},
+            {"account-a", {mailbox("a", "A")}},
+            {"account-b", {mailbox("b", "B")}},
+            {"account-c-123456789", {mailbox("c", "C")}},
+        };
 
-    const auto presentation =
-        javelin::gui::shell::buildMessageTransferDestinationPresentation(
-            "source", accounts, mailboxes,
-            [](const QStringView accountId)
-            {
-                return accountId == QStringLiteral("source") ? QStringLiteral("Source")
-                                                               : QStringLiteral("Personal");
-            });
+    const auto presentation = javelin::gui::shell::buildMessageTransferDestinationPresentation(
+        "source", accounts, mailboxes,
+        [](const QStringView accountId)
+        {
+            return accountId == QStringLiteral("source") ? QStringLiteral("Source")
+                                                         : QStringLiteral("Personal");
+        });
     REQUIRE(presentation.otherAccounts.size() == 3);
     CHECK(presentation.otherAccounts.at(0).label == QStringLiteral("Personal — Personal A"));
     CHECK(presentation.otherAccounts.at(1).label == QStringLiteral("Personal — Personal B"));
@@ -152,14 +146,13 @@ TEST_CASE("transfer destination presentation omits accounts without writable mai
         account("source", "connection-source", "src", "Source"),
         account("locked", "connection-locked", "locked", "Locked"),
     };
-    const std::unordered_map<
-        std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>> mailboxes{
-        {"source", {mailbox("inbox", "Inbox")}},
-        {"locked", {mailbox("locked-mailbox", "Locked", std::nullopt, false)}},
-    };
+    const std::unordered_map<std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>>
+        mailboxes{
+            {"source", {mailbox("inbox", "Inbox")}},
+            {"locked", {mailbox("locked-mailbox", "Locked", std::nullopt, false)}},
+        };
 
-    const auto presentation =
-        javelin::gui::shell::buildMessageTransferDestinationPresentation("source", accounts,
-                                                                          mailboxes);
+    const auto presentation = javelin::gui::shell::buildMessageTransferDestinationPresentation(
+        "source", accounts, mailboxes);
     CHECK(presentation.otherAccounts.empty());
 }

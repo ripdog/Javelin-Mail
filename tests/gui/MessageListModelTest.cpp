@@ -1,5 +1,5 @@
-#include "gui/messages/MessageDragPayload.h"
 #include "gui/messages/MessageListModel.h"
+#include "gui/messages/MessageDragPayload.h"
 #include "gui/messages/MessageSelectionRestoration.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "storage/sqlite/DatabaseConnection.h"
@@ -395,27 +395,25 @@ TEST_CASE("message list drag payload preserves collapsed Thread intent and sourc
     auto conversation = item("email-1", "thread-1");
     conversation.mailboxThreadMessageCount = 3;
     conversation.globalThreadMessageCount = 3;
-    model.setItems(std::optional<std::string>{"account-1"},
-                   std::optional<std::string>{"mailbox-1"},
+    model.setItems(std::optional<std::string>{"account-1"}, std::optional<std::string>{"mailbox-1"},
                    {std::move(conversation), item("email-2", "thread-2")});
 
     REQUIRE(model.rowCount() == 2);
     std::unique_ptr<QMimeData> mime{model.mimeData({model.index(0), model.index(1)})};
     REQUIRE(mime != nullptr);
-    CHECK(mime->hasFormat(
-        QString::fromLatin1(javelin::gui::messages::messageDragMimeType)));
+    CHECK(mime->hasFormat(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)));
     const auto decoded = javelin::gui::messages::decodeMessageDragPayload(
         mime->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)));
     REQUIRE(decoded.has_value());
     CHECK(decoded->sourceAccountId == "account-1");
     CHECK(decoded->sourceMailboxId == std::optional<std::string>{"mailbox-1"});
     REQUIRE(decoded->selection.size() == 2);
-    REQUIRE(std::holds_alternative<javelin::app::SelectedCollapsedThread>(
-        decoded->selection.at(0)));
+    REQUIRE(
+        std::holds_alternative<javelin::app::SelectedCollapsedThread>(decoded->selection.at(0)));
     CHECK(std::get<javelin::app::SelectedCollapsedThread>(decoded->selection.at(0)).threadId ==
           "thread-1");
-    REQUIRE(std::holds_alternative<javelin::app::SelectedCollapsedThread>(
-        decoded->selection.at(1)));
+    REQUIRE(
+        std::holds_alternative<javelin::app::SelectedCollapsedThread>(decoded->selection.at(1)));
     CHECK(std::get<javelin::app::SelectedCollapsedThread>(decoded->selection.at(1)).threadId ==
           "thread-2");
     CHECK(model.supportedDragActions().testFlag(Qt::MoveAction));

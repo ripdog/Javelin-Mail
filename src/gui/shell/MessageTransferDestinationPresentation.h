@@ -44,8 +44,8 @@ namespace javelin::gui::shell
     buildMessageTransferDestinationPresentation(
         std::string currentAccountId,
         const std::vector<javelin::jmap::cache::CachedAccount>& accounts,
-        const std::unordered_map<
-            std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>>& mailboxesByAccount,
+        const std::unordered_map<std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>>&
+            mailboxesByAccount,
         const MessageTransferAccountDisplayName& configuredDisplayName = {});
 
 } // namespace javelin::gui::shell

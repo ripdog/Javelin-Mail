@@ -1270,8 +1270,7 @@ TEST_CASE("daemon dispatches typed cross-account mail transfer action asynchrono
     {
         void onBoundaryEvent(const javelin::protocol::BoundaryEvent& event) override
         {
-            if (const auto* completed =
-                    std::get_if<javelin::protocol::OperationCompleted>(&event))
+            if (const auto* completed = std::get_if<javelin::protocol::OperationCompleted>(&event))
                 completions.push_back(*completed);
         }
         std::vector<javelin::protocol::OperationCompleted> completions;
@@ -1301,8 +1300,8 @@ TEST_CASE("daemon dispatches typed cross-account mail transfer action asynchrono
         .command =
             javelin::protocol::RemoteActionCommand{
                 .action = javelin::protocol::actions::MailTransferAcrossAccounts::id,
-                .payload = actionPayload<javelin::protocol::actions::MailTransferAcrossAccounts>(
-                    intent),
+                .payload =
+                    actionPayload<javelin::protocol::actions::MailTransferAcrossAccounts>(intent),
             },
     });
     const auto* accepted = std::get_if<javelin::protocol::CommandAccepted>(&reply);

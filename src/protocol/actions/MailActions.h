@@ -121,8 +121,7 @@ namespace javelin::protocol::actions
                    std::monostate>;
     using MailTransferAcrossAccounts =
         Descriptor<94, ActionDomain::Mail, AdmissionSemantics::Asynchronous, ReplayPolicy::Never,
-                   detail::mailMutation,
-                   std::tuple<javelin::app::CrossAccountMailTransferIntent>,
+                   detail::mailMutation, std::tuple<javelin::app::CrossAccountMailTransferIntent>,
                    javelin::app::MailTransferExecutionResult>;
 
     using MailActionTypes =

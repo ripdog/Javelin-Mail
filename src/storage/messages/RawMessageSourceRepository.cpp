@@ -339,9 +339,9 @@ namespace javelin::jmap::cache
             return *error;
 
         QSqlQuery query{m_connection.database()};
-        query.prepare(QStringLiteral(
-            "SELECT content_hash,relative_path,size FROM mail_vault_objects WHERE "
-            "content_hash=:content_hash"));
+        query.prepare(
+            QStringLiteral("SELECT content_hash,relative_path,size FROM mail_vault_objects WHERE "
+                           "content_hash=:content_hash"));
         query.bindValue(QStringLiteral(":content_hash"),
                         QString::fromStdString(std::string{contentHash}));
         if (!query.exec())

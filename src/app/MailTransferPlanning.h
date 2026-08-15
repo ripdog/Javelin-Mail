@@ -51,13 +51,13 @@ namespace javelin::app
 
     using MailTransferPlanResult = std::variant<PlannedMailTransfer, QString>;
 
-    [[nodiscard]] MailTransferPlanResult planMailTransfer(
-        const MailTransferIntent& intent, const std::vector<std::string>& emailIds,
-        const std::vector<javelin::jmap::domain::Email>& emails,
-        const std::vector<javelin::jmap::cache::MailboxTreeItem>& sourceMailboxes,
-        const std::vector<javelin::jmap::cache::MailboxTreeItem>& destinationMailboxes,
-        const javelin::jmap::cache::CachedAccount& sourceAccount,
-        const javelin::jmap::cache::CachedAccount& destinationAccount,
-        std::span<const MailTransferSourceCleanupOverride> cleanupOverrides = {});
+    [[nodiscard]] MailTransferPlanResult
+    planMailTransfer(const MailTransferIntent& intent, const std::vector<std::string>& emailIds,
+                     const std::vector<javelin::jmap::domain::Email>& emails,
+                     const std::vector<javelin::jmap::cache::MailboxTreeItem>& sourceMailboxes,
+                     const std::vector<javelin::jmap::cache::MailboxTreeItem>& destinationMailboxes,
+                     const javelin::jmap::cache::CachedAccount& sourceAccount,
+                     const javelin::jmap::cache::CachedAccount& destinationAccount,
+                     std::span<const MailTransferSourceCleanupOverride> cleanupOverrides = {});
 
 } // namespace javelin::app

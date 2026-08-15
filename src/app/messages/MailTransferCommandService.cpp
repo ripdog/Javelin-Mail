@@ -57,9 +57,9 @@ namespace javelin::app
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
             co_return *error;
 
-        MailTransferExecutor executor{m_databaseConnection, m_resourceTransport, m_methodTransport,
-                                      m_messageContentClient, m_connectionProvider,
-                                      &m_historyCoordinator};
+        MailTransferExecutor executor{m_databaseConnection, m_resourceTransport,
+                                      m_methodTransport,    m_messageContentClient,
+                                      m_connectionProvider, &m_historyCoordinator};
         co_return co_await executor.advance(std::get<PreparedMailTransfer>(prepared).operationId);
     }
 

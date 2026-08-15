@@ -21,7 +21,8 @@ namespace javelin::app::undo
             if (error.protocolType == std::optional<std::string>{"partialOutcome"})
                 return HistoryExecutionOutcome::PartialFailure;
             using enum javelin::jmap::OperationErrorCode;
-            if (error.code == Conflict || error.code == PreconditionFailed || error.code == NotFound)
+            if (error.code == Conflict || error.code == PreconditionFailed ||
+                error.code == NotFound)
                 return HistoryExecutionOutcome::Conflict;
             if (javelin::jmap::isTransientError(error) ||
                 javelin::jmap::isAuthenticationError(error))
@@ -51,7 +52,8 @@ namespace javelin::app::undo
         [[nodiscard]] HistoryExecutionResult success(MailTransferHistory history)
         {
             const QString sourceAccountId = QString::fromStdString(history.sourceAccountId);
-            const QString destinationAccountId = QString::fromStdString(history.destinationAccountId);
+            const QString destinationAccountId =
+                QString::fromStdString(history.destinationAccountId);
             return {
                 .outcome = HistoryExecutionOutcome::Success,
                 .updatedPayload = std::move(history),
@@ -99,8 +101,8 @@ namespace javelin::app::undo
             item.sourceSize = source.size;
         }
 
-        [[nodiscard]] std::vector<std::string>
-        withAdded(std::vector<std::string> values, const std::string& addition)
+        [[nodiscard]] std::vector<std::string> withAdded(std::vector<std::string> values,
+                                                         const std::string& addition)
         {
             if (!std::ranges::contains(values, addition))
                 values.push_back(addition);
@@ -113,8 +115,8 @@ namespace javelin::app::undo
             return !current.empty() && containsAll(removals, current);
         }
 
-        [[nodiscard]] std::vector<std::string>
-        missingFrom(const std::vector<std::string>& values, const std::vector<std::string>& desired)
+        [[nodiscard]] std::vector<std::string> missingFrom(const std::vector<std::string>& values,
+                                                           const std::vector<std::string>& desired)
         {
             std::vector<std::string> missing;
             for (const auto& value : desired)
@@ -151,21 +153,22 @@ namespace javelin::app::undo
         [[nodiscard]] const javelin::jmap::domain::Email*
         oneEmail(const javelin::jmap::AuthoritativeEmails& authoritative, std::string_view emailId)
         {
-            const auto found = std::ranges::find(authoritative.emails, emailId,
-                                                 &javelin::jmap::domain::Email::id);
+            const auto found =
+                std::ranges::find(authoritative.emails, emailId, &javelin::jmap::domain::Email::id);
             return found == authoritative.emails.end() ? nullptr : &*found;
         }
 
-        [[nodiscard]] bool acceptedExactlyOne(const javelin::jmap::SubmittedEmailMutations& submitted)
+        [[nodiscard]] bool
+        acceptedExactlyOne(const javelin::jmap::SubmittedEmailMutations& submitted)
         {
             return submitted.attemptedEmailCount == 1 && submitted.updatedEmailCount == 1 &&
                    submitted.failedEmailCount == 0 && submitted.items.size() == 1 &&
                    submitted.items.front().accepted;
         }
 
-        [[nodiscard]] HistoryExecutionResult
-        errorResult(const javelin::jmap::OperationError& error, MailTransferHistory history,
-                    const bool alreadyChanged)
+        [[nodiscard]] HistoryExecutionResult errorResult(const javelin::jmap::OperationError& error,
+                                                         MailTransferHistory history,
+                                                         const bool alreadyChanged)
         {
             auto outcome = outcomeFor(error);
             if (alreadyChanged && outcome != HistoryExecutionOutcome::Unknown)
@@ -175,8 +178,8 @@ namespace javelin::app::undo
             return result;
         }
 
-        [[nodiscard]] HistoryExecutionResult
-        rejection(QString message, MailTransferHistory history, const bool alreadyChanged)
+        [[nodiscard]] HistoryExecutionResult rejection(QString message, MailTransferHistory history,
+                                                       const bool alreadyChanged)
         {
             auto result = failure(alreadyChanged ? HistoryExecutionOutcome::PartialFailure
                                                  : HistoryExecutionOutcome::DefinitiveFailure,
@@ -223,13 +226,11 @@ namespace javelin::app::undo
                         *history);
                 }
                 const std::string sourceEmailId = *item.currentSourceEmailId;
-                auto sourceResult = co_await m_mail.getAuthoritativeEmails(
-                    history->sourceAccountId, {sourceEmailId});
-                if (const auto* error =
-                        std::get_if<javelin::jmap::OperationError>(&sourceResult))
+                auto sourceResult = co_await m_mail.getAuthoritativeEmails(history->sourceAccountId,
+                                                                           {sourceEmailId});
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&sourceResult))
                     co_return errorResult(*error, *history, changed);
-                const auto& source =
-                    std::get<javelin::jmap::AuthoritativeEmails>(sourceResult);
+                const auto& source = std::get<javelin::jmap::AuthoritativeEmails>(sourceResult);
                 const auto* currentSource = oneEmail(source, sourceEmailId);
                 if (currentSource == nullptr)
                 {
@@ -246,8 +247,9 @@ namespace javelin::app::undo
                     co_return failure(
                         changed ? HistoryExecutionOutcome::PartialFailure
                                 : HistoryExecutionOutcome::Conflict,
-                        i18n("The source message no longer has the mailbox state required to repeat "
-                             "this move."),
+                        i18n(
+                            "The source message no longer has the mailbox state required to repeat "
+                            "this move."),
                         *history);
                 }
 
@@ -272,8 +274,7 @@ namespace javelin::app::undo
                     auto redone = co_await m_mail.redoMissingDestination(
                         entry.entryId, history->operation, history->sourceAccountId,
                         history->destinationAccountId, history->destinationMailboxId, item);
-                    if (const auto* error =
-                            std::get_if<javelin::jmap::OperationError>(&redone))
+                    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&redone))
                         co_return errorResult(*error, *history, changed);
                     item = std::get<MailTransferItemHistory>(std::move(redone));
                     changed = true;
@@ -290,16 +291,15 @@ namespace javelin::app::undo
 
                 const auto priorDestinationMailboxes = currentDestination->mailboxIds;
                 const auto destinationKeywords = currentDestination->keywords;
-                const bool targetPresent = std::ranges::contains(
-                    currentDestination->mailboxIds, history->destinationMailboxId);
+                const bool targetPresent = std::ranges::contains(currentDestination->mailboxIds,
+                                                                 history->destinationMailboxId);
                 if (!targetPresent)
                 {
                     auto applied = co_await m_mail.applyExactEmailMutation(
                         history->destinationAccountId,
                         mutation(currentDestination->id, {history->destinationMailboxId}, {}, false,
                                  *destination, *currentDestination));
-                    if (const auto* error =
-                            std::get_if<javelin::jmap::OperationError>(&applied))
+                    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&applied))
                         co_return errorResult(*error, *history, changed);
                     if (!acceptedExactlyOne(
                             std::get<javelin::jmap::SubmittedEmailMutations>(applied)))
@@ -329,20 +329,17 @@ namespace javelin::app::undo
                 {
                     auto retained = co_await m_mail.retainSourceForHistory(
                         entry.entryId, history->sourceAccountId, sourceEmailId);
-                    if (const auto* error =
-                            std::get_if<javelin::jmap::OperationError>(&retained))
+                    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&retained))
                         co_return errorResult(*error, *history, changed);
                     item.rawContentHash = std::get<std::string>(std::move(retained));
                 }
 
                 auto applied = co_await m_mail.applyExactEmailMutation(
-                    history->sourceAccountId,
-                    mutation(sourceEmailId, {},
-                             actualDestroy ? std::vector<std::string>{}
-                                           : item.sourceRemovedMailboxIds,
-                             actualDestroy, source, *currentSource));
-                if (const auto* error =
-                        std::get_if<javelin::jmap::OperationError>(&applied))
+                    history->sourceAccountId, mutation(sourceEmailId, {},
+                                                       actualDestroy ? std::vector<std::string>{}
+                                                                     : item.sourceRemovedMailboxIds,
+                                                       actualDestroy, source, *currentSource));
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&applied))
                     co_return errorResult(*error, *history, changed);
                 if (!acceptedExactlyOne(std::get<javelin::jmap::SubmittedEmailMutations>(applied)))
                 {
@@ -350,9 +347,8 @@ namespace javelin::app::undo
                                         *history, changed);
                 }
                 item.sourceDestroyed = actualDestroy;
-                item.currentSourceEmailId = actualDestroy
-                                                ? std::nullopt
-                                                : std::optional<std::string>{sourceEmailId};
+                item.currentSourceEmailId =
+                    actualDestroy ? std::nullopt : std::optional<std::string>{sourceEmailId};
                 changed = true;
             }
             co_return success(*history);
@@ -381,8 +377,9 @@ namespace javelin::app::undo
                             co_return failure(
                                 changed ? HistoryExecutionOutcome::PartialFailure
                                         : HistoryExecutionOutcome::Conflict,
-                                i18n("A source message recreated by Undo no longer has the expected "
-                                     "mailbox state."),
+                                i18n(
+                                    "A source message recreated by Undo no longer has the expected "
+                                    "mailbox state."),
                                 *history);
                         }
                     }
@@ -462,13 +459,11 @@ namespace javelin::app::undo
             }
             auto destinationResult = co_await m_mail.getAuthoritativeEmails(
                 history->destinationAccountId, {*item.currentDestinationEmailId});
-            if (const auto* error =
-                    std::get_if<javelin::jmap::OperationError>(&destinationResult))
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&destinationResult))
                 co_return errorResult(*error, *history, changed);
             const auto& destination =
                 std::get<javelin::jmap::AuthoritativeEmails>(destinationResult);
-            const auto* currentDestination =
-                oneEmail(destination, *item.currentDestinationEmailId);
+            const auto* currentDestination = oneEmail(destination, *item.currentDestinationEmailId);
             if (currentDestination == nullptr)
             {
                 item.currentDestinationEmailId = std::nullopt;
@@ -476,8 +471,8 @@ namespace javelin::app::undo
                 continue;
             }
 
-            const bool targetPresent = std::ranges::contains(
-                currentDestination->mailboxIds, history->destinationMailboxId);
+            const bool targetPresent = std::ranges::contains(currentDestination->mailboxIds,
+                                                             history->destinationMailboxId);
             if (!targetPresent)
             {
                 ++item.redoGeneration;
@@ -506,8 +501,7 @@ namespace javelin::app::undo
                     history->destinationAccountId,
                     mutation(currentDestination->id, {}, {history->destinationMailboxId}, false,
                              destination, *currentDestination));
-                if (const auto* error =
-                        std::get_if<javelin::jmap::OperationError>(&applied))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&applied))
                     co_return errorResult(*error, *history, changed);
                 if (!acceptedExactlyOne(std::get<javelin::jmap::SubmittedEmailMutations>(applied)))
                     co_return rejection(i18n("The destination server rejected removing the "
@@ -524,8 +518,7 @@ namespace javelin::app::undo
                     history->destinationAccountId,
                     mutation(currentDestination->id, {}, {history->destinationMailboxId}, false,
                              destination, *currentDestination));
-                if (const auto* error =
-                        std::get_if<javelin::jmap::OperationError>(&applied))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&applied))
                     co_return errorResult(*error, *history, changed);
                 if (!acceptedExactlyOne(std::get<javelin::jmap::SubmittedEmailMutations>(applied)))
                     co_return rejection(i18n("The destination server rejected removing the "

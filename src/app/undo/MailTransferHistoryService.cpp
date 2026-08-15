@@ -67,7 +67,8 @@ namespace javelin::app::undo
         [[nodiscard]] OperationError dbError(const QString& operation, const QSqlQuery& query)
         {
             return javelin::jmap::operationError(javelin::jmap::cache::databaseError(
-                operation, query.lastError(), javelin::jmap::cache::DatabaseErrorCode::QueryFailed));
+                operation, query.lastError(),
+                javelin::jmap::cache::DatabaseErrorCode::QueryFailed));
         }
 
         [[nodiscard]] OperationError invalid(QString message)
@@ -86,7 +87,8 @@ namespace javelin::app::undo
             };
         }
 
-        [[nodiscard]] OperationError callerError(const javelin::jmap::api::MethodCallerResult& result)
+        [[nodiscard]] OperationError
+        callerError(const javelin::jmap::api::MethodCallerResult& result)
         {
             if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
                 return javelin::jmap::operationError(*error);
@@ -183,16 +185,18 @@ namespace javelin::app::undo
                 .contentHash = query.value(1).toString().toStdString(),
                 .accountId = query.value(2).toString().toStdString(),
                 .creationId = query.value(3).toString().toStdString(),
-                .uploadedBlobId = query.value(4).isNull()
-                                      ? std::nullopt
-                                      : std::optional<std::string>{
-                                            query.value(4).toString().toStdString()},
-                .preState = query.value(5).isNull()
-                                ? std::nullopt
-                                : std::optional<std::string>{query.value(5).toString().toStdString()},
-                .emailId = query.value(6).isNull()
-                               ? std::nullopt
-                               : std::optional<std::string>{query.value(6).toString().toStdString()},
+                .uploadedBlobId =
+                    query.value(4).isNull()
+                        ? std::nullopt
+                        : std::optional<std::string>{query.value(4).toString().toStdString()},
+                .preState =
+                    query.value(5).isNull()
+                        ? std::nullopt
+                        : std::optional<std::string>{query.value(5).toString().toStdString()},
+                .emailId =
+                    query.value(6).isNull()
+                        ? std::nullopt
+                        : std::optional<std::string>{query.value(6).toString().toStdString()},
                 .phase = query.value(7).toString(),
             }};
         }
@@ -209,7 +213,8 @@ namespace javelin::app::undo
             query.bindValue(QStringLiteral(":history_entry_id"), record.historyEntryId);
             query.bindValue(QStringLiteral(":content_hash"),
                             QString::fromStdString(record.contentHash));
-            query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(record.accountId));
+            query.bindValue(QStringLiteral(":account_id"),
+                            QString::fromStdString(record.accountId));
             query.bindValue(QStringLiteral(":creation_id"),
                             QString::fromStdString(record.creationId));
             if (!query.exec())
@@ -218,8 +223,8 @@ namespace javelin::app::undo
         }
 
         [[nodiscard]] std::optional<OperationError>
-        setUploaded(javelin::jmap::cache::DatabaseConnection& database, const RecreationRecord& record,
-                    const std::string& blobId)
+        setUploaded(javelin::jmap::cache::DatabaseConnection& database,
+                    const RecreationRecord& record, const std::string& blobId)
         {
             QSqlQuery query{database.database()};
             query.prepare(QStringLiteral(
@@ -261,7 +266,8 @@ namespace javelin::app::undo
 
         [[nodiscard]] std::optional<OperationError>
         setPhase(javelin::jmap::cache::DatabaseConnection& database, const RecreationRecord& record,
-                 const QString& expected, const QString& next, std::optional<QString> error = std::nullopt)
+                 const QString& expected, const QString& next,
+                 std::optional<QString> error = std::nullopt)
         {
             QSqlQuery query{database.database()};
             query.prepare(QStringLiteral(
@@ -301,7 +307,8 @@ namespace javelin::app::undo
             if (!query.exec())
                 return dbError(QStringLiteral("Complete history source recreation"), query);
             if (query.numRowsAffected() != 1)
-                return invalid(i18n("The source recreation state changed while completing import."));
+                return invalid(
+                    i18n("The source recreation state changed while completing import."));
             return std::nullopt;
         }
 
@@ -375,15 +382,15 @@ namespace javelin::app::undo
             if (!query.exec() || !query.next())
                 return dbError(QStringLiteral("Verify history mail vault pin"), query);
             if (!query.value(0).toBool())
-                return invalid(i18n("The raw message retained for this Undo entry is unavailable."));
+                return invalid(
+                    i18n("The raw message retained for this Undo entry is unavailable."));
             return std::nullopt;
         }
 
         [[nodiscard]] std::variant<std::optional<std::string>, OperationError>
         findRedoOperation(javelin::jmap::cache::DatabaseConnection& database,
                           const QString& historyEntryId, const std::uint64_t redoGeneration,
-                          const std::string& sourceEmailId,
-                          const std::string& destinationAccountId,
+                          const std::string& sourceEmailId, const std::string& destinationAccountId,
                           const std::string& destinationMailboxId,
                           const MailTransferHistoryOperation operation)
         {
@@ -391,7 +398,8 @@ namespace javelin::app::undo
             query.prepare(QStringLiteral(
                 "SELECT transfer_operation_id FROM mail_transfer_history_redos WHERE "
                 "history_entry_id=:history_entry_id AND redo_generation=:redo_generation AND "
-                "source_email_id=:source_email_id AND destination_account_id=:destination_account_id "
+                "source_email_id=:source_email_id AND "
+                "destination_account_id=:destination_account_id "
                 "AND destination_mailbox_id=:destination_mailbox_id AND operation=:operation"));
             query.bindValue(QStringLiteral(":history_entry_id"), historyEntryId);
             query.bindValue(QStringLiteral(":redo_generation"),
@@ -413,14 +421,11 @@ namespace javelin::app::undo
             return std::optional<std::string>{query.value(0).toString().toStdString()};
         }
 
-        [[nodiscard]] std::optional<OperationError>
-        recordRedoOperation(javelin::jmap::cache::DatabaseConnection& database,
-                            const QString& historyEntryId, const std::uint64_t redoGeneration,
-                            const std::string& sourceEmailId,
-                            const std::string& destinationAccountId,
-                            const std::string& destinationMailboxId,
-                            const MailTransferHistoryOperation operation,
-                            const std::string& transferOperationId)
+        [[nodiscard]] std::optional<OperationError> recordRedoOperation(
+            javelin::jmap::cache::DatabaseConnection& database, const QString& historyEntryId,
+            const std::uint64_t redoGeneration, const std::string& sourceEmailId,
+            const std::string& destinationAccountId, const std::string& destinationMailboxId,
+            const MailTransferHistoryOperation operation, const std::string& transferOperationId)
         {
             QSqlQuery query{database.database()};
             query.prepare(QStringLiteral(
@@ -453,7 +458,7 @@ namespace javelin::app::undo
         {
             return {
                 .code = error.type == "forbidden" ? OperationErrorCode::PermissionDenied
-                                                    : OperationErrorCode::ServerFailure,
+                                                  : OperationErrorCode::ServerFailure,
                 .message = error.description.has_value()
                                ? QString::fromStdString(*error.description)
                                : i18n("The source server rejected restoring this message (%1).",
@@ -498,10 +503,11 @@ namespace javelin::app::undo
         auto called = co_await caller.call(context.requestContext, builder);
         if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(called))
             co_return callerError(called);
-        const auto read = javelin::jmap::api::ResponseReader{
-            std::get<javelin::jmap::api::ResponseEnvelope>(called)}.require(handle);
-        if (const auto* error =
-                std::get_if<javelin::jmap::api::ResponseReaderError>(&read))
+        const auto read =
+            javelin::jmap::api::ResponseReader{
+                std::get<javelin::jmap::api::ResponseEnvelope>(called)}
+                .require(handle);
+        if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&read))
             co_return javelin::jmap::operationError(*error);
         const auto& response = std::get<javelin::jmap::api::EmailGetResponse>(read);
         if (response.accountId != context.account.remoteAccountId || response.state.empty())
@@ -545,7 +551,8 @@ namespace javelin::app::undo
         if (historyEntryId.isEmpty() || accountId.empty() || rawContentHash.empty() ||
             mailboxIds.empty())
             co_return invalid(i18n("The source recreation request is incomplete."));
-        if (const auto error = verifyHistoryPin(m_databaseConnection, historyEntryId, rawContentHash))
+        if (const auto error =
+                verifyHistoryPin(m_databaseConnection, historyEntryId, rawContentHash))
             co_return *error;
 
         auto contextResult = accountContext(m_databaseConnection, m_connectionProvider, accountId);
@@ -587,7 +594,8 @@ namespace javelin::app::undo
             if (record->phase == QStringLiteral("complete"))
             {
                 if (!record->emailId.has_value())
-                    co_return invalid(i18n("The completed source recreation is missing its Email id."));
+                    co_return invalid(
+                        i18n("The completed source recreation is missing its Email id."));
                 const auto emailRequest = javelin::jmap::api::emailGet({
                     .accountId = context.account.remoteAccountId,
                     .ids = std::vector<std::string>{*record->emailId},
@@ -603,8 +611,10 @@ namespace javelin::app::undo
                 auto emailCalled = co_await caller.call(context.requestContext, emailBuilder);
                 if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(emailCalled))
                     co_return callerError(emailCalled);
-                const auto emailRead = javelin::jmap::api::ResponseReader{
-                    std::get<javelin::jmap::api::ResponseEnvelope>(emailCalled)}.require(emailHandle);
+                const auto emailRead =
+                    javelin::jmap::api::ResponseReader{
+                        std::get<javelin::jmap::api::ResponseEnvelope>(emailCalled)}
+                        .require(emailHandle);
                 if (const auto* error =
                         std::get_if<javelin::jmap::api::ResponseReaderError>(&emailRead))
                     co_return javelin::jmap::operationError(*error);
@@ -612,21 +622,22 @@ namespace javelin::app::undo
                 if (response.accountId != context.account.remoteAccountId ||
                     response.list.size() != 1 || response.list.front().id != *record->emailId ||
                     !response.notFound.empty())
-                    co_return invalid(i18n("The recreated source Email is not available after import."));
+                    co_return invalid(
+                        i18n("The recreated source Email is not available after import."));
 
                 auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
                     m_databaseConnection, QStringLiteral("Materialize recreated source Email"));
                 if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
                     co_return javelin::jmap::operationError(*error);
-                auto transaction =
-                    std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+                auto transaction = std::get<javelin::jmap::cache::DatabaseTransaction>(
+                    std::move(transactionResult));
                 javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
                 if (const auto error = emails.upsertMany(transaction, accountId, response.list))
                     co_return javelin::jmap::operationError(*error);
                 javelin::jmap::cache::MailboxWindowRepository mailboxWindows{m_databaseConnection};
                 for (const auto& mailboxId : response.list.front().mailboxIds)
-                    if (const auto error = mailboxWindows.invalidateMailbox(transaction, accountId,
-                                                                             mailboxId))
+                    if (const auto error =
+                            mailboxWindows.invalidateMailbox(transaction, accountId, mailboxId))
                         co_return javelin::jmap::operationError(*error);
                 javelin::jmap::cache::SearchWindowRepository searchWindows{m_databaseConnection};
                 if (const auto error = searchWindows.invalidateAccount(transaction, accountId))
@@ -648,11 +659,11 @@ namespace javelin::app::undo
 
             if (record->phase == QStringLiteral("creating"))
             {
-                if (const auto error = setPhase(m_databaseConnection, *record,
-                                                QStringLiteral("creating"),
-                                                QStringLiteral("unknown"),
-                                                i18n("The application stopped while source "
-                                                     "recreation may have been dispatched.")))
+                if (const auto error =
+                        setPhase(m_databaseConnection, *record, QStringLiteral("creating"),
+                                 QStringLiteral("unknown"),
+                                 i18n("The application stopped while source "
+                                      "recreation may have been dispatched.")))
                     co_return *error;
                 record->phase = QStringLiteral("unknown");
             }
@@ -666,15 +677,16 @@ namespace javelin::app::undo
                 const auto& object =
                     std::get<std::optional<javelin::jmap::cache::MailVaultObject>>(objectResult);
                 if (!object.has_value())
-                    co_return invalid(i18n("The retained raw source is missing from the mail vault."));
-                const auto vault = javelin::jmap::cache::MailVault::forDatabase(m_databaseConnection);
+                    co_return invalid(
+                        i18n("The retained raw source is missing from the mail vault."));
+                const auto vault =
+                    javelin::jmap::cache::MailVault::forDatabase(m_databaseConnection);
                 auto leaseResult = vault.acquireLease(*object);
                 if (const auto* error =
                         std::get_if<javelin::jmap::cache::MailVaultError>(&leaseResult))
                     co_return OperationError{.code = OperationErrorCode::LocalStorageFailure,
                                              .message = error->message};
-                auto lease =
-                    std::get<javelin::jmap::cache::MailVaultLease>(std::move(leaseResult));
+                auto lease = std::get<javelin::jmap::cache::MailVaultLease>(std::move(leaseResult));
                 const auto pathResult = lease.filePath();
                 if (const auto* error =
                         std::get_if<javelin::jmap::cache::MailVaultError>(&pathResult))
@@ -684,11 +696,9 @@ namespace javelin::app::undo
                     m_resourceTransport, context.uploadContext, accountId,
                     context.account.remoteAccountId, context.settings.apiKey,
                     std::get<QString>(pathResult), "message/rfc822");
-                if (const auto* error =
-                        std::get_if<javelin::jmap::api::TransportError>(&upload))
+                if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&upload))
                     co_return javelin::jmap::operationError(*error);
-                if (const auto* error =
-                        std::get_if<javelin::jmap::api::ProtocolError>(&upload))
+                if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&upload))
                     co_return javelin::jmap::operationError(*error);
                 const auto& uploaded = std::get<javelin::jmap::api::BlobUploadResponse>(upload);
                 if (uploaded.accountId != context.account.remoteAccountId)
@@ -718,8 +728,10 @@ namespace javelin::app::undo
                 auto stateCalled = co_await caller.call(context.requestContext, stateBuilder);
                 if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(stateCalled))
                     co_return callerError(stateCalled);
-                const auto stateRead = javelin::jmap::api::ResponseReader{
-                    std::get<javelin::jmap::api::ResponseEnvelope>(stateCalled)}.require(stateHandle);
+                const auto stateRead =
+                    javelin::jmap::api::ResponseReader{
+                        std::get<javelin::jmap::api::ResponseEnvelope>(stateCalled)}
+                        .require(stateHandle);
                 if (const auto* error =
                         std::get_if<javelin::jmap::api::ResponseReaderError>(&stateRead))
                     co_return javelin::jmap::operationError(*error);
@@ -734,14 +746,13 @@ namespace javelin::app::undo
                 const auto importRequest = javelin::jmap::api::emailImport({
                     .accountId = context.account.remoteAccountId,
                     .ifInState = state.state,
-                    .emails =
-                        {{record->creationId,
-                          javelin::jmap::api::EmailImport{
-                              .blobId = *record->uploadedBlobId,
-                              .mailboxIds = enabledMap(mailboxIds),
-                              .keywords = enabledMap(keywords),
-                              .receivedAt = receivedAt,
-                          }}},
+                    .emails = {{record->creationId,
+                                javelin::jmap::api::EmailImport{
+                                    .blobId = *record->uploadedBlobId,
+                                    .mailboxIds = enabledMap(mailboxIds),
+                                    .keywords = enabledMap(keywords),
+                                    .receivedAt = receivedAt,
+                                }}},
                 });
                 if (!importRequest.has_value())
                     co_return invalid(i18n("Unable to encode source Email/import request."));
@@ -750,50 +761,53 @@ namespace javelin::app::undo
                 const auto importHandle =
                     importBuilder.call(*importRequest, "history-source-import");
                 bool dispatched = false;
-                auto importCalled = co_await caller.call(
-                    context.requestContext, importBuilder, {}, [&dispatched] { dispatched = true; });
+                auto importCalled = co_await caller.call(context.requestContext, importBuilder, {},
+                                                         [&dispatched] { dispatched = true; });
                 if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(importCalled))
                 {
                     const auto error = callerError(importCalled);
                     if (dispatched)
                     {
-                        if (const auto journalError = setPhase(
-                                m_databaseConnection, *record, QStringLiteral("creating"),
-                                QStringLiteral("unknown"), error.message))
+                        if (const auto journalError =
+                                setPhase(m_databaseConnection, *record, QStringLiteral("creating"),
+                                         QStringLiteral("unknown"), error.message))
                             co_return *journalError;
                         record->phase = QStringLiteral("unknown");
                         co_return ambiguous(i18n("Source restoration may have succeeded, but its "
-                                                "server response was lost."));
+                                                 "server response was lost."));
                     }
-                    if (const auto journalError = setPhase(
-                            m_databaseConnection, *record, QStringLiteral("creating"),
-                            QStringLiteral("uploaded"), error.message))
+                    if (const auto journalError =
+                            setPhase(m_databaseConnection, *record, QStringLiteral("creating"),
+                                     QStringLiteral("uploaded"), error.message))
                         co_return *journalError;
                     record->phase = QStringLiteral("uploaded");
                     co_return error;
                 }
 
-                const auto importRead = javelin::jmap::api::ResponseReader{
-                    std::get<javelin::jmap::api::ResponseEnvelope>(importCalled)}
-                                            .require(importHandle);
+                const auto importRead =
+                    javelin::jmap::api::ResponseReader{
+                        std::get<javelin::jmap::api::ResponseEnvelope>(importCalled)}
+                        .require(importHandle);
                 if (const auto* error =
                         std::get_if<javelin::jmap::api::ResponseReaderError>(&importRead))
                 {
                     const auto operationError = javelin::jmap::operationError(*error);
-                    if (const auto journalError = setPhase(
-                            m_databaseConnection, *record, QStringLiteral("creating"),
-                            QStringLiteral("unknown"), operationError.message))
+                    if (const auto journalError =
+                            setPhase(m_databaseConnection, *record, QStringLiteral("creating"),
+                                     QStringLiteral("unknown"), operationError.message))
                         co_return *journalError;
                     record->phase = QStringLiteral("unknown");
-                    co_return ambiguous(i18n("Source restoration returned an unaccounted response."));
+                    co_return ambiguous(
+                        i18n("Source restoration returned an unaccounted response."));
                 }
                 const auto& imported =
                     std::get<javelin::jmap::api::EmailImportResponse>(importRead);
                 if (imported.accountId != context.account.remoteAccountId)
                 {
-                    if (const auto journalError = setPhase(
-                            m_databaseConnection, *record, QStringLiteral("creating"),
-                            QStringLiteral("unknown"), i18n("Email/import returned another account.")))
+                    if (const auto journalError =
+                            setPhase(m_databaseConnection, *record, QStringLiteral("creating"),
+                                     QStringLiteral("unknown"),
+                                     i18n("Email/import returned another account.")))
                         co_return *journalError;
                     record->phase = QStringLiteral("unknown");
                     co_return ambiguous(i18n("Source restoration returned the wrong account id."));
@@ -801,28 +815,31 @@ namespace javelin::app::undo
                 const auto created = imported.created.find(record->creationId);
                 if (created != imported.created.end())
                 {
-                    if (const auto error = setComplete(m_databaseConnection, *record,
-                                                       QStringLiteral("creating"), created->second.id))
+                    if (const auto error =
+                            setComplete(m_databaseConnection, *record, QStringLiteral("creating"),
+                                        created->second.id))
                         co_return *error;
                     record->emailId = created->second.id;
                     record->phase = QStringLiteral("complete");
                     continue;
                 }
                 const auto rejected = imported.notCreated.find(record->creationId);
-                if (rejected != imported.notCreated.end() && rejected->second.type == "alreadyExists" &&
+                if (rejected != imported.notCreated.end() &&
+                    rejected->second.type == "alreadyExists" &&
                     rejected->second.existingId.has_value())
                 {
-                    auto existing = co_await getAuthoritativeEmails(
-                        accountId, {*rejected->second.existingId});
+                    auto existing =
+                        co_await getAuthoritativeEmails(accountId, {*rejected->second.existingId});
                     if (const auto* error = std::get_if<OperationError>(&existing))
                         co_return *error;
                     const auto& authoritative =
                         std::get<javelin::jmap::AuthoritativeEmails>(existing);
-                    const auto found = std::ranges::find(
-                        authoritative.emails, *rejected->second.existingId,
-                        &javelin::jmap::domain::Email::id);
+                    const auto found =
+                        std::ranges::find(authoritative.emails, *rejected->second.existingId,
+                                          &javelin::jmap::domain::Email::id);
                     if (found == authoritative.emails.end())
-                        co_return invalid(i18n("The server's existing source Email is inaccessible."));
+                        co_return invalid(
+                            i18n("The server's existing source Email is inaccessible."));
                     std::vector<std::string> missing;
                     for (const auto& mailboxId : mailboxIds)
                         if (!std::ranges::contains(found->mailboxIds, mailboxId))
@@ -830,28 +847,28 @@ namespace javelin::app::undo
                     if (!missing.empty())
                     {
                         auto applied = co_await applyExactEmailMutation(
-                            accountId,
-                            javelin::jmap::EmailMailboxMutation{
-                                .emailId = found->id,
-                                .addMailboxIds = std::move(missing),
-                                .removeMailboxIds = {},
-                                .addKeywords = {},
-                                .removeKeywords = {},
-                                .operationGroupId = QUuid::createUuid()
-                                                        .toString(QUuid::WithoutBraces)
-                                                        .toStdString(),
-                                .ifInState = authoritative.state,
-                                .authoritativeMailboxIds = found->mailboxIds,
-                                .authoritativeKeywords = found->keywords,
-                                .destroy = false,
-                            });
+                            accountId, javelin::jmap::EmailMailboxMutation{
+                                           .emailId = found->id,
+                                           .addMailboxIds = std::move(missing),
+                                           .removeMailboxIds = {},
+                                           .addKeywords = {},
+                                           .removeKeywords = {},
+                                           .operationGroupId = QUuid::createUuid()
+                                                                   .toString(QUuid::WithoutBraces)
+                                                                   .toStdString(),
+                                           .ifInState = authoritative.state,
+                                           .authoritativeMailboxIds = found->mailboxIds,
+                                           .authoritativeKeywords = found->keywords,
+                                           .destroy = false,
+                                       });
                         if (const auto* error = std::get_if<OperationError>(&applied))
                             co_return *error;
                         const auto& summary =
                             std::get<javelin::jmap::SubmittedEmailMutations>(applied);
                         if (summary.updatedEmailCount != 1 || summary.failedEmailCount != 0)
-                            co_return invalid(i18n("The existing source Email could not be restored "
-                                                   "to its original mailboxes."));
+                            co_return invalid(
+                                i18n("The existing source Email could not be restored "
+                                     "to its original mailboxes."));
                     }
                     if (const auto error = setComplete(m_databaseConnection, *record,
                                                        QStringLiteral("creating"), found->id))
@@ -863,18 +880,18 @@ namespace javelin::app::undo
                 if (rejected != imported.notCreated.end())
                 {
                     const auto operationError = rejectedImport(rejected->second);
-                    if (const auto journalError = setPhase(
-                            m_databaseConnection, *record, QStringLiteral("creating"),
-                            QStringLiteral("uploaded"), operationError.message))
+                    if (const auto journalError =
+                            setPhase(m_databaseConnection, *record, QStringLiteral("creating"),
+                                     QStringLiteral("uploaded"), operationError.message))
                         co_return *journalError;
                     record->phase = QStringLiteral("uploaded");
                     co_return operationError;
                 }
 
-                if (const auto error = setPhase(m_databaseConnection, *record,
-                                                QStringLiteral("creating"),
-                                                QStringLiteral("unknown"),
-                                                i18n("Email/import did not account for creation.")))
+                if (const auto error =
+                        setPhase(m_databaseConnection, *record, QStringLiteral("creating"),
+                                 QStringLiteral("unknown"),
+                                 i18n("Email/import did not account for creation.")))
                     co_return *error;
                 record->phase = QStringLiteral("unknown");
                 co_return ambiguous(i18n("Source restoration returned an incomplete result."));
@@ -883,7 +900,8 @@ namespace javelin::app::undo
             if (record->phase == QStringLiteral("unknown"))
             {
                 if (!record->preState.has_value())
-                    co_return ambiguous(i18n("Source restoration is missing its reconciliation state."));
+                    co_return ambiguous(
+                        i18n("Source restoration is missing its reconciliation state."));
                 std::string sinceState = *record->preState;
                 std::vector<std::string> createdIds;
                 bool complete = false;
@@ -903,36 +921,42 @@ namespace javelin::app::undo
                     auto called = co_await caller.call(context.requestContext, changesBuilder);
                     if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(called))
                         co_return callerError(called);
-                    const auto read = javelin::jmap::api::ResponseReader{
-                        std::get<javelin::jmap::api::ResponseEnvelope>(called)}.require(changesHandle);
+                    const auto read =
+                        javelin::jmap::api::ResponseReader{
+                            std::get<javelin::jmap::api::ResponseEnvelope>(called)}
+                            .require(changesHandle);
                     if (const auto* error =
                             std::get_if<javelin::jmap::api::ResponseReaderError>(&read))
                         co_return javelin::jmap::operationError(*error);
-                    const auto& changes =
-                        std::get<javelin::jmap::api::EmailChangesResponse>(read);
+                    const auto& changes = std::get<javelin::jmap::api::EmailChangesResponse>(read);
                     if (changes.accountId != context.account.remoteAccountId ||
                         changes.oldState != sinceState || changes.newState.empty())
-                        co_return ambiguous(i18n("Source Email/changes could not be reconciled safely."));
-                    createdIds.insert(createdIds.end(), changes.created.begin(), changes.created.end());
+                        co_return ambiguous(
+                            i18n("Source Email/changes could not be reconciled safely."));
+                    createdIds.insert(createdIds.end(), changes.created.begin(),
+                                      changes.created.end());
                     if (!changes.hasMoreChanges)
                     {
                         complete = true;
                         break;
                     }
                     if (changes.newState == sinceState)
-                        co_return ambiguous(i18n("Source Email/changes did not advance its state."));
+                        co_return ambiguous(
+                            i18n("Source Email/changes did not advance its state."));
                     sinceState = changes.newState;
                 }
                 if (!complete)
-                    co_return ambiguous(i18n("Too many source changes occurred to reconcile Undo."));
+                    co_return ambiguous(
+                        i18n("Too many source changes occurred to reconcile Undo."));
 
                 std::ranges::sort(createdIds);
-                createdIds.erase(std::unique(createdIds.begin(), createdIds.end()), createdIds.end());
+                createdIds.erase(std::unique(createdIds.begin(), createdIds.end()),
+                                 createdIds.end());
                 if (createdIds.empty())
                 {
-                    if (const auto error = setPhase(m_databaseConnection, *record,
-                                                    QStringLiteral("unknown"),
-                                                    QStringLiteral("uploaded")))
+                    if (const auto error =
+                            setPhase(m_databaseConnection, *record, QStringLiteral("unknown"),
+                                     QStringLiteral("uploaded")))
                         co_return *error;
                     record->phase = QStringLiteral("uploaded");
                     continue;
@@ -941,7 +965,7 @@ namespace javelin::app::undo
                     createdIds.size() > static_cast<std::size_t>(
                                             context.requestContext.requestLimits->maxObjectsInGet))
                     co_return ambiguous(i18n("Source restoration may have created a message, but "
-                                            "it cannot be correlated uniquely."));
+                                             "it cannot be correlated uniquely."));
 
                 const auto candidatesRequest = javelin::jmap::api::emailGet({
                     .accountId = context.account.remoteAccountId,
@@ -958,34 +982,37 @@ namespace javelin::app::undo
                 auto called = co_await caller.call(context.requestContext, candidatesBuilder);
                 if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(called))
                     co_return callerError(called);
-                const auto read = javelin::jmap::api::ResponseReader{
-                    std::get<javelin::jmap::api::ResponseEnvelope>(called)}.require(candidatesHandle);
-                if (const auto* error =
-                        std::get_if<javelin::jmap::api::ResponseReaderError>(&read))
+                const auto read =
+                    javelin::jmap::api::ResponseReader{
+                        std::get<javelin::jmap::api::ResponseEnvelope>(called)}
+                        .require(candidatesHandle);
+                if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&read))
                     co_return javelin::jmap::operationError(*error);
                 const auto& candidates = std::get<javelin::jmap::api::EmailGetResponse>(read);
                 if (candidates.accountId != context.account.remoteAccountId)
-                    co_return ambiguous(i18n("Source candidate Email/get returned another account."));
+                    co_return ambiguous(
+                        i18n("Source candidate Email/get returned another account."));
 
                 auto expectedMessageIds = normalized(messageIds);
                 const javelin::jmap::domain::Email* matched = nullptr;
                 for (const auto& candidate : candidates.list)
                 {
                     auto candidateMessageIds = normalized(candidate.messageId);
-                    const bool receivedMatches = !receivedAt.has_value() ||
-                                                 candidate.receivedAt == *receivedAt;
+                    const bool receivedMatches =
+                        !receivedAt.has_value() || candidate.receivedAt == *receivedAt;
                     const bool matches = candidateMessageIds == expectedMessageIds &&
                                          receivedMatches && candidate.size == sourceSize &&
                                          containsAll(candidate.mailboxIds, mailboxIds);
                     if (!matches)
                         continue;
                     if (matched != nullptr)
-                        co_return ambiguous(i18n("More than one source recreation candidate matches."));
+                        co_return ambiguous(
+                            i18n("More than one source recreation candidate matches."));
                     matched = &candidate;
                 }
                 if (matched == nullptr)
                     co_return ambiguous(i18n("The source recreation candidate cannot be identified "
-                                            "uniquely enough to continue."));
+                                             "uniquely enough to continue."));
                 if (const auto error = setComplete(m_databaseConnection, *record,
                                                    QStringLiteral("unknown"), matched->id))
                     co_return *error;
@@ -1002,8 +1029,7 @@ namespace javelin::app::undo
 
     QCoro::Task<RetainedMailTransferSourceResult>
     MailTransferHistoryService::retainSourceForHistory(QString historyEntryId,
-                                                       std::string accountId,
-                                                       std::string emailId)
+                                                       std::string accountId, std::string emailId)
     {
         if (historyEntryId.isEmpty() || accountId.empty() || emailId.empty())
             co_return invalid(i18n("The source retention request is incomplete."));
@@ -1028,8 +1054,9 @@ namespace javelin::app::undo
         auto referenceResult = sources.findReference(accountId, emailId);
         if (const auto* error = std::get_if<DatabaseError>(&referenceResult))
             co_return javelin::jmap::operationError(*error);
-        const auto& reference = std::get<
-            std::optional<javelin::jmap::cache::RawMessageSourceReference>>(referenceResult);
+        const auto& reference =
+            std::get<std::optional<javelin::jmap::cache::RawMessageSourceReference>>(
+                referenceResult);
         if (!reference.has_value())
             co_return invalid(i18n("The exact raw source is unavailable after message refresh."));
 
@@ -1042,15 +1069,13 @@ namespace javelin::app::undo
                       QString::fromStdString(reference->object.contentHash));
         if (!pin.exec())
             co_return dbError(QStringLiteral("Retain source MIME for transfer history"), pin);
-        if (const auto error =
-                verifyHistoryPin(m_databaseConnection, historyEntryId,
-                                 reference->object.contentHash))
+        if (const auto error = verifyHistoryPin(m_databaseConnection, historyEntryId,
+                                                reference->object.contentHash))
             co_return *error;
         co_return reference->object.contentHash;
     }
 
-    QCoro::Task<RedoneMailTransferItemResult>
-    MailTransferHistoryService::redoMissingDestination(
+    QCoro::Task<RedoneMailTransferItemResult> MailTransferHistoryService::redoMissingDestination(
         QString historyEntryId, const MailTransferHistoryOperation operation,
         std::string sourceAccountId, std::string destinationAccountId,
         std::string destinationMailboxId, MailTransferItemHistory item)
@@ -1060,9 +1085,9 @@ namespace javelin::app::undo
             co_return invalid(i18n("The mail transfer Redo request is incomplete."));
         const std::string sourceEmailId = *item.currentSourceEmailId;
 
-        auto redoResult = findRedoOperation(m_databaseConnection, historyEntryId,
-                                            item.redoGeneration, sourceEmailId,
-                                            destinationAccountId, destinationMailboxId, operation);
+        auto redoResult =
+            findRedoOperation(m_databaseConnection, historyEntryId, item.redoGeneration,
+                              sourceEmailId, destinationAccountId, destinationMailboxId, operation);
         if (const auto* error = std::get_if<OperationError>(&redoResult))
             co_return *error;
         auto redoOperationId = std::get<std::optional<std::string>>(std::move(redoResult));
@@ -1074,8 +1099,8 @@ namespace javelin::app::undo
             if (const auto* error = std::get_if<OperationError>(&sourceResult))
                 co_return *error;
             const auto& source = std::get<javelin::jmap::AuthoritativeEmails>(sourceResult);
-            const auto sourceFound = std::ranges::find(source.emails, sourceEmailId,
-                                                       &javelin::jmap::domain::Email::id);
+            const auto sourceFound =
+                std::ranges::find(source.emails, sourceEmailId, &javelin::jmap::domain::Email::id);
             if (sourceFound == source.emails.end())
                 co_return invalid(i18n("The source message is no longer available for Redo."));
             if (operation == MailTransferHistoryOperation::Move &&
@@ -1096,8 +1121,8 @@ namespace javelin::app::undo
                 co_return javelin::jmap::operationError(*error);
             javelin::jmap::cache::MailboxWindowRepository mailboxWindows{m_databaseConnection};
             for (const auto& mailboxId : sourceFound->mailboxIds)
-                if (const auto error = mailboxWindows.invalidateMailbox(
-                        transaction, sourceAccountId, mailboxId))
+                if (const auto error =
+                        mailboxWindows.invalidateMailbox(transaction, sourceAccountId, mailboxId))
                     co_return javelin::jmap::operationError(*error);
             javelin::jmap::cache::SearchWindowRepository searchWindows{m_databaseConnection};
             if (const auto error = searchWindows.invalidateAccount(transaction, sourceAccountId))
@@ -1130,8 +1155,7 @@ namespace javelin::app::undo
             });
             if (const auto* error = std::get_if<OperationError>(&prepared))
                 co_return *error;
-            redoOperationId =
-                std::get<javelin::app::PreparedMailTransfer>(prepared).operationId;
+            redoOperationId = std::get<javelin::app::PreparedMailTransfer>(prepared).operationId;
             if (const auto error = recordRedoOperation(
                     m_databaseConnection, historyEntryId, item.redoGeneration, sourceEmailId,
                     destinationAccountId, destinationMailboxId, operation, *redoOperationId))
@@ -1141,8 +1165,7 @@ namespace javelin::app::undo
                 destinationAccountId, destinationMailboxId, operation);
             if (const auto* error = std::get_if<OperationError>(&persistedRedo))
                 co_return *error;
-            const auto& persistedOperationId =
-                std::get<std::optional<std::string>>(persistedRedo);
+            const auto& persistedOperationId = std::get<std::optional<std::string>>(persistedRedo);
             if (!persistedOperationId.has_value())
                 co_return invalid(i18n("The durable Redo transfer mapping could not be created."));
             redoOperationId = *persistedOperationId;
@@ -1157,9 +1180,9 @@ namespace javelin::app::undo
         }
 
         javelin::jmap::MessageContentClient content{m_databaseConnection, m_resourceTransport};
-        javelin::app::MailTransferExecutor executor{
-            m_databaseConnection, m_resourceTransport, m_methodTransport, content,
-            m_connectionProvider, nullptr};
+        javelin::app::MailTransferExecutor executor{m_databaseConnection, m_resourceTransport,
+                                                    m_methodTransport,    content,
+                                                    m_connectionProvider, nullptr};
         auto executed = co_await executor.advance(*redoOperationId);
         if (const auto* error = std::get_if<OperationError>(&executed))
             co_return *error;
@@ -1192,7 +1215,8 @@ namespace javelin::app::undo
         if (transferItem.sourceDestroy)
         {
             if (!transferItem.rawContentHash.has_value())
-                co_return invalid(i18n("The repeated destructive move did not retain its raw source."));
+                co_return invalid(
+                    i18n("The repeated destructive move did not retain its raw source."));
             const auto reassigned = transfers.reassignSourcePin(
                 transferItem.itemId, "history_entry", historyEntryId.toStdString());
             if (const auto* error = std::get_if<DatabaseError>(&reassigned))
@@ -1209,7 +1233,8 @@ namespace javelin::app::undo
         const auto& destination =
             std::get<std::optional<javelin::jmap::domain::Email>>(destinationResult);
         if (!destination.has_value())
-            co_return invalid(i18n("The repeated transfer destination is not materialized locally."));
+            co_return invalid(
+                i18n("The repeated transfer destination is not materialized locally."));
 
         co_return MailTransferItemHistory{
             .currentSourceEmailId = transferItem.sourceDestroy
@@ -1222,8 +1247,8 @@ namespace javelin::app::undo
             .sourceSize = transferItem.sourceSize,
             .sourceRemovedMailboxIds = transferItem.sourceRemoveMailboxIds,
             .sourceDestroyed = transferItem.sourceDestroy,
-            .rawContentHash = transferItem.sourceDestroy ? transferItem.rawContentHash
-                                                         : item.rawContentHash,
+            .rawContentHash =
+                transferItem.sourceDestroy ? transferItem.rawContentHash : item.rawContentHash,
             .currentDestinationEmailId = transferItem.destinationEmailId,
             .destinationReusedExisting = transferItem.reusedExisting,
             .destinationPriorMailboxIds =

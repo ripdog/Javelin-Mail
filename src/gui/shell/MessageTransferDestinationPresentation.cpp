@@ -30,8 +30,7 @@ namespace javelin::gui::shell
                 if (!destination.mailbox.myRights.mayAddItems)
                     continue;
                 const bool separatorBefore =
-                    destination.group ==
-                            javelin::gui::mailboxes::MailboxPresentationGroup::User &&
+                    destination.group == javelin::gui::mailboxes::MailboxPresentationGroup::User &&
                     displayedSpecialUse && !insertedUserSeparator;
                 result.push_back({
                     .accountId = accountId,
@@ -50,9 +49,9 @@ namespace javelin::gui::shell
             return result;
         }
 
-        [[nodiscard]] QString baseLabel(
-            const javelin::jmap::cache::CachedAccount& account,
-            const MessageTransferAccountDisplayName& configuredDisplayName)
+        [[nodiscard]] QString
+        baseLabel(const javelin::jmap::cache::CachedAccount& account,
+                  const MessageTransferAccountDisplayName& configuredDisplayName)
         {
             if (configuredDisplayName)
             {
@@ -72,9 +71,9 @@ namespace javelin::gui::shell
             return id.size() <= 8 ? id : id.left(8);
         }
 
-        [[nodiscard]] QString uniqueLabel(
-            const javelin::jmap::cache::CachedAccount& account, const QString& base,
-            const bool baseIsDuplicate, std::unordered_set<QString>& used)
+        [[nodiscard]] QString uniqueLabel(const javelin::jmap::cache::CachedAccount& account,
+                                          const QString& base, const bool baseIsDuplicate,
+                                          std::unordered_set<QString>& used)
         {
             const auto available = [&used](const QString& candidate)
             {
@@ -118,8 +117,8 @@ namespace javelin::gui::shell
     MessageTransferDestinationPresentation buildMessageTransferDestinationPresentation(
         std::string currentAccountId,
         const std::vector<javelin::jmap::cache::CachedAccount>& accounts,
-        const std::unordered_map<
-            std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>>& mailboxesByAccount,
+        const std::unordered_map<std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>>&
+            mailboxesByAccount,
         const MessageTransferAccountDisplayName& configuredDisplayName)
     {
         MessageTransferDestinationPresentation result;
@@ -172,7 +171,8 @@ namespace javelin::gui::shell
             const bool duplicate = labelCounts[candidate.baseLabel.toCaseFolded()] > 1;
             result.otherAccounts.push_back({
                 .accountId = candidate.account->accountId,
-                .label = uniqueLabel(*candidate.account, candidate.baseLabel, duplicate, usedLabels),
+                .label =
+                    uniqueLabel(*candidate.account, candidate.baseLabel, duplicate, usedLabels),
                 .rows = std::move(candidate.rows),
             });
         }

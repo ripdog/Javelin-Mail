@@ -564,13 +564,13 @@ namespace javelin::app
 
     std::variant<bool, DatabaseError>
     MailTransferRepository::markHistoryPublished(const std::string_view operationId,
-                                                  QString historyEntryId)
+                                                 QString historyEntryId)
     {
         QSqlQuery query{m_connection.database()};
-        query.prepare(QStringLiteral(
-            "UPDATE mail_transfer_operations SET history_entry_id=:history_entry_id,"
-            "updated_at=CURRENT_TIMESTAMP WHERE operation_id=:id AND "
-            "(history_entry_id IS NULL OR history_entry_id=:history_entry_id)"));
+        query.prepare(
+            QStringLiteral("UPDATE mail_transfer_operations SET history_entry_id=:history_entry_id,"
+                           "updated_at=CURRENT_TIMESTAMP WHERE operation_id=:id AND "
+                           "(history_entry_id IS NULL OR history_entry_id=:history_entry_id)"));
         query.bindValue(QStringLiteral(":history_entry_id"), historyEntryId);
         query.bindValue(QStringLiteral(":id"), QString::fromStdString(std::string{operationId}));
         if (!query.exec())
@@ -624,9 +624,8 @@ namespace javelin::app
         }
 
         QSqlQuery pin{m_connection.database()};
-        pin.prepare(QStringLiteral(
-            "INSERT INTO mail_vault_pins(owner_kind,owner_id,content_hash) "
-            "VALUES('mail_transfer_item',:owner_id,:content_hash)"));
+        pin.prepare(QStringLiteral("INSERT INTO mail_vault_pins(owner_kind,owner_id,content_hash) "
+                                   "VALUES('mail_transfer_item',:owner_id,:content_hash)"));
         pin.bindValue(QStringLiteral(":owner_id"), QString::fromStdString(std::string{itemId}));
         pin.bindValue(QStringLiteral(":content_hash"),
                       QString::fromStdString(std::string{rawContentHash}));
@@ -744,11 +743,11 @@ namespace javelin::app
         const std::vector<std::string>& priorMailboxIds)
     {
         QSqlQuery query{m_connection.database()};
-        query.prepare(QStringLiteral(
-            "UPDATE mail_transfer_items SET destination_email_id=:email_id,"
-            "destination_pre_state=:state,reused_existing=1,"
-            "destination_prior_mailbox_ids_json=:prior_mailboxes,last_error=NULL,"
-            "updated_at=CURRENT_TIMESTAMP WHERE item_id=:id AND phase=:expected"));
+        query.prepare(
+            QStringLiteral("UPDATE mail_transfer_items SET destination_email_id=:email_id,"
+                           "destination_pre_state=:state,reused_existing=1,"
+                           "destination_prior_mailbox_ids_json=:prior_mailboxes,last_error=NULL,"
+                           "updated_at=CURRENT_TIMESTAMP WHERE item_id=:id AND phase=:expected"));
         query.bindValue(QStringLiteral(":email_id"),
                         QString::fromStdString(std::string{destinationEmailId}));
         query.bindValue(QStringLiteral(":state"),
@@ -793,8 +792,8 @@ namespace javelin::app
 
     std::variant<bool, DatabaseError> MailTransferRepository::markSourceCleanupPrepared(
         const std::string_view itemId, const MailTransferItemPhase expected,
-        const std::string_view sourceEmailState,
-        const std::vector<std::string>& removeMailboxIds, const bool destroy)
+        const std::string_view sourceEmailState, const std::vector<std::string>& removeMailboxIds,
+        const bool destroy)
     {
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
@@ -813,9 +812,10 @@ namespace javelin::app
         return query.numRowsAffected() == 1;
     }
 
-    std::variant<bool, DatabaseError> MailTransferRepository::pinSourceForCleanup(
-        const std::string_view itemId, const MailTransferItemPhase expected,
-        const std::string_view rawContentHash)
+    std::variant<bool, DatabaseError>
+    MailTransferRepository::pinSourceForCleanup(const std::string_view itemId,
+                                                const MailTransferItemPhase expected,
+                                                const std::string_view rawContentHash)
     {
         auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
             m_connection, QStringLiteral("Pin destructive mail transfer source"));

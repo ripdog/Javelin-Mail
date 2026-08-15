@@ -24,8 +24,8 @@ namespace javelin::app::undo
             return {.code = OperationErrorCode::PreconditionFailed, .message = std::move(message)};
         }
 
-        [[nodiscard]] std::optional<HistoryEntry>
-        matchingHistory(const UndoManager& manager, const QString& operationGroupId)
+        [[nodiscard]] std::optional<HistoryEntry> matchingHistory(const UndoManager& manager,
+                                                                  const QString& operationGroupId)
         {
             const auto found = std::ranges::find_if(
                 manager.entries(),
@@ -59,7 +59,8 @@ namespace javelin::app::undo
             return invalidHistory(i18n("The mail transfer no longer exists."));
         const auto& operation = *maybeOperation;
         if (operation.status != javelin::app::MailTransferStatus::Complete)
-            return invalidHistory(i18n("Only a completed mail transfer can be added to Undo history."));
+            return invalidHistory(
+                i18n("Only a completed mail transfer can be added to Undo history."));
 
         if (operation.historyEntryId.has_value())
         {
@@ -72,24 +73,28 @@ namespace javelin::app::undo
                 return std::optional<QString>{std::nullopt};
             }
             if (!std::holds_alternative<MailTransferHistory>(found->payload))
-                return invalidHistory(i18n("The transfer history marker refers to another command."));
+                return invalidHistory(
+                    i18n("The transfer history marker refers to another command."));
             return std::optional<QString>{found->entryId};
         }
 
         const auto itemsResult = transfers.listItems(operation.operationId);
         if (const auto* error = std::get_if<DatabaseError>(&itemsResult))
             return javelin::jmap::operationError(*error);
-        const auto& items = std::get<std::vector<javelin::app::MailTransferItemRecord>>(itemsResult);
+        const auto& items =
+            std::get<std::vector<javelin::app::MailTransferItemRecord>>(itemsResult);
         if (items.empty())
             return invalidHistory(i18n("The completed mail transfer has no messages."));
-        if (std::ranges::any_of(items, [](const auto& item)
-                               { return item.phase != javelin::app::MailTransferItemPhase::Complete; }))
+        if (std::ranges::any_of(
+                items, [](const auto& item)
+                { return item.phase != javelin::app::MailTransferItemPhase::Complete; }))
         {
-            return invalidHistory(i18n("The completed mail transfer contains an unfinished message."));
+            return invalidHistory(
+                i18n("The completed mail transfer contains an unfinished message."));
         }
 
-        const QString operationGroupId = QString::fromStdString(
-            operation.operationGroupId.value_or(operation.operationId));
+        const QString operationGroupId =
+            QString::fromStdString(operation.operationGroupId.value_or(operation.operationId));
         auto historyEntry = matchingHistory(m_undoManager, operationGroupId);
         if (!historyEntry.has_value())
         {
@@ -114,8 +119,8 @@ namespace javelin::app::undo
                     return invalidHistory(
                         i18n("A destructive move is missing its retained raw message source."));
                 if (item.reusedExisting && !item.destinationPriorMailboxIds.has_value())
-                    return invalidHistory(
-                        i18n("A reused destination message is missing its prior mailbox snapshot."));
+                    return invalidHistory(i18n(
+                        "A reused destination message is missing its prior mailbox snapshot."));
 
                 const auto destinationResult =
                     emails.find(operation.destinationAccountId, *item.destinationEmailId);
@@ -125,8 +130,8 @@ namespace javelin::app::undo
                     std::get<std::optional<javelin::jmap::domain::Email>>(destinationResult);
                 if (!destination.has_value())
                 {
-                    return invalidHistory(i18n(
-                        "The completed transfer destination is not materialized in the local cache."));
+                    return invalidHistory(i18n("The completed transfer destination is not "
+                                               "materialized in the local cache."));
                 }
 
                 history.items.push_back(MailTransferItemHistory{
@@ -151,8 +156,8 @@ namespace javelin::app::undo
                 });
             }
 
-            auto recorded = m_undoManager.recordNormal(
-                operation.title, HistoryDomain::Mail, std::move(history), operationGroupId);
+            auto recorded = m_undoManager.recordNormal(operation.title, HistoryDomain::Mail,
+                                                       std::move(history), operationGroupId);
             if (const auto* error = std::get_if<DatabaseError>(&recorded))
                 return javelin::jmap::operationError(*error);
             historyEntry = std::get<HistoryEntry>(std::move(recorded));
@@ -170,12 +175,14 @@ namespace javelin::app::undo
             {
                 return OperationError{
                     .code = OperationErrorCode::LocalStorageFailure,
-                    .message = i18n("The retained source message could not be handed to Undo history."),
+                    .message =
+                        i18n("The retained source message could not be handed to Undo history."),
                 };
             }
         }
 
-        const auto marked = transfers.markHistoryPublished(operation.operationId, historyEntry->entryId);
+        const auto marked =
+            transfers.markHistoryPublished(operation.operationId, historyEntry->entryId);
         if (const auto* error = std::get_if<DatabaseError>(&marked))
             return javelin::jmap::operationError(*error);
         if (!std::get<bool>(marked))

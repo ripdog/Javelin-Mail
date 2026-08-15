@@ -75,8 +75,8 @@ namespace
                     result.notFound.push_back(emailId);
                     continue;
                 }
-                const auto current = std::ranges::find(found->second, emailId,
-                                                       &javelin::jmap::domain::Email::id);
+                const auto current =
+                    std::ranges::find(found->second, emailId, &javelin::jmap::domain::Email::id);
                 if (current == found->second.end())
                     result.notFound.push_back(emailId);
                 else
@@ -105,16 +105,17 @@ namespace
                 .items = {{.emailId = mutation.emailId,
                            .mutationIds = {"history-mutation"},
                            .accepted = accepted,
-                           .error = accepted ? std::nullopt
-                                             : std::optional<std::string>{"rejected"}}},
+                           .error =
+                               accepted ? std::nullopt : std::optional<std::string>{"rejected"}}},
                 .receipt = {},
             };
         }
 
-        QCoro::Task<RecreatedMailTransferSourceResult> recreateSourceFromHistory(
-            QString historyEntryId, std::string accountId, std::string rawContentHash,
-            std::vector<std::string>, std::vector<std::string>, std::vector<std::string>,
-            std::optional<std::string>, std::uint64_t) override
+        QCoro::Task<RecreatedMailTransferSourceResult>
+        recreateSourceFromHistory(QString historyEntryId, std::string accountId,
+                                  std::string rawContentHash, std::vector<std::string>,
+                                  std::vector<std::string>, std::vector<std::string>,
+                                  std::optional<std::string>, std::uint64_t) override
         {
             calls.push_back("recreate:" + accountId);
             recreateHistoryEntryId = std::move(historyEntryId);
@@ -124,8 +125,8 @@ namespace
             co_return recreated;
         }
 
-        QCoro::Task<RetainedMailTransferSourceResult> retainSourceForHistory(
-            QString, std::string accountId, std::string) override
+        QCoro::Task<RetainedMailTransferSourceResult>
+        retainSourceForHistory(QString, std::string accountId, std::string) override
         {
             calls.push_back("retain:" + accountId);
             if (retainError.has_value())
@@ -133,10 +134,10 @@ namespace
             co_return retainedHash;
         }
 
-        QCoro::Task<RedoneMailTransferItemResult> redoMissingDestination(
-            QString, MailTransferHistoryOperation, std::string sourceAccountId,
-            std::string, std::string destinationMailboxId,
-            MailTransferItemHistory historyItem) override
+        QCoro::Task<RedoneMailTransferItemResult>
+        redoMissingDestination(QString, MailTransferHistoryOperation, std::string sourceAccountId,
+                               std::string, std::string destinationMailboxId,
+                               MailTransferItemHistory historyItem) override
         {
             calls.push_back("redo:" + sourceAccountId);
             if (redoError.has_value())
@@ -164,8 +165,8 @@ namespace
             .rawContentHash = std::nullopt,
             .currentDestinationEmailId = std::optional<std::string>{"destination-email"},
             .destinationReusedExisting = reused,
-            .destinationPriorMailboxIds = reused ? std::vector<std::string>{"old-mailbox"}
-                                                 : std::vector<std::string>{},
+            .destinationPriorMailboxIds =
+                reused ? std::vector<std::string>{"old-mailbox"} : std::vector<std::string>{},
             .destinationMailboxIds = {"archive"},
             .destinationKeywords = {"$seen", "project"},
             .redoGeneration = 0,
@@ -209,17 +210,15 @@ TEST_CASE("transfer copy undo destroys an untouched transfer-created destination
     };
     MailTransferHistoryExecutor executor{port};
 
-    const auto result = QCoro::waitFor(
-        executor.execute(entry(MailTransferHistoryOperation::Copy, item()),
-                         HistoryExecutionDirection::Undo));
+    const auto result = QCoro::waitFor(executor.execute(
+        entry(MailTransferHistoryOperation::Copy, item()), HistoryExecutionDirection::Undo));
     CHECK(result.outcome == HistoryExecutionOutcome::Success);
     REQUIRE(port.mutations.size() == 1);
     CHECK(port.mutations.front().first == "destination-account");
     const auto& mutation = port.mutations.front().second;
     CHECK(mutation.emailId == "destination-email");
     CHECK(mutation.destroy);
-    CHECK(mutation.authoritativeMailboxIds ==
-          std::optional<std::vector<std::string>>{{"archive"}});
+    CHECK(mutation.authoritativeMailboxIds == std::optional<std::vector<std::string>>{{"archive"}});
     CHECK(mutation.authoritativeKeywords ==
           std::optional<std::vector<std::string>>{{"$seen", "project"}});
     CHECK_FALSE(updatedHistory(result).items.front().currentDestinationEmailId.has_value());
@@ -234,9 +233,8 @@ TEST_CASE("transfer copy undo preserves a destination adopted into another mailb
     };
     MailTransferHistoryExecutor executor{port};
 
-    const auto result = QCoro::waitFor(
-        executor.execute(entry(MailTransferHistoryOperation::Copy, item()),
-                         HistoryExecutionDirection::Undo));
+    const auto result = QCoro::waitFor(executor.execute(
+        entry(MailTransferHistoryOperation::Copy, item()), HistoryExecutionDirection::Undo));
     CHECK(result.outcome == HistoryExecutionOutcome::Success);
     REQUIRE(port.mutations.size() == 1);
     const auto& mutation = port.mutations.front().second;
@@ -257,9 +255,8 @@ TEST_CASE("transfer copy undo refuses to destroy destination after keyword chang
     };
     MailTransferHistoryExecutor executor{port};
 
-    const auto result = QCoro::waitFor(
-        executor.execute(entry(MailTransferHistoryOperation::Copy, item()),
-                         HistoryExecutionDirection::Undo));
+    const auto result = QCoro::waitFor(executor.execute(
+        entry(MailTransferHistoryOperation::Copy, item()), HistoryExecutionDirection::Undo));
     CHECK(result.outcome == HistoryExecutionOutcome::Conflict);
     CHECK(port.mutations.empty());
 }
@@ -273,9 +270,8 @@ TEST_CASE("transfer undo removes only membership added to a reused destination",
     };
     MailTransferHistoryExecutor executor{port};
 
-    const auto result = QCoro::waitFor(
-        executor.execute(entry(MailTransferHistoryOperation::Copy, item(true)),
-                         HistoryExecutionDirection::Undo));
+    const auto result = QCoro::waitFor(executor.execute(
+        entry(MailTransferHistoryOperation::Copy, item(true)), HistoryExecutionDirection::Undo));
     CHECK(result.outcome == HistoryExecutionOutcome::Success);
     REQUIRE(port.mutations.size() == 1);
     const auto& mutation = port.mutations.front().second;
@@ -396,11 +392,9 @@ TEST_CASE("transfer copy redo reuses an adopted destination object",
     CHECK_FALSE(port.mutations.front().second.destroy);
     CHECK(std::ranges::find(port.calls, std::string{"redo:source-account"}) == port.calls.end());
     const auto& redone = updatedHistory(result).items.front();
-    CHECK(redone.currentDestinationEmailId ==
-          std::optional<std::string>{"destination-email"});
+    CHECK(redone.currentDestinationEmailId == std::optional<std::string>{"destination-email"});
     CHECK(redone.destinationPriorMailboxIds == std::vector<std::string>{"important"});
-    CHECK(redone.destinationMailboxIds ==
-          std::vector<std::string>{"archive", "important"});
+    CHECK(redone.destinationMailboxIds == std::vector<std::string>{"archive", "important"});
     CHECK(redone.destinationKeywords == std::vector<std::string>{"later-destination-tag"});
     CHECK(redone.redoGeneration == 1);
 }
@@ -436,8 +430,7 @@ TEST_CASE("move redo removes only the original source membership and preserves l
     CHECK(port.calls.at(3) == "mutate:source-account");
 
     const auto& redone = updatedHistory(result).items.front();
-    CHECK(redone.originalSourceMailboxIds ==
-          std::vector<std::string>{"inbox", "new-mailbox"});
+    CHECK(redone.originalSourceMailboxIds == std::vector<std::string>{"inbox", "new-mailbox"});
     CHECK(redone.sourceKeywords == std::vector<std::string>{"$seen", "current-source-tag"});
     CHECK_FALSE(redone.sourceDestroyed);
     CHECK(redone.currentSourceEmailId == std::optional<std::string>{"source-email"});
@@ -523,15 +516,13 @@ TEST_CASE("redo treats target membership already present before Redo as pre-exis
     CHECK(result.outcome == HistoryExecutionOutcome::Success);
     CHECK(port.mutations.empty());
     const auto& redone = updatedHistory(result).items.front();
-    CHECK(redone.destinationPriorMailboxIds ==
-          std::vector<std::string>{"archive", "important"});
+    CHECK(redone.destinationPriorMailboxIds == std::vector<std::string>{"archive", "important"});
 
     port.emailsByAccount["destination-account"] = {
         email("destination-email", {"archive", "important"}, {"external-tag"}),
     };
-    const auto undone = QCoro::waitFor(
-        executor.execute(entry(MailTransferHistoryOperation::Copy, redone),
-                         HistoryExecutionDirection::Undo));
+    const auto undone = QCoro::waitFor(executor.execute(
+        entry(MailTransferHistoryOperation::Copy, redone), HistoryExecutionDirection::Undo));
     CHECK(undone.outcome == HistoryExecutionOutcome::Success);
     CHECK(port.mutations.empty());
 }
@@ -584,7 +575,6 @@ TEST_CASE("redo preserves destination progress when source cleanup fails",
     REQUIRE(port.mutations.size() == 2);
     const auto& partial = updatedHistory(result).items.front();
     CHECK(partial.destinationPriorMailboxIds == std::vector<std::string>{"important"});
-    CHECK(partial.destinationMailboxIds ==
-          std::vector<std::string>{"archive", "important"});
+    CHECK(partial.destinationMailboxIds == std::vector<std::string>{"archive", "important"});
     CHECK(partial.currentSourceEmailId == std::optional<std::string>{"source-email"});
 }

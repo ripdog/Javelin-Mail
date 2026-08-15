@@ -42,19 +42,22 @@ namespace javelin::app::undo
         applyExactEmailMutation(std::string accountId,
                                 javelin::jmap::EmailMailboxMutation mutation) = 0;
 
-        [[nodiscard]] virtual QCoro::Task<RecreatedMailTransferSourceResult> recreateSourceFromHistory(
-            QString historyEntryId, std::string accountId, std::string rawContentHash,
-            std::vector<std::string> mailboxIds, std::vector<std::string> keywords,
-            std::vector<std::string> messageIds, std::optional<std::string> receivedAt,
-            std::uint64_t sourceSize) = 0;
+        [[nodiscard]] virtual QCoro::Task<RecreatedMailTransferSourceResult>
+        recreateSourceFromHistory(QString historyEntryId, std::string accountId,
+                                  std::string rawContentHash, std::vector<std::string> mailboxIds,
+                                  std::vector<std::string> keywords,
+                                  std::vector<std::string> messageIds,
+                                  std::optional<std::string> receivedAt,
+                                  std::uint64_t sourceSize) = 0;
 
-        [[nodiscard]] virtual QCoro::Task<RetainedMailTransferSourceResult> retainSourceForHistory(
-            QString historyEntryId, std::string accountId, std::string emailId) = 0;
+        [[nodiscard]] virtual QCoro::Task<RetainedMailTransferSourceResult>
+        retainSourceForHistory(QString historyEntryId, std::string accountId,
+                               std::string emailId) = 0;
 
-        [[nodiscard]] virtual QCoro::Task<RedoneMailTransferItemResult> redoMissingDestination(
-            QString historyEntryId, MailTransferHistoryOperation operation,
-            std::string sourceAccountId, std::string destinationAccountId,
-            std::string destinationMailboxId, MailTransferItemHistory item) = 0;
+        [[nodiscard]] virtual QCoro::Task<RedoneMailTransferItemResult>
+        redoMissingDestination(QString historyEntryId, MailTransferHistoryOperation operation,
+                               std::string sourceAccountId, std::string destinationAccountId,
+                               std::string destinationMailboxId, MailTransferItemHistory item) = 0;
     };
 
 } // namespace javelin::app::undo

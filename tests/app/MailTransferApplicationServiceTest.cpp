@@ -64,8 +64,8 @@ namespace
             .accountCapabilities =
                 {
                     .mail = true,
-                    .mailDetails = javelin::jmap::api::MailAccountCapability{
-                        .mayCreateTopLevelMailbox = true},
+                    .mailDetails =
+                        javelin::jmap::api::MailAccountCapability{.mayCreateTopLevelMailbox = true},
                     .submission = std::nullopt,
                     .contacts = std::nullopt,
                     .calendars = std::nullopt,
@@ -75,7 +75,7 @@ namespace
     }
 
     [[nodiscard]] javelin::jmap::api::Session session(std::vector<std::string> accountIds,
-                                                       std::string primary)
+                                                      std::string primary)
     {
         javelin::jmap::api::Session value{
             .username = "alice@example.test",
@@ -87,16 +87,17 @@ namespace
             .capabilities =
                 {
                     .core = true,
-                    .coreDetails = javelin::jmap::api::CoreCapability{
-                        .maxSizeUpload = 64 * 1024 * 1024,
-                        .maxConcurrentUpload = 2,
-                        .maxSizeRequest = 1024 * 1024,
-                        .maxConcurrentRequests = 4,
-                        .maxCallsInRequest = 8,
-                        .maxObjectsInGet = 256,
-                        .maxObjectsInSet = 128,
-                        .collationAlgorithms = {},
-                    },
+                    .coreDetails =
+                        javelin::jmap::api::CoreCapability{
+                            .maxSizeUpload = 64 * 1024 * 1024,
+                            .maxConcurrentUpload = 2,
+                            .maxSizeRequest = 1024 * 1024,
+                            .maxConcurrentRequests = 4,
+                            .maxCallsInRequest = 8,
+                            .maxObjectsInGet = 256,
+                            .maxObjectsInSet = 128,
+                            .collationAlgorithms = {},
+                        },
                     .mail = true,
                     .submission = false,
                     .contacts = false,
@@ -181,8 +182,9 @@ namespace
         };
     }
 
-    [[nodiscard]] std::vector<MailTransferItemRecord> requireItems(
-        std::variant<std::vector<MailTransferItemRecord>, javelin::jmap::cache::DatabaseError> result)
+    [[nodiscard]] std::vector<MailTransferItemRecord>
+    requireItems(std::variant<std::vector<MailTransferItemRecord>,
+                              javelin::jmap::cache::DatabaseError> result)
     {
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
             FAIL(error->message.toStdString());
@@ -200,8 +202,7 @@ TEST_CASE("mail transfer preparation journals a cross-server collision safely",
     auto db = database(directory.filePath(QStringLiteral("cache.sqlite3")));
 
     const auto sourceLocal = storeSession(db, "connection-a", "u1", session({"u1"}, "u1"));
-    const auto destinationLocal =
-        storeSession(db, "connection-b", "u1", session({"u1"}, "u1"));
+    const auto destinationLocal = storeSession(db, "connection-b", "u1", session({"u1"}, "u1"));
     REQUIRE(sourceLocal != destinationLocal);
 
     javelin::jmap::cache::MailboxRepository mailboxes{db};
@@ -248,10 +249,8 @@ TEST_CASE("mail transfer preparation journals a cross-server collision safely",
     CHECK(items.front().sourceEmailId == sourceEmail.id);
     CHECK(items.front().sourceBlobId == sourceEmail.blobId);
     CHECK(items.front().sourceMailboxIds == sourceEmail.mailboxIds);
-    CHECK(items.front().sourceKeywords ==
-          std::vector<std::string>{"$flagged", "$seen", "project"});
-    CHECK(items.front().sourceMessageIds ==
-          std::vector<std::string>{"message@example.test"});
+    CHECK(items.front().sourceKeywords == std::vector<std::string>{"$flagged", "$seen", "project"});
+    CHECK(items.front().sourceMessageIds == std::vector<std::string>{"message@example.test"});
     CHECK(items.front().sourceEmailState == std::optional<std::string>{"email-state-7"});
     CHECK(items.front().sourceRemoveMailboxIds == std::vector<std::string>{"inbox"});
     CHECK(items.front().sourceDestroy);
@@ -320,8 +319,7 @@ TEST_CASE("mail transfer preparation requires an authoritative source Email stat
     auto db = database(directory.filePath(QStringLiteral("cache.sqlite3")));
 
     const auto sourceLocal = storeSession(db, "connection-a", "u1", session({"u1"}, "u1"));
-    const auto destinationLocal =
-        storeSession(db, "connection-b", "u1", session({"u1"}, "u1"));
+    const auto destinationLocal = storeSession(db, "connection-b", "u1", session({"u1"}, "u1"));
     javelin::jmap::cache::MailboxRepository mailboxes{db};
     REQUIRE_FALSE(mailboxes.replaceAll(sourceLocal, {mailbox("inbox", "Inbox")}).has_value());
     REQUIRE_FALSE(

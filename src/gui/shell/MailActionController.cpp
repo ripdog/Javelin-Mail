@@ -228,8 +228,8 @@ namespace javelin::gui::shell
     {
         menu.clear();
         const auto accountId = activeAccountId();
-        const auto sourceMailboxId = activeTabIsSearch() ? std::optional<std::string>{std::nullopt}
-                                                         : activeMailboxId();
+        const auto sourceMailboxId =
+            activeTabIsSearch() ? std::optional<std::string>{std::nullopt} : activeMailboxId();
         if (!accountId.has_value() || (!sourceMailboxId.has_value() && !activeTabIsSearch()))
         {
             auto* unavailable = menu.addAction(i18n("No transfer destinations available"));

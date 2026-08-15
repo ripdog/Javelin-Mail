@@ -1,8 +1,8 @@
+#include "app/MailTransferExecutor.h"
+#include "app/AccountConnectionProvider.h"
 #include "app/MailTransferApplicationService.h"
 #include "app/MailTransferCommandService.h"
-#include "app/MailTransferExecutor.h"
 #include "app/MailTransferRepository.h"
-#include "app/AccountConnectionProvider.h"
 #include "app/undo/HistoryRepository.h"
 #include "app/undo/MailTransferHistoryCoordinator.h"
 #include "app/undo/MailTransferHistoryService.h"
@@ -90,16 +90,17 @@ namespace
             .capabilities =
                 {
                     .core = true,
-                    .coreDetails = javelin::jmap::api::CoreCapability{
-                        .maxSizeUpload = 64 * 1024 * 1024,
-                        .maxConcurrentUpload = 2,
-                        .maxSizeRequest = 1024 * 1024,
-                        .maxConcurrentRequests = 4,
-                        .maxCallsInRequest = 8,
-                        .maxObjectsInGet = 256,
-                        .maxObjectsInSet = 128,
-                        .collationAlgorithms = {},
-                    },
+                    .coreDetails =
+                        javelin::jmap::api::CoreCapability{
+                            .maxSizeUpload = 64 * 1024 * 1024,
+                            .maxConcurrentUpload = 2,
+                            .maxSizeRequest = 1024 * 1024,
+                            .maxConcurrentRequests = 4,
+                            .maxCallsInRequest = 8,
+                            .maxObjectsInGet = 256,
+                            .maxObjectsInSet = 128,
+                            .collationAlgorithms = {},
+                        },
                     .mail = true,
                     .submission = false,
                     .contacts = false,
@@ -114,23 +115,23 @@ namespace
                                 .calendarsAccountId = std::nullopt,
                                 .sieveAccountId = std::nullopt},
         };
-        value.accounts.emplace(
-            "u1", javelin::jmap::api::Account{
-                      .id = "u1",
-                      .name = "Mail",
-                      .isPersonal = true,
-                      .isReadOnly = false,
-                      .accountCapabilities =
-                          {
-                              .mail = true,
-                              .mailDetails = javelin::jmap::api::MailAccountCapability{
-                                  .mayCreateTopLevelMailbox = true},
-                              .submission = std::nullopt,
-                              .contacts = std::nullopt,
-                              .calendars = std::nullopt,
-                              .sieve = false,
-                          },
-                  });
+        value.accounts.emplace("u1", javelin::jmap::api::Account{
+                                         .id = "u1",
+                                         .name = "Mail",
+                                         .isPersonal = true,
+                                         .isReadOnly = false,
+                                         .accountCapabilities =
+                                             {
+                                                 .mail = true,
+                                                 .mailDetails =
+                                                     javelin::jmap::api::MailAccountCapability{
+                                                         .mayCreateTopLevelMailbox = true},
+                                                 .submission = std::nullopt,
+                                                 .contacts = std::nullopt,
+                                                 .calendars = std::nullopt,
+                                                 .sieve = false,
+                                             },
+                                     });
         return value;
     }
 
@@ -332,7 +333,8 @@ namespace
                     }
                     mailboxJson += '}';
                     const auto response =
-                        std::string{R"({"accountId":"u1","state":"source-state-current","list":[{"id":"email-1","blobId":"blob-1","threadId":"thread-1","mailboxIds":)"} +
+                        std::string{
+                            R"({"accountId":"u1","state":"source-state-current","list":[{"id":"email-1","blobId":"blob-1","threadId":"thread-1","mailboxIds":)"} +
                         mailboxJson +
                         R"(,"keywords":{"$seen":true,"$flagged":true},"size":2048,"receivedAt":"2026-08-15T08:00:00Z","messageId":["mail-transfer@example.test"],"inReplyTo":[],"references":[],"hasAttachment":false,"subject":"Transfer","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Preview"}],"notFound":[]})";
                     co_return ResponseEnvelope{
@@ -361,20 +363,22 @@ namespace
                     };
                 }
 
-                const bool destroys = sourceMethod.arguments.find("\"destroy\":[\"email-1\"]") !=
-                                      std::string::npos;
+                const bool destroys =
+                    sourceMethod.arguments.find("\"destroy\":[\"email-1\"]") != std::string::npos;
                 std::string sourceResponseArguments;
                 if (sourceCleanupBehavior == SourceCleanupBehavior::Reject)
                 {
-                    sourceResponseArguments = destroys
-                                       ? R"({"accountId":"u1","oldState":"source-state-current","newState":"source-state-current","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{"email-1":{"type":"forbidden","description":"Cleanup denied","properties":[]}}})"
-                                       : R"({"accountId":"u1","oldState":"source-state-current","newState":"source-state-current","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{"email-1":{"type":"forbidden","description":"Cleanup denied","properties":[]}},"notDestroyed":{}})";
+                    sourceResponseArguments =
+                        destroys
+                            ? R"({"accountId":"u1","oldState":"source-state-current","newState":"source-state-current","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{"email-1":{"type":"forbidden","description":"Cleanup denied","properties":[]}}})"
+                            : R"({"accountId":"u1","oldState":"source-state-current","newState":"source-state-current","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{"email-1":{"type":"forbidden","description":"Cleanup denied","properties":[]}},"notDestroyed":{}})";
                 }
                 else
                 {
-                    sourceResponseArguments = destroys
-                                       ? R"({"accountId":"u1","oldState":"source-state-current","newState":"source-state-next","created":{},"updated":{},"destroyed":["email-1"],"notCreated":{},"notUpdated":{},"notDestroyed":{}})"
-                                       : R"({"accountId":"u1","oldState":"source-state-current","newState":"source-state-next","created":{},"updated":{"email-1":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})";
+                    sourceResponseArguments =
+                        destroys
+                            ? R"({"accountId":"u1","oldState":"source-state-current","newState":"source-state-next","created":{},"updated":{},"destroyed":["email-1"],"notCreated":{},"notUpdated":{},"notDestroyed":{}})"
+                            : R"({"accountId":"u1","oldState":"source-state-current","newState":"source-state-next","created":{},"updated":{"email-1":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})";
                 }
 
                 std::vector<javelin::jmap::api::MethodInvocation> responses;
@@ -412,9 +416,8 @@ namespace
                     callOrder.push_back("destination-existing-get");
                     const bool inTarget = behavior == ImportBehavior::AlreadyExistsInTarget ||
                                           existingMembershipApplied;
-                    const auto mailboxIds =
-                        inTarget ? R"({"archive":true,"old-mailbox":true})"
-                                 : R"({"old-mailbox":true})";
+                    const auto mailboxIds = inTarget ? R"({"archive":true,"old-mailbox":true})"
+                                                     : R"({"old-mailbox":true})";
                     const auto response =
                         std::string{R"({"accountId":"u1","state":")"} + existingState +
                         R"(","list":[{"id":"existing-email","blobId":"existing-blob","threadId":"existing-thread","mailboxIds":)" +
@@ -461,8 +464,8 @@ namespace
                 bool candidateRequest = false;
                 for (const auto& candidateId : reconciliationCreatedIds)
                 {
-                    candidateRequest = candidateRequest ||
-                                       method.arguments.find(candidateId) != std::string::npos;
+                    candidateRequest =
+                        candidateRequest || method.arguments.find(candidateId) != std::string::npos;
                 }
                 if (candidateRequest)
                 {
@@ -476,20 +479,22 @@ namespace
                             list += ',';
                         const bool matches = reconciliationCandidateMatchesSource &&
                                              candidateId == reconciliationCreatedIds.front();
-                        list += std::string{R"({"id":")"} + candidateId +
-                                R"(","blobId":"candidate-blob","threadId":"candidate-thread","mailboxIds":{"archive":true},"keywords":{"$seen":true},"size":)" +
-                                (matches ? "2048" : "999") +
-                                R"(,"receivedAt":")" +
-                                (matches ? "2026-08-15T08:00:00Z" : "2026-08-10T00:00:00Z") +
-                                R"(","messageId":[")" +
-                                (matches ? "mail-transfer@example.test" : "unrelated@example.test") +
-                                R"("],"hasAttachment":false,"subject":"Candidate","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Candidate"})";
+                        list +=
+                            std::string{R"({"id":")"} + candidateId +
+                            R"(","blobId":"candidate-blob","threadId":"candidate-thread","mailboxIds":{"archive":true},"keywords":{"$seen":true},"size":)" +
+                            (matches ? "2048" : "999") + R"(,"receivedAt":")" +
+                            (matches ? "2026-08-15T08:00:00Z" : "2026-08-10T00:00:00Z") +
+                            R"(","messageId":[")" +
+                            (matches ? "mail-transfer@example.test" : "unrelated@example.test") +
+                            R"("],"hasAttachment":false,"subject":"Candidate","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Candidate"})";
                     }
                     co_return ResponseEnvelope{
                         .methodResponses = {{
                             .name = "Email/get",
-                            .arguments = std::string{R"({"accountId":"u1","state":"destination-state-reconciled","list":[)"} +
-                                         list + R"(],"notFound":[]})",
+                            .arguments =
+                                std::string{
+                                    R"({"accountId":"u1","state":"destination-state-reconciled","list":[)"} +
+                                list + R"(],"notFound":[]})",
                             .callId = method.callId,
                         }},
                         .createdIds = std::nullopt,
@@ -500,10 +505,11 @@ namespace
                 ++stateCalls;
                 callOrder.push_back("destination-state-get");
                 co_return ResponseEnvelope{
-                    .methodResponses = {{.name = "Email/get",
-                                         .arguments =
-                                             R"({"accountId":"u1","state":"destination-state-1","list":[],"notFound":[]})",
-                                         .callId = method.callId}},
+                    .methodResponses =
+                        {{.name = "Email/get",
+                          .arguments =
+                              R"({"accountId":"u1","state":"destination-state-1","list":[],"notFound":[]})",
+                          .callId = method.callId}},
                     .createdIds = std::nullopt,
                     .sessionState = "session-state",
                 };
@@ -527,11 +533,11 @@ namespace
                 co_return ResponseEnvelope{
                     .methodResponses = {{
                         .name = "Email/changes",
-                        .arguments = QStringLiteral(
-                                         R"({"accountId":"u1","oldState":"%1","newState":"destination-state-reconciled","hasMoreChanges":false,"created":[%2],"updated":[],"destroyed":[]})")
-                                         .arg(sinceState,
-                                              QString::fromStdString(std::move(created)))
-                                         .toStdString(),
+                        .arguments =
+                            QStringLiteral(
+                                R"({"accountId":"u1","oldState":"%1","newState":"destination-state-reconciled","hasMoreChanges":false,"created":[%2],"updated":[],"destroyed":[]})")
+                                .arg(sinceState, QString::fromStdString(std::move(created)))
+                                .toStdString(),
                         .callId = method.callId,
                     }},
                     .createdIds = std::nullopt,
@@ -603,10 +609,11 @@ namespace
             const auto creationId = emails.begin().key();
             if (behavior == ImportBehavior::Reject)
             {
-                const auto response = QStringLiteral(
-                                          R"({"accountId":"u1","oldState":"destination-state-1","newState":"destination-state-1","created":{},"notCreated":{"%1":{"type":"overQuota","description":"Mailbox quota exceeded","properties":[]}}})")
-                                          .arg(creationId)
-                                          .toStdString();
+                const auto response =
+                    QStringLiteral(
+                        R"({"accountId":"u1","oldState":"destination-state-1","newState":"destination-state-1","created":{},"notCreated":{"%1":{"type":"overQuota","description":"Mailbox quota exceeded","properties":[]}}})")
+                        .arg(creationId)
+                        .toStdString();
                 co_return ResponseEnvelope{
                     .methodResponses = {{.name = "Email/import",
                                          .arguments = response,
@@ -619,10 +626,11 @@ namespace
                 behavior == ImportBehavior::AlreadyExistsNeedsMembership ||
                 behavior == ImportBehavior::DuplicateMembershipDispatchedFailure)
             {
-                const auto response = QStringLiteral(
-                                          R"({"accountId":"u1","oldState":"destination-state-1","newState":"destination-state-1","created":{},"notCreated":{"%1":{"type":"alreadyExists","existingId":"existing-email","properties":[]}}})")
-                                          .arg(creationId)
-                                          .toStdString();
+                const auto response =
+                    QStringLiteral(
+                        R"({"accountId":"u1","oldState":"destination-state-1","newState":"destination-state-1","created":{},"notCreated":{"%1":{"type":"alreadyExists","existingId":"existing-email","properties":[]}}})")
+                        .arg(creationId)
+                        .toStdString();
                 co_return ResponseEnvelope{
                     .methodResponses = {{.name = "Email/import",
                                          .arguments = response,
@@ -632,10 +640,11 @@ namespace
                 };
             }
 
-            const auto response = QStringLiteral(
-                                      R"({"accountId":"u1","oldState":"destination-state-1","newState":"destination-state-2","created":{"%1":{"id":"destination-email","blobId":"destination-blob","threadId":"destination-thread","size":37}},"notCreated":{}})")
-                                      .arg(creationId)
-                                      .toStdString();
+            const auto response =
+                QStringLiteral(
+                    R"({"accountId":"u1","oldState":"destination-state-1","newState":"destination-state-2","created":{"%1":{"id":"destination-email","blobId":"destination-blob","threadId":"destination-thread","size":37}},"notCreated":{}})")
+                    .arg(creationId)
+                    .toStdString();
             co_return ResponseEnvelope{
                 .methodResponses = {{.name = "Email/import",
                                      .arguments = response,
@@ -656,23 +665,25 @@ namespace
         RecordingResourceTransport resourceTransport;
         RecordingMethodTransport methodTransport;
         std::unique_ptr<javelin::jmap::MessageContentClient> contentClient;
-        QByteArray raw = QByteArrayLiteral("From: sender@example.test\r\nSubject: Transfer\r\n\r\nBody\r\n");
+        QByteArray raw =
+            QByteArrayLiteral("From: sender@example.test\r\nSubject: Transfer\r\n\r\nBody\r\n");
 
         Fixture()
-            : database(openDatabase([this]
-                                    {
-                                        REQUIRE(directory.isValid());
-                                        return directory.filePath(QStringLiteral("cache.sqlite3"));
-                                    }()))
+            : database(openDatabase(
+                  [this]
+                  {
+                      REQUIRE(directory.isValid());
+                      return directory.filePath(QStringLiteral("cache.sqlite3"));
+                  }()))
         {
-            sourceAccountId = storeSession(
-                database, "connection-a",
-                session("https://source.example.test/jmap",
-                        "https://source.example.test/upload/{accountId}"));
-            destinationAccountId = storeSession(
-                database, "connection-b",
-                session("https://destination.example.test/jmap",
-                        "https://destination.example.test/upload/{accountId}"));
+            sourceAccountId =
+                storeSession(database, "connection-a",
+                             session("https://source.example.test/jmap",
+                                     "https://source.example.test/upload/{accountId}"));
+            destinationAccountId =
+                storeSession(database, "connection-b",
+                             session("https://destination.example.test/jmap",
+                                     "https://destination.example.test/upload/{accountId}"));
             REQUIRE(sourceAccountId != destinationAccountId);
 
             connections.settings.emplace(
@@ -713,25 +724,24 @@ namespace
             javelin::jmap::cache::MailboxRepository mailboxes{database};
             REQUIRE_FALSE(
                 mailboxes.replaceAll(sourceAccountId, {mailbox("inbox", "Inbox")}).has_value());
-            REQUIRE_FALSE(mailboxes
-                              .replaceAll(destinationAccountId, {mailbox("archive", "Archive")})
-                              .has_value());
+            REQUIRE_FALSE(
+                mailboxes.replaceAll(destinationAccountId, {mailbox("archive", "Archive")})
+                    .has_value());
             javelin::jmap::cache::EmailRepository emails{database};
             REQUIRE_FALSE(emails.upsertMany(sourceAccountId, {email()}).has_value());
             javelin::jmap::cache::SyncStateRepository states{database};
-            REQUIRE_FALSE(states
-                              .upsert({.accountId = sourceAccountId,
-                                       .objectType = "Email",
-                                       .queryKey = {}},
-                                      "source-email-state")
-                              .has_value());
+            REQUIRE_FALSE(
+                states
+                    .upsert({.accountId = sourceAccountId, .objectType = "Email", .queryKey = {}},
+                            "source-email-state")
+                    .has_value());
             javelin::jmap::cache::RawMessageSourceRepository sources{database};
             REQUIRE_FALSE(sources
                               .upsert(sourceAccountId,
                                       {.emailId = "email-1", .blobId = "blob-1", .payload = raw})
                               .has_value());
-            contentClient = std::make_unique<javelin::jmap::MessageContentClient>(database,
-                                                                                  resourceTransport);
+            contentClient =
+                std::make_unique<javelin::jmap::MessageContentClient>(database, resourceTransport);
         }
 
         [[nodiscard]] std::string prepare(MailTransferOperation operation)
@@ -791,8 +801,7 @@ namespace
             };
             entry.status = javelin::app::undo::HistoryEntryStatus::Ready;
             const auto pushed = repository.pushUndoClearingRedo(std::move(entry));
-            if (const auto* error =
-                    std::get_if<javelin::jmap::cache::DatabaseError>(&pushed))
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&pushed))
                 FAIL(error->message.toStdString());
             return entryId;
         }
@@ -904,8 +913,8 @@ namespace
                 }
                 bool candidateRequest = false;
                 for (const auto& candidateId : reconciliationCreatedIds)
-                    candidateRequest = candidateRequest ||
-                                       method.arguments.find(candidateId) != std::string::npos;
+                    candidateRequest =
+                        candidateRequest || method.arguments.find(candidateId) != std::string::npos;
                 if (candidateRequest)
                 {
                     ++candidateGetCalls;
@@ -918,20 +927,22 @@ namespace
                             list += ',';
                         const bool matches = reconciliationCandidateMatchesSource &&
                                              candidateId == reconciliationCreatedIds.front();
-                        list += std::string{R"({"id":")"} + candidateId +
-                                R"(","blobId":"candidate-blob","threadId":"candidate-thread","mailboxIds":{"archive":true},"keywords":{"$seen":true},"size":)" +
-                                (matches ? "2048" : "999") +
-                                R"(,"receivedAt":")" +
-                                (matches ? "2026-08-15T08:00:00Z" : "2026-08-10T00:00:00Z") +
-                                R"(","messageId":[")" +
-                                (matches ? "mail-transfer@example.test" : "unrelated@example.test") +
-                                R"("],"hasAttachment":false,"subject":"Candidate","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Candidate"})";
+                        list +=
+                            std::string{R"({"id":")"} + candidateId +
+                            R"(","blobId":"candidate-blob","threadId":"candidate-thread","mailboxIds":{"archive":true},"keywords":{"$seen":true},"size":)" +
+                            (matches ? "2048" : "999") + R"(,"receivedAt":")" +
+                            (matches ? "2026-08-15T08:00:00Z" : "2026-08-10T00:00:00Z") +
+                            R"(","messageId":[")" +
+                            (matches ? "mail-transfer@example.test" : "unrelated@example.test") +
+                            R"("],"hasAttachment":false,"subject":"Candidate","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Candidate"})";
                     }
                     co_return ResponseEnvelope{
                         .methodResponses = {{
                             .name = "Email/get",
-                            .arguments = std::string{R"({"accountId":"u2","state":"destination-state-reconciled","list":[)"} +
-                                         list + R"(],"notFound":[]})",
+                            .arguments =
+                                std::string{
+                                    R"({"accountId":"u2","state":"destination-state-reconciled","list":[)"} +
+                                list + R"(],"notFound":[]})",
                             .callId = method.callId,
                         }},
                         .createdIds = std::nullopt,
@@ -962,7 +973,8 @@ namespace
                 }
                 mailboxJson += '}';
                 const auto response =
-                    std::string{R"({"accountId":"u1","state":"source-state-current","list":[{"id":"email-1","mailboxIds":)"} +
+                    std::string{
+                        R"({"accountId":"u1","state":"source-state-current","list":[{"id":"email-1","mailboxIds":)"} +
                     mailboxJson +
                     R"(,"keywords":{"$seen":true,"$flagged":true},"subject":"Transfer"}],"notFound":[]})";
                 co_return ResponseEnvelope{
@@ -992,11 +1004,11 @@ namespace
                 co_return ResponseEnvelope{
                     .methodResponses = {{
                         .name = "Email/changes",
-                        .arguments = QStringLiteral(
-                                         R"({"accountId":"u2","oldState":"%1","newState":"destination-state-reconciled","hasMoreChanges":false,"created":[%2],"updated":[],"destroyed":[]})")
-                                         .arg(sinceState,
-                                              QString::fromStdString(std::move(created)))
-                                         .toStdString(),
+                        .arguments =
+                            QStringLiteral(
+                                R"({"accountId":"u2","oldState":"%1","newState":"destination-state-reconciled","hasMoreChanges":false,"created":[%2],"updated":[],"destroyed":[]})")
+                                .arg(sinceState, QString::fromStdString(std::move(created)))
+                                .toStdString(),
                         .callId = method.callId,
                     }},
                     .createdIds = std::nullopt,
@@ -1026,10 +1038,11 @@ namespace
                 const auto create = arguments.value(QStringLiteral("create")).toObject();
                 REQUIRE(create.size() == 1);
                 const auto creationId = create.begin().key();
-                const auto response = QStringLiteral(
-                                          R"({"fromAccountId":"u1","accountId":"u2","oldState":"destination-state-1","newState":"destination-state-2","created":{"%1":{"id":"destination-email","blobId":"destination-blob","threadId":"destination-thread","size":41}},"notCreated":{}})")
-                                          .arg(creationId)
-                                          .toStdString();
+                const auto response =
+                    QStringLiteral(
+                        R"({"fromAccountId":"u1","accountId":"u2","oldState":"destination-state-1","newState":"destination-state-2","created":{"%1":{"id":"destination-email","blobId":"destination-blob","threadId":"destination-thread","size":41}},"notCreated":{}})")
+                        .arg(creationId)
+                        .toStdString();
                 co_return ResponseEnvelope{
                     .methodResponses = {{.name = "Email/copy",
                                          .arguments = response,
@@ -1083,34 +1096,36 @@ namespace
         RecordingResourceTransport resourceTransport;
         SameSessionMethodTransport methodTransport;
         std::unique_ptr<javelin::jmap::MessageContentClient> contentClient;
-        QByteArray raw = QByteArrayLiteral("From: sender@example.test\r\nSubject: Shared\r\n\r\nBody\r\n");
+        QByteArray raw =
+            QByteArrayLiteral("From: sender@example.test\r\nSubject: Shared\r\n\r\nBody\r\n");
 
         SameSessionFixture()
-            : database(openDatabase([this]
-                                    {
-                                        REQUIRE(directory.isValid());
-                                        return directory.filePath(QStringLiteral("shared.sqlite3"));
-                                    }()))
+            : database(openDatabase(
+                  [this]
+                  {
+                      REQUIRE(directory.isValid());
+                      return directory.filePath(QStringLiteral("shared.sqlite3"));
+                  }()))
         {
             auto shared = session("https://shared.example.test/jmap",
                                   "https://shared.example.test/upload/{accountId}");
-            shared.accounts.emplace(
-                "u2", javelin::jmap::api::Account{
-                          .id = "u2",
-                          .name = "Destination",
-                          .isPersonal = true,
-                          .isReadOnly = false,
-                          .accountCapabilities =
-                              {
-                                  .mail = true,
-                                  .mailDetails = javelin::jmap::api::MailAccountCapability{
-                                      .mayCreateTopLevelMailbox = true},
-                                  .submission = std::nullopt,
-                                  .contacts = std::nullopt,
-                                  .calendars = std::nullopt,
-                                  .sieve = false,
-                              },
-                      });
+            shared.accounts.emplace("u2", javelin::jmap::api::Account{
+                                              .id = "u2",
+                                              .name = "Destination",
+                                              .isPersonal = true,
+                                              .isReadOnly = false,
+                                              .accountCapabilities =
+                                                  {
+                                                      .mail = true,
+                                                      .mailDetails =
+                                                          javelin::jmap::api::MailAccountCapability{
+                                                              .mayCreateTopLevelMailbox = true},
+                                                      .submission = std::nullopt,
+                                                      .contacts = std::nullopt,
+                                                      .calendars = std::nullopt,
+                                                      .sieve = false,
+                                                  },
+                                          });
             javelin::jmap::cache::SessionRepository sessions{database};
             const auto stored = sessions.replaceForConnection("connection-shared", "u1", shared);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&stored))
@@ -1144,20 +1159,19 @@ namespace
             javelin::jmap::cache::MailboxRepository mailboxes{database};
             REQUIRE_FALSE(
                 mailboxes.replaceAll(sourceAccountId, {mailbox("inbox", "Inbox")}).has_value());
-            REQUIRE_FALSE(mailboxes
-                              .replaceAll(destinationAccountId, {mailbox("archive", "Archive")})
-                              .has_value());
+            REQUIRE_FALSE(
+                mailboxes.replaceAll(destinationAccountId, {mailbox("archive", "Archive")})
+                    .has_value());
             javelin::jmap::cache::EmailRepository emails{database};
             REQUIRE_FALSE(emails.upsertMany(sourceAccountId, {email()}).has_value());
             javelin::jmap::cache::SyncStateRepository states{database};
-            REQUIRE_FALSE(states
-                              .upsert({.accountId = sourceAccountId,
-                                       .objectType = "Email",
-                                       .queryKey = {}},
-                                      "source-email-state")
-                              .has_value());
-            contentClient = std::make_unique<javelin::jmap::MessageContentClient>(database,
-                                                                                  resourceTransport);
+            REQUIRE_FALSE(
+                states
+                    .upsert({.accountId = sourceAccountId, .objectType = "Email", .queryKey = {}},
+                            "source-email-state")
+                    .has_value());
+            contentClient =
+                std::make_unique<javelin::jmap::MessageContentClient>(database, resourceTransport);
         }
 
         void seedRawSource()
@@ -1241,8 +1255,9 @@ namespace
     };
 } // namespace
 
-TEST_CASE("cross-account mail transfer command executes daemon-owned transfer and publishes history",
-          "[app][mail-transfer][command]")
+TEST_CASE(
+    "cross-account mail transfer command executes daemon-owned transfer and publishes history",
+    "[app][mail-transfer][command]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -1252,9 +1267,9 @@ TEST_CASE("cross-account mail transfer command executes daemon-owned transfer an
     REQUIRE_FALSE(undoManager.load().has_value());
     javelin::app::undo::MailTransferHistoryCoordinator historyCoordinator{fixture.database,
                                                                           undoManager};
-    MailTransferCommandService service{fixture.database, fixture.resourceTransport,
+    MailTransferCommandService service{fixture.database,        fixture.resourceTransport,
                                        fixture.methodTransport, *fixture.contentClient,
-                                       fixture.connections, historyCoordinator};
+                                       fixture.connections,     historyCoordinator};
 
     const auto result = QCoro::waitFor(service.transfer({
         .sourceAccountId = fixture.sourceAccountId,
@@ -1288,9 +1303,9 @@ TEST_CASE("cross-account mail transfer command rejects same-account routing befo
     REQUIRE_FALSE(undoManager.load().has_value());
     javelin::app::undo::MailTransferHistoryCoordinator historyCoordinator{fixture.database,
                                                                           undoManager};
-    MailTransferCommandService service{fixture.database, fixture.resourceTransport,
+    MailTransferCommandService service{fixture.database,        fixture.resourceTransport,
                                        fixture.methodTransport, *fixture.contentClient,
-                                       fixture.connections, historyCoordinator};
+                                       fixture.connections,     historyCoordinator};
 
     const auto result = QCoro::waitFor(service.transfer({
         .sourceAccountId = fixture.sourceAccountId,
@@ -1321,36 +1336,36 @@ TEST_CASE("cross-server copy streams exact raw MIME and completes only after imp
     Fixture fixture;
     const auto operationId = fixture.prepare(MailTransferOperation::Copy);
     javelin::jmap::cache::MailboxWindowRepository mailboxWindows{fixture.database};
-    REQUIRE_FALSE(mailboxWindows
-                      .replace({.accountId = fixture.destinationAccountId,
-                                .mailboxId = "archive",
-                                .queryKey = "archive-window",
-                                .requestedOffset = 0,
-                                .requestedLimit = 50,
-                                .position = 0,
-                                .returnedLimit = 0,
-                                .total = 0,
-                                .queryState = "destination-query-state",
-                                .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
-                                .materialization =
-                                    javelin::jmap::cache::QueryWindowMaterialization::Complete,
-                                .emailIds = {}})
-                      .has_value());
+    REQUIRE_FALSE(
+        mailboxWindows
+            .replace({.accountId = fixture.destinationAccountId,
+                      .mailboxId = "archive",
+                      .queryKey = "archive-window",
+                      .requestedOffset = 0,
+                      .requestedLimit = 50,
+                      .position = 0,
+                      .returnedLimit = 0,
+                      .total = 0,
+                      .queryState = "destination-query-state",
+                      .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
+                      .materialization = javelin::jmap::cache::QueryWindowMaterialization::Complete,
+                      .emailIds = {}})
+            .has_value());
     javelin::jmap::cache::SearchWindowRepository searchWindows{fixture.database};
-    REQUIRE_FALSE(searchWindows
-                      .replace({.accountId = fixture.destinationAccountId,
-                                .queryKey = "search-window",
-                                .offset = 0,
-                                .limit = 50,
-                                .position = 0,
-                                .returnedLimit = 0,
-                                .total = 0,
-                                .queryState = "destination-search-state",
-                                .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
-                                .materialization =
-                                    javelin::jmap::cache::QueryWindowMaterialization::Complete,
-                                .emailIds = {}})
-                      .has_value());
+    REQUIRE_FALSE(
+        searchWindows
+            .replace({.accountId = fixture.destinationAccountId,
+                      .queryKey = "search-window",
+                      .offset = 0,
+                      .limit = 50,
+                      .position = 0,
+                      .returnedLimit = 0,
+                      .total = 0,
+                      .queryState = "destination-search-state",
+                      .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
+                      .materialization = javelin::jmap::cache::QueryWindowMaterialization::Complete,
+                      .emailIds = {}})
+            .has_value());
 
     const auto result = fixture.execute(operationId);
     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
@@ -1366,8 +1381,8 @@ TEST_CASE("cross-server copy streams exact raw MIME and completes only after imp
     CHECK(fixture.methodTransport.importArguments.find("\"archive\":true") != std::string::npos);
     CHECK(fixture.methodTransport.importArguments.find("\"$seen\":true") != std::string::npos);
     CHECK(fixture.methodTransport.importArguments.find("\"$flagged\":true") != std::string::npos);
-    CHECK(fixture.methodTransport.importArguments.find(
-              "\"ifInState\":\"destination-state-1\"") != std::string::npos);
+    CHECK(fixture.methodTransport.importArguments.find("\"ifInState\":\"destination-state-1\"") !=
+          std::string::npos);
 
     const auto item = fixture.item(operationId);
     CHECK(item.phase == MailTransferItemPhase::Complete);
@@ -1383,26 +1398,28 @@ TEST_CASE("cross-server copy streams exact raw MIME and completes only after imp
     CHECK(cachedDestination->keywords == std::vector<std::string>{"$flagged", "$seen"});
     const auto mailboxWindow =
         mailboxWindows.find(fixture.destinationAccountId, "archive-window", 0, 50);
-    REQUIRE(std::holds_alternative<
-            std::optional<javelin::jmap::cache::MailboxWindowRecord>>(mailboxWindow));
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(
+        mailboxWindow));
     REQUIRE(std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(mailboxWindow)
                 .has_value());
     CHECK(std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(mailboxWindow)
               ->coverage == javelin::jmap::cache::QueryWindowCoverage::Stale);
     const auto searchWindow =
         searchWindows.find(fixture.destinationAccountId, "search-window", 0, 50);
-    REQUIRE(std::holds_alternative<
-            std::optional<javelin::jmap::cache::SearchWindowRecord>>(searchWindow));
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::SearchWindowRecord>>(
+        searchWindow));
     REQUIRE(std::get<std::optional<javelin::jmap::cache::SearchWindowRecord>>(searchWindow)
                 .has_value());
-    CHECK(std::get<std::optional<javelin::jmap::cache::SearchWindowRecord>>(searchWindow)->coverage ==
-          javelin::jmap::cache::QueryWindowCoverage::Stale);
+    CHECK(
+        std::get<std::optional<javelin::jmap::cache::SearchWindowRecord>>(searchWindow)->coverage ==
+        javelin::jmap::cache::QueryWindowCoverage::Stale);
     CHECK(fixture.pinCount() == 0);
     CHECK(fixture.sourceStillExists());
 }
 
-TEST_CASE("cross-server move destroys the last source residency only after destination confirmation",
-          "[app][mail-transfer][executor][move]")
+TEST_CASE(
+    "cross-server move destroys the last source residency only after destination confirmation",
+    "[app][mail-transfer][executor][move]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -1424,12 +1441,12 @@ TEST_CASE("cross-server move destroys the last source residency only after desti
     CHECK(fixture.methodTransport.sourceSetCalls == 1);
     CHECK(fixture.methodTransport.sourceSetArguments.find("\"destroy\":[\"email-1\"]") !=
           std::string::npos);
-    const auto importPosition = std::ranges::find(fixture.methodTransport.callOrder,
-                                                  std::string{"destination-import"});
-    const auto sourceGetPosition = std::ranges::find(fixture.methodTransport.callOrder,
-                                                     std::string{"source-get"});
-    const auto sourceSetPosition = std::ranges::find(fixture.methodTransport.callOrder,
-                                                     std::string{"source-set"});
+    const auto importPosition =
+        std::ranges::find(fixture.methodTransport.callOrder, std::string{"destination-import"});
+    const auto sourceGetPosition =
+        std::ranges::find(fixture.methodTransport.callOrder, std::string{"source-get"});
+    const auto sourceSetPosition =
+        std::ranges::find(fixture.methodTransport.callOrder, std::string{"source-set"});
     REQUIRE(importPosition != fixture.methodTransport.callOrder.end());
     REQUIRE(sourceGetPosition != fixture.methodTransport.callOrder.end());
     REQUIRE(sourceSetPosition != fixture.methodTransport.callOrder.end());
@@ -1481,8 +1498,7 @@ TEST_CASE("cross-server move removes only the selected source mailbox when other
     CHECK_FALSE(item.sourceDestroy);
     CHECK(item.sourceRemoveMailboxIds == std::vector<std::string>{"inbox"});
     CHECK(fixture.methodTransport.sourceSetCalls == 1);
-    CHECK(fixture.methodTransport.sourceSetArguments.find("mailboxIds/inbox") !=
-          std::string::npos);
+    CHECK(fixture.methodTransport.sourceSetArguments.find("mailboxIds/inbox") != std::string::npos);
     CHECK(fixture.methodTransport.sourceSetArguments.find("\"destroy\"") == std::string::npos);
     REQUIRE(fixture.sourceMailboxIds().has_value());
     CHECK(*fixture.sourceMailboxIds() == std::vector<std::string>{"important"});
@@ -1507,16 +1523,16 @@ TEST_CASE("concurrent new source residency downgrades planned destroy to mailbox
     CHECK(item.phase == MailTransferItemPhase::Complete);
     CHECK_FALSE(item.sourceDestroy);
     CHECK(item.sourceRemoveMailboxIds == std::vector<std::string>{"inbox"});
-    CHECK(fixture.methodTransport.sourceSetArguments.find("mailboxIds/inbox") !=
-          std::string::npos);
+    CHECK(fixture.methodTransport.sourceSetArguments.find("mailboxIds/inbox") != std::string::npos);
     CHECK(fixture.methodTransport.sourceSetArguments.find("\"destroy\"") == std::string::npos);
     REQUIRE(fixture.sourceMailboxIds().has_value());
     CHECK(*fixture.sourceMailboxIds() == std::vector<std::string>{"new-mailbox"});
     CHECK(fixture.pinCount() == 0);
 }
 
-TEST_CASE("definitive source cleanup rejection keeps confirmed destination and reports partial move",
-          "[app][mail-transfer][executor][move][source-rejection]")
+TEST_CASE(
+    "definitive source cleanup rejection keeps confirmed destination and reports partial move",
+    "[app][mail-transfer][executor][move][source-rejection]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -1673,8 +1689,7 @@ TEST_CASE("unique created candidate reconciles lost Email import response withou
     CHECK(std::get<MailTransferExecutionSummary>(second).status == MailTransferStatus::Running);
     const auto reconciledItem = fixture.item(operationId);
     CHECK(reconciledItem.phase == MailTransferItemPhase::DestinationConfirmed);
-    CHECK(reconciledItem.destinationEmailId ==
-          std::optional<std::string>{"reconciled-email"});
+    CHECK(reconciledItem.destinationEmailId == std::optional<std::string>{"reconciled-email"});
     CHECK(fixture.methodTransport.changesCalls == 1);
     CHECK(fixture.methodTransport.candidateGetCalls == 1);
     CHECK(fixture.resourceTransport.sendFromFileCalls == uploadCount);
@@ -1690,8 +1705,9 @@ TEST_CASE("unique created candidate reconciles lost Email import response withou
     CHECK_FALSE(fixture.sourceStillExists());
 }
 
-TEST_CASE("failure before Email import dispatch returns to uploaded phase and retries without reupload",
-          "[app][mail-transfer][executor][retry]")
+TEST_CASE(
+    "failure before Email import dispatch returns to uploaded phase and retries without reupload",
+    "[app][mail-transfer][executor][retry]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -1790,8 +1806,7 @@ TEST_CASE("lost duplicate mailbox update response keeps durable reconciliation e
     CHECK(item.phase == MailTransferItemPhase::DestinationUnknown);
     CHECK(item.reusedExisting);
     CHECK(item.destinationEmailId == std::optional<std::string>{"existing-email"});
-    CHECK(item.destinationPreState ==
-          std::optional<std::string>{"destination-state-existing"});
+    CHECK(item.destinationPreState == std::optional<std::string>{"destination-state-existing"});
     CHECK(item.destinationPriorMailboxIds ==
           std::optional<std::vector<std::string>>{{"old-mailbox"}});
     CHECK(fixture.pinCount() == 1);
@@ -1844,8 +1859,9 @@ TEST_CASE("advanced destination state keeps ambiguous duplicate mailbox update b
     CHECK(fixture.pinCount() == 1);
 }
 
-TEST_CASE("completed destructive move publishes one durable transfer history entry and hands off MIME",
-          "[app][mail-transfer][history]")
+TEST_CASE(
+    "completed destructive move publishes one durable transfer history entry and hands off MIME",
+    "[app][mail-transfer][history]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -1855,8 +1871,9 @@ TEST_CASE("completed destructive move publishes one durable transfer history ent
     javelin::app::undo::UndoManager undoManager{historyRepository};
     REQUIRE_FALSE(undoManager.load().has_value());
     javelin::app::undo::MailTransferHistoryCoordinator coordinator{fixture.database, undoManager};
-    MailTransferExecutor executor{fixture.database, fixture.resourceTransport, fixture.methodTransport,
-                                  *fixture.contentClient, fixture.connections, &coordinator};
+    MailTransferExecutor executor{fixture.database,        fixture.resourceTransport,
+                                  fixture.methodTransport, *fixture.contentClient,
+                                  fixture.connections,     &coordinator};
     const auto executed = QCoro::waitFor(executor.advance(operationId));
     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&executed))
         FAIL(error->message.toStdString());
@@ -1883,16 +1900,14 @@ TEST_CASE("completed destructive move publishes one durable transfer history ent
     CHECK(historyItem.originalSourceMailboxIds == std::vector<std::string>{"inbox"});
     CHECK(historyItem.sourceDestroyed);
     REQUIRE(historyItem.rawContentHash.has_value());
-    CHECK(historyItem.currentDestinationEmailId ==
-          std::optional<std::string>{"destination-email"});
+    CHECK(historyItem.currentDestinationEmailId == std::optional<std::string>{"destination-email"});
     CHECK(historyItem.destinationMailboxIds == std::vector<std::string>{"archive"});
     CHECK(historyItem.destinationKeywords == std::vector<std::string>{"$flagged", "$seen"});
 
     QSqlQuery pins{fixture.database.database()};
-    pins.prepare(QStringLiteral(
-        "SELECT owner_kind,owner_id FROM mail_vault_pins WHERE content_hash=:hash"));
-    pins.bindValue(QStringLiteral(":hash"),
-                   QString::fromStdString(*historyItem.rawContentHash));
+    pins.prepare(
+        QStringLiteral("SELECT owner_kind,owner_id FROM mail_vault_pins WHERE content_hash=:hash"));
+    pins.bindValue(QStringLiteral(":hash"), QString::fromStdString(*historyItem.rawContentHash));
     REQUIRE(pins.exec());
     REQUIRE(pins.next());
     CHECK(pins.value(0).toString() == QStringLiteral("history_entry"));
@@ -1940,8 +1955,9 @@ TEST_CASE("forgotten transfer history releases MIME and is never resurrected",
     CHECK(fixture.pinCount() == 0);
 }
 
-TEST_CASE("history Redo can retain current source MIME before destructive existing-destination cleanup",
-          "[app][mail-transfer][history][redo][retention]")
+TEST_CASE(
+    "history Redo can retain current source MIME before destructive existing-destination cleanup",
+    "[app][mail-transfer][history][redo][retention]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -1951,25 +1967,25 @@ TEST_CASE("history Redo can retain current source MIME before destructive existi
     javelin::app::undo::MailTransferHistoryService service{
         fixture.database, fixture.resourceTransport, fixture.methodTransport, fixture.connections};
 
-    const auto retained = QCoro::waitFor(service.retainSourceForHistory(
-        historyEntryId, fixture.sourceAccountId, "email-1"));
+    const auto retained = QCoro::waitFor(
+        service.retainSourceForHistory(historyEntryId, fixture.sourceAccountId, "email-1"));
     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&retained))
         FAIL(error->message.toStdString());
     const auto hash = std::get<std::string>(retained);
     REQUIRE_FALSE(hash.empty());
 
     QSqlQuery pin{fixture.database.database()};
-    pin.prepare(QStringLiteral(
-        "SELECT COUNT(*) FROM mail_vault_pins WHERE owner_kind='history_entry' AND "
-        "owner_id=:owner_id AND content_hash=:content_hash"));
+    pin.prepare(
+        QStringLiteral("SELECT COUNT(*) FROM mail_vault_pins WHERE owner_kind='history_entry' AND "
+                       "owner_id=:owner_id AND content_hash=:content_hash"));
     pin.bindValue(QStringLiteral(":owner_id"), historyEntryId);
     pin.bindValue(QStringLiteral(":content_hash"), QString::fromStdString(hash));
     REQUIRE(pin.exec());
     REQUIRE(pin.next());
     CHECK(pin.value(0).toInt() == 1);
 
-    const auto repeated = QCoro::waitFor(service.retainSourceForHistory(
-        historyEntryId, fixture.sourceAccountId, "email-1"));
+    const auto repeated = QCoro::waitFor(
+        service.retainSourceForHistory(historyEntryId, fixture.sourceAccountId, "email-1"));
     REQUIRE(std::holds_alternative<std::string>(repeated));
     CHECK(std::get<std::string>(repeated) == hash);
     REQUIRE(pin.exec());
@@ -2011,8 +2027,7 @@ TEST_CASE("history Redo reuses one durable forward transfer for the same generat
     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&first))
         FAIL(error->message.toStdString());
     const auto& firstItem = std::get<javelin::app::undo::MailTransferItemHistory>(first);
-    CHECK(firstItem.currentDestinationEmailId ==
-          std::optional<std::string>{"destination-email"});
+    CHECK(firstItem.currentDestinationEmailId == std::optional<std::string>{"destination-email"});
     CHECK(firstItem.currentSourceEmailId == std::optional<std::string>{"email-1"});
     CHECK_FALSE(firstItem.sourceDestroyed);
     const int uploadCount = fixture.resourceTransport.sendFromFileCalls;
@@ -2025,8 +2040,8 @@ TEST_CASE("history Redo reuses one durable forward transfer for the same generat
         fixture.sourceAccountId, fixture.destinationAccountId, "archive", historyItem));
     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&second))
         FAIL(error->message.toStdString());
-    CHECK(std::get<javelin::app::undo::MailTransferItemHistory>(second)
-              .currentDestinationEmailId == firstItem.currentDestinationEmailId);
+    CHECK(std::get<javelin::app::undo::MailTransferItemHistory>(second).currentDestinationEmailId ==
+          firstItem.currentDestinationEmailId);
     CHECK(fixture.resourceTransport.sendFromFileCalls == uploadCount);
     CHECK(fixture.methodTransport.importCalls == importCount);
 
@@ -2078,12 +2093,10 @@ TEST_CASE("history Redo forward transfer preserves later source mailbox via exac
     CHECK_FALSE(redone.sourceDestroyed);
     CHECK(redone.currentSourceEmailId == std::optional<std::string>{"email-1"});
     CHECK(redone.sourceRemovedMailboxIds == std::vector<std::string>{"inbox"});
-    CHECK(redone.originalSourceMailboxIds ==
-          std::vector<std::string>{"inbox", "new-mailbox"});
+    CHECK(redone.originalSourceMailboxIds == std::vector<std::string>{"inbox", "new-mailbox"});
     REQUIRE(fixture.sourceMailboxIds().has_value());
     CHECK(*fixture.sourceMailboxIds() == std::vector<std::string>{"new-mailbox"});
-    CHECK(fixture.methodTransport.sourceSetArguments.find("mailboxIds/inbox") !=
-          std::string::npos);
+    CHECK(fixture.methodTransport.sourceSetArguments.find("mailboxIds/inbox") != std::string::npos);
     CHECK(fixture.methodTransport.sourceSetArguments.find("\"destroy\"") == std::string::npos);
     const int importCount = fixture.methodTransport.importCalls;
     const int sourceSetCount = fixture.methodTransport.sourceSetCalls;
@@ -2138,12 +2151,11 @@ TEST_CASE("history Redo destructive forward move hands current MIME back to exis
     CHECK_FALSE(fixture.sourceStillExists());
 
     QSqlQuery pin{fixture.database.database()};
-    pin.prepare(QStringLiteral(
-        "SELECT COUNT(*) FROM mail_vault_pins WHERE owner_kind='history_entry' AND "
-        "owner_id=:owner_id AND content_hash=:content_hash"));
+    pin.prepare(
+        QStringLiteral("SELECT COUNT(*) FROM mail_vault_pins WHERE owner_kind='history_entry' AND "
+                       "owner_id=:owner_id AND content_hash=:content_hash"));
     pin.bindValue(QStringLiteral(":owner_id"), historyEntryId);
-    pin.bindValue(QStringLiteral(":content_hash"),
-                  QString::fromStdString(*redone.rawContentHash));
+    pin.bindValue(QStringLiteral(":content_hash"), QString::fromStdString(*redone.rawContentHash));
     REQUIRE(pin.exec());
     REQUIRE(pin.next());
     CHECK(pin.value(0).toInt() == 1);
@@ -2180,9 +2192,9 @@ TEST_CASE("same-session copy uses Email copy without MIME download or upload",
     CHECK(fixture.resourceTransport.sendCalls == 0);
     CHECK(fixture.resourceTransport.sendFromFileCalls == 0);
 
-    const auto arguments = QJsonDocument::fromJson(
-                               QByteArray::fromStdString(fixture.methodTransport.copyArguments))
-                               .object();
+    const auto arguments =
+        QJsonDocument::fromJson(QByteArray::fromStdString(fixture.methodTransport.copyArguments))
+            .object();
     CHECK(arguments.value(QStringLiteral("fromAccountId")).toString() == QStringLiteral("u1"));
     CHECK(arguments.value(QStringLiteral("accountId")).toString() == QStringLiteral("u2"));
     CHECK_FALSE(arguments.value(QStringLiteral("onSuccessDestroyOriginal")).toBool(true));
@@ -2194,10 +2206,8 @@ TEST_CASE("same-session copy uses Email copy without MIME download or upload",
               .toObject()
               .value(QStringLiteral("archive"))
               .toBool());
-    CHECK(copy.value(QStringLiteral("keywords"))
-              .toObject()
-              .value(QStringLiteral("$seen"))
-              .toBool());
+    CHECK(
+        copy.value(QStringLiteral("keywords")).toObject().value(QStringLiteral("$seen")).toBool());
 
     const auto item = fixture.item(operationId);
     CHECK(item.phase == MailTransferItemPhase::Complete);
@@ -2225,8 +2235,7 @@ TEST_CASE("same-session mailbox-only move stays MIME-free and removes exact sour
     CHECK(fixture.methodTransport.sourceSetCalls == 1);
     CHECK(fixture.resourceTransport.sendCalls == 0);
     CHECK(fixture.resourceTransport.sendFromFileCalls == 0);
-    CHECK(fixture.methodTransport.sourceSetArguments.find("mailboxIds/inbox") !=
-          std::string::npos);
+    CHECK(fixture.methodTransport.sourceSetArguments.find("mailboxIds/inbox") != std::string::npos);
     CHECK(fixture.methodTransport.sourceSetArguments.find("\"destroy\"") == std::string::npos);
     const auto item = fixture.item(operationId);
     CHECK(item.phase == MailTransferItemPhase::Complete);

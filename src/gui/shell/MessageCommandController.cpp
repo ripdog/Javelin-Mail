@@ -207,11 +207,10 @@ namespace javelin::gui::shell
 
         const auto presentation = buildMessageTransferDestinationPresentation(
             accountId, accounts, mailboxesByAccount, m_accountDisplayName);
-        const auto addRows = [this, &accountId, &sourceMailboxId, &selection](
-                                 QMenu& menu,
-                                 const std::vector<MessageTransferDestinationRow>& rows,
-                                 const MessageTransferOperation operation,
-                                 const QString& successMessage)
+        const auto addRows =
+            [this, &accountId, &sourceMailboxId,
+             &selection](QMenu& menu, const std::vector<MessageTransferDestinationRow>& rows,
+                         const MessageTransferOperation operation, const QString& successMessage)
         {
             const auto iconColor = menu.palette().color(QPalette::Active, QPalette::Text);
             for (const auto& row : rows)
@@ -224,11 +223,12 @@ namespace javelin::gui::shell
                     indentation + QString::fromStdString(row.mailboxName));
                 connect(action, &QAction::triggered, this,
                         [this, sourceAccountId = accountId, sourceMailboxId,
-                         destinationAccountId = row.accountId,
-                         destinationMailboxId = row.mailboxId, selection, operation, successMessage]
+                         destinationAccountId = row.accountId, destinationMailboxId = row.mailboxId,
+                         selection, operation, successMessage]
                         {
                             queueTransfer(sourceAccountId, sourceMailboxId, destinationAccountId,
-                                          destinationMailboxId, selection, operation, successMessage);
+                                          destinationMailboxId, selection, operation,
+                                          successMessage);
                         });
             }
         };
@@ -254,11 +254,13 @@ namespace javelin::gui::shell
         addDestinations(copyMenu, MessageTransferOperation::Copy, i18n("Queued copy."));
     }
 
-    void MessageCommandController::queueTransfer(
-        std::string sourceAccountId, std::optional<std::string> sourceMailboxId,
-        std::string destinationAccountId, std::string destinationMailboxId,
-        javelin::app::MessageSelection selection, const MessageTransferOperation operation,
-        QString successMessage)
+    void MessageCommandController::queueTransfer(std::string sourceAccountId,
+                                                 std::optional<std::string> sourceMailboxId,
+                                                 std::string destinationAccountId,
+                                                 std::string destinationMailboxId,
+                                                 javelin::app::MessageSelection selection,
+                                                 const MessageTransferOperation operation,
+                                                 QString successMessage)
     {
         const bool move = operation == MessageTransferOperation::Move;
         qCInfo(logMessageCommands).noquote()
@@ -281,21 +283,23 @@ namespace javelin::gui::shell
             QCoro::connect(
                 std::move(task), this,
                 [this, sourceAccountId = std::move(sourceAccountId),
-                 destinationAccountId = std::move(destinationAccountId), move](
-                    javelin::app::MailTransferExecutionResult result)
+                 destinationAccountId = std::move(destinationAccountId),
+                 move](javelin::app::MailTransferExecutionResult result)
                 {
                     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                     {
                         Q_EMIT operationFailed(*error);
                         return;
                     }
-                    const auto& summary = std::get<javelin::app::MailTransferExecutionSummary>(result);
+                    const auto& summary =
+                        std::get<javelin::app::MailTransferExecutionSummary>(result);
                     if (summary.status == javelin::app::MailTransferStatus::Complete)
                     {
                         Q_EMIT mailboxMembershipChanged(
                             QString::fromStdString(destinationAccountId));
                         if (move)
-                            Q_EMIT mailboxMembershipChanged(QString::fromStdString(sourceAccountId));
+                            Q_EMIT mailboxMembershipChanged(
+                                QString::fromStdString(sourceAccountId));
                         Q_EMIT statusMessage(
                             move ? i18np("Moved one message.", "Moved %1 messages.",
                                          summary.completeItemCount)
@@ -311,10 +315,10 @@ namespace javelin::gui::shell
                     switch (summary.status)
                     {
                     case javelin::app::MailTransferStatus::BlockedUnknown:
-                        message = i18n(
-                            "The transfer outcome could not be confirmed for %1 message(s). Javelin "
-                            "will not retry those messages automatically.",
-                            summary.unknownItemCount);
+                        message = i18n("The transfer outcome could not be confirmed for %1 "
+                                       "message(s). Javelin "
+                                       "will not retry those messages automatically.",
+                                       summary.unknownItemCount);
                         break;
                     case javelin::app::MailTransferStatus::Partial:
                         message = i18n(
@@ -325,8 +329,8 @@ namespace javelin::gui::shell
                         break;
                     case javelin::app::MailTransferStatus::Failed:
                         code = javelin::jmap::OperationErrorCode::ServerFailure;
-                        message = i18n("The transfer failed for %1 message(s).",
-                                       summary.failedItemCount);
+                        message =
+                            i18n("The transfer failed for %1 message(s).", summary.failedItemCount);
                         break;
                     case javelin::app::MailTransferStatus::Cancelled:
                         message = i18n("The transfer was cancelled.");

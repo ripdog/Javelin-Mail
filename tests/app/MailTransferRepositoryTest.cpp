@@ -109,9 +109,9 @@ namespace
             FAIL(error->message.toStdString());
         const auto object = std::get<javelin::jmap::cache::MailVaultObject>(installed);
         QSqlQuery insert{database.database()};
-        insert.prepare(QStringLiteral(
-            "INSERT INTO mail_vault_objects(content_hash,relative_path,size) "
-            "VALUES(:hash,:path,:size)"));
+        insert.prepare(
+            QStringLiteral("INSERT INTO mail_vault_objects(content_hash,relative_path,size) "
+                           "VALUES(:hash,:path,:size)"));
         insert.bindValue(QStringLiteral(":hash"), QString::fromStdString(object.contentHash));
         insert.bindValue(QStringLiteral(":path"), object.relativePath);
         insert.bindValue(QStringLiteral(":size"), static_cast<qulonglong>(object.size));
@@ -220,9 +220,9 @@ TEST_CASE("mail transfer journal records every irreversible boundary with compar
                                                       MailTransferItemPhase::AcquiringSource)));
     CHECK(requireBool(repository.markSourceReady("item-1", MailTransferItemPhase::AcquiringSource,
                                                  sourceObject.contentHash)));
-    CHECK(scalar(database, QStringLiteral(
-                              "SELECT COUNT(*) FROM mail_vault_pins WHERE "
-                              "owner_kind='mail_transfer_item' AND owner_id='item-1'")) == 1);
+    CHECK(scalar(database,
+                 QStringLiteral("SELECT COUNT(*) FROM mail_vault_pins WHERE "
+                                "owner_kind='mail_transfer_item' AND owner_id='item-1'")) == 1);
     CHECK(requireBool(repository.transitionItem("item-1", MailTransferItemPhase::SourceReady,
                                                 MailTransferItemPhase::Uploading)));
     CHECK(requireBool(repository.markUploaded("item-1", MailTransferItemPhase::Uploading,
@@ -294,21 +294,23 @@ TEST_CASE("mail transfer source pin is atomic and can be retained by history",
     CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_pins")) == 0);
 
     const auto sourceObject = seedVaultObject(database);
-    REQUIRE(requireBool(repository.markSourceReady(
-        "item-1", MailTransferItemPhase::AcquiringSource, sourceObject.contentHash)));
+    REQUIRE(requireBool(repository.markSourceReady("item-1", MailTransferItemPhase::AcquiringSource,
+                                                   sourceObject.contentHash)));
     REQUIRE(requireBool(
         repository.reassignSourcePin("item-1", "operation_history", "history-entry-1")));
-    CHECK(scalar(database, QStringLiteral(
-                              "SELECT COUNT(*) FROM mail_vault_pins WHERE "
-                              "owner_kind='mail_transfer_item' AND owner_id='item-1'")) == 0);
-    CHECK(scalar(database, QStringLiteral(
-                              "SELECT COUNT(*) FROM mail_vault_pins WHERE "
-                              "owner_kind='operation_history' AND owner_id='history-entry-1'")) == 1);
+    CHECK(scalar(database,
+                 QStringLiteral("SELECT COUNT(*) FROM mail_vault_pins WHERE "
+                                "owner_kind='mail_transfer_item' AND owner_id='item-1'")) == 0);
+    CHECK(scalar(database,
+                 QStringLiteral("SELECT COUNT(*) FROM mail_vault_pins WHERE "
+                                "owner_kind='operation_history' AND owner_id='history-entry-1'")) ==
+          1);
     REQUIRE(requireBool(
         repository.reassignSourcePin("item-1", "operation_history", "history-entry-1")));
-    CHECK(scalar(database, QStringLiteral(
-                              "SELECT COUNT(*) FROM mail_vault_pins WHERE "
-                              "owner_kind='operation_history' AND owner_id='history-entry-1'")) == 1);
+    CHECK(scalar(database,
+                 QStringLiteral("SELECT COUNT(*) FROM mail_vault_pins WHERE "
+                                "owner_kind='operation_history' AND owner_id='history-entry-1'")) ==
+          1);
     REQUIRE_FALSE(repository.releaseSourcePin("item-1").has_value());
     CHECK(scalar(database, QStringLiteral("SELECT COUNT(*) FROM mail_vault_pins")) == 1);
 }

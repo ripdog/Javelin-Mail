@@ -17,7 +17,7 @@ namespace javelin::jmap::api
 {
     class AbstractTransport;
     class JmapMethodTransport;
-}
+} // namespace javelin::jmap::api
 namespace javelin::jmap::cache
 {
     class DatabaseConnection;

@@ -14,7 +14,7 @@ namespace javelin::gui::messages
         constexpr quint8 emailSelectionKind = 1;
         constexpr quint8 collapsedThreadSelectionKind = 2;
         constexpr quint32 maxSelectionItems = 100000;
-    }
+    } // namespace
 
     QByteArray encodeMessageDragPayload(const MessageDragPayload& payload)
     {

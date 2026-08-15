@@ -51,14 +51,14 @@ namespace javelin::app
         }
     } // namespace
 
-    MailTransferPlanResult planMailTransfer(
-        const MailTransferIntent& intent, const std::vector<std::string>& emailIds,
-        const std::vector<javelin::jmap::domain::Email>& emails,
-        const std::vector<javelin::jmap::cache::MailboxTreeItem>& sourceMailboxes,
-        const std::vector<javelin::jmap::cache::MailboxTreeItem>& destinationMailboxes,
-        const javelin::jmap::cache::CachedAccount& sourceAccount,
-        const javelin::jmap::cache::CachedAccount& destinationAccount,
-        const std::span<const MailTransferSourceCleanupOverride> cleanupOverrides)
+    MailTransferPlanResult
+    planMailTransfer(const MailTransferIntent& intent, const std::vector<std::string>& emailIds,
+                     const std::vector<javelin::jmap::domain::Email>& emails,
+                     const std::vector<javelin::jmap::cache::MailboxTreeItem>& sourceMailboxes,
+                     const std::vector<javelin::jmap::cache::MailboxTreeItem>& destinationMailboxes,
+                     const javelin::jmap::cache::CachedAccount& sourceAccount,
+                     const javelin::jmap::cache::CachedAccount& destinationAccount,
+                     const std::span<const MailTransferSourceCleanupOverride> cleanupOverrides)
     {
         if (intent.sourceAccountId.empty() || intent.destinationAccountId.empty() ||
             intent.destinationMailboxId.empty())
@@ -78,7 +78,8 @@ namespace javelin::app
 
         const auto sourceById = indexMailboxes(sourceMailboxes);
         const auto destinationById = indexMailboxes(destinationMailboxes);
-        std::unordered_map<std::string_view, const MailTransferSourceCleanupOverride*> cleanupByEmail;
+        std::unordered_map<std::string_view, const MailTransferSourceCleanupOverride*>
+            cleanupByEmail;
         cleanupByEmail.reserve(cleanupOverrides.size());
         for (const auto& cleanup : cleanupOverrides)
         {
@@ -153,9 +154,9 @@ namespace javelin::app
                         std::unique(removeMailboxIds.begin(), removeMailboxIds.end()),
                         removeMailboxIds.end());
                     if (removeMailboxIds.empty() ||
-                        std::ranges::any_of(removeMailboxIds, [&](const auto& mailboxId)
-                                            { return !std::ranges::contains(email.mailboxIds,
-                                                                            mailboxId); }))
+                        std::ranges::any_of(
+                            removeMailboxIds, [&](const auto& mailboxId)
+                            { return !std::ranges::contains(email.mailboxIds, mailboxId); }))
                         return i18n("A message no longer has the mailbox memberships required by "
                                     "the exact source cleanup plan.");
                 }

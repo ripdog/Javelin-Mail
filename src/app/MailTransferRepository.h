@@ -169,8 +169,7 @@ namespace javelin::app
         [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
         markSourceCleanupPrepared(std::string_view itemId, MailTransferItemPhase expected,
                                   std::string_view sourceEmailState,
-                                  const std::vector<std::string>& removeMailboxIds,
-                                  bool destroy);
+                                  const std::vector<std::string>& removeMailboxIds, bool destroy);
         [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
         pinSourceForCleanup(std::string_view itemId, MailTransferItemPhase expected,
                             std::string_view rawContentHash);

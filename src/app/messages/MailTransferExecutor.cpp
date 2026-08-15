@@ -4,8 +4,6 @@
 #include "app/AccountConnectionSettings.h"
 #include "app/undo/MailTransferHistoryCoordinator.h"
 #include "jmap/MessageContentClient.h"
-#include "jmap/sync/EmailMutationEngine.h"
-#include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/api/BlobUpload.h"
 #include "jmap/api/MailMethods.h"
 #include "jmap/api/MethodCaller.h"
@@ -20,6 +18,8 @@
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
+#include "jmap/sync/EmailMutationEngine.h"
+#include "jmap/sync/EmailMutationJournal.h"
 
 #include <KLocalizedString>
 
@@ -80,16 +80,14 @@ namespace javelin::app
             const auto result = sessions.load(localAccountId);
             if (const auto* error = std::get_if<DatabaseError>(&result))
                 return javelin::jmap::operationError(*error);
-            const auto& session =
-                std::get<std::optional<javelin::jmap::api::Session>>(result);
+            const auto& session = std::get<std::optional<javelin::jmap::api::Session>>(result);
             if (!session.has_value())
                 return stateError(i18n("No cached JMAP session is available for this transfer."));
             return *session;
         }
 
         [[nodiscard]] javelin::jmap::api::ApiRequestContext
-        requestContext(const AccountConnectionSettings& settings,
-                       const std::string& localAccountId,
+        requestContext(const AccountConnectionSettings& settings, const std::string& localAccountId,
                        const javelin::jmap::api::Session& session)
         {
             return {
@@ -107,7 +105,8 @@ namespace javelin::app
             };
         }
 
-        [[nodiscard]] OperationError callerError(const javelin::jmap::api::MethodCallerResult& result)
+        [[nodiscard]] OperationError
+        callerError(const javelin::jmap::api::MethodCallerResult& result)
         {
             if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
                 return javelin::jmap::operationError(*error);
@@ -199,8 +198,7 @@ namespace javelin::app
     {
     }
 
-    QCoro::Task<MailTransferExecutionResult>
-    MailTransferExecutor::advance(std::string operationId)
+    QCoro::Task<MailTransferExecutionResult> MailTransferExecutor::advance(std::string operationId)
     {
         MailTransferRepository repository{m_databaseConnection};
         const auto operationResult = repository.findOperation(operationId);
@@ -235,7 +233,8 @@ namespace javelin::app
             std::get<javelin::jmap::cache::CachedAccount>(std::move(destinationAccountResult));
         if ((crossServerImport && sourceAccount.connectionId == destinationAccount.connectionId) ||
             (sameSessionCopy && sourceAccount.connectionId != destinationAccount.connectionId))
-            co_return stateError(i18n("The transfer topology no longer matches the account state."));
+            co_return stateError(
+                i18n("The transfer topology no longer matches the account state."));
 
         const auto sourceSettings =
             m_connectionProvider.connectionSettingsFor(operation.sourceAccountId);
@@ -253,7 +252,8 @@ namespace javelin::app
         if (!destinationSession.accounts.contains(destinationAccount.remoteAccountId))
             co_return stateError(i18n("The destination account is absent from its JMAP session."));
         if (sameSessionCopy && !destinationSession.accounts.contains(sourceAccount.remoteAccountId))
-            co_return stateError(i18n("The source account is absent from the shared JMAP session."));
+            co_return stateError(
+                i18n("The source account is absent from the shared JMAP session."));
         std::optional<javelin::jmap::api::BlobUploadContext> uploadContext;
         if (crossServerImport)
         {
@@ -262,11 +262,10 @@ namespace javelin::app
             if (const auto* error =
                     std::get_if<javelin::jmap::api::ProtocolError>(&uploadContextResult))
                 co_return javelin::jmap::operationError(*error);
-            uploadContext =
-                std::get<javelin::jmap::api::BlobUploadContext>(uploadContextResult);
+            uploadContext = std::get<javelin::jmap::api::BlobUploadContext>(uploadContextResult);
         }
-        const auto destinationRequestContext =
-            requestContext(*destinationSettings, operation.destinationAccountId, destinationSession);
+        const auto destinationRequestContext = requestContext(
+            *destinationSettings, operation.destinationAccountId, destinationSession);
         if (!destinationRequestContext.requestLimits.has_value())
         {
             co_return OperationError{
@@ -275,8 +274,8 @@ namespace javelin::app
             };
         }
 
-        if (const auto error = repository.updateStatus(operation.operationId,
-                                                       MailTransferStatus::Running))
+        if (const auto error =
+                repository.updateStatus(operation.operationId, MailTransferStatus::Running))
             co_return javelin::jmap::operationError(*error);
 
         javelin::jmap::cache::RawMessageSourceRepository sourceRepository{m_databaseConnection};
@@ -290,10 +289,10 @@ namespace javelin::app
         {
             if (item.phase == MailTransferItemPhase::DestinationUnknown)
             {
-                const bool canReconcileExisting =
-                    item.reusedExisting && item.destinationEmailId.has_value() &&
-                    item.destinationPreState.has_value() &&
-                    item.destinationPriorMailboxIds.has_value();
+                const bool canReconcileExisting = item.reusedExisting &&
+                                                  item.destinationEmailId.has_value() &&
+                                                  item.destinationPreState.has_value() &&
+                                                  item.destinationPriorMailboxIds.has_value();
                 if (!canReconcileExisting)
                 {
                     if (!item.destinationPreState.has_value())
@@ -311,8 +310,8 @@ namespace javelin::app
                             .maxChanges = std::optional<std::uint64_t>{256},
                         });
                         if (!changesRequest.has_value())
-                            co_return stateError(i18n(
-                                "Unable to encode the destination Email/changes request."));
+                            co_return stateError(
+                                i18n("Unable to encode the destination Email/changes request."));
                         javelin::jmap::api::RequestBuilder changesBuilder;
                         changesBuilder.useCore().useMail();
                         const auto changesHandle = changesBuilder.call(
@@ -341,9 +340,10 @@ namespace javelin::app
                             break;
                         }
 
-                        const auto changesRead = javelin::jmap::api::ResponseReader{
-                            std::get<javelin::jmap::api::ResponseEnvelope>(changesCalled)}
-                                                     .require(changesHandle);
+                        const auto changesRead =
+                            javelin::jmap::api::ResponseReader{
+                                std::get<javelin::jmap::api::ResponseEnvelope>(changesCalled)}
+                                .require(changesHandle);
                         if (const auto* readError =
                                 std::get_if<javelin::jmap::api::ResponseReaderError>(&changesRead))
                         {
@@ -413,9 +413,9 @@ namespace javelin::app
                     if (createdIds.empty())
                     {
                         if (const auto error = requireTransition(
-                                repository.transitionItem(
-                                    item.itemId, MailTransferItemPhase::DestinationUnknown,
-                                    MailTransferItemPhase::Uploaded),
+                                repository.transitionItem(item.itemId,
+                                                          MailTransferItemPhase::DestinationUnknown,
+                                                          MailTransferItemPhase::Uploaded),
                                 i18n("The transfer state changed while retrying a destination "
                                      "creation proven absent.")))
                             co_return *error;
@@ -428,9 +428,9 @@ namespace javelin::app
                         destinationRequestContext.requestLimits->maxObjectsInGet);
                     if (item.sourceMessageIds.empty() || createdIds.size() > maximumObjects)
                     {
-                        const QString message = i18n(
-                            "The destination may contain a newly created message, but Javelin "
-                            "cannot identify it uniquely enough to continue automatically.");
+                        const QString message =
+                            i18n("The destination may contain a newly created message, but Javelin "
+                                 "cannot identify it uniquely enough to continue automatically.");
                         if (const auto transitionError = requireTransition(
                                 repository.transitionItem(
                                     item.itemId, MailTransferItemPhase::DestinationUnknown,
@@ -479,9 +479,10 @@ namespace javelin::app
                         continue;
                     }
 
-                    const auto candidatesRead = javelin::jmap::api::ResponseReader{
-                        std::get<javelin::jmap::api::ResponseEnvelope>(candidatesCalled)}
-                                                    .require(candidatesHandle);
+                    const auto candidatesRead =
+                        javelin::jmap::api::ResponseReader{
+                            std::get<javelin::jmap::api::ResponseEnvelope>(candidatesCalled)}
+                            .require(candidatesHandle);
                     if (const auto* readError =
                             std::get_if<javelin::jmap::api::ResponseReaderError>(&candidatesRead))
                     {
@@ -525,11 +526,11 @@ namespace javelin::app
                         const bool receivedAtMatches =
                             !item.sourceReceivedAt.has_value() ||
                             candidate.receivedAt == *item.sourceReceivedAt;
-                        const bool matches =
-                            candidateMessageIds == sourceMessageIds && receivedAtMatches &&
-                            candidate.size == item.sourceSize &&
-                            std::ranges::contains(candidate.mailboxIds,
-                                                  operation.destinationMailboxId);
+                        const bool matches = candidateMessageIds == sourceMessageIds &&
+                                             receivedAtMatches &&
+                                             candidate.size == item.sourceSize &&
+                                             std::ranges::contains(candidate.mailboxIds,
+                                                                   operation.destinationMailboxId);
                         if (!matches)
                             continue;
                         if (matched != nullptr)
@@ -587,9 +588,8 @@ namespace javelin::app
                     .accountId = destinationAccount.remoteAccountId,
                     .ids = std::vector<std::string>{*item.destinationEmailId},
                     .idsReference = std::nullopt,
-                    .properties = std::vector<std::string>{
-                        "id", "blobId", "threadId", "mailboxIds", "keywords", "size",
-                        "receivedAt"},
+                    .properties = std::vector<std::string>{"id", "blobId", "threadId", "mailboxIds",
+                                                           "keywords", "size", "receivedAt"},
                 });
                 if (!existingRequest.has_value())
                     co_return stateError(
@@ -620,9 +620,10 @@ namespace javelin::app
                     continue;
                 }
 
-                const auto existingRead = javelin::jmap::api::ResponseReader{
-                    std::get<javelin::jmap::api::ResponseEnvelope>(existingCalled)}
-                                              .require(existingHandle);
+                const auto existingRead =
+                    javelin::jmap::api::ResponseReader{
+                        std::get<javelin::jmap::api::ResponseEnvelope>(existingCalled)}
+                        .require(existingHandle);
                 if (const auto* readError =
                         std::get_if<javelin::jmap::api::ResponseReaderError>(&existingRead))
                 {
@@ -670,13 +671,14 @@ namespace javelin::app
                                 item.itemId, MailTransferItemPhase::DestinationUnknown,
                                 {
                                     .emailId = existingEmail.id,
-                                    .blobId = existingEmail.blobId.empty()
-                                                  ? std::nullopt
-                                                  : std::optional<std::string>{existingEmail.blobId},
-                                    .threadId = existingEmail.threadId.empty()
-                                                    ? std::nullopt
-                                                    : std::optional<std::string>{
-                                                          existingEmail.threadId},
+                                    .blobId =
+                                        existingEmail.blobId.empty()
+                                            ? std::nullopt
+                                            : std::optional<std::string>{existingEmail.blobId},
+                                    .threadId =
+                                        existingEmail.threadId.empty()
+                                            ? std::nullopt
+                                            : std::optional<std::string>{existingEmail.threadId},
                                     .size = existingEmail.size,
                                     .reusedExisting = true,
                                     .priorMailboxIds = priorMailboxIds,
@@ -732,10 +734,9 @@ namespace javelin::app
                     "Javelin restarted after destination creation may have been dispatched. The "
                     "destination must be reconciled before this transfer can continue.");
                 if (const auto error = requireTransition(
-                        repository.transitionItem(item.itemId,
-                                                  MailTransferItemPhase::CreatingDestination,
-                                                  MailTransferItemPhase::DestinationUnknown,
-                                                  message),
+                        repository.transitionItem(
+                            item.itemId, MailTransferItemPhase::CreatingDestination,
+                            MailTransferItemPhase::DestinationUnknown, message),
                         i18n("The destination transfer state changed while recovering.")))
                     co_return *error;
                 item.phase = MailTransferItemPhase::DestinationUnknown;
@@ -771,10 +772,9 @@ namespace javelin::app
                         co_return *error;
                     }
                     if (const auto transitionError = requireTransition(
-                            repository.transitionItem(item.itemId,
-                                                      MailTransferItemPhase::AcquiringSource,
-                                                      MailTransferItemPhase::Failed,
-                                                      error->message),
+                            repository.transitionItem(
+                                item.itemId, MailTransferItemPhase::AcquiringSource,
+                                MailTransferItemPhase::Failed, error->message),
                             i18n("The source transfer state changed while failing acquisition.")))
                         co_return *transitionError;
                     item.phase = MailTransferItemPhase::Failed;
@@ -786,10 +786,9 @@ namespace javelin::app
                 {
                     const auto error = sourceUnavailable(unavailable->message);
                     if (const auto transitionError = requireTransition(
-                            repository.transitionItem(item.itemId,
-                                                      MailTransferItemPhase::AcquiringSource,
-                                                      MailTransferItemPhase::Failed,
-                                                      unavailable->message),
+                            repository.transitionItem(
+                                item.itemId, MailTransferItemPhase::AcquiringSource,
+                                MailTransferItemPhase::Failed, unavailable->message),
                             i18n("The source transfer state changed while failing acquisition.")))
                         co_return *transitionError;
                     item.phase = MailTransferItemPhase::Failed;
@@ -801,20 +800,21 @@ namespace javelin::app
                     sourceRepository.findReference(operation.sourceAccountId, item.sourceEmailId);
                 if (const auto* error = std::get_if<DatabaseError>(&referenceResult))
                     co_return javelin::jmap::operationError(*error);
-                auto reference = std::get<std::optional<javelin::jmap::cache::RawMessageSourceReference>>(
-                    std::move(referenceResult));
+                auto reference =
+                    std::get<std::optional<javelin::jmap::cache::RawMessageSourceReference>>(
+                        std::move(referenceResult));
                 if (!reference.has_value())
                 {
                     const auto migration = sourceRepository.migrateLegacySources(25);
                     if (const auto* error = std::get_if<DatabaseError>(&migration))
                         co_return javelin::jmap::operationError(*error);
-                    referenceResult =
-                        sourceRepository.findReference(operation.sourceAccountId, item.sourceEmailId);
+                    referenceResult = sourceRepository.findReference(operation.sourceAccountId,
+                                                                     item.sourceEmailId);
                     if (const auto* error = std::get_if<DatabaseError>(&referenceResult))
                         co_return javelin::jmap::operationError(*error);
-                    reference = std::get<
-                        std::optional<javelin::jmap::cache::RawMessageSourceReference>>(
-                        std::move(referenceResult));
+                    reference =
+                        std::get<std::optional<javelin::jmap::cache::RawMessageSourceReference>>(
+                            std::move(referenceResult));
                 }
                 if (!reference.has_value() || reference->blobId != item.sourceBlobId)
                 {
@@ -860,7 +860,8 @@ namespace javelin::app
                 const auto& object =
                     std::get<std::optional<javelin::jmap::cache::MailVaultObject>>(objectResult);
                 if (!object.has_value())
-                    co_return stateError(i18n("The pinned raw source is missing from the mail vault."));
+                    co_return stateError(
+                        i18n("The pinned raw source is missing from the mail vault."));
                 auto leaseResult = vault.acquireLease(*object);
                 if (const auto* error =
                         std::get_if<javelin::jmap::cache::MailVaultError>(&leaseResult))
@@ -879,8 +880,7 @@ namespace javelin::app
                     m_resourceTransport, *uploadContext, operation.destinationAccountId,
                     destinationAccount.remoteAccountId, destinationSettings->apiKey,
                     std::get<QString>(pathResult), "message/rfc822");
-                if (const auto* error =
-                        std::get_if<javelin::jmap::api::TransportError>(&upload))
+                if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&upload))
                 {
                     const auto operationError = javelin::jmap::operationError(*error);
                     if (retryable(operationError))
@@ -903,8 +903,7 @@ namespace javelin::app
                     item.lastError = operationError.message;
                     continue;
                 }
-                if (const auto* error =
-                        std::get_if<javelin::jmap::api::ProtocolError>(&upload))
+                if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&upload))
                 {
                     const auto operationError = javelin::jmap::operationError(*error);
                     if (const auto transitionError = requireTransition(
@@ -919,8 +918,7 @@ namespace javelin::app
                     item.lastError = operationError.message;
                     continue;
                 }
-                const auto& uploaded =
-                    std::get<javelin::jmap::api::BlobUploadResponse>(upload);
+                const auto& uploaded = std::get<javelin::jmap::api::BlobUploadResponse>(upload);
                 if (const auto error = requireTransition(
                         repository.markUploaded(item.itemId, MailTransferItemPhase::Uploading,
                                                 uploaded.blobId),
@@ -939,11 +937,13 @@ namespace javelin::app
                     .properties = std::vector<std::string>{"id"},
                 });
                 if (!stateRequest.has_value())
-                    co_return stateError(i18n("Unable to encode the destination Email/get request."));
+                    co_return stateError(
+                        i18n("Unable to encode the destination Email/get request."));
                 javelin::jmap::api::RequestBuilder stateBuilder;
                 stateBuilder.useCore().useMail();
                 const auto stateHandle = stateBuilder.call(*stateRequest, "mail-transfer-state");
-                auto stateCalled = co_await methodCaller.call(destinationRequestContext, stateBuilder);
+                auto stateCalled =
+                    co_await methodCaller.call(destinationRequestContext, stateBuilder);
                 if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(stateCalled))
                 {
                     const auto error = callerError(stateCalled);
@@ -957,7 +957,8 @@ namespace javelin::app
                     if (const auto transitionError = requireTransition(
                             repository.transitionItem(item.itemId, MailTransferItemPhase::Uploaded,
                                                       MailTransferItemPhase::Failed, error.message),
-                            i18n("The transfer state changed while failing destination preflight.")))
+                            i18n(
+                                "The transfer state changed while failing destination preflight.")))
                         co_return *transitionError;
                     if (const auto pinError = releaseSourcePin(repository, item.itemId))
                         co_return *pinError;
@@ -965,8 +966,10 @@ namespace javelin::app
                     item.lastError = error.message;
                     continue;
                 }
-                const auto stateRead = javelin::jmap::api::ResponseReader{
-                    std::get<javelin::jmap::api::ResponseEnvelope>(stateCalled)}.require(stateHandle);
+                const auto stateRead =
+                    javelin::jmap::api::ResponseReader{
+                        std::get<javelin::jmap::api::ResponseEnvelope>(stateCalled)}
+                        .require(stateHandle);
                 if (const auto* readError =
                         std::get_if<javelin::jmap::api::ResponseReaderError>(&stateRead))
                 {
@@ -974,7 +977,8 @@ namespace javelin::app
                     if (const auto transitionError = requireTransition(
                             repository.transitionItem(item.itemId, MailTransferItemPhase::Uploaded,
                                                       MailTransferItemPhase::Failed, error.message),
-                            i18n("The transfer state changed while failing destination preflight.")))
+                            i18n(
+                                "The transfer state changed while failing destination preflight.")))
                         co_return *transitionError;
                     if (const auto pinError = releaseSourcePin(repository, item.itemId))
                         co_return *pinError;
@@ -987,11 +991,13 @@ namespace javelin::app
                 if (stateResponse.accountId != destinationAccount.remoteAccountId ||
                     stateResponse.state.empty())
                 {
-                    const QString message = i18n("The destination Email state response is invalid.");
+                    const QString message =
+                        i18n("The destination Email state response is invalid.");
                     if (const auto transitionError = requireTransition(
                             repository.transitionItem(item.itemId, MailTransferItemPhase::Uploaded,
                                                       MailTransferItemPhase::Failed, message),
-                            i18n("The transfer state changed while failing destination preflight.")))
+                            i18n(
+                                "The transfer state changed while failing destination preflight.")))
                         co_return *transitionError;
                     if (const auto pinError = releaseSourcePin(repository, item.itemId))
                         co_return *pinError;
@@ -1032,15 +1038,15 @@ namespace javelin::app
                     });
                     if (!importRequest.has_value())
                         co_return stateError(i18n("Unable to encode the Email/import request."));
-                    creationHandle =
-                        creationBuilder.call(*importRequest, "mail-transfer-import");
+                    creationHandle = creationBuilder.call(*importRequest, "mail-transfer-import");
                 }
                 else
                 {
                     javelin::jmap::api::EmailCopyCreate copy{
                         .id = item.sourceEmailId,
-                        .mailboxIds = std::unordered_map<std::string, bool>{
-                            {operation.destinationMailboxId, true}},
+                        .mailboxIds =
+                            std::unordered_map<std::string, bool>{
+                                {operation.destinationMailboxId, true}},
                         .keywords = keywordMap(item.sourceKeywords),
                         .receivedAt = item.sourceReceivedAt,
                     };
@@ -1059,9 +1065,9 @@ namespace javelin::app
                 }
 
                 bool dispatched = false;
-                auto creationCalled = co_await methodCaller.call(
-                    destinationRequestContext, creationBuilder, {},
-                    [&dispatched] { dispatched = true; });
+                auto creationCalled =
+                    co_await methodCaller.call(destinationRequestContext, creationBuilder, {},
+                                               [&dispatched] { dispatched = true; });
                 if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(creationCalled))
                 {
                     const auto error = callerError(creationCalled);
@@ -1093,9 +1099,9 @@ namespace javelin::app
                         co_return error;
                     }
                     if (const auto transitionError = requireTransition(
-                            repository.transitionItem(
-                                item.itemId, MailTransferItemPhase::CreatingDestination,
-                                MailTransferItemPhase::Failed, error.message),
+                            repository.transitionItem(item.itemId,
+                                                      MailTransferItemPhase::CreatingDestination,
+                                                      MailTransferItemPhase::Failed, error.message),
                             i18n("The transfer state changed while failing destination creation.")))
                         co_return *transitionError;
                     if (const auto pinError = releaseSourcePin(repository, item.itemId))
@@ -1133,8 +1139,7 @@ namespace javelin::app
                         std::get<javelin::jmap::api::EmailImportResponse>(importRead);
                     if (response.accountId != destinationAccount.remoteAccountId)
                     {
-                        const QString message =
-                            i18n("Email/import returned the wrong account id.");
+                        const QString message = i18n("Email/import returned the wrong account id.");
                         if (const auto transitionError = requireTransition(
                                 repository.transitionItem(
                                     item.itemId, MailTransferItemPhase::CreatingDestination,
@@ -1226,13 +1231,13 @@ namespace javelin::app
                             .accountId = destinationAccount.remoteAccountId,
                             .ids = std::vector<std::string>{existingId},
                             .idsReference = std::nullopt,
-                            .properties = std::vector<std::string>{
-                                "id", "blobId", "threadId", "mailboxIds", "keywords", "size",
-                                "receivedAt"},
+                            .properties =
+                                std::vector<std::string>{"id", "blobId", "threadId", "mailboxIds",
+                                                         "keywords", "size", "receivedAt"},
                         });
                         if (!existingRequest.has_value())
-                            co_return stateError(
-                                i18n("Unable to encode the existing destination Email/get request."));
+                            co_return stateError(i18n(
+                                "Unable to encode the existing destination Email/get request."));
                         javelin::jmap::api::RequestBuilder existingBuilder;
                         existingBuilder.useCore().useMail();
                         const auto existingHandle =
@@ -1247,8 +1252,7 @@ namespace javelin::app
                             {
                                 if (const auto transitionError = requireTransition(
                                         repository.transitionItem(
-                                            item.itemId,
-                                            MailTransferItemPhase::CreatingDestination,
+                                            item.itemId, MailTransferItemPhase::CreatingDestination,
                                             MailTransferItemPhase::Uploaded, error.message),
                                         i18n("The transfer state changed while retrying duplicate "
                                              "destination lookup.")))
@@ -1273,9 +1277,10 @@ namespace javelin::app
                             continue;
                         }
 
-                        const auto existingRead = javelin::jmap::api::ResponseReader{
-                            std::get<javelin::jmap::api::ResponseEnvelope>(existingCalled)}
-                                                      .require(existingHandle);
+                        const auto existingRead =
+                            javelin::jmap::api::ResponseReader{
+                                std::get<javelin::jmap::api::ResponseEnvelope>(existingCalled)}
+                                .require(existingHandle);
                         if (const auto* readError =
                                 std::get_if<javelin::jmap::api::ResponseReaderError>(&existingRead))
                         {
@@ -1335,14 +1340,12 @@ namespace javelin::app
                         item.destinationPriorMailboxIds = priorMailboxIds;
                         item.reusedExisting = true;
 
-                        if (!std::ranges::contains(priorMailboxIds,
-                                                   operation.destinationMailboxId))
+                        if (!std::ranges::contains(priorMailboxIds, operation.destinationMailboxId))
                         {
                             javelin::jmap::api::EmailSetUpdate update;
-                            update.patch.emplace(
-                                javelin::jmap::api::patchPath(
-                                    "mailboxIds", operation.destinationMailboxId),
-                                true);
+                            update.patch.emplace(javelin::jmap::api::patchPath(
+                                                     "mailboxIds", operation.destinationMailboxId),
+                                                 true);
                             const auto setRequest = javelin::jmap::api::emailSet({
                                 .accountId = destinationAccount.remoteAccountId,
                                 .ifInState = existingResponse.state,
@@ -1392,37 +1395,36 @@ namespace javelin::app
                                         co_return *transitionError;
                                     item.phase = MailTransferItemPhase::Uploaded;
                                     if (const auto databaseError = repository.updateStatus(
-                                            operation.operationId, waitStatus(error), error.message))
+                                            operation.operationId, waitStatus(error),
+                                            error.message))
                                         co_return javelin::jmap::operationError(*databaseError);
                                     co_return error;
                                 }
                                 if (const auto transitionError = requireTransition(
                                         repository.transitionItem(
-                                            item.itemId,
-                                            MailTransferItemPhase::CreatingDestination,
+                                            item.itemId, MailTransferItemPhase::CreatingDestination,
                                             MailTransferItemPhase::Failed, error.message),
                                         i18n("The transfer state changed while failing duplicate "
                                              "membership update.")))
                                     co_return *transitionError;
-                                if (const auto pinError =
-                                        releaseSourcePin(repository, item.itemId))
+                                if (const auto pinError = releaseSourcePin(repository, item.itemId))
                                     co_return *pinError;
                                 item.phase = MailTransferItemPhase::Failed;
                                 item.lastError = error.message;
                                 continue;
                             }
 
-                            const auto setRead = javelin::jmap::api::ResponseReader{
-                                std::get<javelin::jmap::api::ResponseEnvelope>(setCalled)}
-                                                     .require(setHandle);
+                            const auto setRead =
+                                javelin::jmap::api::ResponseReader{
+                                    std::get<javelin::jmap::api::ResponseEnvelope>(setCalled)}
+                                    .require(setHandle);
                             if (const auto* readError =
                                     std::get_if<javelin::jmap::api::ResponseReaderError>(&setRead))
                             {
                                 const auto error = javelin::jmap::operationError(*readError);
                                 if (const auto transitionError = requireTransition(
                                         repository.transitionItem(
-                                            item.itemId,
-                                            MailTransferItemPhase::CreatingDestination,
+                                            item.itemId, MailTransferItemPhase::CreatingDestination,
                                             MailTransferItemPhase::DestinationUnknown,
                                             error.message),
                                         i18n("The transfer state changed while recording an "
@@ -1441,8 +1443,7 @@ namespace javelin::app
                                     i18n("Email/set returned the wrong destination account id.");
                                 if (const auto transitionError = requireTransition(
                                         repository.transitionItem(
-                                            item.itemId,
-                                            MailTransferItemPhase::CreatingDestination,
+                                            item.itemId, MailTransferItemPhase::CreatingDestination,
                                             MailTransferItemPhase::DestinationUnknown, message),
                                         i18n("The transfer state changed while recording an "
                                              "unknown duplicate membership response.")))
@@ -1474,13 +1475,12 @@ namespace javelin::app
                                     continue;
                                 }
 
-                                const QString message = i18n(
-                                    "Email/set did not account for the existing destination "
-                                    "message membership update.");
+                                const QString message =
+                                    i18n("Email/set did not account for the existing destination "
+                                         "message membership update.");
                                 if (const auto transitionError = requireTransition(
                                         repository.transitionItem(
-                                            item.itemId,
-                                            MailTransferItemPhase::CreatingDestination,
+                                            item.itemId, MailTransferItemPhase::CreatingDestination,
                                             MailTransferItemPhase::DestinationUnknown, message),
                                         i18n("The transfer state changed while recording an "
                                              "unknown duplicate membership response.")))
@@ -1495,18 +1495,18 @@ namespace javelin::app
                         {
                             if (const auto confirmedError = requireTransition(
                                     repository.markDestinationConfirmed(
-                                        item.itemId,
-                                        MailTransferItemPhase::CreatingDestination,
+                                        item.itemId, MailTransferItemPhase::CreatingDestination,
                                         {
                                             .emailId = existingEmail.id,
                                             .blobId = existingEmail.blobId.empty()
                                                           ? std::nullopt
-                                                          : std::optional<std::string>{
-                                                                existingEmail.blobId},
-                                            .threadId = existingEmail.threadId.empty()
-                                                            ? std::nullopt
-                                                            : std::optional<std::string>{
-                                                                  existingEmail.threadId},
+                                                          : std::optional<std::string>{existingEmail
+                                                                                           .blobId},
+                                            .threadId =
+                                                existingEmail.threadId.empty()
+                                                    ? std::nullopt
+                                                    : std::optional<std::string>{existingEmail
+                                                                                     .threadId},
                                             .size = existingEmail.size,
                                             .reusedExisting = true,
                                             .priorMailboxIds = priorMailboxIds,
@@ -1523,13 +1523,12 @@ namespace javelin::app
                     if (item.phase == MailTransferItemPhase::CreatingDestination &&
                         rejected != creationResponse.notCreated.end())
                     {
-                        const QString message = rejected->second.description.has_value()
-                                                    ? QString::fromStdString(
-                                                          *rejected->second.description)
-                                                    : i18n("The destination rejected Email/import "
-                                                           "with error %1.",
-                                                           QString::fromStdString(
-                                                               rejected->second.type));
+                        const QString message =
+                            rejected->second.description.has_value()
+                                ? QString::fromStdString(*rejected->second.description)
+                                : i18n("The destination rejected Email/import "
+                                       "with error %1.",
+                                       QString::fromStdString(rejected->second.type));
                         if (const auto transitionError = requireTransition(
                                 repository.transitionItem(
                                     item.itemId, MailTransferItemPhase::CreatingDestination,
@@ -1566,7 +1565,8 @@ namespace javelin::app
             if (item.phase == MailTransferItemPhase::DestinationConfirmed)
             {
                 if (!item.destinationEmailId.has_value())
-                    co_return stateError(i18n("The confirmed transfer has no destination Email id."));
+                    co_return stateError(
+                        i18n("The confirmed transfer has no destination Email id."));
 
                 const auto destinationEmailRequest = javelin::jmap::api::emailGet({
                     .accountId = destinationAccount.remoteAccountId,
@@ -1606,9 +1606,10 @@ namespace javelin::app
                     continue;
                 }
 
-                const auto destinationEmailRead = javelin::jmap::api::ResponseReader{
-                    std::get<javelin::jmap::api::ResponseEnvelope>(destinationEmailCalled)}
-                                                      .require(destinationEmailHandle);
+                const auto destinationEmailRead =
+                    javelin::jmap::api::ResponseReader{
+                        std::get<javelin::jmap::api::ResponseEnvelope>(destinationEmailCalled)}
+                        .require(destinationEmailHandle);
                 if (const auto* readError =
                         std::get_if<javelin::jmap::api::ResponseReaderError>(&destinationEmailRead))
                 {
@@ -1655,23 +1656,20 @@ namespace javelin::app
                     m_databaseConnection, QStringLiteral("Materialize mail transfer destination"));
                 if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
                     co_return javelin::jmap::operationError(*error);
-                auto transaction =
-                    std::get<javelin::jmap::cache::DatabaseTransaction>(
-                        std::move(transactionResult));
+                auto transaction = std::get<javelin::jmap::cache::DatabaseTransaction>(
+                    std::move(transactionResult));
                 javelin::jmap::cache::EmailRepository destinationEmails{m_databaseConnection};
                 if (const auto error = destinationEmails.upsertMany(
-                        transaction, operation.destinationAccountId,
-                        destinationEmailResponse.list))
+                        transaction, operation.destinationAccountId, destinationEmailResponse.list))
                     co_return javelin::jmap::operationError(*error);
-                javelin::jmap::cache::MailboxWindowRepository mailboxWindows{
-                    m_databaseConnection};
+                javelin::jmap::cache::MailboxWindowRepository mailboxWindows{m_databaseConnection};
                 if (const auto error = mailboxWindows.invalidateMailbox(
                         transaction, operation.destinationAccountId,
                         operation.destinationMailboxId))
                     co_return javelin::jmap::operationError(*error);
                 javelin::jmap::cache::SearchWindowRepository searchWindows{m_databaseConnection};
-                if (const auto error =
-                        searchWindows.invalidateAccount(transaction, operation.destinationAccountId))
+                if (const auto error = searchWindows.invalidateAccount(
+                        transaction, operation.destinationAccountId))
                     co_return javelin::jmap::operationError(*error);
                 if (const auto error = transaction.commit())
                     co_return javelin::jmap::operationError(*error);
@@ -1698,11 +1696,11 @@ namespace javelin::app
                 auto cleanupRecords =
                     std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
                         std::move(cleanupRecordsResult));
-                std::erase_if(cleanupRecords,
-                              [&item](const auto& record)
+                std::erase_if(cleanupRecords, [&item](const auto& record)
                               { return record.patch.emailId != item.sourceEmailId; });
 
-                const auto hasStatus = [&cleanupRecords](const javelin::jmap::sync::MutationStatus status)
+                const auto hasStatus =
+                    [&cleanupRecords](const javelin::jmap::sync::MutationStatus status)
                 {
                     return std::ranges::any_of(cleanupRecords, [status](const auto& record)
                                                { return record.status == status; });
@@ -1714,10 +1712,9 @@ namespace javelin::app
                         "The source cleanup outcome is unknown and must be reconciled before this "
                         "move can continue.");
                     if (const auto error = requireTransition(
-                            repository.transitionItem(item.itemId,
-                                                      MailTransferItemPhase::RemovingSource,
-                                                      MailTransferItemPhase::SourceCleanupUnknown,
-                                                      message),
+                            repository.transitionItem(
+                                item.itemId, MailTransferItemPhase::RemovingSource,
+                                MailTransferItemPhase::SourceCleanupUnknown, message),
                             i18n("The transfer state changed while recording unknown source "
                                  "cleanup.")))
                         co_return *error;
@@ -1731,10 +1728,9 @@ namespace javelin::app
                         "The destination was created, but the source server rejected cleanup. The "
                         "source message was retained.");
                     if (const auto error = requireTransition(
-                            repository.transitionItem(item.itemId,
-                                                      MailTransferItemPhase::RemovingSource,
-                                                      MailTransferItemPhase::PartialSourceRetained,
-                                                      message),
+                            repository.transitionItem(
+                                item.itemId, MailTransferItemPhase::RemovingSource,
+                                MailTransferItemPhase::PartialSourceRetained, message),
                             i18n("The transfer state changed while recording rejected source "
                                  "cleanup.")))
                         co_return *error;
@@ -1778,9 +1774,9 @@ namespace javelin::app
                     }
                     const auto& authoritative =
                         std::get<javelin::jmap::AuthoritativeEmails>(authoritativeResult);
-                    const bool missing =
-                        authoritative.emails.empty() && authoritative.notFound.size() == 1 &&
-                        authoritative.notFound.front() == item.sourceEmailId;
+                    const bool missing = authoritative.emails.empty() &&
+                                         authoritative.notFound.size() == 1 &&
+                                         authoritative.notFound.front() == item.sourceEmailId;
                     if (missing)
                     {
                         if (const auto error = requireTransition(
@@ -1797,7 +1793,8 @@ namespace javelin::app
                                 repository.transitionItem(item.itemId,
                                                           MailTransferItemPhase::RemovingSource,
                                                           MailTransferItemPhase::Complete),
-                                i18n("The transfer state changed while completing source cleanup.")))
+                                i18n(
+                                    "The transfer state changed while completing source cleanup.")))
                             co_return *error;
                         if (const auto pinError = releaseSourcePin(repository, item.itemId))
                             co_return *pinError;
@@ -1811,7 +1808,7 @@ namespace javelin::app
                         co_return OperationError{
                             .code = OperationErrorCode::ProtocolViolation,
                             .message = i18n("The source Email/get response could not be accounted "
-                                           "for exactly."),
+                                            "for exactly."),
                         };
                     }
 
@@ -1821,7 +1818,7 @@ namespace javelin::app
                         co_return OperationError{
                             .code = OperationErrorCode::ProtocolViolation,
                             .message = i18n("The source server returned an Email with no mailbox "
-                                           "membership."),
+                                            "membership."),
                         };
                     }
                     std::vector<std::string> effectiveRemoveMailboxIds;
@@ -1832,13 +1829,13 @@ namespace javelin::app
                             effectiveRemoveMailboxIds.push_back(mailboxId);
                     }
                     std::ranges::sort(effectiveRemoveMailboxIds);
-                    effectiveRemoveMailboxIds.erase(
-                        std::unique(effectiveRemoveMailboxIds.begin(),
-                                    effectiveRemoveMailboxIds.end()),
-                        effectiveRemoveMailboxIds.end());
+                    effectiveRemoveMailboxIds.erase(std::unique(effectiveRemoveMailboxIds.begin(),
+                                                                effectiveRemoveMailboxIds.end()),
+                                                    effectiveRemoveMailboxIds.end());
                     const bool actualDestroy =
                         !effectiveRemoveMailboxIds.empty() &&
-                        std::ranges::all_of(currentEmail.mailboxIds, [&](const auto& mailboxId)
+                        std::ranges::all_of(currentEmail.mailboxIds,
+                                            [&](const auto& mailboxId)
                                             {
                                                 return std::ranges::contains(
                                                     effectiveRemoveMailboxIds, mailboxId);
@@ -1860,7 +1857,8 @@ namespace javelin::app
                                 repository.transitionItem(item.itemId,
                                                           MailTransferItemPhase::RemovingSource,
                                                           MailTransferItemPhase::Complete),
-                                i18n("The transfer state changed while completing source cleanup.")))
+                                i18n(
+                                    "The transfer state changed while completing source cleanup.")))
                             co_return *error;
                         if (const auto pinError = releaseSourcePin(repository, item.itemId))
                             co_return *pinError;
@@ -1909,32 +1907,28 @@ namespace javelin::app
                         item.rawContentHash = reference->object.contentHash;
                     }
 
-                    const auto activeResult =
-                        sourceMutationJournal.listForEmail(operation.sourceAccountId,
-                                                           item.sourceEmailId);
+                    const auto activeResult = sourceMutationJournal.listForEmail(
+                        operation.sourceAccountId, item.sourceEmailId);
                     if (const auto* error = std::get_if<DatabaseError>(&activeResult))
                         co_return javelin::jmap::operationError(*error);
                     const auto& activeRecords =
-                        std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(activeResult);
-                    const bool hasForeignActiveMutation =
-                        std::ranges::any_of(activeRecords, [&](const auto& record)
-                                            {
-                                                const bool active =
-                                                    record.status ==
-                                                        javelin::jmap::sync::MutationStatus::Pending ||
-                                                    record.status ==
-                                                        javelin::jmap::sync::MutationStatus::InFlight ||
-                                                    record.status ==
-                                                        javelin::jmap::sync::MutationStatus::Unknown;
-                                                return active &&
-                                                       record.operationGroupId !=
-                                                           std::optional<std::string>{
-                                                               operation.operationId};
-                                            });
+                        std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
+                            activeResult);
+                    const bool hasForeignActiveMutation = std::ranges::any_of(
+                        activeRecords,
+                        [&](const auto& record)
+                        {
+                            const bool active =
+                                record.status == javelin::jmap::sync::MutationStatus::Pending ||
+                                record.status == javelin::jmap::sync::MutationStatus::InFlight ||
+                                record.status == javelin::jmap::sync::MutationStatus::Unknown;
+                            return active && record.operationGroupId !=
+                                                 std::optional<std::string>{operation.operationId};
+                        });
                     if (hasForeignActiveMutation)
                     {
-                        co_return conflictError(i18n(
-                            "Another unresolved change is already pending for the source message."));
+                        co_return conflictError(i18n("Another unresolved change is already pending "
+                                                     "for the source message."));
                     }
 
                     auto queued = sourceMutationEngine.queue(
@@ -1942,9 +1936,8 @@ namespace javelin::app
                         {
                             .emailId = item.sourceEmailId,
                             .addMailboxIds = {},
-                            .removeMailboxIds = actualDestroy
-                                                    ? std::vector<std::string>{}
-                                                    : effectiveRemoveMailboxIds,
+                            .removeMailboxIds = actualDestroy ? std::vector<std::string>{}
+                                                              : effectiveRemoveMailboxIds,
                             .addKeywords = {},
                             .removeKeywords = {},
                             .operationGroupId = operation.operationId,
@@ -1963,17 +1956,13 @@ namespace javelin::app
                     cleanupRecords =
                         std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
                             std::move(cleanupRecordsResult));
-                    std::erase_if(cleanupRecords,
-                                  [&item](const auto& record)
+                    std::erase_if(cleanupRecords, [&item](const auto& record)
                                   { return record.patch.emailId != item.sourceEmailId; });
                 }
 
-                const bool pendingCleanup =
-                    std::ranges::any_of(cleanupRecords, [](const auto& record)
-                                        {
-                                            return record.status ==
-                                                   javelin::jmap::sync::MutationStatus::Pending;
-                                        });
+                const bool pendingCleanup = std::ranges::any_of(
+                    cleanupRecords, [](const auto& record)
+                    { return record.status == javelin::jmap::sync::MutationStatus::Pending; });
                 if (pendingCleanup)
                 {
                     auto submitted = co_await sourceMutationEngine.submitPending(
@@ -1988,8 +1977,7 @@ namespace javelin::app
                         auto afterError =
                             std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
                                 std::move(afterErrorResult));
-                        std::erase_if(afterError,
-                                      [&item](const auto& record)
+                        std::erase_if(afterError, [&item](const auto& record)
                                       { return record.patch.emailId != item.sourceEmailId; });
                         const auto afterHasStatus =
                             [&afterError](const javelin::jmap::sync::MutationStatus status)

@@ -119,8 +119,8 @@ TEST_CASE("mail vault stores one immutable object and projects effective mailbox
     CHECK(std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(loaded)->payload ==
           payload);
     const auto referenceResult = sources.findReference("account-1", "email-1");
-    REQUIRE(std::holds_alternative<
-            std::optional<javelin::jmap::cache::RawMessageSourceReference>>(referenceResult));
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::RawMessageSourceReference>>(
+        referenceResult));
     const auto& reference =
         std::get<std::optional<javelin::jmap::cache::RawMessageSourceReference>>(referenceResult);
     REQUIRE(reference.has_value());
@@ -135,8 +135,7 @@ TEST_CASE("mail vault stores one immutable object and projects effective mailbox
     const auto vault = javelin::jmap::cache::MailVault::forDatabase(context.connection);
     auto sourceLeaseResult = vault.acquireLease(reference->object);
     REQUIRE(std::holds_alternative<javelin::jmap::cache::MailVaultLease>(sourceLeaseResult));
-    auto sourceLease =
-        std::get<javelin::jmap::cache::MailVaultLease>(std::move(sourceLeaseResult));
+    auto sourceLease = std::get<javelin::jmap::cache::MailVaultLease>(std::move(sourceLeaseResult));
     const auto leasedPathResult = sourceLease.filePath();
     REQUIRE(std::holds_alternative<QString>(leasedPathResult));
     CHECK(QFileInfo::exists(std::get<QString>(leasedPathResult)));
@@ -344,9 +343,8 @@ TEST_CASE("mail vault eviction removes projections and respects active leases",
 
     lease = {};
     QSqlQuery pin{context.connection.database()};
-    pin.prepare(QStringLiteral(
-        "INSERT INTO mail_vault_pins(owner_kind,owner_id,content_hash) "
-        "VALUES('test','pin-1',:hash)"));
+    pin.prepare(QStringLiteral("INSERT INTO mail_vault_pins(owner_kind,owner_id,content_hash) "
+                               "VALUES('test','pin-1',:hash)"));
     pin.bindValue(QStringLiteral(":hash"), QString::fromStdString(object.contentHash));
     REQUIRE(pin.exec());
     const auto persistentlyBlocked = sources.evictUnretained(10);

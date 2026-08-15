@@ -124,14 +124,14 @@ TEST_CASE("accounts on one JMAP connection use Email copy topology",
     const auto source = account("source-local", "connection-a", "u1");
     const auto destination = account("destination-local", "connection-a", "u2");
     const auto message = email("email-1", {"inbox"}, {});
-    const auto plan = requirePlan(planMailTransfer(
-        {.sourceAccountId = source.accountId,
-         .sourceMailboxId = std::optional<std::string>{"inbox"},
-         .destinationAccountId = destination.accountId,
-         .destinationMailboxId = "archive",
-         .operation = MailTransferOperation::Copy},
-        {message.id}, {message}, {mailbox("inbox", "Inbox")}, {mailbox("archive", "Archive")},
-        source, destination));
+    const auto plan =
+        requirePlan(planMailTransfer({.sourceAccountId = source.accountId,
+                                      .sourceMailboxId = std::optional<std::string>{"inbox"},
+                                      .destinationAccountId = destination.accountId,
+                                      .destinationMailboxId = "archive",
+                                      .operation = MailTransferOperation::Copy},
+                                     {message.id}, {message}, {mailbox("inbox", "Inbox")},
+                                     {mailbox("archive", "Archive")}, source, destination));
     CHECK(plan.topology == MailTransferTopology::SameSessionCopy);
 }
 
@@ -165,26 +165,26 @@ TEST_CASE("thread-visible or search move removes all real source residencies and
         std::vector{mailbox("inbox", "Inbox"), mailbox("archive", "Archive"),
                     mailbox("important", "Important")};
 
-    const auto threadVisible = requirePlan(planMailTransfer(
-        {.sourceAccountId = source.accountId,
-         .sourceMailboxId = std::optional<std::string>{"inbox"},
-         .destinationAccountId = destination.accountId,
-         .destinationMailboxId = "archive",
-         .operation = MailTransferOperation::Move},
-        {message.id}, {message}, sourceMailboxes, {mailbox("archive", "Destination Archive")}, source,
-        destination));
+    const auto threadVisible = requirePlan(
+        planMailTransfer({.sourceAccountId = source.accountId,
+                          .sourceMailboxId = std::optional<std::string>{"inbox"},
+                          .destinationAccountId = destination.accountId,
+                          .destinationMailboxId = "archive",
+                          .operation = MailTransferOperation::Move},
+                         {message.id}, {message}, sourceMailboxes,
+                         {mailbox("archive", "Destination Archive")}, source, destination));
     REQUIRE(threadVisible.items.size() == 1);
     CHECK(threadVisible.items.front().sourceRemoveMailboxIds == message.mailboxIds);
     CHECK(threadVisible.items.front().sourceDestroy);
 
-    const auto searchMove = requirePlan(planMailTransfer(
-        {.sourceAccountId = source.accountId,
-         .sourceMailboxId = std::nullopt,
-         .destinationAccountId = destination.accountId,
-         .destinationMailboxId = "archive",
-         .operation = MailTransferOperation::Move},
-        {message.id}, {message}, sourceMailboxes, {mailbox("archive", "Destination Archive")}, source,
-        destination));
+    const auto searchMove = requirePlan(
+        planMailTransfer({.sourceAccountId = source.accountId,
+                          .sourceMailboxId = std::nullopt,
+                          .destinationAccountId = destination.accountId,
+                          .destinationMailboxId = "archive",
+                          .operation = MailTransferOperation::Move},
+                         {message.id}, {message}, sourceMailboxes,
+                         {mailbox("archive", "Destination Archive")}, source, destination));
     CHECK(searchMove.items.front().sourceRemoveMailboxIds == message.mailboxIds);
     CHECK(searchMove.items.front().sourceDestroy);
 }
@@ -208,13 +208,14 @@ TEST_CASE("mail transfer planning rejects missing write rights instead of weaken
 
     auto noRemove = mailbox("inbox", "Inbox");
     noRemove.myRights.mayRemoveItems = false;
-    CHECK(std::holds_alternative<QString>(planMailTransfer(
-        {.sourceAccountId = source.accountId,
-         .sourceMailboxId = std::optional<std::string>{"inbox"},
-         .destinationAccountId = destination.accountId,
-         .destinationMailboxId = "archive",
-         .operation = MailTransferOperation::Move},
-        {message.id}, {message}, {noRemove}, {mailbox("archive", "Archive")}, source, destination)));
+    CHECK(std::holds_alternative<QString>(
+        planMailTransfer({.sourceAccountId = source.accountId,
+                          .sourceMailboxId = std::optional<std::string>{"inbox"},
+                          .destinationAccountId = destination.accountId,
+                          .destinationMailboxId = "archive",
+                          .operation = MailTransferOperation::Move},
+                         {message.id}, {message}, {noRemove}, {mailbox("archive", "Archive")},
+                         source, destination)));
 
     auto noSeen = mailbox("archive", "Archive");
     noSeen.myRights.maySetSeen = false;
@@ -229,14 +230,14 @@ TEST_CASE("mail transfer planning rejects missing write rights instead of weaken
     auto noKeywords = mailbox("archive", "Archive");
     noKeywords.myRights.maySetKeywords = false;
     const auto flaggedOnly = email("email-2", {"inbox"}, {"$flagged"});
-    CHECK(std::holds_alternative<QString>(planMailTransfer(
-        {.sourceAccountId = source.accountId,
-         .sourceMailboxId = std::optional<std::string>{"inbox"},
-         .destinationAccountId = destination.accountId,
-         .destinationMailboxId = "archive",
-         .operation = MailTransferOperation::Copy},
-        {flaggedOnly.id}, {flaggedOnly}, {mailbox("inbox", "Inbox")}, {noKeywords}, source,
-        destination)));
+    CHECK(std::holds_alternative<QString>(
+        planMailTransfer({.sourceAccountId = source.accountId,
+                          .sourceMailboxId = std::optional<std::string>{"inbox"},
+                          .destinationAccountId = destination.accountId,
+                          .destinationMailboxId = "archive",
+                          .operation = MailTransferOperation::Copy},
+                         {flaggedOnly.id}, {flaggedOnly}, {mailbox("inbox", "Inbox")}, {noKeywords},
+                         source, destination)));
 }
 
 TEST_CASE("exact redo cleanup removes only requested source membership and preserves later filing",
@@ -273,14 +274,14 @@ TEST_CASE("exact redo cleanup becomes destroy only when requested memberships co
         .emailId = message.id,
         .removeMailboxIds = {"inbox"},
     }};
-    const auto plan = requirePlan(planMailTransfer(
-        {.sourceAccountId = source.accountId,
-         .sourceMailboxId = std::nullopt,
-         .destinationAccountId = destination.accountId,
-         .destinationMailboxId = "archive",
-         .operation = MailTransferOperation::Move},
-        {message.id}, {message}, {mailbox("inbox", "Inbox")}, {mailbox("archive", "Archive")},
-        source, destination, overrides));
+    const auto plan = requirePlan(
+        planMailTransfer({.sourceAccountId = source.accountId,
+                          .sourceMailboxId = std::nullopt,
+                          .destinationAccountId = destination.accountId,
+                          .destinationMailboxId = "archive",
+                          .operation = MailTransferOperation::Move},
+                         {message.id}, {message}, {mailbox("inbox", "Inbox")},
+                         {mailbox("archive", "Archive")}, source, destination, overrides));
     CHECK(plan.items.front().sourceDestroy);
 }
 
@@ -308,14 +309,14 @@ TEST_CASE("exact redo cleanup rejects missing membership and unrelated override"
         MailTransferSourceCleanupOverride{.emailId = message.id, .removeMailboxIds = {"inbox"}},
         MailTransferSourceCleanupOverride{.emailId = "other-email", .removeMailboxIds = {"inbox"}},
     };
-    CHECK(std::holds_alternative<QString>(planMailTransfer(
-        {.sourceAccountId = source.accountId,
-         .sourceMailboxId = std::nullopt,
-         .destinationAccountId = destination.accountId,
-         .destinationMailboxId = "archive",
-         .operation = MailTransferOperation::Move},
-        {message.id}, {message}, {mailbox("inbox", "Inbox")}, {mailbox("archive", "Archive")},
-        source, destination, unrelated)));
+    CHECK(std::holds_alternative<QString>(
+        planMailTransfer({.sourceAccountId = source.accountId,
+                          .sourceMailboxId = std::nullopt,
+                          .destinationAccountId = destination.accountId,
+                          .destinationMailboxId = "archive",
+                          .operation = MailTransferOperation::Move},
+                         {message.id}, {message}, {mailbox("inbox", "Inbox")},
+                         {mailbox("archive", "Archive")}, source, destination, unrelated)));
 }
 
 TEST_CASE("mail transfer planning deduplicates exact email ids and rejects same-account routing",
@@ -324,22 +325,22 @@ TEST_CASE("mail transfer planning deduplicates exact email ids and rejects same-
     const auto source = account("source-local", "connection-a", "u1");
     const auto destination = account("destination-local", "connection-b", "u1");
     const auto message = email("email-1", {"inbox"}, {});
-    const auto plan = requirePlan(planMailTransfer(
-        {.sourceAccountId = source.accountId,
-         .sourceMailboxId = std::optional<std::string>{"inbox"},
-         .destinationAccountId = destination.accountId,
-         .destinationMailboxId = "archive",
-         .operation = MailTransferOperation::Copy},
-        {message.id, message.id}, {message}, {mailbox("inbox", "Inbox")},
-        {mailbox("archive", "Archive")}, source, destination));
+    const auto plan = requirePlan(
+        planMailTransfer({.sourceAccountId = source.accountId,
+                          .sourceMailboxId = std::optional<std::string>{"inbox"},
+                          .destinationAccountId = destination.accountId,
+                          .destinationMailboxId = "archive",
+                          .operation = MailTransferOperation::Copy},
+                         {message.id, message.id}, {message}, {mailbox("inbox", "Inbox")},
+                         {mailbox("archive", "Archive")}, source, destination));
     CHECK(plan.items.size() == 1);
 
-    CHECK(std::holds_alternative<QString>(planMailTransfer(
-        {.sourceAccountId = source.accountId,
-         .sourceMailboxId = std::optional<std::string>{"inbox"},
-         .destinationAccountId = source.accountId,
-         .destinationMailboxId = "archive",
-         .operation = MailTransferOperation::Copy},
-        {message.id}, {message}, {mailbox("inbox", "Inbox")}, {mailbox("archive", "Archive")}, source,
-        source)));
+    CHECK(std::holds_alternative<QString>(
+        planMailTransfer({.sourceAccountId = source.accountId,
+                          .sourceMailboxId = std::optional<std::string>{"inbox"},
+                          .destinationAccountId = source.accountId,
+                          .destinationMailboxId = "archive",
+                          .operation = MailTransferOperation::Copy},
+                         {message.id}, {message}, {mailbox("inbox", "Inbox")},
+                         {mailbox("archive", "Archive")}, source, source)));
 }
