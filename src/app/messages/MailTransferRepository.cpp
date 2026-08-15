@@ -777,4 +777,45 @@ namespace javelin::app
         return query.numRowsAffected() == 1;
     }
 
+    std::variant<bool, DatabaseError> MailTransferRepository::pinSourceForCleanup(
+        const std::string_view itemId, const MailTransferItemPhase expected,
+        const std::string_view rawContentHash)
+    {
+        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Pin destructive mail transfer source"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction =
+            std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+
+        QSqlQuery update{m_connection.database()};
+        update.prepare(QStringLiteral(
+            "UPDATE mail_transfer_items SET raw_content_hash=:hash,updated_at=CURRENT_TIMESTAMP "
+            "WHERE item_id=:id AND phase=:expected"));
+        update.bindValue(QStringLiteral(":hash"),
+                         QString::fromStdString(std::string{rawContentHash}));
+        update.bindValue(QStringLiteral(":id"), QString::fromStdString(std::string{itemId}));
+        update.bindValue(QStringLiteral(":expected"), toString(expected));
+        if (!update.exec())
+            return queryError(QStringLiteral("Record destructive transfer source object"), update);
+        if (update.numRowsAffected() != 1)
+        {
+            transaction.rollback();
+            return false;
+        }
+
+        QSqlQuery pin{m_connection.database()};
+        pin.prepare(QStringLiteral(
+            "INSERT OR IGNORE INTO mail_vault_pins(owner_kind,owner_id,content_hash) "
+            "VALUES('mail_transfer_item',:owner_id,:content_hash)"));
+        pin.bindValue(QStringLiteral(":owner_id"), QString::fromStdString(std::string{itemId}));
+        pin.bindValue(QStringLiteral(":content_hash"),
+                      QString::fromStdString(std::string{rawContentHash}));
+        if (!pin.exec())
+            return queryError(QStringLiteral("Pin destructive transfer source object"), pin);
+        if (const auto error = transaction.commit())
+            return *error;
+        return true;
+    }
+
 } // namespace javelin::app

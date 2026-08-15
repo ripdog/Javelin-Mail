@@ -709,6 +709,300 @@ namespace
             return QCoro::waitFor(executor.advance(operationId));
         }
     };
+
+    class SameSessionMethodTransport final : public javelin::jmap::api::JmapMethodTransport
+    {
+      public:
+        bool copyDispatchedFailure = false;
+        std::vector<std::string> sourceAuthoritativeMailboxIds{"inbox"};
+        int copyCalls = 0;
+        int sourceGetCalls = 0;
+        int sourceSetCalls = 0;
+        std::string copyArguments;
+        std::string sourceSetArguments;
+
+        [[nodiscard]] QCoro::Task<JmapMethodTransportResult>
+        call(JmapMethodRequest request) override
+        {
+            REQUIRE(request.apiUrl == "https://shared.example.test/jmap");
+            REQUIRE_FALSE(request.envelope.methodCalls.empty());
+            const auto& method = request.envelope.methodCalls.front();
+            if (method.name == "Email/get")
+            {
+                REQUIRE(request.envelope.methodCalls.size() == 1);
+                if (request.dispatched)
+                    request.dispatched();
+                if (method.arguments.find("email-1") == std::string::npos)
+                {
+                    co_return ResponseEnvelope{
+                        .methodResponses = {{
+                            .name = "Email/get",
+                            .arguments =
+                                R"({"accountId":"u2","state":"destination-state-1","list":[],"notFound":[]})",
+                            .callId = method.callId,
+                        }},
+                        .createdIds = std::nullopt,
+                        .sessionState = "session-state",
+                    };
+                }
+
+                ++sourceGetCalls;
+                std::string mailboxJson{"{"};
+                for (const auto& mailboxId : sourceAuthoritativeMailboxIds)
+                {
+                    if (mailboxJson.size() > 1)
+                        mailboxJson += ',';
+                    mailboxJson += '"' + mailboxId + R"(":true)";
+                }
+                mailboxJson += '}';
+                const auto response =
+                    std::string{R"({"accountId":"u1","state":"source-state-current","list":[{"id":"email-1","mailboxIds":)"} +
+                    mailboxJson +
+                    R"(,"keywords":{"$seen":true,"$flagged":true},"subject":"Transfer"}],"notFound":[]})";
+                co_return ResponseEnvelope{
+                    .methodResponses = {{.name = "Email/get",
+                                         .arguments = response,
+                                         .callId = method.callId}},
+                    .createdIds = std::nullopt,
+                    .sessionState = "session-state",
+                };
+            }
+
+            if (method.name == "Email/copy")
+            {
+                REQUIRE(request.envelope.methodCalls.size() == 1);
+                ++copyCalls;
+                copyArguments = method.arguments;
+                if (request.dispatched)
+                    request.dispatched();
+                if (copyDispatchedFailure)
+                {
+                    co_return TransportError{
+                        .code = TransportErrorCode::NetworkFailure,
+                        .message = "connection lost after Email/copy dispatch",
+                        .httpStatus = std::nullopt,
+                        .networkError = std::nullopt,
+                        .retryAfter = std::nullopt,
+                    };
+                }
+                const auto arguments =
+                    QJsonDocument::fromJson(QByteArray::fromStdString(method.arguments)).object();
+                const auto create = arguments.value(QStringLiteral("create")).toObject();
+                REQUIRE(create.size() == 1);
+                const auto creationId = create.begin().key();
+                const auto response = QStringLiteral(
+                                          R"({"fromAccountId":"u1","accountId":"u2","oldState":"destination-state-1","newState":"destination-state-2","created":{"%1":{"id":"destination-email","blobId":"destination-blob","threadId":"destination-thread","size":41}},"notCreated":{}})")
+                                          .arg(creationId)
+                                          .toStdString();
+                co_return ResponseEnvelope{
+                    .methodResponses = {{.name = "Email/copy",
+                                         .arguments = response,
+                                         .callId = method.callId}},
+                    .createdIds = std::nullopt,
+                    .sessionState = "session-state",
+                };
+            }
+
+            REQUIRE(method.name == "Email/set");
+            ++sourceSetCalls;
+            sourceSetArguments = method.arguments;
+            if (request.dispatched)
+                request.dispatched();
+            const bool destroys =
+                method.arguments.find("\"destroy\":[\"email-1\"]") != std::string::npos;
+            const std::string response =
+                destroys
+                    ? R"({"accountId":"u1","oldState":"source-state-current","newState":"source-state-next","created":{},"updated":{},"destroyed":["email-1"],"notCreated":{},"notUpdated":{},"notDestroyed":{}})"
+                    : R"({"accountId":"u1","oldState":"source-state-current","newState":"source-state-next","created":{},"updated":{"email-1":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})";
+            std::vector<javelin::jmap::api::MethodInvocation> responses{{
+                .name = "Email/set",
+                .arguments = response,
+                .callId = method.callId,
+            }};
+            for (std::size_t index = 1; index < request.envelope.methodCalls.size(); ++index)
+            {
+                const auto& extra = request.envelope.methodCalls[index];
+                REQUIRE(extra.name == "Mailbox/get");
+                responses.push_back({
+                    .name = "error",
+                    .arguments = R"({"type":"serverUnavailable"})",
+                    .callId = extra.callId,
+                });
+            }
+            co_return ResponseEnvelope{
+                .methodResponses = std::move(responses),
+                .createdIds = std::nullopt,
+                .sessionState = "session-state",
+            };
+        }
+    };
+
+    struct SameSessionFixture
+    {
+        QTemporaryDir directory;
+        javelin::jmap::cache::DatabaseConnection database;
+        std::string sourceAccountId;
+        std::string destinationAccountId;
+        ConnectionProvider connections;
+        RecordingResourceTransport resourceTransport;
+        SameSessionMethodTransport methodTransport;
+        std::unique_ptr<javelin::jmap::MessageContentClient> contentClient;
+        QByteArray raw = QByteArrayLiteral("From: sender@example.test\r\nSubject: Shared\r\n\r\nBody\r\n");
+
+        SameSessionFixture()
+            : database(openDatabase([this]
+                                    {
+                                        REQUIRE(directory.isValid());
+                                        return directory.filePath(QStringLiteral("shared.sqlite3"));
+                                    }()))
+        {
+            auto shared = session("https://shared.example.test/jmap",
+                                  "https://shared.example.test/upload/{accountId}");
+            shared.accounts.emplace(
+                "u2", javelin::jmap::api::Account{
+                          .id = "u2",
+                          .name = "Destination",
+                          .isPersonal = true,
+                          .isReadOnly = false,
+                          .accountCapabilities =
+                              {
+                                  .mail = true,
+                                  .mailDetails = javelin::jmap::api::MailAccountCapability{
+                                      .mayCreateTopLevelMailbox = true},
+                                  .submission = std::nullopt,
+                                  .contacts = std::nullopt,
+                                  .calendars = std::nullopt,
+                                  .sieve = false,
+                              },
+                      });
+            javelin::jmap::cache::SessionRepository sessions{database};
+            const auto stored = sessions.replaceForConnection("connection-shared", "u1", shared);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&stored))
+                FAIL(error->message.toStdString());
+            const auto& mapping =
+                std::get<javelin::jmap::cache::StoredSessionAccounts>(stored).accountIdsByRemoteId;
+            sourceAccountId = mapping.at("u1");
+            destinationAccountId = mapping.at("u2");
+            REQUIRE(sourceAccountId != destinationAccountId);
+
+            const AccountConnectionSettings settings{
+                .connectionId = "connection-shared",
+                .revision = 1,
+                .displayName = "Shared",
+                .sessionUrl = "https://shared.example.test/session",
+                .loginEmail = "shared@example.test",
+                .apiKey = "shared-token",
+                .refreshToken = {},
+                .tokenEndpoint = {},
+                .oauthClientId = {},
+                .oauthIssuer = {},
+                .oauthResource = {},
+                .oauthScope = {},
+                .revocationEndpoint = {},
+                .registrationClientUri = {},
+                .registrationAccessToken = {},
+            };
+            connections.settings.emplace(sourceAccountId, settings);
+            connections.settings.emplace(destinationAccountId, settings);
+
+            javelin::jmap::cache::MailboxRepository mailboxes{database};
+            REQUIRE_FALSE(
+                mailboxes.replaceAll(sourceAccountId, {mailbox("inbox", "Inbox")}).has_value());
+            REQUIRE_FALSE(mailboxes
+                              .replaceAll(destinationAccountId, {mailbox("archive", "Archive")})
+                              .has_value());
+            javelin::jmap::cache::EmailRepository emails{database};
+            REQUIRE_FALSE(emails.upsertMany(sourceAccountId, {email()}).has_value());
+            javelin::jmap::cache::SyncStateRepository states{database};
+            REQUIRE_FALSE(states
+                              .upsert({.accountId = sourceAccountId,
+                                       .objectType = "Email",
+                                       .queryKey = {}},
+                                      "source-email-state")
+                              .has_value());
+            contentClient = std::make_unique<javelin::jmap::MessageContentClient>(database,
+                                                                                  resourceTransport);
+        }
+
+        void seedRawSource()
+        {
+            javelin::jmap::cache::RawMessageSourceRepository sources{database};
+            REQUIRE_FALSE(sources
+                              .upsert(sourceAccountId,
+                                      {.emailId = "email-1", .blobId = "blob-1", .payload = raw})
+                              .has_value());
+        }
+
+        void setSourceMailboxIds(std::vector<std::string> mailboxIds)
+        {
+            javelin::jmap::cache::EmailRepository emails{database};
+            const auto found = emails.find(sourceAccountId, "email-1");
+            REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(found));
+            auto current = std::get<std::optional<javelin::jmap::domain::Email>>(found);
+            REQUIRE(current.has_value());
+            current->mailboxIds = mailboxIds;
+            REQUIRE_FALSE(emails.upsertMany(sourceAccountId, {*current}).has_value());
+            std::vector<javelin::jmap::domain::Mailbox> sourceMailboxes;
+            for (const auto& mailboxId : mailboxIds)
+                sourceMailboxes.push_back(mailbox(mailboxId, mailboxId));
+            javelin::jmap::cache::MailboxRepository mailboxes{database};
+            REQUIRE_FALSE(mailboxes.replaceAll(sourceAccountId, sourceMailboxes).has_value());
+            methodTransport.sourceAuthoritativeMailboxIds = std::move(mailboxIds);
+        }
+
+        [[nodiscard]] std::string prepare(const MailTransferOperation operation)
+        {
+            MailTransferApplicationService service{database};
+            const auto prepared = QCoro::waitFor(service.prepare({
+                .intent = {.sourceAccountId = sourceAccountId,
+                           .sourceMailboxId = std::optional<std::string>{"inbox"},
+                           .destinationAccountId = destinationAccountId,
+                           .destinationMailboxId = "archive",
+                           .operation = operation},
+                .selection = {SelectedEmail{.emailId = "email-1"}},
+            }));
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
+                FAIL(error->message.toStdString());
+            CHECK(std::get<PreparedMailTransfer>(prepared).topology ==
+                  MailTransferTopology::SameSessionCopy);
+            return std::get<PreparedMailTransfer>(prepared).operationId;
+        }
+
+        [[nodiscard]] MailTransferExecutionResult execute(const std::string& operationId)
+        {
+            MailTransferExecutor executor{database, resourceTransport, methodTransport,
+                                          *contentClient, connections};
+            return QCoro::waitFor(executor.advance(operationId));
+        }
+
+        [[nodiscard]] MailTransferItemRecord item(const std::string& operationId)
+        {
+            MailTransferRepository repository{database};
+            const auto result = repository.listItems(operationId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                FAIL(error->message.toStdString());
+            const auto& items = std::get<std::vector<MailTransferItemRecord>>(result);
+            REQUIRE(items.size() == 1);
+            return items.front();
+        }
+
+        [[nodiscard]] std::optional<std::vector<std::string>> sourceMailboxIds()
+        {
+            javelin::jmap::cache::EmailRepository emails{database};
+            const auto result = emails.find(sourceAccountId, "email-1");
+            REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(result));
+            const auto& current = std::get<std::optional<javelin::jmap::domain::Email>>(result);
+            return current.has_value() ? std::optional{current->mailboxIds} : std::nullopt;
+        }
+
+        [[nodiscard]] int pinCount()
+        {
+            QSqlQuery query{database.database()};
+            REQUIRE(query.exec(QStringLiteral("SELECT COUNT(*) FROM mail_vault_pins")));
+            REQUIRE(query.next());
+            return query.value(0).toInt();
+        }
+    };
 } // namespace
 
 TEST_CASE("cross-server copy streams exact raw MIME and completes only after import confirmation",
@@ -1078,4 +1372,136 @@ TEST_CASE("lost duplicate mailbox update response keeps durable reconciliation e
     CHECK(fixture.methodTransport.setCalls == setCount);
     CHECK(fixture.methodTransport.importCalls == importCount);
     CHECK(fixture.sourceStillExists());
+}
+
+TEST_CASE("same-session copy uses Email copy without MIME download or upload",
+          "[app][mail-transfer][executor][same-session]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    SameSessionFixture fixture;
+    const auto operationId = fixture.prepare(MailTransferOperation::Copy);
+
+    const auto result = fixture.execute(operationId);
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        FAIL(error->message.toStdString());
+    CHECK(std::get<MailTransferExecutionSummary>(result).status == MailTransferStatus::Complete);
+    CHECK(fixture.methodTransport.copyCalls == 1);
+    CHECK(fixture.methodTransport.sourceGetCalls == 0);
+    CHECK(fixture.methodTransport.sourceSetCalls == 0);
+    CHECK(fixture.resourceTransport.sendCalls == 0);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == 0);
+
+    const auto arguments = QJsonDocument::fromJson(
+                               QByteArray::fromStdString(fixture.methodTransport.copyArguments))
+                               .object();
+    CHECK(arguments.value(QStringLiteral("fromAccountId")).toString() == QStringLiteral("u1"));
+    CHECK(arguments.value(QStringLiteral("accountId")).toString() == QStringLiteral("u2"));
+    CHECK_FALSE(arguments.value(QStringLiteral("onSuccessDestroyOriginal")).toBool(true));
+    const auto create = arguments.value(QStringLiteral("create")).toObject();
+    REQUIRE(create.size() == 1);
+    const auto copy = create.begin().value().toObject();
+    CHECK(copy.value(QStringLiteral("id")).toString() == QStringLiteral("email-1"));
+    CHECK(copy.value(QStringLiteral("mailboxIds"))
+              .toObject()
+              .value(QStringLiteral("archive"))
+              .toBool());
+    CHECK(copy.value(QStringLiteral("keywords"))
+              .toObject()
+              .value(QStringLiteral("$seen"))
+              .toBool());
+
+    const auto item = fixture.item(operationId);
+    CHECK(item.phase == MailTransferItemPhase::Complete);
+    CHECK_FALSE(item.rawContentHash.has_value());
+    CHECK(fixture.pinCount() == 0);
+    REQUIRE(fixture.sourceMailboxIds().has_value());
+    CHECK(*fixture.sourceMailboxIds() == std::vector<std::string>{"inbox"});
+}
+
+TEST_CASE("same-session mailbox-only move stays MIME-free and removes exact source membership",
+          "[app][mail-transfer][executor][same-session][move]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    SameSessionFixture fixture;
+    fixture.setSourceMailboxIds({"inbox", "important"});
+    const auto operationId = fixture.prepare(MailTransferOperation::Move);
+
+    const auto result = fixture.execute(operationId);
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        FAIL(error->message.toStdString());
+    CHECK(std::get<MailTransferExecutionSummary>(result).status == MailTransferStatus::Complete);
+    CHECK(fixture.methodTransport.copyCalls == 1);
+    CHECK(fixture.methodTransport.sourceGetCalls == 1);
+    CHECK(fixture.methodTransport.sourceSetCalls == 1);
+    CHECK(fixture.resourceTransport.sendCalls == 0);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == 0);
+    CHECK(fixture.methodTransport.sourceSetArguments.find("mailboxIds/inbox") !=
+          std::string::npos);
+    CHECK(fixture.methodTransport.sourceSetArguments.find("\"destroy\"") == std::string::npos);
+    const auto item = fixture.item(operationId);
+    CHECK(item.phase == MailTransferItemPhase::Complete);
+    CHECK_FALSE(item.sourceDestroy);
+    CHECK_FALSE(item.rawContentHash.has_value());
+    CHECK(fixture.pinCount() == 0);
+    REQUIRE(fixture.sourceMailboxIds().has_value());
+    CHECK(*fixture.sourceMailboxIds() == std::vector<std::string>{"important"});
+}
+
+TEST_CASE("same-session destructive move retains raw MIME only immediately before source destroy",
+          "[app][mail-transfer][executor][same-session][move][undo-retention]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    SameSessionFixture fixture;
+    fixture.seedRawSource();
+    const auto operationId = fixture.prepare(MailTransferOperation::Move);
+    CHECK_FALSE(fixture.item(operationId).rawContentHash.has_value());
+
+    const auto result = fixture.execute(operationId);
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        FAIL(error->message.toStdString());
+    CHECK(std::get<MailTransferExecutionSummary>(result).status == MailTransferStatus::Complete);
+    CHECK(fixture.methodTransport.copyCalls == 1);
+    CHECK(fixture.methodTransport.sourceSetCalls == 1);
+    CHECK(fixture.resourceTransport.sendCalls == 0);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == 0);
+    CHECK(fixture.methodTransport.sourceSetArguments.find("\"destroy\":[\"email-1\"]") !=
+          std::string::npos);
+    const auto item = fixture.item(operationId);
+    CHECK(item.phase == MailTransferItemPhase::Complete);
+    CHECK(item.sourceDestroy);
+    CHECK(item.rawContentHash.has_value());
+    CHECK(fixture.pinCount() == 1);
+    CHECK_FALSE(fixture.sourceMailboxIds().has_value());
+}
+
+TEST_CASE("lost Email copy response blocks same-session transfer without source cleanup or retry",
+          "[app][mail-transfer][executor][same-session][ambiguity]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    SameSessionFixture fixture;
+    fixture.methodTransport.copyDispatchedFailure = true;
+    const auto operationId = fixture.prepare(MailTransferOperation::Move);
+
+    const auto first = fixture.execute(operationId);
+    REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(first));
+    CHECK(std::get<MailTransferExecutionSummary>(first).status ==
+          MailTransferStatus::BlockedUnknown);
+    CHECK(fixture.item(operationId).phase == MailTransferItemPhase::DestinationUnknown);
+    CHECK(fixture.methodTransport.copyCalls == 1);
+    CHECK(fixture.methodTransport.sourceGetCalls == 0);
+    CHECK(fixture.methodTransport.sourceSetCalls == 0);
+    CHECK(fixture.resourceTransport.sendCalls == 0);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == 0);
+
+    fixture.methodTransport.copyDispatchedFailure = false;
+    const auto second = fixture.execute(operationId);
+    REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(second));
+    CHECK(std::get<MailTransferExecutionSummary>(second).status ==
+          MailTransferStatus::BlockedUnknown);
+    CHECK(fixture.methodTransport.copyCalls == 1);
+    CHECK(fixture.methodTransport.sourceSetCalls == 0);
 }
