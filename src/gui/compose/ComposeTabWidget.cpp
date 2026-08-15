@@ -320,6 +320,37 @@ namespace javelin::gui::compose
         return subject.isEmpty() ? defaultTitleForMode(m_snapshot.mode) : subject;
     }
 
+    QString ComposeTabWidget::confirmationDetails() const
+    {
+        QStringList details;
+        const auto subject = m_subjectEdit->text().trimmed();
+        details.push_back(i18n("Subject: %1", subject.isEmpty() ? i18n("(no subject)") : subject));
+
+        const auto appendRecipients = [&details](const QString& label, const QString& recipients)
+        {
+            if (!recipients.trimmed().isEmpty())
+                details.push_back(QStringLiteral("%1: %2").arg(label, recipients.trimmed()));
+        };
+        appendRecipients(i18n("To"), recipientText(RecipientType::To));
+        appendRecipients(i18n("Cc"), recipientText(RecipientType::Cc));
+        appendRecipients(i18n("Bcc"), recipientText(RecipientType::Bcc));
+        if (details.size() == 1)
+            details.push_back(i18n("Recipients: (none)"));
+
+        const auto account =
+            m_settings.accountForCachedId(QString::fromStdString(m_snapshot.accountId));
+        QString accountLabel = account.displayName;
+        if (accountLabel.isEmpty())
+            accountLabel = account.loginEmail;
+        else if (!account.loginEmail.isEmpty() &&
+                 accountLabel.compare(account.loginEmail, Qt::CaseInsensitive) != 0)
+            accountLabel = QStringLiteral("%1 — %2").arg(accountLabel, account.loginEmail);
+        if (!accountLabel.isEmpty())
+            details.push_back(i18n("Account: %1", accountLabel));
+
+        return details.join(QLatin1Char('\n'));
+    }
+
     std::string ComposeTabWidget::composeSessionId() const
     {
         return m_snapshot.composeSessionId;
@@ -837,6 +868,7 @@ namespace javelin::gui::compose
                     i18n("This message contains formatting. How should it be converted to plain "
                          "text?"),
                     QMessageBox::NoButton, this};
+                warning.setInformativeText(confirmationDetails());
                 QAbstractButton* loseFormatting = warning.addButton(
                     i18nc("@action:button", "Lose Formatting"), QMessageBox::DestructiveRole);
                 QPushButton* addMarkup = warning.addButton(
@@ -1351,6 +1383,7 @@ namespace javelin::gui::compose
             QMessageBox messageBox{this};
             messageBox.setWindowTitle(i18n("Send Without Subject?"));
             messageBox.setText(i18n("This message has no subject. Send it anyway?"));
+            messageBox.setInformativeText(confirmationDetails());
             QAbstractButton* sendAnywayButton =
                 messageBox.addButton(i18n("Send Anyway"), QMessageBox::AcceptRole);
             messageBox.addButton(QMessageBox::Cancel);

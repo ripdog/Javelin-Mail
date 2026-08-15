@@ -101,7 +101,8 @@ namespace javelin::gui::shell
                        javelin::app::MessageSelection selection, bool junk);
         void submitQueuedMutations(std::string accountId,
                                    std::optional<std::string> operationGroupId);
-        [[nodiscard]] bool confirmPermanentDelete(std::size_t selectionItemCount) const;
+        [[nodiscard]] bool
+        confirmPermanentDelete(const javelin::app::MessageSelection& selection) const;
 
         javelin::app::MailCommandPort& m_mailCommandPort;
         javelin::jmap::cache::MailboxReader& m_mailboxReader;

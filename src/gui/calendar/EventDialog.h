@@ -110,5 +110,6 @@ namespace javelin::gui::calendar
         bool m_recurrenceEdited = false;
         bool m_attendeesEdited = false;
         bool m_alertsEdited = false;
+        bool m_occurrenceMode = false;
     };
 } // namespace javelin::gui::calendar

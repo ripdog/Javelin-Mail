@@ -2,6 +2,7 @@
 
 #include "gui/mailboxes/MailboxPresentation.h"
 #include "gui/messages/MessageActionSelection.h"
+#include "gui/messages/MessageConfirmationPresentation.h"
 #include "gui/messages/MessageListModel.h"
 #include "jmap/cache/MailboxReadRepository.h"
 
@@ -18,6 +19,7 @@
 #include <QMessageBox>
 #include <QPalette>
 #include <QPersistentModelIndex>
+#include <QPushButton>
 
 #include <ranges>
 #include <utility>
@@ -126,7 +128,7 @@ namespace javelin::gui::shell
             Q_EMIT statusMessage(i18n("Select a message to delete."), 3000);
             return;
         }
-        if (!confirmPermanentDelete(selection.size()))
+        if (!confirmPermanentDelete(selection))
         {
             return;
         }
@@ -720,18 +722,24 @@ namespace javelin::gui::shell
                        });
     }
 
-    bool
-    MessageCommandController::confirmPermanentDelete(const std::size_t selectionItemCount) const
+    bool MessageCommandController::confirmPermanentDelete(
+        const javelin::app::MessageSelection& selection) const
     {
-        const auto prompt =
-            selectionItemCount == 1
-                ? i18n("Permanently delete the selected message? This cannot be undone.")
-                : i18np("Permanently delete %1 selected message? This cannot be undone.",
-                        "Permanently delete %1 selected messages? This cannot be undone.",
-                        selectionItemCount);
-        return QMessageBox::warning(m_dialogParent.data(), i18n("Delete Permanently"), prompt,
-                                    QMessageBox::Yes | QMessageBox::Cancel,
-                                    QMessageBox::Cancel) == QMessageBox::Yes;
+        const auto* selectionModel = m_messageView.selectionModel();
+        const auto selectedRows =
+            selectionModel == nullptr ? QModelIndexList{} : selectionModel->selectedRows();
+        const auto presentation = javelin::gui::messages::permanentDeleteConfirmation(
+            selection, selectedRows, m_messageView.currentIndex());
+
+        QMessageBox confirmation{QMessageBox::Warning, i18n("Delete Permanently"),
+                                 presentation.prompt, QMessageBox::NoButton, m_dialogParent.data()};
+        confirmation.setInformativeText(presentation.details);
+        auto* deleteButton =
+            confirmation.addButton(i18n("Delete Permanently"), QMessageBox::DestructiveRole);
+        confirmation.addButton(QMessageBox::Cancel);
+        confirmation.setDefaultButton(QMessageBox::Cancel);
+        confirmation.exec();
+        return confirmation.clickedButton() == deleteButton;
     }
 
 } // namespace javelin::gui::shell

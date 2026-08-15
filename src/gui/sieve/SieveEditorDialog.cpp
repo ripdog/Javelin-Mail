@@ -152,9 +152,11 @@ namespace javelin::gui::sieve
             return;
         if (m_dirty)
         {
-            const auto answer =
-                QMessageBox::question(this, i18n("Discard Changes?"),
-                                      i18n("This script has unsaved changes. Discard them?"));
+            const auto& script = m_scripts[static_cast<std::size_t>(m_currentRow)];
+            const auto answer = QMessageBox::question(
+                this, i18n("Discard Changes?"),
+                i18n("Discard unsaved changes to this script?\n\nScript: “%1”",
+                     QString::fromStdString(script.name)));
             if (answer != QMessageBox::Yes)
             {
                 const QSignalBlocker blocker{m_scriptList};
@@ -207,11 +209,18 @@ namespace javelin::gui::sieve
 
     void SieveEditorDialog::newScript()
     {
-        if (m_dirty &&
-            QMessageBox::question(this, i18n("Discard Changes?"),
-                                  i18n("The current script has unsaved changes. Discard them?")) !=
+        if (m_dirty)
+        {
+            const QString scriptName =
+                m_currentRow >= 0 && m_currentRow < static_cast<int>(m_scripts.size())
+                    ? QString::fromStdString(m_scripts[static_cast<std::size_t>(m_currentRow)].name)
+                    : i18n("Untitled script");
+            if (QMessageBox::question(
+                    this, i18n("Discard Changes?"),
+                    i18n("Discard unsaved changes to this script?\n\nScript: “%1”", scriptName)) !=
                 QMessageBox::Yes)
-            return;
+                return;
+        }
         bool accepted = false;
         const auto name =
             QInputDialog::getText(this, i18n("New Sieve Script"), i18n("Script name:"),
@@ -231,9 +240,10 @@ namespace javelin::gui::sieve
         if (m_currentRow < 0)
             return;
         const auto script = m_scripts[static_cast<std::size_t>(m_currentRow)];
-        if (QMessageBox::question(this, i18n("Delete Sieve Script?"),
-                                  i18n("Delete “%1”? This cannot be undone.",
-                                       QString::fromStdString(script.name))) != QMessageBox::Yes)
+        if (QMessageBox::question(
+                this, i18n("Delete Sieve Script?"),
+                i18n("Delete this Sieve script? This cannot be undone.\n\nScript: “%1”",
+                     QString::fromStdString(script.name))) != QMessageBox::Yes)
             return;
         if (script.id.empty())
         {

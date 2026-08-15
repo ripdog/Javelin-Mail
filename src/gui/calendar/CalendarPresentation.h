@@ -6,6 +6,7 @@
 #include "protocol/SettingsContract.h"
 
 #include <QColor>
+#include <QString>
 
 #include <optional>
 #include <span>
@@ -38,4 +39,7 @@ namespace javelin::gui::calendar
         const std::vector<javelin::jmap::calendar::Calendar>& calendars,
         const std::optional<javelin::jmap::cache::CalendarWindow>& window,
         const QColor& fallbackColor);
+
+    [[nodiscard]] QString
+    eventConfirmationDetails(const javelin::jmap::calendar::CalendarEvent& event);
 } // namespace javelin::gui::calendar

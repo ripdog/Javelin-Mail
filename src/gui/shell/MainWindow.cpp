@@ -2642,6 +2642,7 @@ namespace javelin::gui::shell
             messageBox.setWindowTitle(i18n("Close Draft"));
             messageBox.setText(
                 i18n("This message is already saved in Drafts. Close the tab and keep it there?"));
+            messageBox.setInformativeText(m_composeTabController->confirmationDetails(index));
             QAbstractButton* keepDraftButton =
                 messageBox.addButton(i18n("Keep Draft"), QMessageBox::AcceptRole);
             messageBox.addButton(QMessageBox::Cancel);
@@ -2655,6 +2656,7 @@ namespace javelin::gui::shell
             QMessageBox messageBox{this};
             messageBox.setWindowTitle(i18n("Save Changes?"));
             messageBox.setText(i18n("Save changes to this draft before closing?"));
+            messageBox.setInformativeText(m_composeTabController->confirmationDetails(index));
             QAbstractButton* saveButton =
                 messageBox.addButton(i18nc("@action:button", "Save"), QMessageBox::AcceptRole);
             QAbstractButton* discardButton = messageBox.addButton(

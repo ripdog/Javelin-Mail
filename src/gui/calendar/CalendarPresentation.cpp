@@ -1,6 +1,9 @@
 #include "gui/calendar/CalendarPresentation.h"
 
+#include <KLocalizedString>
+
 #include <QDateTime>
+#include <QLocale>
 
 #include <ranges>
 #include <unordered_map>
@@ -34,6 +37,24 @@ namespace javelin::gui::calendar
                 return index;
         }
         return serverDefaultIndex.has_value() ? serverDefaultIndex : firstWritableIndex;
+    }
+
+    QString eventConfirmationDetails(const javelin::jmap::calendar::CalendarEvent& event)
+    {
+        const QString title =
+            event.title.empty() ? i18n("Untitled event") : QString::fromStdString(event.title);
+        const auto start =
+            QDateTime::fromString(QString::fromStdString(event.start.value), Qt::ISODate);
+        QString when = QString::fromStdString(event.start.value);
+        if (start.isValid())
+        {
+            when = event.showWithoutTime
+                       ? QLocale{}.toString(start.date(), QLocale::LongFormat)
+                       : i18nc("calendar confirmation date and time", "%1 at %2",
+                               QLocale{}.toString(start.date(), QLocale::LongFormat),
+                               QLocale{}.toString(start.time(), QLocale::ShortFormat));
+        }
+        return i18n("Event: %1\nWhen: %2", title, when);
     }
 
     CalendarAccountPresentation buildCalendarAccountPresentation(

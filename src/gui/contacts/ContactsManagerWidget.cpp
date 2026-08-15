@@ -2375,10 +2375,21 @@ namespace javelin::gui::contacts
         if (m_busy)
             return;
         const auto* group = currentGroup();
-        if (group == nullptr || !groupIsWritable(*group) ||
-            QMessageBox::question(this, i18n("Delete Contact Group"),
-                                  i18n("Delete %1?", QString::fromStdString(group->displayName))) !=
-                QMessageBox::Yes)
+        if (group == nullptr || !groupIsWritable(*group))
+            return;
+
+        const QString groupName = group->displayName.empty()
+                                      ? i18n("(unnamed group)")
+                                      : QString::fromStdString(group->displayName);
+        QStringList details{i18n("Group: %1", groupName)};
+        const auto parsed = javelin::jmap::contacts::contactEditorData(group->document);
+        if (const auto* editorData =
+                std::get_if<javelin::jmap::contacts::ContactEditorData>(&parsed))
+            details.push_back(i18n("Members: %1", editorData->members.size()));
+        if (QMessageBox::question(
+                this, i18n("Delete Contact Group"),
+                i18n("Delete this contact group? The contacts in it will not be deleted.\n\n%1",
+                     details.join(QLatin1Char('\n')))) != QMessageBox::Yes)
             return;
 
         m_groupController->deleteGroup(group->accountId, group->id);
@@ -2767,11 +2778,30 @@ namespace javelin::gui::contacts
             return;
         const auto accountId = currentAccountId();
         const auto* contact = currentContact();
-        if (!accountId.has_value() || contact == nullptr || !canDeleteContact() ||
-            QMessageBox::question(
-                this, i18n("Delete Contact"),
-                i18n("Delete %1?", QString::fromStdString(contact->displayName))) !=
-                QMessageBox::Yes)
+        if (!accountId.has_value() || contact == nullptr || !canDeleteContact())
+            return;
+        const QString email = contact->emails.empty()
+                                  ? QString{}
+                                  : QString::fromStdString(contact->emails.front().address);
+        QString contactName = QString::fromStdString(contact->displayName).trimmed();
+        if (contactName.isEmpty())
+            contactName = email.isEmpty() ? i18n("(unnamed contact)") : email;
+        QStringList details{i18n("Contact: %1", contactName)};
+        if (!email.isEmpty() && email != contactName)
+            details.push_back(i18n("Email: %1", email));
+        QStringList addressBooks;
+        for (const auto& addressBookId : contact->addressBookIds)
+        {
+            const auto book = std::ranges::find(m_addressBooks, addressBookId,
+                                                &javelin::jmap::api::AddressBook::id);
+            if (book != m_addressBooks.end())
+                addressBooks.push_back(QString::fromStdString(book->name));
+        }
+        if (!addressBooks.isEmpty())
+            details.push_back(i18n("Address books: %1", addressBooks.join(QStringLiteral(", "))));
+        if (QMessageBox::question(this, i18n("Delete Contact"),
+                                  i18n("Delete this contact?\n\n%1",
+                                       details.join(QLatin1Char('\n')))) != QMessageBox::Yes)
             return;
         javelin::app::DeleteContactsCommand command{
             .accountId = *accountId,
@@ -3089,11 +3119,25 @@ namespace javelin::gui::contacts
                 return;
             }
         }
+        QStringList mergeDetails;
+        for (const auto* candidate : candidates)
+        {
+            QString label = QString::fromStdString(candidate->displayName).trimmed();
+            const QString email = candidate->emails.empty()
+                                      ? QString{}
+                                      : QString::fromStdString(candidate->emails.front().address);
+            if (label.isEmpty())
+                label = email.isEmpty() ? i18n("(unnamed contact)") : email;
+            else if (!email.isEmpty())
+                label = i18nc("contact confirmation name and address", "%1 <%2>", label, email);
+            mergeDetails.push_back(label);
+        }
         if (QMessageBox::question(
                 this, i18n("Merge Duplicate Contacts"),
                 i18n("Merge %1 contacts into %2? This keeps all mapped fields and removes the "
-                     "redundant contacts.",
-                     candidates.size(), primaryName)) != QMessageBox::Yes)
+                     "redundant contacts.\n\nContacts:\n%3",
+                     candidates.size(), primaryName, mergeDetails.join(QLatin1Char('\n')))) !=
+            QMessageBox::Yes)
             return;
         const auto* primary = candidates[static_cast<std::size_t>(primaryIndex)];
         javelin::app::MergeContactsCommand command{
@@ -3207,8 +3251,9 @@ namespace javelin::gui::contacts
             return;
         const auto answer = QMessageBox::question(
             this, i18n("Delete Address Book"),
-            i18n("Delete %1 and remove its contacts that belong to no other address book?",
-                 QString::fromStdString(book.name)));
+            i18n("Delete this address book and remove contacts that belong to no other address "
+                 "book?\n\nAddress book: %1\nAccount: %2",
+                 QString::fromStdString(book.name), accountLabel(m_settings, *account)));
         if (answer != QMessageBox::Yes)
             return;
         applyAddressBookMutation(

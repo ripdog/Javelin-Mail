@@ -278,9 +278,13 @@ namespace javelin::gui::compose
                 {
                     if (m_editorDirty && previous != nullptr && current != previous)
                     {
+                        const QString identityLabel = m_editorIdentity.has_value()
+                                                          ? identityAddressLabel(*m_editorIdentity)
+                                                          : previous->text(0);
                         const auto answer = QMessageBox::question(
                             this, i18n("Discard Changes?"),
-                            i18n("Discard the unsaved identity changes?"),
+                            i18n("Discard the unsaved identity changes?\n\nIdentity: %1",
+                                 identityLabel),
                             QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Cancel);
                         if (answer != QMessageBox::Discard)
                         {
@@ -808,8 +812,8 @@ namespace javelin::gui::compose
             return;
         if (QMessageBox::question(
                 this, i18n("Delete Sending Identity?"),
-                i18n("Delete %1 from the server? Existing drafts using this identity will need "
-                     "another sender before they can be sent.",
+                i18n("Delete this sending identity from the server? Existing drafts using it will "
+                     "need another sender before they can be sent.\n\nIdentity: %1",
                      identityAddressLabel(*m_editorIdentity)),
                 QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes)
             return;
@@ -876,6 +880,8 @@ namespace javelin::gui::compose
                                 i18n("This signature contains formatting. How should it be "
                                      "converted to plain text?"),
                                 QMessageBox::NoButton, this};
+            warning.setInformativeText(
+                i18n("Identity: %1", identityAddressLabel(*m_editorIdentity)));
             QAbstractButton* loseFormatting = warning.addButton(
                 i18nc("@action:button", "Lose Formatting"), QMessageBox::DestructiveRole);
             QPushButton* addMarkup = warning.addButton(

@@ -121,6 +121,14 @@ namespace javelin::gui::shell
         };
     }
 
+    QString ComposeTabController::confirmationDetails(const int index) const
+    {
+        const auto* composeTab = composeTabAt(index);
+        return composeTab == nullptr || composeTab->widget == nullptr
+                   ? QString{}
+                   : composeTab->widget->confirmationDetails();
+    }
+
     bool ComposeTabController::closeImmediately(const int index)
     {
         return detachWidget(index);

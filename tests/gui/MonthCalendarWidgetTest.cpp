@@ -32,6 +32,37 @@ TEST_CASE("month calendar event capacity follows cell and font geometry", "[gui]
     CHECK(monthCellVisibleEventCount(120, 18, 20, 8, 2, 0) == 0);
 }
 
+TEST_CASE("calendar confirmation details identify the event and its date and time",
+          "[gui][calendar][confirmation]")
+{
+    javelin::jmap::calendar::CalendarEvent event;
+    event.title = "Planning review";
+    event.start = {.value = "2026-08-15T09:30:00"};
+    event.duration = {.value = "PT1H"};
+
+    const auto details = javelin::gui::calendar::eventConfirmationDetails(event);
+    const auto start = QDateTime::fromString(QStringLiteral("2026-08-15T09:30:00"), Qt::ISODate);
+    CHECK(details.contains(QStringLiteral("Planning review")));
+    CHECK(details.contains(QLocale{}.toString(start.date(), QLocale::LongFormat)));
+    CHECK(details.contains(QLocale{}.toString(start.time(), QLocale::ShortFormat)));
+}
+
+TEST_CASE("calendar confirmation details keep all-day events date-only",
+          "[gui][calendar][confirmation]")
+{
+    javelin::jmap::calendar::CalendarEvent event;
+    event.title = "Public holiday";
+    event.start = {.value = "2026-08-15T00:00:00"};
+    event.duration = {.value = "P1D"};
+    event.showWithoutTime = true;
+
+    const auto details = javelin::gui::calendar::eventConfirmationDetails(event);
+    const auto start = QDateTime::fromString(QStringLiteral("2026-08-15T00:00:00"), Qt::ISODate);
+    CHECK(details.contains(QStringLiteral("Public holiday")));
+    CHECK(details.contains(QLocale{}.toString(start.date(), QLocale::LongFormat)));
+    CHECK_FALSE(details.contains(QLocale{}.toString(start.time(), QLocale::ShortFormat)));
+}
+
 TEST_CASE("calendar presentation includes events from subscribed calendars only",
           "[gui][calendar][subscriptions]")
 {

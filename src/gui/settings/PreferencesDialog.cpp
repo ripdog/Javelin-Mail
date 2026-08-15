@@ -553,6 +553,8 @@ namespace javelin::gui::settings
             i18n("Applying this change will permanently wipe all of this account's cached mail, "
                  "drafts, state, and pending actions."),
             QMessageBox::Cancel, this};
+        warning.setInformativeText(
+            i18n("Account: %1\nServer: %2", accountListText(account), account.sessionUrl));
         auto* removeButton =
             warning.addButton(i18n("Remove Account"), QMessageBox::DestructiveRole);
         auto* confirmation =

@@ -1,4 +1,5 @@
 #include "gui/calendar/EventDialog.h"
+#include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/RecurrenceDialog.h"
 #include "gui/widgets/EmailAddressLineEdit.h"
 
@@ -15,6 +16,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -247,7 +249,24 @@ namespace javelin::gui::calendar
         connect(buttons, &QDialogButtonBox::accepted, this, &EventDialog::validateAndAccept);
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         connect(m_delete, &QPushButton::clicked, this,
-                [this]() { done(EventDialog::DeleteRequested); });
+                [this]()
+                {
+                    QMessageBox confirmation{
+                        QMessageBox::Warning,
+                        m_occurrenceMode ? i18n("Delete Occurrence") : i18n("Delete Event"),
+                        m_occurrenceMode ? i18n("Delete this occurrence from the recurring series?")
+                                         : i18n("Delete this event?"),
+                        QMessageBox::NoButton, this};
+                    confirmation.setInformativeText(eventConfirmationDetails(m_event));
+                    auto* deleteButton = confirmation.addButton(
+                        m_occurrenceMode ? i18n("Delete Occurrence") : i18n("Delete Event"),
+                        QMessageBox::DestructiveRole);
+                    confirmation.addButton(QMessageBox::Cancel);
+                    confirmation.setDefaultButton(QMessageBox::Cancel);
+                    confirmation.exec();
+                    if (confirmation.clickedButton() == deleteButton)
+                        done(EventDialog::DeleteRequested);
+                });
         connect(m_allDay, &QCheckBox::toggled, this, &EventDialog::updateAllDayMode);
         connect(m_startDate, &QDateEdit::editingFinished, this, &EventDialog::updateAutomaticEnd);
         connect(m_startTime->lineEdit(), &QLineEdit::editingFinished, this,
@@ -401,6 +420,7 @@ namespace javelin::gui::calendar
 
     void EventDialog::setOccurrenceMode(const bool occurrenceMode)
     {
+        m_occurrenceMode = occurrenceMode;
         setWindowTitle(occurrenceMode ? i18n("Edit occurrence") : i18n("Calendar event"));
         m_calendar->setEnabled(!occurrenceMode);
         m_allDay->setEnabled(!occurrenceMode);

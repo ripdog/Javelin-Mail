@@ -73,6 +73,7 @@ namespace javelin::gui::shell
         [[nodiscard]] bool restore(const PersistedComposeTab& persisted);
 
         [[nodiscard]] std::optional<ComposeTabCloseInput> closeInput(int index) const;
+        [[nodiscard]] QString confirmationDetails(int index) const;
         [[nodiscard]] bool closeImmediately(int index);
         [[nodiscard]] bool discardAndClose(int index);
         void saveDraftAndClose(int index);

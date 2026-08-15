@@ -242,6 +242,9 @@ set(JAVELIN_FORMAT_FILES
     tests/app/DeveloperMaintenanceServiceTest.cpp
     tests/gui/DeveloperOptionsDialogTest.cpp
     tests/gui/IndeterminateProgressBarTest.cpp
+    src/gui/messages/MessageConfirmationPresentation.cpp
+    src/gui/messages/MessageConfirmationPresentation.h
+    tests/gui/MessageConfirmationPresentationTest.cpp
     tests/app/RemoteCodecTest.cpp
     src/daemon/actions/DaemonRemoteActionAccountHandler.cpp
     src/daemon/actions/DaemonRemoteActionCalendarHandler.cpp
@@ -1530,6 +1533,8 @@ add_library(javelin_gui STATIC
 )
 target_sources(javelin_gui PRIVATE
     src/app/SettingsApplicationPorts.h
+    src/gui/messages/MessageConfirmationPresentation.cpp
+    src/gui/messages/MessageConfirmationPresentation.h
     src/gui/messageview/MessageAppearance.cpp
     src/gui/messageview/MessageAppearance.h
     src/gui/settings/GuiSettings.cpp

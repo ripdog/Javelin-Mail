@@ -291,6 +291,7 @@ add_executable(javelin_gui_policy_tests
     gui/EmailContextMenuLayoutTest.cpp
     gui/CalendarEventContextMenuLayoutTest.cpp
     gui/MessageActionSelectionTest.cpp
+    gui/MessageConfirmationPresentationTest.cpp
     gui/MessageContentPolicyTest.cpp
     gui/MessageSelectionRestorationTest.cpp
     gui/MessageListTabPolicyTest.cpp

@@ -998,12 +998,21 @@ namespace javelin::gui::shell
         {
             if (targetCalendarId.isEmpty())
                 return;
-            if (!recurrenceId.isEmpty() &&
-                QMessageBox::question(
-                    &widget, i18n("Move recurring event"),
-                    i18n("Move the entire recurring series to the selected calendar?")) !=
+            if (!recurrenceId.isEmpty())
+            {
+                const auto targetCalendar =
+                    std::ranges::find(*calendars, targetCalendarId.toStdString(),
+                                      &javelin::jmap::calendar::Calendar::id);
+                const QString targetName = targetCalendar == calendars->end()
+                                               ? targetCalendarId
+                                               : QString::fromStdString(targetCalendar->name);
+                if (QMessageBox::question(
+                        &widget, i18n("Move recurring event"),
+                        i18n("Move the entire recurring series to “%1”?\n\n%2", targetName,
+                             javelin::gui::calendar::eventConfirmationDetails(selectedEvent))) !=
                     QMessageBox::Yes)
-                return;
+                    return;
+            }
             auto moved = *foundEvent;
             moved.calendarIds.clear();
             moved.calendarIds.emplace(targetCalendarId.toStdString(), true);
@@ -1025,6 +1034,8 @@ namespace javelin::gui::shell
                 QMessageBox prompt{&widget};
                 prompt.setWindowTitle(i18n("Delete recurring event"));
                 prompt.setText(i18n("Delete only this occurrence or the entire series?"));
+                prompt.setInformativeText(
+                    javelin::gui::calendar::eventConfirmationDetails(selectedEvent));
                 auto* occurrenceButton =
                     prompt.addButton(i18n("This occurrence"), QMessageBox::AcceptRole);
                 auto* seriesButton =
@@ -1037,7 +1048,9 @@ namespace javelin::gui::shell
                     return;
             }
             else if (QMessageBox::question(&widget, i18n("Delete event"),
-                                           i18n("Delete this event?")) != QMessageBox::Yes)
+                                           i18n("Delete this event?\n\n%1",
+                                                javelin::gui::calendar::eventConfirmationDetails(
+                                                    selectedEvent))) != QMessageBox::Yes)
                 return;
 
             if (occurrenceOnly)
@@ -1795,6 +1808,8 @@ namespace javelin::gui::shell
                     scopePrompt.setWindowTitle(i18n("Edit recurring event"));
                     scopePrompt.setText(
                         i18n("Do you want to edit only this occurrence or the entire series?"));
+                    scopePrompt.setInformativeText(
+                        javelin::gui::calendar::eventConfirmationDetails(occurrenceEvent));
                     auto* occurrenceButton =
                         scopePrompt.addButton(i18n("This occurrence"), QMessageBox::AcceptRole);
                     auto* seriesButton =
