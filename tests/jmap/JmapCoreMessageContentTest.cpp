@@ -297,7 +297,8 @@ namespace
         return session;
     }
 
-    void seedEmail(javelin::jmap::cache::DatabaseConnection& connection)
+    void seedEmail(javelin::jmap::cache::DatabaseConnection& connection,
+                   const QString& accountId = QStringLiteral("u1"))
     {
         QSqlQuery query{connection.database()};
         query.prepare(QStringLiteral(
@@ -307,7 +308,7 @@ namespace
             ") VALUES ("
             ":account_id, :email_id, :thread_id, :blob_id, :received_at, :subject, "
             ":preview, :mailbox_ids_json, :keywords_json, :has_attachment, :size)"));
-        query.bindValue(QStringLiteral(":account_id"), QStringLiteral("u1"));
+        query.bindValue(QStringLiteral(":account_id"), accountId);
         query.bindValue(QStringLiteral(":email_id"), QStringLiteral("eml-1"));
         query.bindValue(QStringLiteral(":thread_id"), QStringLiteral("thr-1"));
         query.bindValue(QStringLiteral(":blob_id"), QStringLiteral("blob-root"));
@@ -332,8 +333,14 @@ TEST_CASE("MessageContentClient caches raw message sources", "[jmap][core][messa
     auto databaseContext = makeDatabaseContext();
     javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
     const auto session = loadSessionFixture();
-    REQUIRE_FALSE(sessionRepository.replace("u1", session).has_value());
-    seedEmail(databaseContext.connection);
+    const auto firstStored = sessionRepository.replaceForConnection("connection-a", "u1", session);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(firstStored));
+    const auto secondStored = sessionRepository.replaceForConnection("connection-b", "u1", session);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(secondStored));
+    const auto localAccountId =
+        std::get<javelin::jmap::cache::StoredSessionAccounts>(secondStored).ownerAccountId;
+    REQUIRE(localAccountId != "u1");
+    seedEmail(databaseContext.connection, QString::fromStdString(localAccountId));
 
     FakeTransport transport;
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
@@ -360,7 +367,7 @@ TEST_CASE("MessageContentClient caches raw message sources", "[jmap][core][messa
             .loginEmail = "alice@example.com",
             .apiKey = "access-token",
         },
-        "u1", "eml-1"));
+        localAccountId, "eml-1"));
 
     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
     {
@@ -380,9 +387,11 @@ TEST_CASE("MessageContentClient caches raw message sources", "[jmap][core][messa
     CHECK_FALSE(downloadType.isEmpty());
     CHECK(downloadType.contains(QStringLiteral("message")));
     CHECK(transport.requests.front().headers.front().value == "Bearer access-token");
+    REQUIRE(transport.requests.front().authentication.has_value());
+    CHECK(transport.requests.front().authentication->accountId == localAccountId);
 
     javelin::jmap::cache::RawMessageSourceRepository sourceRepository{databaseContext.connection};
-    const auto sourceResult = sourceRepository.find("u1", "eml-1");
+    const auto sourceResult = sourceRepository.find(localAccountId, "eml-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::RawMessageSource>>(
         sourceResult));
     const auto& source =
@@ -545,7 +554,13 @@ TEST_CASE("MailQueryClient full mailbox pages stay uncollapsed and within negoti
     auto session = loadSessionFixture();
     REQUIRE(session.capabilities.coreDetails.has_value());
     session.capabilities.coreDetails->maxObjectsInGet = 1;
-    REQUIRE_FALSE(sessions.replace("u1", session).has_value());
+    const auto firstStored = sessions.replaceForConnection("connection-a", "u1", session);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(firstStored));
+    const auto secondStored = sessions.replaceForConnection("connection-b", "u1", session);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(secondStored));
+    const auto localAccountId =
+        std::get<javelin::jmap::cache::StoredSessionAccounts>(secondStored).ownerAccountId;
+    REQUIRE(localAccountId != "u1");
 
     FakeTransport transport;
     transport.responseFactory = [](const javelin::jmap::api::HttpRequest& request)
@@ -557,10 +572,12 @@ TEST_CASE("MailQueryClient full mailbox pages stay uncollapsed and within negoti
         const QString queryArguments =
             QString::fromStdString(envelope.value->methodCalls[0].arguments);
         const auto queryObject = QJsonDocument::fromJson(queryArguments.toUtf8()).object();
+        CHECK(queryObject.value(QStringLiteral("accountId")).toString() == QStringLiteral("u1"));
         CHECK_FALSE(queryObject.value(QStringLiteral("collapseThreads")).toBool(true));
         CHECK(queryObject.value(QStringLiteral("limit")).toInteger() == 1);
         const QString getArguments =
             QString::fromStdString(envelope.value->methodCalls[1].arguments);
+        CHECK(getArguments.contains(QStringLiteral("\"accountId\":\"u1\"")));
         CHECK(getArguments.contains(QStringLiteral("\"subject\"")));
         CHECK(getArguments.contains(QStringLiteral("\"from\"")));
         CHECK_FALSE(getArguments.contains(QStringLiteral("\"preview\"")));
@@ -599,10 +616,12 @@ TEST_CASE("MailQueryClient full mailbox pages stay uncollapsed and within negoti
             .loginEmail = "alice@example.com",
             .apiKey = "access-token",
         },
-        "u1", "mbx-inbox", 0, 250, std::nullopt));
+        localAccountId, "mbx-inbox", 0, 250, std::nullopt));
     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         FAIL(error->message.toStdString());
     const auto& page = std::get<javelin::jmap::FullMailboxPage>(result);
+    CHECK(page.accountId == localAccountId);
+    REQUIRE(transport.requests.size() == 1);
     REQUIRE(page.emails.size() == 1);
     CHECK(page.emails.front().subject == std::optional<std::string>{"Cached safely"});
     CHECK_FALSE(page.emails.front().preview.has_value());
@@ -1442,7 +1461,13 @@ TEST_CASE("EmailMutationEngine submits queued mailbox mutations through Email/se
     auto databaseContext = makeDatabaseContext();
     javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
     const auto session = loadSessionFixture();
-    REQUIRE_FALSE(sessionRepository.replace("u1", session).has_value());
+    const auto firstStored = sessionRepository.replaceForConnection("connection-a", "u1", session);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(firstStored));
+    const auto secondStored = sessionRepository.replaceForConnection("connection-b", "u1", session);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(secondStored));
+    const auto localAccountId =
+        std::get<javelin::jmap::cache::StoredSessionAccounts>(secondStored).ownerAccountId;
+    REQUIRE(localAccountId != "u1");
 
     auto email = loadEmailFixture();
     email.id = "eml-1";
@@ -1451,12 +1476,12 @@ TEST_CASE("EmailMutationEngine submits queued mailbox mutations through Email/se
     email.keywords = {"$seen"};
 
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
-    REQUIRE_FALSE(emailRepository.replaceAll("u1", {email}).has_value());
+    REQUIRE_FALSE(emailRepository.replaceAll(localAccountId, {email}).has_value());
     javelin::jmap::cache::SyncStateRepository syncStates{databaseContext.connection};
-    REQUIRE_FALSE(
-        syncStates
-            .upsert({.accountId = "u1", .objectType = "Email", .queryKey = {}}, "email-state-0")
-            .has_value());
+    REQUIRE_FALSE(syncStates
+                      .upsert({.accountId = localAccountId, .objectType = "Email", .queryKey = {}},
+                              "email-state-0")
+                      .has_value());
 
     FakeTransport transport;
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
@@ -1467,11 +1492,11 @@ TEST_CASE("EmailMutationEngine submits queued mailbox mutations through Email/se
 
     MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
     const auto queuedResult =
-        capabilities.emailMutations.queue("u1", javelin::jmap::EmailMailboxMutation{
-                                                    .emailId = "eml-1",
-                                                    .addMailboxIds = {"mbx-archive"},
-                                                    .removeMailboxIds = {"mbx-inbox"},
-                                                });
+        capabilities.emailMutations.queue(localAccountId, javelin::jmap::EmailMailboxMutation{
+                                                              .emailId = "eml-1",
+                                                              .addMailboxIds = {"mbx-archive"},
+                                                              .removeMailboxIds = {"mbx-inbox"},
+                                                          });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queuedResult));
 
     const auto submitResult = QCoro::waitFor(capabilities.emailMutations.submitPending(
@@ -1480,7 +1505,7 @@ TEST_CASE("EmailMutationEngine submits queued mailbox mutations through Email/se
             .loginEmail = "alice@example.com",
             .apiKey = "access-token",
         },
-        "u1"));
+        localAccountId));
 
     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&submitResult))
     {
@@ -1489,6 +1514,9 @@ TEST_CASE("EmailMutationEngine submits queued mailbox mutations through Email/se
 
     REQUIRE(std::holds_alternative<javelin::jmap::SubmittedEmailMutations>(submitResult));
     const auto& summary = std::get<javelin::jmap::SubmittedEmailMutations>(submitResult);
+    CHECK(summary.accountId == localAccountId);
+    REQUIRE(summary.receipt.domains.size() == 1);
+    CHECK(summary.receipt.domains.front().accountId == localAccountId);
     CHECK(summary.attemptedEmailCount == 1);
     CHECK(summary.updatedEmailCount == 1);
     CHECK(summary.failedEmailCount == 0);
@@ -1496,12 +1524,15 @@ TEST_CASE("EmailMutationEngine submits queued mailbox mutations through Email/se
     REQUIRE(transport.requests.size() == 1);
     CHECK(transport.requests.front().method == javelin::jmap::api::HttpMethod::Post);
     CHECK(transport.requests.front().body.contains("\"Email/set\""));
+    CHECK(transport.requests.front().body.contains("\"accountId\":\"u1\""));
+    CHECK_FALSE(transport.requests.front().body.contains(
+        QByteArray::fromStdString("\"accountId\":\"" + localAccountId + "\"")));
     CHECK(transport.requests.front().body.contains("\"mailboxIds/mbx-archive\":true"));
     CHECK(transport.requests.front().body.contains("\"mailboxIds/mbx-inbox\":null"));
     CHECK_FALSE(transport.requests.front().body.contains("\"mailboxIds\":{"));
     CHECK_FALSE(transport.requests.front().body.contains("\"mbx-inbox\":true"));
 
-    const auto refreshedEmailResult = emailRepository.find("u1", "eml-1");
+    const auto refreshedEmailResult = emailRepository.find(localAccountId, "eml-1");
     REQUIRE(
         std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(refreshedEmailResult));
     const auto& refreshedEmail =
@@ -1510,7 +1541,7 @@ TEST_CASE("EmailMutationEngine submits queued mailbox mutations through Email/se
     CHECK(refreshedEmail->mailboxIds == std::vector<std::string>{"mbx-archive"});
     CHECK(refreshedEmail->keywords == std::vector<std::string>{"$seen"});
     const auto staleState =
-        syncStates.find({.accountId = "u1", .objectType = "Email", .queryKey = {}});
+        syncStates.find({.accountId = localAccountId, .objectType = "Email", .queryKey = {}});
     REQUIRE(
         std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(staleState));
     REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(staleState).has_value());
@@ -1518,7 +1549,7 @@ TEST_CASE("EmailMutationEngine submits queued mailbox mutations through Email/se
           "email-state-0");
 
     javelin::jmap::sync::EmailMutationJournal emailMutationJournal{databaseContext.connection};
-    const auto pendingResult = emailMutationJournal.listForEmail("u1", "eml-1");
+    const auto pendingResult = emailMutationJournal.listForEmail(localAccountId, "eml-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
         pendingResult));
     CHECK(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(pendingResult).empty());

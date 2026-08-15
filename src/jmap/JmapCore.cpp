@@ -18,6 +18,7 @@
 #include "jmap/api/Transport.h"
 #include "jmap/auth/AccessTokenResolver.h"
 #include "jmap/auth/Auth.h"
+#include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailVault.h"
 #include "jmap/cache/MailboxRepository.h"
@@ -70,10 +71,18 @@ namespace javelin::jmap
     namespace
     {
 
+        struct CachedAccountIdentity
+        {
+            std::string localAccountId;
+            std::string connectionId;
+            std::string remoteAccountId;
+        };
+
         struct DownloadContext
         {
             javelin::jmap::auth::AccountCredentials credentials;
             javelin::jmap::api::Session session;
+            std::string remoteAccountId;
             std::string accessToken;
         };
 
@@ -228,6 +237,36 @@ namespace javelin::jmap
             return *session;
         }
 
+        [[nodiscard]] std::variant<CachedAccountIdentity, OperationError>
+        resolveCachedAccountIdentity(javelin::jmap::cache::DatabaseConnection& connection,
+                                     const std::string_view accountId)
+        {
+            javelin::jmap::cache::AccountRepository accounts{connection};
+            const auto accountResult = accounts.findById(accountId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&accountResult))
+            {
+                return operationError(*error);
+            }
+
+            const auto& account =
+                std::get<std::optional<javelin::jmap::cache::CachedAccount>>(accountResult);
+            if (!account.has_value() || account->remoteAccountId.empty())
+            {
+                return OperationError{
+                    .code = OperationErrorCode::NotFound,
+                    .message = QStringLiteral(
+                        "The cached mail account does not have a remote JMAP identity."),
+                };
+            }
+
+            return CachedAccountIdentity{
+                .localAccountId = account->accountId,
+                .connectionId = account->connectionId,
+                .remoteAccountId = account->remoteAccountId,
+            };
+        }
+
         [[nodiscard]] std::variant<std::string, OperationError>
         resolveAccessToken(const javelin::jmap::auth::AccountCredentials& credentials)
         {
@@ -250,8 +289,13 @@ namespace javelin::jmap
                 return *validationError;
             }
 
-            auto credentials = buildAccountCredentials(settings, accountId);
-            const auto sessionResult = loadCachedSession(connection, accountId);
+            const auto identityResult = resolveCachedAccountIdentity(connection, accountId);
+            if (const auto* error = std::get_if<OperationError>(&identityResult))
+                return *error;
+            const auto& identity = std::get<CachedAccountIdentity>(identityResult);
+
+            auto credentials = buildAccountCredentials(settings, identity.localAccountId);
+            const auto sessionResult = loadCachedSession(connection, identity.localAccountId);
             if (const auto* error = std::get_if<OperationError>(&sessionResult))
             {
                 return *error;
@@ -266,19 +310,21 @@ namespace javelin::jmap
             return DownloadContext{
                 .credentials = std::move(credentials),
                 .session = std::get<javelin::jmap::api::Session>(sessionResult),
+                .remoteAccountId = identity.remoteAccountId,
                 .accessToken = std::get<std::string>(tokenResult),
             };
         }
 
         [[nodiscard]] QCoro::Task<std::variant<std::uint64_t, BlobDownloadError>>
         downloadBlobToFile(javelin::jmap::api::AbstractTransport& transport,
-                           std::string downloadUrlTemplate, std::string accountId,
+                           std::string downloadUrlTemplate, std::string remoteAccountId,
+                           std::string authenticationAccountId,
                            javelin::jmap::cache::EmailPart part, std::string accessToken,
                            QString filePath, QString failurePrefix)
         {
             const auto transportResult = co_await transport.sendToFile(
-                buildDownloadRequest(buildDownloadUrl(downloadUrlTemplate, accountId, part),
-                                     accountId, accessToken),
+                buildDownloadRequest(buildDownloadUrl(downloadUrlTemplate, remoteAccountId, part),
+                                     authenticationAccountId, accessToken),
                 std::move(filePath));
             if (const auto* error =
                     std::get_if<javelin::jmap::api::TransportError>(&transportResult))
@@ -422,7 +468,13 @@ namespace javelin::jmap
                 co_return *validationError;
             }
 
-            const auto sessionResult = loadCachedSession(databaseConnection, accountId);
+            const auto identityResult = resolveCachedAccountIdentity(databaseConnection, accountId);
+            if (const auto* error = std::get_if<OperationError>(&identityResult))
+                co_return *error;
+            const auto& identity = std::get<CachedAccountIdentity>(identityResult);
+
+            const auto sessionResult =
+                loadCachedSession(databaseConnection, identity.localAccountId);
             if (const auto* error = std::get_if<OperationError>(&sessionResult))
             {
                 co_return *error;
@@ -430,7 +482,8 @@ namespace javelin::jmap
             const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
 
             javelin::jmap::api::MethodCaller methodCaller{methodTransport};
-            const auto apiRequestContext = buildApiRequestContext(settings, accountId, session);
+            const auto apiRequestContext =
+                buildApiRequestContext(settings, identity.localAccountId, session);
             const auto effectiveLimit = std::min<std::size_t>(
                 limit, static_cast<std::size_t>(apiRequestContext.requestLimits->maxObjectsInGet));
 
@@ -438,7 +491,7 @@ namespace javelin::jmap
             builder.useCore().useMail();
 
             const auto queryRequest = javelin::jmap::api::emailQuery({
-                .accountId = accountId,
+                .accountId = identity.remoteAccountId,
                 .filter = filter,
                 .sort = {javelin::jmap::query::toEmailQuerySort(sort)},
                 .position = anchor.has_value()
@@ -459,7 +512,7 @@ namespace javelin::jmap
             const auto queryHandle = builder.call(*queryRequest, "page-query");
 
             const auto representativeRequest = javelin::jmap::api::emailGet(
-                javelin::jmap::api::getRequestFrom(accountId, queryHandle, "/ids"));
+                javelin::jmap::api::getRequestFrom(identity.remoteAccountId, queryHandle, "/ids"));
             if (!representativeRequest.has_value())
             {
                 co_return OperationError{
@@ -1189,9 +1242,9 @@ namespace javelin::jmap
         if (connectionId.empty() || ownerAccountId.empty() || ownerRemoteAccountId.empty())
         {
             co_return OperationError{
-                .message = QStringLiteral(
-                    "Connection, local account, and remote account ids are required for session "
-                    "discovery."),
+                .message = QStringLiteral("Connection, local account, and remote account ids "
+                                          "are required for session "
+                                          "discovery."),
             };
         }
 
@@ -1230,8 +1283,8 @@ namespace javelin::jmap
         if (stored.ownerAccountId != ownerAccountId)
         {
             co_return OperationError{
-                .message = QStringLiteral(
-                    "The refreshed JMAP account resolved to a different local account identity."),
+                .message = QStringLiteral("The refreshed JMAP account resolved to a different "
+                                          "local account identity."),
             };
         }
 
@@ -1547,8 +1600,9 @@ namespace javelin::jmap
         static_cast<void>(removeIncoming);
 
         const auto downloadResult = co_await downloadBlobToFile(
-            *m_impl->resourceTransport, context.session.downloadUrl, accountId, sourcePart,
-            context.accessToken, incomingPath, QStringLiteral("Message source download"));
+            *m_impl->resourceTransport, context.session.downloadUrl, context.remoteAccountId,
+            context.credentials.accountId, sourcePart, context.accessToken, incomingPath,
+            QStringLiteral("Message source download"));
         if (const auto* error = std::get_if<BlobDownloadError>(&downloadResult))
         {
             if (error->httpStatus == std::optional<int>{404})
@@ -1625,7 +1679,13 @@ namespace javelin::jmap
         }
         if (const auto validationError = validateLoginSettings(settings, true))
             co_return *validationError;
-        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        const auto identityResult =
+            resolveCachedAccountIdentity(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<OperationError>(&identityResult))
+            co_return *error;
+        const auto& identity = std::get<CachedAccountIdentity>(identityResult);
+        const auto sessionResult =
+            loadCachedSession(*m_impl->databaseConnection, identity.localAccountId);
         if (const auto* error = std::get_if<OperationError>(&sessionResult))
             co_return *error;
 
@@ -1633,7 +1693,7 @@ namespace javelin::jmap
         javelin::jmap::api::RequestBuilder builder;
         builder.useCore().useMail();
         const auto queryRequest = javelin::jmap::api::emailQuery({
-            .accountId = accountId,
+            .accountId = identity.remoteAccountId,
             .filter = javelin::jmap::api::EmailQueryFilter{.hasKeyword = std::move(keyword)},
             .sort = {},
             .position = std::uint64_t{0},
@@ -1651,7 +1711,7 @@ namespace javelin::jmap
         }
         const auto queryHandle = builder.call(*queryRequest, "keyword-query");
         const auto envelopeResult = co_await caller.call(
-            buildApiRequestContext(settings, accountId,
+            buildApiRequestContext(settings, identity.localAccountId,
                                    std::get<javelin::jmap::api::Session>(sessionResult)),
             builder);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
@@ -1689,7 +1749,13 @@ namespace javelin::jmap
         }
         if (const auto validationError = validateLoginSettings(settings, true))
             co_return *validationError;
-        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        const auto identityResult =
+            resolveCachedAccountIdentity(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<OperationError>(&identityResult))
+            co_return *error;
+        const auto& identity = std::get<CachedAccountIdentity>(identityResult);
+        const auto sessionResult =
+            loadCachedSession(*m_impl->databaseConnection, identity.localAccountId);
         if (const auto* error = std::get_if<OperationError>(&sessionResult))
             co_return *error;
         const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
@@ -1713,7 +1779,7 @@ namespace javelin::jmap
         javelin::jmap::api::RequestBuilder builder;
         builder.useCore().useMail();
         const auto queryRequest = javelin::jmap::api::emailQuery({
-            .accountId = accountId,
+            .accountId = identity.remoteAccountId,
             .filter = javelin::jmap::api::EmailQueryFilter{.inMailbox = mailboxId},
             .sort = {javelin::jmap::api::EmailQuerySort{.property = "receivedAt",
                                                         .isAscending = false}},
@@ -1734,7 +1800,7 @@ namespace javelin::jmap
         }
         const auto queryHandle = builder.call(*queryRequest, "full-mailbox-query");
         const auto getRequest = javelin::jmap::api::emailGet(javelin::jmap::api::getRequestFrom(
-            accountId, queryHandle, "/ids",
+            identity.remoteAccountId, queryHandle, "/ids",
             std::vector<std::string>{"id", "blobId", "threadId", "mailboxIds", "keywords", "size",
                                      "receivedAt", "sentAt", "messageId", "inReplyTo", "references",
                                      "hasAttachment", "subject", "from", "to", "cc", "bcc",
@@ -1746,8 +1812,8 @@ namespace javelin::jmap
             };
         }
         const auto getHandle = builder.call(*getRequest, "full-mailbox-get");
-        const auto envelopeResult =
-            co_await caller.call(buildApiRequestContext(settings, accountId, session), builder);
+        const auto envelopeResult = co_await caller.call(
+            buildApiRequestContext(settings, identity.localAccountId, session), builder);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
             co_return operationError(*error);
         if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))
@@ -1947,7 +2013,14 @@ namespace javelin::jmap
             co_return *validationError;
         }
 
-        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        const auto identityResult =
+            resolveCachedAccountIdentity(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<OperationError>(&identityResult))
+            co_return *error;
+        const auto& identity = std::get<CachedAccountIdentity>(identityResult);
+
+        const auto sessionResult =
+            loadCachedSession(*m_impl->databaseConnection, identity.localAccountId);
         if (const auto* error = std::get_if<OperationError>(&sessionResult))
         {
             co_return *error;
@@ -2149,7 +2222,7 @@ namespace javelin::jmap
 
         const bool statePreconditionUsed = ifInState.has_value();
         const auto requestMethod = javelin::jmap::api::emailSet({
-            .accountId = accountId,
+            .accountId = identity.remoteAccountId,
             .ifInState = std::move(ifInState),
             .create = {},
             .update = std::move(updates),
@@ -2163,7 +2236,8 @@ namespace javelin::jmap
         }
 
         javelin::jmap::api::MethodCaller methodCaller{*m_impl->methodTransport};
-        const auto apiRequestContext = buildApiRequestContext(settings, accountId, session);
+        const auto apiRequestContext =
+            buildApiRequestContext(settings, identity.localAccountId, session);
         javelin::jmap::api::RequestBuilder requestBuilder;
         requestBuilder.useCore().useMail();
         const auto setHandle = requestBuilder.call(*requestMethod, "queued-email-set");
@@ -2186,7 +2260,7 @@ namespace javelin::jmap
         if (mailboxCountsMayChange)
         {
             const auto mailboxRequest = javelin::jmap::api::mailboxGet({
-                .accountId = accountId,
+                .accountId = identity.remoteAccountId,
                 .ids = std::nullopt,
                 .idsReference = std::nullopt,
                 .properties = std::nullopt,
@@ -2325,6 +2399,18 @@ namespace javelin::jmap
             co_return operationError(*error);
         }
         const auto& parsed = std::get<javelin::jmap::api::EmailSetResponse>(parsedResult);
+        if (parsed.accountId != identity.remoteAccountId)
+        {
+            if (const auto transitionError =
+                    transitionSubmittedMutations(javelin::jmap::sync::MutationStatus::Unknown))
+            {
+                co_return *transitionError;
+            }
+            co_return OperationError{
+                .code = OperationErrorCode::ProtocolViolation,
+                .message = QStringLiteral("The server returned Email/set for another account."),
+            };
+        }
         std::optional<javelin::jmap::api::MailboxGetResponse> parsedMailboxes;
         if (mailboxHandle.has_value())
         {
@@ -2332,9 +2418,9 @@ namespace javelin::jmap
             if (const auto* mailboxError =
                     std::get_if<javelin::jmap::api::ResponseReaderError>(&mailboxResult))
             {
-                qWarning().noquote()
-                    << "Post-mutation Mailbox/get was incomplete; a later push will reconcile it"
-                    << operationError(*mailboxError).message;
+                qWarning().noquote() << "Post-mutation Mailbox/get was incomplete; a later "
+                                        "push will reconcile it"
+                                     << operationError(*mailboxError).message;
             }
             else
             {
@@ -2533,7 +2619,7 @@ namespace javelin::jmap
         }
 
         co_return SubmittedEmailMutations{
-            .accountId = std::move(accountId),
+            .accountId = accountId,
             .attemptedEmailCount = mergedEmails.size(),
             .updatedEmailCount = updatedEmailIds.size() + destroyedEmailIds.size(),
             .failedEmailCount = failedEmailIds.size(),
@@ -2544,7 +2630,7 @@ namespace javelin::jmap
                     .domains =
                         {
                             {
-                                .accountId = parsed.accountId,
+                                .accountId = accountId,
                                 .dataType = "Email",
                                 .oldState = parsed.oldState,
                                 .newState = parsed.newState,
@@ -2579,13 +2665,19 @@ namespace javelin::jmap
         if (const auto validationError = validateLoginSettings(settings, true))
             co_return *validationError;
 
-        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        const auto identityResult =
+            resolveCachedAccountIdentity(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<OperationError>(&identityResult))
+            co_return *error;
+        const auto& identity = std::get<CachedAccountIdentity>(identityResult);
+        const auto sessionResult =
+            loadCachedSession(*m_impl->databaseConnection, identity.localAccountId);
         if (const auto* error = std::get_if<OperationError>(&sessionResult))
             co_return *error;
         const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
 
         const auto getMethod = javelin::jmap::api::emailGet({
-            .accountId = accountId,
+            .accountId = identity.remoteAccountId,
             .ids = std::move(emailIds),
             .idsReference = std::nullopt,
             .properties = std::vector<std::string>{"id", "mailboxIds", "keywords", "subject"},
@@ -2602,8 +2694,8 @@ namespace javelin::jmap
         builder.useCore().useMail();
         const auto handle = builder.call(*getMethod, "history-email-get");
         javelin::jmap::api::MethodCaller caller{*m_impl->methodTransport};
-        const auto result =
-            co_await caller.call(buildApiRequestContext(settings, accountId, session), builder);
+        const auto result = co_await caller.call(
+            buildApiRequestContext(settings, identity.localAccountId, session), builder);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
             co_return operationError(*error);
         if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&result))
@@ -2617,8 +2709,15 @@ namespace javelin::jmap
         if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&parsed))
             co_return operationError(*error);
         const auto& response = std::get<javelin::jmap::api::EmailGetResponse>(parsed);
+        if (response.accountId != identity.remoteAccountId)
+        {
+            co_return OperationError{
+                .code = OperationErrorCode::ProtocolViolation,
+                .message = QStringLiteral("The server returned Email/get for another account."),
+            };
+        }
         co_return AuthoritativeEmails{
-            .accountId = response.accountId,
+            .accountId = std::move(accountId),
             .state = response.state,
             .emails = response.list,
             .notFound = response.notFound,
@@ -2890,8 +2989,8 @@ namespace javelin::jmap
         {
             co_return OperationError{
                 .code = OperationErrorCode::PermissionDenied,
-                .message = QStringLiteral(
-                    "You do not have permission to create top-level mailboxes in this account."),
+                .message = QStringLiteral("You do not have permission to create top-level "
+                                          "mailboxes in this account."),
             };
         }
 
@@ -3038,8 +3137,8 @@ namespace javelin::jmap
                 {
                     co_return OperationError{
                         .code = OperationErrorCode::ProtocolViolation,
-                        .message = QStringLiteral(
-                            "The server returned duplicate sibling mailboxes with the same name."),
+                        .message = QStringLiteral("The server returned duplicate sibling "
+                                                  "mailboxes with the same name."),
                     };
                 }
                 if (const auto error =
