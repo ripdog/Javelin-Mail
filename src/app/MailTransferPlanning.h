@@ -29,6 +29,7 @@ namespace javelin::app
         std::string sourceBlobId;
         std::vector<std::string> sourceMailboxIds;
         std::vector<std::string> sourceKeywords;
+        std::vector<std::string> sourceMessageIds;
         std::string sourceReceivedAt;
         std::uint64_t sourceSize = 0;
         std::vector<std::string> sourceRemoveMailboxIds;

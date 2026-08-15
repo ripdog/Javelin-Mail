@@ -249,6 +249,8 @@ TEST_CASE("mail transfer preparation journals a cross-server collision safely",
     CHECK(items.front().sourceMailboxIds == sourceEmail.mailboxIds);
     CHECK(items.front().sourceKeywords ==
           std::vector<std::string>{"$flagged", "$seen", "project"});
+    CHECK(items.front().sourceMessageIds ==
+          std::vector<std::string>{"message@example.test"});
     CHECK(items.front().sourceEmailState == std::optional<std::string>{"email-state-7"});
     CHECK(items.front().sourceRemoveMailboxIds == std::vector<std::string>{"inbox"});
     CHECK(items.front().sourceDestroy);

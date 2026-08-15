@@ -231,6 +231,7 @@ namespace javelin::app
                 .sourceEmailState = emailState->stateToken,
                 .sourceMailboxIds = planned.sourceMailboxIds,
                 .sourceKeywords = planned.sourceKeywords,
+                .sourceMessageIds = planned.sourceMessageIds,
                 .sourceReceivedAt = planned.sourceReceivedAt.empty()
                                         ? std::nullopt
                                         : std::optional<std::string>{planned.sourceReceivedAt},

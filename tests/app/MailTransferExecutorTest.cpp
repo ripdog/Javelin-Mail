@@ -270,6 +270,8 @@ namespace
         int stateCalls = 0;
         int existingGetCalls = 0;
         int materializeCalls = 0;
+        int changesCalls = 0;
+        int candidateGetCalls = 0;
         int importCalls = 0;
         int setCalls = 0;
         int sourceGetCalls = 0;
@@ -280,6 +282,8 @@ namespace
         std::string existingState{"destination-state-existing"};
         bool existingMembershipApplied = false;
         bool materializeNotFound = false;
+        bool reconciliationCandidateMatchesSource = false;
+        std::vector<std::string> reconciliationCreatedIds;
         std::vector<std::string> sourceAuthoritativeMailboxIds{"inbox"};
         std::vector<std::string> callOrder;
 
@@ -449,6 +453,45 @@ namespace
                     };
                 }
 
+                bool candidateRequest = false;
+                for (const auto& candidateId : reconciliationCreatedIds)
+                {
+                    candidateRequest = candidateRequest ||
+                                       method.arguments.find(candidateId) != std::string::npos;
+                }
+                if (candidateRequest)
+                {
+                    ++candidateGetCalls;
+                    std::string list;
+                    for (const auto& candidateId : reconciliationCreatedIds)
+                    {
+                        if (method.arguments.find(candidateId) == std::string::npos)
+                            continue;
+                        if (!list.empty())
+                            list += ',';
+                        const bool matches = reconciliationCandidateMatchesSource &&
+                                             candidateId == reconciliationCreatedIds.front();
+                        list += std::string{R"({"id":")"} + candidateId +
+                                R"(","blobId":"candidate-blob","threadId":"candidate-thread","mailboxIds":{"archive":true},"keywords":{"$seen":true},"size":)" +
+                                (matches ? "2048" : "999") +
+                                R"(,"receivedAt":")" +
+                                (matches ? "2026-08-15T08:00:00Z" : "2026-08-10T00:00:00Z") +
+                                R"(","messageId":[")" +
+                                (matches ? "mail-transfer@example.test" : "unrelated@example.test") +
+                                R"("],"hasAttachment":false,"subject":"Candidate","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Candidate"})";
+                    }
+                    co_return ResponseEnvelope{
+                        .methodResponses = {{
+                            .name = "Email/get",
+                            .arguments = std::string{R"({"accountId":"u1","state":"destination-state-reconciled","list":[)"} +
+                                         list + R"(],"notFound":[]})",
+                            .callId = method.callId,
+                        }},
+                        .createdIds = std::nullopt,
+                        .sessionState = "session-state",
+                    };
+                }
+
                 ++stateCalls;
                 callOrder.push_back("destination-state-get");
                 co_return ResponseEnvelope{
@@ -456,6 +499,36 @@ namespace
                                          .arguments =
                                              R"({"accountId":"u1","state":"destination-state-1","list":[],"notFound":[]})",
                                          .callId = method.callId}},
+                    .createdIds = std::nullopt,
+                    .sessionState = "session-state",
+                };
+            }
+
+            if (method.name == "Email/changes")
+            {
+                ++changesCalls;
+                if (request.dispatched)
+                    request.dispatched();
+                const auto arguments =
+                    QJsonDocument::fromJson(QByteArray::fromStdString(method.arguments)).object();
+                const auto sinceState = arguments.value(QStringLiteral("sinceState")).toString();
+                std::string created;
+                for (const auto& id : reconciliationCreatedIds)
+                {
+                    if (!created.empty())
+                        created += ',';
+                    created += '"' + id + '"';
+                }
+                co_return ResponseEnvelope{
+                    .methodResponses = {{
+                        .name = "Email/changes",
+                        .arguments = QStringLiteral(
+                                         R"({"accountId":"u1","oldState":"%1","newState":"destination-state-reconciled","hasMoreChanges":false,"created":[%2],"updated":[],"destroyed":[]})")
+                                         .arg(sinceState,
+                                              QString::fromStdString(std::move(created)))
+                                         .toStdString(),
+                        .callId = method.callId,
+                    }},
                     .createdIds = std::nullopt,
                     .sessionState = "session-state",
                 };
@@ -762,9 +835,13 @@ namespace
     {
       public:
         bool copyDispatchedFailure = false;
+        bool reconciliationCandidateMatchesSource = false;
+        std::vector<std::string> reconciliationCreatedIds;
         std::vector<std::string> sourceAuthoritativeMailboxIds{"inbox"};
         int copyCalls = 0;
         int materializeCalls = 0;
+        int changesCalls = 0;
+        int candidateGetCalls = 0;
         int sourceGetCalls = 0;
         int sourceSetCalls = 0;
         std::string copyArguments;
@@ -789,6 +866,42 @@ namespace
                             .name = "Email/get",
                             .arguments =
                                 R"({"accountId":"u2","state":"destination-state-2","list":[{"id":"destination-email","blobId":"destination-blob","threadId":"destination-thread","mailboxIds":{"archive":true},"keywords":{"$seen":true,"$flagged":true},"size":41,"receivedAt":"2026-08-15T08:00:00Z","hasAttachment":false,"subject":"Transfer","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Preview"}],"notFound":[]})",
+                            .callId = method.callId,
+                        }},
+                        .createdIds = std::nullopt,
+                        .sessionState = "session-state",
+                    };
+                }
+                bool candidateRequest = false;
+                for (const auto& candidateId : reconciliationCreatedIds)
+                    candidateRequest = candidateRequest ||
+                                       method.arguments.find(candidateId) != std::string::npos;
+                if (candidateRequest)
+                {
+                    ++candidateGetCalls;
+                    std::string list;
+                    for (const auto& candidateId : reconciliationCreatedIds)
+                    {
+                        if (method.arguments.find(candidateId) == std::string::npos)
+                            continue;
+                        if (!list.empty())
+                            list += ',';
+                        const bool matches = reconciliationCandidateMatchesSource &&
+                                             candidateId == reconciliationCreatedIds.front();
+                        list += std::string{R"({"id":")"} + candidateId +
+                                R"(","blobId":"candidate-blob","threadId":"candidate-thread","mailboxIds":{"archive":true},"keywords":{"$seen":true},"size":)" +
+                                (matches ? "2048" : "999") +
+                                R"(,"receivedAt":")" +
+                                (matches ? "2026-08-15T08:00:00Z" : "2026-08-10T00:00:00Z") +
+                                R"(","messageId":[")" +
+                                (matches ? "mail-transfer@example.test" : "unrelated@example.test") +
+                                R"("],"hasAttachment":false,"subject":"Candidate","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Candidate"})";
+                    }
+                    co_return ResponseEnvelope{
+                        .methodResponses = {{
+                            .name = "Email/get",
+                            .arguments = std::string{R"({"accountId":"u2","state":"destination-state-reconciled","list":[)"} +
+                                         list + R"(],"notFound":[]})",
                             .callId = method.callId,
                         }},
                         .createdIds = std::nullopt,
@@ -826,6 +939,36 @@ namespace
                     .methodResponses = {{.name = "Email/get",
                                          .arguments = response,
                                          .callId = method.callId}},
+                    .createdIds = std::nullopt,
+                    .sessionState = "session-state",
+                };
+            }
+
+            if (method.name == "Email/changes")
+            {
+                ++changesCalls;
+                if (request.dispatched)
+                    request.dispatched();
+                const auto arguments =
+                    QJsonDocument::fromJson(QByteArray::fromStdString(method.arguments)).object();
+                const auto sinceState = arguments.value(QStringLiteral("sinceState")).toString();
+                std::string created;
+                for (const auto& id : reconciliationCreatedIds)
+                {
+                    if (!created.empty())
+                        created += ',';
+                    created += '"' + id + '"';
+                }
+                co_return ResponseEnvelope{
+                    .methodResponses = {{
+                        .name = "Email/changes",
+                        .arguments = QStringLiteral(
+                                         R"({"accountId":"u2","oldState":"%1","newState":"destination-state-reconciled","hasMoreChanges":false,"created":[%2],"updated":[],"destroyed":[]})")
+                                         .arg(sinceState,
+                                              QString::fromStdString(std::move(created)))
+                                         .toStdString(),
+                        .callId = method.callId,
+                    }},
                     .createdIds = std::nullopt,
                     .sessionState = "session-state",
                 };
@@ -1386,13 +1529,63 @@ TEST_CASE("connection loss after Email import dispatch becomes blocked unknown w
     const int importCount = fixture.methodTransport.importCalls;
 
     fixture.methodTransport.behavior = ImportBehavior::Success;
+    fixture.methodTransport.reconciliationCreatedIds.clear();
     const auto second = fixture.execute(operationId);
     REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(second));
-    CHECK(std::get<MailTransferExecutionSummary>(second).status ==
-          MailTransferStatus::BlockedUnknown);
+    CHECK(std::get<MailTransferExecutionSummary>(second).status == MailTransferStatus::Running);
+    CHECK(fixture.item(operationId).phase == MailTransferItemPhase::Uploaded);
+    CHECK(fixture.methodTransport.changesCalls == 1);
     CHECK(fixture.resourceTransport.sendFromFileCalls == uploadCount);
     CHECK(fixture.methodTransport.importCalls == importCount);
     CHECK(fixture.sourceStillExists());
+
+    const auto third = fixture.execute(operationId);
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&third))
+        FAIL(error->message.toStdString());
+    CHECK(std::get<MailTransferExecutionSummary>(third).status == MailTransferStatus::Complete);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == uploadCount);
+    CHECK(fixture.methodTransport.importCalls == importCount + 1);
+    CHECK_FALSE(fixture.sourceStillExists());
+}
+
+TEST_CASE("unique created candidate reconciles lost Email import response without retry",
+          "[app][mail-transfer][executor][ambiguity][reconcile]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    fixture.methodTransport.behavior = ImportBehavior::DispatchedFailure;
+    const auto operationId = fixture.prepare(MailTransferOperation::Move);
+
+    const auto first = fixture.execute(operationId);
+    REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(first));
+    CHECK(std::get<MailTransferExecutionSummary>(first).status ==
+          MailTransferStatus::BlockedUnknown);
+    const int uploadCount = fixture.resourceTransport.sendFromFileCalls;
+    const int importCount = fixture.methodTransport.importCalls;
+
+    fixture.methodTransport.reconciliationCreatedIds = {"reconciled-email"};
+    fixture.methodTransport.reconciliationCandidateMatchesSource = true;
+    const auto second = fixture.execute(operationId);
+    REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(second));
+    CHECK(std::get<MailTransferExecutionSummary>(second).status == MailTransferStatus::Running);
+    const auto reconciledItem = fixture.item(operationId);
+    CHECK(reconciledItem.phase == MailTransferItemPhase::DestinationConfirmed);
+    CHECK(reconciledItem.destinationEmailId ==
+          std::optional<std::string>{"reconciled-email"});
+    CHECK(fixture.methodTransport.changesCalls == 1);
+    CHECK(fixture.methodTransport.candidateGetCalls == 1);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == uploadCount);
+    CHECK(fixture.methodTransport.importCalls == importCount);
+    CHECK(fixture.sourceStillExists());
+
+    const auto third = fixture.execute(operationId);
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&third))
+        FAIL(error->message.toStdString());
+    CHECK(std::get<MailTransferExecutionSummary>(third).status == MailTransferStatus::Complete);
+    CHECK(fixture.resourceTransport.sendFromFileCalls == uploadCount);
+    CHECK(fixture.methodTransport.importCalls == importCount);
+    CHECK_FALSE(fixture.sourceStillExists());
 }
 
 TEST_CASE("failure before Email import dispatch returns to uploaded phase and retries without reupload",
@@ -1673,10 +1866,13 @@ TEST_CASE("lost Email copy response blocks same-session transfer without source 
     CHECK(fixture.resourceTransport.sendFromFileCalls == 0);
 
     fixture.methodTransport.copyDispatchedFailure = false;
+    fixture.methodTransport.reconciliationCreatedIds = {"unrelated-shared"};
     const auto second = fixture.execute(operationId);
     REQUIRE(std::holds_alternative<MailTransferExecutionSummary>(second));
     CHECK(std::get<MailTransferExecutionSummary>(second).status ==
           MailTransferStatus::BlockedUnknown);
+    CHECK(fixture.methodTransport.changesCalls == 1);
+    CHECK(fixture.methodTransport.candidateGetCalls == 1);
     CHECK(fixture.methodTransport.copyCalls == 1);
     CHECK(fixture.methodTransport.sourceSetCalls == 0);
 }

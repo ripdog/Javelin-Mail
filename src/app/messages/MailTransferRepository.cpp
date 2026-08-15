@@ -108,7 +108,7 @@ namespace javelin::app
                 "destination_creation_id,destination_upload_blob_id,destination_pre_state,"
                 "destination_email_id,destination_blob_id,destination_thread_id,destination_size,"
                 "reused_existing,destination_prior_mailbox_ids_json,phase,last_error,created_at,"
-                "updated_at");
+                "updated_at,source_message_ids_json");
         }
 
         [[nodiscard]] std::variant<MailTransferOperationRecord, DatabaseError>
@@ -143,9 +143,11 @@ namespace javelin::app
             const auto sourceMailboxIds = parseStrings(query.value(6));
             const auto sourceKeywords = parseStrings(query.value(7));
             const auto sourceRemoveMailboxIds = parseStrings(query.value(10));
+            const auto sourceMessageIds = parseStrings(query.value(26));
             const auto phase = mailTransferItemPhaseFromString(query.value(22).toString());
             if (!sourceMailboxIds.has_value() || !sourceKeywords.has_value() ||
-                !sourceRemoveMailboxIds.has_value() || !phase.has_value())
+                !sourceRemoveMailboxIds.has_value() || !sourceMessageIds.has_value() ||
+                !phase.has_value())
             {
                 return corruptRecord(QStringLiteral("invalid item snapshot"));
             }
@@ -167,6 +169,7 @@ namespace javelin::app
                 .sourceEmailState = optionalString(query.value(5)),
                 .sourceMailboxIds = *sourceMailboxIds,
                 .sourceKeywords = *sourceKeywords,
+                .sourceMessageIds = *sourceMessageIds,
                 .sourceReceivedAt = optionalString(query.value(8)),
                 .sourceSize = query.value(9).toULongLong(),
                 .sourceRemoveMailboxIds = *sourceRemoveMailboxIds,
@@ -401,7 +404,7 @@ namespace javelin::app
             "id,"
             "destination_upload_blob_id,destination_pre_state,destination_email_id,"
             "destination_blob_id,destination_thread_id,destination_size,reused_existing,"
-            "destination_prior_mailbox_ids_json,phase,last_error"
+            "destination_prior_mailbox_ids_json,phase,last_error,source_message_ids_json"
             ") VALUES(:item_id,:operation_id,:ordinal,:source_email_id,:source_blob_id,"
             ":source_email_state,:source_mailbox_ids_json,:source_keywords_json,:source_received_"
             "at,"
@@ -409,7 +412,7 @@ namespace javelin::app
             ":destination_creation_id,:destination_upload_blob_id,:destination_pre_state,"
             ":destination_email_id,:destination_blob_id,:destination_thread_id,:destination_size,"
             ":reused_existing,"
-            ":destination_prior_mailbox_ids_json,:phase,:last_error)"));
+            ":destination_prior_mailbox_ids_json,:phase,:last_error,:source_message_ids_json)"));
         for (const auto& item : items)
         {
             if (item.operationId != operation.operationId)
@@ -433,6 +436,8 @@ namespace javelin::app
                                  serializeStrings(item.sourceMailboxIds));
             insertItem.bindValue(QStringLiteral(":source_keywords_json"),
                                  serializeStrings(item.sourceKeywords));
+            insertItem.bindValue(QStringLiteral(":source_message_ids_json"),
+                                 serializeStrings(item.sourceMessageIds));
             insertItem.bindValue(QStringLiteral(":source_received_at"),
                                  optionalText(item.sourceReceivedAt));
             insertItem.bindValue(QStringLiteral(":source_size"),

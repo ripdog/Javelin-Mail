@@ -159,6 +159,7 @@ namespace javelin::app
                 .sourceBlobId = email.blobId,
                 .sourceMailboxIds = email.mailboxIds,
                 .sourceKeywords = email.keywords,
+                .sourceMessageIds = email.messageId,
                 .sourceReceivedAt = email.receivedAt,
                 .sourceSize = email.size,
                 .sourceRemoveMailboxIds = std::move(removeMailboxIds),

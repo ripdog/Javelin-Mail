@@ -293,7 +293,293 @@ namespace javelin::app
                     item.destinationPreState.has_value() &&
                     item.destinationPriorMailboxIds.has_value();
                 if (!canReconcileExisting)
+                {
+                    if (!item.destinationPreState.has_value())
+                        continue;
+
+                    std::vector<std::string> createdIds;
+                    std::string sinceState = *item.destinationPreState;
+                    bool changesComplete = false;
+                    constexpr std::size_t maximumChangePages = 32;
+                    for (std::size_t page = 0; page < maximumChangePages; ++page)
+                    {
+                        const auto changesRequest = javelin::jmap::api::emailChanges({
+                            .accountId = destinationAccount.remoteAccountId,
+                            .sinceState = sinceState,
+                            .maxChanges = std::optional<std::uint64_t>{256},
+                        });
+                        if (!changesRequest.has_value())
+                            co_return stateError(i18n(
+                                "Unable to encode the destination Email/changes request."));
+                        javelin::jmap::api::RequestBuilder changesBuilder;
+                        changesBuilder.useCore().useMail();
+                        const auto changesHandle = changesBuilder.call(
+                            *changesRequest, "mail-transfer-destination-changes");
+                        auto changesCalled =
+                            co_await methodCaller.call(destinationRequestContext, changesBuilder);
+                        if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(
+                                changesCalled))
+                        {
+                            const auto error = callerError(changesCalled);
+                            if (retryable(error))
+                            {
+                                if (const auto databaseError = repository.updateStatus(
+                                        operation.operationId, waitStatus(error), error.message))
+                                    co_return javelin::jmap::operationError(*databaseError);
+                                co_return error;
+                            }
+                            if (const auto transitionError = requireTransition(
+                                    repository.transitionItem(
+                                        item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                        MailTransferItemPhase::DestinationUnknown, error.message),
+                                    i18n("The transfer state changed while reconciling an unknown "
+                                         "destination creation.")))
+                                co_return *transitionError;
+                            item.lastError = error.message;
+                            break;
+                        }
+
+                        const auto changesRead = javelin::jmap::api::ResponseReader{
+                            std::get<javelin::jmap::api::ResponseEnvelope>(changesCalled)}
+                                                     .require(changesHandle);
+                        if (const auto* readError =
+                                std::get_if<javelin::jmap::api::ResponseReaderError>(&changesRead))
+                        {
+                            const auto error = javelin::jmap::operationError(*readError);
+                            if (const auto transitionError = requireTransition(
+                                    repository.transitionItem(
+                                        item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                        MailTransferItemPhase::DestinationUnknown, error.message),
+                                    i18n("The transfer state changed while reconciling an unknown "
+                                         "destination creation.")))
+                                co_return *transitionError;
+                            item.lastError = error.message;
+                            break;
+                        }
+
+                        const auto& changes =
+                            std::get<javelin::jmap::api::EmailChangesResponse>(changesRead);
+                        if (changes.accountId != destinationAccount.remoteAccountId ||
+                            changes.oldState != sinceState || changes.newState.empty() ||
+                            (changes.hasMoreChanges && changes.newState == sinceState))
+                        {
+                            const QString message = i18n(
+                                "The destination Email/changes response could not be reconciled "
+                                "safely.");
+                            if (const auto transitionError = requireTransition(
+                                    repository.transitionItem(
+                                        item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                        MailTransferItemPhase::DestinationUnknown, message),
+                                    i18n("The transfer state changed while reconciling an unknown "
+                                         "destination creation.")))
+                                co_return *transitionError;
+                            item.lastError = message;
+                            break;
+                        }
+                        createdIds.insert(createdIds.end(), changes.created.begin(),
+                                          changes.created.end());
+                        if (!changes.hasMoreChanges)
+                        {
+                            changesComplete = true;
+                            break;
+                        }
+                        sinceState = changes.newState;
+                    }
+
+                    if (!changesComplete)
+                    {
+                        if (!item.lastError.has_value())
+                        {
+                            const QString message = i18n(
+                                "Too many destination changes occurred to reconcile this transfer "
+                                "automatically.");
+                            if (const auto transitionError = requireTransition(
+                                    repository.transitionItem(
+                                        item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                        MailTransferItemPhase::DestinationUnknown, message),
+                                    i18n("The transfer state changed while reconciling an unknown "
+                                         "destination creation.")))
+                                co_return *transitionError;
+                            item.lastError = message;
+                        }
+                        continue;
+                    }
+
+                    std::ranges::sort(createdIds);
+                    createdIds.erase(std::unique(createdIds.begin(), createdIds.end()),
+                                     createdIds.end());
+                    if (createdIds.empty())
+                    {
+                        if (const auto error = requireTransition(
+                                repository.transitionItem(
+                                    item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                    MailTransferItemPhase::Uploaded),
+                                i18n("The transfer state changed while retrying a destination "
+                                     "creation proven absent.")))
+                            co_return *error;
+                        item.phase = MailTransferItemPhase::Uploaded;
+                        item.lastError = std::nullopt;
+                        continue;
+                    }
+
+                    const auto maximumObjects = static_cast<std::size_t>(
+                        destinationRequestContext.requestLimits->maxObjectsInGet);
+                    if (item.sourceMessageIds.empty() || createdIds.size() > maximumObjects)
+                    {
+                        const QString message = i18n(
+                            "The destination may contain a newly created message, but Javelin "
+                            "cannot identify it uniquely enough to continue automatically.");
+                        if (const auto transitionError = requireTransition(
+                                repository.transitionItem(
+                                    item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                    MailTransferItemPhase::DestinationUnknown, message),
+                                i18n("The transfer state changed while reconciling an unknown "
+                                     "destination creation.")))
+                            co_return *transitionError;
+                        item.lastError = message;
+                        continue;
+                    }
+
+                    const auto candidatesRequest = javelin::jmap::api::emailGet({
+                        .accountId = destinationAccount.remoteAccountId,
+                        .ids = createdIds,
+                        .idsReference = std::nullopt,
+                        .properties = destinationEmailProperties(),
+                    });
+                    if (!candidatesRequest.has_value())
+                        co_return stateError(
+                            i18n("Unable to encode destination candidate Email/get."));
+                    javelin::jmap::api::RequestBuilder candidatesBuilder;
+                    candidatesBuilder.useCore().useMail();
+                    const auto candidatesHandle = candidatesBuilder.call(
+                        *candidatesRequest, "mail-transfer-destination-candidates");
+                    auto candidatesCalled =
+                        co_await methodCaller.call(destinationRequestContext, candidatesBuilder);
+                    if (!std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(
+                            candidatesCalled))
+                    {
+                        const auto error = callerError(candidatesCalled);
+                        if (retryable(error))
+                        {
+                            if (const auto databaseError = repository.updateStatus(
+                                    operation.operationId, waitStatus(error), error.message))
+                                co_return javelin::jmap::operationError(*databaseError);
+                            co_return error;
+                        }
+                        if (const auto transitionError = requireTransition(
+                                repository.transitionItem(
+                                    item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                    MailTransferItemPhase::DestinationUnknown, error.message),
+                                i18n("The transfer state changed while reconciling destination "
+                                     "candidates.")))
+                            co_return *transitionError;
+                        item.lastError = error.message;
+                        continue;
+                    }
+
+                    const auto candidatesRead = javelin::jmap::api::ResponseReader{
+                        std::get<javelin::jmap::api::ResponseEnvelope>(candidatesCalled)}
+                                                    .require(candidatesHandle);
+                    if (const auto* readError =
+                            std::get_if<javelin::jmap::api::ResponseReaderError>(&candidatesRead))
+                    {
+                        const auto error = javelin::jmap::operationError(*readError);
+                        if (const auto transitionError = requireTransition(
+                                repository.transitionItem(
+                                    item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                    MailTransferItemPhase::DestinationUnknown, error.message),
+                                i18n("The transfer state changed while reconciling destination "
+                                     "candidates.")))
+                            co_return *transitionError;
+                        item.lastError = error.message;
+                        continue;
+                    }
+
+                    const auto& candidates =
+                        std::get<javelin::jmap::api::EmailGetResponse>(candidatesRead);
+                    if (candidates.accountId != destinationAccount.remoteAccountId)
+                    {
+                        const QString message =
+                            i18n("Destination candidate Email/get returned the wrong account id.");
+                        if (const auto transitionError = requireTransition(
+                                repository.transitionItem(
+                                    item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                    MailTransferItemPhase::DestinationUnknown, message),
+                                i18n("The transfer state changed while reconciling destination "
+                                     "candidates.")))
+                            co_return *transitionError;
+                        item.lastError = message;
+                        continue;
+                    }
+
+                    auto sourceMessageIds = item.sourceMessageIds;
+                    std::ranges::sort(sourceMessageIds);
+                    const javelin::jmap::domain::Email* matched = nullptr;
+                    bool multipleMatches = false;
+                    for (const auto& candidate : candidates.list)
+                    {
+                        auto candidateMessageIds = candidate.messageId;
+                        std::ranges::sort(candidateMessageIds);
+                        const bool receivedAtMatches =
+                            !item.sourceReceivedAt.has_value() ||
+                            candidate.receivedAt == *item.sourceReceivedAt;
+                        const bool matches =
+                            candidateMessageIds == sourceMessageIds && receivedAtMatches &&
+                            candidate.size == item.sourceSize &&
+                            std::ranges::contains(candidate.mailboxIds,
+                                                  operation.destinationMailboxId);
+                        if (!matches)
+                            continue;
+                        if (matched != nullptr)
+                        {
+                            multipleMatches = true;
+                            break;
+                        }
+                        matched = &candidate;
+                    }
+
+                    if (matched == nullptr || multipleMatches)
+                    {
+                        const QString message = i18n(
+                            "The destination may contain the transferred message, but its creation "
+                            "cannot be correlated uniquely enough to continue automatically.");
+                        if (const auto transitionError = requireTransition(
+                                repository.transitionItem(
+                                    item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                    MailTransferItemPhase::DestinationUnknown, message),
+                                i18n("The transfer state changed while reconciling destination "
+                                     "candidates.")))
+                            co_return *transitionError;
+                        item.lastError = message;
+                        continue;
+                    }
+
+                    if (const auto error = requireTransition(
+                            repository.markDestinationConfirmed(
+                                item.itemId, MailTransferItemPhase::DestinationUnknown,
+                                {
+                                    .emailId = matched->id,
+                                    .blobId = matched->blobId.empty()
+                                                  ? std::nullopt
+                                                  : std::optional<std::string>{matched->blobId},
+                                    .threadId = matched->threadId.empty()
+                                                    ? std::nullopt
+                                                    : std::optional<std::string>{matched->threadId},
+                                    .size = matched->size,
+                                    .reusedExisting = false,
+                                    .priorMailboxIds = std::nullopt,
+                                }),
+                            i18n("The transfer state changed while confirming a reconciled "
+                                 "destination creation.")))
+                        co_return *error;
+                    item.destinationEmailId = matched->id;
+                    item.destinationBlobId = matched->blobId;
+                    item.destinationThreadId = matched->threadId;
+                    item.destinationSize = matched->size;
+                    item.phase = MailTransferItemPhase::DestinationConfirmed;
+                    item.lastError = std::nullopt;
                     continue;
+                }
 
                 const auto existingRequest = javelin::jmap::api::emailGet({
                     .accountId = destinationAccount.remoteAccountId,

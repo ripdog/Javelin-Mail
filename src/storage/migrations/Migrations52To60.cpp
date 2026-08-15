@@ -99,6 +99,15 @@ namespace javelin::jmap::cache::migrations
                                        "destination_pre_state TEXT"),
                     },
             },
+            MigrationStep{
+                .version = 56,
+                .name = QStringLiteral("mail_transfer_source_message_ids"),
+                .statements =
+                    {
+                        QStringLiteral("ALTER TABLE mail_transfer_items ADD COLUMN "
+                                       "source_message_ids_json TEXT NOT NULL DEFAULT '[]'"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

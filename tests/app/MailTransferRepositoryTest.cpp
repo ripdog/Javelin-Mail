@@ -76,6 +76,7 @@ namespace
             .sourceEmailState = std::optional<std::string>{"email-state-7"},
             .sourceMailboxIds = {"inbox", "important"},
             .sourceKeywords = {"$seen", "$flagged", "custom-keyword"},
+            .sourceMessageIds = {"message@example.test"},
             .sourceReceivedAt = std::optional<std::string>{"2026-08-15T08:00:00Z"},
             .sourceSize = static_cast<std::uint64_t>(1000 + ordinal),
             .sourceRemoveMailboxIds = {"inbox"},
