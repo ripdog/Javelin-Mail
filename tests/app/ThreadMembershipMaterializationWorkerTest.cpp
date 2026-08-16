@@ -432,6 +432,14 @@ TEST_CASE("Thread materialization uses the remote account id for a connection-qu
     REQUIRE(remoteNamedCache.exec());
     REQUIRE(remoteNamedCache.next());
     CHECK(remoteNamedCache.value(0).toInt() == 0);
+
+    QSqlQuery localCache{fixture.database.database()};
+    localCache.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM emails WHERE account_id=:account AND email_id='child-thread-1'"));
+    localCache.bindValue(QStringLiteral(":account"), QString::fromStdString(localAccountId));
+    REQUIRE(localCache.exec());
+    REQUIRE(localCache.next());
+    CHECK(localCache.value(0).toInt() == 1);
 }
 
 TEST_CASE("current Thread membership cardinality mismatch is repaired from the server",
