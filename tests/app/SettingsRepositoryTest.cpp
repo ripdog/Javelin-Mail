@@ -424,6 +424,30 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
     CHECK(stale->error.code == javelin::protocol::BoundaryErrorCode::StaleSettingsRevision);
 }
 
+TEST_CASE("settings updates reject incomplete default calendar destinations", "[app][settings]")
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto repository = repositoryFor(directory.filePath(QStringLiteral("settings.ini")));
+    const auto loaded = repository.load();
+    const auto* initial = std::get_if<SettingsSnapshot>(&loaded);
+    REQUIRE(initial != nullptr);
+
+    auto workspace = initial->workspace;
+    workspace.defaultCalendarDestination = {
+        .ownerAccountId = QStringLiteral("server-1"),
+        .accountId = QStringLiteral("account-1"),
+        .calendarId = QString{},
+    };
+    auto update = emptyUpdate();
+    update.workspace = std::move(workspace);
+    const auto result =
+        repository.update({.baseRevision = initial->revision, .update = std::move(update)});
+    const auto* rejected = std::get_if<javelin::protocol::SettingsUpdateRejected>(&result);
+    REQUIRE(rejected != nullptr);
+    CHECK(rejected->error.detail == QStringLiteral("default calendar destination is incomplete"));
+}
+
 TEST_CASE("settings migration fails closed on malformed account records", "[app][settings]")
 {
     QTemporaryDir directory;
