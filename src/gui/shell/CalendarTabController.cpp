@@ -202,13 +202,18 @@ namespace javelin::gui::shell
                 if (utcEnd.isValid())
                     return utcEnd.toLocalTime();
             }
-            const auto duration = QString::fromStdString(event.duration.value);
-            static const QRegularExpression days{QStringLiteral(R"(^P(\d+)D$)")};
-            static const QRegularExpression seconds{QStringLiteral(R"(^PT(\d+)S$)")};
-            if (const auto match = days.match(duration); match.hasMatch())
-                return start.addDays(match.captured(1).toInt());
-            if (const auto match = seconds.match(duration); match.hasMatch())
-                return start.addSecs(match.captured(1).toLongLong());
+            static const QRegularExpression durationPattern{QStringLiteral(
+                R"(^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$)")};
+            const auto match =
+                durationPattern.match(QString::fromStdString(event.duration.value));
+            if (match.hasMatch())
+            {
+                const auto seconds =
+                    match.captured(1).toLongLong() * 86400 +
+                    match.captured(2).toLongLong() * 3600 +
+                    match.captured(3).toLongLong() * 60 + qRound64(match.captured(4).toDouble());
+                return start.addSecs(seconds);
+            }
             return event.showWithoutTime ? start.addDays(1) : start.addSecs(60 * 60);
         }
 
