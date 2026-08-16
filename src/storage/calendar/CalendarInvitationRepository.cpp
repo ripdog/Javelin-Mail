@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace javelin::jmap::cache
 {
@@ -383,9 +385,11 @@ namespace javelin::jmap::cache
                 transaction.rollback();
                 return queryError(QStringLiteral("Read pending invitation scopes"), pendingScopes);
             }
+            std::vector<QString> pendingRecurrences;
             while (pendingScopes.next())
+                pendingRecurrences.push_back(pendingScopes.value(0).toString());
+            for (const auto& recurrence : pendingRecurrences)
             {
-                const auto recurrence = pendingScopes.value(0).toString();
                 auto key = eventId;
                 key.push_back('\0');
                 key += recurrence.toStdString();
@@ -412,15 +416,19 @@ namespace javelin::jmap::cache
                 return queryError(QStringLiteral("Read calendar invitation outbox scopes"),
                                   outboxScopes);
             }
+            std::vector<std::pair<QString, std::string>> outboxRows;
             while (outboxScopes.next())
             {
-                const auto recurrence = outboxScopes.value(0).toString();
+                outboxRows.emplace_back(outboxScopes.value(0).toString(),
+                                        outboxScopes.value(1).toString().toStdString());
+            }
+            for (const auto& [recurrence, invitation] : outboxRows)
+            {
                 auto key = eventId;
                 key.push_back('\0');
                 key += recurrence.toStdString();
                 if (projectedScopes.contains(key))
                     continue;
-                const auto invitation = outboxScopes.value(1).toString().toStdString();
                 resolveOutbox.bindValue(QStringLiteral(":key"), QString::fromStdString(invitation));
                 if (!resolveOutbox.exec())
                 {

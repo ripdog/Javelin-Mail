@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <unordered_set>
+#include <vector>
 
 namespace javelin::jmap::cache
 {
@@ -1226,16 +1227,33 @@ namespace javelin::jmap::cache
             invitationOutbox.bindValue(QStringLiteral(":event"), QString::fromStdString(event.id));
             if (!exec(invitationOutbox, failure, QStringLiteral("Read calendar invitation outbox")))
                 return failure;
+            struct InvitationOutboxRow
+            {
+                QString recurrenceText;
+                std::string selfParticipantId;
+                QString invitationKey;
+                QVariant sourceNotification;
+            };
+            std::vector<InvitationOutboxRow> invitationRows;
             while (invitationOutbox.next())
             {
-                const auto recurrenceText = invitationOutbox.value(0).toString();
+                invitationRows.push_back({
+                    .recurrenceText = invitationOutbox.value(0).toString(),
+                    .selfParticipantId = invitationOutbox.value(1).toString().toStdString(),
+                    .invitationKey = invitationOutbox.value(2).toString(),
+                    .sourceNotification = invitationOutbox.value(3),
+                });
+            }
+            for (const auto& invitationRow : invitationRows)
+            {
+                const auto& recurrenceText = invitationRow.recurrenceText;
                 const auto recurrenceId = recurrenceText.isEmpty()
                                               ? std::optional<calendar::LocalDateTime>{}
                                               : std::optional<calendar::LocalDateTime>{
                                                     {.value = recurrenceText.toStdString()}};
-                const auto selfParticipantId = invitationOutbox.value(1).toString().toStdString();
-                const auto invitationKey = invitationOutbox.value(2).toString();
-                const auto sourceNotification = invitationOutbox.value(3);
+                const auto& selfParticipantId = invitationRow.selfParticipantId;
+                const auto& invitationKey = invitationRow.invitationKey;
+                const auto& sourceNotification = invitationRow.sourceNotification;
 
                 std::optional<calendar::CalendarEvent> effectiveOccurrence;
                 const calendar::CalendarEvent* effectiveEvent = &event;
