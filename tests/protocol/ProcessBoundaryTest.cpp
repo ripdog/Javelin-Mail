@@ -1117,6 +1117,27 @@ TEST_CASE("socket async command admission bounds outstanding replies", "[protoco
     CHECK(std::holds_alternative<CommandAccepted>(first.result()));
 }
 
+TEST_CASE("activation route wire discriminators remain stable", "[protocol][socket][compatibility]")
+{
+    const std::vector<std::pair<ActivationRoute, quint8>> routes{
+        {RestoreDraftRoute{}, 5},
+        {OpenTaskCenterRoute{}, 6},
+        {OpenMailtoRoute{}, 7},
+        {ShowUndoSendDialogRoute{}, 8},
+        {CloseUndoSendDialogRoute{}, 9},
+        {OpenCalendarEventRoute{}, 10},
+    };
+
+    for (const auto& [route, expectedKind] : routes)
+    {
+        const auto encoded = encodeActivationRoute(route);
+        REQUIRE(std::holds_alternative<QByteArray>(encoded));
+        const auto& payload = std::get<QByteArray>(encoded);
+        REQUIRE_FALSE(payload.isEmpty());
+        CHECK(static_cast<quint8>(payload.front()) == expectedKind);
+    }
+}
+
 TEST_CASE("activation socket carries typed routes to the daemon", "[protocol][socket]")
 {
     QTemporaryDir runtimeDirectory;
