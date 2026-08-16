@@ -804,6 +804,20 @@ TEST_CASE("email copy requests serialize RFC 8620 copy arguments", "[jmap][metho
     CHECK(json->find(R"("onSuccessDestroyOriginal":false)") != std::string::npos);
     CHECK(json->find("destroyFromIfInState") == std::string::npos);
 
+    const auto destructive = javelin::jmap::api::serializeEmailCopyRequest({
+        .fromAccountId = "source-account",
+        .ifFromInState = "source-state",
+        .accountId = "destination-account",
+        .ifInState = "destination-state",
+        .create = {{"copy-1", javelin::jmap::api::EmailCopyCreate{.id = "eml-1"}}},
+        .onSuccessDestroyOriginal = true,
+        .destroyFromIfInState = "source-state-after-copy",
+    });
+    REQUIRE(destructive.has_value());
+    CHECK(destructive->find(R"("onSuccessDestroyOriginal":true)") != std::string::npos);
+    CHECK(destructive->find(R"("destroyFromIfInState":"source-state-after-copy")") !=
+          std::string::npos);
+
     const auto method = javelin::jmap::api::emailCopy({
         .fromAccountId = "source-account",
         .ifFromInState = std::nullopt,
