@@ -345,10 +345,12 @@ namespace javelin::gui::shell
                     switch (summary.status)
                     {
                     case javelin::app::MailTransferStatus::BlockedUnknown:
-                        message = i18n("The transfer outcome could not be confirmed for %1 "
-                                       "message(s). Javelin "
-                                       "will not retry those messages automatically.",
-                                       summary.unknownItemCount);
+                        message = i18np(
+                            "The transfer outcome could not be confirmed for one message. Javelin "
+                            "will not retry it automatically.",
+                            "The transfer outcome could not be confirmed for %1 messages. Javelin "
+                            "will not retry them automatically.",
+                            summary.unknownItemCount);
                         break;
                     case javelin::app::MailTransferStatus::Partial:
                         message = i18n(
@@ -359,8 +361,9 @@ namespace javelin::gui::shell
                         break;
                     case javelin::app::MailTransferStatus::Failed:
                         code = javelin::jmap::OperationErrorCode::ServerFailure;
-                        message =
-                            i18n("The transfer failed for %1 message(s).", summary.failedItemCount);
+                        message = i18np("The transfer failed for one message.",
+                                        "The transfer failed for %1 messages.",
+                                        summary.failedItemCount);
                         break;
                     case javelin::app::MailTransferStatus::Cancelled:
                         message = i18n("The transfer was cancelled.");
