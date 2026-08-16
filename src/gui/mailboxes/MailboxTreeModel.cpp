@@ -576,12 +576,14 @@ namespace javelin::gui::mailboxes
                     if (node->unreadEmails != mailbox.unreadEmails ||
                         node->totalThreads != mailbox.totalThreads || node->checked != checked ||
                         node->subscribed != mailbox.isSubscribed ||
+                        node->mayAddItems != mailbox.myRights.mayAddItems ||
                         node->preferences != preferences)
                     {
                         node->unreadEmails = mailbox.unreadEmails;
                         node->totalThreads = mailbox.totalThreads;
                         node->checked = checked;
                         node->subscribed = mailbox.isSubscribed;
+                        node->mayAddItems = mailbox.myRights.mayAddItems;
                         node->preferences = preferences;
                         const auto last = index(row, columnCount(parentIndex) - 1, parentIndex);
                         Q_EMIT dataChanged(current, last,
