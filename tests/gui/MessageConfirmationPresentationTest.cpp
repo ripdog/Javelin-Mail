@@ -64,5 +64,5 @@ TEST_CASE("permanent conversation deletion identifies its message count",
 
     CHECK(confirmation.prompt.contains(QStringLiteral("conversation")));
     CHECK(confirmation.details.contains(QStringLiteral("Project discussion")));
-    CHECK(confirmation.details.contains(QStringLiteral("7")));
+    CHECK(confirmation.details.contains(QStringLiteral("7 messages")));
 }
