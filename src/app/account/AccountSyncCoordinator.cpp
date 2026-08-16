@@ -223,10 +223,11 @@ namespace javelin::app
     QCoro::Task<void>
     AccountSyncCoordinator::onStateChange(javelin::jmap::sync::StateChangeEvent event)
     {
+        if (m_runContext == nullptr)
+            co_return;
         m_lastEventId = event.newState;
-        const std::string primaryRemoteAccountId =
-            m_runContext != nullptr ? m_runContext->configuration.remoteAccountId : m_accountId;
-        auto routed = routeStateChanges(std::move(event.changedStates), primaryRemoteAccountId);
+        auto routed = routeStateChanges(std::move(event.changedStates),
+                                        m_runContext->configuration.remoteAccountId);
         for (auto& [type, state] : routed.mailStates)
             m_pendingStateChanges.insert_or_assign(std::move(type), std::move(state));
         const auto merge = [](auto& destination, auto source)
