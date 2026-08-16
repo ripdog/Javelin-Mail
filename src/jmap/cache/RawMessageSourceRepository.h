@@ -46,7 +46,7 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::variant<std::optional<RawMessageSource>, DatabaseError>
         find(std::string_view accountId, std::string_view emailId) const;
         [[nodiscard]] std::variant<std::optional<RawMessageSourceReference>, DatabaseError>
-        findReference(std::string_view accountId, std::string_view emailId) const;
+        findReference(std::string_view accountId, std::string_view emailId);
         [[nodiscard]] std::variant<std::optional<MailVaultObject>, DatabaseError>
         findVaultObject(std::string_view contentHash) const;
         [[nodiscard]] std::variant<std::optional<std::string>, DatabaseError>

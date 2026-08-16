@@ -302,7 +302,7 @@ namespace javelin::jmap::cache
 
     std::variant<std::optional<RawMessageSourceReference>, DatabaseError>
     RawMessageSourceRepository::findReference(const std::string_view accountId,
-                                              const std::string_view emailId) const
+                                              const std::string_view emailId)
     {
         if (const auto error = m_connection.validate())
             return *error;
@@ -318,7 +318,31 @@ namespace javelin::jmap::cache
         if (!query.exec())
             return makeQueryError(QStringLiteral("Read raw message source reference"), query);
         if (!query.next())
-            return std::optional<RawMessageSourceReference>{};
+        {
+            query.finish();
+            QSqlQuery legacyQuery{m_connection.database()};
+            legacyQuery.prepare(QStringLiteral(
+                "SELECT blob_id,payload FROM raw_message_sources WHERE account_id=:account_id AND "
+                "email_id=:email_id"));
+            legacyQuery.bindValue(QStringLiteral(":account_id"),
+                                  QString::fromStdString(std::string{accountId}));
+            legacyQuery.bindValue(QStringLiteral(":email_id"),
+                                  QString::fromStdString(std::string{emailId}));
+            if (!legacyQuery.exec())
+                return makeQueryError(QStringLiteral("Read legacy raw source reference"),
+                                      legacyQuery);
+            if (!legacyQuery.next())
+                return std::optional<RawMessageSourceReference>{};
+            RawMessageSource source{
+                .emailId = std::string{emailId},
+                .blobId = legacyQuery.value(0).toString().toStdString(),
+                .payload = legacyQuery.value(1).toByteArray(),
+            };
+            legacyQuery.finish();
+            if (const auto error = upsert(accountId, source))
+                return *error;
+            return findReference(accountId, emailId);
+        }
 
         return std::optional<RawMessageSourceReference>{RawMessageSourceReference{
             .emailId = std::string{emailId},
