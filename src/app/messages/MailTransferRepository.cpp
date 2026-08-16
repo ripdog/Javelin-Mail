@@ -58,7 +58,8 @@ namespace javelin::app
             {
                 parsed =
                     QDateTime::fromString(value.toString(), QStringLiteral("yyyy-MM-dd HH:mm:ss"));
-                parsed.setTimeZone(QTimeZone::UTC);
+                if (parsed.isValid())
+                    parsed.setTimeZone(QTimeZone::UTC);
             }
             return parsed;
         }
