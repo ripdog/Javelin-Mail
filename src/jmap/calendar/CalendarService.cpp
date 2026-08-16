@@ -1741,7 +1741,7 @@ namespace javelin::jmap::calendar
                 acceptedState = response.newState;
                 for (const auto& [id, update] : response.updated)
                     if (update && update->isDefault.has_value())
-                        defaults.emplace(id, *update->isDefault);
+                        defaults.insert_or_assign(id, *update->isDefault);
             }
         }
         if (!accepted)
@@ -1780,7 +1780,7 @@ namespace javelin::jmap::calendar
             const auto& verified = std::get<api::CalendarGetResponse>(verifyRead);
             acceptedState = verified.state;
             for (const auto& calendar : verified.list)
-                defaults.emplace(calendar.id, calendar.isDefault);
+                defaults.insert_or_assign(calendar.id, calendar.isDefault);
             const auto selectedCalendar =
                 std::ranges::find(verified.list, calendarId, &Calendar::id);
             accepted = selectedCalendar != verified.list.end() && selectedCalendar->isDefault;
