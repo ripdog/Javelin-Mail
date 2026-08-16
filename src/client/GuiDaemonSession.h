@@ -114,7 +114,7 @@ namespace javelin::app
 
       private:
         [[nodiscard]] std::optional<GuiBootstrapError> connectAndHandshake(bool allowStart);
-        [[nodiscard]] std::optional<GuiBootstrapError> launchDaemon();
+        [[nodiscard]] std::optional<GuiBootstrapError> launchDaemon(bool enableService);
         [[nodiscard]] std::optional<GuiBootstrapError> refreshSettings();
         [[nodiscard]] std::optional<GuiBootstrapError> loadSettingsAndCache();
         [[nodiscard]] std::optional<GuiBootstrapError> openReadConnection();

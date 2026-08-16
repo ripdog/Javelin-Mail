@@ -200,7 +200,7 @@ namespace javelin::app
             return std::nullopt;
         }
 
-        if (const auto error = launchDaemon())
+        if (const auto error = launchDaemon(true))
         {
             metrics.finish(QStringLiteral("error"));
             return error;
@@ -217,7 +217,7 @@ namespace javelin::app
         return result;
     }
 
-    std::optional<GuiBootstrapError> GuiDaemonSession::launchDaemon()
+    std::optional<GuiBootstrapError> GuiDaemonSession::launchDaemon(const bool enableService)
     {
         PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("daemon_launch")};
         if (!m_client->isConnected())
@@ -228,25 +228,35 @@ namespace javelin::app
                                         : m_options.daemonExecutable;
             if (canUseSystemdUserService())
             {
-                const auto result = runSystemctl(
-                    {QStringLiteral("--user"), QStringLiteral("--no-pager"),
-                     QStringLiteral("enable"), QStringLiteral("--now"), systemdUnitName()},
-                    m_options.startTimeoutMilliseconds);
+                QStringList arguments{QStringLiteral("--user"), QStringLiteral("--no-pager")};
+                if (enableService)
+                    arguments << QStringLiteral("enable") << QStringLiteral("--now");
+                else
+                    arguments << QStringLiteral("start");
+                arguments << systemdUnitName();
+                const auto result =
+                    runSystemctl(std::move(arguments), m_options.startTimeoutMilliseconds);
                 if (!result.has_value())
                 {
-                    metrics.finish(QStringLiteral("error"),
-                                   QStringLiteral("stage=enable_systemd_user_service"));
+                    metrics.finish(
+                        QStringLiteral("error"),
+                        enableService ? QStringLiteral("stage=enable_systemd_user_service")
+                                      : QStringLiteral("stage=start_systemd_user_service"));
                     return detailError(
                         GuiBootstrapErrorCode::DaemonStartFailed,
                         QStringLiteral("could not run systemctl --user to start javelind"));
                 }
                 if (result->exitCode != 0)
                 {
-                    metrics.finish(QStringLiteral("error"),
-                                   QStringLiteral("stage=enable_systemd_user_service"));
+                    metrics.finish(
+                        QStringLiteral("error"),
+                        enableService ? QStringLiteral("stage=enable_systemd_user_service")
+                                      : QStringLiteral("stage=start_systemd_user_service"));
                     return detailError(
                         GuiBootstrapErrorCode::DaemonStartFailed,
-                        systemdFailureDetail(QStringLiteral("enable --now javelind.service"),
+                        systemdFailureDetail(enableService
+                                                 ? QStringLiteral("enable --now javelind.service")
+                                                 : QStringLiteral("start javelind.service"),
                                              *result));
                 }
             }
@@ -594,7 +604,7 @@ namespace javelin::app
                     return transportError(*error);
                 }
 
-                if (const auto startError = launchDaemon())
+                if (const auto startError = launchDaemon(false))
                     return startError;
             }
         }
