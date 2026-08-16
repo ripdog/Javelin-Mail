@@ -1088,7 +1088,7 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
     auto cancelledProjection =
         std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(cancelTransaction));
     REQUIRE_FALSE(
-        calendars.projectEvents(cancelledProjection, "a1", "e4", {cancelled}, {}, {}).has_value());
+        calendars.projectEvents(cancelledProjection, "a1", "e6", {cancelled}, {}, {}).has_value());
     REQUIRE_FALSE(cancelledProjection.commit().has_value());
     QSqlQuery cancelledRow{connection.database()};
     REQUIRE(cancelledRow.exec(QStringLiteral(
