@@ -2651,9 +2651,8 @@ namespace javelin::jmap::calendar
             const auto preferred =
                 std::ranges::find(identities, true, &ParticipantIdentity::isDefault);
             const auto& identity = preferred != identities.end() ? *preferred : identities.front();
-            auto owner = std::ranges::find(command.event.attendees, identity.calendarAddress,
-                                           &Attendee::calendarAddress);
-            if (owner == command.event.attendees.end())
+            const auto ownerIndex = participantIndexForAddress(command.event, identity.calendarAddress);
+            if (!ownerIndex.has_value())
             {
                 std::unordered_set<std::string> participantIds;
                 for (const auto& participant : command.event.attendees)
@@ -2663,8 +2662,9 @@ namespace javelin::jmap::calendar
                     participantId = "owner-" + std::to_string(suffix);
                 std::optional<std::string> email;
                 constexpr std::string_view mailtoPrefix = "mailto:";
-                if (identity.calendarAddress.starts_with(mailtoPrefix))
-                    email = identity.calendarAddress.substr(mailtoPrefix.size());
+                const auto normalizedAddress = normalizedCalendarAddress(identity.calendarAddress);
+                if (normalizedAddress.starts_with(mailtoPrefix))
+                    email = normalizedAddress.substr(mailtoPrefix.size());
                 command.event.attendees.push_back({
                     .id = std::move(participantId),
                     .name = identity.name,
@@ -2681,10 +2681,11 @@ namespace javelin::jmap::calendar
             }
             else
             {
-                owner->isOwner = true;
-                owner->isAttendee = true;
-                owner->participationStatus = "accepted";
-                owner->expectReply = false;
+                auto& owner = command.event.attendees[*ownerIndex];
+                owner.isOwner = true;
+                owner.isAttendee = true;
+                owner.participationStatus = "accepted";
+                owner.expectReply = false;
             }
         }
         if (!command.ifInState)
