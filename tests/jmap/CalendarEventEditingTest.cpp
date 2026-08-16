@@ -199,6 +199,12 @@ TEST_CASE("occurrence RSVP changes only the participant status override")
     CHECK(declined.recurrenceOverrides.at("2026-09-08T09:00:00")
               .participantParticipationStatus.at("me") == "declined");
     CHECK(declined.attendees.front().participationStatus == "accepted");
+
+    base.recurrenceOverrides["2026-09-15T09:00:00"].excluded = true;
+    const auto excluded = javelin::jmap::calendar::setOccurrenceParticipationStatus(
+        base, {.value = "2026-09-15T09:00:00"}, "me", "declined");
+    REQUIRE(excluded.recurrenceOverrides.contains("2026-09-15T09:00:00"));
+    CHECK(excluded.recurrenceOverrides.at("2026-09-15T09:00:00").excluded);
 }
 
 TEST_CASE("occurrence edits create an override without changing the base event")

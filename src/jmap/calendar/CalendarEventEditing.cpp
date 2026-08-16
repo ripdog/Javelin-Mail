@@ -286,7 +286,6 @@ namespace javelin::jmap::calendar
     {
         auto result = baseEvent;
         auto& occurrence = result.recurrenceOverrides[recurrenceId.value];
-        occurrence.excluded = false;
         const auto participantOverride =
             occurrence.participantOverrides.find(std::string{participantId});
         if (participantOverride != occurrence.participantOverrides.end())
