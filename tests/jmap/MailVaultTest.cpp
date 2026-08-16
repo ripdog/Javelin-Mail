@@ -164,6 +164,35 @@ TEST_CASE("mail vault stores one immutable object and projects effective mailbox
     CHECK_FALSE(QFileInfo::exists(movedPath));
 }
 
+TEST_CASE("raw source reference lookup migrates the requested legacy row beyond batch limits",
+          "[jmap][cache][vault][migration]")
+{
+    auto context = database();
+    seedAccount(context.connection);
+    QSqlQuery insert{context.connection.database()};
+    insert.prepare(QStringLiteral(
+        "INSERT INTO raw_message_sources(account_id,email_id,blob_id,payload) "
+        "VALUES('account-1',:email,:blob,:payload)"));
+    for (int index = 0; index < 30; ++index)
+    {
+        insert.bindValue(QStringLiteral(":email"), QStringLiteral("email-%1").arg(index));
+        insert.bindValue(QStringLiteral(":blob"), QStringLiteral("blob-%1").arg(index));
+        insert.bindValue(QStringLiteral(":payload"),
+                         QByteArrayLiteral("legacy raw message ") + QByteArray::number(index));
+        REQUIRE(insert.exec());
+    }
+
+    javelin::jmap::cache::RawMessageSourceRepository sources{context.connection};
+    const auto referenceResult = sources.findReference("account-1", "email-29");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::RawMessageSourceReference>>(
+        referenceResult));
+    const auto& reference =
+        std::get<std::optional<javelin::jmap::cache::RawMessageSourceReference>>(referenceResult);
+    REQUIRE(reference.has_value());
+    CHECK(reference->blobId == "blob-29");
+    CHECK(reference->object.size == QByteArrayLiteral("legacy raw message 29").size());
+}
+
 TEST_CASE("mail vault storage is not failed by stale metadata projection work",
           "[jmap][cache][vault][projection]")
 {
