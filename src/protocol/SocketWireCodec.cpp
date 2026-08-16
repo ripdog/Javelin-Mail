@@ -1357,9 +1357,43 @@ namespace javelin::protocol
             return finishReply(reader, std::optional<BoundaryError>{std::move(error)});
         }
 
+        [[nodiscard]] quint8 activationRouteKind(const ActivationRoute& route)
+        {
+            return std::visit(
+                [](const auto& value) -> quint8
+                {
+                    using Route = std::decay_t<decltype(value)>;
+                    if constexpr (std::is_same_v<Route, OpenMailboxRoute>)
+                        return 0;
+                    else if constexpr (std::is_same_v<Route, OpenMessageRoute>)
+                        return 1;
+                    else if constexpr (std::is_same_v<Route, OpenComposeRoute>)
+                        return 2;
+                    else if constexpr (std::is_same_v<Route, RaiseGuiRoute>)
+                        return 3;
+                    else if constexpr (std::is_same_v<Route, OpenSettingsRoute>)
+                        return 4;
+                    else if constexpr (std::is_same_v<Route, RestoreDraftRoute>)
+                        return 5;
+                    else if constexpr (std::is_same_v<Route, OpenTaskCenterRoute>)
+                        return 6;
+                    else if constexpr (std::is_same_v<Route, OpenMailtoRoute>)
+                        return 7;
+                    else if constexpr (std::is_same_v<Route, ShowUndoSendDialogRoute>)
+                        return 8;
+                    else if constexpr (std::is_same_v<Route, CloseUndoSendDialogRoute>)
+                        return 9;
+                    else if constexpr (std::is_same_v<Route, OpenCalendarEventRoute>)
+                        return 10;
+                    else
+                        static_assert(sizeof(Route) == 0, "Unhandled activation route");
+                },
+                route);
+        }
+
         bool writeActivationRoute(PayloadWriter& writer, const ActivationRoute& route)
         {
-            if (!writer.byte(static_cast<quint8>(route.index())))
+            if (!writer.byte(activationRouteKind(route)))
                 return false;
             return std::visit(
                 [&writer](const auto& value)
@@ -1457,7 +1491,7 @@ namespace javelin::protocol
                 route = std::move(value);
                 return true;
             }
-            if (kind == 5)
+            if (kind == 10)
             {
                 OpenCalendarEventRoute value;
                 bool hasRecurrenceId = false;
@@ -1476,7 +1510,7 @@ namespace javelin::protocol
                 route = std::move(value);
                 return true;
             }
-            if (kind == 6)
+            if (kind == 5)
             {
                 RestoreDraftRoute value;
                 if (!reader.string(value.accountId) || !reader.string(value.draftEmailId) ||
@@ -1485,7 +1519,7 @@ namespace javelin::protocol
                 route = std::move(value);
                 return true;
             }
-            if (kind == 7)
+            if (kind == 6)
             {
                 OpenTaskCenterRoute value;
                 if (!reader.string(value.activationToken))
@@ -1493,7 +1527,7 @@ namespace javelin::protocol
                 route = std::move(value);
                 return true;
             }
-            if (kind == 8)
+            if (kind == 7)
             {
                 OpenMailtoRoute value;
                 if (!reader.string(value.uri) || !reader.string(value.activationToken))
@@ -1501,7 +1535,7 @@ namespace javelin::protocol
                 route = std::move(value);
                 return true;
             }
-            if (kind == 9)
+            if (kind == 8)
             {
                 ShowUndoSendDialogRoute value;
                 quint64 deadline = 0;
@@ -1514,7 +1548,7 @@ namespace javelin::protocol
                 route = std::move(value);
                 return true;
             }
-            if (kind == 10)
+            if (kind == 9)
             {
                 CloseUndoSendDialogRoute value;
                 if (!reader.string(value.sendId))
@@ -2042,74 +2076,7 @@ namespace javelin::protocol
     {
         const auto encoded = makePayload(
             SocketFrameKind::ActivationRequest, limits,
-            [&route](PayloadWriter& writer)
-            {
-                return std::visit(
-                    [&writer](const auto& value)
-                    {
-                        using Route = std::decay_t<decltype(value)>;
-                        if constexpr (std::is_same_v<Route, OpenMailboxRoute>)
-                        {
-                            return writer.byte(0) && writer.string(value.accountId) &&
-                                   writer.string(value.mailboxId) &&
-                                   writer.string(value.activationToken);
-                        }
-                        else if constexpr (std::is_same_v<Route, OpenMessageRoute>)
-                        {
-                            return writer.byte(1) && writer.string(value.accountId) &&
-                                   writer.string(value.mailboxId) &&
-                                   writer.string(value.mailboxName) &&
-                                   writer.string(value.threadId) && writer.string(value.emailId) &&
-                                   writer.string(value.activationToken);
-                        }
-                        else if constexpr (std::is_same_v<Route, OpenComposeRoute>)
-                            return writer.byte(2) && writer.string(value.composeSessionId) &&
-                                   writer.string(value.activationToken);
-                        else if constexpr (std::is_same_v<Route, RaiseGuiRoute>)
-                        {
-                            return writer.byte(3) && writer.string(value.activationToken);
-                        }
-                        else if constexpr (std::is_same_v<Route, OpenSettingsRoute>)
-                        {
-                            return writer.byte(4) && writer.string(value.connectionId) &&
-                                   writer.string(value.activationToken);
-                        }
-                        else if constexpr (std::is_same_v<Route, OpenCalendarEventRoute>)
-                        {
-                            return writer.byte(5) && writer.string(value.calendarAccountId) &&
-                                   writer.string(value.eventId) &&
-                                   writer.boolean(value.recurrenceId.has_value()) &&
-                                   (!value.recurrenceId || writer.string(*value.recurrenceId)) &&
-                                   writer.string(value.navigationDate) &&
-                                   writer.string(value.activationToken);
-                        }
-                        else if constexpr (std::is_same_v<Route, RestoreDraftRoute>)
-                        {
-                            return writer.byte(6) && writer.string(value.accountId) &&
-                                   writer.string(value.draftEmailId) &&
-                                   writer.string(value.composeSessionId) &&
-                                   writer.string(value.activationToken);
-                        }
-                        else if constexpr (std::is_same_v<Route, OpenTaskCenterRoute>)
-                            return writer.byte(7) && writer.string(value.activationToken);
-                        else if constexpr (std::is_same_v<Route, OpenMailtoRoute>)
-                            return writer.byte(8) && writer.string(value.uri) &&
-                                   writer.string(value.activationToken);
-                        else if constexpr (std::is_same_v<Route, ShowUndoSendDialogRoute>)
-                            return value.deadlineEpochMilliseconds >= 0 && writer.byte(9) &&
-                                   writer.string(value.sendId) && writer.string(value.title) &&
-                                   writer.string(value.message) &&
-                                   writer.qword(
-                                       static_cast<quint64>(value.deadlineEpochMilliseconds));
-                        else if constexpr (std::is_same_v<Route, CloseUndoSendDialogRoute>)
-                            return writer.byte(10) && writer.string(value.sendId);
-                        else
-                        {
-                            return false;
-                        }
-                    },
-                    route);
-            });
+            [&route](PayloadWriter& writer) { return writeActivationRoute(writer, route); });
         if (const auto* error = std::get_if<SocketFrameError>(&encoded))
             return *error;
         return std::get<EncodedPayload>(encoded).payload;
@@ -2119,129 +2086,12 @@ namespace javelin::protocol
     decodeActivationRoute(const QByteArray& payload, const BoundaryLimits& limits)
     {
         PayloadReader reader{payload, limits};
-        quint8 routeIndex = 0;
-        if (!reader.byte(routeIndex))
+        ActivationRoute route;
+        if (!readActivationRoute(reader, route))
             return malformed(QStringLiteral("invalid activation route"));
-        if (routeIndex == 0)
-        {
-            OpenMailboxRoute route;
-            if (!reader.string(route.accountId) || !reader.string(route.mailboxId) ||
-                !reader.string(route.activationToken))
-                return malformed(QStringLiteral("invalid mailbox activation route"));
-            if (const auto error = reader.finish())
-                return *error;
-            return ActivationRoute{std::move(route)};
-        }
-        if (routeIndex == 1)
-        {
-            OpenMessageRoute route;
-            if (!reader.string(route.accountId) || !reader.string(route.mailboxId) ||
-                !reader.string(route.mailboxName) || !reader.string(route.threadId) ||
-                !reader.string(route.emailId) || !reader.string(route.activationToken))
-                return malformed(QStringLiteral("invalid message activation route"));
-            if (const auto error = reader.finish())
-                return *error;
-            return ActivationRoute{std::move(route)};
-        }
-        if (routeIndex == 2)
-        {
-            OpenComposeRoute route;
-            if (!reader.string(route.composeSessionId) || !reader.string(route.activationToken))
-                return malformed(QStringLiteral("invalid compose activation route"));
-            if (const auto error = reader.finish())
-                return *error;
-            return ActivationRoute{std::move(route)};
-        }
-        if (routeIndex == 3)
-        {
-            RaiseGuiRoute route;
-            if (!reader.string(route.activationToken))
-                return malformed(QStringLiteral("invalid raise activation route"));
-            if (const auto error = reader.finish())
-                return *error;
-            return ActivationRoute{std::move(route)};
-        }
-        if (routeIndex == 4)
-        {
-            OpenSettingsRoute route;
-            if (!reader.string(route.connectionId) || !reader.string(route.activationToken))
-                return malformed(QStringLiteral("invalid settings activation route"));
-            if (const auto error = reader.finish())
-                return *error;
-            return ActivationRoute{std::move(route)};
-        }
-        if (routeIndex == 5)
-        {
-            OpenCalendarEventRoute route;
-            bool hasRecurrenceId = false;
-            if (!reader.string(route.calendarAccountId) || !reader.string(route.eventId) ||
-                !reader.boolean(hasRecurrenceId))
-                return malformed(QStringLiteral("invalid calendar event activation route"));
-            if (hasRecurrenceId)
-            {
-                QString recurrenceId;
-                if (!reader.string(recurrenceId))
-                    return malformed(QStringLiteral("invalid calendar event activation route"));
-                route.recurrenceId = std::move(recurrenceId);
-            }
-            if (!reader.string(route.navigationDate) || !reader.string(route.activationToken))
-                return malformed(QStringLiteral("invalid calendar event activation route"));
-            if (const auto error = reader.finish())
-                return *error;
-            return ActivationRoute{std::move(route)};
-        }
-        if (routeIndex == 6)
-        {
-            RestoreDraftRoute route;
-            if (!reader.string(route.accountId) || !reader.string(route.draftEmailId) ||
-                !reader.string(route.composeSessionId) || !reader.string(route.activationToken))
-                return malformed(QStringLiteral("invalid draft activation route"));
-            if (const auto error = reader.finish())
-                return *error;
-            return ActivationRoute{std::move(route)};
-        }
-        if (routeIndex == 7)
-        {
-            OpenTaskCenterRoute route;
-            if (!reader.string(route.activationToken))
-                return malformed(QStringLiteral("invalid task center activation route"));
-            if (const auto error = reader.finish())
-                return *error;
-            return ActivationRoute{std::move(route)};
-        }
-        if (routeIndex == 8)
-        {
-            OpenMailtoRoute route;
-            if (!reader.string(route.uri) || !reader.string(route.activationToken))
-                return malformed(QStringLiteral("invalid mailto activation route"));
-            if (const auto error = reader.finish())
-                return *error;
-            return ActivationRoute{std::move(route)};
-        }
-        if (routeIndex == 9)
-        {
-            ShowUndoSendDialogRoute route;
-            quint64 deadline = 0;
-            if (!reader.string(route.sendId) || !reader.string(route.title) ||
-                !reader.string(route.message) || !reader.qword(deadline))
-                return malformed(QStringLiteral("invalid undo send dialog activation route"));
-            if (deadline > static_cast<quint64>(std::numeric_limits<qint64>::max()))
-                return malformed(QStringLiteral("invalid undo send dialog activation route"));
-            route.deadlineEpochMilliseconds = static_cast<qint64>(deadline);
-            if (const auto error = reader.finish())
-                return *error;
-            return ActivationRoute{std::move(route)};
-        }
-        if (routeIndex == 10)
-        {
-            CloseUndoSendDialogRoute route;
-            if (!reader.string(route.sendId))
-                return malformed(QStringLiteral("invalid undo send close activation route"));
-            if (const auto error = reader.finish())
-                return *error;
-            return ActivationRoute{std::move(route)};
-        }
-        return malformed(QStringLiteral("unknown activation route variant"));
+        if (const auto error = reader.finish())
+            return *error;
+        return route;
     }
 
     std::variant<QByteArray, SocketFrameError>
