@@ -3087,7 +3087,7 @@ namespace javelin::gui::contacts
             groupIndex = static_cast<std::size_t>(index);
         }
         std::vector<const javelin::jmap::contacts::ContactSummary*> candidates;
-        QStringList candidateNames;
+        QStringList candidateChoices;
         for (const auto& id : groups[groupIndex].contactIds)
         {
             const auto found =
@@ -3095,14 +3095,18 @@ namespace javelin::gui::contacts
             if (found != contacts->end())
             {
                 candidates.push_back(&*found);
-                candidateNames.push_back(QString::fromStdString(found->displayName));
+                const auto displayName = QString::fromStdString(found->displayName).trimmed();
+                const auto label = displayName.isEmpty() ? i18n("(unnamed contact)") : displayName;
+                candidateChoices.push_back(
+                    i18nc("numbered duplicate contact choice", "%1. %2", candidates.size(), label));
             }
         }
         bool accepted = false;
-        const QString primaryName = QInputDialog::getItem(this, i18n("Merge Duplicate Contacts"),
-                                                          i18n("Keep this contact as the primary"),
-                                                          candidateNames, 0, false, &accepted);
-        const auto primaryIndex = candidateNames.indexOf(primaryName);
+        const QString primaryChoice =
+            QInputDialog::getItem(this, i18n("Merge Duplicate Contacts"),
+                                  i18n("Keep this contact as the primary"), candidateChoices, 0,
+                                  false, &accepted);
+        const auto primaryIndex = candidateChoices.indexOf(primaryChoice);
         if (!accepted || primaryIndex < 0)
             return;
         const auto* account = currentAccount();
@@ -3132,6 +3136,7 @@ namespace javelin::gui::contacts
                 label = i18nc("contact confirmation name and address", "%1 <%2>", label, email);
             mergeDetails.push_back(label);
         }
+        const auto primaryName = mergeDetails.at(primaryIndex);
         if (QMessageBox::question(
                 this, i18n("Merge Duplicate Contacts"),
                 i18n("Merge %1 contacts into %2? This keeps all mapped fields and removes the "
