@@ -37,6 +37,15 @@ namespace
         Q_UNUSED(application);
     }
 
+    [[nodiscard]] const javelin::jmap::api::HttpHeader*
+    header(const javelin::jmap::api::HttpRequest& request, const QByteArray& name)
+    {
+        for (const auto& value : request.headers)
+            if (value.name == name)
+                return &value;
+        return nullptr;
+    }
+
     class FakeTransport final : public javelin::jmap::api::AbstractTransport
     {
       public:
@@ -245,10 +254,12 @@ TEST_CASE("method caller posts a typed request envelope and parses the response"
     CHECK(transport.lastRequest.method == javelin::jmap::api::HttpMethod::Post);
     CHECK(transport.lastRequest.url == QUrl{QStringLiteral("https://mail.example.com/jmap/api")});
     REQUIRE(transport.lastRequest.headers.size() == 3);
-    CHECK(transport.lastRequest.headers.front().name == "Authorization");
-    CHECK(transport.lastRequest.headers.front().value == "Bearer access-token");
-    CHECK(transport.lastRequest.headers.back().name == "Content-Type");
-    CHECK(transport.lastRequest.headers.back().value == "application/json");
+    const auto* authorization = header(transport.lastRequest, QByteArrayLiteral("Authorization"));
+    REQUIRE(authorization != nullptr);
+    CHECK(authorization->value == "Bearer access-token");
+    const auto* contentType = header(transport.lastRequest, QByteArrayLiteral("Content-Type"));
+    REQUIRE(contentType != nullptr);
+    CHECK(contentType->value == "application/json");
 
     const auto roundTripRequest =
         javelin::jmap::api::parseRequestEnvelope(transport.lastRequest.body.toStdString());
@@ -290,7 +301,10 @@ TEST_CASE("method caller refreshes expired tokens and persists them when configu
     CHECK(tokenRefresher.calls == 1);
     REQUIRE(secretStore.storedToken.has_value());
     CHECK(secretStore.storedToken->accessToken == "refreshed-token");
-    CHECK(transport.lastRequest.headers.front().value == "Bearer refreshed-token");
+    const auto* refreshedAuthorization =
+        header(transport.lastRequest, QByteArrayLiteral("Authorization"));
+    REQUIRE(refreshedAuthorization != nullptr);
+    CHECK(refreshedAuthorization->value == "Bearer refreshed-token");
 }
 
 TEST_CASE("refreshing HTTP transport retries one definite unauthorized response",
@@ -341,7 +355,10 @@ TEST_CASE("refreshing HTTP transport retries one definite unauthorized response"
     REQUIRE(rawTransport.requests.size() == 2);
     REQUIRE(rawTransport.requests[1].authentication.has_value());
     CHECK(rawTransport.requests[1].authentication->accessToken == "refreshed-token");
-    CHECK(rawTransport.requests[1].headers.front().value == "Bearer refreshed-token");
+    const auto* refreshedAuthorization =
+        header(rawTransport.requests[1], QByteArrayLiteral("Authorization"));
+    REQUIRE(refreshedAuthorization != nullptr);
+    CHECK(refreshedAuthorization->value == "Bearer refreshed-token");
 }
 
 TEST_CASE("refreshing HTTP file transport retries unauthorized downloads",
@@ -445,7 +462,10 @@ TEST_CASE("blob upload streams a file to the expanded JMAP upload URL",
     CHECK(transport.requests.front().body == payload);
     REQUIRE(transport.requests.front().authentication.has_value());
     CHECK(transport.requests.front().authentication->accountId == "auth-account");
-    CHECK(transport.requests.front().headers.back().value == "message/rfc822");
+    const auto* contentType =
+        header(transport.requests.front(), QByteArrayLiteral("Content-Type"));
+    REQUIRE(contentType != nullptr);
+    CHECK(contentType->value == "message/rfc822");
 }
 
 TEST_CASE("blob upload rejects a file above the advertised JMAP upload limit before dispatch",
@@ -543,7 +563,10 @@ TEST_CASE("refreshing HTTP file upload retries unauthorized requests from the sa
     CHECK(rawTransport.requests[0].body.contains("streamed upload"));
     REQUIRE(rawTransport.requests[1].authentication.has_value());
     CHECK(rawTransport.requests[1].authentication->accessToken == "refreshed-token");
-    CHECK(rawTransport.requests[1].headers.front().value == "Bearer refreshed-token");
+    const auto* refreshedAuthorization =
+        header(rawTransport.requests[1], QByteArrayLiteral("Authorization"));
+    REQUIRE(refreshedAuthorization != nullptr);
+    CHECK(refreshedAuthorization->value == "Bearer refreshed-token");
 }
 
 TEST_CASE("refreshing HTTP transport resolves current tokens for stale request scopes",
@@ -605,7 +628,10 @@ TEST_CASE("refreshing HTTP transport resolves current tokens for stale request s
     CHECK(rawTransport.requests[0].authentication->accessToken == "access-token");
     CHECK(rawTransport.requests[1].authentication->accessToken == "refreshed-token");
     CHECK(rawTransport.requests[2].authentication->accessToken == "refreshed-token");
-    CHECK(rawTransport.requests[2].headers.front().value == "Bearer refreshed-token");
+    const auto* refreshedAuthorization =
+        header(rawTransport.requests[2], QByteArrayLiteral("Authorization"));
+    REQUIRE(refreshedAuthorization != nullptr);
+    CHECK(refreshedAuthorization->value == "Bearer refreshed-token");
 }
 
 TEST_CASE("refreshing HTTP transport surfaces a second unauthorized response",
