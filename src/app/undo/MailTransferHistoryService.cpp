@@ -217,6 +217,7 @@ namespace javelin::app::undo
                             QString::fromStdString(record.accountId));
             query.bindValue(QStringLiteral(":creation_id"),
                             QString::fromStdString(record.creationId));
+            const javelin::jmap::cache::DatabaseWriteScope writeScope{database};
             if (!query.exec())
                 return dbError(QStringLiteral("Create mail transfer history recreation"), query);
             return std::nullopt;
@@ -236,6 +237,7 @@ namespace javelin::app::undo
             query.bindValue(QStringLiteral(":history_entry_id"), record.historyEntryId);
             query.bindValue(QStringLiteral(":content_hash"),
                             QString::fromStdString(record.contentHash));
+            const javelin::jmap::cache::DatabaseWriteScope writeScope{database};
             if (!query.exec())
                 return dbError(QStringLiteral("Record history source upload"), query);
             if (query.numRowsAffected() != 1)
@@ -257,6 +259,7 @@ namespace javelin::app::undo
             query.bindValue(QStringLiteral(":history_entry_id"), record.historyEntryId);
             query.bindValue(QStringLiteral(":content_hash"),
                             QString::fromStdString(record.contentHash));
+            const javelin::jmap::cache::DatabaseWriteScope writeScope{database};
             if (!query.exec())
                 return dbError(QStringLiteral("Prepare history source import"), query);
             if (query.numRowsAffected() != 1)
@@ -281,6 +284,7 @@ namespace javelin::app::undo
             query.bindValue(QStringLiteral(":content_hash"),
                             QString::fromStdString(record.contentHash));
             query.bindValue(QStringLiteral(":expected"), expected);
+            const javelin::jmap::cache::DatabaseWriteScope writeScope{database};
             if (!query.exec())
                 return dbError(QStringLiteral("Transition history source recreation"), query);
             if (query.numRowsAffected() != 1)
@@ -304,6 +308,7 @@ namespace javelin::app::undo
             query.bindValue(QStringLiteral(":content_hash"),
                             QString::fromStdString(record.contentHash));
             query.bindValue(QStringLiteral(":expected"), expected);
+            const javelin::jmap::cache::DatabaseWriteScope writeScope{database};
             if (!query.exec())
                 return dbError(QStringLiteral("Complete history source recreation"), query);
             if (query.numRowsAffected() != 1)
@@ -449,6 +454,7 @@ namespace javelin::app::undo
                                 : QStringLiteral("copy"));
             query.bindValue(QStringLiteral(":transfer_operation_id"),
                             QString::fromStdString(transferOperationId));
+            const javelin::jmap::cache::DatabaseWriteScope writeScope{database};
             if (!query.exec())
                 return dbError(QStringLiteral("Record mail transfer history redo"), query);
             return std::nullopt;
@@ -1067,8 +1073,11 @@ namespace javelin::app::undo
         pin.bindValue(QStringLiteral(":owner_id"), historyEntryId);
         pin.bindValue(QStringLiteral(":content_hash"),
                       QString::fromStdString(reference->object.contentHash));
-        if (!pin.exec())
-            co_return dbError(QStringLiteral("Retain source MIME for transfer history"), pin);
+        {
+            const javelin::jmap::cache::DatabaseWriteScope writeScope{m_databaseConnection};
+            if (!pin.exec())
+                co_return dbError(QStringLiteral("Retain source MIME for transfer history"), pin);
+        }
         if (const auto error = verifyHistoryPin(m_databaseConnection, historyEntryId,
                                                 reference->object.contentHash))
             co_return *error;
