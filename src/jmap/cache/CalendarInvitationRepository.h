@@ -5,6 +5,7 @@
 
 #include <QDateTime>
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -74,7 +75,7 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
         notificationIds(std::string_view accountId) const;
         [[nodiscard]] std::variant<std::vector<CalendarInvitationDispatchCandidate>, DatabaseError>
-        claimPendingDispatches();
+        claimPendingDispatches(std::size_t maxCandidates = 100);
         [[nodiscard]] std::optional<DatabaseError> markDelivered(std::string_view invitationKey,
                                                                  const QDateTime& deliveredAt);
         [[nodiscard]] std::optional<DatabaseError> releaseDispatch(std::string_view invitationKey);
