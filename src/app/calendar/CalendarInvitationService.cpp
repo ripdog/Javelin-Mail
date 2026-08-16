@@ -556,6 +556,10 @@ namespace javelin::app
         m_syncTimer.setInterval(150);
         connect(&m_syncTimer, &QTimer::timeout, this,
                 &CalendarInvitationService::synchronizeQueuedOwners);
+        m_dispatchTimer.setSingleShot(true);
+        m_dispatchTimer.setInterval(0);
+        connect(&m_dispatchTimer, &QTimer::timeout, this,
+                &CalendarInvitationService::dispatchPending);
         m_dispatchRetryTimer.setSingleShot(true);
         m_dispatchRetryTimer.setInterval(60000);
         connect(&m_dispatchRetryTimer, &QTimer::timeout, this,
@@ -1010,8 +1014,8 @@ namespace javelin::app
 
     void CalendarInvitationService::requestDispatch()
     {
-        if (!m_dispatchRetryTimer.isActive())
-            m_dispatchRetryTimer.start(0);
+        if (!m_dispatchRetryTimer.isActive() && !m_dispatchTimer.isActive())
+            m_dispatchTimer.start();
     }
 
     void CalendarInvitationService::calendarCacheCommitted()

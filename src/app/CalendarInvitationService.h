@@ -74,6 +74,7 @@ namespace javelin::app
         CalendarInvitationAccountSource& m_accountSource;
         javelin::jmap::cache::CalendarInvitationRepository m_repository;
         QTimer m_syncTimer;
+        QTimer m_dispatchTimer;
         QTimer m_dispatchRetryTimer;
         std::unordered_set<std::string> m_pendingOwners;
         std::unordered_set<std::string> m_runningOwners;
