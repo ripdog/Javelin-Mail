@@ -848,7 +848,7 @@ Qt GUI code owns only destination selection and presentation.
 
 - correct `From_` separator is emitted;
 - separator-like message lines are quoted according to mboxrd rules;
-- already quoted `>From ` cases round-trip according to mboxrd semantics;
+- already quoted lines beginning with `>From` followed by a space round-trip according to mboxrd semantics;
 - message with no final newline gets valid record framing;
 - empty message/body edge cases remain parseable;
 - large source is streamed in bounded chunks;
