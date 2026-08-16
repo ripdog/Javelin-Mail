@@ -181,6 +181,8 @@ TEST_CASE("work scheduler preserves mail transfer jobs across restart",
     CHECK(job->status == javelin::app::WorkStatus::WaitingForNetwork);
     CHECK(job->progress.completedUnits == 1);
     CHECK(job->progress.totalUnits == std::optional<std::uint64_t>{2});
+    CHECK(job->checkpointJson ==
+          QStringLiteral("{\"operationId\":\"operation-1\",\"canRetry\":false}"));
     CHECK(javelin::app::classify(job->kind, job->priority) ==
           javelin::app::WorkClass::ForegroundCommand);
 }
