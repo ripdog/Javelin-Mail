@@ -177,8 +177,9 @@ TEST_CASE("raw source reference lookup migrates the requested legacy row beyond 
     {
         insert.bindValue(QStringLiteral(":email"), QStringLiteral("email-%1").arg(index));
         insert.bindValue(QStringLiteral(":blob"), QStringLiteral("blob-%1").arg(index));
-        insert.bindValue(QStringLiteral(":payload"),
-                         QByteArrayLiteral("legacy raw message ") + QByteArray::number(index));
+        const QByteArray payload =
+            QByteArrayLiteral("legacy raw message ") + QByteArray::number(index);
+        insert.bindValue(QStringLiteral(":payload"), payload);
         REQUIRE(insert.exec());
     }
 
@@ -190,7 +191,8 @@ TEST_CASE("raw source reference lookup migrates the requested legacy row beyond 
         std::get<std::optional<javelin::jmap::cache::RawMessageSourceReference>>(referenceResult);
     REQUIRE(reference.has_value());
     CHECK(reference->blobId == "blob-29");
-    CHECK(reference->object.size == QByteArrayLiteral("legacy raw message 29").size());
+    CHECK(reference->object.size ==
+          static_cast<std::uint64_t>(QByteArrayLiteral("legacy raw message 29").size()));
 }
 
 TEST_CASE("mail vault storage is not failed by stale metadata projection work",
