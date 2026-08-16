@@ -86,7 +86,8 @@ namespace
     }
 
     [[nodiscard]] const ConfiguredAccount&
-    selectAccount(const std::vector<ConfiguredAccount>& accounts, const QString& name)
+    selectAccount(const std::vector<ConfiguredAccount>& accounts, const QString& name,
+                  const bool requireCachedAccountId)
     {
         const auto account = std::ranges::find_if(
             accounts,
@@ -97,7 +98,7 @@ namespace
             });
         if (account == accounts.end())
             throw std::runtime_error("No configured account matches --account");
-        if (account->cachedAccountIds.empty())
+        if (requireCachedAccountId && account->cachedAccountIds.empty())
             throw std::runtime_error("The configured account has no cached JMAP account id");
         if (account->sessionUrl.empty())
             throw std::runtime_error("The configured account has incomplete connection settings");
@@ -166,7 +167,9 @@ namespace
                 .body = {},
                 .authentication =
                     javelin::jmap::api::BearerAuthentication{
-                        .accountId = account.cachedAccountIds.front(),
+                        .accountId = account.cachedAccountIds.empty()
+                                         ? std::string{}
+                                         : account.cachedAccountIds.front(),
                         .accessToken = credentials.accessToken.toStdString(),
                     },
                 .cancellation = {},
@@ -245,7 +248,8 @@ int main(int argc, char* argv[])
         const auto accountName = parser.value(QStringLiteral("account"));
         if (accountName.isEmpty())
             throw std::runtime_error("--account is required unless --list-accounts is used");
-        const auto& account = selectAccount(accounts, accountName);
+        const auto& account =
+            selectAccount(accounts, accountName, !parser.isSet(QStringLiteral("session")));
         const auto credentials = accountCredentials(*credentialStore, account);
         if (parser.isSet(QStringLiteral("session")))
         {
