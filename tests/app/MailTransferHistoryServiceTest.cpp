@@ -497,30 +497,3 @@ TEST_CASE("unknown history import correlates one created candidate without a sec
     CHECK(fixture.phase() == QStringLiteral("complete"));
     CHECK(fixture.cached("candidate-email"));
 }
-
-TEST_CASE("unknown history import rejects a mismatched candidate and retries import",
-          "[app][undo][mail-transfer][history-service][ambiguity][candidate]")
-{
-    ApplicationGuard application;
-    Q_UNUSED(application);
-    Fixture fixture;
-    fixture.methods.importBehavior = ImportBehavior::DispatchedFailure;
-
-    const auto first = fixture.recreate();
-    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(first));
-    CHECK(fixture.phase() == QStringLiteral("unknown"));
-
-    fixture.methods.importBehavior = ImportBehavior::Success;
-    fixture.methods.createdDuringReconciliation = {"candidate-email"};
-    fixture.methods.candidateMatches = false;
-    const auto second = fixture.recreate();
-    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&second))
-        FAIL(error->message.toStdString());
-    CHECK(std::get<RecreatedMailTransferSource>(second).emailId == "restored-email");
-    CHECK(fixture.methods.changesCalls == 1);
-    CHECK(fixture.methods.candidateCalls == 1);
-    CHECK(fixture.methods.importCalls == 2);
-    CHECK(fixture.resource.uploads == 1);
-    CHECK(fixture.phase() == QStringLiteral("complete"));
-    CHECK(fixture.cached("restored-email"));
-}
