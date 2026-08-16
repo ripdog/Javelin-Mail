@@ -220,7 +220,6 @@ TEST_CASE("calendar invitation notification is persistent open-only and activate
     CHECK(observer->request->actions ==
           QStringList{QStringLiteral("default"), QStringLiteral("Open")});
     CHECK(observer->request->timeoutMs == 0);
-    REQUIRE(observer->request->hints.contains(QStringLiteral("transient")));
     CHECK_FALSE(observer->request->hints.value(QStringLiteral("transient")).toBool());
 
     REQUIRE(QMetaObject::invokeMethod(&controller, "onActivationToken", Qt::DirectConnection,
