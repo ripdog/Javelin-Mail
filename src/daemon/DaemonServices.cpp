@@ -383,7 +383,7 @@ namespace javelin::app
         m_mailTransferCommandService = std::make_unique<MailTransferCommandService>(
             m_databaseConnection, *m_transport, *m_methodTransport, *m_messageContentClient,
             *m_accountRuntimeManager, *m_mailTransferHistoryCoordinator,
-            *m_threadMaterializationCoordinator);
+            m_threadMaterializationCoordinator.get());
         m_mailTransferCommandService->setWorkService(m_mailTransferWorkService.get());
         m_mailCommandService = std::make_unique<MailCommandService>(
             *m_mailMutationApplicationService, *m_mailTransferCommandService);

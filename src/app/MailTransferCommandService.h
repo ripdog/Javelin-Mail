@@ -53,7 +53,7 @@ namespace javelin::app
             javelin::jmap::MessageContentClient& messageContentClient,
             const AccountConnectionProvider& connectionProvider,
             javelin::app::undo::MailTransferHistoryCoordinator& historyCoordinator,
-            ThreadMaterializationCoordinator& threadMaterializationCoordinator);
+            ThreadMaterializationCoordinator* threadMaterializationCoordinator = nullptr);
 
         [[nodiscard]] QCoro::Task<MailTransferExecutionResult>
         transfer(CrossAccountMailTransferIntent intent);
@@ -66,7 +66,7 @@ namespace javelin::app
         javelin::jmap::MessageContentClient& m_messageContentClient;
         const AccountConnectionProvider& m_connectionProvider;
         javelin::app::undo::MailTransferHistoryCoordinator& m_historyCoordinator;
-        ThreadMaterializationCoordinator& m_threadMaterializationCoordinator;
+        ThreadMaterializationCoordinator* m_threadMaterializationCoordinator = nullptr;
         MailTransferWorkService* m_workService = nullptr;
     };
 

@@ -17,7 +17,7 @@ namespace javelin::app
         javelin::jmap::MessageContentClient& messageContentClient,
         const AccountConnectionProvider& connectionProvider,
         javelin::app::undo::MailTransferHistoryCoordinator& historyCoordinator,
-        ThreadMaterializationCoordinator& threadMaterializationCoordinator)
+        ThreadMaterializationCoordinator* threadMaterializationCoordinator)
         : m_databaseConnection(databaseConnection), m_resourceTransport(resourceTransport),
           m_methodTransport(methodTransport), m_messageContentClient(messageContentClient),
           m_connectionProvider(connectionProvider), m_historyCoordinator(historyCoordinator),
@@ -50,7 +50,7 @@ namespace javelin::app
         }
 
         MailTransferApplicationService preparation{m_databaseConnection,
-                                                   &m_threadMaterializationCoordinator};
+                                                   m_threadMaterializationCoordinator};
         auto prepared = co_await preparation.prepare({
             .intent =
                 {
