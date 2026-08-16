@@ -520,7 +520,7 @@ namespace javelin::jmap::sync
                 const auto assessment =
                     assessMaterialization(relevantUpdatedIds, updated.list, updated.notFound,
                                           parsed.emailChanges->newState, updated.state);
-                if (!assessment.complete || updated.accountId != accountId)
+                if (!assessment.complete || updated.accountId != remoteAccountId)
                 {
                     summary.emailNeedsFullRefresh = true;
                     co_return summary;
@@ -750,7 +750,7 @@ namespace javelin::jmap::sync
         };
         if (continuation.mailbox || continuation.email)
         {
-            const auto continued = co_await refresh(accountId, continuation);
+            const auto continued = co_await refresh(accountId, continuation, remoteAccountId);
             if (const auto* error = std::get_if<OperationError>(&continued))
                 co_return *error;
             const auto& next = std::get<MailDeltaRefreshSummary>(continued);
