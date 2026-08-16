@@ -35,9 +35,14 @@ jobs:
           chown -R builder:builder "$GITHUB_WORKSPACE"
 
       - name: Build package
+        env:
+          JAVELIN_GIT_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+          JAVELIN_GIT_URL: https://github.com/${{ github.event.pull_request.head.repo.full_name || github.repository }}.git
         run: |
-          sudo -u builder bash -lc \
-            "cd '$GITHUB_WORKSPACE' && JAVELIN_GIT_REF='$GITHUB_SHA' makepkg --syncdeps --noconfirm --cleanbuild --clean"
+          sudo -u builder env \
+            JAVELIN_GIT_REF="$JAVELIN_GIT_REF" \
+            JAVELIN_GIT_URL="$JAVELIN_GIT_URL" \
+            bash -lc "cd '$GITHUB_WORKSPACE' && makepkg --syncdeps --noconfirm --cleanbuild --clean"
 
       - name: Upload package
         uses: actions/upload-artifact@v4

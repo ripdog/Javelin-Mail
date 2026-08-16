@@ -34,8 +34,9 @@ makedepends=(
 )
 provides=('javelin-mail')
 conflicts=('javelin-mail')
+_source_url=${JAVELIN_GIT_URL:-https://github.com/ripdog/Javelin-Mail.git}
 _source_ref=${JAVELIN_GIT_REF:+#commit=${JAVELIN_GIT_REF}}
-source=("${_project_name}::git+https://github.com/ripdog/Javelin-Mail.git${_source_ref}")
+source=("${_project_name}::git+${_source_url}${_source_ref}")
 sha256sums=('SKIP')
 
 _repo_root() {
