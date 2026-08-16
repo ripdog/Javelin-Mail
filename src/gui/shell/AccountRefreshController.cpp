@@ -99,21 +99,21 @@ namespace javelin::gui::shell
                             << error->message;
                         Q_EMIT userInterventionRequired(
                             i18n("Could not configure the default Inbox notifications."));
-                        return;
                     }
-                    const auto& mailboxes =
-                        std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(mailboxResult);
-                    const auto inbox =
-                        std::ranges::find(mailboxes, std::optional<std::string>{"inbox"},
-                                          &javelin::jmap::cache::MailboxTreeItem::role);
-                    if (inbox != mailboxes.end())
+                    else
                     {
-                        if (const auto error = m_settings.ensureNotificationMailboxSelected(
-                                QString::fromStdString(summary.accountId),
-                                QString::fromStdString(inbox->id)))
+                        const auto& mailboxes =
+                            std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(
+                                mailboxResult);
+                        const auto inbox =
+                            std::ranges::find(mailboxes, std::optional<std::string>{"inbox"},
+                                              &javelin::jmap::cache::MailboxTreeItem::role);
+                        if (inbox != mailboxes.end())
                         {
-                            Q_EMIT userInterventionRequired(error->detail);
-                            return;
+                            if (const auto error = m_settings.ensureNotificationMailboxSelected(
+                                    QString::fromStdString(summary.accountId),
+                                    QString::fromStdString(inbox->id)))
+                                Q_EMIT userInterventionRequired(error->detail);
                         }
                     }
                 }
