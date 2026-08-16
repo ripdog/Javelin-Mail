@@ -306,11 +306,11 @@ namespace javelin::app
                            std::make_move_iterator(page.ids.end()));
                 if (total && ids.size() >= *total)
                     break;
-                if (pageSize < pageLimit)
-                    break;
                 if (pageSize == 0)
                     co_return CallFailure{.message =
                                               QStringLiteral("Query pagination stopped early")};
+                if (pageSize < pageLimit)
+                    break;
             }
             co_return ids;
         }
