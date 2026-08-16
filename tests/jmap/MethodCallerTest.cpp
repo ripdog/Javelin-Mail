@@ -504,6 +504,46 @@ TEST_CASE("blob upload rejects a file above the advertised JMAP upload limit bef
     CHECK(transport.requests.empty());
 }
 
+TEST_CASE("blob upload accepts a file exactly at the advertised JMAP upload limit",
+          "[jmap][transport][upload][file]")
+{
+    ensureApplication();
+
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("message.eml"));
+    QFile source{path};
+    REQUIRE(source.open(QIODevice::WriteOnly));
+    REQUIRE(source.write(QByteArrayLiteral("12345678")) == 8);
+    source.close();
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 201,
+        .body =
+            R"({"accountId":"destination-account","blobId":"blob-1","type":"message/rfc822","size":8})",
+    });
+    javelin::jmap::api::Session session;
+    session.uploadUrl = "https://mail.example.com/upload/{accountId}";
+    session.capabilities.core = true;
+    session.capabilities.coreDetails.emplace();
+    session.capabilities.coreDetails->maxSizeUpload = 8;
+    javelin::jmap::api::Account destination;
+    destination.id = "destination-account";
+    session.accounts.emplace(destination.id, destination);
+
+    const auto contextResult =
+        javelin::jmap::api::blobUploadContext(session, "destination-account");
+    REQUIRE(std::holds_alternative<javelin::jmap::api::BlobUploadContext>(contextResult));
+    const auto result = QCoro::waitFor(javelin::jmap::api::uploadBlobFromFile(
+        transport, std::get<javelin::jmap::api::BlobUploadContext>(contextResult), "auth-account",
+        "destination-account", "access-token", path, "message/rfc822"));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::BlobUploadResponse>(result));
+    REQUIRE(transport.requests.size() == 1);
+    CHECK(transport.requests.front().body == QByteArrayLiteral("12345678"));
+}
+
 TEST_CASE("refreshing HTTP file upload retries unauthorized requests from the same source file",
           "[jmap][transport][auth][file]")
 {
