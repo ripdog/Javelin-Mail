@@ -5,6 +5,7 @@
 
 #include <QMimeData>
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>

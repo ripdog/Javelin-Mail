@@ -9,6 +9,7 @@
 
 #include <QCoroTask>
 
+#include <QDebug>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QScopeGuard>
