@@ -881,8 +881,8 @@ namespace javelin::gui::calendar
         {
             const auto when =
                 invitation.allDay
-                    ? QLocale{}.toString(invitation.displayTime.date(), QLocale::ShortFormat)
-                    : QLocale{}.toString(invitation.displayTime, QLocale::ShortFormat);
+                    ? m_locale.toString(invitation.displayTime.date(), QLocale::ShortFormat)
+                    : m_locale.toString(invitation.displayTime, QLocale::ShortFormat);
             QString label =
                 i18nc("pending invitation menu item", "%1 — %2", invitation.title, when);
             if (!invitation.organizer.isEmpty())
