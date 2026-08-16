@@ -167,6 +167,11 @@ TEST_CASE("mail vault stores one immutable object and projects effective mailbox
 TEST_CASE("raw source reference lookup migrates the requested legacy row beyond batch limits",
           "[jmap][cache][vault][migration]")
 {
+    int argc = 1;
+    char appName[] = "mail-vault-test";
+    char* argv[] = {appName, nullptr};
+    QCoreApplication application(argc, argv);
+
     auto context = database();
     seedAccount(context.connection);
     QSqlQuery insert{context.connection.database()};
