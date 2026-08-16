@@ -165,6 +165,8 @@ namespace javelin::app
                     .message = QStringLiteral("Server advertises maxObjectsInGet as zero")};
             javelin::jmap::api::CalendarEventGetResponse combined{
                 .accountId = accountId, .state = {}, .list = {}, .notFound = {}};
+            if (ids.empty())
+                co_return combined;
             std::size_t offset = 0;
             bool first = true;
             do
@@ -224,6 +226,8 @@ namespace javelin::app
                     .message = QStringLiteral("Server advertises maxObjectsInGet as zero")};
             javelin::jmap::api::CalendarEventNotificationGetResponse combined{
                 .accountId = accountId, .state = {}, .list = {}, .notFound = {}};
+            if (ids.empty())
+                co_return combined;
             std::size_t offset = 0;
             bool first = true;
             do
