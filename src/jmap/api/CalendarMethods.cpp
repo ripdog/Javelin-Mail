@@ -871,7 +871,7 @@ namespace javelin::jmap::api
                                        [](const char character) { return character != '0'; });
         }
 
-        detail::RawEvent rawEvent(const calendar::CalendarEvent& value)
+        std::optional<detail::RawEvent> rawEvent(const calendar::CalendarEvent& value)
         {
             detail::RawEvent raw{
                 .type = "Event",
@@ -959,19 +959,23 @@ namespace javelin::jmap::api
             for (const auto& [id, valueOverride] : value.recurrenceOverrides)
             {
                 const auto encoded = rawRecurrenceOverride(valueOverride);
-                if (encoded)
-                    raw.recurrenceOverrides.emplace(id, *encoded);
+                if (!encoded)
+                    return std::nullopt;
+                raw.recurrenceOverrides.emplace(id, *encoded);
             }
             for (const auto& participant : value.attendees)
                 raw.participants.emplace(participant.id, rawParticipant(participant));
             return raw;
         }
 
-        detail::RawEventWrite rawEventWrite(const calendar::CalendarEvent& value,
-                                            const bool includeUid)
+        std::optional<detail::RawEventWrite> rawEventWrite(const calendar::CalendarEvent& value,
+                                                           const bool includeUid)
         {
-            const auto raw = rawEvent(value);
-            return {.type = raw.type,
+            const auto rawResult = rawEvent(value);
+            if (!rawResult)
+                return std::nullopt;
+            const auto& raw = *rawResult;
+            return detail::RawEventWrite{.type = raw.type,
                     .uid = includeUid && !raw.uid.empty() ? std::optional{raw.uid} : std::nullopt,
                     .calendarIds = raw.calendarIds,
                     .title = raw.title,
@@ -996,8 +1000,12 @@ namespace javelin::jmap::api
         std::optional<std::string> rawEventPatch(const calendar::CalendarEvent& previous,
                                                  const calendar::CalendarEvent& current)
         {
-            const auto before = serialize(rawEventWrite(previous, false));
-            const auto after = serialize(rawEventWrite(current, false));
+            const auto beforeRaw = rawEventWrite(previous, false);
+            const auto afterRaw = rawEventWrite(current, false);
+            if (!beforeRaw || !afterRaw)
+                return std::nullopt;
+            const auto before = serialize(*beforeRaw);
+            const auto after = serialize(*afterRaw);
             if (!before || !after)
                 return std::nullopt;
             const auto patch = makePatchObject(*before, *after);
@@ -1005,7 +1013,8 @@ namespace javelin::jmap::api
             return patchJson ? std::optional{*patchJson} : std::nullopt;
         }
 
-        calendar::CalendarEvent event(const std::string& accountId, const detail::RawEvent& raw)
+        std::optional<calendar::CalendarEvent> event(const std::string& accountId,
+                                                     const detail::RawEvent& raw)
         {
             calendar::CalendarEvent value{
                 .accountId = accountId,
@@ -1110,8 +1119,9 @@ namespace javelin::jmap::api
             for (const auto& [id, rawOverride] : raw.recurrenceOverrides)
             {
                 const auto parsed = recurrenceOverride(rawOverride);
-                if (parsed)
-                    value.recurrenceOverrides.emplace(id, *parsed);
+                if (!parsed)
+                    return std::nullopt;
+                value.recurrenceOverrides.emplace(id, *parsed);
             }
             for (const auto& [id, participant] : raw.participants)
                 value.attendees.push_back(attendee(id, participant));
@@ -1291,7 +1301,12 @@ namespace javelin::jmap::api
                                   .destroy = request.destroy,
                                   .sendSchedulingMessages = request.sendSchedulingMessages};
         for (const auto& [id, value] : request.create)
-            raw.create.emplace(id, rawEventWrite(value, true));
+        {
+            const auto encoded = rawEventWrite(value, true);
+            if (!encoded)
+                return std::nullopt;
+            raw.create.emplace(id, *encoded);
+        }
         for (const auto& [id, value] : request.update)
         {
             const auto patch = rawEventPatch(value.previous, value.event);
@@ -1502,7 +1517,13 @@ namespace javelin::jmap::api
                                         .list = {},
                                         .notFound = raw.value->notFound};
         for (const auto& item : raw.value->list)
-            result.list.push_back(event(result.accountId, item));
+        {
+            auto parsedEvent = event(result.accountId, item);
+            if (!parsedEvent)
+                return {.value = std::nullopt,
+                        .error = "Failed to decode a CalendarEvent recurrence override"};
+            result.list.push_back(std::move(*parsedEvent));
+        }
         return {.value = std::move(result), .error = std::nullopt};
     }
 
@@ -1583,8 +1604,11 @@ namespace javelin::jmap::api
                         .error =
                             std::string{"Invalid CalendarEventNotification type: "} + item.type};
             auto snapshot = event(result.accountId, item.event);
-            if (snapshot.id.empty())
-                snapshot.id = item.calendarEventId;
+            if (!snapshot)
+                return {.value = std::nullopt,
+                        .error = "Failed to decode a CalendarEventNotification recurrence override"};
+            if (snapshot->id.empty())
+                snapshot->id = item.calendarEventId;
             result.list.push_back(calendar::CalendarEventNotification{
                 .accountId = result.accountId,
                 .id = item.id,
@@ -1597,7 +1621,7 @@ namespace javelin::jmap::api
                 .type = *parsedType,
                 .calendarEventId = item.calendarEventId,
                 .isDraft = item.isDraft,
-                .event = std::move(snapshot),
+                .event = std::move(*snapshot),
                 .eventPatchJson = item.eventPatch ? std::optional<std::string>{item.eventPatch->str}
                                                   : std::nullopt});
         }
@@ -1617,13 +1641,16 @@ namespace javelin::jmap::api
 
     std::optional<std::string> serializeCalendarEventDocument(const calendar::CalendarEvent& value)
     {
-        return serialize(rawEvent(value));
+        const auto raw = rawEvent(value);
+        return raw ? serialize(*raw) : std::nullopt;
     }
 
     bool calendarEventWritablePropertiesEqual(const calendar::CalendarEvent& left,
                                               const calendar::CalendarEvent& right)
     {
-        return rawEventWrite(left, true) == rawEventWrite(right, true);
+        const auto rawLeft = rawEventWrite(left, true);
+        const auto rawRight = rawEventWrite(right, true);
+        return rawLeft && rawRight && *rawLeft == *rawRight;
     }
 
     ParsedEnvelope<calendar::CalendarEvent>
@@ -1634,6 +1661,10 @@ namespace javelin::jmap::api
         {
             return {.value = std::nullopt, .error = raw.error};
         }
-        return {.value = event(std::string{accountId}, *raw.value), .error = std::nullopt};
+        auto parsedEvent = event(std::string{accountId}, *raw.value);
+        if (!parsedEvent)
+            return {.value = std::nullopt,
+                    .error = "Failed to decode a CalendarEvent recurrence override"};
+        return {.value = std::move(*parsedEvent), .error = std::nullopt};
     }
 } // namespace javelin::jmap::api
