@@ -1266,9 +1266,9 @@ namespace javelin::jmap::cache
                         effectiveEvent = nullptr;
                 }
 
-                bool pendingInvitation = effectiveEvent != nullptr && !event.isDraft &&
-                                         !event.isOrigin &&
-                                         event.status != std::optional<std::string>{"cancelled"};
+                bool pendingInvitation =
+                    effectiveEvent != nullptr && !effectiveEvent->isDraft && !effectiveEvent->isOrigin &&
+                    effectiveEvent->status != std::optional<std::string>{"cancelled"};
                 if (pendingInvitation)
                 {
                     const auto participant = std::ranges::find(
