@@ -1120,12 +1120,9 @@ TEST_CASE("socket async command admission bounds outstanding replies", "[protoco
 TEST_CASE("activation route wire discriminators remain stable", "[protocol][socket][compatibility]")
 {
     const std::vector<std::pair<ActivationRoute, quint8>> routes{
-        {RestoreDraftRoute{}, 5},
-        {OpenTaskCenterRoute{}, 6},
-        {OpenMailtoRoute{}, 7},
-        {ShowUndoSendDialogRoute{}, 8},
-        {CloseUndoSendDialogRoute{}, 9},
-        {OpenCalendarEventRoute{}, 10},
+        {RestoreDraftRoute{}, 5},        {OpenTaskCenterRoute{}, 6},
+        {OpenMailtoRoute{}, 7},          {ShowUndoSendDialogRoute{}, 8},
+        {CloseUndoSendDialogRoute{}, 9}, {OpenCalendarEventRoute{}, 10},
     };
 
     for (const auto& [route, expectedKind] : routes)

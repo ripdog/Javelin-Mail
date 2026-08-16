@@ -3102,10 +3102,9 @@ namespace javelin::gui::contacts
             }
         }
         bool accepted = false;
-        const QString primaryChoice =
-            QInputDialog::getItem(this, i18n("Merge Duplicate Contacts"),
-                                  i18n("Keep this contact as the primary"), candidateChoices, 0,
-                                  false, &accepted);
+        const QString primaryChoice = QInputDialog::getItem(
+            this, i18n("Merge Duplicate Contacts"), i18n("Keep this contact as the primary"),
+            candidateChoices, 0, false, &accepted);
         const auto primaryIndex = candidateChoices.indexOf(primaryChoice);
         if (!accepted || primaryIndex < 0)
             return;

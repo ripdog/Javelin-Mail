@@ -204,13 +204,11 @@ namespace javelin::gui::shell
             }
             static const QRegularExpression durationPattern{QStringLiteral(
                 R"(^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$)")};
-            const auto match =
-                durationPattern.match(QString::fromStdString(event.duration.value));
+            const auto match = durationPattern.match(QString::fromStdString(event.duration.value));
             if (match.hasMatch())
             {
                 const auto seconds =
-                    match.captured(1).toLongLong() * 86400 +
-                    match.captured(2).toLongLong() * 3600 +
+                    match.captured(1).toLongLong() * 86400 + match.captured(2).toLongLong() * 3600 +
                     match.captured(3).toLongLong() * 60 + qRound64(match.captured(4).toDouble());
                 return start.addSecs(seconds);
             }

@@ -361,9 +361,9 @@ namespace javelin::gui::shell
                         break;
                     case javelin::app::MailTransferStatus::Failed:
                         code = javelin::jmap::OperationErrorCode::ServerFailure;
-                        message = i18np("The transfer failed for one message.",
-                                        "The transfer failed for %1 messages.",
-                                        summary.failedItemCount);
+                        message =
+                            i18np("The transfer failed for one message.",
+                                  "The transfer failed for %1 messages.", summary.failedItemCount);
                         break;
                     case javelin::app::MailTransferStatus::Cancelled:
                         message = i18n("The transfer was cancelled.");

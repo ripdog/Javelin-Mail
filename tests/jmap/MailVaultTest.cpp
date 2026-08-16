@@ -175,9 +175,9 @@ TEST_CASE("raw source reference lookup migrates the requested legacy row beyond 
     auto context = database();
     seedAccount(context.connection);
     QSqlQuery insert{context.connection.database()};
-    insert.prepare(QStringLiteral(
-        "INSERT INTO raw_message_sources(account_id,email_id,blob_id,payload) "
-        "VALUES('account-1',:email,:blob,:payload)"));
+    insert.prepare(
+        QStringLiteral("INSERT INTO raw_message_sources(account_id,email_id,blob_id,payload) "
+                       "VALUES('account-1',:email,:blob,:payload)"));
     for (int index = 0; index < 30; ++index)
     {
         insert.bindValue(QStringLiteral(":email"), QStringLiteral("email-%1").arg(index));

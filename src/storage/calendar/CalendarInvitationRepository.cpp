@@ -82,9 +82,9 @@ namespace javelin::jmap::cache
         {
             if (event.organizerCalendarAddress)
             {
-                const auto found = std::ranges::find(
-                    event.attendees, *event.organizerCalendarAddress,
-                    &calendar::Attendee::calendarAddress);
+                const auto found =
+                    std::ranges::find(event.attendees, *event.organizerCalendarAddress,
+                                      &calendar::Attendee::calendarAddress);
                 if (found != event.attendees.end() && !found->name.empty())
                     return found->name;
                 return *event.organizerCalendarAddress;

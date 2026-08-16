@@ -2651,7 +2651,8 @@ namespace javelin::jmap::calendar
             const auto preferred =
                 std::ranges::find(identities, true, &ParticipantIdentity::isDefault);
             const auto& identity = preferred != identities.end() ? *preferred : identities.front();
-            const auto ownerIndex = participantIndexForAddress(command.event, identity.calendarAddress);
+            const auto ownerIndex =
+                participantIndexForAddress(command.event, identity.calendarAddress);
             if (!ownerIndex.has_value())
             {
                 std::unordered_set<std::string> participantIds;

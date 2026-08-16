@@ -238,20 +238,20 @@ namespace javelin::app
                     runSystemctl(std::move(arguments), m_options.startTimeoutMilliseconds);
                 if (!result.has_value())
                 {
-                    metrics.finish(
-                        QStringLiteral("error"),
-                        enableService ? QStringLiteral("stage=enable_systemd_user_service")
-                                      : QStringLiteral("stage=start_systemd_user_service"));
+                    metrics.finish(QStringLiteral("error"),
+                                   enableService
+                                       ? QStringLiteral("stage=enable_systemd_user_service")
+                                       : QStringLiteral("stage=start_systemd_user_service"));
                     return detailError(
                         GuiBootstrapErrorCode::DaemonStartFailed,
                         QStringLiteral("could not run systemctl --user to start javelind"));
                 }
                 if (result->exitCode != 0)
                 {
-                    metrics.finish(
-                        QStringLiteral("error"),
-                        enableService ? QStringLiteral("stage=enable_systemd_user_service")
-                                      : QStringLiteral("stage=start_systemd_user_service"));
+                    metrics.finish(QStringLiteral("error"),
+                                   enableService
+                                       ? QStringLiteral("stage=enable_systemd_user_service")
+                                       : QStringLiteral("stage=start_systemd_user_service"));
                     return detailError(
                         GuiBootstrapErrorCode::DaemonStartFailed,
                         systemdFailureDetail(enableService

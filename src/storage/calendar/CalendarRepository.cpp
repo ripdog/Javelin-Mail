@@ -1267,7 +1267,8 @@ namespace javelin::jmap::cache
                 }
 
                 bool pendingInvitation =
-                    effectiveEvent != nullptr && !effectiveEvent->isDraft && !effectiveEvent->isOrigin &&
+                    effectiveEvent != nullptr && !effectiveEvent->isDraft &&
+                    !effectiveEvent->isOrigin &&
                     effectiveEvent->status != std::optional<std::string>{"cancelled"};
                 if (pendingInvitation)
                 {

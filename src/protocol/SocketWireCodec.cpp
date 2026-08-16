@@ -2074,9 +2074,9 @@ namespace javelin::protocol
     std::variant<QByteArray, SocketFrameError> encodeActivationRoute(const ActivationRoute& route,
                                                                      const BoundaryLimits& limits)
     {
-        const auto encoded = makePayload(
-            SocketFrameKind::ActivationRequest, limits,
-            [&route](PayloadWriter& writer) { return writeActivationRoute(writer, route); });
+        const auto encoded =
+            makePayload(SocketFrameKind::ActivationRequest, limits, [&route](PayloadWriter& writer)
+                        { return writeActivationRoute(writer, route); });
         if (const auto* error = std::get_if<SocketFrameError>(&encoded))
             return *error;
         return std::get<EncodedPayload>(encoded).payload;

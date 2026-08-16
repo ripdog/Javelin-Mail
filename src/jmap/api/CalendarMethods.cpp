@@ -975,26 +975,26 @@ namespace javelin::jmap::api
             if (!rawResult)
                 return std::nullopt;
             const auto& raw = *rawResult;
-            return detail::RawEventWrite{.type = raw.type,
-                    .uid = includeUid && !raw.uid.empty() ? std::optional{raw.uid} : std::nullopt,
-                    .calendarIds = raw.calendarIds,
-                    .title = raw.title,
-                    .description = raw.description,
-                    .locations =
-                        raw.locations.empty() ? std::nullopt : std::optional{raw.locations},
-                    .start = raw.start,
-                    .duration = raw.duration,
-                    .timeZone = raw.timeZone,
-                    .showWithoutTime = raw.showWithoutTime,
-                    .isDraft = raw.isDraft,
-                    .useDefaultAlerts = raw.useDefaultAlerts,
-                    .alerts = raw.alerts.empty() ? std::nullopt : std::optional{raw.alerts},
-                    .recurrenceRule = raw.recurrenceRule,
-                    .recurrenceOverrides = raw.recurrenceOverrides.empty()
-                                               ? std::nullopt
-                                               : std::optional{raw.recurrenceOverrides},
-                    .participants =
-                        raw.participants.empty() ? std::nullopt : std::optional{raw.participants}};
+            return detail::RawEventWrite{
+                .type = raw.type,
+                .uid = includeUid && !raw.uid.empty() ? std::optional{raw.uid} : std::nullopt,
+                .calendarIds = raw.calendarIds,
+                .title = raw.title,
+                .description = raw.description,
+                .locations = raw.locations.empty() ? std::nullopt : std::optional{raw.locations},
+                .start = raw.start,
+                .duration = raw.duration,
+                .timeZone = raw.timeZone,
+                .showWithoutTime = raw.showWithoutTime,
+                .isDraft = raw.isDraft,
+                .useDefaultAlerts = raw.useDefaultAlerts,
+                .alerts = raw.alerts.empty() ? std::nullopt : std::optional{raw.alerts},
+                .recurrenceRule = raw.recurrenceRule,
+                .recurrenceOverrides = raw.recurrenceOverrides.empty()
+                                           ? std::nullopt
+                                           : std::optional{raw.recurrenceOverrides},
+                .participants =
+                    raw.participants.empty() ? std::nullopt : std::optional{raw.participants}};
         }
 
         std::optional<std::string> rawEventPatch(const calendar::CalendarEvent& previous,
@@ -1606,7 +1606,8 @@ namespace javelin::jmap::api
             auto snapshot = event(result.accountId, item.event);
             if (!snapshot)
                 return {.value = std::nullopt,
-                        .error = "Failed to decode a CalendarEventNotification recurrence override"};
+                        .error =
+                            "Failed to decode a CalendarEventNotification recurrence override"};
             if (snapshot->id.empty())
                 snapshot->id = item.calendarEventId;
             result.list.push_back(calendar::CalendarEventNotification{

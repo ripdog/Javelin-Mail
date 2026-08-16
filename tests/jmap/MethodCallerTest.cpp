@@ -462,8 +462,7 @@ TEST_CASE("blob upload streams a file to the expanded JMAP upload URL",
     CHECK(transport.requests.front().body == payload);
     REQUIRE(transport.requests.front().authentication.has_value());
     CHECK(transport.requests.front().authentication->accountId == "auth-account");
-    const auto* contentType =
-        header(transport.requests.front(), QByteArrayLiteral("Content-Type"));
+    const auto* contentType = header(transport.requests.front(), QByteArrayLiteral("Content-Type"));
     REQUIRE(contentType != nullptr);
     CHECK(contentType->value == "message/rfc822");
 }
