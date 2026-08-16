@@ -230,6 +230,10 @@ int main(int argc, char* argv[])
 
     try
     {
+        if (parser.isSet(QStringLiteral("session")) &&
+            (parser.isSet(QStringLiteral("json")) || parser.isSet(QStringLiteral("request"))))
+            throw std::runtime_error("--session cannot be combined with --json or --request");
+
         auto credentialStore = javelin::app::makeKWalletAccountCredentialStore();
         javelin::app::SettingsRepository settings{daemonSettings(), credentialStore.get()};
         const auto accounts = configuredAccounts(settings);
@@ -252,11 +256,7 @@ int main(int argc, char* argv[])
             selectAccount(accounts, accountName, !parser.isSet(QStringLiteral("session")));
         const auto credentials = accountCredentials(*credentialStore, account);
         if (parser.isSet(QStringLiteral("session")))
-        {
-            if (parser.isSet(QStringLiteral("json")) || parser.isSet(QStringLiteral("request")))
-                throw std::runtime_error("--session cannot be combined with --json or --request");
             return printLiveSession(application, account, credentials);
-        }
         const auto parsedRequest = javelin::jmap::api::parseRequestEnvelope(requestJson(parser));
         if (!parsedRequest.ok())
             throw std::runtime_error(parsedRequest.error.value_or("Invalid JMAP request envelope"));
