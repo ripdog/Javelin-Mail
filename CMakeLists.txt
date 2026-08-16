@@ -1971,6 +1971,19 @@ javelin_enable_sanitizers(javelin_daemon_core)
 # QCoro and daemon composition use exceptions internally
 target_compile_options(javelin_daemon_core PRIVATE -fexceptions)
 
+# GCC 16 can produce false -Wmaybe-uninitialized diagnostics from coroutine-frame
+# destruction during LTO. Keep LTO enabled for the package as a whole, but compile
+# the two affected translation units without LTO so link-time analysis cannot
+# manufacture warnings for std::string/std::optional frame slots.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+   AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16
+   AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 17)
+    set_property(SOURCE
+        src/app/calendar/CalendarInvitationService.cpp
+        src/app/undo/MailTransferHistoryService.cpp
+        APPEND PROPERTY COMPILE_OPTIONS -fno-lto)
+endif()
+
 # Phase 11 composition checks.  The daemon target is the socket-safe half of
 # the application graph.  The GUI bootstrap consumes only the typed protocol,
 # read-only cache, and presentation targets.
