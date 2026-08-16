@@ -136,6 +136,15 @@ namespace javelin::jmap::api
             co_return *error;
 
         const auto& response = std::get<HttpResponse>(transportResult);
+        if (response.statusCode < 200 || response.statusCode >= 300)
+        {
+            co_return TransportError{
+                .code = TransportErrorCode::HttpFailure,
+                .message = "JMAP blob upload failed with HTTP status " +
+                           std::to_string(response.statusCode),
+                .httpStatus = response.statusCode,
+            };
+        }
         RawBlobUploadResponse raw;
         std::string json = response.body.toStdString();
         const auto parseError = glz::read<glz::opts{.error_on_unknown_keys = false}>(raw, json);
