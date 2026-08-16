@@ -54,12 +54,15 @@ namespace javelin::app::undo
             const QString sourceAccountId = QString::fromStdString(history.sourceAccountId);
             const QString destinationAccountId =
                 QString::fromStdString(history.destinationAccountId);
+            QStringList accountIds{sourceAccountId};
+            if (destinationAccountId != sourceAccountId)
+                accountIds.push_back(destinationAccountId);
             return {
                 .outcome = HistoryExecutionOutcome::Success,
                 .updatedPayload = std::move(history),
                 .refreshScope =
                     {
-                        .accountIds = {sourceAccountId, destinationAccountId},
+                        .accountIds = std::move(accountIds),
                         .objectTypes = {QStringLiteral("Email")},
                         .views = {QStringLiteral("mail")},
                     },
