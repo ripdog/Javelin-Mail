@@ -152,11 +152,13 @@ namespace javelin::gui::sieve
             return;
         if (m_dirty)
         {
-            const auto& script = m_scripts[static_cast<std::size_t>(m_currentRow)];
+            const QString scriptName =
+                m_currentRow >= 0 && m_currentRow < static_cast<int>(m_scripts.size())
+                    ? QString::fromStdString(m_scripts[static_cast<std::size_t>(m_currentRow)].name)
+                    : i18n("Untitled script");
             const auto answer = QMessageBox::question(
                 this, i18n("Discard Changes?"),
-                i18n("Discard unsaved changes to this script?\n\nScript: “%1”",
-                     QString::fromStdString(script.name)));
+                i18n("Discard unsaved changes to this script?\n\nScript: “%1”", scriptName));
             if (answer != QMessageBox::Yes)
             {
                 const QSignalBlocker blocker{m_scriptList};
