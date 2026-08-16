@@ -193,6 +193,25 @@ TEST_CASE("new event destination falls back when the configured calendar is not 
           std::optional<std::size_t>{0});
 }
 
+TEST_CASE("new event destination is absent when no calendar is writable",
+          "[gui][calendar][default-destination]")
+{
+    const std::vector<javelin::gui::calendar::NewEventCalendarCandidate> candidates{
+        {.ownerAccountId = "server-1",
+         .accountId = "a1",
+         .calendarId = "personal",
+         .writable = false,
+         .serverDefault = true},
+        {.ownerAccountId = "server-2",
+         .accountId = "a2",
+         .calendarId = "work",
+         .writable = false,
+         .serverDefault = false},
+    };
+
+    CHECK_FALSE(javelin::gui::calendar::preferredNewEventCalendarIndex(candidates, {}).has_value());
+}
+
 TEST_CASE("month calendar labels multi-day event segments coherently", "[gui][calendar]")
 {
     using javelin::gui::calendar::monthEventSegment;
