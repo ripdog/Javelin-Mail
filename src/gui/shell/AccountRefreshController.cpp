@@ -110,10 +110,11 @@ namespace javelin::gui::shell
                                               &javelin::jmap::cache::MailboxTreeItem::role);
                         if (inbox != mailboxes.end())
                         {
-                            if (const auto error = m_settings.ensureNotificationMailboxSelected(
-                                    QString::fromStdString(summary.accountId),
-                                    QString::fromStdString(inbox->id)))
-                                Q_EMIT userInterventionRequired(error->detail);
+                            if (const auto settingsError =
+                                    m_settings.ensureNotificationMailboxSelected(
+                                        QString::fromStdString(summary.accountId),
+                                        QString::fromStdString(inbox->id)))
+                                Q_EMIT userInterventionRequired(settingsError->detail);
                         }
                     }
                 }
