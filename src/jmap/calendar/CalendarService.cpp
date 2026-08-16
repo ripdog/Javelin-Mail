@@ -2661,10 +2661,10 @@ namespace javelin::jmap::calendar
                 for (std::size_t suffix = 2; participantIds.contains(participantId); ++suffix)
                     participantId = "owner-" + std::to_string(suffix);
                 std::optional<std::string> email;
-                constexpr std::string_view mailtoPrefix = "mailto:";
-                const auto normalizedAddress = normalizedCalendarAddress(identity.calendarAddress);
-                if (normalizedAddress.starts_with(mailtoPrefix))
-                    email = normalizedAddress.substr(mailtoPrefix.size());
+                const auto calendarAddress =
+                    QString::fromStdString(identity.calendarAddress).trimmed();
+                if (calendarAddress.startsWith(QStringLiteral("mailto:"), Qt::CaseInsensitive))
+                    email = calendarAddress.mid(7).toStdString();
                 command.event.attendees.push_back({
                     .id = std::move(participantId),
                     .name = identity.name,
