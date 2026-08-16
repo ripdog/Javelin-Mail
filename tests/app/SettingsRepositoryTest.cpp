@@ -445,7 +445,8 @@ TEST_CASE("settings updates reject incomplete default calendar destinations", "[
         repository.update({.baseRevision = initial->revision, .update = std::move(update)});
     const auto* rejected = std::get_if<javelin::protocol::SettingsUpdateRejected>(&result);
     REQUIRE(rejected != nullptr);
-    CHECK(rejected->error.detail == QStringLiteral("default calendar destination is incomplete"));
+    CHECK(rejected->error.field ==
+          QStringLiteral("update.workspace.defaultCalendarDestination.calendarId"));
 }
 
 TEST_CASE("settings migration fails closed on malformed account records", "[app][settings]")
