@@ -359,6 +359,8 @@ namespace javelin::app
                     .contactsChanged = false,
                     .identitiesChanged = false,
                 });
+                if (!operation.sourceMailboxId.has_value())
+                    m_fullMailSyncService->requestCatchUp(operation.sourceAccountId);
             },
             m_accountRuntimeManager.get());
         QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::accountConfigured,
