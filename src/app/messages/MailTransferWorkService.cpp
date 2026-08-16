@@ -11,6 +11,7 @@
 
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QScopeGuard>
 #include <QTimer>
 
 #include <algorithm>
@@ -235,6 +236,12 @@ namespace javelin::app
     {
         const auto jobId = jobIdFor(operationId);
         m_runningOperations.insert(operationId);
+        const auto runningGuard = qScopeGuard(
+            [this, &operationId]
+            {
+                m_runningOperations.erase(operationId);
+                schedulePump();
+            });
         ensureTracked(operationId);
         MailTransferRepository repository{m_databaseConnection};
         const auto operationResult = repository.findOperation(operationId);
@@ -252,10 +259,7 @@ namespace javelin::app
                                                          checkpoint(operationId)));
             }
         }
-        auto result = co_await executeAndTrack(operationId, jobId);
-        m_runningOperations.erase(operationId);
-        schedulePump();
-        co_return result;
+        co_return co_await executeAndTrack(operationId, jobId);
     }
 
     void MailTransferWorkService::networkBecameReachable()
@@ -339,19 +343,20 @@ namespace javelin::app
                 continue;
             m_runningOperations.insert(*operationId);
             auto task = runBackground(*operationId, job.jobId);
-            QCoro::connect(std::move(task), this,
-                           [this, operationId = *operationId, jobId = job.jobId]
-                           {
-                               m_workScheduler.release(jobId);
-                               m_runningOperations.erase(operationId);
-                               schedulePump();
-                           });
+            QCoro::connect(std::move(task), this, [] {});
         }
     }
 
     QCoro::Task<void> MailTransferWorkService::runBackground(std::string operationId,
                                                              std::string jobId)
     {
+        const auto runningGuard = qScopeGuard(
+            [this, &operationId, &jobId]
+            {
+                m_workScheduler.release(jobId);
+                m_runningOperations.erase(operationId);
+                schedulePump();
+            });
         MailTransferRepository repository{m_databaseConnection};
         const auto operationResult = repository.findOperation(operationId);
         if (const auto* operation =
@@ -368,7 +373,7 @@ namespace javelin::app
                                                          checkpoint(operationId)));
             }
         }
-        static_cast<void>(co_await executeAndTrack(std::move(operationId), jobId));
+        static_cast<void>(co_await executeAndTrack(operationId, jobId));
     }
 
     QCoro::Task<MailTransferExecutionResult>
