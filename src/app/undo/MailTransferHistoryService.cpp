@@ -1084,6 +1084,12 @@ namespace javelin::app::undo
         co_return reference->object.contentHash;
     }
 
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 16
+#pragma GCC diagnostic push
+    // GCC 16 emits a false -Wmaybe-uninitialized from std::string destruction in this coroutine's
+    // generated frame at -O3. Keep the suppression local so later compilers re-check the function.
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
     QCoro::Task<RedoneMailTransferItemResult> MailTransferHistoryService::redoMissingDestination(
         QString historyEntryId, const MailTransferHistoryOperation operation,
         std::string sourceAccountId, std::string destinationAccountId,
@@ -1267,5 +1273,8 @@ namespace javelin::app::undo
             .redoGeneration = item.redoGeneration,
         };
     }
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 16
+#pragma GCC diagnostic pop
+#endif
 
 } // namespace javelin::app::undo
