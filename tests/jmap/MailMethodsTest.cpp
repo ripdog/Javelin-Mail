@@ -809,7 +809,13 @@ TEST_CASE("email copy requests serialize RFC 8620 copy arguments", "[jmap][metho
         .ifFromInState = "source-state",
         .accountId = "destination-account",
         .ifInState = "destination-state",
-        .create = {{"copy-1", javelin::jmap::api::EmailCopyCreate{.id = "eml-1"}}},
+        .create = {{"copy-1",
+                    javelin::jmap::api::EmailCopyCreate{
+                        .id = "eml-1",
+                        .mailboxIds = std::nullopt,
+                        .keywords = std::nullopt,
+                        .receivedAt = std::nullopt,
+                    }}},
         .onSuccessDestroyOriginal = true,
         .destroyFromIfInState = "source-state-after-copy",
     });
