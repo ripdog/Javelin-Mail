@@ -155,7 +155,7 @@ TEST_CASE("cross-account move removes only the actual selection mailbox when res
     CHECK_FALSE(plan.items.front().sourceDestroy);
 }
 
-TEST_CASE("thread-visible or search move removes all real source residencies and destroys source",
+TEST_CASE("scoped move rejects stale membership while unscoped search move removes all residencies",
           "[app][mail-transfer][planning][move]")
 {
     const auto source = account("source-local", "connection-a", "u1");
@@ -165,17 +165,15 @@ TEST_CASE("thread-visible or search move removes all real source residencies and
         std::vector{mailbox("inbox", "Inbox"), mailbox("archive", "Archive"),
                     mailbox("important", "Important")};
 
-    const auto threadVisible = requirePlan(
+    const auto staleScopedMove =
         planMailTransfer({.sourceAccountId = source.accountId,
                           .sourceMailboxId = std::optional<std::string>{"inbox"},
                           .destinationAccountId = destination.accountId,
                           .destinationMailboxId = "archive",
                           .operation = MailTransferOperation::Move},
                          {message.id}, {message}, sourceMailboxes,
-                         {mailbox("archive", "Destination Archive")}, source, destination));
-    REQUIRE(threadVisible.items.size() == 1);
-    CHECK(threadVisible.items.front().sourceRemoveMailboxIds == message.mailboxIds);
-    CHECK(threadVisible.items.front().sourceDestroy);
+                         {mailbox("archive", "Destination Archive")}, source, destination);
+    CHECK(std::holds_alternative<QString>(staleScopedMove));
 
     const auto searchMove = requirePlan(
         planMailTransfer({.sourceAccountId = source.accountId,

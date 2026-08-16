@@ -160,9 +160,13 @@ namespace javelin::app
                         return i18n("A message no longer has the mailbox memberships required by "
                                     "the exact source cleanup plan.");
                 }
-                else if (intent.sourceMailboxId.has_value() &&
-                         std::ranges::contains(email.mailboxIds, *intent.sourceMailboxId))
+                else if (intent.sourceMailboxId.has_value())
                 {
+                    if (!std::ranges::contains(email.mailboxIds, *intent.sourceMailboxId))
+                    {
+                        return i18n("Message %1 is no longer in the mailbox you moved it from.",
+                                    QString::fromStdString(email.id));
+                    }
                     removeMailboxIds.push_back(*intent.sourceMailboxId);
                 }
                 else
