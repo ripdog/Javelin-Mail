@@ -508,7 +508,7 @@ namespace javelin::jmap::cache
             "p.event_id=o.event_id AND p.recurrence_id=o.recurrence_id JOIN calendar_events e ON "
             "e.account_id=o.account_id AND e.event_id=o.event_id JOIN accounts a ON "
             "a.account_id=o.account_id WHERE o.status='pending' ORDER BY "
-            "o.created_at,o.invitation_key"));
+            "o.created_at,o.invitation_key LIMIT 100"));
         query.bindValue(QStringLiteral(":today"), QDate::currentDate().toString(Qt::ISODate));
         if (!query.exec())
             return queryError(QStringLiteral("Read calendar invitation outbox"), query);
