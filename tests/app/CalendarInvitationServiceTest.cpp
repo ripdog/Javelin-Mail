@@ -164,6 +164,27 @@ namespace
         loop.exec();
         return delivered ? std::optional{signal} : std::nullopt;
     }
+
+    bool runUntilCacheChanged(javelin::app::CalendarInvitationService& service)
+    {
+        QEventLoop loop;
+        bool changed = false;
+        QObject::connect(&service,
+                         &javelin::app::CalendarInvitationService::pendingInvitationCacheChanged,
+                         &loop,
+                         [&changed, &loop]
+                         {
+                             changed = true;
+                             loop.quit();
+                         });
+        QTimer timeout;
+        timeout.setSingleShot(true);
+        QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+        timeout.start(3000);
+        service.start();
+        loop.exec();
+        return changed;
+    }
 } // namespace
 
 TEST_CASE("calendar invitation service discovers an occurrence-only invitation",
@@ -370,4 +391,208 @@ TEST_CASE("calendar invitation service resolves the next recurring occurrence fo
     CHECK(invitation.displayRecurrenceId->value == "2026-09-03T09:00:00");
     CHECK(invitation.displayTime.value == "2026-09-03T09:00:00");
     CHECK(transport.results.empty());
+}
+
+TEST_CASE("calendar invitation empty baseline keeps authoritative state tokens",
+          "[app][calendar][invitation][service][reconciliation]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-invitation-empty-baseline"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("owner", calendarSession()).has_value());
+
+    FakeMethodTransport transport;
+    transport.results = {
+        response(
+            "Calendar/get",
+            R"({"accountId":"calendar-account","state":"c1","list":[{"id":"work","name":"Work","isSubscribed":true,"isVisible":true,"isDefault":true,"myRights":{"mayReadItems":true,"mayRSVP":true}}],"notFound":[]})",
+            "calendar-invitation-calendars"),
+        response(
+            "ParticipantIdentity/get",
+            R"({"accountId":"calendar-account","state":"p1","list":[{"id":"self","name":"Alice","calendarAddress":"mailto:alice@example.test","isDefault":true}],"notFound":[]})",
+            "calendar-invitation-identities"),
+        response(
+            "CalendarEventNotification/query",
+            R"({"accountId":"calendar-account","queryState":"nq1","canCalculateChanges":false,"position":0,"ids":[],"total":0})",
+            "calendar-invitation-query"),
+        response("CalendarEventNotification/get",
+                 R"({"accountId":"calendar-account","state":"n1","list":[],"notFound":[]})",
+                 "calendar-invitation-notification-get"),
+        response(
+            "CalendarEvent/query",
+            R"({"accountId":"calendar-account","queryState":"eq1","canCalculateChanges":false,"position":0,"ids":[],"total":0})",
+            "calendar-invitation-query"),
+        response("CalendarEvent/get",
+                 R"({"accountId":"calendar-account","state":"e1","list":[],"notFound":[]})",
+                 "calendar-invitation-event-get"),
+    };
+
+    javelin::jmap::calendar::CalendarCacheReader reader{connection};
+    javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
+    FakeAccountSource accounts;
+    javelin::app::CalendarInvitationService service{connection, protocol, reader, accounts};
+
+    REQUIRE(runUntilCacheChanged(service));
+    CHECK(transport.results.empty());
+    CHECK(transport.requests.size() == 6);
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    const auto notificationState =
+        repository.stateToken("calendar-account", "CalendarEventNotification");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(notificationState));
+    REQUIRE(std::get<std::optional<std::string>>(notificationState).has_value());
+    CHECK(*std::get<std::optional<std::string>>(notificationState) == "n1");
+}
+
+TEST_CASE("calendar invitation no-op changes do not reschedule forever",
+          "[app][calendar][invitation][service][reconciliation]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-invitation-empty-incremental"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("owner", calendarSession()).has_value());
+    QSqlQuery seed{connection.database()};
+    REQUIRE(seed.exec(
+        QStringLiteral("INSERT INTO calendar_state_tokens(account_id,data_type,state) VALUES "
+                       "('calendar-account','CalendarEventNotification','n0')")));
+
+    FakeMethodTransport transport;
+    transport.results = {
+        response(
+            "Calendar/get",
+            R"({"accountId":"calendar-account","state":"c1","list":[{"id":"work","name":"Work","isSubscribed":true,"isVisible":true,"isDefault":true,"myRights":{"mayReadItems":true,"mayRSVP":true}}],"notFound":[]})",
+            "calendar-invitation-calendars"),
+        response(
+            "ParticipantIdentity/get",
+            R"({"accountId":"calendar-account","state":"p1","list":[{"id":"self","name":"Alice","calendarAddress":"mailto:alice@example.test","isDefault":true}],"notFound":[]})",
+            "calendar-invitation-identities"),
+        response(
+            "CalendarEventNotification/changes",
+            R"({"accountId":"calendar-account","oldState":"n0","newState":"n1","hasMoreChanges":false,"created":[],"updated":[],"destroyed":[]})",
+            "calendar-invitation-notification-changes"),
+        response("CalendarEventNotification/get",
+                 R"({"accountId":"calendar-account","state":"n1","list":[],"notFound":[]})",
+                 "calendar-invitation-notification-get"),
+        response("CalendarEvent/get",
+                 R"({"accountId":"calendar-account","state":"e1","list":[],"notFound":[]})",
+                 "calendar-invitation-event-get"),
+    };
+
+    javelin::jmap::calendar::CalendarCacheReader reader{connection};
+    javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
+    FakeAccountSource accounts;
+    javelin::app::CalendarInvitationService service{connection, protocol, reader, accounts};
+
+    REQUIRE(runUntilCacheChanged(service));
+    CHECK(transport.results.empty());
+    REQUIRE(transport.requests.size() == 5);
+
+    QEventLoop settle;
+    QTimer::singleShot(400, &settle, &QEventLoop::quit);
+    settle.exec();
+    CHECK(transport.requests.size() == 5);
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    const auto notificationState =
+        repository.stateToken("calendar-account", "CalendarEventNotification");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(notificationState));
+    REQUIRE(std::get<std::optional<std::string>>(notificationState).has_value());
+    CHECK(*std::get<std::optional<std::string>>(notificationState) == "n1");
+}
+
+TEST_CASE("calendar invitation state race commits progress before follow-up",
+          "[app][calendar][invitation][service][reconciliation]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-invitation-state-race"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("owner", calendarSession()).has_value());
+    QSqlQuery seed{connection.database()};
+    REQUIRE(seed.exec(
+        QStringLiteral("INSERT INTO calendar_state_tokens(account_id,data_type,state) VALUES "
+                       "('calendar-account','CalendarEventNotification','n0')")));
+
+    FakeMethodTransport transport;
+    transport.results = {
+        response(
+            "Calendar/get",
+            R"({"accountId":"calendar-account","state":"c1","list":[{"id":"work","name":"Work","isSubscribed":true,"isVisible":true,"isDefault":true,"myRights":{"mayReadItems":true,"mayRSVP":true}}],"notFound":[]})",
+            "calendar-invitation-calendars"),
+        response(
+            "ParticipantIdentity/get",
+            R"({"accountId":"calendar-account","state":"p1","list":[{"id":"self","name":"Alice","calendarAddress":"mailto:alice@example.test","isDefault":true}],"notFound":[]})",
+            "calendar-invitation-identities"),
+        response(
+            "CalendarEventNotification/changes",
+            R"({"accountId":"calendar-account","oldState":"n0","newState":"n1","hasMoreChanges":false,"created":["notification-1"],"updated":[],"destroyed":[]})",
+            "calendar-invitation-notification-changes"),
+        response(
+            "CalendarEventNotification/get",
+            R"({"accountId":"calendar-account","state":"n2","list":[],"notFound":["notification-1"]})",
+            "calendar-invitation-notification-get"),
+        response("CalendarEvent/get",
+                 R"({"accountId":"calendar-account","state":"e1","list":[],"notFound":[]})",
+                 "calendar-invitation-event-get"),
+        response(
+            "Calendar/get",
+            R"({"accountId":"calendar-account","state":"c1","list":[{"id":"work","name":"Work","isSubscribed":true,"isVisible":true,"isDefault":true,"myRights":{"mayReadItems":true,"mayRSVP":true}}],"notFound":[]})",
+            "calendar-invitation-calendars"),
+        response(
+            "ParticipantIdentity/get",
+            R"({"accountId":"calendar-account","state":"p1","list":[{"id":"self","name":"Alice","calendarAddress":"mailto:alice@example.test","isDefault":true}],"notFound":[]})",
+            "calendar-invitation-identities"),
+        response(
+            "CalendarEventNotification/changes",
+            R"({"accountId":"calendar-account","oldState":"n1","newState":"n2","hasMoreChanges":false,"created":[],"updated":[],"destroyed":["notification-1"]})",
+            "calendar-invitation-notification-changes"),
+        response("CalendarEventNotification/get",
+                 R"({"accountId":"calendar-account","state":"n2","list":[],"notFound":[]})",
+                 "calendar-invitation-notification-get"),
+        response("CalendarEvent/get",
+                 R"({"accountId":"calendar-account","state":"e1","list":[],"notFound":[]})",
+                 "calendar-invitation-event-get"),
+    };
+
+    javelin::jmap::calendar::CalendarCacheReader reader{connection};
+    javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
+    FakeAccountSource accounts;
+    javelin::app::CalendarInvitationService service{connection, protocol, reader, accounts};
+
+    REQUIRE(runUntilCacheChanged(service));
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    auto notificationState = repository.stateToken("calendar-account", "CalendarEventNotification");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(notificationState));
+    REQUIRE(std::get<std::optional<std::string>>(notificationState).has_value());
+    CHECK(*std::get<std::optional<std::string>>(notificationState) == "n1");
+
+    REQUIRE(runUntilCacheChanged(service));
+    notificationState = repository.stateToken("calendar-account", "CalendarEventNotification");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(notificationState));
+    REQUIRE(std::get<std::optional<std::string>>(notificationState).has_value());
+    CHECK(*std::get<std::optional<std::string>>(notificationState) == "n2");
+    CHECK(transport.results.empty());
+    REQUIRE(transport.requests.size() == 10);
+
+    QEventLoop settle;
+    QTimer::singleShot(400, &settle, &QEventLoop::quit);
+    settle.exec();
+    CHECK(transport.requests.size() == 10);
 }

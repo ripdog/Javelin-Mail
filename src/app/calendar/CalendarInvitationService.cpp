@@ -165,8 +165,6 @@ namespace javelin::app
                     .message = QStringLiteral("Server advertises maxObjectsInGet as zero")};
             javelin::jmap::api::CalendarEventGetResponse combined{
                 .accountId = accountId, .state = {}, .list = {}, .notFound = {}};
-            if (ids.empty())
-                co_return combined;
             std::size_t offset = 0;
             bool first = true;
             do
@@ -226,8 +224,6 @@ namespace javelin::app
                     .message = QStringLiteral("Server advertises maxObjectsInGet as zero")};
             javelin::jmap::api::CalendarEventNotificationGetResponse combined{
                 .accountId = accountId, .state = {}, .list = {}, .notFound = {}};
-            if (ids.empty())
-                co_return combined;
             std::size_t offset = 0;
             bool first = true;
             do
@@ -818,13 +814,17 @@ namespace javelin::app
                         newlyCreatedNotificationIds.insert(notification.id);
                 }
             }
-            if (!fullNotificationReconciliation && notifications.state != notificationState)
+            const bool notificationStateMoved =
+                !fullNotificationReconciliation && notifications.state != notificationState;
+            if (notificationStateMoved)
             {
-                qWarning() << "CalendarEventNotification state moved during reconciliation";
-                scheduleOwner(ownerAccountId);
-                continue;
+                qWarning() << "CalendarEventNotification state moved during reconciliation; "
+                              "scheduling a follow-up after committing progress";
             }
-            notificationState = notifications.state;
+            else
+            {
+                notificationState = notifications.state;
+            }
 
             std::vector<std::string> eventIds;
             std::unordered_map<std::string, std::string> createdSourceByScope;
@@ -1011,6 +1011,8 @@ namespace javelin::app
                 continue;
             }
             Q_EMIT pendingInvitationCacheChanged();
+            if (notificationStateMoved)
+                scheduleOwner(ownerAccountId);
         }
         refreshPresentationState();
         dispatchPending();
