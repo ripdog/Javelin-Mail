@@ -699,7 +699,8 @@ namespace javelin::app
             }
             const auto previousNotificationState =
                 std::get<std::optional<std::string>>(stateResult);
-            const bool baseline = !previousNotificationState.has_value();
+            const bool baseline =
+                !previousNotificationState.has_value() || previousNotificationState->empty();
 
             std::vector<std::string> notificationIds;
             std::vector<std::string> deletedNotificationIds;

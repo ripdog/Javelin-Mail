@@ -393,7 +393,7 @@ TEST_CASE("calendar invitation service resolves the next recurring occurrence fo
     CHECK(transport.results.empty());
 }
 
-TEST_CASE("calendar invitation empty baseline keeps authoritative state tokens",
+TEST_CASE("calendar invitation missing or empty baseline keeps authoritative state tokens",
           "[app][calendar][invitation][service][reconciliation]")
 {
     ensureApplication();
@@ -406,6 +406,17 @@ TEST_CASE("calendar invitation empty baseline keeps authoritative state tokens",
     auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
     javelin::jmap::cache::SessionRepository sessions{connection};
     REQUIRE_FALSE(sessions.replace("owner", calendarSession()).has_value());
+
+    SECTION("missing notification state")
+    {
+    }
+    SECTION("poisoned empty notification state")
+    {
+        QSqlQuery seed{connection.database()};
+        REQUIRE(seed.exec(
+            QStringLiteral("INSERT INTO calendar_state_tokens(account_id,data_type,state) VALUES "
+                           "('calendar-account','CalendarEventNotification','')")));
+    }
 
     FakeMethodTransport transport;
     transport.results = {
@@ -441,6 +452,9 @@ TEST_CASE("calendar invitation empty baseline keeps authoritative state tokens",
     REQUIRE(runUntilCacheChanged(service));
     CHECK(transport.results.empty());
     CHECK(transport.requests.size() == 6);
+    REQUIRE(transport.requests.at(2).envelope.methodCalls.size() == 1);
+    CHECK(transport.requests.at(2).envelope.methodCalls.front().name ==
+          "CalendarEventNotification/query");
 
     javelin::jmap::cache::CalendarRepository repository{connection};
     const auto notificationState =
