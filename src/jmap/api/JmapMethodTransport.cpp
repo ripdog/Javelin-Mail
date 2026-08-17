@@ -228,6 +228,18 @@ namespace javelin::jmap::api::detail
                     QStringLiteral("[%1]").arg(QString::fromStdString(reference.mailboxId)));
             return labels;
         }
+
+        [[nodiscard]] QString diagnosticText(const glz::generic& value, const std::string_view key)
+        {
+            if (!value.is_object() || !value.contains(key) || !value.at(key).is_string())
+                return {};
+
+            auto text = QString::fromStdString(value.at(key).get_string()).simplified();
+            constexpr qsizetype maxLength = 180;
+            if (text.size() > maxLength)
+                text = text.left(maxLength - 1) + QChar{0x2026};
+            return text;
+        }
     } // namespace
 
     JmapRequestLogContext describeJmapRequest(const JmapMethodRequest& request)
@@ -268,6 +280,77 @@ namespace javelin::jmap::api::detail
             .methodCalls = description.methodCalls.join(QStringLiteral(", ")),
             .mailboxes = mailboxLabels.join(QStringLiteral(", ")),
         };
+    }
+
+    QString describeWebSocketFrame(const std::string_view payload)
+    {
+        glz::generic frame;
+        auto json = std::string{payload};
+        if (glz::read_json(frame, json) || !frame.is_object())
+            return QStringLiteral("bytes=%1 parse=invalid").arg(payload.size());
+
+        QStringList parts;
+        parts.push_back(QStringLiteral("bytes=%1").arg(payload.size()));
+
+        QStringList keys;
+        for (const auto& [key, value] : frame.get_object())
+        {
+            static_cast<void>(value);
+            keys.push_back(QString::fromStdString(key));
+        }
+        keys.sort(Qt::CaseSensitive);
+        parts.push_back(QStringLiteral("keys=%1").arg(keys.join(QStringLiteral(","))));
+
+        const auto type = diagnosticText(frame, "@type");
+        parts.push_back(
+            QStringLiteral("type=%1").arg(type.isEmpty() ? QStringLiteral("<missing>") : type));
+
+        const auto requestId = diagnosticText(frame, "requestId");
+        parts.push_back(QStringLiteral("requestId=%1")
+                            .arg(requestId.isEmpty() ? QStringLiteral("<missing>") : requestId));
+
+        if (frame.contains("methodResponses") && frame.at("methodResponses").is_array())
+        {
+            QStringList responses;
+            QStringList errors;
+            for (const auto& invocation : frame.at("methodResponses").get_array())
+            {
+                if (!invocation.is_array())
+                    continue;
+                const auto& fields = invocation.get_array();
+                if (fields.size() < 3 || !fields[0].is_string() || !fields[2].is_string())
+                    continue;
+
+                const auto method = QString::fromStdString(fields[0].get_string());
+                const auto callId = QString::fromStdString(fields[2].get_string());
+                responses.push_back(QStringLiteral("%1(%2)").arg(method, callId));
+
+                if (method == QStringLiteral("error") && fields[1].is_object())
+                {
+                    const auto errorType = diagnosticText(fields[1], "type");
+                    const auto description = diagnosticText(fields[1], "description");
+                    QString error = QStringLiteral("%1:%2").arg(
+                        callId, errorType.isEmpty() ? QStringLiteral("<unknown>") : errorType);
+                    if (!description.isEmpty())
+                        error += QStringLiteral("[%1]").arg(description);
+                    errors.push_back(std::move(error));
+                }
+            }
+            if (!responses.isEmpty())
+                parts.push_back(
+                    QStringLiteral("methods=%1").arg(responses.join(QStringLiteral(","))));
+            if (!errors.isEmpty())
+                parts.push_back(QStringLiteral("errors=%1").arg(errors.join(QStringLiteral(","))));
+        }
+
+        const auto title = diagnosticText(frame, "title");
+        const auto detail = diagnosticText(frame, "detail");
+        if (!title.isEmpty())
+            parts.push_back(QStringLiteral("title=%1").arg(title));
+        if (!detail.isEmpty())
+            parts.push_back(QStringLiteral("detail=%1").arg(detail));
+
+        return parts.join(QStringLiteral(" "));
     }
 } // namespace javelin::jmap::api::detail
 
@@ -514,6 +597,7 @@ namespace javelin::jmap::api
                 ++m_disconnectGeneration;
                 m_responses.clear();
                 m_ignoredRequestIds.clear();
+                m_invalidMessageDescription.clear();
                 m_socket.abort();
             }
 
@@ -628,9 +712,14 @@ namespace javelin::jmap::api
                     if (m_invalidMessageGeneration != invalidMessageGeneration)
                     {
                         m_ignoredRequestIds.insert(requestId);
-                        co_return finish(
-                            decodingError("JMAP WebSocket returned an invalid response message"),
-                            true, false);
+                        auto message =
+                            std::string{"JMAP WebSocket returned an invalid response message"};
+                        if (!m_invalidMessageDescription.isEmpty())
+                        {
+                            message += ": ";
+                            message += m_invalidMessageDescription.toStdString();
+                        }
+                        co_return finish(decodingError(message), true, false);
                     }
 
                     static_cast<void>(co_await qCoro(&m_socket, &QWebSocket::textMessageReceived,
@@ -662,6 +751,7 @@ namespace javelin::jmap::api
                     m_socket.abort();
                     m_responses.clear();
                     m_ignoredRequestIds.clear();
+                    m_invalidMessageDescription.clear();
                     m_url = nextUrl;
                     m_accessToken = nextToken;
                     m_opening = false;
@@ -734,8 +824,11 @@ namespace javelin::jmap::api
                 if (glz::read<glz::opts{.error_on_unknown_keys = false}>(header, json) ||
                     !header.type.has_value())
                 {
+                    const auto frameDescription = detail::describeWebSocketFrame(json);
                     ++m_invalidMessageGeneration;
-                    qCWarning(logJmapWebSocketTransport) << "invalid WebSocket message";
+                    m_invalidMessageDescription = frameDescription;
+                    qCWarning(logJmapWebSocketTransport).noquote()
+                        << "invalid WebSocket message" << frameDescription;
                     return;
                 }
 
@@ -748,8 +841,11 @@ namespace javelin::jmap::api
                 }
                 if (!header.requestId.has_value() || header.requestId->empty())
                 {
+                    const auto frameDescription = detail::describeWebSocketFrame(json);
                     ++m_invalidMessageGeneration;
-                    qCWarning(logJmapWebSocketTransport) << "response omitted required requestId";
+                    m_invalidMessageDescription = frameDescription;
+                    qCWarning(logJmapWebSocketTransport).noquote()
+                        << "response omitted required requestId" << frameDescription;
                     return;
                 }
                 if (m_ignoredRequestIds.erase(*header.requestId) > 0)
@@ -769,6 +865,7 @@ namespace javelin::jmap::api
             std::string m_accessToken;
             std::unordered_map<std::string, BufferedWebSocketMessage> m_responses;
             std::unordered_set<std::string> m_ignoredRequestIds;
+            QString m_invalidMessageDescription;
             std::uint64_t m_disconnectGeneration = 0;
             std::uint64_t m_invalidMessageGeneration = 0;
             bool m_opening = false;

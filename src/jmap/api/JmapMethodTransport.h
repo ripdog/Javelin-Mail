@@ -73,6 +73,8 @@ namespace javelin::jmap::api
         [[nodiscard]] JmapRequestLogContext
         describeJmapRequest(javelin::jmap::cache::DatabaseConnection& databaseConnection,
                             const JmapMethodRequest& request);
+
+        [[nodiscard]] QString describeWebSocketFrame(std::string_view payload);
     } // namespace detail
 
     using JmapMethodTransportResult = std::variant<ResponseEnvelope, TransportError, ProtocolError>;

@@ -121,6 +121,33 @@ namespace
     }
 } // namespace
 
+TEST_CASE("websocket frame diagnostics identify malformed response structure safely",
+          "[jmap][method][transport][websocket][logging]")
+{
+    const auto description = javelin::jmap::api::detail::describeWebSocketFrame(
+        R"({"@type":"Response","methodResponses":[["error",{"type":"invalidArguments","description":"invalid JMAP State at line 1 column 236","private":"do-not-log"},"changes"]],"sessionState":"secret-session-state"})");
+
+    CHECK(description.contains(QStringLiteral("type=Response")));
+    CHECK(description.contains(QStringLiteral("requestId=<missing>")));
+    CHECK(description.contains(QStringLiteral("methods=error(changes)")));
+    CHECK(description.contains(QStringLiteral("changes:invalidArguments")));
+    CHECK(description.contains(QStringLiteral("invalid JMAP State at line 1 column 236")));
+    CHECK(description.contains(QStringLiteral("keys=@type,methodResponses,sessionState")));
+    CHECK_FALSE(description.contains(QStringLiteral("do-not-log")));
+    CHECK_FALSE(description.contains(QStringLiteral("secret-session-state")));
+}
+
+TEST_CASE("websocket frame diagnostics do not echo unparseable payloads",
+          "[jmap][method][transport][websocket][logging]")
+{
+    const auto description =
+        javelin::jmap::api::detail::describeWebSocketFrame("not-json-sensitive-content");
+
+    CHECK(description.contains(QStringLiteral("parse=invalid")));
+    CHECK(description.contains(QStringLiteral("bytes=26")));
+    CHECK_FALSE(description.contains(QStringLiteral("sensitive-content")));
+}
+
 TEST_CASE("preferred JMAP transport falls back to HTTP before websocket dispatch",
           "[jmap][method][transport][websocket]")
 {
