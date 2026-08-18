@@ -236,6 +236,7 @@ namespace javelin::gui::calendar
             button->setProperty("agendaAccountId", event.key.accountId);
             button->setProperty("agendaEventId", event.key.eventId);
             button->setProperty("agendaRecurrenceId", event.key.recurrenceId);
+            button->show();
             return button;
         }
 

@@ -375,6 +375,7 @@ TEST_CASE("day agenda keeps remaining events when a selected event disappears",
 
     const auto buttons = dialog.findChildren<QToolButton*>(QStringLiteral("dayAgendaEventButton"));
     REQUIRE(buttons.size() == 1);
+    CHECK(buttons.front()->isVisible());
     CHECK(buttons.front()->property("agendaEventId").toString() == QStringLiteral("retained"));
     CHECK(buttons.front()->accessibleName().contains(QStringLiteral("Retained event")));
     CHECK_FALSE(dialog.selectedEvent().has_value());
