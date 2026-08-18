@@ -506,12 +506,9 @@ namespace javelin::app
         m_calendarInvitationService = std::make_unique<CalendarInvitationService>(
             m_databaseConnection, *m_calendarProtocolClient, *m_calendarReader,
             *m_accountRuntimeManager);
-        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::sessionRefreshed,
-                         m_calendarInvitationService.get(),
-                         &CalendarInvitationService::accountChanged);
-        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::accountConfigured,
-                         m_calendarInvitationService.get(),
-                         &CalendarInvitationService::accountChanged);
+        QObject::connect(
+            m_calendarApplicationService.get(), &CalendarApplicationService::calendarMetadataReady,
+            m_calendarInvitationService.get(), &CalendarInvitationService::accountChanged);
         QObject::connect(
             m_accountRuntimeManager.get(), &AccountRuntimeManager::calendarStateChanged,
             m_calendarInvitationService.get(), &CalendarInvitationService::calendarStateChanged);

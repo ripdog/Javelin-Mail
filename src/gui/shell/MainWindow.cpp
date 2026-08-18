@@ -557,7 +557,12 @@ namespace javelin::gui::shell
         connect(m_mailWorkspaceController.get(), &MailWorkspaceController::operationFailed, this,
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
         connect(&m_mailEvents, &javelin::app::MailApplicationEventsPort::sessionCapabilitiesChanged,
-                this, [this](const QString&) { reloadAccounts(); });
+                this,
+                [this](const QString&)
+                {
+                    reloadAccounts();
+                    m_calendarTabController->accountsChanged();
+                });
         createActions();
         setupGUI(KXmlGuiWindow::ToolBar | KXmlGuiWindow::Keys | KXmlGuiWindow::Save |
                      KXmlGuiWindow::Create,
@@ -628,7 +633,6 @@ namespace javelin::gui::shell
             }
             m_mailboxModel->setConnectionStatus(accountId, modelStatus);
             m_authenticationPromptCoordinator->updateAccountStatus(accountId, status);
-            m_calendarTabController->accountsChanged();
         };
         connect(&m_mailEvents, &javelin::app::MailApplicationEventsPort::accountStatusChanged, this,
                 applyAccountStatus);

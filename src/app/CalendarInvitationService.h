@@ -62,9 +62,10 @@ namespace javelin::app
             std::optional<javelin::jmap::calendar::LocalDateTime> recurrenceId;
         };
 
-        void scheduleOwner(std::string ownerAccountId);
+        void scheduleOwner(std::string ownerAccountId, bool refreshParticipantIdentities);
         void synchronizeQueuedOwners();
-        [[nodiscard]] QCoro::Task<void> synchronizeOwner(std::string ownerAccountId);
+        [[nodiscard]] QCoro::Task<void> synchronizeOwner(std::string ownerAccountId,
+                                                         bool refreshParticipantIdentities);
         void dispatchPending();
         void refreshPresentationState();
 
@@ -76,7 +77,8 @@ namespace javelin::app
         QTimer m_syncTimer;
         QTimer m_dispatchTimer;
         QTimer m_dispatchRetryTimer;
-        std::unordered_set<std::string> m_pendingOwners;
+        std::unordered_map<std::string, bool> m_pendingOwners;
+        std::unordered_map<std::string, bool> m_waitingForCalendarMetadata;
         std::unordered_set<std::string> m_runningOwners;
         std::unordered_map<std::string, LiveInvitation> m_liveInvitations;
         bool m_started = false;

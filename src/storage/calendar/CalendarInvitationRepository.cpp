@@ -101,7 +101,7 @@ namespace javelin::jmap::cache
     }
 
     std::optional<DatabaseError> CalendarInvitationRepository::replaceParticipantIdentities(
-        const std::string_view accountId,
+        const std::string_view accountId, const std::string_view state,
         const std::vector<calendar::ParticipantIdentity>& identities)
     {
         auto transactionResult = DatabaseTransaction::begin(
@@ -139,6 +139,19 @@ namespace javelin::jmap::cache
                 transaction.rollback();
                 return queryError(QStringLiteral("Store calendar participant identity"), insert);
             }
+        }
+
+        QSqlQuery token{m_connection.database()};
+        token.prepare(QStringLiteral(
+            "INSERT INTO calendar_state_tokens (account_id,data_type,state) VALUES "
+            "(:account,'ParticipantIdentity',:state) ON CONFLICT(account_id,data_type) DO UPDATE "
+            "SET state=excluded.state"));
+        token.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        token.bindValue(QStringLiteral(":state"), QString::fromStdString(std::string{state}));
+        if (!token.exec())
+        {
+            transaction.rollback();
+            return queryError(QStringLiteral("Store participant identity state"), token);
         }
         return transaction.commit();
     }

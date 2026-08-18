@@ -897,14 +897,15 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
     javelin::jmap::cache::CalendarInvitationRepository invitations{connection};
     REQUIRE_FALSE(
         invitations
-            .replaceParticipantIdentities("a1", {{.id = "primary",
-                                                  .name = "Alice",
-                                                  .calendarAddress = "mailto:alice@example.test",
-                                                  .isDefault = true},
-                                                 {.id = "alias",
-                                                  .name = "Alice Alias",
-                                                  .calendarAddress = "mailto:alias@example.test",
-                                                  .isDefault = false}})
+            .replaceParticipantIdentities("a1", "p1",
+                                          {{.id = "primary",
+                                            .name = "Alice",
+                                            .calendarAddress = "mailto:alice@example.test",
+                                            .isDefault = true},
+                                           {.id = "alias",
+                                            .name = "Alice Alias",
+                                            .calendarAddress = "mailto:alias@example.test",
+                                            .isDefault = false}})
             .has_value());
     javelin::jmap::calendar::CalendarCacheReader cacheReader{connection};
     const auto identityRead = cacheReader.participantIdentities("a1");
@@ -915,6 +916,10 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
     REQUIRE(identities.size() == 2);
     CHECK(identities.front().id == "primary");
     CHECK(identities.back().calendarAddress == "mailto:alias@example.test");
+    const auto participantIdentityState = calendars.stateToken("a1", "ParticipantIdentity");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(participantIdentityState));
+    REQUIRE(std::get<std::optional<std::string>>(participantIdentityState).has_value());
+    CHECK(*std::get<std::optional<std::string>>(participantIdentityState) == "p1");
 
     REQUIRE_FALSE(invitations
                       .reconcile({.accountId = "a1",

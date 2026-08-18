@@ -129,14 +129,6 @@ namespace javelin::app
             return properties;
         }
 
-        [[nodiscard]] const std::vector<std::string>& calendarProperties()
-        {
-            static const std::vector<std::string> properties{
-                "id",           "name",      "description", "color",    "sortOrder",
-                "isSubscribed", "isVisible", "isDefault",   "timeZone", "myRights"};
-            return properties;
-        }
-
         [[nodiscard]] const std::vector<std::string>& participantIdentityProperties()
         {
             static const std::vector<std::string> properties{"id", "name", "calendarAddress",
@@ -573,17 +565,19 @@ namespace javelin::app
         m_started = true;
         if (const auto error = m_repository.recoverDispatches())
             qWarning().noquote() << "Recover calendar invitation dispatches:" << error->message;
-        for (const auto& ownerAccountId : m_accountSource.configuredAccountIds())
-            scheduleOwner(ownerAccountId);
         dispatchPending();
         refreshPresentationState();
     }
 
-    void CalendarInvitationService::scheduleOwner(std::string ownerAccountId)
+    void CalendarInvitationService::scheduleOwner(std::string ownerAccountId,
+                                                  const bool refreshParticipantIdentities)
     {
         if (!m_started || ownerAccountId.empty())
             return;
-        m_pendingOwners.insert(std::move(ownerAccountId));
+        auto [pending, inserted] =
+            m_pendingOwners.try_emplace(std::move(ownerAccountId), refreshParticipantIdentities);
+        if (!inserted)
+            pending->second = pending->second || refreshParticipantIdentities;
         if (!m_syncTimer.isActive())
             m_syncTimer.start();
     }
@@ -591,15 +585,18 @@ namespace javelin::app
     void CalendarInvitationService::synchronizeQueuedOwners()
     {
         auto owners = std::exchange(m_pendingOwners, {});
-        for (auto& ownerAccountId : owners)
+        for (auto& [ownerAccountId, refreshParticipantIdentities] : owners)
         {
             if (!m_runningOwners.insert(ownerAccountId).second)
             {
-                m_pendingOwners.insert(std::move(ownerAccountId));
+                auto [pending, inserted] =
+                    m_pendingOwners.try_emplace(ownerAccountId, refreshParticipantIdentities);
+                if (!inserted)
+                    pending->second = pending->second || refreshParticipantIdentities;
                 continue;
             }
             const auto key = ownerAccountId;
-            auto task = synchronizeOwner(ownerAccountId);
+            auto task = synchronizeOwner(ownerAccountId, refreshParticipantIdentities);
             QCoro::connect(std::move(task), this,
                            [this, key]
                            {
@@ -610,7 +607,9 @@ namespace javelin::app
         }
     }
 
-    QCoro::Task<void> CalendarInvitationService::synchronizeOwner(std::string ownerAccountId)
+    QCoro::Task<void>
+    CalendarInvitationService::synchronizeOwner(std::string ownerAccountId,
+                                                const bool refreshParticipantIdentities)
     {
         const auto connectionSettings = m_accountSource.connectionSettingsFor(ownerAccountId);
         if (!connectionSettings)
@@ -638,56 +637,89 @@ namespace javelin::app
             if (!account.accountCapabilities.calendars)
                 continue;
 
-            const auto calendarMethod =
-                javelin::jmap::api::calendarGet({.accountId = accountId,
-                                                 .ids = std::nullopt,
-                                                 .idsReference = std::nullopt,
-                                                 .properties = calendarProperties()});
-            const auto identityMethod = javelin::jmap::api::participantIdentityGet(
-                {.accountId = accountId,
-                 .ids = std::nullopt,
-                 .idsReference = std::nullopt,
-                 .properties = participantIdentityProperties()});
-            if (!calendarMethod || !identityMethod)
+            const auto calendarListResult = m_reader.calendars(accountId);
+            if (const auto* readError =
+                    std::get_if<javelin::jmap::OperationError>(&calendarListResult))
             {
-                qWarning() << "Unable to serialize invitation metadata request";
+                qWarning().noquote() << "Read invitation calendar metadata:" << readError->message;
                 continue;
             }
-            auto calendarsResponse =
-                co_await call(m_protocolClient, settings, *session, accountId, *calendarMethod,
-                              "calendar-invitation-calendars");
-            auto identitiesResponse =
-                co_await call(m_protocolClient, settings, *session, accountId, *identityMethod,
-                              "calendar-invitation-identities");
-            if (const auto* failure = std::get_if<CallFailure>(&calendarsResponse))
-            {
-                qWarning().noquote() << "Refresh invitation calendars:" << failure->message;
-                continue;
-            }
-            if (const auto* failure = std::get_if<CallFailure>(&identitiesResponse))
-            {
-                qWarning().noquote() << "Refresh participant identities:" << failure->message;
-                continue;
-            }
-            auto calendarGet =
-                std::get<javelin::jmap::api::CalendarGetResponse>(std::move(calendarsResponse));
-            auto identityGet = std::get<javelin::jmap::api::ParticipantIdentityGetResponse>(
-                std::move(identitiesResponse));
-            if (const auto error =
-                    m_repository.replaceParticipantIdentities(accountId, identityGet.list))
-            {
-                qWarning().noquote() << "Store participant identities:" << error->message;
-                continue;
-            }
+            const auto& calendarList =
+                std::get<std::vector<javelin::jmap::calendar::Calendar>>(calendarListResult);
+
             javelin::jmap::cache::CalendarRepository calendarRepository{m_connection};
-            if (const auto error = calendarRepository.replaceCalendars(accountId, calendarGet.state,
-                                                                       calendarGet.list))
+            const auto calendarStateResult = calendarRepository.stateToken(accountId, "Calendar");
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&calendarStateResult))
             {
-                qWarning().noquote() << "Store invitation calendar metadata:" << error->message;
+                qWarning().noquote() << "Read invitation calendar state:" << error->message;
                 continue;
             }
+            if (!std::get<std::optional<std::string>>(calendarStateResult).has_value())
+            {
+                qDebug().noquote() << "defer invitation sync until calendar metadata is ready"
+                                   << QString::fromStdString(accountId);
+                continue;
+            }
+            const auto identityStateResult =
+                calendarRepository.stateToken(accountId, "ParticipantIdentity");
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&identityStateResult))
+            {
+                qWarning().noquote() << "Read participant identity state:" << error->message;
+                continue;
+            }
+            const auto& identityState = std::get<std::optional<std::string>>(identityStateResult);
+            const bool shouldRefreshIdentities = refreshParticipantIdentities ||
+                                                 !identityState.has_value() ||
+                                                 identityState->empty();
+            std::vector<javelin::jmap::calendar::ParticipantIdentity> identities;
+            if (shouldRefreshIdentities)
+            {
+                const auto identityMethod = javelin::jmap::api::participantIdentityGet(
+                    {.accountId = accountId,
+                     .ids = std::nullopt,
+                     .idsReference = std::nullopt,
+                     .properties = participantIdentityProperties()});
+                if (!identityMethod)
+                {
+                    qWarning() << "Unable to serialize participant identity request";
+                    continue;
+                }
+                auto identitiesResponse =
+                    co_await call(m_protocolClient, settings, *session, accountId, *identityMethod,
+                                  "calendar-invitation-identities");
+                if (const auto* failure = std::get_if<CallFailure>(&identitiesResponse))
+                {
+                    qWarning().noquote() << "Refresh participant identities:" << failure->message;
+                    continue;
+                }
+                auto identityGet = std::get<javelin::jmap::api::ParticipantIdentityGetResponse>(
+                    std::move(identitiesResponse));
+                if (const auto error = m_repository.replaceParticipantIdentities(
+                        accountId, identityGet.state, identityGet.list))
+                {
+                    qWarning().noquote() << "Store participant identities:" << error->message;
+                    continue;
+                }
+                identities = std::move(identityGet.list);
+            }
+            else
+            {
+                const auto identitiesResult = m_reader.participantIdentities(accountId);
+                if (const auto* readError =
+                        std::get_if<javelin::jmap::OperationError>(&identitiesResult))
+                {
+                    qWarning().noquote()
+                        << "Read cached participant identities:" << readError->message;
+                    continue;
+                }
+                identities = std::get<std::vector<javelin::jmap::calendar::ParticipantIdentity>>(
+                    identitiesResult);
+            }
+
             std::unordered_map<std::string, javelin::jmap::calendar::Calendar> calendars;
-            for (const auto& calendar : calendarGet.list)
+            for (const auto& calendar : calendarList)
                 calendars.insert_or_assign(calendar.id, calendar);
 
             const auto stateResult =
@@ -908,7 +940,7 @@ namespace javelin::app
                 const auto seriesIsNew = seriesSource != createdSourceByScope.end() &&
                                          newlyCreatedNotificationIds.contains(seriesSource->second);
                 auto seriesProjection =
-                    pendingProjection(event, event, std::nullopt, identityGet.list, calendars,
+                    pendingProjection(event, event, std::nullopt, identities, calendars,
                                       seriesSource == createdSourceByScope.end()
                                           ? std::nullopt
                                           : std::optional<std::string>{seriesSource->second},
@@ -954,7 +986,7 @@ namespace javelin::app
                         javelin::jmap::calendar::effectiveOccurrenceEvent(event, recurrenceId);
                     if (!effective)
                         continue;
-                    const auto* participant = selfParticipant(*effective, identityGet.list);
+                    const auto* participant = selfParticipant(*effective, identities);
                     if (participant == nullptr ||
                         !occurrenceOverridesParticipant(event, recurrenceId, *participant))
                         continue;
@@ -962,12 +994,12 @@ namespace javelin::app
                     const auto source = createdSourceByScope.find(scopeKey);
                     const auto isNew = source != createdSourceByScope.end() &&
                                        newlyCreatedNotificationIds.contains(source->second);
-                    auto projection = pendingProjection(
-                        event, *effective, recurrenceId, identityGet.list, calendars,
-                        source == createdSourceByScope.end()
-                            ? std::nullopt
-                            : std::optional<std::string>{source->second},
-                        baseline || isNew, false);
+                    auto projection =
+                        pendingProjection(event, *effective, recurrenceId, identities, calendars,
+                                          source == createdSourceByScope.end()
+                                              ? std::nullopt
+                                              : std::optional<std::string>{source->second},
+                                          baseline || isNew, false);
                     if (!projection)
                         continue;
                     if (const auto snapshot = createdSnapshotByScope.find(scopeKey);
@@ -1013,7 +1045,7 @@ namespace javelin::app
             }
             Q_EMIT pendingInvitationCacheChanged();
             if (notificationStateMoved)
-                scheduleOwner(ownerAccountId);
+                scheduleOwner(ownerAccountId, false);
         }
         refreshPresentationState();
         dispatchPending();
@@ -1032,24 +1064,45 @@ namespace javelin::app
 
     void CalendarInvitationService::accountChanged(const QString& ownerAccountId)
     {
-        scheduleOwner(ownerAccountId.toStdString());
+        auto key = ownerAccountId.toStdString();
+        bool refreshParticipantIdentities = false;
+        if (const auto waiting = m_waitingForCalendarMetadata.find(key);
+            waiting != m_waitingForCalendarMetadata.end())
+        {
+            refreshParticipantIdentities = waiting->second;
+            m_waitingForCalendarMetadata.erase(waiting);
+        }
+        scheduleOwner(std::move(key), refreshParticipantIdentities);
     }
 
     void CalendarInvitationService::calendarStateChanged(
         const QString& ownerAccountId,
         const javelin::jmap::sync::AccountTypeStateMap& changedStates)
     {
-        const bool relevant =
-            std::ranges::any_of(changedStates,
-                                [](const auto& account)
-                                {
-                                    return account.second.contains("Calendar") ||
-                                           account.second.contains("CalendarEvent") ||
-                                           account.second.contains("CalendarEventNotification") ||
-                                           account.second.contains("ParticipantIdentity");
-                                });
+        bool calendarMetadataChanged = false;
+        bool relevant = false;
+        bool refreshParticipantIdentities = false;
+        for (const auto& [accountId, states] : changedStates)
+        {
+            static_cast<void>(accountId);
+            calendarMetadataChanged = calendarMetadataChanged || states.contains("Calendar");
+            relevant = relevant || states.contains("CalendarEvent") ||
+                       states.contains("CalendarEventNotification") ||
+                       states.contains("ParticipantIdentity");
+            refreshParticipantIdentities =
+                refreshParticipantIdentities || states.contains("ParticipantIdentity");
+        }
+        auto key = ownerAccountId.toStdString();
+        if (calendarMetadataChanged)
+        {
+            auto [waiting, inserted] = m_waitingForCalendarMetadata.try_emplace(
+                std::move(key), refreshParticipantIdentities);
+            if (!inserted)
+                waiting->second = waiting->second || refreshParticipantIdentities;
+            return;
+        }
         if (relevant)
-            scheduleOwner(ownerAccountId.toStdString());
+            scheduleOwner(std::move(key), refreshParticipantIdentities);
     }
 
     void CalendarInvitationService::dispatchPending()

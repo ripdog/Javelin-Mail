@@ -66,7 +66,7 @@ namespace javelin::jmap::cache
         explicit CalendarInvitationRepository(DatabaseConnection& connection);
 
         [[nodiscard]] std::optional<DatabaseError>
-        replaceParticipantIdentities(std::string_view accountId,
+        replaceParticipantIdentities(std::string_view accountId, std::string_view state,
                                      const std::vector<calendar::ParticipantIdentity>& identities);
         [[nodiscard]] std::optional<DatabaseError>
         reconcile(const CalendarInvitationReconciliation& reconciliation);

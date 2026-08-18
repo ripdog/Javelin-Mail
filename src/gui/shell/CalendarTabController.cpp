@@ -624,6 +624,32 @@ namespace javelin::gui::shell
         return true;
     }
 
+    void
+    CalendarTabController::requestVisibleRange(javelin::gui::calendar::MonthCalendarWidget& widget,
+                                               const QDate& start, const QDate& end)
+    {
+        const javelin::jmap::calendar::VisibleInterval interval{
+            .start = {.value = start.toString(Qt::ISODate).toStdString() + "T00:00:00"},
+            .end = {.value = end.toString(Qt::ISODate).toStdString() + "T00:00:00"}};
+        const javelin::jmap::calendar::TimeZoneId timeZone{
+            .value = QTimeZone::systemTimeZoneId().toStdString()};
+        std::unordered_set<std::string> owners;
+        for (const auto& account : m_calendarAccounts)
+        {
+            if (!owners.insert(account.ownerAccountId).second)
+                continue;
+            auto task = m_calendarCommandPort.requestCalendarRange(account.ownerAccountId, interval,
+                                                                   timeZone);
+            QCoro::connect(std::move(task), &widget,
+                           [this](javelin::jmap::calendar::CalendarRefreshResult result)
+                           {
+                               if (const auto* error =
+                                       std::get_if<javelin::jmap::OperationError>(&result))
+                                   Q_EMIT operationFailed(*error);
+                           });
+        }
+    }
+
     void CalendarTabController::configureEventContextMenu(
         QMenu& menu, std::function<std::vector<QString>()> configuredLayout,
         std::function<void(const QList<QAction*>&)> replaceActionList,
@@ -1567,28 +1593,7 @@ namespace javelin::gui::shell
                 });
         loadVisible(widget->visibleStart(), widget->visibleEnd());
         const auto refreshVisible = [this, widget](const QDate& start, const QDate& end)
-        {
-            const javelin::jmap::calendar::VisibleInterval interval{
-                .start = {.value = start.toString(Qt::ISODate).toStdString() + "T00:00:00"},
-                .end = {.value = end.toString(Qt::ISODate).toStdString() + "T00:00:00"}};
-            const javelin::jmap::calendar::TimeZoneId timeZone{
-                .value = QTimeZone::systemTimeZoneId().toStdString()};
-            std::unordered_set<std::string> owners;
-            for (const auto& account : m_calendarAccounts)
-            {
-                if (!owners.insert(account.ownerAccountId).second)
-                    continue;
-                auto task = m_calendarCommandPort.requestCalendarRange(account.ownerAccountId,
-                                                                       interval, timeZone);
-                QCoro::connect(std::move(task), widget,
-                               [this](javelin::jmap::calendar::CalendarRefreshResult result)
-                               {
-                                   if (const auto* error =
-                                           std::get_if<javelin::jmap::OperationError>(&result))
-                                       Q_EMIT operationFailed(*error);
-                               });
-            }
-        };
+        { requestVisibleRange(*widget, start, end); };
         connect(widget, &javelin::gui::calendar::MonthCalendarWidget::visibleIntervalChanged,
                 widget, refreshVisible);
         connect(
@@ -2005,7 +2010,7 @@ namespace javelin::gui::shell
             return false;
         if (!refreshAccountSnapshot(*widget))
             return false;
-        widget->setDisplayedMonth(widget->displayedMonth());
+        requestVisibleRange(*widget, widget->visibleStart(), widget->visibleEnd());
         return true;
     }
 
@@ -2014,9 +2019,8 @@ namespace javelin::gui::shell
         for (auto& tab : m_tabs)
         {
             auto* widget = widgetForTab(&tab);
-            if (widget == nullptr || !refreshAccountSnapshot(*widget))
-                continue;
-            widget->setDisplayedMonth(widget->displayedMonth());
+            if (widget != nullptr)
+                static_cast<void>(refreshAccountSnapshot(*widget));
         }
     }
 

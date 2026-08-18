@@ -70,6 +70,23 @@ TEST_CASE("calendar accessibility factories ignore Qt objects without C++ RTTI",
     CHECK(QAccessible::queryAccessibleInterface(foreignObject.get()) == nullptr);
 }
 
+TEST_CASE("setting the displayed calendar month is idempotent", "[gui][calendar]")
+{
+    TestWorkspaceSettingsPort settings;
+    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    int visibleIntervalChangeCount = 0;
+    QObject::connect(&widget, &javelin::gui::calendar::MonthCalendarWidget::visibleIntervalChanged,
+                     &widget, [&visibleIntervalChangeCount](const QDate&, const QDate&)
+                     { ++visibleIntervalChangeCount; });
+
+    const auto displayedMonth = widget.displayedMonth();
+    widget.setDisplayedMonth(displayedMonth);
+    CHECK(visibleIntervalChangeCount == 0);
+
+    widget.setDisplayedMonth(displayedMonth.addMonths(1));
+    CHECK(visibleIntervalChangeCount == 1);
+}
+
 TEST_CASE("month calendar accessibility exposes one named table with concise date cells",
           "[gui][calendar][accessibility]")
 {

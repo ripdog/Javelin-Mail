@@ -6,6 +6,7 @@
 #include <QCoroTask>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -24,10 +25,12 @@ namespace javelin::jmap::calendar
         CalendarSyncEngine(cache::DatabaseConnection& connection,
                            CalendarProtocolClient& protocolClient);
 
-        [[nodiscard]] QCoro::Task<CalendarRefreshResult> refresh(LiveConnectionSettings settings,
-                                                                 std::string ownerAccountId,
-                                                                 VisibleInterval interval,
-                                                                 TimeZoneId displayTimeZone);
+        [[nodiscard]] QCoro::Task<CalendarRefreshResult>
+        refresh(LiveConnectionSettings settings, std::string ownerAccountId,
+                VisibleInterval interval, TimeZoneId displayTimeZone,
+                bool refreshCalendarMetadata = true);
+        [[nodiscard]] QCoro::Task<std::variant<bool, OperationError>>
+        refreshMetadata(LiveConnectionSettings settings, std::string ownerAccountId);
         [[nodiscard]] QCoro::Task<CalendarRefreshResult>
         refreshChanged(LiveConnectionSettings settings, std::string ownerAccountId,
                        VisibleInterval interval, TimeZoneId displayTimeZone);

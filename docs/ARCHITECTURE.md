@@ -446,9 +446,20 @@ an explicit protocol review, fixture update, and architecture change.
 
 Calendar protocol envelopes and JSCalendar wire documents remain inside `javelin_jmap`.
 `CalendarProtocolClient` and `CalendarMutationEngine` are daemon-only protocol/mutation components;
-`CalendarSyncEngine` owns bounded materialization and `CalendarCacheReader` owns cached reads. The GUI
-consumes typed calendar values from its read-only cache surface and commands through application
-ports such as `CalendarCommandPort`; it never constructs method names or raw JSON.
+`CalendarSyncEngine` owns policy-neutral metadata, delta, and bounded range materialization, while
+`CalendarApplicationService` is the single daemon coordinator that serializes those synchronization
+demands per owning account. Calendar metadata has one authoritative refresh path. Consumers are
+notified only after that coordinator has established usable cached metadata; when an active optimistic
+Calendar mutation prevents authoritative replacement, the projected cache remains usable but the
+coordinator does not mark metadata authoritative or suppress a later reconciliation fetch. Readiness
+is retained and replayed when background invitation delivery starts, so an early startup refresh
+cannot lose its consumer trigger. `CalendarInvitationService` consumes that cached Calendar metadata
+and owns only invitation-specific `CalendarEventNotification` reconciliation,
+`ParticipantIdentity` synchronization, and event fetches required to resolve invitations outside the
+visible range. `CalendarCacheReader` owns cached reads. The GUI consumes typed calendar values from
+its read-only cache surface and commands through application ports such as `CalendarCommandPort`; it
+never constructs method names or raw JSON. GUI connection-status changes are presentation state and
+do not create calendar synchronization demand; opening or navigating a calendar range does.
 
 ## Contacts synchronization
 

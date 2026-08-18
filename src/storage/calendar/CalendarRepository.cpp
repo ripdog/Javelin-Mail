@@ -562,7 +562,7 @@ namespace javelin::jmap::cache
         if (const auto error = m_connection.validate())
             return *error;
         if (dataType != "Calendar" && dataType != "CalendarEvent" &&
-            dataType != "CalendarEventNotification")
+            dataType != "CalendarEventNotification" && dataType != "ParticipantIdentity")
             return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
                                  .message = QStringLiteral("Unsupported calendar state type")};
         QSqlQuery query{m_connection.database()};

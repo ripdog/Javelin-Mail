@@ -18,6 +18,7 @@ namespace javelin::jmap::calendar
         TimeZoneId displayTimeZone;
         std::size_t accountCount = 0;
         std::size_t eventCount = 0;
+        bool calendarMetadataAuthoritative = true;
     };
 
     struct CommittedMutation

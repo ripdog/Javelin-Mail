@@ -52,6 +52,7 @@
 #include "jmap/sync/MailboxQueryDescriptor.h"
 #include "jmap/sync/MutationJournal.h"
 
+#include <QCoroFuture>
 #include <QCoroTask>
 
 #include <KLocalizedString>
@@ -666,16 +667,40 @@ namespace javelin::app
                 [this](const QString& ownerAccountId,
                        const javelin::jmap::sync::AccountTypeStateMap& changedStates)
                 {
+                    const bool calendarMetadataChanged =
+                        std::ranges::any_of(changedStates, [](const auto& account)
+                                            { return account.second.contains("Calendar"); });
                     const bool eventStateChanged =
-                        std::ranges::any_of(changedStates,
-                                            [](const auto& account)
-                                            {
-                                                return account.second.contains("Calendar") ||
-                                                       account.second.contains("CalendarEvent");
-                                            });
+                        std::ranges::any_of(changedStates, [](const auto& account)
+                                            { return account.second.contains("CalendarEvent"); });
+                    auto owner = ownerAccountId.toStdString();
+                    if (calendarMetadataChanged)
+                        scheduleMetadataRefresh(owner);
                     if (eventStateChanged)
-                        scheduleRefresh(ownerAccountId.toStdString());
+                        scheduleRefresh(std::move(owner));
                 });
+        connect(&m_accountRuntime, &AccountRuntimeManager::sessionRefreshed, this,
+                [this](const QString& ownerAccountId)
+                { scheduleMetadataRefresh(ownerAccountId.toStdString()); });
+        connect(&m_accountRuntime, &AccountRuntimeManager::accountRemoved, this,
+                [this](const QString& ownerAccountId)
+                {
+                    const auto key = ownerAccountId.toStdString();
+                    m_calendarSyncEngine.invalidateRefresh(key);
+                    m_visibleCalendarRanges.erase(key);
+                    m_calendarMetadataReadyOwners.erase(key);
+                    m_calendarMetadataUsableOwners.erase(key);
+                    m_calendarMetadataRefreshesInFlight.erase(key);
+                    m_calendarRangeRefreshesInFlight.erase(key);
+                    m_calendarMetadataRefreshPending.erase(key);
+                    m_calendarStateRefreshesInFlight.erase(key);
+                    m_calendarStateRefreshPending.erase(key);
+                });
+    }
+
+    std::vector<std::string> CalendarApplicationService::calendarMetadataReadyOwners() const
+    {
+        return {m_calendarMetadataUsableOwners.begin(), m_calendarMetadataUsableOwners.end()};
     }
 
     SieveApplicationService::SieveApplicationService(
@@ -3529,21 +3554,110 @@ namespace javelin::app
         std::string ownerAccountId, javelin::jmap::calendar::VisibleInterval interval,
         javelin::jmap::calendar::TimeZoneId displayTimeZone)
     {
-        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
         if (!configuration.has_value())
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = accountSynchronizationNotConfigured(),
             };
-        m_visibleCalendarRanges.insert_or_assign(
+
+        const VisibleCalendarRange requestedRange{.interval = interval,
+                                                  .displayTimeZone = displayTimeZone};
+        m_visibleCalendarRanges.insert_or_assign(ownerAccountId, requestedRange);
+        const auto sameRange =
+            [](const VisibleCalendarRange& left, const VisibleCalendarRange& right)
+        {
+            return left.interval.start.value == right.interval.start.value &&
+                   left.interval.end.value == right.interval.end.value &&
+                   left.displayTimeZone.value == right.displayTimeZone.value;
+        };
+        const auto stillDesired = [this, &ownerAccountId, &requestedRange, &sameRange]
+        {
+            const auto desired = m_visibleCalendarRanges.find(ownerAccountId);
+            return desired != m_visibleCalendarRanges.end() &&
+                   sameRange(desired->second, requestedRange);
+        };
+        if (const auto metadata = m_calendarMetadataRefreshesInFlight.find(ownerAccountId);
+            metadata != m_calendarMetadataRefreshesInFlight.end())
+        {
+            auto future = metadata->second;
+            static_cast<void>(co_await qCoro(future).result());
+            if (!stillDesired())
+                co_return javelin::jmap::calendar::RefreshedRange{
+                    .interval = requestedRange.interval,
+                    .displayTimeZone = requestedRange.displayTimeZone,
+                    .accountCount = 0,
+                    .eventCount = 0,
+                    .calendarMetadataAuthoritative =
+                        m_calendarMetadataReadyOwners.contains(ownerAccountId)};
+            co_return co_await requestCalendarRange(std::move(ownerAccountId), std::move(interval),
+                                                    std::move(displayTimeZone));
+        }
+        if (const auto state = m_calendarStateRefreshesInFlight.find(ownerAccountId);
+            state != m_calendarStateRefreshesInFlight.end())
+        {
+            auto future = state->second;
+            static_cast<void>(co_await qCoro(future).result());
+            if (!stillDesired())
+                co_return javelin::jmap::calendar::RefreshedRange{
+                    .interval = requestedRange.interval,
+                    .displayTimeZone = requestedRange.displayTimeZone,
+                    .accountCount = 0,
+                    .eventCount = 0,
+                    .calendarMetadataAuthoritative =
+                        m_calendarMetadataReadyOwners.contains(ownerAccountId)};
+            co_return co_await requestCalendarRange(std::move(ownerAccountId), std::move(interval),
+                                                    std::move(displayTimeZone));
+        }
+        if (const auto active = m_calendarRangeRefreshesInFlight.find(ownerAccountId);
+            active != m_calendarRangeRefreshesInFlight.end())
+        {
+            const auto activeRange = active->second.range;
+            auto future = active->second.future;
+            auto activeResult = co_await qCoro(future).result();
+            if (sameRange(activeRange, requestedRange))
+                co_return activeResult;
+
+            const auto desired = m_visibleCalendarRanges.find(ownerAccountId);
+            if (desired == m_visibleCalendarRanges.end() ||
+                !sameRange(desired->second, requestedRange))
+            {
+                co_return activeResult;
+            }
+            co_return co_await requestCalendarRange(std::move(ownerAccountId), std::move(interval),
+                                                    std::move(displayTimeZone));
+        }
+
+        const ForegroundWorkScope foreground{m_workScheduler};
+        const bool refreshCalendarMetadata =
+            !m_calendarMetadataReadyOwners.contains(ownerAccountId);
+        auto promise = std::make_shared<QPromise<javelin::jmap::calendar::CalendarRefreshResult>>();
+        promise->start();
+        auto future = promise->future();
+        m_calendarRangeRefreshesInFlight.insert_or_assign(
             ownerAccountId,
-            VisibleCalendarRange{.interval = interval, .displayTimeZone = displayTimeZone});
+            RangeRefreshFlight{.range = requestedRange, .future = future, .promise = promise});
         auto result = co_await m_calendarSyncEngine.refresh(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId, interval,
-            displayTimeZone);
-        if (const auto* summary = std::get_if<javelin::jmap::calendar::RefreshedRange>(&result);
-            summary != nullptr && summary->accountCount > 0)
+            displayTimeZone, refreshCalendarMetadata);
+
+        const auto* summary = std::get_if<javelin::jmap::calendar::RefreshedRange>(&result);
+        const bool succeeded = summary != nullptr;
+        const bool metadataAuthoritative =
+            summary != nullptr && summary->calendarMetadataAuthoritative;
+        if (succeeded && refreshCalendarMetadata)
+        {
+            m_calendarMetadataUsableOwners.insert(ownerAccountId);
+            Q_EMIT calendarMetadataReady(QString::fromStdString(ownerAccountId));
+            if (metadataAuthoritative)
+                m_calendarMetadataReadyOwners.insert(ownerAccountId);
+        }
+        const bool pendingMetadataRequest =
+            m_calendarMetadataRefreshPending.erase(ownerAccountId) > 0;
+        const bool metadataRefreshPending =
+            pendingMetadataRequest && (!succeeded || !refreshCalendarMetadata);
+
+        if (summary != nullptr && summary->accountCount > 0)
         {
             Q_EMIT calendarCacheCommitted({.ownerAccountId = QString::fromStdString(ownerAccountId),
                                            .interval = summary->interval,
@@ -3551,23 +3665,152 @@ namespace javelin::app
                                            .accountCount = summary->accountCount,
                                            .eventCount = summary->eventCount});
         }
-        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
-                                i18n("Synchronize calendar"), std::move(result));
+        const bool stateRefreshPending = m_calendarStateRefreshPending.erase(ownerAccountId) > 0;
+        m_calendarRangeRefreshesInFlight.erase(ownerAccountId);
+        if (metadataRefreshPending)
+            scheduleMetadataRefresh(ownerAccountId);
+        else if (stateRefreshPending)
+            scheduleRefresh(ownerAccountId);
+
+        auto observedResult =
+            observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                          i18n("Synchronize calendar"), std::move(result));
+        promise->addResult(observedResult);
+        promise->finish();
+        co_return observedResult;
+    }
+
+    void CalendarApplicationService::scheduleMetadataRefresh(std::string ownerAccountId)
+    {
+        if (ownerAccountId.empty())
+            return;
+        if (m_calendarRangeRefreshesInFlight.contains(ownerAccountId) ||
+            m_calendarMetadataRefreshesInFlight.contains(ownerAccountId) ||
+            m_calendarStateRefreshesInFlight.contains(ownerAccountId))
+        {
+            m_calendarMetadataRefreshPending.insert(std::move(ownerAccountId));
+            return;
+        }
+
+        auto promise = std::make_shared<QPromise<bool>>();
+        promise->start();
+        auto future = promise->future();
+        const auto key = ownerAccountId;
+        if (!m_calendarMetadataRefreshesInFlight.try_emplace(key, future).second)
+            return;
+
+        auto task = requestCalendarMetadata(std::move(ownerAccountId));
+        QCoro::connect(
+            std::move(task), this,
+            [this, key, promise](const std::variant<bool, javelin::jmap::OperationError>& result)
+            {
+                m_calendarMetadataRefreshesInFlight.erase(key);
+                const bool configured = m_accountRuntime.configurationFor(key).has_value();
+                const auto* error = std::get_if<javelin::jmap::OperationError>(&result);
+                const bool authoritative = configured && error == nullptr && std::get<bool>(result);
+                if (error != nullptr)
+                    qWarning().noquote() << "Calendar metadata refresh failed" << error->message;
+                if (configured && error == nullptr)
+                {
+                    m_calendarMetadataUsableOwners.insert(key);
+                    Q_EMIT calendarMetadataReady(QString::fromStdString(key));
+                }
+                if (authoritative)
+                {
+                    m_calendarMetadataReadyOwners.insert(key);
+                    const auto range = m_visibleCalendarRanges.find(key);
+                    if (range != m_visibleCalendarRanges.end())
+                    {
+                        Q_EMIT calendarCacheCommitted({
+                            .ownerAccountId = QString::fromStdString(key),
+                            .interval = range->second.interval,
+                            .displayTimeZone = range->second.displayTimeZone,
+                            .accountCount = 0,
+                            .eventCount = 0,
+                        });
+                    }
+                }
+                if (configured && m_calendarMetadataRefreshPending.erase(key) > 0)
+                    scheduleMetadataRefresh(key);
+                else if (configured && m_calendarStateRefreshPending.erase(key) > 0)
+                    scheduleRefresh(key);
+                else if (!configured)
+                {
+                    m_calendarMetadataRefreshPending.erase(key);
+                    m_calendarStateRefreshPending.erase(key);
+                }
+                promise->addResult(authoritative);
+                promise->finish();
+            });
+    }
+
+    QCoro::Task<std::variant<bool, javelin::jmap::OperationError>>
+    CalendarApplicationService::requestCalendarMetadata(std::string ownerAccountId)
+    {
+        const ForegroundWorkScope foreground{m_workScheduler};
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
+                .message = accountSynchronizationNotConfigured(),
+            };
+        auto result = co_await m_calendarSyncEngine.refreshMetadata(
+            toLiveConnectionSettings(configuration->second.settings), ownerAccountId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            m_errorCoordinator.reportFailure(configuration->second.settings, ownerAccountId,
+                                             QStringLiteral("Synchronize calendar metadata"),
+                                             *error);
+            co_return *error;
+        }
+        m_errorCoordinator.reportSuccess(configuration->second.settings.connectionId);
+        co_return std::get<bool>(result);
     }
 
     void CalendarApplicationService::scheduleRefresh(std::string ownerAccountId)
     {
         if (!m_visibleCalendarRanges.contains(ownerAccountId))
             return;
+        if (m_calendarRangeRefreshesInFlight.contains(ownerAccountId) ||
+            m_calendarMetadataRefreshesInFlight.contains(ownerAccountId) ||
+            m_calendarStateRefreshesInFlight.contains(ownerAccountId))
+        {
+            m_calendarStateRefreshPending.insert(std::move(ownerAccountId));
+            return;
+        }
+
+        auto promise = std::make_shared<QPromise<bool>>();
+        promise->start();
+        auto future = promise->future();
+        const auto key = ownerAccountId;
+        if (!m_calendarStateRefreshesInFlight.try_emplace(key, future).second)
+            return;
+
         auto task = requestCalendarChanges(std::move(ownerAccountId));
-        QCoro::connect(std::move(task), this,
-                       [](const javelin::jmap::calendar::CalendarRefreshResult& result)
-                       {
-                           if (const auto* error =
-                                   std::get_if<javelin::jmap::OperationError>(&result))
-                               qWarning().noquote()
-                                   << "Calendar state-change refresh failed" << error->message;
-                       });
+        QCoro::connect(
+            std::move(task), this,
+            [this, key, promise](const javelin::jmap::calendar::CalendarRefreshResult& result)
+            {
+                m_calendarStateRefreshesInFlight.erase(key);
+                const bool configured = m_accountRuntime.configurationFor(key).has_value();
+                const bool succeeded =
+                    configured &&
+                    std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(result);
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                    qWarning().noquote()
+                        << "Calendar state-change refresh failed" << error->message;
+                if (configured && m_calendarMetadataRefreshPending.erase(key) > 0)
+                    scheduleMetadataRefresh(key);
+                else if (configured && m_calendarStateRefreshPending.erase(key) > 0)
+                    scheduleRefresh(key);
+                else if (!configured)
+                {
+                    m_calendarMetadataRefreshPending.erase(key);
+                    m_calendarStateRefreshPending.erase(key);
+                }
+                promise->addResult(succeeded);
+                promise->finish();
+            });
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>

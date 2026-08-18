@@ -6,13 +6,18 @@
 #include "jmap/calendar/CalendarReader.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
+#include <QFuture>
 #include <QObject>
+#include <QPromise>
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
+#include <vector>
 
 namespace javelin::jmap::calendar
 {
@@ -54,6 +59,7 @@ namespace javelin::app
         requestCalendarRange(std::string ownerAccountId,
                              javelin::jmap::calendar::VisibleInterval interval,
                              javelin::jmap::calendar::TimeZoneId displayTimeZone);
+        [[nodiscard]] std::vector<std::string> calendarMetadataReadyOwners() const;
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         createCalendarEvent(std::string ownerAccountId,
                             javelin::jmap::calendar::CreateEventCommand command,
@@ -107,8 +113,12 @@ namespace javelin::app
 
       Q_SIGNALS:
         void calendarCacheCommitted(javelin::app::CalendarCacheChange change);
+        void calendarMetadataReady(const QString& ownerAccountId);
 
       private:
+        void scheduleMetadataRefresh(std::string ownerAccountId);
+        [[nodiscard]] QCoro::Task<std::variant<bool, javelin::jmap::OperationError>>
+        requestCalendarMetadata(std::string ownerAccountId);
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
         requestCalendarChanges(std::string ownerAccountId);
 
@@ -116,6 +126,13 @@ namespace javelin::app
         {
             javelin::jmap::calendar::VisibleInterval interval;
             javelin::jmap::calendar::TimeZoneId displayTimeZone;
+        };
+
+        struct RangeRefreshFlight
+        {
+            VisibleCalendarRange range;
+            QFuture<javelin::jmap::calendar::CalendarRefreshResult> future;
+            std::shared_ptr<QPromise<javelin::jmap::calendar::CalendarRefreshResult>> promise;
         };
 
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
@@ -128,6 +145,13 @@ namespace javelin::app
         WorkScheduler& m_workScheduler;
         javelin::app::undo::UndoManager& m_undoManager;
         std::unordered_map<std::string, VisibleCalendarRange> m_visibleCalendarRanges;
+        std::unordered_set<std::string> m_calendarMetadataReadyOwners;
+        std::unordered_set<std::string> m_calendarMetadataUsableOwners;
+        std::unordered_map<std::string, QFuture<bool>> m_calendarMetadataRefreshesInFlight;
+        std::unordered_map<std::string, RangeRefreshFlight> m_calendarRangeRefreshesInFlight;
+        std::unordered_set<std::string> m_calendarMetadataRefreshPending;
+        std::unordered_map<std::string, QFuture<bool>> m_calendarStateRefreshesInFlight;
+        std::unordered_set<std::string> m_calendarStateRefreshPending;
     };
 
 } // namespace javelin::app

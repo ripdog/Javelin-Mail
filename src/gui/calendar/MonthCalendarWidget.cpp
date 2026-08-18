@@ -741,7 +741,8 @@ namespace javelin::gui::calendar
     MonthCalendarWidget::MonthCalendarWidget(
         javelin::gui::settings::WorkspaceSettingsPort& settings, QWidget* parent)
         : QWidget(parent), m_settings(settings), m_locale(QLocale{}),
-          m_displayedMonth(QDate::currentDate()), m_selectedDate(QDate::currentDate())
+          m_displayedMonth(QDate{QDate::currentDate().year(), QDate::currentDate().month(), 1}),
+          m_selectedDate(QDate::currentDate())
     {
         ensureCalendarAccessibilityFactoryInstalled();
         setFocusPolicy(Qt::StrongFocus);
@@ -830,18 +831,19 @@ namespace javelin::gui::calendar
             return;
 
         const QDate targetMonth{month.year(), month.month(), 1};
-        const bool monthChanged = targetMonth != m_displayedMonth;
+        if (targetMonth == m_displayedMonth)
+            return;
+
         const auto previousSelection = m_selectedDate;
         m_displayedMonth = targetMonth;
-        if (monthChanged && (m_selectedDate.year() != targetMonth.year() ||
-                             m_selectedDate.month() != targetMonth.month()))
+        if (m_selectedDate.year() != targetMonth.year() ||
+            m_selectedDate.month() != targetMonth.month())
         {
             m_selectedDate = QDate{targetMonth.year(), targetMonth.month(),
                                    std::min(m_selectedDate.day(), targetMonth.daysInMonth())};
         }
         rebuildDates();
-        if (monthChanged)
-            notifyAccessibilityGridChanged();
+        notifyAccessibilityGridChanged();
         if (m_selectedDate != previousSelection)
             Q_EMIT selectionChanged(m_selectedDate);
     }

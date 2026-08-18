@@ -3458,7 +3458,9 @@ namespace javelin::jmap
         auto query = javelin::jmap::search::displayString(criteria);
         const auto queryKey = windowKey.value_or(javelin::jmap::search::cacheKey(criteria, sort));
         qInfo().noquote() << "Mail search materialization start"
-                          << QString::fromStdString(accountId) << QString::fromStdString(query);
+                          << QString::fromStdString(accountId) << QString::fromStdString(query)
+                          << "offset" << offset << "limit" << limit << "window"
+                          << QString::fromStdString(queryKey);
         reportProgress(QStringLiteral("Searching the server..."));
         if (m_impl->databaseConnection == nullptr || m_impl->queryClient == nullptr)
         {

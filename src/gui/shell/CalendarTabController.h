@@ -97,6 +97,8 @@ namespace javelin::gui::shell
         widgetForTab(const TabState* tab) const;
         [[nodiscard]] bool
         refreshAccountSnapshot(javelin::gui::calendar::MonthCalendarWidget& widget);
+        void requestVisibleRange(javelin::gui::calendar::MonthCalendarWidget& widget,
+                                 const QDate& start, const QDate& end);
         void showEventContextMenu(javelin::gui::calendar::MonthCalendarWidget& widget,
                                   const QPoint& globalPosition, const QString& accountId,
                                   const QString& eventId, const QString& recurrenceId);

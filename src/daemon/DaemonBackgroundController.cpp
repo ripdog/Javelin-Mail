@@ -2,6 +2,7 @@
 
 #include "app/AccountRuntimeManager.h"
 #include "app/ApplicationErrorCoordinator.h"
+#include "app/CalendarApplicationService.h"
 #include "app/CalendarInvitationService.h"
 #include "app/CalendarNotificationService.h"
 #include "app/ComposePreferences.h"
@@ -265,6 +266,12 @@ namespace javelin::app
         m_services.deferredSendService().start();
         m_services.calendarNotificationService().start();
         m_services.calendarInvitationService().start();
+        for (const auto& ownerAccountId :
+             m_services.calendarApplicationService().calendarMetadataReadyOwners())
+        {
+            m_services.calendarInvitationService().accountChanged(
+                QString::fromStdString(ownerAccountId));
+        }
         if (enableNetworkReachability)
             setupNetworkReachability();
         refreshTrayUnreadCount();
