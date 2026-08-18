@@ -66,6 +66,7 @@ namespace javelin::jmap::calendar
         std::vector<std::string> calendarIds;
         std::optional<std::string> operationGroupId;
         std::optional<std::string> ifInState;
+        std::optional<CalendarRangeMaterialization> materialization = std::nullopt;
     };
 
     struct RespondToEventCommand

@@ -2898,8 +2898,9 @@ namespace javelin::jmap::calendar
                                              .sendSchedulingMessages = true};
         co_return co_await mutate(std::move(settings), std::move(ownerAccountId),
                                   std::move(request), std::move(command.calendarIds),
-                                  std::move(command.operationGroupId), std::nullopt,
-                                  MutationPermission::Write, std::move(projectionCommitted));
+                                  std::move(command.operationGroupId),
+                                  std::move(command.materialization), MutationPermission::Write,
+                                  std::move(projectionCommitted));
     }
 
     QCoro::Task<CalendarMutationResult>

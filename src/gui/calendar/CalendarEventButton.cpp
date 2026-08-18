@@ -1,5 +1,6 @@
 #include "gui/calendar/CalendarEventButton.h"
 #include "gui/accessibility/AccessibleFactory.h"
+#include "gui/calendar/MonthCalendarLayout.h"
 
 #include <QAccessible>
 #include <QAccessibleWidget>
@@ -130,6 +131,16 @@ namespace javelin::gui::calendar
         m_segmentEnds = segmentEnds;
         setAccessibleName(std::move(accessibleText));
         applyPresentation();
+    }
+
+    void CalendarEventButton::setCalendarEventPresentation(
+        const QString& title, const QDateTime& start, const QDateTime& end, const bool allDay,
+        const bool recurring, const QDate& displayDate, QString accessibleText, QColor color)
+    {
+        const auto segment = monthEventSegment(title, start, end, allDay, displayDate);
+        setEventPresentation(segment.label + (recurring ? QStringLiteral(" ↻") : QString{}),
+                             std::move(accessibleText), std::move(color), segment.begins,
+                             segment.ends);
     }
 
     void CalendarEventButton::setControlledWidget(QWidget* widget)

@@ -4,6 +4,8 @@
 #include <QPointer>
 #include <QToolButton>
 
+class QDate;
+class QDateTime;
 class QResizeEvent;
 class QWidget;
 
@@ -18,6 +20,10 @@ namespace javelin::gui::calendar
 
         void setEventPresentation(QString visualText, QString accessibleText, QColor color,
                                   bool segmentBegins = true, bool segmentEnds = true);
+        void setCalendarEventPresentation(const QString& title, const QDateTime& start,
+                                          const QDateTime& end, bool allDay, bool recurring,
+                                          const QDate& displayDate, QString accessibleText,
+                                          QColor color);
         void setControlledWidget(QWidget* widget);
         [[nodiscard]] QWidget* controlledWidget() const;
 

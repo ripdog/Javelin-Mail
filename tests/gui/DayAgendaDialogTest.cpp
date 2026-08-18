@@ -4,6 +4,7 @@
 #include <QAccessible>
 #include <QApplication>
 #include <QCheckBox>
+#include <QCursor>
 #include <QFontMetrics>
 #include <QImage>
 #include <QLabel>
@@ -65,8 +66,10 @@ TEST_CASE("day agenda renders a midnight-to-midnight timeline and starts at eigh
           "[gui][calendar][agenda]")
 {
     javelin::gui::calendar::DayAgendaDialog dialog;
-    dialog.setDay(QDate{2026, 8, 10}, {event(QStringLiteral("morning"), QTime{9, 0}, QTime{10, 0},
-                                             QStringLiteral("Morning meeting"))});
+    auto morning = event(QStringLiteral("morning"), QTime{9, 0}, QTime{10, 0},
+                         QStringLiteral("Morning meeting"));
+    morning.recurring = true;
+    dialog.setDay(QDate{2026, 8, 10}, {morning});
     dialog.show();
     settleGui();
 
@@ -89,11 +92,15 @@ TEST_CASE("day agenda renders a midnight-to-midnight timeline and starts at eigh
     const auto buttons = dialog.findChildren<QToolButton*>(QStringLiteral("dayAgendaEventButton"));
     REQUIRE(buttons.size() == 1);
     auto monthPresentation = javelin::gui::calendar::CalendarEventButton{};
-    monthPresentation.setEventPresentation(QStringLiteral("Morning meeting"),
-                                           QStringLiteral("Morning meeting"),
-                                           QColor{QStringLiteral("#336699")});
+    monthPresentation.setCalendarEventPresentation(
+        QStringLiteral("Morning meeting"), QDateTime{QDate{2026, 8, 10}, QTime{9, 0}},
+        QDateTime{QDate{2026, 8, 10}, QTime{10, 0}}, false, true, QDate{2026, 8, 10},
+        QStringLiteral("Morning meeting"), QColor{QStringLiteral("#336699")});
     CHECK(buttons.front()->styleSheet() == monthPresentation.styleSheet());
     CHECK(buttons.front()->sizePolicy() == monthPresentation.sizePolicy());
+    CHECK(buttons.front()->text().contains(QStringLiteral("09:00")));
+    CHECK(buttons.front()->text().contains(QStringLiteral("Morning meeting")));
+    CHECK(buttons.front()->text().contains(QStringLiteral("↻")));
     CHECK(buttons.front()->y() >= 9 * 64);
     CHECK(buttons.front()->accessibleName().contains(QStringLiteral("Morning meeting")));
     dialog.close();
@@ -320,6 +327,31 @@ TEST_CASE("day agenda occurrence RSVP stays scoped to the selected instance",
     dialog.close();
 }
 
+TEST_CASE("day agenda keeps remaining events when a selected event disappears",
+          "[gui][calendar][agenda][mutation]")
+{
+    javelin::gui::calendar::DayAgendaDialog dialog;
+    const auto removed = event(QStringLiteral("removed"), QTime{9, 0}, QTime{10, 0},
+                               QStringLiteral("Removed event"));
+    const auto retained = event(QStringLiteral("retained"), QTime{11, 0}, QTime{12, 0},
+                                QStringLiteral("Retained event"));
+    dialog.setDay(QDate{2026, 8, 10}, {removed, retained}, removed.key);
+    dialog.show();
+    settleGui();
+
+    dialog.setDay(QDate{2026, 8, 10}, {retained}, removed.key);
+    settleGui();
+
+    const auto buttons = dialog.findChildren<QToolButton*>(QStringLiteral("dayAgendaEventButton"));
+    REQUIRE(buttons.size() == 1);
+    CHECK(buttons.front()->property("agendaEventId").toString() == QStringLiteral("retained"));
+    CHECK(buttons.front()->accessibleName().contains(QStringLiteral("Retained event")));
+    auto* title = dialog.findChild<QLabel*>(QStringLiteral("dayAgendaDetailsTitle"));
+    REQUIRE(title != nullptr);
+    CHECK(title->text() == QStringLiteral("Select an event to see details"));
+    dialog.close();
+}
+
 TEST_CASE("day agenda event buttons request the shared context menu", "[gui][calendar][agenda]")
 {
     javelin::gui::calendar::DayAgendaDialog dialog;
@@ -332,13 +364,19 @@ TEST_CASE("day agenda event buttons request the shared context menu", "[gui][cal
     const auto buttons = dialog.findChildren<QToolButton*>(QStringLiteral("dayAgendaEventButton"));
     REQUIRE(buttons.size() == 1);
     QString requestedEventId;
-    QObject::connect(
-        &dialog, &javelin::gui::calendar::DayAgendaDialog::eventContextMenuRequested, &dialog,
-        [&requestedEventId](const QPoint&, const QString&, const QString& eventId, const QString&)
-        { requestedEventId = eventId; });
+    QPoint requestedPosition;
+    QObject::connect(&dialog, &javelin::gui::calendar::DayAgendaDialog::eventContextMenuRequested,
+                     &dialog,
+                     [&requestedEventId, &requestedPosition](const QPoint& position, const QString&,
+                                                             const QString& eventId, const QString&)
+                     {
+                         requestedPosition = position;
+                         requestedEventId = eventId;
+                     });
     REQUIRE(QMetaObject::invokeMethod(buttons.front(), "customContextMenuRequested",
                                       Qt::DirectConnection, Q_ARG(QPoint, QPoint(3, 4))));
     CHECK(requestedEventId == QStringLiteral("context-event"));
+    CHECK(requestedPosition == QCursor::pos());
     dialog.close();
 }
 

@@ -8,6 +8,7 @@
 #include <QAccessibleWidget>
 #include <QButtonGroup>
 #include <QCheckBox>
+#include <QCursor>
 #include <QDialogButtonBox>
 #include <QFont>
 #include <QFontMetrics>
@@ -198,8 +199,9 @@ namespace javelin::gui::calendar
             auto* button = new CalendarEventButton(parent);
             button->setObjectName(QStringLiteral("dayAgendaEventButton"));
             button->setCheckable(true);
-            button->setEventPresentation(event.title, eventAccessibleName(event, date),
-                                         event.color);
+            button->setCalendarEventPresentation(event.title, event.start, event.end, event.allDay,
+                                                 event.recurring, date,
+                                                 eventAccessibleName(event, date), event.color);
             button->setControlledWidget(detailsTarget);
             button->setProperty("agendaAccountId", event.key.accountId);
             button->setProperty("agendaEventId", event.key.eventId);
@@ -265,10 +267,10 @@ namespace javelin::gui::calendar
                                              m_selected(key);
                                      });
                     button->setContextMenuPolicy(Qt::CustomContextMenu);
-                    QObject::connect(button, &QWidget::customContextMenuRequested, button,
-                                     [button, key = placement.event->key,
-                                      contextMenuRequested](const QPoint& point)
-                                     { contextMenuRequested(button->mapToGlobal(point), key); });
+                    QObject::connect(
+                        button, &QWidget::customContextMenuRequested, button,
+                        [key = placement.event->key, contextMenuRequested](const QPoint&)
+                        { contextMenuRequested(QCursor::pos(), key); });
                     m_buttons.push_back(button);
                 }
                 layoutButtons();
@@ -837,10 +839,10 @@ namespace javelin::gui::calendar
                     [this, key = event.key] { selectEvent(key); });
             button->setContextMenuPolicy(Qt::CustomContextMenu);
             connect(button, &QWidget::customContextMenuRequested, this,
-                    [this, button, key = event.key](const QPoint& point)
+                    [this, key = event.key](const QPoint&)
                     {
-                        Q_EMIT eventContextMenuRequested(button->mapToGlobal(point), key.accountId,
-                                                         key.eventId, key.recurrenceId);
+                        Q_EMIT eventContextMenuRequested(QCursor::pos(), key.accountId, key.eventId,
+                                                         key.recurrenceId);
                     });
             m_allDayLayout->addWidget(button);
             m_eventButtons.push_back(button);

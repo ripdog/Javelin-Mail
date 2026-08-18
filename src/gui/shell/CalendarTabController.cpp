@@ -537,7 +537,7 @@ namespace javelin::gui::shell
                         .title = displayEvent.title.isEmpty() ? i18n("Untitled event")
                                                               : displayEvent.title,
                         .calendarName = std::move(calendarName),
-                        .color = displayEvent.color,
+                        .color = widget.calendarColor(QString::fromStdString(displayEvent.calendarId)),
                         .start = displayEvent.start,
                         .end = displayEvent.end,
                         .allDay = displayEvent.allDay,
@@ -1101,11 +1101,16 @@ namespace javelin::gui::shell
                     if (present)
                         calendarIds.push_back(calendarId);
                 auto task = m_calendarCommandPort.deleteCalendarEvent(
-                    account->ownerAccountId, {.accountId = account->accountId,
-                                              .eventId = foundEvent->id,
-                                              .calendarIds = std::move(calendarIds),
-                                              .operationGroupId = std::nullopt,
-                                              .ifInState = std::nullopt});
+                    account->ownerAccountId,
+                    {.accountId = account->accountId,
+                     .eventId = foundEvent->id,
+                     .calendarIds = std::move(calendarIds),
+                     .operationGroupId = std::nullopt,
+                     .ifInState = std::nullopt,
+                     .materialization = javelin::jmap::calendar::CalendarRangeMaterialization{
+                         .interval = interval,
+                         .displayTimeZone = timeZone,
+                     }});
                 QCoro::connect(std::move(task), &widget, reportResult);
             }
             return;
@@ -1885,7 +1890,12 @@ namespace javelin::gui::shell
                                    return ids;
                                }(),
                                .operationGroupId = std::nullopt,
-                               .ifInState = std::nullopt})
+                               .ifInState = std::nullopt,
+                               .materialization =
+                                   javelin::jmap::calendar::CalendarRangeMaterialization{
+                                       .interval = interval,
+                                       .displayTimeZone = timeZone,
+                                   }})
                         : m_calendarCommandPort.updateCalendarEvent(
                               account->ownerAccountId,
                               {.accountId = account->accountId,

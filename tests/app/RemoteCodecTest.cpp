@@ -3,11 +3,13 @@
 #include "app/DeveloperMaintenance.h"
 #include "app/MailTransferCommandService.h"
 #include "app/RemoteActionTypes.h"
+#include "jmap/calendar/CalendarCommandTypes.h"
 #include "jmap/calendar/CalendarTypes.h"
 #include "jmap/identity/IdentityCommandTypes.h"
 #include "jmap/submission/ComposeTypes.h"
 #include "jmap/sync/MailboxMutationEngine.h"
 #include "protocol/actions/ActionCatalog.h"
+#include "protocol/actions/CalendarActions.h"
 #include "protocol/actions/MailActions.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -155,6 +157,47 @@ TEST_CASE("remote codec round-trips cross-account mail transfer action payloads"
     CHECK(metadata->name == "MailTransferAcrossAccounts");
     CHECK(metadata->admission == javelin::protocol::actions::AdmissionSemantics::Asynchronous);
     CHECK(metadata->replay == javelin::protocol::actions::ReplayPolicy::Never);
+}
+
+TEST_CASE("remote codec preserves calendar delete range materialization",
+          "[app][remote-codec][calendar]")
+{
+    using Action = javelin::protocol::actions::CalendarDeleteEvent;
+    const javelin::jmap::calendar::DeleteEventCommand command{
+        .accountId = "calendar-account",
+        .eventId = "event-1",
+        .calendarIds = {"work"},
+        .operationGroupId = std::optional<std::string>{"operation-1"},
+        .ifInState = std::optional<std::string>{"event-state"},
+        .materialization =
+            javelin::jmap::calendar::CalendarRangeMaterialization{
+                .interval = {.start = {.value = "2026-08-01T00:00:00"},
+                             .end = {.value = "2026-09-01T00:00:00"}},
+                .displayTimeZone = {.value = "Pacific/Auckland"},
+            },
+    };
+
+    const auto encoded = javelin::app::remote::encodeVersioned<Action::requestSchemaVersion>(
+        std::string{"owner-account"}, command, javelin::app::undo::CommandOrigin::User);
+    const auto* payload = std::get_if<QByteArray>(&encoded);
+    REQUIRE(payload != nullptr);
+    const auto decoded =
+        javelin::app::remote::decodeVersionedValue<Action::requestSchemaVersion, Action::Request>(
+            *payload);
+    const auto* value = std::get_if<Action::Request>(&decoded);
+    REQUIRE(value != nullptr);
+    CHECK(std::get<0>(*value) == "owner-account");
+    const auto& decodedCommand = std::get<1>(*value);
+    CHECK(decodedCommand.accountId == command.accountId);
+    CHECK(decodedCommand.eventId == command.eventId);
+    CHECK(decodedCommand.calendarIds == command.calendarIds);
+    CHECK(decodedCommand.operationGroupId == command.operationGroupId);
+    CHECK(decodedCommand.ifInState == command.ifInState);
+    REQUIRE(decodedCommand.materialization.has_value());
+    CHECK(decodedCommand.materialization->interval.start.value == "2026-08-01T00:00:00");
+    CHECK(decodedCommand.materialization->interval.end.value == "2026-09-01T00:00:00");
+    CHECK(decodedCommand.materialization->displayTimeZone.value == "Pacific/Auckland");
+    CHECK(std::get<2>(*value) == javelin::app::undo::CommandOrigin::User);
 }
 
 TEST_CASE("remote codec rejects unsupported action schema versions", "[app][remote-codec][schema]")
