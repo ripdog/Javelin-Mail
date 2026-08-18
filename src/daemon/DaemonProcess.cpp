@@ -2,6 +2,7 @@
 
 #include "app/AccountRuntimeManager.h"
 #include "app/CacheAccessBarrier.h"
+#include "app/CalendarApplicationService.h"
 #include "app/CalendarInvitationService.h"
 #include "app/CalendarNotificationService.h"
 #include "app/CommandDispatcher.h"
@@ -1389,6 +1390,18 @@ namespace javelin::app
                     .searchWindows = std::move(searchWindows),
                 });
             });
+        connect(&m_services->calendarApplicationService(),
+                &CalendarApplicationService::calendarCacheCommitted, this,
+                [this](const CalendarCacheChange& change)
+                {
+                    ++m_epoch.value;
+                    onBoundaryEvent(CacheInvalidation{
+                        .epoch = currentEpoch(),
+                        .changedDomains = {ChangedDomain::Calendars},
+                        .affectedKeys = {},
+                        .accountId = change.ownerAccountId,
+                    });
+                });
         connect(&m_services->calendarInvitationService(),
                 &CalendarInvitationService::pendingInvitationCacheChanged, this,
                 [this]

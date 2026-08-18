@@ -64,6 +64,15 @@ namespace javelin::app
                         id, m_services.calendarReader().loadRangeSnapshot(accountId, interval,
                                                                           timeZone));
                 });
+        case actions::CalendarReadDaySnapshot::id.value:
+            return dispatchDecoded<actions::CalendarReadDaySnapshot>(
+                id, command,
+                [this, &id](const javelin::jmap::calendar::VisibleInterval& interval,
+                            const javelin::jmap::calendar::TimeZoneId& timeZone)
+                {
+                    return acceptValue<actions::CalendarReadDaySnapshot>(
+                        id, m_services.calendarReader().daySnapshot(interval, timeZone));
+                });
         case actions::CalendarRequestRange::id.value:
             return dispatchDecoded<actions::CalendarRequestRange>(
                 id, command,

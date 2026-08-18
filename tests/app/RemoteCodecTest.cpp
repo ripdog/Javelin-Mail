@@ -200,6 +200,55 @@ TEST_CASE("remote codec preserves calendar delete range materialization",
     CHECK(std::get<2>(*value) == javelin::app::undo::CommandOrigin::User);
 }
 
+TEST_CASE("remote codec preserves coherent calendar day snapshots", "[app][remote-codec][calendar]")
+{
+    using Action = javelin::protocol::actions::CalendarReadDaySnapshot;
+    javelin::jmap::calendar::CalendarDaySnapshotResult result =
+        javelin::jmap::calendar::CalendarDaySnapshot{
+            .accounts = {{.account = {.ownerAccountId = "owner-account",
+                                      .accountId = "calendar-account",
+                                      .name = "Calendar"},
+                          .calendars = {},
+                          .participantIdentities = {{.id = "me",
+                                                     .name = "Alice",
+                                                     .calendarAddress = "mailto:alice@example.test",
+                                                     .isDefault = true}},
+                          .window =
+                              javelin::jmap::cache::CalendarWindow{
+                                  .accountId = "calendar-account",
+                                  .start = {.value = "2026-08-18T00:00:00"},
+                                  .end = {.value = "2026-08-19T00:00:00"},
+                                  .displayTimeZone = {.value = "Pacific/Auckland"},
+                                  .queryState = "query-state",
+                                  .eventState = "event-state",
+                                  .events = {},
+                                  .occurrences = {},
+                              }}},
+            .pendingInvitations = {},
+        };
+
+    const auto encoded = javelin::app::remote::encodeVersioned<Action::resultSchemaVersion>(result);
+    const auto* payload = std::get_if<QByteArray>(&encoded);
+    REQUIRE(payload != nullptr);
+    const auto decoded = javelin::app::remote::decodeVersionedValue<
+        Action::resultSchemaVersion, javelin::jmap::calendar::CalendarDaySnapshotResult>(*payload);
+    const auto* decodedResult =
+        std::get_if<javelin::jmap::calendar::CalendarDaySnapshotResult>(&decoded);
+    REQUIRE(decodedResult != nullptr);
+    const auto* snapshot = std::get_if<javelin::jmap::calendar::CalendarDaySnapshot>(decodedResult);
+    REQUIRE(snapshot != nullptr);
+    REQUIRE(snapshot->accounts.size() == 1);
+    CHECK(snapshot->accounts.front().account.ownerAccountId == "owner-account");
+    CHECK(snapshot->accounts.front().account.accountId == "calendar-account");
+    CHECK(snapshot->accounts.front().window.eventState == "event-state");
+
+    const auto metadata = javelin::protocol::actions::findActionMetadata(Action::id);
+    REQUIRE(metadata.has_value());
+    CHECK(metadata->id.value == 95);
+    CHECK(metadata->name == "CalendarReadDaySnapshot");
+    CHECK(metadata->admission == javelin::protocol::actions::AdmissionSemantics::Immediate);
+}
+
 TEST_CASE("remote codec rejects unsupported action schema versions", "[app][remote-codec][schema]")
 {
     const auto encoded = javelin::app::remote::encodeVersioned<2>(42);

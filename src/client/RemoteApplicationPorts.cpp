@@ -165,6 +165,14 @@ namespace javelin::app
             m_client, std::string{accountId}, std::string{eventId});
     }
 
+    javelin::jmap::calendar::CalendarDaySnapshotResult RemoteCalendarReader::daySnapshot(
+        const javelin::jmap::calendar::VisibleInterval& interval,
+        const javelin::jmap::calendar::TimeZoneId& displayTimeZone) const
+    {
+        return callImmediate<javelin::protocol::actions::CalendarReadDaySnapshot>(
+            m_client, interval, displayTimeZone);
+    }
+
     RemoteCalendarCommandPort::RemoteCalendarCommandPort(RemoteActionClient& client,
                                                          QObject* parent)
         : CalendarCommandPort(parent), m_client(client)
@@ -176,19 +184,8 @@ namespace javelin::app
         std::string ownerAccountId, javelin::jmap::calendar::VisibleInterval interval,
         javelin::jmap::calendar::TimeZoneId displayTimeZone)
     {
-        auto result = co_await call<javelin::protocol::actions::CalendarRequestRange>(
+        co_return co_await call<javelin::protocol::actions::CalendarRequestRange>(
             m_client, ownerAccountId, interval, displayTimeZone);
-        if (const auto* refreshed = std::get_if<javelin::jmap::calendar::RefreshedRange>(&result))
-        {
-            Q_EMIT calendarCacheCommitted({
-                .ownerAccountId = QString::fromStdString(ownerAccountId),
-                .interval = refreshed->interval,
-                .displayTimeZone = refreshed->displayTimeZone,
-                .accountCount = refreshed->accountCount,
-                .eventCount = refreshed->eventCount,
-            });
-        }
-        co_return result;
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
@@ -196,10 +193,8 @@ namespace javelin::app
         std::string ownerAccountId, javelin::jmap::calendar::CreateEventCommand command,
         const undo::CommandOrigin origin)
     {
-        auto result = co_await call<javelin::protocol::actions::CalendarCreateEvent>(
+        co_return co_await call<javelin::protocol::actions::CalendarCreateEvent>(
             m_client, ownerAccountId, command, origin);
-        noteCalendarChanged(ownerAccountId);
-        co_return result;
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
@@ -207,10 +202,8 @@ namespace javelin::app
         std::string ownerAccountId, javelin::jmap::calendar::UpdateEventCommand command,
         const undo::CommandOrigin origin)
     {
-        auto result = co_await call<javelin::protocol::actions::CalendarUpdateEvent>(
+        co_return co_await call<javelin::protocol::actions::CalendarUpdateEvent>(
             m_client, ownerAccountId, command, origin);
-        noteCalendarChanged(ownerAccountId);
-        co_return result;
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
@@ -218,20 +211,16 @@ namespace javelin::app
         std::string ownerAccountId, javelin::jmap::calendar::DeleteEventCommand command,
         const undo::CommandOrigin origin)
     {
-        auto result = co_await call<javelin::protocol::actions::CalendarDeleteEvent>(
+        co_return co_await call<javelin::protocol::actions::CalendarDeleteEvent>(
             m_client, ownerAccountId, command, origin);
-        noteCalendarChanged(ownerAccountId);
-        co_return result;
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     RemoteCalendarCommandPort::respondToCalendarEvent(
         std::string ownerAccountId, javelin::jmap::calendar::RespondToEventCommand command)
     {
-        auto result = co_await call<javelin::protocol::actions::CalendarRespondEvent>(
+        co_return co_await call<javelin::protocol::actions::CalendarRespondEvent>(
             m_client, ownerAccountId, command);
-        noteCalendarChanged(ownerAccountId);
-        co_return result;
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
@@ -239,10 +228,8 @@ namespace javelin::app
                                                      std::string accountId, std::string calendarId,
                                                      const bool subscribed)
     {
-        auto result = co_await call<javelin::protocol::actions::CalendarSetSubscribed>(
+        co_return co_await call<javelin::protocol::actions::CalendarSetSubscribed>(
             m_client, ownerAccountId, accountId, calendarId, subscribed);
-        noteCalendarChanged(ownerAccountId);
-        co_return result;
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
@@ -250,30 +237,24 @@ namespace javelin::app
                                                   std::string calendarId,
                                                   const undo::CommandOrigin origin)
     {
-        auto result = co_await call<javelin::protocol::actions::CalendarSetDefault>(
+        co_return co_await call<javelin::protocol::actions::CalendarSetDefault>(
             m_client, ownerAccountId, accountId, calendarId, origin);
-        noteCalendarChanged(ownerAccountId);
-        co_return result;
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     RemoteCalendarCommandPort::createCalendar(
         std::string ownerAccountId, javelin::jmap::calendar::CreateCalendarCommand command)
     {
-        auto result = co_await call<javelin::protocol::actions::CalendarCreate>(
+        co_return co_await call<javelin::protocol::actions::CalendarCreate>(
             m_client, ownerAccountId, command);
-        noteCalendarChanged(ownerAccountId);
-        co_return result;
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     RemoteCalendarCommandPort::deleteCalendar(
         std::string ownerAccountId, javelin::jmap::calendar::DeleteCalendarCommand command)
     {
-        auto result = co_await call<javelin::protocol::actions::CalendarDelete>(
+        co_return co_await call<javelin::protocol::actions::CalendarDelete>(
             m_client, ownerAccountId, command);
-        noteCalendarChanged(ownerAccountId);
-        co_return result;
     }
 
     javelin::jmap::calendar::CalendarPreferenceResult
@@ -281,21 +262,8 @@ namespace javelin::app
                                                   const bool visible,
                                                   const undo::CommandOrigin origin)
     {
-        auto result = callImmediate<javelin::protocol::actions::CalendarSetVisible>(
+        return callImmediate<javelin::protocol::actions::CalendarSetVisible>(
             m_client, accountId, calendarId, visible, origin);
-        noteCalendarChanged(accountId);
-        return result;
-    }
-
-    void RemoteCalendarCommandPort::noteCalendarChanged(const std::string& ownerAccountId)
-    {
-        Q_EMIT calendarCacheCommitted({
-            .ownerAccountId = QString::fromStdString(ownerAccountId),
-            .interval = {},
-            .displayTimeZone = {},
-            .accountCount = 0,
-            .eventCount = 0,
-        });
     }
 
     RemoteComposeCommandPort::RemoteComposeCommandPort(RemoteActionClient& client)

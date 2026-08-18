@@ -26,7 +26,6 @@
 #include <QMessageBox>
 #include <QPalette>
 #include <QPushButton>
-#include <QRegularExpression>
 #include <QStackedWidget>
 #include <QTime>
 #include <QTimeZone>
@@ -191,231 +190,29 @@ namespace javelin::gui::shell
                        std::string{participantId});
         }
 
-        [[nodiscard]] QDateTime
-        eventEndForAgenda(const javelin::jmap::calendar::CalendarEvent& event,
-                          const QDateTime& start)
-        {
-            if (event.utcEnd)
-            {
-                const auto utcEnd =
-                    QDateTime::fromString(QString::fromStdString(event.utcEnd->value), Qt::ISODate);
-                if (utcEnd.isValid())
-                    return utcEnd.toLocalTime();
-            }
-            static const QRegularExpression durationPattern{QStringLiteral(
-                R"(^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$)")};
-            const auto match = durationPattern.match(QString::fromStdString(event.duration.value));
-            if (match.hasMatch())
-            {
-                const auto seconds =
-                    match.captured(1).toLongLong() * 86400 + match.captured(2).toLongLong() * 3600 +
-                    match.captured(3).toLongLong() * 60 + qRound64(match.captured(4).toDouble());
-                return start.addSecs(seconds);
-            }
-            return event.showWithoutTime ? start.addDays(1) : start.addSecs(60 * 60);
-        }
-
-        [[nodiscard]] std::optional<javelin::gui::calendar::DayAgendaEvent>
-        standaloneAgendaEvent(javelin::gui::settings::GuiSettings& settings,
-                              javelin::jmap::calendar::CalendarReader& calendarReader,
-                              javelin::gui::calendar::MonthCalendarWidget& widget,
-                              const std::vector<javelin::jmap::cache::CalendarAccount>& accounts,
-                              const QString& accountId, const QString& eventId,
-                              const QString& recurrenceId)
-        {
-            const auto loaded =
-                calendarReader.event(accountId.toStdString(), eventId.toStdString());
-            const auto* cached =
-                std::get_if<std::optional<javelin::jmap::calendar::CalendarEvent>>(&loaded);
-            if (cached == nullptr || !cached->has_value())
-                return std::nullopt;
-            const auto& event = **cached;
-            const auto account = std::ranges::find(
-                accounts, event.accountId, &javelin::jmap::cache::CalendarAccount::accountId);
-            if (account == accounts.end())
-                return std::nullopt;
-            const auto listed = calendarReader.calendars(event.accountId);
-            const auto* calendars =
-                std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(&listed);
-            const auto identitiesResult = calendarReader.participantIdentities(event.accountId);
-            const auto* identities =
-                std::get_if<std::vector<javelin::jmap::calendar::ParticipantIdentity>>(
-                    &identitiesResult);
-            const auto configuredAddress =
-                settings.accountForCachedId(QString::fromStdString(event.accountId))
-                    .loginEmail.toStdString();
-            std::optional<javelin::jmap::calendar::CalendarEvent> effectiveOccurrence;
-            const javelin::jmap::calendar::CalendarEvent* detailEvent = &event;
-            if (!recurrenceId.isEmpty())
-            {
-                effectiveOccurrence = javelin::jmap::calendar::effectiveOccurrenceEvent(
-                    event, {.value = recurrenceId.toStdString()});
-                if (effectiveOccurrence)
-                    detailEvent = &*effectiveOccurrence;
-            }
-            const auto participantAddress =
-                selfCalendarAddress(*detailEvent, identities, configuredAddress);
-            const javelin::jmap::calendar::PendingCalendarInvitation* pendingInvitation = nullptr;
-            const auto pending = calendarReader.pendingInvitations();
-            if (const auto* invitations =
-                    std::get_if<std::vector<javelin::jmap::calendar::PendingCalendarInvitation>>(
-                        &pending))
-            {
-                const auto exact = std::ranges::find_if(
-                    *invitations,
-                    [&event, &recurrenceId](const auto& invitation)
-                    {
-                        return invitation.accountId == event.accountId &&
-                               invitation.eventId == event.id && invitation.recurrenceId &&
-                               QString::fromStdString(invitation.recurrenceId->value) ==
-                                   recurrenceId;
-                    });
-                if (exact != invitations->end())
-                    pendingInvitation = &*exact;
-                else
-                {
-                    const auto series =
-                        std::ranges::find_if(*invitations,
-                                             [&event](const auto& invitation)
-                                             {
-                                                 return invitation.accountId == event.accountId &&
-                                                        invitation.eventId == event.id &&
-                                                        !invitation.recurrenceId;
-                                             });
-                    if (series != invitations->end())
-                        pendingInvitation = &*series;
-                }
-            }
-            const javelin::jmap::calendar::Calendar* membership = nullptr;
-            if (calendars != nullptr)
-            {
-                const auto membershipIt = std::ranges::find_if(
-                    *calendars,
-                    [&event](const auto& calendar)
-                    {
-                        const auto found = event.calendarIds.find(calendar.id);
-                        return found != event.calendarIds.end() && found->second;
-                    });
-                if (membershipIt != calendars->end())
-                    membership = &*membershipIt;
-            }
-            QDateTime start;
-            if (detailEvent->utcStart)
-                start = QDateTime::fromString(QString::fromStdString(detailEvent->utcStart->value),
-                                              Qt::ISODate)
-                            .toLocalTime();
-            if (!start.isValid())
-                start = QDateTime::fromString(QString::fromStdString(detailEvent->start.value),
-                                              Qt::ISODate);
-            if (!start.isValid())
-                start = QDateTime{QDate::currentDate(), QTime{0, 0}};
-            QStringList attendees;
-            for (const auto& attendee : detailEvent->attendees)
-                if (attendee.isAttendee && !attendee.isOwner)
-                    attendees.push_back(participantLabel(attendee));
-            const auto participant = [&]() -> std::optional<std::size_t>
-            {
-                if (pendingInvitation == nullptr)
-                    return javelin::jmap::calendar::participantIndexForAddress(*detailEvent,
-                                                                               participantAddress);
-                const auto found =
-                    std::ranges::find(detailEvent->attendees, pendingInvitation->selfParticipantId,
-                                      &javelin::jmap::calendar::Attendee::id);
-                if (found == detailEvent->attendees.end())
-                    return std::nullopt;
-                return static_cast<std::size_t>(
-                    std::distance(detailEvent->attendees.begin(), found));
-            }();
-            QString rsvpRecurrenceId;
-            if (pendingInvitation != nullptr && pendingInvitation->recurrenceId)
-                rsvpRecurrenceId = QString::fromStdString(pendingInvitation->recurrenceId->value);
-            else if (!recurrenceId.isEmpty() && participant &&
-                     occurrenceOverridesParticipant(event, recurrenceId.toStdString(),
-                                                    detailEvent->attendees[*participant].id))
-                rsvpRecurrenceId = recurrenceId;
-            return javelin::gui::calendar::DayAgendaEvent{
-                .key = {.accountId = accountId, .eventId = eventId, .recurrenceId = recurrenceId},
-                .title = detailEvent->title.empty() ? i18n("Untitled event")
-                                                    : QString::fromStdString(detailEvent->title),
-                .calendarName =
-                    membership != nullptr ? QString::fromStdString(membership->name) : QString{},
-                .color = membership != nullptr
-                             ? widget.calendarColor(QString::fromStdString(membership->id))
-                             : widget.palette().color(QPalette::Highlight),
-                .start = start,
-                .end = eventEndForAgenda(*detailEvent, start),
-                .allDay = detailEvent->showWithoutTime,
-                .recurring = event.recurrenceRule.has_value(),
-                .editable = membership != nullptr &&
-                            canEditEventInCalendar(*detailEvent, *membership, participantAddress),
-                .rsvpAllowed = pendingInvitation != nullptr
-                                   ? pendingInvitation->rsvpAllowed
-                                   : calendars != nullptr &&
-                                         canRsvp(*detailEvent, *calendars, participantAddress),
-                .rsvpRecurrenceId = rsvpRecurrenceId,
-                .participationStatus =
-                    pendingInvitation != nullptr
-                        ? QString::fromStdString(pendingInvitation->participationStatus)
-                    : participant ? QString::fromStdString(
-                                        detailEvent->attendees[*participant].participationStatus)
-                                  : QString{},
-                .responseMutationPending = false,
-                .responseError = {},
-                .organizer = invitationOrganizer(*detailEvent),
-                .location = detailEvent->location ? QString::fromStdString(*detailEvent->location)
-                                                  : QString{},
-                .description = detailEvent->description
-                                   ? QString::fromStdString(*detailEvent->description)
-                                   : QString{},
-                .attendees = std::move(attendees),
-            };
-        }
-
         [[nodiscard]] std::vector<javelin::gui::calendar::DayAgendaEvent>
         buildDayAgendaEvents(javelin::gui::settings::GuiSettings& settings,
-                             javelin::jmap::calendar::CalendarReader& calendarReader,
                              javelin::gui::calendar::MonthCalendarWidget& widget,
-                             const std::vector<javelin::jmap::cache::CalendarAccount>& accounts,
+                             const javelin::jmap::calendar::CalendarDaySnapshot& snapshot,
                              const QDate& date)
         {
             std::vector<javelin::gui::calendar::DayAgendaEvent> result;
 
             std::unordered_map<std::string, javelin::jmap::calendar::PendingCalendarInvitation>
                 pendingInvitations;
-            const auto pending = calendarReader.pendingInvitations();
-            if (const auto* values =
-                    std::get_if<std::vector<javelin::jmap::calendar::PendingCalendarInvitation>>(
-                        &pending))
-            {
-                for (const auto& invitation : *values)
-                    pendingInvitations.insert_or_assign(
-                        invitationScopeKey(invitation.accountId, invitation.eventId,
-                                           invitation.recurrenceId ? invitation.recurrenceId->value
-                                                                   : std::string{}),
-                        invitation);
-            }
+            for (const auto& invitation : snapshot.pendingInvitations)
+                pendingInvitations.insert_or_assign(
+                    invitationScopeKey(invitation.accountId, invitation.eventId,
+                                       invitation.recurrenceId ? invitation.recurrenceId->value
+                                                               : std::string{}),
+                    invitation);
 
-            const javelin::jmap::calendar::VisibleInterval interval{
-                .start = {.value = date.toString(Qt::ISODate).toStdString() + "T00:00:00"},
-                .end = {.value =
-                            date.addDays(1).toString(Qt::ISODate).toStdString() + "T00:00:00"}};
-            const javelin::jmap::calendar::TimeZoneId timeZone{
-                .value = QTimeZone::systemTimeZoneId().toStdString()};
-
-            for (const auto& account : accounts)
+            for (const auto& accountSnapshot : snapshot.accounts)
             {
-                const auto listed = calendarReader.calendars(account.accountId);
-                const auto* calendars =
-                    std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(&listed);
-                const auto identitiesResult =
-                    calendarReader.participantIdentities(account.accountId);
-                const auto* identities =
-                    std::get_if<std::vector<javelin::jmap::calendar::ParticipantIdentity>>(
-                        &identitiesResult);
-                const auto loaded =
-                    calendarReader.loadRangeSnapshot(account.accountId, interval, timeZone);
-                const auto* window =
-                    std::get_if<std::optional<javelin::jmap::cache::CalendarWindow>>(&loaded);
+                const auto& account = accountSnapshot.account;
+                const auto* calendars = &accountSnapshot.calendars;
+                const auto* identities = &accountSnapshot.participantIdentities;
+                const auto& window = accountSnapshot.window;
                 const auto configuredAddress =
                     settings.accountForCachedId(QString::fromStdString(account.accountId))
                         .loginEmail.toStdString();
@@ -425,9 +222,7 @@ namespace javelin::gui::shell
                     displayAccount,
                     calendars != nullptr ? *calendars
                                          : std::vector<javelin::jmap::calendar::Calendar>{},
-                    window != nullptr ? *window
-                                      : std::optional<javelin::jmap::cache::CalendarWindow>{},
-                    widget.palette().color(QPalette::Highlight));
+                    std::optional{window}, widget.palette().color(QPalette::Highlight));
 
                 for (const auto& displayEvent : presentation.events)
                 {
@@ -437,14 +232,11 @@ namespace javelin::gui::shell
                         continue;
 
                     const javelin::jmap::calendar::CalendarEvent* event = nullptr;
-                    if (window != nullptr && window->has_value())
-                    {
-                        const auto found =
-                            std::ranges::find(window->value().events, displayEvent.eventId,
-                                              &javelin::jmap::calendar::CalendarEvent::id);
-                        if (found != window->value().events.end())
-                            event = &*found;
-                    }
+                    const auto eventMatch =
+                        std::ranges::find(window.events, displayEvent.eventId,
+                                          &javelin::jmap::calendar::CalendarEvent::id);
+                    if (eventMatch != window.events.end())
+                        event = &*eventMatch;
 
                     const javelin::jmap::calendar::Calendar* calendar = nullptr;
                     if (calendars != nullptr)
@@ -462,7 +254,7 @@ namespace javelin::gui::shell
 
                     QString calendarName =
                         calendar != nullptr ? QString::fromStdString(calendar->name) : QString{};
-                    if (accounts.size() > 1 && !calendarName.isEmpty())
+                    if (snapshot.accounts.size() > 1 && !calendarName.isEmpty())
                     {
                         calendarName = i18nc("calendar and account", "%1 — %2", calendarName,
                                              calendarAccountLabel(settings, account));
@@ -591,6 +383,29 @@ namespace javelin::gui::shell
                                   return left.title.localeAwareCompare(right.title) < 0;
                               });
             return result;
+        }
+
+        using DayAgendaEventsResult =
+            std::variant<std::vector<javelin::gui::calendar::DayAgendaEvent>,
+                         javelin::jmap::OperationError>;
+
+        [[nodiscard]] DayAgendaEventsResult
+        loadDayAgendaEvents(javelin::gui::settings::GuiSettings& settings,
+                            javelin::jmap::calendar::CalendarReader& calendarReader,
+                            javelin::gui::calendar::MonthCalendarWidget& widget, const QDate& date)
+        {
+            const javelin::jmap::calendar::VisibleInterval interval{
+                .start = {.value = date.toString(Qt::ISODate).toStdString() + "T00:00:00"},
+                .end = {.value =
+                            date.addDays(1).toString(Qt::ISODate).toStdString() + "T00:00:00"}};
+            const javelin::jmap::calendar::TimeZoneId timeZone{
+                .value = QTimeZone::systemTimeZoneId().toStdString()};
+            auto snapshot = calendarReader.daySnapshot(interval, timeZone);
+            if (const auto* failure = std::get_if<javelin::jmap::OperationError>(&snapshot))
+                return *failure;
+            return buildDayAgendaEvents(
+                settings, widget,
+                std::get<javelin::jmap::calendar::CalendarDaySnapshot>(std::move(snapshot)), date);
         }
     } // namespace
 
@@ -1339,10 +1154,7 @@ namespace javelin::gui::shell
         connect(widget, &javelin::gui::calendar::MonthCalendarWidget::visibleIntervalChanged,
                 widget, loadVisible);
         const auto agendaEvents = [this, widget](const QDate& date)
-        {
-            return buildDayAgendaEvents(m_settings, m_calendarReader, *widget, m_calendarAccounts,
-                                        date);
-        };
+        { return loadDayAgendaEvents(m_settings, m_calendarReader, *widget, date); };
         connect(
             widget, &javelin::gui::calendar::MonthCalendarWidget::dayAgendaRequested, widget,
             [this, widget, agendaEvents](const QDate& date, const QString& accountId,
@@ -1350,31 +1162,44 @@ namespace javelin::gui::shell
             {
                 auto* dialog = new javelin::gui::calendar::DayAgendaDialog(widget);
                 dialog->setAttribute(Qt::WA_DeleteOnClose);
-                const auto selected = eventId.isEmpty()
-                                          ? std::nullopt
-                                          : std::optional{javelin::gui::calendar::DayAgendaEventKey{
-                                                .accountId = accountId,
-                                                .eventId = eventId,
-                                                .recurrenceId = recurrenceId,
-                                            }};
-                auto events = agendaEvents(date);
+                auto selected = eventId.isEmpty()
+                                    ? std::nullopt
+                                    : std::optional{javelin::gui::calendar::DayAgendaEventKey{
+                                          .accountId = accountId,
+                                          .eventId = eventId,
+                                          .recurrenceId = recurrenceId,
+                                      }};
+                auto loadedEvents = agendaEvents(date);
+                if (const auto* failure = std::get_if<javelin::jmap::OperationError>(&loadedEvents))
+                {
+                    Q_EMIT operationFailed(*failure);
+                    dialog->deleteLater();
+                    return;
+                }
+                auto events = std::get<std::vector<javelin::gui::calendar::DayAgendaEvent>>(
+                    std::move(loadedEvents));
                 if (selected && std::ranges::none_of(events, [&selected](const auto& event)
                                                      { return event.key == *selected; }))
                 {
-                    if (auto standalone = standaloneAgendaEvent(m_settings, m_calendarReader,
-                                                                *widget, m_calendarAccounts,
-                                                                accountId, eventId, recurrenceId))
-                        events.push_back(std::move(*standalone));
-                    else
-                        Q_EMIT statusMessage(i18n("The calendar event is no longer available."),
-                                             10000);
+                    selected.reset();
+                    Q_EMIT statusMessage(i18n("The calendar event is no longer available."), 10000);
                 }
                 dialog->setDay(date, std::move(events), selected);
                 connect(dialog, &javelin::gui::calendar::DayAgendaDialog::dayChanged, dialog,
-                        [widget, dialog, agendaEvents](const QDate& selectedDate)
+                        [this, widget, dialog, agendaEvents](const QDate& selectedDate)
                         {
                             widget->setSelectedDateFromAgenda(selectedDate);
-                            dialog->setDay(selectedDate, agendaEvents(selectedDate));
+                            auto loaded = agendaEvents(selectedDate);
+                            if (const auto* failure =
+                                    std::get_if<javelin::jmap::OperationError>(&loaded))
+                            {
+                                Q_EMIT operationFailed(*failure);
+                                return;
+                            }
+                            dialog->setDay(
+                                selectedDate,
+                                std::get<std::vector<javelin::gui::calendar::DayAgendaEvent>>(
+                                    std::move(loaded)));
                         });
                 connect(dialog, &javelin::gui::calendar::DayAgendaDialog::newEventRequested, widget,
                         [widget](const QDateTime& start, const QDateTime& end)
@@ -1450,38 +1275,40 @@ namespace javelin::gui::shell
                                                                  selectedEventId,
                                                                  selectedRecurrenceId);
                     });
-                connect(&m_calendarCommandPort,
-                        &javelin::app::CalendarCommandPort::calendarCacheCommitted, dialog,
-                        [this, widget, dialog,
-                         agendaEvents](const javelin::app::CalendarCacheChange& change)
-                        {
-                            const auto owner = change.ownerAccountId.toStdString();
-                            if (!owner.empty() &&
-                                std::ranges::none_of(m_calendarAccounts,
-                                                     [&owner](const auto& account)
-                                                     { return account.ownerAccountId == owner; }))
-                                return;
-                            QTimer::singleShot(
-                                0, dialog,
-                                [this, widget, dialog, agendaEvents]
+                connect(
+                    &m_calendarCommandPort,
+                    &javelin::app::CalendarCommandPort::calendarCacheCommitted, dialog,
+                    [this, widget, dialog,
+                     agendaEvents](const javelin::app::CalendarCacheChange& change)
+                    {
+                        const auto owner = change.ownerAccountId.toStdString();
+                        if (!owner.empty() &&
+                            std::ranges::none_of(m_calendarAccounts, [&owner](const auto& account)
+                                                 { return account.ownerAccountId == owner; }))
+                            return;
+                        if (dialog->property("agendaRefreshScheduled").toBool())
+                            return;
+                        dialog->setProperty("agendaRefreshScheduled", true);
+                        QTimer::singleShot(
+                            0, dialog,
+                            [this, dialog, agendaEvents]
+                            {
+                                dialog->setProperty("agendaRefreshScheduled", false);
+                                auto loaded = agendaEvents(dialog->date());
+                                if (const auto* failure =
+                                        std::get_if<javelin::jmap::OperationError>(&loaded))
                                 {
-                                    const auto selectedKey = dialog->selectedEvent();
-                                    auto refreshedEvents = agendaEvents(dialog->date());
-                                    if (selectedKey &&
-                                        std::ranges::none_of(refreshedEvents,
-                                                             [&selectedKey](const auto& event)
-                                                             { return event.key == *selectedKey; }))
-                                    {
-                                        if (auto standalone = standaloneAgendaEvent(
-                                                m_settings, m_calendarReader, *widget,
-                                                m_calendarAccounts, selectedKey->accountId,
-                                                selectedKey->eventId, selectedKey->recurrenceId))
-                                            refreshedEvents.push_back(std::move(*standalone));
-                                    }
-                                    dialog->setDay(dialog->date(), std::move(refreshedEvents),
-                                                   selectedKey);
-                                });
-                        });
+                                    Q_EMIT operationFailed(*failure);
+                                    return;
+                                }
+                                auto refreshedEvents =
+                                    std::get<std::vector<javelin::gui::calendar::DayAgendaEvent>>(
+                                        std::move(loaded));
+                                const auto selectedKey = dialog->selectedEvent();
+                                dialog->setDay(dialog->date(), std::move(refreshedEvents),
+                                               selectedKey);
+                            });
+                    });
                 dialog->open();
             });
         connect(widget, &javelin::gui::calendar::MonthCalendarWidget::pendingInvitationActivated,

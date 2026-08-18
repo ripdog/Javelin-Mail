@@ -6,6 +6,7 @@
 
 class QDate;
 class QDateTime;
+class QContextMenuEvent;
 class QResizeEvent;
 class QWidget;
 
@@ -27,7 +28,11 @@ namespace javelin::gui::calendar
         void setControlledWidget(QWidget* widget);
         [[nodiscard]] QWidget* controlledWidget() const;
 
+      Q_SIGNALS:
+        void contextMenuRequested(QPoint globalPosition);
+
       protected:
+        void contextMenuEvent(QContextMenuEvent* event) override;
         void resizeEvent(QResizeEvent* event) override;
 
       private:

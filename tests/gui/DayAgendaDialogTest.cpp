@@ -4,7 +4,7 @@
 #include <QAccessible>
 #include <QApplication>
 #include <QCheckBox>
-#include <QCursor>
+#include <QContextMenuEvent>
 #include <QFontMetrics>
 #include <QImage>
 #include <QLabel>
@@ -346,6 +346,7 @@ TEST_CASE("day agenda keeps remaining events when a selected event disappears",
     REQUIRE(buttons.size() == 1);
     CHECK(buttons.front()->property("agendaEventId").toString() == QStringLiteral("retained"));
     CHECK(buttons.front()->accessibleName().contains(QStringLiteral("Retained event")));
+    CHECK_FALSE(dialog.selectedEvent().has_value());
     auto* title = dialog.findChild<QLabel*>(QStringLiteral("dayAgendaDetailsTitle"));
     REQUIRE(title != nullptr);
     CHECK(title->text() == QStringLiteral("Select an event to see details"));
@@ -373,10 +374,13 @@ TEST_CASE("day agenda event buttons request the shared context menu", "[gui][cal
                          requestedPosition = position;
                          requestedEventId = eventId;
                      });
-    REQUIRE(QMetaObject::invokeMethod(buttons.front(), "customContextMenuRequested",
-                                      Qt::DirectConnection, Q_ARG(QPoint, QPoint(3, 4))));
+    auto* eventButton = dynamic_cast<javelin::gui::calendar::CalendarEventButton*>(buttons.front());
+    REQUIRE(eventButton != nullptr);
+    const QPoint expectedGlobal{731, 419};
+    QContextMenuEvent contextEvent{QContextMenuEvent::Mouse, QPoint{3, 4}, expectedGlobal};
+    QApplication::sendEvent(eventButton, &contextEvent);
     CHECK(requestedEventId == QStringLiteral("context-event"));
-    CHECK(requestedPosition == QCursor::pos());
+    CHECK(requestedPosition == expectedGlobal);
     dialog.close();
 }
 
@@ -503,6 +507,40 @@ TEST_CASE("day agenda accessibility exposes schedule events and selected details
     dialog.close();
 }
 
+TEST_CASE("day agenda keeps the committed day visible until navigation data arrives",
+          "[gui][calendar][agenda][navigation]")
+{
+    javelin::gui::calendar::DayAgendaDialog dialog;
+    const auto retained = event(QStringLiteral("retained"), QTime{11, 0}, QTime{12, 0},
+                                QStringLiteral("Retained event"));
+    dialog.setDay(QDate{2026, 8, 10}, {retained});
+    dialog.show();
+    settleGui();
+
+    QDate requestedDay;
+    QObject::connect(&dialog, &javelin::gui::calendar::DayAgendaDialog::dayChanged, &dialog,
+                     [&requestedDay](const QDate& date) { requestedDay = date; });
+    QToolButton* next = nullptr;
+    for (auto* candidate : dialog.findChildren<QToolButton*>())
+    {
+        if (candidate->accessibleName() == QStringLiteral("Next day"))
+        {
+            next = candidate;
+            break;
+        }
+    }
+    REQUIRE(next != nullptr);
+    next->click();
+    settleGui();
+
+    CHECK(requestedDay == QDate{2026, 8, 11});
+    CHECK(dialog.date() == QDate{2026, 8, 10});
+    const auto buttons = dialog.findChildren<QToolButton*>(QStringLiteral("dayAgendaEventButton"));
+    REQUIRE(buttons.size() == 1);
+    CHECK(buttons.front()->property("agendaEventId").toString() == QStringLiteral("retained"));
+    dialog.close();
+}
+
 TEST_CASE("day agenda navigation changes its day and leaves creation explicit",
           "[gui][calendar][agenda][keyboard]")
 {
@@ -515,7 +553,11 @@ TEST_CASE("day agenda navigation changes its day and leaves creation explicit",
     QDateTime createStart;
     QDateTime createEnd;
     QObject::connect(&dialog, &javelin::gui::calendar::DayAgendaDialog::dayChanged, &dialog,
-                     [&requestedDay](const QDate& date) { requestedDay = date; });
+                     [&dialog, &requestedDay](const QDate& date)
+                     {
+                         requestedDay = date;
+                         dialog.setDay(date, {});
+                     });
     QObject::connect(&dialog, &javelin::gui::calendar::DayAgendaDialog::newEventRequested, &dialog,
                      [&createStart, &createEnd](const QDateTime& start, const QDateTime& end)
                      {

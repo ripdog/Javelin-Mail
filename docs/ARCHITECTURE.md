@@ -211,7 +211,13 @@ repositories, JMAP transports, synchronization services, history executors, sett
 controllers are assembled together. Mail protocol work is intentionally injected as narrow
 capabilities, and daemon application policy is likewise split by responsibility: no application
 object combines account runtime, queries, content, mutations, notifications, contacts, calendars,
-and Sieve. `GuiServices` is deliberately smaller: it exposes
+and Sieve. Calendar cache commits are published across the process boundary as `Calendars` cache
+invalidations regardless of whether the change came from a GUI command, push synchronization, or
+background work; GUI command adapters do not manufacture replacement invalidations from command
+completion. The Day Agenda uses one `CalendarReadDaySnapshot` request backed by one SQLite
+transaction to read account metadata, calendars, participant identities, pending invitations, and
+the requested day's range as one generation. A failed snapshot never replaces the last committed
+agenda projection with an empty view. `GuiServices` is deliberately smaller: it exposes
 read-only cache readers and remote ports matching the interfaces expected by GUI controllers.
 `gui_main` is the GUI composition root: concrete calendar, contacts, and compose dependencies stay
 there and are captured by a typed `MainWindowFeatureFactories` set. `MainWindow` receives controller

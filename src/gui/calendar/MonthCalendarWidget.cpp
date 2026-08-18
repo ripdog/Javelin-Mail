@@ -11,7 +11,6 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QColorDialog>
-#include <QCursor>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QEvent>
@@ -157,10 +156,9 @@ namespace javelin::gui::calendar
                                                eventAccessibleName(event, cellDate), event.color);
             chip->setToolTip(event.title);
             QObject::connect(chip, &QToolButton::clicked, chip, std::move(activated));
-            chip->setContextMenuPolicy(Qt::CustomContextMenu);
-            QObject::connect(chip, &QWidget::customContextMenuRequested, chip,
-                             [contextMenuRequested = std::move(contextMenuRequested)](const QPoint&)
-                             { contextMenuRequested(QCursor::pos()); });
+            QObject::connect(chip, &CalendarEventButton::contextMenuRequested, chip,
+                             [contextMenuRequested = std::move(contextMenuRequested)](
+                                 const QPoint& globalPos) { contextMenuRequested(globalPos); });
             m_layout->insertWidget(m_layout->count() - 1, chip);
         }
 

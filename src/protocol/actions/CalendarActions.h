@@ -103,6 +103,10 @@ namespace javelin::protocol::actions
                    std::tuple<std::string, javelin::jmap::calendar::VisibleInterval,
                               javelin::jmap::calendar::TimeZoneId>,
                    javelin::jmap::calendar::CalendarLoadResult>;
+    using CalendarReadDaySnapshot = Descriptor<
+        95, ActionDomain::Calendar, AdmissionSemantics::Immediate, ReplayPolicy::Reexecute, 0,
+        std::tuple<javelin::jmap::calendar::VisibleInterval, javelin::jmap::calendar::TimeZoneId>,
+        javelin::jmap::calendar::CalendarDaySnapshotResult>;
 
     using CalendarActionTypes = std::tuple<
         RegisteredAction<CalendarReadCached, "CalendarReadCached">,
@@ -121,5 +125,6 @@ namespace javelin::protocol::actions
         RegisteredAction<CalendarReadPendingInvitations, "CalendarReadPendingInvitations">,
         RegisteredAction<CalendarReadEvent, "CalendarReadEvent">,
         RegisteredAction<CalendarReadParticipantIdentities, "CalendarReadParticipantIdentities">,
-        RegisteredAction<CalendarReadRangeSnapshot, "CalendarReadRangeSnapshot">>;
+        RegisteredAction<CalendarReadRangeSnapshot, "CalendarReadRangeSnapshot">,
+        RegisteredAction<CalendarReadDaySnapshot, "CalendarReadDaySnapshot">>;
 } // namespace javelin::protocol::actions

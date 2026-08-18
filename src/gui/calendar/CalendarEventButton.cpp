@@ -4,6 +4,7 @@
 
 #include <QAccessible>
 #include <QAccessibleWidget>
+#include <QContextMenuEvent>
 #include <QPalette>
 #include <QResizeEvent>
 
@@ -151,6 +152,14 @@ namespace javelin::gui::calendar
     QWidget* CalendarEventButton::controlledWidget() const
     {
         return m_controlledWidget;
+    }
+
+    void CalendarEventButton::contextMenuEvent(QContextMenuEvent* event)
+    {
+        if (event == nullptr)
+            return;
+        Q_EMIT contextMenuRequested(event->globalPos());
+        event->accept();
     }
 
     void CalendarEventButton::resizeEvent(QResizeEvent* event)

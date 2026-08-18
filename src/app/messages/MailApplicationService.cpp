@@ -4006,6 +4006,16 @@ namespace javelin::app
             };
         if (calendar->isVisible == visible)
             return std::monostate{};
+        std::string ownerAccountId;
+        if (const auto accountResult = m_calendarReader.accounts();
+            const auto* accounts =
+                std::get_if<std::vector<javelin::jmap::cache::CalendarAccount>>(&accountResult))
+        {
+            const auto account = std::ranges::find(
+                *accounts, accountId, &javelin::jmap::cache::CalendarAccount::accountId);
+            if (account != accounts->end())
+                ownerAccountId = account->ownerAccountId;
+        }
         auto preparedResult =
             m_undoManager.prepareNormal(visible ? i18n("Show Calendar") : i18n("Hide Calendar"),
                                         javelin::app::undo::HistoryDomain::LocalPreference,
@@ -4035,6 +4045,11 @@ namespace javelin::app
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
                 return javelin::jmap::operationError(*error);
         }
+        Q_EMIT calendarCacheCommitted({.ownerAccountId = QString::fromStdString(ownerAccountId),
+                                       .interval = {},
+                                       .displayTimeZone = {},
+                                       .accountCount = 1,
+                                       .eventCount = 0});
         return std::monostate{};
     }
 

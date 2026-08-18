@@ -8,7 +8,6 @@
 #include <QAccessibleWidget>
 #include <QButtonGroup>
 #include <QCheckBox>
-#include <QCursor>
 #include <QDialogButtonBox>
 #include <QFont>
 #include <QFontMetrics>
@@ -266,11 +265,10 @@ namespace javelin::gui::calendar
                                          if (m_selected)
                                              m_selected(key);
                                      });
-                    button->setContextMenuPolicy(Qt::CustomContextMenu);
                     QObject::connect(
-                        button, &QWidget::customContextMenuRequested, button,
-                        [key = placement.event->key, contextMenuRequested](const QPoint&)
-                        { contextMenuRequested(QCursor::pos(), key); });
+                        button, &CalendarEventButton::contextMenuRequested, button,
+                        [key = placement.event->key, contextMenuRequested](const QPoint& globalPos)
+                        { contextMenuRequested(globalPos, key); });
                     m_buttons.push_back(button);
                 }
                 layoutButtons();
@@ -747,14 +745,21 @@ namespace javelin::gui::calendar
                                  std::optional<DayAgendaEventKey> selectedEvent)
     {
         const auto dayChanged = date != m_date;
-        const bool selectionChanged =
-            selectedEvent && (!m_selectedEvent || *m_selectedEvent != *selectedEvent);
+        const auto previousSelection = m_selectedEvent;
         m_date = date;
         m_events = std::move(events);
         if (selectedEvent)
-            m_selectedEvent = std::move(selectedEvent);
-        else if (dayChanged)
+        {
+            if (eventForKey(*selectedEvent) != nullptr)
+                m_selectedEvent = std::move(selectedEvent);
+            else
+                m_selectedEvent.reset();
+        }
+        else if (dayChanged || (m_selectedEvent && eventForKey(*m_selectedEvent) == nullptr))
+        {
             m_selectedEvent.reset();
+        }
+        const bool selectionChanged = previousSelection != m_selectedEvent;
         if (selectionChanged)
         {
             const QSignalBlocker blocker{m_changeResponse};
@@ -803,11 +808,7 @@ namespace javelin::gui::calendar
     {
         if (!date.isValid() || date == m_date)
             return;
-        m_selectedEvent.reset();
-        m_date = date;
-        updateDatePresentation();
-        clearDetails();
-        Q_EMIT dayChanged(m_date);
+        Q_EMIT dayChanged(date);
     }
 
     void DayAgendaDialog::updateDatePresentation()
@@ -837,11 +838,10 @@ namespace javelin::gui::calendar
             auto* button = createAgendaEventButton(event, m_date, m_detailsScroll, m_allDayPanel);
             connect(button, &QToolButton::clicked, this,
                     [this, key = event.key] { selectEvent(key); });
-            button->setContextMenuPolicy(Qt::CustomContextMenu);
-            connect(button, &QWidget::customContextMenuRequested, this,
-                    [this, key = event.key](const QPoint&)
+            connect(button, &CalendarEventButton::contextMenuRequested, this,
+                    [this, key = event.key](const QPoint& globalPos)
                     {
-                        Q_EMIT eventContextMenuRequested(QCursor::pos(), key.accountId, key.eventId,
+                        Q_EMIT eventContextMenuRequested(globalPos, key.accountId, key.eventId,
                                                          key.recurrenceId);
                     });
             m_allDayLayout->addWidget(button);
