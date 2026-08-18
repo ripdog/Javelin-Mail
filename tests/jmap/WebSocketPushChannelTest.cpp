@@ -2,7 +2,40 @@
 
 #include "jmap/sync/PushProtocol.h"
 
+#include <QCoroTask>
+
+#include <QCoreApplication>
+#include <QElapsedTimer>
+#include <QHostAddress>
+#include <QTcpServer>
+#include <QTimer>
+
 #include <catch2/catch_test_macros.hpp>
+
+namespace
+{
+    void ensureApplication()
+    {
+        if (QCoreApplication::instance() != nullptr)
+            return;
+
+        static int argc = 1;
+        static char appName[] = "javelin-tests";
+        static char* argv[] = {appName, nullptr};
+        static QCoreApplication application(argc, argv);
+        Q_UNUSED(application);
+    }
+
+    class NoopStateChangeConsumer final : public javelin::jmap::sync::StateChangeConsumer
+    {
+      public:
+        [[nodiscard]] QCoro::Task<void>
+        onStateChange(javelin::jmap::sync::StateChangeEvent) override
+        {
+            co_return;
+        }
+    };
+} // namespace
 
 TEST_CASE("WebSocket push enable uses the requested data types", "[jmap][push][websocket]")
 {
@@ -18,6 +51,37 @@ TEST_CASE("WebSocket push enable uses the requested data types", "[jmap][push][w
     CHECK(encoded->find(R"("dataTypes":["Email","Mailbox","Calendar","CalendarEvent"])") !=
           std::string::npos);
     CHECK(encoded->find(R"("pushState":"push-state-1")") != std::string::npos);
+}
+
+TEST_CASE("WebSocket push cancellation interrupts an in-flight handshake",
+          "[jmap][push][websocket]")
+{
+    ensureApplication();
+
+    QTcpServer server;
+    REQUIRE(server.listen(QHostAddress::LocalHost, 0));
+    const auto endpoint = QStringLiteral("ws://127.0.0.1:%1/jmap").arg(server.serverPort());
+
+    javelin::jmap::sync::WebSocketStateChangeSource source{endpoint.toStdString(), "token"};
+    javelin::jmap::sync::StateChangeCancellation cancellation;
+    NoopStateChangeConsumer consumer;
+    QElapsedTimer elapsed;
+    elapsed.start();
+    QTimer::singleShot(25,
+                       [&cancellation, &source]
+                       {
+                           cancellation.cancel();
+                           source.cancel();
+                       });
+
+    const auto result = QCoro::waitFor(source.consume(
+        {.accountId = "account-1", .lastState = {}, .types = {"Email"}, .groupwareAccountIds = {}},
+        consumer, cancellation));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::TransportError>(result));
+    CHECK(std::get<javelin::jmap::api::TransportError>(result).code ==
+          javelin::jmap::api::TransportErrorCode::Cancelled);
+    CHECK(elapsed.elapsed() < 1000);
 }
 
 TEST_CASE("state-change routing includes groupware changes from secondary accounts", "[jmap][push]")

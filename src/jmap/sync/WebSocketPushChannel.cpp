@@ -8,6 +8,7 @@
 #include <QCoroSignal>
 #include <QCoroTimer>
 
+#include <QElapsedTimer>
 #include <QLoggingCategory>
 #include <QNetworkRequest>
 #include <QScopeGuard>
@@ -18,6 +19,8 @@
 
 #include <glaze/glaze.hpp>
 
+#include <algorithm>
+#include <chrono>
 #include <deque>
 
 namespace javelin::jmap::sync
@@ -34,6 +37,7 @@ namespace javelin::jmap::sync
     namespace
     {
         constexpr auto connectTimeout = std::chrono::seconds{15};
+        constexpr auto cancellationPollInterval = std::chrono::milliseconds{250};
 
     } // namespace
 } // namespace javelin::jmap::sync
@@ -101,8 +105,48 @@ namespace javelin::jmap::sync
         handshakeOptions.setSubprotocols({QStringLiteral("jmap")});
         socket.open(handshake, handshakeOptions);
         qCInfo(logWebSocket) << "connecting";
-        const auto connected = co_await qCoro(&socket, &QWebSocket::connected, connectTimeout);
-        if (!connected.has_value())
+
+        QElapsedTimer elapsed;
+        elapsed.start();
+        const auto timeoutMs =
+            std::chrono::duration_cast<std::chrono::milliseconds>(connectTimeout).count();
+        while (socket.state() != QAbstractSocket::ConnectedState && elapsed.elapsed() < timeoutMs)
+        {
+            if (cancellation.isCancelled())
+            {
+                socket.abort();
+                co_return javelin::jmap::api::TransportError{
+                    .code = javelin::jmap::api::TransportErrorCode::Cancelled,
+                    .message = "JMAP WebSocket connection cancelled.",
+                    .httpStatus = std::nullopt,
+                };
+            }
+            if (socket.state() == QAbstractSocket::UnconnectedState)
+            {
+                const auto error = socket.errorString();
+                co_return javelin::jmap::api::TransportError{
+                    .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+                    .message =
+                        error.isEmpty() ? "JMAP WebSocket handshake failed." : error.toStdString(),
+                    .httpStatus = std::nullopt,
+                };
+            }
+
+            const auto remaining =
+                std::chrono::milliseconds{std::max<qint64>(1, timeoutMs - elapsed.elapsed())};
+            static_cast<void>(co_await qCoro(&socket, &QWebSocket::stateChanged,
+                                             std::min(remaining, cancellationPollInterval)));
+        }
+        if (cancellation.isCancelled())
+        {
+            socket.abort();
+            co_return javelin::jmap::api::TransportError{
+                .code = javelin::jmap::api::TransportErrorCode::Cancelled,
+                .message = "JMAP WebSocket connection cancelled.",
+                .httpStatus = std::nullopt,
+            };
+        }
+        if (socket.state() != QAbstractSocket::ConnectedState)
         {
             qCWarning(logWebSocket) << "connection timed out";
             socket.abort();

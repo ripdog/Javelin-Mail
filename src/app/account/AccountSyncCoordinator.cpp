@@ -182,11 +182,11 @@ namespace javelin::app
         if (m_runContext != nullptr)
         {
             const auto endpoint = m_runContext->configuration.apiUrl;
+            m_runContext->cancellation.cancel();
             if (m_runContext->source != nullptr)
             {
                 m_runContext->source->cancel();
             }
-            m_runContext->cancellation.cancel();
             m_runContext.reset();
             m_endpointRetryGate.releaseProbe(endpoint);
         }
