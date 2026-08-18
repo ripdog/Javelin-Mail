@@ -481,6 +481,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/LogStore.h
     src/app/account/AccountSyncCoordinator.cpp
     src/app/account/AccountSyncCoordinator.h
+    src/app/account/EndpointRetryGate.cpp
+    src/app/account/EndpointRetryGate.h
     src/app/account/OAuthRefreshSingleFlight.cpp
     src/app/OAuthRefreshSingleFlight.h
     src/app/messages/MailApplicationService.cpp
@@ -1891,6 +1893,8 @@ add_library(javelin_daemon_core STATIC
     src/app/LocalMaintenanceService.h
     src/app/account/AccountSyncCoordinator.cpp
     src/app/account/AccountSyncCoordinator.h
+    src/app/account/EndpointRetryGate.cpp
+    src/app/account/EndpointRetryGate.h
     src/app/account/OAuthRefreshSingleFlight.cpp
     src/app/OAuthRefreshSingleFlight.h
     src/app/messages/MailApplicationService.cpp

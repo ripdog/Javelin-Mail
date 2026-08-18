@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace javelin::jmap::cache
@@ -45,6 +46,9 @@ namespace javelin::app
       private:
         [[nodiscard]] static QString incidentKey(std::string_view connectionId,
                                                  javelin::jmap::OperationErrorCode code);
+        [[nodiscard]] static QString serviceIncidentKey(const AccountConnectionSettings& settings);
+        [[nodiscard]] static QString serviceName(const AccountConnectionSettings& settings);
+        [[nodiscard]] static bool isServiceOutage(const javelin::jmap::OperationError& error);
         [[nodiscard]] static QString userTitle(const javelin::jmap::OperationError& error);
         [[nodiscard]] QString accountName(const AccountConnectionSettings& settings,
                                           std::string_view accountId) const;
@@ -58,6 +62,7 @@ namespace javelin::app
 
         javelin::jmap::cache::AccountReader& m_accountReader;
         std::unordered_set<std::string> m_activeIncidents;
+        std::unordered_map<std::string, std::string> m_connectionServices;
     };
 
 } // namespace javelin::app

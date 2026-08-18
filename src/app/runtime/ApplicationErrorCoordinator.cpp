@@ -6,6 +6,7 @@
 
 #include <QDebug>
 #include <QSettings>
+#include <QUrl>
 
 #include <algorithm>
 
@@ -61,15 +62,33 @@ namespace javelin::app
         if (settings.connectionId.empty())
             return;
 
-        const auto key = incidentKey(settings.connectionId, error.code);
-        if (!m_activeIncidents.insert(key.toStdString()).second)
-            return;
-
         const bool authentication = javelin::jmap::isAuthenticationError(error);
         if (authentication)
         {
+            const auto key = incidentKey(settings.connectionId, error.code);
+            if (!m_activeIncidents.insert(key.toStdString()).second)
+                return;
             persistAuthenticationPause(settings.connectionId, settings.revision);
             Q_EMIT authenticationPauseChanged(connectionKey(settings.connectionId), true);
+        }
+        else if (isServiceOutage(error))
+        {
+            const auto key = serviceIncidentKey(settings);
+            m_connectionServices.insert_or_assign(settings.connectionId, key.toStdString());
+            if (!m_activeIncidents.insert(key.toStdString()).second)
+                return;
+
+            const auto service = serviceName(settings);
+            const auto message = service.isEmpty()
+                                     ? i18n("The mail server is temporarily unavailable. Javelin "
+                                            "Mail will retry synchronization automatically.")
+                                     : i18n("%1 is temporarily unavailable. Javelin Mail will "
+                                            "retry synchronization automatically.",
+                                            service);
+            Q_EMIT incidentRaised(connectionKey(settings.connectionId),
+                                  QString::fromStdString(std::string{accountId}), userTitle(error),
+                                  message, false, false);
+            return;
         }
 
         const auto account = accountName(settings, accountId);
@@ -92,6 +111,15 @@ namespace javelin::app
                           return QString::fromStdString(key).startsWith(prefix) &&
                                  (!authenticationBlocked || key != authenticationKey);
                       });
+
+        const auto service = m_connectionServices.find(std::string{connectionId});
+        if (service == m_connectionServices.end())
+            return;
+        const auto serviceKey = service->second;
+        m_connectionServices.erase(service);
+        if (std::ranges::none_of(m_connectionServices, [&serviceKey](const auto& entry)
+                                 { return entry.second == serviceKey; }))
+            m_activeIncidents.erase(serviceKey);
     }
 
     void ApplicationErrorCoordinator::settingsApplied(const std::string_view connectionId,
@@ -101,14 +129,27 @@ namespace javelin::app
         if (!blocked.has_value() || revision <= *blocked)
             return;
         clearAuthenticationPause(connectionId);
-        reportSuccess(connectionId);
+        m_activeIncidents.erase(
+            incidentKey(connectionId, javelin::jmap::OperationErrorCode::AuthenticationRequired)
+                .toStdString());
         Q_EMIT authenticationPauseChanged(connectionKey(connectionId), false);
     }
 
     void ApplicationErrorCoordinator::forgetConnection(const std::string_view connectionId)
     {
         clearAuthenticationPause(connectionId);
-        reportSuccess(connectionId);
+        m_activeIncidents.erase(
+            incidentKey(connectionId, javelin::jmap::OperationErrorCode::AuthenticationRequired)
+                .toStdString());
+
+        const auto service = m_connectionServices.find(std::string{connectionId});
+        if (service == m_connectionServices.end())
+            return;
+        const auto serviceKey = service->second;
+        m_connectionServices.erase(service);
+        if (std::ranges::none_of(m_connectionServices, [&serviceKey](const auto& entry)
+                                 { return entry.second == serviceKey; }))
+            m_activeIncidents.erase(serviceKey);
     }
 
     bool ApplicationErrorCoordinator::authenticationPaused(const std::string_view connectionId,
@@ -123,6 +164,44 @@ namespace javelin::app
     {
         return QStringLiteral("%1:%2").arg(connectionKey(connectionId),
                                            QString::fromUtf8(javelin::jmap::toString(code).data()));
+    }
+
+    QString
+    ApplicationErrorCoordinator::serviceIncidentKey(const AccountConnectionSettings& settings)
+    {
+        const QUrl url{QString::fromStdString(settings.sessionUrl)};
+        if (!url.isValid() || url.host().isEmpty())
+            return QStringLiteral("service:%1").arg(QString::fromStdString(settings.sessionUrl));
+
+        QString origin = url.scheme().toLower();
+        origin += QStringLiteral("://");
+        origin += url.host().toLower();
+        if (url.port() >= 0)
+            origin += QStringLiteral(":%1").arg(url.port());
+        return QStringLiteral("service:%1").arg(origin);
+    }
+
+    QString ApplicationErrorCoordinator::serviceName(const AccountConnectionSettings& settings)
+    {
+        const QUrl url{QString::fromStdString(settings.sessionUrl)};
+        return url.isValid() ? url.host() : QString{};
+    }
+
+    bool ApplicationErrorCoordinator::isServiceOutage(const javelin::jmap::OperationError& error)
+    {
+        if (error.protocolType.has_value())
+            return false;
+
+        switch (error.code)
+        {
+        case javelin::jmap::OperationErrorCode::NetworkUnavailable:
+        case javelin::jmap::OperationErrorCode::Timeout:
+        case javelin::jmap::OperationErrorCode::RateLimited:
+        case javelin::jmap::OperationErrorCode::ServerUnavailable:
+            return true;
+        default:
+            return false;
+        }
     }
 
     QString ApplicationErrorCoordinator::userTitle(const javelin::jmap::OperationError& error)

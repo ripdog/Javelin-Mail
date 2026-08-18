@@ -72,12 +72,14 @@ namespace javelin::app
         javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
         javelin::jmap::cache::AccountRepository& accountRepository,
         javelin::jmap::cache::MailboxReader& mailboxReader, WorkScheduler& workScheduler,
+        EndpointRetryGate& endpointRetryGate,
         javelin::jmap::auth::AccessTokenRefreshHandler authenticationRefreshHandler,
         QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
           m_transportCooldowns(cooldowns), m_accountRepository(accountRepository),
           m_mailboxReader(mailboxReader), m_workScheduler(workScheduler),
+          m_endpointRetryGate(endpointRetryGate),
           m_authenticationRefreshHandler(std::move(authenticationRefreshHandler))
     {
         m_refreshDebounceTimer.setSingleShot(true);
@@ -179,12 +181,14 @@ namespace javelin::app
     {
         if (m_runContext != nullptr)
         {
+            const auto endpoint = m_runContext->configuration.apiUrl;
             if (m_runContext->source != nullptr)
             {
                 m_runContext->source->cancel();
             }
             m_runContext->cancellation.cancel();
             m_runContext.reset();
+            m_endpointRetryGate.releaseProbe(endpoint);
         }
 
         m_pendingStateChanges.clear();
@@ -207,6 +211,8 @@ namespace javelin::app
 
     void AccountSyncCoordinator::networkBecameReachable()
     {
+        if (m_runContext != nullptr)
+            m_endpointRetryGate.reset(m_runContext->configuration.apiUrl);
         restartForCatchUp();
     }
 
@@ -216,6 +222,7 @@ namespace javelin::app
             return true;
         if (m_runContext == nullptr)
             return false;
+        m_endpointRetryGate.reset(m_runContext->configuration.apiUrl);
         scheduleDebouncedRefresh(true);
         return true;
     }
@@ -461,6 +468,7 @@ namespace javelin::app
 
         bool mailboxStateChanged = false;
         bool emailCacheChanged = false;
+        bool endpointRequestSucceeded = false;
         bool refreshEveryMailbox = demand.allMailboxes;
         bool accountEmailStateRefreshed = false;
         bool hasNewMail = false;
@@ -469,7 +477,11 @@ namespace javelin::app
 
         if (demand.allMailboxes)
         {
-            mailboxStateChanged = co_await refreshMailboxStateOnce(runContext);
+            const auto mailboxState = co_await refreshMailboxStateOnce(runContext);
+            if (!mailboxState.has_value())
+                co_return;
+            mailboxStateChanged = *mailboxState;
+            endpointRequestSucceeded = true;
         }
         else if (demand.mailboxState || demand.emailState)
         {
@@ -487,11 +499,13 @@ namespace javelin::app
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&deltaResult))
             {
                 qWarning().noquote() << "Account mail delta refresh failed" << error->message;
+                recordRefreshFailure(runContext->configuration.apiUrl, *error);
                 publishOperationError(QStringLiteral("Synchronize mail changes"), *error);
                 if (javelin::jmap::isTransientError(*error))
                     scheduleDebouncedRefresh(true);
                 co_return;
             }
+            endpointRequestSucceeded = true;
             const auto& delta = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(deltaResult);
             if (delta.superseded)
             {
@@ -507,7 +521,13 @@ namespace javelin::app
             for (const auto& mailboxId : delta.changedMailboxIds)
                 refreshedMailboxIds.push_back(QString::fromStdString(mailboxId));
             if (delta.mailboxNeedsFullRefresh)
-                mailboxStateChanged = co_await refreshMailboxStateOnce(runContext);
+            {
+                const auto mailboxState = co_await refreshMailboxStateOnce(runContext);
+                if (!mailboxState.has_value())
+                    co_return;
+                mailboxStateChanged = *mailboxState;
+                endpointRequestSucceeded = true;
+            }
         }
 
         if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
@@ -541,6 +561,10 @@ namespace javelin::app
                     .hasNewMail = false,
                 });
             }
+            if (endpointRequestSucceeded)
+                recordRefreshSuccess(runContext->configuration.apiUrl);
+            else
+                m_endpointRetryGate.releaseProbe(runContext->configuration.apiUrl);
             co_return;
         }
 
@@ -565,6 +589,7 @@ namespace javelin::app
             if (const auto* summary =
                     std::get_if<javelin::jmap::sync::MailboxRefreshSummary>(&refreshResult))
             {
+                endpointRequestSucceeded = true;
                 if (summary->superseded)
                 {
                     m_shouldCatchUpRefreshOnReconnect = true;
@@ -597,11 +622,15 @@ namespace javelin::app
             else if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
             {
                 qWarning().noquote() << "Push mailbox refresh failed" << error->message;
+                recordRefreshFailure(runContext->configuration.apiUrl, *error);
                 publishOperationError(QStringLiteral("Synchronize mailbox"), *error);
                 if (javelin::jmap::isAuthenticationError(*error))
                     co_return;
                 if (javelin::jmap::isTransientError(*error))
+                {
                     scheduleDebouncedRefresh(true);
+                    co_return;
+                }
             }
         }
         if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
@@ -621,16 +650,20 @@ namespace javelin::app
                 .hasNewMail = hasNewMail,
             });
         }
+        if (endpointRequestSucceeded)
+            recordRefreshSuccess(runContext->configuration.apiUrl);
+        else
+            m_endpointRetryGate.releaseProbe(runContext->configuration.apiUrl);
     }
 
-    QCoro::Task<bool>
+    QCoro::Task<std::optional<bool>>
     AccountSyncCoordinator::refreshMailboxStateOnce(std::shared_ptr<RunContext> runContext)
     {
         if (runContext == nullptr || !hasValidSettings() ||
             runContext->cancellation.isCancelled() || m_runContext == nullptr ||
             m_runContext->generation != runContext->generation)
         {
-            co_return false;
+            co_return std::nullopt;
         }
 
         javelin::jmap::api::MethodCaller methodCaller{m_methodTransport};
@@ -658,16 +691,17 @@ namespace javelin::app
         if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
             runContext->cancellation.isCancelled())
         {
-            co_return false;
+            co_return std::nullopt;
         }
 
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
         {
             qWarning().noquote() << "Account sync mailbox state refresh failed" << error->message;
+            recordRefreshFailure(runContext->configuration.apiUrl, *error);
             publishOperationError(QStringLiteral("Synchronize mailbox state"), *error);
             if (javelin::jmap::isTransientError(*error))
                 scheduleDebouncedRefresh(true);
-            co_return false;
+            co_return std::nullopt;
         }
 
         const auto& summary =
@@ -716,7 +750,7 @@ namespace javelin::app
                                                              .emailState = false,
                                                              .allMailboxes = false,
                                                              .mailboxIds = std::move(mailboxIds)});
-        m_refreshDebounceTimer.start();
+        m_refreshDebounceTimer.start(static_cast<int>(refreshDebounceInterval.count()));
     }
 
     void AccountSyncCoordinator::scheduleCatchUpRefresh()
@@ -747,6 +781,25 @@ namespace javelin::app
         m_pendingStateChanges.clear();
         if (demand.empty())
             return;
+
+        if (m_refreshInFlight)
+        {
+            m_queuedRefreshDemand.merge(demand);
+            return;
+        }
+
+        if (m_runContext != nullptr)
+        {
+            const auto decision = m_endpointRetryGate.acquire(m_runContext->configuration.apiUrl);
+            if (!decision.allowed)
+            {
+                m_debouncedRefreshDemand.merge(demand);
+                m_refreshDebounceTimer.start(
+                    static_cast<int>(std::max<std::int64_t>(1, decision.retryAfter.count())));
+                return;
+            }
+        }
+
         auto task = refreshWatchedMailbox(demand);
         QCoro::connect(std::move(task), this, []() {});
     }
@@ -807,7 +860,7 @@ namespace javelin::app
                 { Q_EMIT identityStateChanged(ownerAccountId, states); });
         if (!m_pendingCalendarStateChanges.empty() || !m_pendingContactStateChanges.empty() ||
             !m_pendingIdentityStateChanges.empty())
-            m_refreshDebounceTimer.start();
+            m_refreshDebounceTimer.start(static_cast<int>(refreshDebounceInterval.count()));
     }
 
     bool
@@ -1026,6 +1079,47 @@ namespace javelin::app
         Q_EMIT operationFailed(operation, error);
         if (javelin::jmap::isAuthenticationError(error))
             pauseForAuthentication();
+    }
+
+    void AccountSyncCoordinator::recordRefreshFailure(const std::string& endpoint,
+                                                      const javelin::jmap::OperationError& error)
+    {
+        if (usesEndpointBackoff(error))
+        {
+            m_endpointRetryGate.recordFailure(endpoint, error.retryAfter);
+            return;
+        }
+
+        if (error.code == javelin::jmap::OperationErrorCode::LocalStorageBusy ||
+            error.code == javelin::jmap::OperationErrorCode::LocalStorageFailure)
+        {
+            m_endpointRetryGate.releaseProbe(endpoint);
+            return;
+        }
+
+        // A protocol, authentication, or method-level rejection proves that the endpoint answered.
+        // Clear any stale transport outage before surfacing the independent operation error.
+        m_endpointRetryGate.recordSuccess(endpoint);
+    }
+
+    void AccountSyncCoordinator::recordRefreshSuccess(const std::string& endpoint)
+    {
+        m_endpointRetryGate.recordSuccess(endpoint);
+        Q_EMIT operationSucceeded();
+    }
+
+    bool AccountSyncCoordinator::usesEndpointBackoff(const javelin::jmap::OperationError& error)
+    {
+        switch (error.code)
+        {
+        case javelin::jmap::OperationErrorCode::NetworkUnavailable:
+        case javelin::jmap::OperationErrorCode::Timeout:
+        case javelin::jmap::OperationErrorCode::RateLimited:
+        case javelin::jmap::OperationErrorCode::ServerUnavailable:
+            return true;
+        default:
+            return false;
+        }
     }
 
 } // namespace javelin::app

@@ -1121,7 +1121,7 @@ namespace javelin::app
             coordinatorIt->second = std::make_unique<AccountSyncCoordinator>(
                 m_databaseConnection, m_methodTransport, m_networkAccessManager,
                 m_transportCooldowns, m_accountRepository, m_mailboxReader, m_workScheduler,
-                m_authenticationRefreshHandler, this);
+                m_endpointRetryGate, m_authenticationRefreshHandler, this);
             connectCoordinator(coordinatorIt->first, *coordinatorIt->second);
         }
         if (m_errorCoordinator.authenticationPaused(configuration.settings.connectionId,
@@ -4581,6 +4581,14 @@ namespace javelin::app
                     m_errorCoordinator.reportFailure(configuration->second.settings, accountId,
                                                      operation, error);
             });
+        connect(&coordinator, &AccountSyncCoordinator::operationSucceeded, this,
+                [this, accountId]
+                {
+                    const auto configuration = m_configurations.find(accountId);
+                    if (configuration != m_configurations.end())
+                        m_errorCoordinator.reportSuccess(
+                            configuration->second.settings.connectionId);
+                });
     }
 
 } // namespace javelin::app

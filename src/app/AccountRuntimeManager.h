@@ -5,6 +5,7 @@
 #include "app/CalendarInvitationAccountSource.h"
 #include "app/MailApplicationTypes.h"
 #include "app/account/AccountSyncCoordinator.h"
+#include "app/account/EndpointRetryGate.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
 #include <QObject>
@@ -126,6 +127,7 @@ namespace javelin::app
         javelin::jmap::cache::MailboxReader& m_mailboxReader;
         ApplicationErrorCoordinator& m_errorCoordinator;
         WorkScheduler& m_workScheduler;
+        EndpointRetryGate m_endpointRetryGate;
         javelin::jmap::auth::AccessTokenRefreshHandler m_authenticationRefreshHandler;
         std::unordered_map<std::string, std::unique_ptr<AccountSyncCoordinator>> m_coordinators;
         std::unordered_map<std::string, AccountSyncConfiguration> m_configurations;

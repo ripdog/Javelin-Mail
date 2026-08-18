@@ -40,6 +40,14 @@ TEST_CASE("transport failures are classified for application policy")
     CHECK(rateLimit.code == OperationErrorCode::RateLimited);
     REQUIRE(rateLimit.retryAfter.has_value());
     CHECK(*rateLimit.retryAfter == std::chrono::seconds{45});
+
+    const auto genericServerFailure = javelin::jmap::operationError(TransportError{
+        .code = TransportErrorCode::HttpFailure,
+        .message = "server error",
+        .httpStatus = 500,
+    });
+    CHECK(genericServerFailure.code == OperationErrorCode::ServerUnavailable);
+    CHECK(javelin::jmap::isTransientError(genericServerFailure));
 }
 
 TEST_CASE("JMAP method failures retain actionable distinctions")

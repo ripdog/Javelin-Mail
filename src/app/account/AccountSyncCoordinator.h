@@ -2,6 +2,7 @@
 
 #include "app/AccountConnectionSettings.h"
 #include "app/MailApplicationTypes.h"
+#include "app/account/EndpointRetryGate.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Session.h"
 #include "jmap/cache/AccountRepository.h"
@@ -56,6 +57,7 @@ namespace javelin::app
             javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
             javelin::jmap::cache::AccountRepository& accountRepository,
             javelin::jmap::cache::MailboxReader& mailboxReader, WorkScheduler& workScheduler,
+            EndpointRetryGate& endpointRetryGate,
             javelin::jmap::auth::AccessTokenRefreshHandler authenticationRefreshHandler = {},
             QObject* parent = nullptr);
         ~AccountSyncCoordinator() override;
@@ -84,6 +86,7 @@ namespace javelin::app
         void notificationMailboxRefreshed(const QString& accountId, const QString& mailboxId,
                                           const QString& mailboxName);
         void operationFailed(const QString& operation, javelin::jmap::OperationError error);
+        void operationSucceeded();
 
       private:
         struct RunConfiguration
@@ -159,7 +162,7 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<void> refreshWatchedMailbox(MailRefreshDemand demand);
         [[nodiscard]] QCoro::Task<void>
         refreshWatchedMailboxOnce(std::shared_ptr<RunContext> runContext, MailRefreshDemand demand);
-        [[nodiscard]] QCoro::Task<bool>
+        [[nodiscard]] QCoro::Task<std::optional<bool>>
         refreshMailboxStateOnce(std::shared_ptr<RunContext> runContext);
         void handleResumeWatchdogTimeout();
         void scheduleDebouncedRefresh(bool forceEmailRefresh = false,
@@ -185,6 +188,10 @@ namespace javelin::app
                                          std::string rejectedAccessToken);
         void publishOperationError(const QString& operation,
                                    const javelin::jmap::OperationError& error);
+        void recordRefreshFailure(const std::string& endpoint,
+                                  const javelin::jmap::OperationError& error);
+        void recordRefreshSuccess(const std::string& endpoint);
+        [[nodiscard]] static bool usesEndpointBackoff(const javelin::jmap::OperationError& error);
 
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
         javelin::jmap::api::JmapMethodTransport& m_methodTransport;
@@ -193,6 +200,7 @@ namespace javelin::app
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::MailboxReader& m_mailboxReader;
         WorkScheduler& m_workScheduler;
+        EndpointRetryGate& m_endpointRetryGate;
         javelin::jmap::auth::AccessTokenRefreshHandler m_authenticationRefreshHandler;
         std::optional<AccountConnectionSettings> m_settings;
         std::string m_accountId;

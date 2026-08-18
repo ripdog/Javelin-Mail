@@ -150,7 +150,8 @@ TEST_CASE("application errors are deduplicated and rearmed after recovery")
     coordinator.reportFailure(settings, "account-a", QStringLiteral("Synchronize mail"), timeout);
     coordinator.reportFailure(settings, "account-a", QStringLiteral("Synchronize mail"), timeout);
     CHECK(incidents == 1);
-    CHECK(userMessage.contains(QStringLiteral("Configured personal mail")));
+    CHECK(userMessage.contains(QStringLiteral("example.test")));
+    CHECK_FALSE(userMessage.contains(QStringLiteral("Configured personal mail")));
     CHECK_FALSE(userMessage.contains(QStringLiteral("Personal mail")));
     CHECK_FALSE(userMessage.contains(QStringLiteral("account-a")));
     CHECK_FALSE(userMessage.contains(QStringLiteral("diagnostic timeout")));
@@ -159,6 +160,118 @@ TEST_CASE("application errors are deduplicated and rearmed after recovery")
     coordinator.reportFailure(settings, "account-a", QStringLiteral("Synchronize mail"), timeout);
     CHECK(incidents == 2);
     coordinator.forgetConnection(settings.connectionId);
+}
+
+TEST_CASE("transport outages are coalesced across accounts sharing a mail service")
+{
+    QTemporaryDir settingsDirectory;
+    REQUIRE(settingsDirectory.isValid());
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDirectory.path());
+
+    StubAccountReader accountReader;
+    javelin::app::ApplicationErrorCoordinator coordinator{accountReader};
+    const javelin::app::AccountConnectionSettings first{
+        .connectionId = "connection-a",
+        .revision = 1,
+        .displayName = "First account",
+        .sessionUrl = "https://mail.example.test/.well-known/jmap",
+        .loginEmail = "first@example.test",
+        .apiKey = "secret",
+        .refreshToken = {},
+        .tokenEndpoint = {},
+        .oauthClientId = {},
+    };
+    const javelin::app::AccountConnectionSettings second{
+        .connectionId = "connection-b",
+        .revision = 1,
+        .displayName = "Second account",
+        .sessionUrl = "https://mail.example.test/jmap/session",
+        .loginEmail = "second@example.test",
+        .apiKey = "secret",
+        .refreshToken = {},
+        .tokenEndpoint = {},
+        .oauthClientId = {},
+    };
+
+    int incidents = 0;
+    QString message;
+    QObject::connect(&coordinator, &javelin::app::ApplicationErrorCoordinator::incidentRaised,
+                     [&incidents, &message](const QString&, const QString&, const QString&,
+                                            const QString& value, const bool, const bool)
+                     {
+                         ++incidents;
+                         message = value;
+                     });
+
+    coordinator.reportFailure(first, "account-a", QStringLiteral("Synchronize mailbox"),
+                              {.code = javelin::jmap::OperationErrorCode::Timeout,
+                               .message = QStringLiteral("request timed out")});
+    coordinator.reportFailure(second, "account-b", QStringLiteral("Maintain account connection"),
+                              {.code = javelin::jmap::OperationErrorCode::ServerUnavailable,
+                               .message = QStringLiteral("gateway unavailable"),
+                               .httpStatus = 503});
+
+    CHECK(incidents == 1);
+    CHECK(message.contains(QStringLiteral("mail.example.test")));
+    CHECK_FALSE(message.contains(QStringLiteral("First account")));
+    CHECK_FALSE(message.contains(QStringLiteral("Second account")));
+
+    coordinator.reportSuccess(second.connectionId);
+    coordinator.reportFailure(first, "account-a", QStringLiteral("Synchronize mailbox"),
+                              {.code = javelin::jmap::OperationErrorCode::NetworkUnavailable,
+                               .message = QStringLiteral("connection refused")});
+    CHECK(incidents == 1);
+
+    coordinator.reportSuccess(first.connectionId);
+    coordinator.reportFailure(first, "account-a", QStringLiteral("Synchronize mailbox"),
+                              {.code = javelin::jmap::OperationErrorCode::NetworkUnavailable,
+                               .message = QStringLiteral("connection refused again")});
+    CHECK(incidents == 2);
+}
+
+TEST_CASE("server method rejections are not hidden by outage coalescing")
+{
+    StubAccountReader accountReader;
+    javelin::app::ApplicationErrorCoordinator coordinator{accountReader};
+    const javelin::app::AccountConnectionSettings settings{
+        .connectionId = "connection-a",
+        .revision = 1,
+        .displayName = "Personal mail",
+        .sessionUrl = "https://mail.example.test/jmap",
+        .loginEmail = "user@example.test",
+        .apiKey = "secret",
+        .refreshToken = {},
+        .tokenEndpoint = {},
+        .oauthClientId = {},
+    };
+
+    int incidents = 0;
+    QObject::connect(&coordinator, &javelin::app::ApplicationErrorCoordinator::incidentRaised,
+                     [&incidents](const QString&, const QString&, const QString&, const QString&,
+                                  const bool, const bool) { ++incidents; });
+
+    const javelin::jmap::OperationError methodUnavailable{
+        .code = javelin::jmap::OperationErrorCode::ServerUnavailable,
+        .message = QStringLiteral("this method is temporarily unavailable"),
+        .protocolType = "serverUnavailable",
+    };
+    coordinator.reportFailure(settings, "account-a", QStringLiteral("Save calendar event"),
+                              methodUnavailable);
+    coordinator.reportFailure(settings, "account-a", QStringLiteral("Save calendar event"),
+                              methodUnavailable);
+
+    const javelin::jmap::OperationError permissionDenied{
+        .code = javelin::jmap::OperationErrorCode::PermissionDenied,
+        .message = QStringLiteral("forbidden"),
+        .protocolType = "forbidden",
+    };
+    coordinator.reportFailure(settings, "account-a", QStringLiteral("Move message"),
+                              permissionDenied);
+    coordinator.reportFailure(settings, "account-a", QStringLiteral("Delete message"),
+                              permissionDenied);
+
+    CHECK(incidents == 4);
 }
 
 TEST_CASE("authentication pause persists until a newer connection revision is applied")

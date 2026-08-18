@@ -246,6 +246,7 @@ add_executable(javelin_daemon_app_tests
     app/DeveloperMaintenanceServiceTest.cpp
     app/DraftHistoryExecutorTest.cpp
     app/EmailMutationBatchSubmitterTest.cpp
+    app/EndpointRetryGateTest.cpp
     app/FullMailSyncServiceTest.cpp
     app/HistoryRepositoryTest.cpp
     app/MailTransferRepositoryTest.cpp
