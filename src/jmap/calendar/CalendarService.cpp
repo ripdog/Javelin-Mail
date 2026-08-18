@@ -778,20 +778,6 @@ namespace javelin::jmap::calendar
         return std::get<std::optional<cache::CalendarWindow>>(std::move(loaded));
     }
 
-    CalendarLoadResult
-    CalendarCacheReader::loadRangeSnapshot(const std::string_view accountId,
-                                           const VisibleInterval& interval,
-                                           const TimeZoneId& displayTimeZone) const
-    {
-        cache::CalendarRepository repository{m_connection};
-        auto loaded =
-            repository.loadRangeSnapshot(accountId, interval.start, interval.end, displayTimeZone);
-        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&loaded))
-            return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
-        return std::optional<cache::CalendarWindow>{
-            std::get<cache::CalendarWindow>(std::move(loaded))};
-    }
-
     CalendarAccountsResult CalendarCacheReader::accounts() const
     {
         cache::CalendarRepository repository{m_connection};

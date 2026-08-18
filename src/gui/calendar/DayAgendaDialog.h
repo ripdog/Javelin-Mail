@@ -23,7 +23,6 @@ class QWidget;
 namespace javelin::gui::calendar
 {
     class CalendarEventButton;
-    struct MonthEvent;
 
     struct DayAgendaEventKey
     {
@@ -55,8 +54,6 @@ namespace javelin::gui::calendar
         QString description;
         QStringList attendees;
     };
-
-    [[nodiscard]] DayAgendaEvent dayAgendaEventFromMonthEvent(const MonthEvent& event);
 
     class DayAgendaDialog final : public QDialog
     {

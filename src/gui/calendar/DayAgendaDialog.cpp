@@ -1,7 +1,6 @@
 #include "gui/calendar/DayAgendaDialog.h"
 #include "gui/accessibility/AccessibleFactory.h"
 #include "gui/calendar/CalendarEventButton.h"
-#include "gui/calendar/MonthCalendarWidget.h"
 
 #include <KLocalizedString>
 
@@ -35,36 +34,6 @@
 
 namespace javelin::gui::calendar
 {
-    DayAgendaEvent dayAgendaEventFromMonthEvent(const MonthEvent& event)
-    {
-        return DayAgendaEvent{
-            .key =
-                {
-                    .accountId = QString::fromStdString(event.accountId),
-                    .eventId = QString::fromStdString(event.eventId),
-                    .recurrenceId =
-                        QString::fromStdString(event.recurrenceId.value_or(std::string{})),
-                },
-            .title = event.title,
-            .calendarName = {},
-            .color = event.color,
-            .start = event.start,
-            .end = event.end,
-            .allDay = event.allDay,
-            .recurring = event.recurring,
-            .editable = false,
-            .rsvpAllowed = false,
-            .rsvpRecurrenceId = {},
-            .participationStatus = {},
-            .responseMutationPending = false,
-            .responseError = {},
-            .organizer = {},
-            .location = {},
-            .description = {},
-            .attendees = {},
-        };
-    }
-
     namespace
     {
         constexpr int PixelsPerHour = 64;

@@ -124,14 +124,6 @@ namespace javelin::app
             m_client, std::string{accountId}, interval, displayTimeZone);
     }
 
-    javelin::jmap::calendar::CalendarLoadResult RemoteCalendarReader::loadRangeSnapshot(
-        const std::string_view accountId, const javelin::jmap::calendar::VisibleInterval& interval,
-        const javelin::jmap::calendar::TimeZoneId& displayTimeZone) const
-    {
-        return callImmediate<javelin::protocol::actions::CalendarReadRangeSnapshot>(
-            m_client, std::string{accountId}, interval, displayTimeZone);
-    }
-
     javelin::jmap::calendar::CalendarAccountsResult RemoteCalendarReader::accounts() const
     {
         return callImmediate<javelin::protocol::actions::CalendarReadAccounts>(m_client);

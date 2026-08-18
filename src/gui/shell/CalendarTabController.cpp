@@ -32,6 +32,7 @@
 #include <QTimer>
 
 #include <iterator>
+#include <memory>
 #include <ranges>
 #include <unordered_set>
 #include <utility>
@@ -1137,12 +1138,35 @@ namespace javelin::gui::shell
             return buildDayAgendaEvents(m_settings, m_calendarReader, *widget, m_calendarAccounts,
                                         date);
         };
+        const auto agendaPresentationReady = [this, widget]
+        {
+            const javelin::jmap::calendar::VisibleInterval interval{
+                .start = {.value = widget->visibleStart().toString(Qt::ISODate).toStdString() +
+                                   "T00:00:00"},
+                .end = {.value =
+                            widget->visibleEnd().toString(Qt::ISODate).toStdString() + "T00:00:00"},
+            };
+            const javelin::jmap::calendar::TimeZoneId timeZone{
+                .value = QTimeZone::systemTimeZoneId().toStdString()};
+            return std::ranges::all_of(
+                m_calendarAccounts,
+                [this, &interval, &timeZone](const auto& account)
+                {
+                    const auto loaded =
+                        m_calendarReader.loadCached(account.accountId, interval, timeZone);
+                    const auto* window =
+                        std::get_if<std::optional<javelin::jmap::cache::CalendarWindow>>(&loaded);
+                    return window != nullptr && window->has_value();
+                });
+        };
         connect(
             widget, &javelin::gui::calendar::MonthCalendarWidget::dayAgendaRequested, widget,
-            [this, widget, agendaEvents](const QDate& date, const QString& accountId,
-                                         const QString& eventId, const QString& recurrenceId)
+            [this, widget, agendaEvents,
+             agendaPresentationReady](const QDate& date, const QString& accountId,
+                                      const QString& eventId, const QString& recurrenceId)
             {
                 auto* dialog = new javelin::gui::calendar::DayAgendaDialog(widget);
+                const auto pendingDate = std::make_shared<std::optional<QDate>>();
                 dialog->setAttribute(Qt::WA_DeleteOnClose);
                 auto selected = eventId.isEmpty()
                                     ? std::nullopt
@@ -1160,10 +1184,18 @@ namespace javelin::gui::shell
                 }
                 dialog->setDay(date, std::move(events), selected);
                 connect(dialog, &javelin::gui::calendar::DayAgendaDialog::dayChanged, dialog,
-                        [this, widget, dialog, agendaEvents](const QDate& selectedDate)
+                        [widget, dialog, agendaEvents, pendingDate](const QDate& selectedDate)
                         {
+                            const bool outsidePresentation =
+                                selectedDate < widget->visibleStart() ||
+                                selectedDate >= widget->visibleEnd();
+                            if (outsidePresentation)
+                                *pendingDate = selectedDate;
+                            else
+                                pendingDate->reset();
                             widget->setSelectedDateFromAgenda(selectedDate);
-                            dialog->setDay(selectedDate, agendaEvents(selectedDate));
+                            if (!outsidePresentation)
+                                dialog->setDay(selectedDate, agendaEvents(selectedDate));
                         });
                 connect(dialog, &javelin::gui::calendar::DayAgendaDialog::newEventRequested, widget,
                         [widget](const QDateTime& start, const QDateTime& end)
@@ -1242,8 +1274,18 @@ namespace javelin::gui::shell
                 connect(
                     widget, &javelin::gui::calendar::MonthCalendarWidget::eventPresentationChanged,
                     dialog,
-                    [dialog, agendaEvents]
+                    [dialog, widget, agendaEvents, agendaPresentationReady, pendingDate]
                     {
+                        if (pendingDate->has_value())
+                        {
+                            const auto targetDate = **pendingDate;
+                            if (targetDate < widget->visibleStart() ||
+                                targetDate >= widget->visibleEnd() || !agendaPresentationReady())
+                                return;
+                            pendingDate->reset();
+                            dialog->setDay(targetDate, agendaEvents(targetDate));
+                            return;
+                        }
                         const auto selectedKey = dialog->selectedEvent();
                         dialog->setDay(dialog->date(), agendaEvents(dialog->date()), selectedKey);
                     },

@@ -15,6 +15,8 @@
 
 namespace javelin::gui::calendar
 {
+    struct DayAgendaEvent;
+
     struct CalendarAccountPresentation
     {
         std::vector<CalendarDisplay> calendars;
@@ -33,6 +35,8 @@ namespace javelin::gui::calendar
     [[nodiscard]] std::optional<std::size_t> preferredNewEventCalendarIndex(
         std::span<const NewEventCalendarCandidate> candidates,
         const javelin::protocol::CalendarDefaultDestination& configuredDestination);
+
+    [[nodiscard]] DayAgendaEvent dayAgendaEventFromMonthEvent(const MonthEvent& event);
 
     [[nodiscard]] CalendarAccountPresentation buildCalendarAccountPresentation(
         const javelin::jmap::cache::CalendarAccount& account,

@@ -97,13 +97,14 @@ namespace javelin::protocol::actions
         Descriptor<92, ActionDomain::Calendar, AdmissionSemantics::Immediate,
                    ReplayPolicy::Reexecute, 0, std::tuple<std::string>,
                    javelin::jmap::calendar::ParticipantIdentityListResult>;
-    using CalendarReadRangeSnapshot =
+    // Wire action ids are stable and contiguous. Slot 93 is reserved for the removed
+    // CalendarReadRangeSnapshot action so later actions do not need to be renumbered.
+    using CalendarReservedRangeSnapshot =
         Descriptor<93, ActionDomain::Calendar, AdmissionSemantics::Immediate,
                    ReplayPolicy::Reexecute, 0,
                    std::tuple<std::string, javelin::jmap::calendar::VisibleInterval,
                               javelin::jmap::calendar::TimeZoneId>,
                    javelin::jmap::calendar::CalendarLoadResult>;
-
     using CalendarActionTypes = std::tuple<
         RegisteredAction<CalendarReadCached, "CalendarReadCached">,
         RegisteredAction<CalendarReadAccounts, "CalendarReadAccounts">,
@@ -121,5 +122,5 @@ namespace javelin::protocol::actions
         RegisteredAction<CalendarReadPendingInvitations, "CalendarReadPendingInvitations">,
         RegisteredAction<CalendarReadEvent, "CalendarReadEvent">,
         RegisteredAction<CalendarReadParticipantIdentities, "CalendarReadParticipantIdentities">,
-        RegisteredAction<CalendarReadRangeSnapshot, "CalendarReadRangeSnapshot">>;
+        RegisteredAction<CalendarReservedRangeSnapshot, "CalendarReadRangeSnapshot">>;
 } // namespace javelin::protocol::actions

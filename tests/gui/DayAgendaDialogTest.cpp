@@ -1,5 +1,6 @@
 #include "gui/calendar/DayAgendaDialog.h"
 #include "gui/calendar/CalendarEventButton.h"
+#include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/MonthCalendarWidget.h"
 
 #include <QAccessible>
