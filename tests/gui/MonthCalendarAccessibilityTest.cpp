@@ -71,6 +71,31 @@ TEST_CASE("calendar accessibility factories ignore Qt objects without C++ RTTI",
     CHECK(QAccessible::queryAccessibleInterface(foreignObject.get()) == nullptr);
 }
 
+TEST_CASE("month calendar publishes committed event presentation replacements",
+          "[gui][calendar][presentation]")
+{
+    TestWorkspaceSettingsPort settings;
+    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    int presentationChanges = 0;
+    QObject::connect(&widget,
+                     &javelin::gui::calendar::MonthCalendarWidget::eventPresentationChanged,
+                     &widget, [&presentationChanges] { ++presentationChanges; });
+
+    javelin::gui::calendar::MonthEvent event;
+    event.accountId = "account";
+    event.calendarId = "account\\ncalendar";
+    event.eventId = "event";
+    event.title = QStringLiteral("Presentation event");
+    event.start = QDateTime{QDate{2026, 8, 18}, QTime{9, 0}};
+    event.end = QDateTime{QDate{2026, 8, 18}, QTime{10, 0}};
+    widget.setEvents({event});
+
+    CHECK(presentationChanges == 1);
+    const auto dayEvents = widget.eventsForDate(QDate{2026, 8, 18});
+    REQUIRE(dayEvents.size() == 1);
+    CHECK(dayEvents.front().eventId == "event");
+}
+
 TEST_CASE("setting the displayed calendar month is idempotent", "[gui][calendar]")
 {
     TestWorkspaceSettingsPort settings;

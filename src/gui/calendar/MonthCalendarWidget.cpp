@@ -773,6 +773,7 @@ namespace javelin::gui::calendar
                                                                  applyCalendarColors();
                                                                  rebuildCalendarMenu();
                                                                  rebuildEvents();
+                                                                 Q_EMIT eventPresentationChanged();
                                                              }));
         m_grid = new QGridLayout;
         m_grid->setSpacing(0);
@@ -849,6 +850,7 @@ namespace javelin::gui::calendar
         m_events = std::move(events);
         applyCalendarColors();
         rebuildEvents();
+        Q_EMIT eventPresentationChanged();
     }
 
     void MonthCalendarWidget::setCalendars(std::vector<CalendarDisplay> calendars)
@@ -913,6 +915,7 @@ namespace javelin::gui::calendar
         applyCalendarColors();
         rebuildCalendarMenu();
         rebuildEvents();
+        Q_EMIT eventPresentationChanged();
     }
 
     QColor MonthCalendarWidget::effectiveCalendarColor(const std::string& calendarId) const

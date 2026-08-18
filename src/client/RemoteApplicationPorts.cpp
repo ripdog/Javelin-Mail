@@ -165,14 +165,6 @@ namespace javelin::app
             m_client, std::string{accountId}, std::string{eventId});
     }
 
-    javelin::jmap::calendar::CalendarDaySnapshotResult RemoteCalendarReader::daySnapshot(
-        const javelin::jmap::calendar::VisibleInterval& interval,
-        const javelin::jmap::calendar::TimeZoneId& displayTimeZone) const
-    {
-        return callImmediate<javelin::protocol::actions::CalendarReadDaySnapshot>(
-            m_client, interval, displayTimeZone);
-    }
-
     RemoteCalendarCommandPort::RemoteCalendarCommandPort(RemoteActionClient& client,
                                                          QObject* parent)
         : CalendarCommandPort(parent), m_client(client)

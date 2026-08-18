@@ -115,6 +115,7 @@ namespace javelin::gui::calendar
       Q_SIGNALS:
         void visibleIntervalChanged(const QDate& start, const QDate& end);
         void selectionChanged(const QDate& date);
+        void eventPresentationChanged();
         void dayAgendaRequested(const QDate& date, const QString& accountId, const QString& eventId,
                                 const QString& recurrenceId);
         void eventActivated(const QString& accountId, const QString& eventId,

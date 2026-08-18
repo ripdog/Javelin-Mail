@@ -58,9 +58,6 @@ namespace javelin::app
         pendingInvitations() const override;
         [[nodiscard]] javelin::jmap::calendar::CalendarEventReadResult
         event(std::string_view accountId, std::string_view eventId) const override;
-        [[nodiscard]] javelin::jmap::calendar::CalendarDaySnapshotResult
-        daySnapshot(const javelin::jmap::calendar::VisibleInterval& interval,
-                    const javelin::jmap::calendar::TimeZoneId& displayTimeZone) const override;
 
       private:
         RemoteActionClient& m_client;

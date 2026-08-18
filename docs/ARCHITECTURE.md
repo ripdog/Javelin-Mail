@@ -214,10 +214,11 @@ object combines account runtime, queries, content, mutations, notifications, con
 and Sieve. Calendar cache commits are published across the process boundary as `Calendars` cache
 invalidations regardless of whether the change came from a GUI command, push synchronization, or
 background work; GUI command adapters do not manufacture replacement invalidations from command
-completion. The Day Agenda uses one `CalendarReadDaySnapshot` request backed by one SQLite
-transaction to read account metadata, calendars, participant identities, pending invitations, and
-the requested day's range as one generation. A failed snapshot never replaces the last committed
-agenda projection with an empty view. `GuiServices` is deliberately smaller: it exposes
+completion. Month and Day Agenda views share one materialized event presentation: the month view
+owns visible event membership, timing, recurrence, and calendar colour, and an open Day Agenda
+filters that same presentation by date. Detail reads may enrich an agenda event with RSVP and editor
+state but never decide whether the event exists in the view. `GuiServices` is deliberately smaller:
+it exposes
 read-only cache readers and remote ports matching the interfaces expected by GUI controllers.
 `gui_main` is the GUI composition root: concrete calendar, contacts, and compose dependencies stay
 there and are captured by a typed `MainWindowFeatureFactories` set. `MainWindow` receives controller

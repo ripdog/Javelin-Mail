@@ -1391,11 +1391,10 @@ TEST_CASE("calendar event deletion rematerializes the visible range without drop
         [&]
         {
             ++projectionNotifications;
-            const auto snapshot = reader.daySnapshot(interval, zone);
-            REQUIRE(std::holds_alternative<javelin::jmap::calendar::CalendarDaySnapshot>(snapshot));
-            const auto& day = std::get<javelin::jmap::calendar::CalendarDaySnapshot>(snapshot);
-            REQUIRE(day.accounts.size() == 1);
-            const auto& window = day.accounts.front().window;
+            const auto snapshot =
+                calendars.loadRangeSnapshot("a1", interval.start, interval.end, zone);
+            REQUIRE(std::holds_alternative<javelin::jmap::cache::CalendarWindow>(snapshot));
+            const auto& window = std::get<javelin::jmap::cache::CalendarWindow>(snapshot);
             CHECK(std::ranges::none_of(window.events,
                                        [](const auto& value) { return value.id == "event-1"; }));
             CHECK(std::ranges::any_of(window.events,

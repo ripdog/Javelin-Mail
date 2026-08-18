@@ -991,33 +991,6 @@ namespace javelin::jmap::calendar
         return std::get<std::optional<CalendarEvent>>(std::move(loaded));
     }
 
-    CalendarDaySnapshotResult
-    CalendarCacheReader::daySnapshot(const VisibleInterval& interval,
-                                     const TimeZoneId& displayTimeZone) const
-    {
-        if (const auto validation = m_connection.validate())
-            return error(OperationErrorCode::LocalStorageFailure, validation->message);
-        auto& database = m_connection.database();
-        if (!database.transaction())
-            return error(OperationErrorCode::LocalStorageFailure,
-                         QStringLiteral("Begin calendar day snapshot: ") +
-                             database.lastError().text());
-        auto snapshot = CalendarReader::daySnapshot(interval, displayTimeZone);
-        if (std::holds_alternative<OperationError>(snapshot))
-        {
-            database.rollback();
-            return snapshot;
-        }
-        if (!database.commit())
-        {
-            const auto message =
-                QStringLiteral("Commit calendar day snapshot: ") + database.lastError().text();
-            database.rollback();
-            return error(OperationErrorCode::LocalStorageFailure, message);
-        }
-        return snapshot;
-    }
-
     QCoro::Task<CalendarMutationResult> CalendarMutationEngine::createCalendar(
         LiveConnectionSettings settings, std::string ownerAccountId, CreateCalendarCommand command)
     {

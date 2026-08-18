@@ -81,11 +81,8 @@ namespace javelin::gui::shell
         [[nodiscard]] QWidget* contentWidgetForTab(const TabState* tab) const;
         [[nodiscard]] QMenu* calendarMenuForTab(const TabState* tab) const;
         void applicationPaletteChanged();
-        void
-        configureEventContextMenu(QMenu& menu,
-                                  std::function<std::vector<QString>()> configuredLayout,
-                                  std::function<void(const QList<QAction*>&)> replaceActionList,
-                                  CalendarEventContextActions actions);
+        void configureEventContextMenu(std::function<std::vector<QString>()> configuredLayout,
+                                       CalendarEventContextActions actions);
 
       Q_SIGNALS:
         void tabReady(int index);
@@ -100,8 +97,9 @@ namespace javelin::gui::shell
         void requestVisibleRange(javelin::gui::calendar::MonthCalendarWidget& widget,
                                  const QDate& start, const QDate& end);
         void showEventContextMenu(javelin::gui::calendar::MonthCalendarWidget& widget,
-                                  const QPoint& globalPosition, const QString& accountId,
-                                  const QString& eventId, const QString& recurrenceId);
+                                  QWidget& popupParent, const QPoint& globalPosition,
+                                  const QString& accountId, const QString& eventId,
+                                  const QString& recurrenceId);
         void handleEventContextAction(javelin::gui::calendar::MonthCalendarWidget& widget,
                                       const QString& actionId, const QString& accountId,
                                       const QString& eventId, const QString& recurrenceId,
@@ -113,11 +111,8 @@ namespace javelin::gui::shell
         QStackedWidget& m_contentStack;
         std::vector<TabState>& m_tabs;
         std::vector<javelin::jmap::cache::CalendarAccount> m_calendarAccounts;
-        QMenu* m_eventContextMenu = nullptr;
         std::function<std::vector<QString>()> m_configuredEventContextMenuLayout;
-        std::function<void(const QList<QAction*>&)> m_replaceEventContextMenuActionList;
         std::optional<CalendarEventContextActions> m_eventContextActions;
-        QList<QObject*> m_eventContextMenuObjects;
         javelin::gui::calendar::MonthCalendarWidget* m_eventContextWidget = nullptr;
         QString m_eventContextAccountId;
         QString m_eventContextEventId;

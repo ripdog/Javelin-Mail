@@ -581,29 +581,16 @@ namespace javelin::gui::shell
                         plugActionList(QStringLiteral("email_context_menu_layout"), actions);
                 });
         }
-        m_calendarEventContextMenu = qobject_cast<QMenu*>(
-            guiFactory()->container(QStringLiteral("calendar_event_context_menu"), this));
-        if (m_calendarEventContextMenu != nullptr)
-        {
-            m_calendarTabController->configureEventContextMenu(
-                *m_calendarEventContextMenu,
-                [this] { return m_settings.workspaceSettings().calendarEventContextMenuLayout; },
-                [this](const QList<QAction*>& actions)
-                {
-                    unplugActionList(QStringLiteral("calendar_event_context_menu_layout"));
-                    if (!actions.empty())
-                        plugActionList(QStringLiteral("calendar_event_context_menu_layout"),
-                                       actions);
-                },
-                {.edit = *m_calendarEventEditAction,
-                 .duplicate = *m_calendarEventDuplicateAction,
-                 .move = *m_calendarEventMoveAction,
-                 .accept = *m_calendarEventAcceptAction,
-                 .tentative = *m_calendarEventTentativeAction,
-                 .decline = *m_calendarEventDeclineAction,
-                 .copyDetails = *m_calendarEventCopyDetailsAction,
-                 .deleteEvent = *m_calendarEventDeleteAction});
-        }
+        m_calendarTabController->configureEventContextMenu(
+            [this] { return m_settings.workspaceSettings().calendarEventContextMenuLayout; },
+            {.edit = *m_calendarEventEditAction,
+             .duplicate = *m_calendarEventDuplicateAction,
+             .move = *m_calendarEventMoveAction,
+             .accept = *m_calendarEventAcceptAction,
+             .tentative = *m_calendarEventTentativeAction,
+             .decline = *m_calendarEventDeclineAction,
+             .copyDetails = *m_calendarEventCopyDetailsAction,
+             .deleteEvent = *m_calendarEventDeleteAction});
         if (auto* composeToolBar = toolBar(QStringLiteral("composeToolBar"));
             composeToolBar != nullptr)
         {

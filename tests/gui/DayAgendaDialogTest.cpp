@@ -1,5 +1,6 @@
 #include "gui/calendar/DayAgendaDialog.h"
 #include "gui/calendar/CalendarEventButton.h"
+#include "gui/calendar/MonthCalendarWidget.h"
 
 #include <QAccessible>
 #include <QApplication>
@@ -61,6 +62,36 @@ namespace
         QApplication::sendEvent(widget, &event);
     }
 } // namespace
+
+TEST_CASE("day agenda base events preserve the month presentation without detail data",
+          "[gui][calendar][agenda][presentation]")
+{
+    const javelin::gui::calendar::MonthEvent monthEvent{
+        .accountId = "account",
+        .calendarId = "account\\ncalendar",
+        .eventId = "event",
+        .title = QStringLiteral("Shared presentation"),
+        .color = QColor{QStringLiteral("#5a7fb2")},
+        .start = QDateTime{QDate{2026, 8, 10}, QTime{9, 15}},
+        .end = QDateTime{QDate{2026, 8, 10}, QTime{10, 45}},
+        .allDay = false,
+        .recurrenceId = std::optional<std::string>{"2026-08-10T09:15:00"},
+        .recurring = true,
+    };
+
+    const auto agendaEvent = javelin::gui::calendar::dayAgendaEventFromMonthEvent(monthEvent);
+    CHECK(agendaEvent.key.accountId == QStringLiteral("account"));
+    CHECK(agendaEvent.key.eventId == QStringLiteral("event"));
+    CHECK(agendaEvent.key.recurrenceId == QStringLiteral("2026-08-10T09:15:00"));
+    CHECK(agendaEvent.title == monthEvent.title);
+    CHECK(agendaEvent.color == monthEvent.color);
+    CHECK(agendaEvent.start == monthEvent.start);
+    CHECK(agendaEvent.end == monthEvent.end);
+    CHECK(agendaEvent.allDay == monthEvent.allDay);
+    CHECK(agendaEvent.recurring == monthEvent.recurring);
+    CHECK_FALSE(agendaEvent.editable);
+    CHECK_FALSE(agendaEvent.rsvpAllowed);
+}
 
 TEST_CASE("day agenda renders a midnight-to-midnight timeline and starts at eight",
           "[gui][calendar][agenda]")

@@ -388,7 +388,6 @@ namespace javelin::gui::shell
         QAction* m_viewSourceAction = nullptr;
         QAction* m_findSenderContextAction = nullptr;
         QPointer<QMenu> m_emailContextMenu;
-        QMenu* m_calendarEventContextMenu = nullptr;
         QAction* m_calendarEventEditAction = nullptr;
         QAction* m_calendarEventDuplicateAction = nullptr;
         QAction* m_calendarEventMoveAction = nullptr;

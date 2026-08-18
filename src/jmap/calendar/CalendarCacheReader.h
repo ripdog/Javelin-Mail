@@ -27,9 +27,6 @@ namespace javelin::jmap::calendar
         [[nodiscard]] PendingCalendarInvitationsResult pendingInvitations() const override;
         [[nodiscard]] CalendarEventReadResult event(std::string_view accountId,
                                                     std::string_view eventId) const override;
-        [[nodiscard]] CalendarDaySnapshotResult
-        daySnapshot(const VisibleInterval& interval,
-                    const TimeZoneId& displayTimeZone) const override;
 
       private:
         cache::DatabaseConnection& m_connection;

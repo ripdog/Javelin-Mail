@@ -102,7 +102,4 @@
   <Menu name="email_context_menu"><text>Email Context Menu</text>
     <ActionList name="email_context_menu_layout"/>
   </Menu>
-  <Menu name="calendar_event_context_menu"><text>Calendar Event Context Menu</text>
-    <ActionList name="calendar_event_context_menu_layout"/>
-  </Menu>
 </gui>
