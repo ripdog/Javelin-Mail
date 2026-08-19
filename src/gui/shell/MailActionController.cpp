@@ -215,9 +215,10 @@ namespace javelin::gui::shell
         m_actions.junk.setEnabled(actions.junk);
         m_actions.junk.setText(selectedMessagesAreJunk() ? i18nc("@action", "Not &Junk")
                                                          : i18nc("@action", "&Junk"));
-        m_actions.tags.setEnabled(accountId.has_value() && m_activeTab != nullptr &&
-                                  (tabKind(*m_activeTab) == TabKind::Mailbox ||
-                                   tabKind(*m_activeTab) == TabKind::Search));
+        const bool messageListContext =
+            m_activeTab != nullptr &&
+            (tabKind(*m_activeTab) == TabKind::Mailbox || tabKind(*m_activeTab) == TabKind::Search);
+        m_actions.tags.setEnabled(accountId.has_value() && messageListContext);
         m_actions.deleteFromMailbox.setEnabled(actions.deleteFromMailbox);
         m_actions.permanentDelete.setEnabled(actions.permanentDelete);
         m_actions.move.setEnabled(actions.move);
@@ -229,6 +230,22 @@ namespace javelin::gui::shell
         m_actions.save.setText(oneExplicitEmail ? i18nc("@action", "Save Message As…")
                                                 : i18nc("@action", "Save Messages…"));
         m_actions.viewSource.setEnabled(actions.viewSource);
+        const auto currentIndex = m_messageView.currentIndex();
+        const auto senderEmail =
+            currentIndex.data(javelin::gui::messages::MessageListModel::SenderEmailRole)
+                .toString()
+                .trimmed();
+        m_actions.findSender.setEnabled(accountId.has_value() && messageListContext &&
+                                        currentIndex.isValid() && !senderEmail.isEmpty());
+
+        // Transfer-menu actions capture the current selection. KCommandBar indexes submenu actions
+        // without emitting QMenu::aboutToShow, so never leave an old selection's actions available
+        // for it to discover. The ordinary menu-opening path rebuilds these on demand.
+        if (auto* menu = m_actions.move.menu(); menu != nullptr)
+            menu->clear();
+        if (auto* menu = m_actions.copy.menu(); menu != nullptr)
+            menu->clear();
+        m_tagsMenu.clear();
     }
 
     void MailActionController::rebuildTransferMenu(QMenu& menu, const bool move)

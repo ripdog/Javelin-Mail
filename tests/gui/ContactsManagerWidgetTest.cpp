@@ -1,6 +1,7 @@
 #include "gui/contacts/ContactsManagerWidget.h"
 
 #include "gui/settings/GuiSettings.h"
+#include "gui/shell/ContactsTabController.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/SessionRepository.h"
 
@@ -130,9 +131,12 @@ namespace
     class RefreshPort final : public javelin::app::ContactRefreshPort
     {
       public:
+        int requestCount = 0;
+
         QCoro::Task<javelin::jmap::contacts::ContactRefreshResult>
         requestContacts(std::string) override
         {
+            ++requestCount;
             co_return javelin::jmap::contacts::ContactRefreshSummary{
                 .accountCount = 1,
                 .addressBookCount = 2,
@@ -308,6 +312,80 @@ TEST_CASE("Contacts refresh merges rows without disturbing selection or editor d
     CHECK(groups->isEnabled());
     CHECK(contacts->isEnabled());
     CHECK(save->isEnabled());
+}
+
+TEST_CASE("workspace Contacts refresh does not duplicate materialization refresh",
+          "[gui][contacts][actions]")
+{
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contacts-workspace-refresh-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    if (const auto error = sessions.replace("a1", session()))
+        FAIL(error->message.toStdString());
+    javelin::jmap::cache::ContactRepository repository{connection};
+    REQUIRE_FALSE(
+        repository.replaceAll("a1", {book("book-1", "Personal")}, {}, "b1", "c1").has_value());
+
+    RefreshPort refresh;
+    CommandPort commands;
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    QStackedWidget contentStack;
+    std::vector<javelin::gui::shell::TabState> tabs;
+    javelin::gui::shell::ContactsTabController controller{settings, repository,   refresh,
+                                                          commands, contentStack, tabs};
+
+    controller.invokeWorkspace(javelin::gui::shell::ContactsTabCommand::Refresh);
+
+    REQUIRE(tabs.size() == 1);
+    CHECK(refresh.requestCount == 1);
+
+    controller.invokeWorkspace(javelin::gui::shell::ContactsTabCommand::Refresh);
+    CHECK(refresh.requestCount == 2);
+}
+
+TEST_CASE("workspace contact commands materialize Contacts before executing",
+          "[gui][contacts][actions]")
+{
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contacts-workspace-command-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    if (const auto error = sessions.replace("a1", session()))
+        FAIL(error->message.toStdString());
+    javelin::jmap::cache::ContactRepository repository{connection};
+    REQUIRE_FALSE(
+        repository.replaceAll("a1", {book("book-1", "Personal")}, {}, "b1", "c1").has_value());
+
+    RefreshPort refresh;
+    CommandPort commands;
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    QStackedWidget contentStack;
+    std::vector<javelin::gui::shell::TabState> tabs;
+    javelin::gui::shell::ContactsTabController controller{settings, repository,   refresh,
+                                                          commands, contentStack, tabs};
+    int activatedIndex = -1;
+    QObject::connect(&controller, &javelin::gui::shell::ContactsTabController::tabReady,
+                     &contentStack, [&activatedIndex](const int index) { activatedIndex = index; });
+
+    controller.invokeWorkspace(javelin::gui::shell::ContactsTabCommand::CreateContact);
+
+    CHECK(activatedIndex == 0);
+    REQUIRE(tabs.size() == 1);
+    auto* widget =
+        qobject_cast<javelin::gui::contacts::ContactsManagerWidget*>(contentStack.widget(0));
+    REQUIRE(widget != nullptr);
+    auto* details = widget->findChild<QStackedWidget*>(QStringLiteral("contactsDetailStack"));
+    REQUIRE(details != nullptr);
+    CHECK(details->currentIndex() == 3);
 }
 
 TEST_CASE("Fastmail-style rights allow editing and deleting group cards",

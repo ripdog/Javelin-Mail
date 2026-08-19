@@ -54,6 +54,7 @@ namespace javelin::gui::shell
         QAction& copy;
         QAction& save;
         QAction& viewSource;
+        QAction& findSender;
     };
 
     class MailActionController final : public QObject

@@ -267,6 +267,8 @@ namespace javelin::gui::shell
         [[nodiscard]] bool activeTabIsCompose() const;
         [[nodiscard]] bool activeTabIsContacts() const;
         [[nodiscard]] std::optional<std::string> activeAccountId() const;
+        [[nodiscard]] std::optional<std::string> preferredMailAccountId() const;
+        [[nodiscard]] std::optional<std::string> preferredSubmissionAccountId() const;
         [[nodiscard]] std::optional<std::string> activeMailboxId() const;
         [[nodiscard]] const TabState* activeTab() const;
         [[nodiscard]] TabState* activeTab();
@@ -277,7 +279,7 @@ namespace javelin::gui::shell
         void refreshFromServer();
         void refreshAccountFromServer(std::string accountId);
         [[nodiscard]] ToolbarContext toolbarContextForActiveTab() const;
-        void updateToolbarForActiveTab();
+        void updateActiveContextUi();
         void openEmailRoute(const javelin::app::OpenEmailRoute& route);
         void resolveOpenEmailRoute();
         void findConversationsWithSender(const QModelIndex& index);
@@ -438,8 +440,11 @@ namespace javelin::gui::shell
         QAction* m_contactExportAction = nullptr;
         QAction* m_contactDuplicatesAction = nullptr;
         QAction* m_contactAddToGroupAction = nullptr;
+        QMenu* m_contactAddToGroupMenu = nullptr;
         QAction* m_contactRemoveFromGroupAction = nullptr;
+        QMenu* m_contactRemoveFromGroupMenu = nullptr;
         QAction* m_contactManageAddressBooksAction = nullptr;
+        QMenu* m_contactAddressBooksMenu = nullptr;
         QAction* m_contactRefreshAction = nullptr;
         QAction* m_calendarNewEventAction = nullptr;
         QAction* m_calendarPreviousMonthAction = nullptr;

@@ -432,7 +432,7 @@ namespace javelin::gui::shell
                     activateTab(index, false);
                 });
         connect(m_contactsTabController, &ContactsTabController::toolbarStateChanged, this,
-                &MainWindow::updateToolbarForActiveTab);
+                &MainWindow::updateActiveContextUi);
         connect(m_contactsTabController, &ContactsTabController::statusMessage, this,
                 [this](const QString& message, const int durationMilliseconds)
                 { m_statusBar->showMessage(message, durationMilliseconds); });
@@ -484,7 +484,7 @@ namespace javelin::gui::shell
         connect(m_composeTabController, &ComposeTabController::operationFailed, this,
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
         connect(m_composeTabController, &ComposeTabController::toolbarStateChanged, this,
-                &MainWindow::updateToolbarForActiveTab);
+                &MainWindow::updateActiveContextUi);
         connect(m_composeTabController, &ComposeTabController::manageIdentitiesRequested, this,
                 &MainWindow::openSendingIdentitiesFor);
         m_messageListTabBindingPresenter = std::make_unique<MessageListTabBindingPresenter>(
@@ -609,7 +609,7 @@ namespace javelin::gui::shell
                     composeToolBar->widgetForAction(m_composeSignatureAction)))
                 signatureButton->setPopupMode(QToolButton::MenuButtonPopup);
         }
-        updateToolbarForActiveTab();
+        updateActiveContextUi();
         connectSelection();
         connect(&m_messageNavigationPort, &javelin::app::MessageNavigationPort::routeRequested,
                 this, &MainWindow::openEmailRoute);
@@ -1164,19 +1164,21 @@ namespace javelin::gui::shell
 
         const auto invokeContact = [this](const ContactsTabCommand command)
         { m_contactsTabController->invoke(activeTab(), command); };
+        const auto invokeContactWorkspace = [this](const ContactsTabCommand command)
+        { m_contactsTabController->invokeWorkspace(command); };
         m_contactNewAction = new QAction(QIcon::fromTheme(QStringLiteral("contact-new")),
                                          i18nc("@action", "Add"), this);
-        connect(m_contactNewAction, &QAction::triggered, this,
-                [invokeContact] { invokeContact(ContactsTabCommand::CreateContact); });
+        connect(m_contactNewAction, &QAction::triggered, this, [invokeContactWorkspace]
+                { invokeContactWorkspace(ContactsTabCommand::CreateContact); });
         auto* contactAddMenu = new QMenu(this);
         auto* newContact = contactAddMenu->addAction(
             QIcon::fromTheme(QStringLiteral("contact-new")), i18n("New Contact"));
-        connect(newContact, &QAction::triggered, this,
-                [invokeContact] { invokeContact(ContactsTabCommand::CreateContact); });
+        connect(newContact, &QAction::triggered, this, [invokeContactWorkspace]
+                { invokeContactWorkspace(ContactsTabCommand::CreateContact); });
         auto* newGroup = contactAddMenu->addAction(QIcon::fromTheme(QStringLiteral("system-users")),
                                                    i18n("New Group"));
-        connect(newGroup, &QAction::triggered, this,
-                [invokeContact] { invokeContact(ContactsTabCommand::CreateGroup); });
+        connect(newGroup, &QAction::triggered, this, [invokeContactWorkspace]
+                { invokeContactWorkspace(ContactsTabCommand::CreateGroup); });
         m_contactNewAction->setMenu(contactAddMenu);
         actionCollection()->addAction(QStringLiteral("contact_new"), m_contactNewAction);
         m_contactEditAction = new QAction(QIcon::fromTheme(QStringLiteral("document-edit")),
@@ -1196,8 +1198,8 @@ namespace javelin::gui::shell
         actionCollection()->addAction(QStringLiteral("contact_copy"), m_contactCopyAction);
         m_contactImportAction = new QAction(QIcon::fromTheme(QStringLiteral("document-import")),
                                             i18n("Import vCard…"), this);
-        connect(m_contactImportAction, &QAction::triggered, this,
-                [invokeContact] { invokeContact(ContactsTabCommand::ImportVCard); });
+        connect(m_contactImportAction, &QAction::triggered, this, [invokeContactWorkspace]
+                { invokeContactWorkspace(ContactsTabCommand::ImportVCard); });
         actionCollection()->addAction(QStringLiteral("contact_import"), m_contactImportAction);
         m_contactExportAction = new QAction(QIcon::fromTheme(QStringLiteral("document-save")),
                                             i18n("Save Contact As…"), this);
@@ -1206,50 +1208,58 @@ namespace javelin::gui::shell
         actionCollection()->addAction(QStringLiteral("contact_export"), m_contactExportAction);
         m_contactDuplicatesAction =
             new QAction(QIcon::fromTheme(QStringLiteral("merge")), i18n("Find Duplicates…"), this);
-        connect(m_contactDuplicatesAction, &QAction::triggered, this,
-                [invokeContact] { invokeContact(ContactsTabCommand::FindDuplicates); });
+        connect(m_contactDuplicatesAction, &QAction::triggered, this, [invokeContactWorkspace]
+                { invokeContactWorkspace(ContactsTabCommand::FindDuplicates); });
         actionCollection()->addAction(QStringLiteral("contact_duplicates"),
                                       m_contactDuplicatesAction);
         m_contactAddToGroupAction =
             new QAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("Add to Group"), this);
-        auto* addToGroupMenu = new QMenu(this);
-        connect(addToGroupMenu, &QMenu::aboutToShow, this, [this, addToGroupMenu]
-                { m_contactsTabController->populateAddToGroupMenu(activeTab(), *addToGroupMenu); });
-        m_contactAddToGroupAction->setMenu(addToGroupMenu);
+        m_contactAddToGroupMenu = new QMenu(this);
+        connect(m_contactAddToGroupMenu, &QMenu::aboutToShow, this,
+                [this]
+                {
+                    m_contactsTabController->populateAddToGroupMenu(activeTab(),
+                                                                    *m_contactAddToGroupMenu);
+                });
+        m_contactAddToGroupAction->setMenu(m_contactAddToGroupMenu);
         actionCollection()->addAction(QStringLiteral("contact_add_to_group"),
                                       m_contactAddToGroupAction);
         m_contactRemoveFromGroupAction = new QAction(
             QIcon::fromTheme(QStringLiteral("list-remove")), i18n("Remove from Group"), this);
-        auto* removeFromGroupMenu = new QMenu(this);
-        connect(removeFromGroupMenu, &QMenu::aboutToShow, this,
-                [this, removeFromGroupMenu]
+        m_contactRemoveFromGroupMenu = new QMenu(this);
+        connect(m_contactRemoveFromGroupMenu, &QMenu::aboutToShow, this,
+                [this]
                 {
-                    m_contactsTabController->populateRemoveFromGroupMenu(activeTab(),
-                                                                         *removeFromGroupMenu);
+                    m_contactsTabController->populateRemoveFromGroupMenu(
+                        activeTab(), *m_contactRemoveFromGroupMenu);
                 });
-        m_contactRemoveFromGroupAction->setMenu(removeFromGroupMenu);
+        m_contactRemoveFromGroupAction->setMenu(m_contactRemoveFromGroupMenu);
         actionCollection()->addAction(QStringLiteral("contact_remove_from_group"),
                                       m_contactRemoveFromGroupAction);
         m_contactManageAddressBooksAction =
             new QAction(QIcon::fromTheme(QStringLiteral("view-list-details")),
                         i18n("Manage Address Books…"), this);
         connect(m_contactManageAddressBooksAction, &QAction::triggered, this,
-                [invokeContact] { invokeContact(ContactsTabCommand::ManageAddressBooks); });
-        auto* addressBooksMenu = new QMenu(this);
-        connect(
-            addressBooksMenu, &QMenu::aboutToShow, this, [this, addressBooksMenu]
-            { m_contactsTabController->populateAddressBookMenu(activeTab(), *addressBooksMenu); });
-        m_contactManageAddressBooksAction->setMenu(addressBooksMenu);
+                [invokeContactWorkspace]
+                { invokeContactWorkspace(ContactsTabCommand::ManageAddressBooks); });
+        m_contactAddressBooksMenu = new QMenu(this);
+        connect(m_contactAddressBooksMenu, &QMenu::aboutToShow, this,
+                [this]
+                {
+                    m_contactsTabController->populateAddressBookMenu(activeTab(),
+                                                                     *m_contactAddressBooksMenu);
+                });
+        m_contactManageAddressBooksAction->setMenu(m_contactAddressBooksMenu);
         actionCollection()->addAction(QStringLiteral("contact_manage_address_books"),
                                       m_contactManageAddressBooksAction);
         m_contactRefreshAction = new QAction(QIcon::fromTheme(QStringLiteral("view-refresh")),
                                              i18n("Refresh Contacts"), this);
         connect(m_contactRefreshAction, &QAction::triggered, this,
-                [invokeContact] { invokeContact(ContactsTabCommand::Refresh); });
+                [invokeContactWorkspace] { invokeContactWorkspace(ContactsTabCommand::Refresh); });
         actionCollection()->addAction(QStringLiteral("contact_refresh"), m_contactRefreshAction);
 
         const auto invokeCalendar = [this](const CalendarTabCommand command)
-        { m_calendarTabController->invoke(activeTab(), command); };
+        { m_calendarTabController->invokeWorkspace(command); };
         m_calendarNewEventAction = new QAction(QIcon::fromTheme(QStringLiteral("appointment-new")),
                                                i18n("New Event"), this);
         connect(m_calendarNewEventAction, &QAction::triggered, this,
@@ -1279,13 +1289,14 @@ namespace javelin::gui::shell
         m_calendarRefreshAction = new QAction(QIcon::fromTheme(QStringLiteral("view-refresh")),
                                               i18n("Refresh Calendar"), this);
         connect(m_calendarRefreshAction, &QAction::triggered, this,
-                [this] { refreshActiveTabFromServer(); });
+                [invokeCalendar] { invokeCalendar(CalendarTabCommand::Refresh); });
         actionCollection()->addAction(QStringLiteral("calendar_refresh"), m_calendarRefreshAction);
 
         const auto addCalendarEventAction =
             [this](QAction*& target, const QString& id, const QString& icon, const QString& text)
         {
             target = new QAction(QIcon::fromTheme(icon), text, this);
+            target->setEnabled(false);
             actionCollection()->addAction(id, target);
             KActionCollection::setShortcutsConfigurable(target, false);
         };
@@ -1342,7 +1353,8 @@ namespace javelin::gui::shell
              .move = *m_moveAction,
              .copy = *m_copyAction,
              .save = *m_saveCurrentAction,
-             .viewSource = *m_viewSourceAction},
+             .viewSource = *m_viewSourceAction,
+             .findSender = *m_findSenderContextAction},
             [this](QString message, const int durationMilliseconds)
             { m_statusBar->showMessage(message, durationMilliseconds); },
             [this](const javelin::jmap::OperationError& error) { presentError(error); },
@@ -1444,7 +1456,7 @@ namespace javelin::gui::shell
 
     void MainWindow::exportCurrentAccount()
     {
-        const auto accountId = activeAccountId();
+        const auto accountId = preferredMailAccountId();
         if (!accountId.has_value())
         {
             m_statusBar->showMessage(i18n("Select a mail account to export it."), 3000);
@@ -2044,7 +2056,10 @@ namespace javelin::gui::shell
 
         connect(m_messageView->selectionModel(), &QItemSelectionModel::currentChanged, this,
                 [this](const QModelIndex& current, const QModelIndex&)
-                { handleCurrentMessageChanged(current); });
+                {
+                    handleCurrentMessageChanged(current);
+                    updateActiveContextUi();
+                });
         connect(m_messageView->selectionModel(), &QItemSelectionModel::selectionChanged, this,
                 [this](const QItemSelection&, const QItemSelection&)
                 { refreshSelectionFromModels(); });
@@ -2123,7 +2138,7 @@ namespace javelin::gui::shell
 
     void MainWindow::openSieveEditor()
     {
-        const auto accountId = activeAccountId();
+        const auto accountId = preferredMailAccountId();
         if (!accountId)
         {
             m_statusBar->showMessage(i18n("Select an account to edit its Sieve rules."), 5000);
@@ -2162,11 +2177,10 @@ namespace javelin::gui::shell
 
     void MainWindow::composeNewMessage()
     {
-        const auto accountId =
-            activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
+        const auto accountId = preferredSubmissionAccountId();
         if (!accountId.has_value())
         {
-            m_statusBar->showMessage(i18n("Select an account before composing a message."), 5000);
+            m_statusBar->showMessage(i18n("No account is available for sending mail."), 5000);
             return;
         }
 
@@ -2188,38 +2202,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        auto preferredAccountId = activeAccountId();
-        if (!preferredAccountId.has_value())
-            preferredAccountId = currentAccountId(*m_mailboxView);
-
-        std::optional<std::string> accountId;
-        const auto accountsResult = m_accountReader.listAll();
-        if (const auto* accounts =
-                std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult))
-        {
-            const auto usable = [](const auto& account)
-            {
-                return account.hasMailCapability && account.hasSubmissionCapability &&
-                       !account.isReadOnly;
-            };
-            auto selected = accounts->cend();
-            if (preferredAccountId.has_value())
-            {
-                selected = std::find_if(
-                    accounts->cbegin(), accounts->cend(), [&](const auto& account)
-                    { return account.accountId == *preferredAccountId && usable(account); });
-            }
-            if (selected == accounts->cend())
-            {
-                selected = std::find_if(accounts->cbegin(), accounts->cend(),
-                                        [&usable](const auto& account)
-                                        { return account.isPrimary && usable(account); });
-            }
-            if (selected == accounts->cend())
-                selected = std::find_if(accounts->cbegin(), accounts->cend(), usable);
-            if (selected != accounts->cend())
-                accountId = selected->accountId;
-        }
+        const auto accountId = preferredSubmissionAccountId();
         if (!accountId.has_value())
         {
             m_statusBar->showMessage(i18n("No account is available for sending mail."), 7000);
@@ -2364,6 +2347,43 @@ namespace javelin::gui::shell
         return tab == nullptr ? std::optional<std::string>{std::nullopt} : tabAccountId(*tab);
     }
 
+    std::optional<std::string> MainWindow::preferredMailAccountId() const
+    {
+        if (auto accountId = activeAccountId(); accountId.has_value())
+            return accountId;
+        return currentAccountId(*m_mailboxView);
+    }
+
+    std::optional<std::string> MainWindow::preferredSubmissionAccountId() const
+    {
+        const auto preferredAccountId = preferredMailAccountId();
+        const auto accountsResult = m_accountReader.listAll();
+        const auto* accounts =
+            std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult);
+        if (accounts == nullptr)
+            return std::nullopt;
+
+        const auto usable = [](const auto& account)
+        {
+            return account.hasMailCapability && account.hasSubmissionCapability &&
+                   !account.isReadOnly;
+        };
+        if (preferredAccountId.has_value())
+        {
+            const auto preferred = std::ranges::find(
+                *accounts, *preferredAccountId, &javelin::jmap::cache::CachedAccount::accountId);
+            if (preferred != accounts->end() && usable(*preferred))
+                return preferred->accountId;
+        }
+        const auto primary = std::ranges::find_if(*accounts, [&usable](const auto& account)
+                                                  { return account.isPrimary && usable(account); });
+        if (primary != accounts->end())
+            return primary->accountId;
+        const auto fallback = std::ranges::find_if(*accounts, usable);
+        return fallback == accounts->end() ? std::nullopt
+                                           : std::optional<std::string>{fallback->accountId};
+    }
+
     std::optional<std::string> MainWindow::activeMailboxId() const
     {
         const auto* tab = activeTab();
@@ -2470,33 +2490,91 @@ namespace javelin::gui::shell
         return ToolbarContext::Mail;
     }
 
-    void MainWindow::updateToolbarForActiveTab()
+    void MainWindow::updateActiveContextUi()
     {
         const auto context = toolbarContextForActiveTab();
         const bool mailContext = context == ToolbarContext::Mail;
+        const bool contactsAvailable = m_contactsTabController->available();
+        const bool calendarAvailable = m_calendarTabController->available();
+        const auto selectedAccount = activeAccountId();
+        const auto preferredMailAccount = preferredMailAccountId();
+        const auto preferredSubmissionAccount = preferredSubmissionAccountId();
         m_closeTabAction->setEnabled(
             m_activeTabIndex.has_value() &&
             tabCanClose(m_tabs[static_cast<std::size_t>(*m_activeTabIndex)],
                         static_cast<std::size_t>(*m_activeTabIndex)));
         m_previousTabAction->setEnabled(m_tabs.size() > 1);
         m_nextTabAction->setEnabled(m_tabs.size() > 1);
-        m_previousMessageAction->setEnabled(mailContext);
-        m_nextMessageAction->setEnabled(mailContext);
-        m_previousUnreadMessageAction->setEnabled(mailContext);
-        m_nextUnreadMessageAction->setEnabled(mailContext);
+        const auto canMoveMessageSelection =
+            [this, mailContext](const int direction, const bool unreadOnly)
+        {
+            if (!mailContext || direction == 0 || m_messageModel->rowCount() <= 0)
+                return false;
+            const auto current = m_messageView->currentIndex();
+            int row = current.isValid() ? current.row()
+                                        : (direction > 0 ? -1 : m_messageModel->rowCount());
+            for (row += direction; row >= 0 && row < m_messageModel->rowCount(); row += direction)
+            {
+                const auto index = m_messageModel->index(row, 0);
+                if (!index.isValid())
+                    continue;
+                if (!unreadOnly ||
+                    index.data(javelin::gui::messages::MessageListModel::IsUnreadRole).toBool())
+                    return true;
+            }
+            return false;
+        };
+        m_previousMessageAction->setEnabled(canMoveMessageSelection(-1, false));
+        m_nextMessageAction->setEnabled(canMoveMessageSelection(1, false));
+        m_previousUnreadMessageAction->setEnabled(canMoveMessageSelection(-1, true));
+        m_nextUnreadMessageAction->setEnabled(canMoveMessageSelection(1, true));
         m_focusMailboxTreeAction->setEnabled(mailContext);
         m_focusMessageListAction->setEnabled(mailContext);
         m_focusMessageReaderAction->setEnabled(mailContext);
         m_focusSearchAction->setEnabled(mailContext);
-        m_contactsAction->setEnabled(m_contactsTabController->available());
-        const auto selectedAccount = activeAccountId();
-        m_exportMailboxAction->setEnabled(context == ToolbarContext::Mail && activeTabIsMailbox() &&
+        m_contactsAction->setEnabled(contactsAvailable);
+        m_calendarAction->setEnabled(calendarAvailable);
+        m_newMessageAction->setEnabled(preferredSubmissionAccount.has_value());
+        m_sendingIdentitiesAction->setEnabled(preferredSubmissionAccount.has_value());
+        m_advancedSearchAction->setEnabled(preferredMailAccount.has_value());
+        m_sieveAction->setEnabled(preferredMailAccount.has_value());
+        m_refreshAction->setEnabled(context == ToolbarContext::Contacts ||
+                                    context == ToolbarContext::Calendar ||
+                                    preferredMailAccount.has_value());
+        m_exportMailboxAction->setEnabled(mailContext && activeTabIsMailbox() &&
                                           activeMailboxId().has_value());
-        m_exportAccountAction->setEnabled(context == ToolbarContext::Mail &&
-                                          selectedAccount.has_value());
-        m_calendarAction->setEnabled(m_calendarTabController->available(
-            selectedAccount.has_value() ? std::optional<std::string_view>{*selectedAccount}
-                                        : std::nullopt));
+        m_exportAccountAction->setEnabled(preferredMailAccount.has_value());
+
+        m_composeSendAction->setEnabled(false);
+        m_composeScheduleSendAction->setEnabled(false);
+        m_composeSaveDraftAction->setEnabled(false);
+        m_composeAttachFilesAction->setEnabled(false);
+        m_composeSignatureAction->setEnabled(false);
+        m_composeRichTextAction->setEnabled(false);
+
+        m_contactNewAction->setEnabled(contactsAvailable);
+        m_contactEditAction->setEnabled(false);
+        m_contactDeleteAction->setEnabled(false);
+        m_contactCopyAction->setEnabled(false);
+        m_contactImportAction->setEnabled(contactsAvailable);
+        m_contactExportAction->setEnabled(false);
+        m_contactDuplicatesAction->setEnabled(contactsAvailable);
+        m_contactAddToGroupAction->setEnabled(false);
+        m_contactRemoveFromGroupAction->setEnabled(false);
+        m_contactManageAddressBooksAction->setEnabled(contactsAvailable);
+        m_contactManageAddressBooksAction->setMenu(
+            context == ToolbarContext::Contacts ? m_contactAddressBooksMenu : nullptr);
+        m_contactRefreshAction->setEnabled(contactsAvailable);
+
+        m_calendarNewEventAction->setEnabled(calendarAvailable);
+        m_calendarPreviousMonthAction->setEnabled(calendarAvailable);
+        m_calendarTodayAction->setEnabled(calendarAvailable);
+        m_calendarNextMonthAction->setEnabled(calendarAvailable);
+        m_calendarListAction->setEnabled(false);
+        if (context != ToolbarContext::Calendar)
+            m_calendarListAction->setMenu(nullptr);
+        m_calendarRefreshAction->setEnabled(calendarAvailable);
+
         setToolBarVisible(QStringLiteral("mainToolBar"), context == ToolbarContext::Mail);
         setToolBarVisible(QStringLiteral("composeToolBar"), context == ToolbarContext::Compose);
         setToolBarVisible(QStringLiteral("contactsToolBar"), context == ToolbarContext::Contacts);
@@ -2504,6 +2582,12 @@ namespace javelin::gui::shell
         if (context == ToolbarContext::Mail)
         {
             m_mailActionController->update();
+            m_newMessageAction->setEnabled(preferredSubmissionAccount.has_value());
+            const bool activeAccountCanSubmit =
+                selectedAccount.has_value() && preferredSubmissionAccount == selectedAccount;
+            m_replyAction->setEnabled(m_replyAction->isEnabled() && activeAccountCanSubmit);
+            m_replyAllAction->setEnabled(m_replyAllAction->isEnabled() && activeAccountCanSubmit);
+            m_forwardAction->setEnabled(m_forwardAction->isEnabled() && activeAccountCanSubmit);
         }
         if (context == ToolbarContext::Compose)
         {
@@ -2514,6 +2598,8 @@ namespace javelin::gui::shell
             m_composeSendAction->setEnabled(state.canSend);
             m_composeScheduleSendAction->setVisible(state.canScheduleSend);
             m_composeScheduleSendAction->setEnabled(state.canScheduleSend);
+            m_composeSaveDraftAction->setEnabled(state.canToggleRichText);
+            m_composeAttachFilesAction->setEnabled(state.canToggleRichText);
             auto* signatureMenu = m_composeTabController->signatureMenuForTab(activeTab());
             m_composeSignatureAction->setMenu(signatureMenu);
             m_composeSignatureAction->setEnabled(state.canUseSignature && signatureMenu != nullptr);
@@ -2536,6 +2622,16 @@ namespace javelin::gui::shell
             m_contactRemoveFromGroupAction->setEnabled(state.canRemoveFromGroup);
             m_contactManageAddressBooksAction->setEnabled(state.canManageAddressBooks);
             m_contactRefreshAction->setEnabled(state.canRefresh);
+            m_refreshAction->setEnabled(state.canRefresh);
+            if (state.canAddToGroup)
+                m_contactsTabController->populateAddToGroupMenu(activeTab(),
+                                                                *m_contactAddToGroupMenu);
+            if (state.canRemoveFromGroup)
+                m_contactsTabController->populateRemoveFromGroupMenu(activeTab(),
+                                                                     *m_contactRemoveFromGroupMenu);
+            if (state.canManageAddressBooks)
+                m_contactsTabController->populateAddressBookMenu(activeTab(),
+                                                                 *m_contactAddressBooksMenu);
         }
         if (context == ToolbarContext::Calendar)
         {
@@ -2564,7 +2660,7 @@ namespace javelin::gui::shell
                         plugActionList(QStringLiteral("email_context_menu_layout"), actions);
                 });
         }
-        updateToolbarForActiveTab();
+        updateActiveContextUi();
     }
 
     void MainWindow::openOrActivateMailboxTab(std::string accountId, std::string mailboxId,
@@ -2627,7 +2723,7 @@ namespace javelin::gui::shell
             updateMessageListHeader();
             m_quickFilterController->activate(nullptr);
             m_mailActionController->activate(nullptr);
-            updateToolbarForActiveTab();
+            updateActiveContextUi();
             metrics.finish(QStringLiteral("empty"));
             return;
         }
@@ -2643,7 +2739,7 @@ namespace javelin::gui::shell
             .remoteRefreshRequested = refreshRemote,
         });
 
-        updateToolbarForActiveTab();
+        updateActiveContextUi();
         if (m_tabBar->currentIndex() != index)
         {
             QSignalBlocker blocker{m_tabBar};
@@ -2771,6 +2867,7 @@ namespace javelin::gui::shell
             handleCurrentMessageChanged(m_messageView->currentIndex());
         else
             refreshSelectionFromModels();
+        updateActiveContextUi();
     }
 
     void MainWindow::loadActiveTabFromCache(const bool forceReload, const bool refreshRemote)
@@ -3000,8 +3097,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto accountId =
-            activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
+        const auto accountId = preferredMailAccountId();
         if (!accountId.has_value())
         {
             m_statusBar->showMessage(i18n("Select an account before searching."), 5000);
@@ -3013,8 +3109,7 @@ namespace javelin::gui::shell
 
     void MainWindow::showAdvancedSearch()
     {
-        const auto accountId =
-            activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
+        const auto accountId = preferredMailAccountId();
         if (!accountId.has_value())
         {
             m_statusBar->showMessage(i18n("Select an account before searching."), 5000);
@@ -3172,6 +3267,8 @@ namespace javelin::gui::shell
     {
         m_mailboxModel->refresh();
         m_mailboxView->expandAll();
+        if (m_contactsAction != nullptr)
+            updateActiveContextUi();
     }
 
     void MainWindow::refreshViewsFromCache()
@@ -3460,8 +3557,7 @@ namespace javelin::gui::shell
             m_messageViewContainer->translationSettingsChanged();
             m_statusBar->showMessage(i18n("Saved preferences."), 3000);
             m_mailboxModel->refresh();
-            const auto accountId = activeAccountId().has_value() ? activeAccountId()
-                                                                 : currentAccountId(*m_mailboxView);
+            const auto accountId = preferredMailAccountId();
             if (accountId.has_value())
             {
                 refreshAccountFromServer(*accountId);
@@ -3471,14 +3567,23 @@ namespace javelin::gui::shell
 
     void MainWindow::refreshFromServer()
     {
+        if (toolbarContextForActiveTab() == ToolbarContext::Contacts)
+        {
+            m_contactsTabController->invoke(activeTab(), ContactsTabCommand::Refresh);
+            return;
+        }
+        if (toolbarContextForActiveTab() == ToolbarContext::Calendar)
+        {
+            m_calendarTabController->invoke(activeTab(), CalendarTabCommand::Refresh);
+            return;
+        }
         if (activeTabIsSearch())
         {
             refreshActiveTabFromServer();
             return;
         }
 
-        const auto accountId =
-            activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
+        const auto accountId = preferredMailAccountId();
         if (!accountId.has_value())
         {
             presentUserInterventionError(i18n("Select an account to refresh."));

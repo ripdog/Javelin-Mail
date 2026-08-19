@@ -8,7 +8,9 @@ namespace javelin::gui::shell
         const auto search = context.tabKind == TabKind::Search;
         const auto compose = context.tabKind == TabKind::Compose;
         const auto contacts = context.tabKind == TabKind::Contacts;
-        const auto hasSelection = context.hasAccount && context.selectedCount > 0 && !contacts;
+        const auto calendar = context.tabKind == TabKind::Calendar;
+        const auto hasSelection =
+            context.hasAccount && context.selectedCount > 0 && !contacts && !calendar;
         const auto movable = (mailbox || search) && context.hasAccount && context.selectedCount > 0;
 
         return {

@@ -56,6 +56,7 @@ namespace javelin::gui::shell
         PreviousMonth,
         Today,
         NextMonth,
+        Refresh,
     };
 
     class CalendarTabController final : public QObject
@@ -73,6 +74,7 @@ namespace javelin::gui::shell
         void openEvent(const QString& calendarAccountId, const QString& eventId,
                        const QString& recurrenceId, const QDate& navigationDate);
         void invoke(const TabState* tab, CalendarTabCommand command);
+        void invokeWorkspace(CalendarTabCommand command);
         [[nodiscard]] bool
         available(std::optional<std::string_view> accountId = std::nullopt) const;
         [[nodiscard]] bool refresh(const TabState* tab);

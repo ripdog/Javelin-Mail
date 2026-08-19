@@ -25,6 +25,9 @@ Check off completed items as you commit.
   existing `QAction` / KXMLGUI actions rather than constructing a parallel command palette.
 - Keep actions as the source of truth so shortcuts, menus, toolbars, and the command palette invoke the
   same commands.
+- Keep action availability truthful for Find Action: workspace-level commands should activate the
+  required tab and run, while selection-, editor-, and context-menu-only commands should be disabled
+  when their required context is absent rather than silently doing nothing.
 
 ### [x] Improve tab conventions and keyboard navigation
 

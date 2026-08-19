@@ -623,6 +623,7 @@ namespace javelin::gui::shell
             auto* action = actionForId(id);
             if (action == nullptr)
                 continue;
+            action->setEnabled(true);
             if (separatorPending)
             {
                 popup.addSeparator();
@@ -633,6 +634,13 @@ namespace javelin::gui::shell
         }
         if (hasAction)
             popup.exec(globalPosition);
+
+        for (auto* action :
+             {&m_eventContextActions->edit, &m_eventContextActions->duplicate,
+              &m_eventContextActions->move, &m_eventContextActions->accept,
+              &m_eventContextActions->tentative, &m_eventContextActions->decline,
+              &m_eventContextActions->copyDetails, &m_eventContextActions->deleteEvent})
+            action->setEnabled(false);
     }
 
     void CalendarTabController::handleEventContextAction(
@@ -1809,6 +1817,24 @@ namespace javelin::gui::shell
         case CalendarTabCommand::NextMonth:
             widget->showNextMonth();
             break;
+        case CalendarTabCommand::Refresh:
+            static_cast<void>(refresh(tab));
+            break;
+        }
+    }
+
+    void CalendarTabController::invokeWorkspace(const CalendarTabCommand command)
+    {
+        const bool alreadyMaterialized = std::ranges::any_of(
+            m_tabs, [this](const auto& tab) { return widgetForTab(&tab) != nullptr; });
+        open();
+        for (auto& tab : m_tabs)
+        {
+            if (widgetForTab(&tab) == nullptr)
+                continue;
+            if (command != CalendarTabCommand::Refresh || alreadyMaterialized)
+                invoke(&tab, command);
+            return;
         }
     }
 

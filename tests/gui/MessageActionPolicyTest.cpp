@@ -107,3 +107,20 @@ TEST_CASE("contacts never expose message actions")
     CHECK_FALSE(actions.permanentDelete);
     CHECK_FALSE(actions.viewSource);
 }
+
+TEST_CASE("calendar never exposes stale message actions")
+{
+    const auto actions = messageActionAvailability({
+        .tabKind = TabKind::Calendar,
+        .hasAccount = true,
+        .selectedCount = 1,
+        .hasReadSelection = true,
+    });
+
+    CHECK_FALSE(actions.reply);
+    CHECK_FALSE(actions.markUnread);
+    CHECK_FALSE(actions.star);
+    CHECK_FALSE(actions.junk);
+    CHECK_FALSE(actions.permanentDelete);
+    CHECK_FALSE(actions.viewSource);
+}

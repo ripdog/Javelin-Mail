@@ -83,6 +83,7 @@ namespace javelin::gui::shell
         void open();
         [[nodiscard]] bool restore(const PersistedContactsTab& persisted);
         void invoke(const TabState* tab, ContactsTabCommand command);
+        void invokeWorkspace(ContactsTabCommand command);
         void populateAddToGroupMenu(const TabState* tab, QMenu& menu) const;
         void populateRemoveFromGroupMenu(const TabState* tab, QMenu& menu) const;
         void populateAddressBookMenu(const TabState* tab, QMenu& menu) const;

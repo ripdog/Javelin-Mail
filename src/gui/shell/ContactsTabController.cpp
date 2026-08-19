@@ -108,6 +108,58 @@ namespace javelin::gui::shell
         }
     }
 
+    void ContactsTabController::invokeWorkspace(const ContactsTabCommand command)
+    {
+        const bool alreadyMaterialized = std::ranges::any_of(
+            m_tabs, [this](const auto& tab) { return widgetForTab(&tab) != nullptr; });
+        open();
+        for (auto& tab : m_tabs)
+        {
+            auto* widget = widgetForTab(&tab);
+            if (widget == nullptr)
+                continue;
+
+            const auto state = toolbarState(&tab);
+            bool enabled = false;
+            QString unavailableMessage;
+            switch (command)
+            {
+            case ContactsTabCommand::CreateContact:
+            case ContactsTabCommand::CreateGroup:
+            case ContactsTabCommand::ImportVCard:
+                enabled = state.canCreateContact;
+                unavailableMessage = i18n("No writable address book is available.");
+                break;
+            case ContactsTabCommand::FindDuplicates:
+                enabled = state.canFindDuplicates;
+                unavailableMessage = i18n("Wait for the current Contacts operation to finish.");
+                break;
+            case ContactsTabCommand::ManageAddressBooks:
+                enabled = state.canManageAddressBooks;
+                unavailableMessage = i18n("Wait for the current Contacts operation to finish.");
+                break;
+            case ContactsTabCommand::Refresh:
+                enabled = state.canRefresh;
+                unavailableMessage = i18n("Wait for the current Contacts operation to finish.");
+                break;
+            case ContactsTabCommand::EditContact:
+            case ContactsTabCommand::DeleteContact:
+            case ContactsTabCommand::CopyContact:
+            case ContactsTabCommand::ExportVCard:
+                return;
+            }
+
+            if (!enabled)
+            {
+                Q_EMIT statusMessage(unavailableMessage, 5000);
+                return;
+            }
+            if (command != ContactsTabCommand::Refresh || alreadyMaterialized)
+                invoke(&tab, command);
+            return;
+        }
+    }
+
     void ContactsTabController::populateAddToGroupMenu(const TabState* tab, QMenu& menu) const
     {
         if (auto* widget = widgetForTab(tab); widget != nullptr)
