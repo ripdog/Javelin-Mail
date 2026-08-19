@@ -245,19 +245,16 @@ namespace javelin::gui::messageview
     void MessageAttachmentPanel::rebuildRows()
     {
         while (QLayoutItem* item = m_listLayout->takeAt(0))
-        {
-            if (QWidget* widget = item->widget())
-                widget->deleteLater();
             delete item;
-        }
+        for (auto* tile : m_attachmentTiles)
+            delete tile;
+        m_attachmentTiles.clear();
 
         const auto attachments = visibleAttachments(m_snapshot);
         if (attachments.empty() || !m_accountId.has_value() || !m_emailId.has_value())
             return;
 
-        constexpr int tileSpacing = 6;
-        std::vector<AttachmentTile*> tiles;
-        tiles.reserve(attachments.size());
+        m_attachmentTiles.reserve(attachments.size());
         const auto attachmentSaveSettings = m_settings.attachmentSaveSettings();
         for (const auto* attachment : attachments)
         {
@@ -267,7 +264,7 @@ namespace javelin::gui::messageview
                     ? i18n("Save %1 to selected location", fileName)
                     : i18n("Save %1 to %2", fileName, attachmentSaveSettings.directory);
             const auto partId = QString::fromStdString(attachment->partId);
-            auto* tile = new AttachmentTile(
+            m_attachmentTiles.push_back(new AttachmentTile(
                 *attachment,
                 [this, partId]
                 {
@@ -279,20 +276,34 @@ namespace javelin::gui::messageview
                     Q_EMIT saveAttachmentRequested(QString::fromStdString(*m_accountId),
                                                    QString::fromStdString(*m_emailId), partId);
                 },
-                saveToolTip, m_listWidget);
-            tiles.push_back(tile);
+                saveToolTip, m_listWidget));
         }
+        reflowRows();
+    }
 
+    void MessageAttachmentPanel::reflowRows()
+    {
+        while (QLayoutItem* item = m_listLayout->takeAt(0))
+            delete item;
+        if (m_attachmentTiles.empty())
+            return;
+
+        constexpr int tileSpacing = 6;
         const int availableWidth =
-            std::max(m_listWidget->contentsRect().width(),
-                     contentsRect().width() - m_statusLabel->sizeHint().width() -
-                         m_saveAllButton->sizeHint().width() - 12);
+            std::max(1, std::max(m_listWidget->contentsRect().width(),
+                                 contentsRect().width() - m_statusLabel->sizeHint().width() -
+                                     m_saveAllButton->sizeHint().width() - 12));
+
+        for (std::size_t column = 0; column <= m_attachmentTiles.size(); ++column)
+            m_listLayout->setColumnStretch(static_cast<int>(column), 0);
+
         int row = 0;
         int column = 0;
         int rowWidth = 0;
         int maxColumnCount = 0;
-        for (auto* tile : tiles)
+        for (auto* widget : m_attachmentTiles)
         {
+            auto* tile = static_cast<AttachmentTile*>(widget);
             const int tileWidth = std::min(tile->targetWidth(), availableWidth);
             const int nextWidth = column == 0 ? tileWidth : rowWidth + tileSpacing + tileWidth;
             if (column > 0 && nextWidth > availableWidth)
@@ -308,15 +319,13 @@ namespace javelin::gui::messageview
             ++column;
         }
         maxColumnCount = std::max(maxColumnCount, column);
-        for (int stretchColumn = 0; stretchColumn < maxColumnCount; ++stretchColumn)
-            m_listLayout->setColumnStretch(stretchColumn, 0);
         m_listLayout->setColumnStretch(maxColumnCount, 1);
     }
 
     void MessageAttachmentPanel::resizeEvent(QResizeEvent* event)
     {
         QWidget::resizeEvent(event);
-        if (hasVisibleAttachments())
-            rebuildRows();
+        if (hasVisibleAttachments() && event->size().width() != event->oldSize().width())
+            reflowRows();
     }
 } // namespace javelin::gui::messageview

@@ -395,6 +395,7 @@ add_executable(javelin_gui_widget_tests
     gui/EmailContextMenuEditorDialogTest.cpp
     gui/CalendarEventContextMenuEditorDialogTest.cpp
     gui/MessageDragListViewTest.cpp
+    gui/MessageAttachmentPanelTest.cpp
     gui/MessageListPanePresenterTest.cpp
     gui/MailboxPreferenceStateTest.cpp
     gui/MailboxMessageDropTest.cpp

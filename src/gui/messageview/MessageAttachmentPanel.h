@@ -6,6 +6,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 class QGridLayout;
 class QLabel;
@@ -44,6 +45,7 @@ namespace javelin::gui::messageview
 
       private:
         void rebuildRows();
+        void reflowRows();
 
         javelin::gui::settings::GuiSettings& m_settings;
         const std::optional<std::string>& m_accountId;
@@ -53,5 +55,6 @@ namespace javelin::gui::messageview
         QToolButton* m_saveAllButton = nullptr;
         QWidget* m_listWidget = nullptr;
         QGridLayout* m_listLayout = nullptr;
+        std::vector<QWidget*> m_attachmentTiles;
     };
 } // namespace javelin::gui::messageview
