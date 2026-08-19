@@ -21,12 +21,14 @@ class QAction;
 class QLabel;
 class QEvent;
 class QGridLayout;
+class QLineEdit;
 class QMenu;
 class QProgressBar;
 class QScrollArea;
 class QResizeEvent;
 class QStackedWidget;
 class QTextBrowser;
+class QToolButton;
 class QVBoxLayout;
 class KMessageWidget;
 class QWidget;
@@ -74,6 +76,14 @@ namespace javelin::gui::messageview
         void refresh(javelin::jmap::cache::MessageViewReader& messageViewReader);
         void setErrorState(const QString& errorMessage);
         void focusMessageBody();
+        [[nodiscard]] bool readerActionsAvailable() const;
+        void showFindBar();
+        void findNext();
+        void findPrevious();
+        void zoomIn();
+        void zoomOut();
+        void resetZoom();
+        void printMessage();
         void appearanceSettingsChanged();
         void translationSettingsChanged();
 
@@ -86,6 +96,7 @@ namespace javelin::gui::messageview
         void hoveredLinkChanged(QString url);
         void contentRequired(QString accountId, QString emailId);
         void notJunkRequested(QString accountId, QString mailboxId, QString emailId);
+        void readerActionsAvailabilityChanged(bool available);
 
       private:
         using ActiveView = MessageBodyPresenter::View;
@@ -108,6 +119,10 @@ namespace javelin::gui::messageview
         void setAutoTranslateDomain(bool enabled);
         void maybeAutoTranslateCurrentMessage();
         void rebuildMultipleSelectionRows();
+        void runFind(bool backwards);
+        void clearFindHighlights();
+        void updateFindResult(int activeMatch, int matchCount);
+        void applyZoom();
         void permitRemoteContentForCurrentSender();
         void permitRemoteContentForCurrentDomain();
         [[nodiscard]] QString currentSenderAddress() const;
@@ -136,6 +151,11 @@ namespace javelin::gui::messageview
         QLabel* m_placeholderTitleLabel = nullptr;
         QLabel* m_placeholderDetailLabel = nullptr;
         MessageAttachmentPanel* m_attachmentPanel = nullptr;
+        KMessageWidget* m_findBar = nullptr;
+        QLineEdit* m_findEdit = nullptr;
+        QLabel* m_findResultLabel = nullptr;
+        QToolButton* m_findPreviousButton = nullptr;
+        QToolButton* m_findNextButton = nullptr;
         QAction* m_permitSenderRemoteContentAction = nullptr;
         QAction* m_permitDomainRemoteContentAction = nullptr;
         QAction* m_remoteContentAction = nullptr;
@@ -160,6 +180,10 @@ namespace javelin::gui::messageview
         std::unique_ptr<MessageBodyPresenter> m_bodyPresenter;
         std::unique_ptr<MessageTranslationController> m_translationController;
         std::uint64_t m_snapshotLoadToken = 0;
+        QString m_plainTextFindQuery;
+        int m_plainTextFindIndex = -1;
+        int m_zoomSteps = 0;
+        bool m_readerActionsAvailable = false;
         std::unique_ptr<MessageBannerCoordinator> m_bannerCoordinator;
         std::unique_ptr<RemoteContentController> m_remoteContentController;
     };

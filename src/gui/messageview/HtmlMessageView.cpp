@@ -16,6 +16,8 @@
 #include <QMenu>
 #include <QPalette>
 #include <QPointer>
+#include <QPrintDialog>
+#include <QPrinter>
 #include <QRegularExpression>
 #include <QResource>
 #include <QStackedLayout>
@@ -25,6 +27,7 @@
 #include <QVBoxLayout>
 #include <QVariant>
 #include <QWebEngineContextMenuRequest>
+#include <QWebEngineFindTextResult>
 #include <QWebEnginePage>
 #include <QWebEngineScript>
 #include <QWebEngineSettings>
@@ -177,10 +180,19 @@ namespace javelin::gui::messageview
           public:
             explicit FilteredWebEngineView(std::function<void()> viewSourceAction,
                                            std::function<void()> toggleDarkModeAction,
-                                           std::function<bool()> darkModeEnabled, QWidget* parent)
+                                           std::function<bool()> darkModeEnabled,
+                                           std::function<void()> findAction,
+                                           std::function<void()> zoomInAction,
+                                           std::function<void()> zoomOutAction,
+                                           std::function<void()> resetZoomAction,
+                                           std::function<void()> printAction, QWidget* parent)
                 : QWebEngineView(parent), m_viewSourceAction(std::move(viewSourceAction)),
                   m_toggleDarkModeAction(std::move(toggleDarkModeAction)),
-                  m_darkModeEnabled(std::move(darkModeEnabled))
+                  m_darkModeEnabled(std::move(darkModeEnabled)),
+                  m_findAction(std::move(findAction)), m_zoomInAction(std::move(zoomInAction)),
+                  m_zoomOutAction(std::move(zoomOutAction)),
+                  m_resetZoomAction(std::move(resetZoomAction)),
+                  m_printAction(std::move(printAction))
             {
             }
 
@@ -194,10 +206,6 @@ namespace javelin::gui::messageview
                 }
 
                 QMenu menu(this);
-                auto* sourceAction = menu.addAction(i18n("View Source"));
-                auto* appearanceAction = menu.addAction(m_darkModeEnabled && m_darkModeEnabled()
-                                                            ? i18n("Use Original Colours")
-                                                            : i18n("Use Dark Appearance"));
 
                 if (request->editFlags().testFlag(QWebEngineContextMenuRequest::CanCopy))
                 {
@@ -231,8 +239,51 @@ namespace javelin::gui::messageview
                     }
                 }
 
+                if (!menu.actions().isEmpty())
+                {
+                    menu.addSeparator();
+                }
+                auto* findAction = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-find")),
+                                                  i18nc("@action", "Find in Message…"));
+                menu.addSeparator();
+                auto* zoomInAction =
+                    menu.addAction(QIcon::fromTheme(QStringLiteral("zoom-in")), i18n("Zoom In"));
+                auto* zoomOutAction =
+                    menu.addAction(QIcon::fromTheme(QStringLiteral("zoom-out")), i18n("Zoom Out"));
+                auto* resetZoomAction = menu.addAction(
+                    QIcon::fromTheme(QStringLiteral("zoom-original")), i18n("Actual Size"));
+                menu.addSeparator();
+                auto* printAction =
+                    menu.addAction(QIcon::fromTheme(QStringLiteral("document-print")),
+                                   i18nc("@action", "Print Message…"));
+                menu.addSeparator();
+                auto* sourceAction = menu.addAction(i18n("View Source"));
+                auto* appearanceAction = menu.addAction(m_darkModeEnabled && m_darkModeEnabled()
+                                                            ? i18n("Use Original Colours")
+                                                            : i18n("Use Dark Appearance"));
+
                 const QAction* chosen = menu.exec(event->globalPos());
-                if (chosen == sourceAction && m_viewSourceAction)
+                if (chosen == findAction && m_findAction)
+                {
+                    m_findAction();
+                }
+                else if (chosen == zoomInAction && m_zoomInAction)
+                {
+                    m_zoomInAction();
+                }
+                else if (chosen == zoomOutAction && m_zoomOutAction)
+                {
+                    m_zoomOutAction();
+                }
+                else if (chosen == resetZoomAction && m_resetZoomAction)
+                {
+                    m_resetZoomAction();
+                }
+                else if (chosen == printAction && m_printAction)
+                {
+                    m_printAction();
+                }
+                else if (chosen == sourceAction && m_viewSourceAction)
                 {
                     m_viewSourceAction();
                 }
@@ -246,6 +297,11 @@ namespace javelin::gui::messageview
             std::function<void()> m_viewSourceAction;
             std::function<void()> m_toggleDarkModeAction;
             std::function<bool()> m_darkModeEnabled;
+            std::function<void()> m_findAction;
+            std::function<void()> m_zoomInAction;
+            std::function<void()> m_zoomOutAction;
+            std::function<void()> m_resetZoomAction;
+            std::function<void()> m_printAction;
         };
 
     } // namespace
@@ -266,9 +322,12 @@ namespace javelin::gui::messageview
         auto* renderLayout = new QStackedLayout(renderSurface);
         renderLayout->setContentsMargins(0, 0, 0, 0);
         renderLayout->setStackingMode(QStackedLayout::StackAll);
-        m_view = new FilteredWebEngineView([this] { Q_EMIT viewSourceRequested(); },
-                                           [this] { toggleDarkModeForCurrentDocument(); },
-                                           [this] { return shouldUseDarkMode(); }, renderSurface);
+        m_view = new FilteredWebEngineView(
+            [this] { Q_EMIT viewSourceRequested(); },
+            [this] { toggleDarkModeForCurrentDocument(); }, [this] { return shouldUseDarkMode(); },
+            [this] { Q_EMIT findRequested(); }, [this] { Q_EMIT zoomInRequested(); },
+            [this] { Q_EMIT zoomOutRequested(); }, [this] { Q_EMIT resetZoomRequested(); },
+            [this] { Q_EMIT printRequested(); }, renderSurface);
         m_view->setPage(new MessageWebEnginePage(m_view));
         renderLayout->addWidget(m_view);
         m_loadingCover = new QWidget(renderSurface);
@@ -387,6 +446,51 @@ namespace javelin::gui::messageview
         m_loadingCover->hide();
         updatePageBackground();
         m_view->setUrl(QUrl{QStringLiteral("about:blank")});
+    }
+
+    void HtmlMessageView::findText(
+        const QString& text, const bool backwards,
+        std::function<void(const int activeMatch, const int matchCount)> callback)
+    {
+        QWebEnginePage::FindFlags flags;
+        if (backwards)
+        {
+            flags.setFlag(QWebEnginePage::FindBackward);
+        }
+        m_view->findText(text, flags,
+                         [callback = std::move(callback)](const QWebEngineFindTextResult& result)
+                         {
+                             if (callback)
+                             {
+                                 callback(result.activeMatch(), result.numberOfMatches());
+                             }
+                         });
+    }
+
+    void HtmlMessageView::clearFindHighlights()
+    {
+        m_view->findText(QString{});
+    }
+
+    void HtmlMessageView::setZoomFactor(const qreal factor)
+    {
+        m_view->setZoomFactor(factor);
+    }
+
+    void HtmlMessageView::printDocument(const QString& documentName)
+    {
+        auto printer = std::make_shared<QPrinter>(QPrinter::HighResolution);
+        printer->setDocName(documentName);
+        QPrintDialog dialog(printer.get(), this);
+        if (dialog.exec() != QDialog::Accepted)
+        {
+            return;
+        }
+
+        connect(
+            m_view, &QWebEngineView::printFinished, this,
+            [printer](const bool success) { Q_UNUSED(success); }, Qt::SingleShotConnection);
+        m_view->print(printer.get());
     }
 
     void HtmlMessageView::setRemoteContentEnabled(const bool enabled)

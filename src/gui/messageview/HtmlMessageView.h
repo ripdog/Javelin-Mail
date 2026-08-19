@@ -37,9 +37,19 @@ namespace javelin::gui::messageview
         void collectTranslationChunks(std::function<void(QVector<QStringList>)> callback);
         void applyTranslationChunks(const QVector<QStringList>& translatedChunks);
         void restoreOriginalText();
+        void findText(const QString& text, bool backwards,
+                      std::function<void(int activeMatch, int matchCount)> callback = {});
+        void clearFindHighlights();
+        void setZoomFactor(qreal factor);
+        void printDocument(const QString& documentName = {});
 
       Q_SIGNALS:
         void viewSourceRequested();
+        void findRequested();
+        void zoomInRequested();
+        void zoomOutRequested();
+        void resetZoomRequested();
+        void printRequested();
         void documentLoaded(QString documentId);
         void hoveredLinkChanged(QString url);
 

@@ -909,6 +909,43 @@ namespace javelin::gui::shell
         actionCollection()->setDefaultShortcut(m_focusSearchAction,
                                                QKeySequence{Qt::ALT | Qt::Key_0});
 
+        m_findInMessageAction = KStandardAction::find(
+            m_messageViewContainer, &javelin::gui::messageview::MessageViewContainer::showFindBar,
+            this);
+        m_findInMessageAction->setText(i18nc("@action", "Find in Message…"));
+        actionCollection()->addAction(QStringLiteral("find_in_message"), m_findInMessageAction);
+        actionCollection()->setDefaultShortcuts(m_findInMessageAction,
+                                                QKeySequence::keyBindings(QKeySequence::Find));
+
+        m_printMessageAction = KStandardAction::print(
+            m_messageViewContainer, &javelin::gui::messageview::MessageViewContainer::printMessage,
+            this);
+        m_printMessageAction->setText(i18nc("@action", "Print Message…"));
+        actionCollection()->addAction(QStringLiteral("print_message"), m_printMessageAction);
+        actionCollection()->setDefaultShortcuts(m_printMessageAction,
+                                                QKeySequence::keyBindings(QKeySequence::Print));
+
+        m_zoomMessageInAction = KStandardAction::zoomIn(
+            m_messageViewContainer, &javelin::gui::messageview::MessageViewContainer::zoomIn, this);
+        actionCollection()->addAction(QStringLiteral("message_zoom_in"), m_zoomMessageInAction);
+        actionCollection()->setDefaultShortcuts(m_zoomMessageInAction,
+                                                QKeySequence::keyBindings(QKeySequence::ZoomIn));
+
+        m_zoomMessageOutAction = KStandardAction::zoomOut(
+            m_messageViewContainer, &javelin::gui::messageview::MessageViewContainer::zoomOut,
+            this);
+        actionCollection()->addAction(QStringLiteral("message_zoom_out"), m_zoomMessageOutAction);
+        actionCollection()->setDefaultShortcuts(m_zoomMessageOutAction,
+                                                QKeySequence::keyBindings(QKeySequence::ZoomOut));
+
+        m_resetMessageZoomAction = KStandardAction::actualSize(
+            m_messageViewContainer, &javelin::gui::messageview::MessageViewContainer::resetZoom,
+            this);
+        actionCollection()->addAction(QStringLiteral("message_zoom_reset"),
+                                      m_resetMessageZoomAction);
+        actionCollection()->setDefaultShortcut(m_resetMessageZoomAction,
+                                               QKeySequence{Qt::CTRL | Qt::Key_0});
+
         m_saveCurrentAction = new QAction(QIcon::fromTheme(QStringLiteral("document-save")),
                                           i18nc("@action", "Save"), this);
         connect(m_saveCurrentAction, &QAction::triggered, this, &MainWindow::routeSaveCurrent);
@@ -1902,6 +1939,9 @@ namespace javelin::gui::shell
         connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::hoveredLinkChanged, this,
                 [this](const QString& url) { m_statusBar->setOverlayMessage(url); });
+        connect(m_messageViewContainer,
+                &javelin::gui::messageview::MessageViewContainer::readerActionsAvailabilityChanged,
+                this, [this] { updateActiveContextUi(); });
 
         m_messageView->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(m_messageView, &QListView::customContextMenuRequested, this,
@@ -2550,6 +2590,13 @@ namespace javelin::gui::shell
         m_focusMessageListAction->setEnabled(mailContext);
         m_focusMessageReaderAction->setEnabled(mailContext);
         m_focusSearchAction->setEnabled(mailContext);
+        const bool readerActionsAvailable =
+            mailContext && m_messageViewContainer->readerActionsAvailable();
+        m_findInMessageAction->setEnabled(readerActionsAvailable);
+        m_printMessageAction->setEnabled(readerActionsAvailable);
+        m_zoomMessageInAction->setEnabled(readerActionsAvailable);
+        m_zoomMessageOutAction->setEnabled(readerActionsAvailable);
+        m_resetMessageZoomAction->setEnabled(readerActionsAvailable);
         m_contactsAction->setEnabled(contactsAvailable);
         m_calendarAction->setEnabled(calendarAvailable);
         m_newMessageAction->setEnabled(preferredSubmissionAccount.has_value());

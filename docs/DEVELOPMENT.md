@@ -26,8 +26,9 @@ host CMake environment.
 
 ## Dependencies
 
-Required Qt components are Core, DBus, Network, SQL, Widgets, Concurrent, LinguistTools, WebEngine,
-SVG, and WebSockets. Required KDE components are ConfigWidgets, XmlGui, CoreAddons, TextEditor,
+Required Qt components are Core, DBus, Network, SQL, Widgets, PrintSupport, Concurrent,
+LinguistTools, WebEngine, SVG, and WebSockets. Required KDE components are ConfigWidgets, XmlGui,
+CoreAddons, TextEditor,
 Extra CMake Modules, KPim6Mime, and KPim6MessageComposer. These are product dependencies, not merely
 build conveniences: KXMLGUI owns the main-window action layout, KConfigWidgets owns preferences
 presentation, KTextEditor powers compose/source and Sieve editing, MessageComposer supplies the

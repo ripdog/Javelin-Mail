@@ -34,25 +34,34 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QLocale>
 #include <QMenu>
 #include <QMimeDatabase>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPoint>
+#include <QPrintDialog>
+#include <QPrinter>
 #include <QProgressBar>
 #include <QScrollArea>
+#include <QShortcut>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QStackedWidget>
 #include <QStringList>
 #include <QStyle>
 #include <QTextBrowser>
+#include <QTextCursor>
+#include <QTextDocument>
+#include <QTextEdit>
+#include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <variant>
 #include <vector>
 
@@ -668,6 +677,15 @@ namespace javelin::gui::messageview
                 });
         connect(m_htmlView, &HtmlMessageView::viewSourceRequested, this,
                 &MessageViewContainer::viewSourceRequested);
+        connect(m_htmlView, &HtmlMessageView::findRequested, this,
+                &MessageViewContainer::showFindBar);
+        connect(m_htmlView, &HtmlMessageView::zoomInRequested, this, &MessageViewContainer::zoomIn);
+        connect(m_htmlView, &HtmlMessageView::zoomOutRequested, this,
+                &MessageViewContainer::zoomOut);
+        connect(m_htmlView, &HtmlMessageView::resetZoomRequested, this,
+                &MessageViewContainer::resetZoom);
+        connect(m_htmlView, &HtmlMessageView::printRequested, this,
+                &MessageViewContainer::printMessage);
         connect(m_htmlView, &HtmlMessageView::hoveredLinkChanged, this,
                 &MessageViewContainer::hoveredLinkChanged);
         connect(
@@ -696,12 +714,92 @@ namespace javelin::gui::messageview
         connect(m_attachmentPanel, &MessageAttachmentPanel::saveAllAttachmentsRequested, this,
                 &MessageViewContainer::saveAllAttachmentsRequested);
 
+        m_findBar = new MessageViewBanner(this);
+        m_findBar->setMessageType(KMessageWidget::Information);
+        m_findBar->setPosition(KMessageWidget::Footer);
+        m_findBar->setText(QString{});
+        m_findBar->setIcon(QIcon{});
+        m_findBar->setCloseButtonVisible(false);
+        m_findBar->setVisible(false);
+
+        auto* findControls = new QWidget(m_findBar);
+        auto* findLayout = new QHBoxLayout(findControls);
+        findLayout->setContentsMargins(0, 0, 0, 0);
+        findLayout->setSpacing(6);
+        auto* findLabel = new QLabel(i18nc("@label", "Find:"), findControls);
+        m_findEdit = new QLineEdit(findControls);
+        m_findEdit->setClearButtonEnabled(true);
+        m_findEdit->setPlaceholderText(i18n("Find in message"));
+        m_findEdit->setAccessibleName(i18n("Find in message"));
+        m_findResultLabel = new QLabel(findControls);
+        m_findResultLabel->setMinimumWidth(m_findResultLabel->fontMetrics().horizontalAdvance(
+            i18nc("@info find result count", "999 of 999")));
+        m_findResultLabel->setAlignment(Qt::AlignCenter);
+
+        m_findPreviousButton = new QToolButton(findControls);
+        m_findPreviousButton->setAutoRaise(true);
+        m_findPreviousButton->setIcon(QIcon::fromTheme(QStringLiteral("go-up")));
+        m_findPreviousButton->setToolTip(i18n("Previous match"));
+        m_findPreviousButton->setAccessibleName(i18n("Previous match"));
+        m_findNextButton = new QToolButton(findControls);
+        m_findNextButton->setAutoRaise(true);
+        m_findNextButton->setIcon(QIcon::fromTheme(QStringLiteral("go-down")));
+        m_findNextButton->setToolTip(i18n("Next match"));
+        m_findNextButton->setAccessibleName(i18n("Next match"));
+        auto* closeFindButton = new QToolButton(findControls);
+        closeFindButton->setAutoRaise(true);
+        closeFindButton->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
+        closeFindButton->setToolTip(i18n("Close find bar"));
+        closeFindButton->setAccessibleName(i18n("Close find bar"));
+
+        findLayout->addWidget(findLabel);
+        findLayout->addWidget(m_findEdit, 1);
+        findLayout->addWidget(m_findResultLabel);
+        findLayout->addWidget(m_findPreviousButton);
+        findLayout->addWidget(m_findNextButton);
+        findLayout->addWidget(closeFindButton);
+        m_findBar->layout()->addWidget(findControls);
+
+        connect(m_findEdit, &QLineEdit::textChanged, this,
+                [this]
+                {
+                    m_plainTextFindQuery.clear();
+                    m_plainTextFindIndex = -1;
+                    runFind(false);
+                });
+        connect(m_findEdit, &QLineEdit::returnPressed, this,
+                [this]
+                {
+                    if (QGuiApplication::keyboardModifiers().testFlag(Qt::ShiftModifier))
+                    {
+                        findPrevious();
+                    }
+                    else
+                    {
+                        findNext();
+                    }
+                });
+        connect(m_findPreviousButton, &QToolButton::clicked, this,
+                &MessageViewContainer::findPrevious);
+        connect(m_findNextButton, &QToolButton::clicked, this, &MessageViewContainer::findNext);
+        const auto dismissFindBar = [this]
+        {
+            clearFindHighlights();
+            m_findBar->setVisible(false);
+            focusMessageBody();
+        };
+        connect(closeFindButton, &QToolButton::clicked, this, dismissFindBar);
+        auto* dismissFindShortcut = new QShortcut(QKeySequence{Qt::Key_Escape}, m_findBar);
+        dismissFindShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+        connect(dismissFindShortcut, &QShortcut::activated, this, dismissFindBar);
+
         layout->addWidget(headerWidget);
         layout->addWidget(m_remoteContentBanner);
         layout->addWidget(m_translationBanner);
         layout->addWidget(m_junkBanner);
         layout->addWidget(m_unsubscribeBanner);
         layout->addWidget(m_bodyStack, 1);
+        layout->addWidget(m_findBar);
         layout->addWidget(m_attachmentPanel);
 
         connect(&m_contactIdentityLookup,
@@ -739,6 +837,221 @@ namespace javelin::gui::messageview
         case ActiveView::Placeholder:
             m_bodyStack->setFocus(Qt::ShortcutFocusReason);
             break;
+        }
+    }
+
+    bool MessageViewContainer::readerActionsAvailable() const
+    {
+        if (m_bodyPresenter == nullptr || !m_snapshot.has_value())
+        {
+            return false;
+        }
+        const auto view = m_bodyPresenter->activeView();
+        return view == ActiveView::Html || view == ActiveView::PlainText;
+    }
+
+    void MessageViewContainer::showFindBar()
+    {
+        if (!readerActionsAvailable())
+        {
+            return;
+        }
+        m_findBar->setVisible(true);
+        m_findEdit->setFocus(Qt::ShortcutFocusReason);
+        m_findEdit->selectAll();
+        if (!m_findEdit->text().isEmpty())
+        {
+            runFind(false);
+        }
+    }
+
+    void MessageViewContainer::findNext()
+    {
+        runFind(false);
+    }
+
+    void MessageViewContainer::findPrevious()
+    {
+        runFind(true);
+    }
+
+    void MessageViewContainer::runFind(const bool backwards)
+    {
+        if (!readerActionsAvailable() || m_findEdit == nullptr)
+        {
+            updateFindResult(0, 0);
+            return;
+        }
+
+        const QString query = m_findEdit->text();
+        if (query.isEmpty())
+        {
+            clearFindHighlights();
+            return;
+        }
+
+        if (m_bodyPresenter->activeView() == ActiveView::Html)
+        {
+            m_htmlView->findText(query, backwards,
+                                 [this, query](const int activeMatch, const int matchCount)
+                                 {
+                                     if (m_findEdit->text() == query &&
+                                         m_bodyPresenter->activeView() == ActiveView::Html)
+                                     {
+                                         updateFindResult(activeMatch, matchCount);
+                                     }
+                                 });
+            return;
+        }
+
+        const bool newQuery = m_plainTextFindQuery != query;
+        std::vector<QTextCursor> matches;
+        QTextCursor cursor{m_plainTextView->document()};
+        while (true)
+        {
+            cursor = m_plainTextView->document()->find(query, cursor);
+            if (cursor.isNull())
+            {
+                break;
+            }
+            matches.push_back(cursor);
+        }
+
+        if (matches.empty())
+        {
+            m_plainTextFindQuery = query;
+            m_plainTextFindIndex = -1;
+            m_plainTextView->setExtraSelections({});
+            updateFindResult(0, 0);
+            return;
+        }
+
+        const int matchCount = static_cast<int>(matches.size());
+        if (newQuery || m_plainTextFindIndex < 0 || m_plainTextFindIndex >= matchCount)
+        {
+            m_plainTextFindIndex = backwards ? matchCount - 1 : 0;
+        }
+        else if (backwards)
+        {
+            m_plainTextFindIndex = (m_plainTextFindIndex + matchCount - 1) % matchCount;
+        }
+        else
+        {
+            m_plainTextFindIndex = (m_plainTextFindIndex + 1) % matchCount;
+        }
+        m_plainTextFindQuery = query;
+
+        QList<QTextEdit::ExtraSelection> highlights;
+        highlights.reserve(matchCount);
+        for (const auto& match : matches)
+        {
+            QTextEdit::ExtraSelection selection;
+            selection.cursor = match;
+            selection.format.setBackground(palette().brush(QPalette::AlternateBase));
+            highlights.push_back(std::move(selection));
+        }
+        m_plainTextView->setExtraSelections(highlights);
+        m_plainTextView->setTextCursor(matches[static_cast<std::size_t>(m_plainTextFindIndex)]);
+        m_plainTextView->ensureCursorVisible();
+        updateFindResult(m_plainTextFindIndex + 1, matchCount);
+    }
+
+    void MessageViewContainer::clearFindHighlights()
+    {
+        m_htmlView->clearFindHighlights();
+        m_plainTextView->setExtraSelections({});
+        auto cursor = m_plainTextView->textCursor();
+        cursor.clearSelection();
+        m_plainTextView->setTextCursor(cursor);
+        m_plainTextFindQuery.clear();
+        m_plainTextFindIndex = -1;
+        updateFindResult(0, 0);
+    }
+
+    void MessageViewContainer::updateFindResult(const int activeMatch, const int matchCount)
+    {
+        const bool hasQuery = m_findEdit != nullptr && !m_findEdit->text().isEmpty();
+        if (!hasQuery)
+        {
+            m_findResultLabel->clear();
+        }
+        else if (matchCount <= 0)
+        {
+            m_findResultLabel->setText(i18nc("@info find result", "No matches"));
+        }
+        else
+        {
+            m_findResultLabel->setText(
+                i18nc("@info find result count", "%1 of %2", activeMatch, matchCount));
+        }
+        const bool canNavigate = hasQuery && matchCount > 0;
+        m_findPreviousButton->setEnabled(canNavigate);
+        m_findNextButton->setEnabled(canNavigate);
+    }
+
+    void MessageViewContainer::applyZoom()
+    {
+        m_htmlView->setZoomFactor(std::pow(1.1, static_cast<double>(m_zoomSteps)));
+    }
+
+    void MessageViewContainer::zoomIn()
+    {
+        if (!readerActionsAvailable() || m_zoomSteps >= 15)
+        {
+            return;
+        }
+        ++m_zoomSteps;
+        m_plainTextView->zoomIn(1);
+        applyZoom();
+    }
+
+    void MessageViewContainer::zoomOut()
+    {
+        if (!readerActionsAvailable() || m_zoomSteps <= -8)
+        {
+            return;
+        }
+        --m_zoomSteps;
+        m_plainTextView->zoomOut(1);
+        applyZoom();
+    }
+
+    void MessageViewContainer::resetZoom()
+    {
+        if (!readerActionsAvailable())
+        {
+            return;
+        }
+        if (m_zoomSteps > 0)
+        {
+            m_plainTextView->zoomOut(m_zoomSteps);
+        }
+        else if (m_zoomSteps < 0)
+        {
+            m_plainTextView->zoomIn(-m_zoomSteps);
+        }
+        m_zoomSteps = 0;
+        applyZoom();
+    }
+
+    void MessageViewContainer::printMessage()
+    {
+        if (!readerActionsAvailable())
+        {
+            return;
+        }
+        if (m_bodyPresenter->activeView() == ActiveView::Html)
+        {
+            m_htmlView->printDocument(m_titleLabel->text());
+            return;
+        }
+
+        QPrinter printer{QPrinter::HighResolution};
+        printer.setDocName(m_titleLabel->text());
+        QPrintDialog dialog{&printer, this};
+        if (dialog.exec() == QDialog::Accepted)
+        {
+            m_plainTextView->print(&printer);
         }
     }
 
@@ -784,6 +1097,11 @@ namespace javelin::gui::messageview
         m_emailId = std::move(emailId);
         m_junkMailboxId = std::move(junkMailboxId);
         m_multipleMessages.clear();
+        if (!m_emailId.has_value())
+        {
+            clearFindHighlights();
+            m_findBar->setVisible(false);
+        }
         m_translationController->reset();
         ++m_snapshotLoadToken;
         m_loading = m_emailId.has_value();
@@ -803,6 +1121,8 @@ namespace javelin::gui::messageview
         m_emailId = std::nullopt;
         m_junkMailboxId = std::nullopt;
         m_multipleMessages = std::move(messages);
+        clearFindHighlights();
+        m_findBar->setVisible(false);
         m_translationController->reset();
         ++m_snapshotLoadToken;
         m_loading = false;
@@ -879,6 +1199,22 @@ namespace javelin::gui::messageview
     void MessageViewContainer::setActiveView(const ActiveView view)
     {
         m_bodyPresenter->setActiveView(view);
+        const bool actionsAreAvailable = readerActionsAvailable();
+        if (m_readerActionsAvailable != actionsAreAvailable)
+        {
+            m_readerActionsAvailable = actionsAreAvailable;
+            Q_EMIT readerActionsAvailabilityChanged(actionsAreAvailable);
+        }
+        if (m_findBar != nullptr && m_findBar->isVisible() && actionsAreAvailable)
+        {
+            m_plainTextFindQuery.clear();
+            m_plainTextFindIndex = -1;
+            runFind(false);
+        }
+        else if (!actionsAreAvailable)
+        {
+            updateFindResult(0, 0);
+        }
         updateSenderRemoteContentPermit();
         updateRemoteContentButton();
         updateJunkBanner();

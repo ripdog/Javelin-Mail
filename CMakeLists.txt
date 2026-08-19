@@ -29,7 +29,7 @@ include(cmake/Sanitizers.cmake)
 include(CTest)
 
 # 1. Find Qt6 FIRST
-find_package(Qt6 6.6 REQUIRED COMPONENTS Core DBus Network Sql Widgets Concurrent WebEngineCore WebEngineWidgets Svg WebSockets)
+find_package(Qt6 6.6 REQUIRED COMPONENTS Core DBus Network Sql Widgets PrintSupport Concurrent WebEngineCore WebEngineWidgets Svg WebSockets)
 
 # 2. Fetch Dependencies BEFORE KDE is allowed to load
 javelin_configure_dependencies()
@@ -1757,6 +1757,7 @@ target_link_libraries(javelin_gui
         Qt::Sql
         Qt::Svg
         Qt::Widgets
+        Qt::PrintSupport
         Qt::WebEngineWidgets
         KF6::ConfigWidgets
         KF6::I18n

@@ -392,6 +392,11 @@ namespace javelin::gui::shell
         QAction* m_focusMessageListAction = nullptr;
         QAction* m_focusMessageReaderAction = nullptr;
         QAction* m_focusSearchAction = nullptr;
+        QAction* m_findInMessageAction = nullptr;
+        QAction* m_printMessageAction = nullptr;
+        QAction* m_zoomMessageInAction = nullptr;
+        QAction* m_zoomMessageOutAction = nullptr;
+        QAction* m_resetMessageZoomAction = nullptr;
         QAction* m_refreshAction = nullptr;
         QAction* m_saveCurrentAction = nullptr;
         QAction* m_exportMailboxAction = nullptr;
