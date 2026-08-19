@@ -38,7 +38,7 @@ Check off completed items as you commit.
 - Expose everything through KDE's existing shortcut configuration rather than hard-coding a second
   shortcut system.
 
-### [ ] Replace bare transient feedback with actionable inline feedback
+### [x] Replace bare transient feedback with actionable inline feedback
 
 - Use `KMessageWidget` or equivalent non-modal inline feedback for ordinary operation results and
   recoverable failures.
