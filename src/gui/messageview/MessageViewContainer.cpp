@@ -38,6 +38,7 @@
 #include <QMenu>
 #include <QMimeDatabase>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QPoint>
 #include <QProgressBar>
 #include <QScrollArea>
@@ -64,6 +65,24 @@ namespace javelin::gui::messageview
         constexpr std::string_view JunkBannerId{"junk"};
         constexpr std::string_view UnsubscribeBannerId{"unsubscribe"};
         constexpr auto AccessibleDocumentTextProperty = "_javelin_accessible_document_text";
+
+        class MessageViewBanner final : public KMessageWidget
+        {
+          public:
+            using KMessageWidget::KMessageWidget;
+
+          protected:
+            void paintEvent(QPaintEvent*) override
+            {
+                // Reader conditions are persistent context, not alerts. Keep KMessageWidget's
+                // semantics and controls while matching the surrounding application palette.
+                QPainter painter(this);
+                painter.setRenderHint(QPainter::Antialiasing);
+                painter.setPen(QPen(palette().color(QPalette::Mid), 1));
+                painter.setBrush(palette().color(QPalette::AlternateBase));
+                painter.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 6, 6);
+            }
+        };
 
         class AccessibleMessageView final : public QAccessibleWidget,
                                             public QAccessibleTextInterface
@@ -432,7 +451,7 @@ namespace javelin::gui::messageview
 
         const auto makeBanner = [this](const KMessageWidget::MessageType type, const QIcon& icon)
         {
-            auto* banner = new KMessageWidget(this);
+            auto* banner = new MessageViewBanner(this);
             banner->setMessageType(type);
             banner->setIcon(icon);
             banner->setWordWrap(false);
@@ -1055,7 +1074,11 @@ namespace javelin::gui::messageview
 
         const auto url = QString::fromStdString(*m_snapshot->unsubscribeUrl).toHtmlEscaped();
         m_unsubscribeBanner->setText(
-            i18n("This message is from a mailing list. <a href=\"%1\">Unsubscribe</a>", url));
+            QStringLiteral("<table width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>"
+                           "<td>%1</td><td align=\"right\"><a href=\"%2\">%3</a></td>"
+                           "</tr></table>")
+                .arg(i18n("This message is from a mailing list.").toHtmlEscaped(), url,
+                     i18nc("@action:link", "Unsubscribe").toHtmlEscaped()));
     }
 
     void MessageViewContainer::updateLanguageBanner()
