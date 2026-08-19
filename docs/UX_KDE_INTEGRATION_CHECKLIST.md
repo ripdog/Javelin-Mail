@@ -21,8 +21,8 @@ Check off completed items as you commit.
 
 ### [x] Add a command palette
 
-- Add a `KCommandBar`-style "Search Actions…" command palette over Javelin's existing `QAction` /
-  KXMLGUI actions.
+- Use `KXmlGuiWindow`'s built-in `open_kcommand_bar` / `KCommandBar` integration over Javelin's
+  existing `QAction` / KXMLGUI actions rather than constructing a parallel command palette.
 - Keep actions as the source of truth so shortcuts, menus, toolbars, and the command palette invoke the
   same commands.
 

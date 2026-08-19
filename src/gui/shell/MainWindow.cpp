@@ -79,7 +79,6 @@
 #include <QCoroTask>
 
 #include <KActionCollection>
-#include <KCommandBar>
 #include <KLocalizedString>
 #include <KStandardAction>
 #include <KToolBar>
@@ -576,11 +575,9 @@ namespace javelin::gui::shell
                     m_calendarTabController->accountsChanged();
                 });
         createActions();
-        setCommandBarEnabled(false);
         setupGUI(KXmlGuiWindow::ToolBar | KXmlGuiWindow::Keys | KXmlGuiWindow::Save |
                      KXmlGuiWindow::Create,
                  QStringLiteral("javelinmailui.rc"));
-        initializeCommandPalette();
         m_emailContextMenu = qobject_cast<QMenu*>(
             guiFactory()->container(QStringLiteral("email_context_menu"), this));
         if (m_emailContextMenu != nullptr)
@@ -797,18 +794,6 @@ namespace javelin::gui::shell
         if (!redoShortcuts.contains(controlShiftZ))
             redoShortcuts.prepend(controlShiftZ);
         actionCollection()->setDefaultShortcuts(m_redoAction, redoShortcuts);
-
-        m_searchActionsAction = new QAction(QIcon::fromTheme(QStringLiteral("system-search")),
-                                            i18nc("@action", "Search Actions…"), this);
-        connect(m_searchActionsAction, &QAction::triggered, this,
-                [this]
-                {
-                    if (m_commandBar != nullptr)
-                        m_commandBar->show();
-                });
-        actionCollection()->addAction(QStringLiteral("search_actions"), m_searchActionsAction);
-        actionCollection()->setDefaultShortcut(m_searchActionsAction,
-                                               QKeySequence{Qt::CTRL | Qt::SHIFT | Qt::Key_P});
 
         m_closeTabAction = new QAction(QIcon::fromTheme(QStringLiteral("tab-close")),
                                        i18nc("@action", "Close Tab"), this);
@@ -2383,23 +2368,6 @@ namespace javelin::gui::shell
     {
         const auto* tab = activeTab();
         return tab == nullptr ? std::optional<std::string>{std::nullopt} : tabMailboxId(*tab);
-    }
-
-    void MainWindow::initializeCommandPalette()
-    {
-        m_commandBar = new KCommandBar(this);
-        KCommandBar::ActionGroup group;
-        group.name = i18n("Javelin Mail");
-        for (auto* action : actionCollection()->actions())
-        {
-            if (action == nullptr || action == m_searchActionsAction || action->isSeparator() ||
-                action->text().trimmed().isEmpty())
-            {
-                continue;
-            }
-            group.actions.push_back(action);
-        }
-        m_commandBar->setActions({group});
     }
 
     void MainWindow::updateTabBar()

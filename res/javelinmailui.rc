@@ -1,5 +1,5 @@
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
-<gui name="javelinmail" version="22">
+<gui name="javelinmail" version="23">
   <MenuBar>
     <Menu name="file"><text>&amp;File</text>
       <Action name="compose_new_message"/>
@@ -64,7 +64,7 @@
       <Action name="open_developer_options"/>
     </Menu>
     <Menu name="help"><text>&amp;Help</text>
-      <Action name="search_actions"/>
+      <Action name="open_kcommand_bar"/>
       <Separator/>
       <Action name="open_application_log"/>
     </Menu>

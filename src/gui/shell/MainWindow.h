@@ -17,7 +17,6 @@
 #include <utility>
 #include <vector>
 
-class KCommandBar;
 class QCloseEvent;
 class QLabel;
 class QLineEdit;
@@ -248,7 +247,6 @@ namespace javelin::gui::shell
         void clearSearch();
         void showSortMenu();
         void setEmailListSort(javelin::jmap::query::EmailListSort sort);
-        void initializeCommandPalette();
         void updateTabBar();
         void activateRelativeTab(int offset);
         void moveMessageSelection(int direction, bool unreadOnly);
@@ -347,7 +345,6 @@ namespace javelin::gui::shell
         QuickFilterController* m_quickFilterController = nullptr;
         TabBarPresenter* m_tabBarPresenter = nullptr;
         ThemeController* m_themeController = nullptr;
-        KCommandBar* m_commandBar = nullptr;
         std::unique_ptr<javelin::gui::messages::MessageListPanePresenter>
             m_messageListPanePresenter;
         std::unique_ptr<MessageListTabPresenter> m_messageListTabPresenter;
@@ -373,7 +370,6 @@ namespace javelin::gui::shell
         LayeredStatusBar* m_statusBar = nullptr;
         QAction* m_undoAction = nullptr;
         QAction* m_redoAction = nullptr;
-        QAction* m_searchActionsAction = nullptr;
         QAction* m_closeTabAction = nullptr;
         QAction* m_previousTabAction = nullptr;
         QAction* m_nextTabAction = nullptr;
