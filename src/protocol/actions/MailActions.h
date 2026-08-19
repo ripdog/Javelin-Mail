@@ -3,6 +3,7 @@
 #include "protocol/actions/ActionDescriptor.h"
 
 #include "app/MailApplicationPorts.h"
+#include "app/MailExportApplicationPorts.h"
 #include "app/MessageContentApplicationPorts.h"
 #include "app/MessageListMaterializationPort.h"
 
@@ -123,6 +124,12 @@ namespace javelin::protocol::actions
         Descriptor<94, ActionDomain::Mail, AdmissionSemantics::Asynchronous, ReplayPolicy::Never,
                    detail::mailMutation, std::tuple<javelin::app::CrossAccountMailTransferIntent>,
                    javelin::app::MailTransferExecutionResult>;
+    using SaveMessages =
+        Descriptor<95, ActionDomain::Mail, AdmissionSemantics::Asynchronous, ReplayPolicy::Never, 0,
+                   std::tuple<javelin::app::SaveMessagesIntent>, javelin::app::SaveMessagesResult>;
+    using StartMailExport =
+        Descriptor<96, ActionDomain::Mail, AdmissionSemantics::Asynchronous, ReplayPolicy::Never, 0,
+                   std::tuple<javelin::app::MailExportIntent>, javelin::app::MailExportStartResult>;
 
     using MailActionTypes =
         std::tuple<RegisteredAction<MailQueueMailboxMutation, "MailQueueMailboxMutation">,
@@ -147,5 +154,7 @@ namespace javelin::protocol::actions
                    RegisteredAction<MailDestroyMailbox, "MailDestroyMailbox">,
                    RegisteredAction<MailQueueSetSelectionFlagged, "MailQueueSetSelectionFlagged">,
                    RegisteredAction<ThreadEnsure, "ThreadEnsure">,
-                   RegisteredAction<MailTransferAcrossAccounts, "MailTransferAcrossAccounts">>;
+                   RegisteredAction<MailTransferAcrossAccounts, "MailTransferAcrossAccounts">,
+                   RegisteredAction<SaveMessages, "SaveMessages">,
+                   RegisteredAction<StartMailExport, "StartMailExport">>;
 } // namespace javelin::protocol::actions

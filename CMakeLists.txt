@@ -235,6 +235,22 @@ javelin_enable_static_analysis(javelin_app_shared)
 javelin_enable_sanitizers(javelin_app_shared)
 
 set(JAVELIN_FORMAT_FILES
+    src/app/FileNameUtils.h
+    src/app/MailSaveNaming.h
+    src/app/RawMailMaterializer.h
+    src/app/messages/RawMailMaterializer.cpp
+    src/app/MailExportApplicationPorts.h
+    src/app/MailExportRepository.h
+    src/app/MailExportService.h
+    src/app/MailExportWriter.h
+    src/app/messages/MailExportRepository.cpp
+    src/app/messages/MailExportService.cpp
+    src/app/messages/MailExportWriter.cpp
+    src/gui/shell/MailExportController.cpp
+    src/gui/shell/MailExportController.h
+    tests/app/MailExportRepositoryTest.cpp
+    tests/app/MailExportWriterTest.cpp
+    tests/gui/MailSaveNamingTest.cpp
     src/gui/widgets/IndeterminateProgressBar.h
     src/gui/developer/DeveloperOptionsDialog.cpp
     src/gui/developer/DeveloperOptionsDialog.h
@@ -1342,6 +1358,8 @@ javelin_enable_static_analysis(javelin_translation)
 javelin_enable_sanitizers(javelin_translation)
 
 add_library(javelin_gui STATIC
+    src/gui/shell/MailExportController.cpp
+    src/gui/shell/MailExportController.h
     src/gui/shell/MessageTransferDestinationPresentation.cpp
     src/gui/shell/MessageTransferDestinationPresentation.h
     src/gui/compose/AddressSuggestionStore.cpp
@@ -1766,6 +1784,17 @@ javelin_enable_sanitizers(javelin_gui)
 target_compile_options(javelin_gui PRIVATE -fexceptions)
 
 add_library(javelin_daemon_core STATIC
+    src/app/FileNameUtils.h
+    src/app/MailSaveNaming.h
+    src/app/RawMailMaterializer.h
+    src/app/messages/RawMailMaterializer.cpp
+    src/app/MailExportApplicationPorts.h
+    src/app/MailExportRepository.h
+    src/app/MailExportService.h
+    src/app/MailExportWriter.h
+    src/app/messages/MailExportRepository.cpp
+    src/app/messages/MailExportService.cpp
+    src/app/messages/MailExportWriter.cpp
     src/app/AccountApplicationPorts.h
     src/app/DeveloperDiagnostics.h
     src/app/developer/DeveloperDiagnosticsService.cpp

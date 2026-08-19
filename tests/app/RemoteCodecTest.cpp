@@ -159,6 +159,105 @@ TEST_CASE("remote codec round-trips cross-account mail transfer action payloads"
     CHECK(metadata->replay == javelin::protocol::actions::ReplayPolicy::Never);
 }
 
+TEST_CASE("remote codec round-trips message save and bulk mail export payloads",
+          "[app][remote-codec][mail-export]")
+{
+    using SaveAction = javelin::protocol::actions::SaveMessages;
+    const javelin::app::SaveMessagesIntent saveIntent{
+        .accountId = "account-local",
+        .sourceMailboxId = std::nullopt,
+        .selection = {javelin::app::SelectedCollapsedThread{.threadId = "thread-1"}},
+        .targetKind = javelin::app::MessageSaveTargetKind::Directory,
+        .destinationPath = QStringLiteral("/tmp/Mail Save"),
+    };
+    const auto saveEncoded =
+        javelin::app::remote::encodeVersioned<SaveAction::requestSchemaVersion>(saveIntent);
+    const auto* savePayload = std::get_if<QByteArray>(&saveEncoded);
+    REQUIRE(savePayload != nullptr);
+    const auto saveDecoded =
+        javelin::app::remote::decodeVersionedValue<SaveAction::requestSchemaVersion,
+                                                   javelin::app::SaveMessagesIntent>(*savePayload);
+    const auto* decodedSave = std::get_if<javelin::app::SaveMessagesIntent>(&saveDecoded);
+    REQUIRE(decodedSave != nullptr);
+    CHECK(decodedSave->accountId == saveIntent.accountId);
+    CHECK_FALSE(decodedSave->sourceMailboxId.has_value());
+    REQUIRE(decodedSave->selection.size() == 1);
+    REQUIRE(std::holds_alternative<javelin::app::SelectedCollapsedThread>(
+        decodedSave->selection.front()));
+    CHECK(
+        std::get<javelin::app::SelectedCollapsedThread>(decodedSave->selection.front()).threadId ==
+        "thread-1");
+    CHECK(decodedSave->targetKind == javelin::app::MessageSaveTargetKind::Directory);
+    CHECK(decodedSave->destinationPath == saveIntent.destinationPath);
+
+    javelin::app::SaveMessagesResult saveResult = javelin::app::SaveMessagesSummary{
+        .savedMessageCount = 3,
+        .destinationPath = QStringLiteral("/tmp/Mail Save"),
+    };
+    const auto saveResultEncoded =
+        javelin::app::remote::encodeVersioned<SaveAction::resultSchemaVersion>(saveResult);
+    const auto* saveResultPayload = std::get_if<QByteArray>(&saveResultEncoded);
+    REQUIRE(saveResultPayload != nullptr);
+    const auto saveResultDecoded = javelin::app::remote::decodeVersionedValue<
+        SaveAction::resultSchemaVersion, javelin::app::SaveMessagesResult>(*saveResultPayload);
+    const auto* decodedSaveResult =
+        std::get_if<javelin::app::SaveMessagesResult>(&saveResultDecoded);
+    REQUIRE(decodedSaveResult != nullptr);
+    REQUIRE(std::holds_alternative<javelin::app::SaveMessagesSummary>(*decodedSaveResult));
+    CHECK(std::get<javelin::app::SaveMessagesSummary>(*decodedSaveResult).savedMessageCount == 3);
+
+    using ExportAction = javelin::protocol::actions::StartMailExport;
+    const javelin::app::MailExportIntent exportIntent{
+        .accountId = "account-local",
+        .scopeKind = javelin::app::MailExportScopeKind::Mailbox,
+        .mailboxId = std::optional<std::string>{"mailbox-1"},
+        .format = javelin::app::MailExportFormat::MboxRd,
+        .destinationDirectory = QStringLiteral("/tmp/Account Export"),
+    };
+    const auto exportEncoded =
+        javelin::app::remote::encodeVersioned<ExportAction::requestSchemaVersion>(exportIntent);
+    const auto* exportPayload = std::get_if<QByteArray>(&exportEncoded);
+    REQUIRE(exportPayload != nullptr);
+    const auto exportDecoded =
+        javelin::app::remote::decodeVersionedValue<ExportAction::requestSchemaVersion,
+                                                   javelin::app::MailExportIntent>(*exportPayload);
+    const auto* decodedExport = std::get_if<javelin::app::MailExportIntent>(&exportDecoded);
+    REQUIRE(decodedExport != nullptr);
+    CHECK(decodedExport->accountId == exportIntent.accountId);
+    CHECK(decodedExport->scopeKind == javelin::app::MailExportScopeKind::Mailbox);
+    CHECK(decodedExport->mailboxId == exportIntent.mailboxId);
+    CHECK(decodedExport->format == javelin::app::MailExportFormat::MboxRd);
+    CHECK(decodedExport->destinationDirectory == exportIntent.destinationDirectory);
+
+    javelin::app::MailExportStartResult exportResult = javelin::app::MailExportAdmission{
+        .operationId = "export-operation",
+        .jobId = "mail-export:export-operation",
+    };
+    const auto exportResultEncoded =
+        javelin::app::remote::encodeVersioned<ExportAction::resultSchemaVersion>(exportResult);
+    const auto* exportResultPayload = std::get_if<QByteArray>(&exportResultEncoded);
+    REQUIRE(exportResultPayload != nullptr);
+    const auto exportResultDecoded =
+        javelin::app::remote::decodeVersionedValue<ExportAction::resultSchemaVersion,
+                                                   javelin::app::MailExportStartResult>(
+            *exportResultPayload);
+    const auto* decodedExportResult =
+        std::get_if<javelin::app::MailExportStartResult>(&exportResultDecoded);
+    REQUIRE(decodedExportResult != nullptr);
+    REQUIRE(std::holds_alternative<javelin::app::MailExportAdmission>(*decodedExportResult));
+    CHECK(std::get<javelin::app::MailExportAdmission>(*decodedExportResult).jobId ==
+          "mail-export:export-operation");
+
+    const auto saveMetadata = javelin::protocol::actions::findActionMetadata(SaveAction::id);
+    REQUIRE(saveMetadata.has_value());
+    CHECK(saveMetadata->id.value == 95);
+    CHECK(saveMetadata->name == "SaveMessages");
+    const auto exportMetadata = javelin::protocol::actions::findActionMetadata(ExportAction::id);
+    REQUIRE(exportMetadata.has_value());
+    CHECK(exportMetadata->id.value == 96);
+    CHECK(exportMetadata->name == "StartMailExport");
+}
+
 TEST_CASE("remote codec preserves calendar delete range materialization",
           "[app][remote-codec][calendar]")
 {

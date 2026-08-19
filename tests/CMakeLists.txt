@@ -249,6 +249,8 @@ add_executable(javelin_daemon_app_tests
     app/EndpointRetryGateTest.cpp
     app/FullMailSyncServiceTest.cpp
     app/HistoryRepositoryTest.cpp
+    app/MailExportRepositoryTest.cpp
+    app/MailExportWriterTest.cpp
     app/MailTransferRepositoryTest.cpp
     app/MailTransferPlanningTest.cpp
     app/MailTransferApplicationServiceTest.cpp
@@ -296,6 +298,7 @@ add_executable(javelin_gui_policy_tests
     gui/MailboxSortTest.cpp
     gui/MessageActionPolicyTest.cpp
     gui/EmailContextMenuLayoutTest.cpp
+    gui/MailSaveNamingTest.cpp
     gui/CalendarEventContextMenuLayoutTest.cpp
     gui/MessageActionSelectionTest.cpp
     gui/MessageConfirmationPresentationTest.cpp

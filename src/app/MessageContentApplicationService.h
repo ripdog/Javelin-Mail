@@ -19,6 +19,7 @@ namespace javelin::app
     class ApplicationErrorCoordinator;
     class MailboxMaintenanceRegistry;
     class WorkScheduler;
+    class ThreadMaterializationCoordinator;
 
     class MessageContentApplicationService final : public QObject
     {
@@ -38,6 +39,9 @@ namespace javelin::app
         requestAttachment(std::string accountId, std::string emailId, std::string partId);
         [[nodiscard]] QCoro::Task<javelin::jmap::MessageSourceDownloadResult>
         requestMessageSource(std::string accountId, std::string emailId);
+        [[nodiscard]] QCoro::Task<SaveMessagesResult> saveMessages(SaveMessagesIntent intent);
+        void setThreadMaterializationCoordinator(
+            ThreadMaterializationCoordinator* threadMaterializationCoordinator);
         void publishMessageContentCommitted(QString accountId, QString emailId);
 
       Q_SIGNALS:
@@ -50,6 +54,7 @@ namespace javelin::app
         ApplicationErrorCoordinator& m_errorCoordinator;
         WorkScheduler& m_workScheduler;
         MailboxMaintenanceRegistry& m_mailboxMaintenanceRegistry;
+        ThreadMaterializationCoordinator* m_threadMaterializationCoordinator = nullptr;
     };
 
 } // namespace javelin::app

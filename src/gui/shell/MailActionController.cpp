@@ -179,6 +179,7 @@ namespace javelin::gui::shell
     void MailActionController::update()
     {
         const auto selectedIds = m_selectionController.selectedEmailIds();
+        const auto selection = m_commandController.selectedActionItems();
         const auto accountId = activeAccountId();
         const auto mailboxId = activeMailboxId();
         const auto draftsMailbox =
@@ -221,6 +222,12 @@ namespace javelin::gui::shell
         m_actions.permanentDelete.setEnabled(actions.permanentDelete);
         m_actions.move.setEnabled(actions.move);
         m_actions.copy.setEnabled(actions.copy);
+        const bool oneExplicitEmail =
+            selection.size() == 1 &&
+            std::holds_alternative<javelin::app::SelectedEmail>(selection[0]);
+        m_actions.save.setEnabled(accountId.has_value() && !selection.empty());
+        m_actions.save.setText(oneExplicitEmail ? i18nc("@action", "Save Message As…")
+                                                : i18nc("@action", "Save Messages…"));
         m_actions.viewSource.setEnabled(actions.viewSource);
     }
 
@@ -376,6 +383,8 @@ namespace javelin::gui::shell
                         { findConversationsWithSender(index); });
                 return action;
             }
+            if (id == QStringLiteral("save_message"))
+                return &m_actions.save;
             if (id == QStringLiteral("view_message_source"))
                 return &m_actions.viewSource;
             if (id == QStringLiteral("permanently_delete_email"))

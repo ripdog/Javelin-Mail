@@ -633,6 +633,15 @@ namespace javelin::app
         QCoro::connect(std::move(task), &m_client, [](bool) {});
     }
 
+    RemoteMailExportPort::RemoteMailExportPort(RemoteActionClient& client) : m_client(client)
+    {
+    }
+
+    QCoro::Task<MailExportStartResult> RemoteMailExportPort::startExport(MailExportIntent intent)
+    {
+        return call<javelin::protocol::actions::StartMailExport>(m_client, std::move(intent));
+    }
+
     RemoteMessageContentPort::RemoteMessageContentPort(RemoteActionClient& client)
         : m_client(client)
     {
@@ -658,6 +667,12 @@ namespace javelin::app
     {
         return call<javelin::protocol::actions::MessageSource>(m_client, std::move(accountId),
                                                                std::move(emailId));
+    }
+
+    QCoro::Task<SaveMessagesResult>
+    RemoteMessageContentPort::saveMessages(SaveMessagesIntent intent)
+    {
+        return call<javelin::protocol::actions::SaveMessages>(m_client, std::move(intent));
     }
 
     RemoteUndoCommandPort::RemoteUndoCommandPort(GuiDaemonSession& session,

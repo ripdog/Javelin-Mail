@@ -28,6 +28,7 @@ namespace javelin::app
         TagDeletion,
         Maintenance,
         MailTransfer,
+        MailExport,
     };
 
     enum class WorkPriority : int
@@ -101,6 +102,8 @@ namespace javelin::app
             return "maintenance";
         case WorkKind::MailTransfer:
             return "mail_transfer";
+        case WorkKind::MailExport:
+            return "mail_export";
         }
         return "maintenance";
     }

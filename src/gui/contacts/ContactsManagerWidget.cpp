@@ -1,4 +1,6 @@
 #include "gui/contacts/ContactsManagerWidget.h"
+
+#include "app/FileNameUtils.h"
 #include "gui/contacts/AddressBookController.h"
 #include "gui/contacts/ContactDetailsView.h"
 #include "gui/contacts/ContactEditor.h"
@@ -761,6 +763,12 @@ namespace javelin::gui::contacts
     bool ContactsManagerWidget::hasSingleSelectedContact() const
     {
         return selectedContacts().size() == 1;
+    }
+
+    bool ContactsManagerWidget::canSaveContactAs() const
+    {
+        return !m_busy && m_detailStack != nullptr && m_detailStack->currentIndex() == 1 &&
+               hasSingleSelectedContact();
     }
 
     bool ContactsManagerWidget::canCreateContact() const
@@ -2142,8 +2150,8 @@ namespace javelin::gui::contacts
         auto* copy =
             menu->addAction(QIcon::fromTheme(QStringLiteral("edit-copy")), i18n("Copy Contact…"));
         connect(copy, &QAction::triggered, this, &ContactsManagerWidget::copyContact);
-        auto* exportAction = menu->addAction(QIcon::fromTheme(QStringLiteral("document-export")),
-                                             i18n("Export vCard…"));
+        auto* exportAction = menu->addAction(QIcon::fromTheme(QStringLiteral("document-save")),
+                                             i18n("Save Contact As…"));
         connect(exportAction, &QAction::triggered, this, &ContactsManagerWidget::exportVCard);
         auto* merge = menu->addAction(QIcon::fromTheme(QStringLiteral("merge")),
                                       i18n("Find and Merge Duplicates…"));
@@ -2902,37 +2910,38 @@ namespace javelin::gui::contacts
     void ContactsManagerWidget::exportVCard()
     {
         const auto* contact = currentContact();
-        if (m_busy || contact == nullptr)
+        if (!canSaveContactAs() || contact == nullptr)
             return;
         const auto parsed = javelin::jmap::contacts::contactEditorData(contact->document);
         const auto* editorData = std::get_if<javelin::jmap::contacts::ContactEditorData>(&parsed);
         if (editorData == nullptr)
         {
-            QMessageBox::warning(this, i18n("Export vCard"),
-                                 i18n("This contact cannot be exported."));
+            QMessageBox::warning(this, i18n("Save Contact As"),
+                                 i18n("This contact cannot be saved as a vCard."));
             return;
         }
         QString suggestedName = QString::fromStdString(contact->displayName);
         suggestedName.replace(QLatin1Char('/'), QLatin1Char('-'));
-        const QString path = QFileDialog::getSaveFileName(this, i18n("Export vCard"),
-                                                          suggestedName + QStringLiteral(".vcf"),
-                                                          i18n("vCard files (*.vcf)"));
+        const QString path = QFileDialog::getSaveFileName(
+            this, i18n("Save Contact As"),
+            javelin::app::truncateGeneratedFileName(suggestedName + QStringLiteral(".vcf")),
+            i18n("vCard files (*.vcf)"));
         if (path.isEmpty())
             return;
         QSaveFile file{path};
         if (!file.open(QIODevice::WriteOnly))
         {
-            QMessageBox::warning(this, i18n("Export vCard"), file.errorString());
+            QMessageBox::warning(this, i18n("Save Contact As"), file.errorString());
             return;
         }
         const auto output =
             QByteArray::fromStdString(javelin::jmap::contacts::exportVCard(*editorData));
         if (file.write(output) != output.size() || !file.commit())
         {
-            QMessageBox::warning(this, i18n("Export vCard"), file.errorString());
+            QMessageBox::warning(this, i18n("Save Contact As"), file.errorString());
             return;
         }
-        Q_EMIT statusMessageRequested(i18n("Contact exported."), 5000);
+        Q_EMIT statusMessageRequested(i18n("Contact saved."), 5000);
     }
 
     void ContactsManagerWidget::importVCard()

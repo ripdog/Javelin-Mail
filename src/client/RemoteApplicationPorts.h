@@ -12,6 +12,7 @@
 #include "app/IdentityApplicationPorts.h"
 #include "app/LogStore.h"
 #include "app/MailApplicationPorts.h"
+#include "app/MailExportApplicationPorts.h"
 #include "app/MessageContentApplicationPorts.h"
 #include "app/MessageListMaterializationPort.h"
 #include "app/SieveApplicationPorts.h"
@@ -292,6 +293,17 @@ namespace javelin::app
         RemoteActionClient& m_client;
     };
 
+    class RemoteMailExportPort final : public MailExportPort
+    {
+      public:
+        explicit RemoteMailExportPort(RemoteActionClient& client);
+        [[nodiscard]] QCoro::Task<MailExportStartResult>
+        startExport(MailExportIntent intent) override;
+
+      private:
+        RemoteActionClient& m_client;
+    };
+
     class RemoteMessageContentPort final : public MessageContentPort
     {
       public:
@@ -302,6 +314,8 @@ namespace javelin::app
         requestAttachment(std::string accountId, std::string emailId, std::string partId) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::MessageSourceDownloadResult>
         requestMessageSource(std::string accountId, std::string emailId) override;
+        [[nodiscard]] QCoro::Task<SaveMessagesResult>
+        saveMessages(SaveMessagesIntent intent) override;
 
       private:
         RemoteActionClient& m_client;

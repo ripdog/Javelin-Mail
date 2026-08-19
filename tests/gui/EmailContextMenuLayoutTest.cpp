@@ -7,13 +7,14 @@ using namespace javelin::gui::shell;
 TEST_CASE("email context menu defaults preserve safe action grouping")
 {
     const auto& layout = defaultEmailContextMenuLayout();
-    REQUIRE(layout.size() == 19);
+    REQUIRE(layout.size() == 20);
     CHECK(layout.front() == QStringLiteral("compose_edit_draft"));
     CHECK(layout[4] == emailContextMenuSeparatorId());
     CHECK(layout[9] == emailContextMenuSeparatorId());
     CHECK(layout[13] == emailContextMenuSeparatorId());
     CHECK(layout[16] == emailContextMenuSeparatorId());
-    CHECK(layout[17] == QStringLiteral("view_message_source"));
+    CHECK(layout[17] == QStringLiteral("save_message"));
+    CHECK(layout[18] == QStringLiteral("view_message_source"));
     CHECK(layout.back() == QStringLiteral("permanently_delete_email"));
 }
 

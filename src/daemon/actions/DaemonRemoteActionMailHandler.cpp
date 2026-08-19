@@ -173,6 +173,22 @@ namespace javelin::app
                         id, m_services.messageContentPort().requestMessageSource(
                                 std::move(accountId), std::move(emailId)));
                 });
+        case actions::SaveMessages::id.value:
+            return dispatchDecoded<actions::SaveMessages>(
+                id, command,
+                [this, &id](SaveMessagesIntent intent)
+                {
+                    return launchAction<actions::SaveMessages>(
+                        id, m_services.messageContentPort().saveMessages(std::move(intent)));
+                });
+        case actions::StartMailExport::id.value:
+            return dispatchDecoded<actions::StartMailExport>(
+                id, command,
+                [this, &id](MailExportIntent intent)
+                {
+                    return launchAction<actions::StartMailExport>(
+                        id, m_services.mailExportPort().startExport(std::move(intent)));
+                });
         case actions::MailboxObserve::id.value:
             return dispatchDecoded<actions::MailboxObserve>(
                 id, command,

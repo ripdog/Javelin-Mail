@@ -1,5 +1,6 @@
 #include "gui/shell/MessageFileController.h"
 
+#include "app/MailSaveNaming.h"
 #include "app/MessageContentApplicationPorts.h"
 #include "gui/settings/GuiSettings.h"
 #include "gui/shell/MessageFileUtils.h"
@@ -168,6 +169,71 @@ namespace javelin::gui::shell
                                [targetDirectory, files = std::move(result.files)]
                                { return writePayloadBatchToDirectory(targetDirectory, files); }));
                        });
+    }
+
+    void MessageFileController::saveMessages(std::string accountId,
+                                             std::optional<std::string> sourceMailboxId,
+                                             javelin::app::MessageSelection selection)
+    {
+        if (selection.empty())
+        {
+            Q_EMIT statusMessage(i18n("Select a message to save."), 3000);
+            return;
+        }
+
+        const auto* singleEmail = selection.size() == 1
+                                      ? std::get_if<javelin::app::SelectedEmail>(&selection.front())
+                                      : nullptr;
+        javelin::app::MessageSaveTargetKind targetKind =
+            javelin::app::MessageSaveTargetKind::Directory;
+        QString destinationPath;
+        if (singleEmail != nullptr)
+        {
+            QString suggestedName = QStringLiteral("message.eml");
+            const auto snapshotResult = m_messageViewReader.load(accountId, singleEmail->emailId);
+            if (const auto* snapshot =
+                    std::get_if<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(
+                        &snapshotResult);
+                snapshot != nullptr && snapshot->has_value())
+            {
+                suggestedName = javelin::app::suggestedMailSaveFileName((*snapshot)->email);
+            }
+            destinationPath =
+                QFileDialog::getSaveFileName(m_dialogParent, i18n("Save Message As"), suggestedName,
+                                             i18n("Email files (*.eml);;All files (*)"));
+            targetKind = javelin::app::MessageSaveTargetKind::SingleFile;
+        }
+        else
+        {
+            destinationPath = QFileDialog::getExistingDirectory(
+                m_dialogParent, i18n("Save Messages"), QDir::homePath());
+        }
+        if (destinationPath.isEmpty())
+            return;
+
+        Q_EMIT statusMessage(
+            singleEmail != nullptr ? i18n("Saving message…") : i18n("Saving messages…"), 0);
+        auto task = m_contentPort.saveMessages({
+            .accountId = std::move(accountId),
+            .sourceMailboxId = std::move(sourceMailboxId),
+            .selection = std::move(selection),
+            .targetKind = targetKind,
+            .destinationPath = destinationPath,
+        });
+        QCoro::connect(
+            std::move(task), this,
+            [this](javelin::app::SaveMessagesResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    Q_EMIT operationFailed(*error);
+                    return;
+                }
+                const auto& saved = std::get<javelin::app::SaveMessagesSummary>(result);
+                Q_EMIT statusMessage(i18np("Saved one message to %2.", "Saved %1 messages to %2.",
+                                           saved.savedMessageCount, saved.destinationPath),
+                                     5000);
+            });
     }
 
     void MessageFileController::openAttachment(std::string accountId, std::string emailId,

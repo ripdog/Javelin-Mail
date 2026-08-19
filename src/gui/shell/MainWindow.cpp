@@ -47,6 +47,7 @@
 #include "gui/shell/FocusedCommandRouter.h"
 #include "gui/shell/LayeredStatusBar.h"
 #include "gui/shell/MailActionController.h"
+#include "gui/shell/MailExportController.h"
 #include "gui/shell/MailWorkspaceController.h"
 #include "gui/shell/MainWindowStateStore.h"
 #include "gui/shell/MessageCommandController.h"
@@ -92,7 +93,6 @@
 #include <QDialog>
 #include <QElapsedTimer>
 #include <QEvent>
-#include <QFormLayout>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -284,6 +284,7 @@ namespace javelin::gui::shell
                            javelin::app::DeveloperMaintenancePort& developerMaintenancePort,
                            javelin::app::DaemonLogPort& daemonLogPort,
                            javelin::app::MailCommandPort& mailCommandPort,
+                           javelin::app::MailExportPort& mailExportPort,
                            javelin::app::SieveCommandPort& sieveCommandPort,
                            javelin::app::IdentityCommandPort& identityCommandPort,
                            javelin::app::AccountRefreshPort& accountRefreshPort,
@@ -328,6 +329,13 @@ namespace javelin::gui::shell
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
         connect(m_messageFileController, &MessageFileController::userInterventionRequired, this,
                 &MainWindow::presentUserInterventionError);
+        m_mailExportController = new MailExportController(mailExportPort, m_accountReader,
+                                                          m_mailboxReader, m_settings, *this, this);
+        connect(m_mailExportController, &MailExportController::statusMessage, this,
+                [this](const QString& message, const int durationMilliseconds)
+                { m_statusBar->showMessage(message, durationMilliseconds); });
+        connect(m_mailExportController, &MailExportController::operationFailed, this,
+                [this](const javelin::jmap::OperationError& error) { presentError(error); });
         setupUi();
         connect(&m_undoCommandPort, &javelin::app::UndoCommandPort::historyStateChanged, this,
                 [this](const javelin::app::undo::HistoryState&) { updateUndoRedoActions(); });
@@ -779,6 +787,24 @@ namespace javelin::gui::shell
             redoShortcuts.prepend(controlShiftZ);
         actionCollection()->setDefaultShortcuts(m_redoAction, redoShortcuts);
 
+        m_saveCurrentAction = new QAction(QIcon::fromTheme(QStringLiteral("document-save")),
+                                          i18nc("@action", "Save"), this);
+        connect(m_saveCurrentAction, &QAction::triggered, this, &MainWindow::routeSaveCurrent);
+        actionCollection()->addAction(QStringLiteral("save_current_item"), m_saveCurrentAction);
+        actionCollection()->setDefaultShortcut(m_saveCurrentAction, QKeySequence::Save);
+
+        m_exportMailboxAction = new QAction(QIcon::fromTheme(QStringLiteral("document-export")),
+                                            i18n("Mailbox…"), this);
+        connect(m_exportMailboxAction, &QAction::triggered, this,
+                &MainWindow::exportCurrentMailbox);
+        actionCollection()->addAction(QStringLiteral("export_mailbox"), m_exportMailboxAction);
+
+        m_exportAccountAction = new QAction(QIcon::fromTheme(QStringLiteral("document-export")),
+                                            i18n("Account…"), this);
+        connect(m_exportAccountAction, &QAction::triggered, this,
+                &MainWindow::exportCurrentAccount);
+        actionCollection()->addAction(QStringLiteral("export_account"), m_exportAccountAction);
+
         m_refreshAction = new QAction(
             thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/cloud-download.svg")),
             i18n("Refresh From Server"), this);
@@ -1053,8 +1079,8 @@ namespace javelin::gui::shell
         connect(m_contactImportAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::ImportVCard); });
         actionCollection()->addAction(QStringLiteral("contact_import"), m_contactImportAction);
-        m_contactExportAction = new QAction(QIcon::fromTheme(QStringLiteral("document-export")),
-                                            i18n("Export vCard…"), this);
+        m_contactExportAction = new QAction(QIcon::fromTheme(QStringLiteral("document-save")),
+                                            i18n("Save Contact As…"), this);
         connect(m_contactExportAction, &QAction::triggered, this,
                 [invokeContact] { invokeContact(ContactsTabCommand::ExportVCard); });
         actionCollection()->addAction(QStringLiteral("contact_export"), m_contactExportAction);
@@ -1195,6 +1221,7 @@ namespace javelin::gui::shell
              .permanentDelete = *m_permanentDeleteAction,
              .move = *m_moveAction,
              .copy = *m_copyAction,
+             .save = *m_saveCurrentAction,
              .viewSource = *m_viewSourceAction},
             [this](QString message, const int durationMilliseconds)
             { m_statusBar->showMessage(message, durationMilliseconds); },
@@ -1242,6 +1269,68 @@ namespace javelin::gui::shell
         }
         auto task = m_undoCommandPort.redo();
         QCoro::connect(std::move(task), this, [](const bool) {});
+    }
+
+    void MainWindow::routeSaveCurrent()
+    {
+        if (activeTabIsCompose())
+        {
+            m_composeTabController->saveDraft(activeTab());
+            return;
+        }
+        if (activeTabIsContacts())
+        {
+            m_contactsTabController->invoke(activeTab(), ContactsTabCommand::ExportVCard);
+            return;
+        }
+        if (activeTabIsMailbox() || activeTabIsSearch())
+        {
+            saveSelectedMessages();
+            return;
+        }
+        m_statusBar->showMessage(i18n("There is nothing to save in this view."), 3000);
+    }
+
+    void MainWindow::saveSelectedMessages()
+    {
+        const auto accountId = activeAccountId();
+        if (!accountId.has_value())
+        {
+            m_statusBar->showMessage(i18n("Select a message to save."), 3000);
+            return;
+        }
+        auto selection = m_messageCommandController->selectedActionItems();
+        if (selection.empty())
+        {
+            m_statusBar->showMessage(i18n("Select a message to save."), 3000);
+            return;
+        }
+        // Save follows conversation semantics rather than mailbox-mutation semantics: a collapsed
+        // Thread represents the whole conversation, including members currently filed elsewhere.
+        m_messageFileController->saveMessages(*accountId, std::nullopt, std::move(selection));
+    }
+
+    void MainWindow::exportCurrentMailbox()
+    {
+        const auto accountId = activeAccountId();
+        const auto mailboxId = activeMailboxId();
+        if (!accountId.has_value() || !mailboxId.has_value())
+        {
+            m_statusBar->showMessage(i18n("Open a mailbox to export it."), 3000);
+            return;
+        }
+        m_mailExportController->exportMailbox(*accountId, *mailboxId);
+    }
+
+    void MainWindow::exportCurrentAccount()
+    {
+        const auto accountId = activeAccountId();
+        if (!accountId.has_value())
+        {
+            m_statusBar->showMessage(i18n("Select a mail account to export it."), 3000);
+            return;
+        }
+        m_mailExportController->exportAccount(*accountId);
     }
 
     void MainWindow::updateUndoRedoActions()
@@ -2186,6 +2275,10 @@ namespace javelin::gui::shell
         const auto context = toolbarContextForActiveTab();
         m_contactsAction->setEnabled(m_contactsTabController->available());
         const auto selectedAccount = activeAccountId();
+        m_exportMailboxAction->setEnabled(context == ToolbarContext::Mail && activeTabIsMailbox() &&
+                                          activeMailboxId().has_value());
+        m_exportAccountAction->setEnabled(context == ToolbarContext::Mail &&
+                                          selectedAccount.has_value());
         m_calendarAction->setEnabled(m_calendarTabController->available(
             selectedAccount.has_value() ? std::optional<std::string_view>{*selectedAccount}
                                         : std::nullopt));
@@ -2193,8 +2286,14 @@ namespace javelin::gui::shell
         setToolBarVisible(QStringLiteral("composeToolBar"), context == ToolbarContext::Compose);
         setToolBarVisible(QStringLiteral("contactsToolBar"), context == ToolbarContext::Contacts);
         setToolBarVisible(QStringLiteral("calendarToolBar"), context == ToolbarContext::Calendar);
+        if (context == ToolbarContext::Mail)
+        {
+            m_mailActionController->update();
+        }
         if (context == ToolbarContext::Compose)
         {
+            m_saveCurrentAction->setText(i18nc("@action", "Save Draft"));
+            m_saveCurrentAction->setEnabled(true);
             const auto state = m_composeTabController->toolbarState(activeTab());
             const QSignalBlocker blocker{m_composeRichTextAction};
             m_composeSendAction->setEnabled(state.canSend);
@@ -2209,6 +2308,8 @@ namespace javelin::gui::shell
         if (context == ToolbarContext::Contacts)
         {
             const auto state = m_contactsTabController->toolbarState(activeTab());
+            m_saveCurrentAction->setText(i18nc("@action", "Save Contact As…"));
+            m_saveCurrentAction->setEnabled(state.canExportContact);
             m_contactNewAction->setEnabled(state.canCreateContact);
             m_contactEditAction->setEnabled(state.canEditContact);
             m_contactDeleteAction->setEnabled(state.canDeleteContact);
@@ -2223,6 +2324,8 @@ namespace javelin::gui::shell
         }
         if (context == ToolbarContext::Calendar)
         {
+            m_saveCurrentAction->setText(i18nc("@action", "Save"));
+            m_saveCurrentAction->setEnabled(false);
             auto* menu = m_calendarTabController->calendarMenuForTab(activeTab());
             m_calendarListAction->setMenu(menu);
             m_calendarListAction->setEnabled(menu != nullptr);
@@ -3243,6 +3346,10 @@ namespace javelin::gui::shell
             connect(refreshAccountAction, &QAction::triggered, this,
                     [this, account = accountId.toStdString()]
                     { refreshAccountFromServer(account); });
+            auto* exportAccountAction = menu.addAction(
+                QIcon::fromTheme(QStringLiteral("document-export")), i18n("Export Account…"));
+            connect(exportAccountAction, &QAction::triggered, this, [this, accountId]
+                    { m_mailExportController->exportAccount(accountId.toStdString()); });
             menu.exec(m_mailboxView->viewport()->mapToGlobal(position));
             return;
         }
@@ -3307,6 +3414,14 @@ namespace javelin::gui::shell
                     });
             });
         menu.addSeparator();
+        auto* exportMailboxAction = menu.addAction(
+            QIcon::fromTheme(QStringLiteral("document-export")), i18n("Export Mailbox…"));
+        connect(exportMailboxAction, &QAction::triggered, this,
+                [this, accountId, mailboxId]
+                {
+                    m_mailExportController->exportMailbox(accountId.toStdString(),
+                                                          mailboxId.toStdString());
+                });
         auto* propertiesAction = menu.addAction(i18n("Properties…"));
         connect(
             propertiesAction, &QAction::triggered, this,

@@ -28,6 +28,7 @@ namespace javelin::gui::shell
             QStringLiteral("copy_email"),
             QStringLiteral("toggle_email_junk"),
             QStringLiteral("find_conversations_with_sender"),
+            QStringLiteral("save_message"),
             QStringLiteral("view_message_source"),
             QStringLiteral("permanently_delete_email"),
         };
@@ -54,6 +55,7 @@ namespace javelin::gui::shell
             QStringLiteral("toggle_email_junk"),
             QStringLiteral("find_conversations_with_sender"),
             emailContextMenuSeparatorId(),
+            QStringLiteral("save_message"),
             QStringLiteral("view_message_source"),
             QStringLiteral("permanently_delete_email"),
         };

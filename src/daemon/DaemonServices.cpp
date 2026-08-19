@@ -24,6 +24,7 @@
 #include "app/LocalMaintenanceService.h"
 #include "app/MailApplicationEventsService.h"
 #include "app/MailCommandService.h"
+#include "app/MailExportService.h"
 #include "app/MailIndexService.h"
 #include "app/MailMutationApplicationService.h"
 #include "app/MailNotificationService.h"
@@ -290,6 +291,8 @@ namespace javelin::app
             m_threadMaterializationCoordinator.get());
         m_mailMutationApplicationService->setThreadMaterializationCoordinator(
             m_threadMaterializationCoordinator.get());
+        m_messageContentApplicationService->setThreadMaterializationCoordinator(
+            m_threadMaterializationCoordinator.get());
         m_threadMembershipMaterializationWorker =
             std::make_unique<ThreadMembershipMaterializationWorker>(
                 m_databaseConnection, *m_methodTransport, *m_accountRuntimeManager);
@@ -379,6 +382,25 @@ namespace javelin::app
                          {
                              if (!paused)
                                  m_mailTransferWorkService->authenticationBecameAvailable();
+                         });
+        m_mailExportService = std::make_unique<MailExportService>(
+            m_databaseConnection, *m_methodTransport, *m_mailQueryClient, *m_messageContentClient,
+            *m_accountRuntimeManager, *m_workScheduler);
+        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::accountConfigured,
+                         m_mailExportService.get(),
+                         [this](const QString&) { m_mailExportService->restoreRecoverable(); });
+        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::sessionRefreshed,
+                         m_mailExportService.get(),
+                         [this](const QString&) { m_mailExportService->restoreRecoverable(); });
+        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::networkReachable,
+                         m_mailExportService.get(), &MailExportService::networkBecameReachable);
+        QObject::connect(m_errorCoordinator.get(),
+                         &ApplicationErrorCoordinator::authenticationPauseChanged,
+                         m_mailExportService.get(),
+                         [this](const QString&, const bool paused)
+                         {
+                             if (!paused)
+                                 m_mailExportService->authenticationBecameAvailable();
                          });
         m_mailTransferCommandService = std::make_unique<MailTransferCommandService>(
             m_databaseConnection, *m_transport, *m_methodTransport, *m_messageContentClient,
@@ -622,6 +644,11 @@ namespace javelin::app
     MailCommandPort& DaemonServices::mailCommandPort()
     {
         return *m_mailCommandService;
+    }
+
+    MailExportPort& DaemonServices::mailExportPort()
+    {
+        return *m_mailExportService;
     }
 
     SieveCommandPort& DaemonServices::sieveCommandPort()

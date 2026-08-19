@@ -62,62 +62,13 @@ namespace javelin::app
     {
     }
 
-    QCoro::Task<std::optional<javelin::jmap::OperationError>>
-    MailTransferApplicationService::ensureSelectionMaterialized(
-        std::string accountId, std::optional<std::string> sourceMailboxId,
-        MessageSelection selection)
-    {
-        if (sourceMailboxId.has_value())
-            co_return std::nullopt;
-
-        std::vector<std::string> threadIds;
-        for (const auto& item : selection)
-        {
-            if (const auto* thread = std::get_if<SelectedCollapsedThread>(&item);
-                thread != nullptr && !thread->threadId.empty())
-                threadIds.push_back(thread->threadId);
-        }
-        std::ranges::sort(threadIds);
-        threadIds.erase(std::unique(threadIds.begin(), threadIds.end()), threadIds.end());
-        if (threadIds.empty())
-            co_return std::nullopt;
-
-        javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
-        bool incomplete = false;
-        for (const auto& threadId : threadIds)
-        {
-            const auto coverageResult = threads.coverage(accountId, threadId);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::cache::DatabaseError>(&coverageResult))
-                co_return javelin::jmap::operationError(*error);
-            const auto& coverage =
-                std::get<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverageResult);
-            incomplete = incomplete || !coverage.has_value() || !coverage->childEmailsComplete;
-        }
-        if (!incomplete)
-            co_return std::nullopt;
-        if (m_threadMaterializationCoordinator == nullptr)
-        {
-            co_return javelin::jmap::OperationError{
-                .code = javelin::jmap::OperationErrorCode::NetworkUnavailable,
-                .message = i18n("The selected conversation is not fully available. Connect to "
-                                "the network and try again."),
-            };
-        }
-
-        auto result = co_await m_threadMaterializationCoordinator->waitForThreads(
-            std::move(accountId), std::move(threadIds), WorkPriority::Interactive);
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-            co_return *error;
-        co_return std::nullopt;
-    }
-
     QCoro::Task<MailTransferPreparationResult>
     MailTransferApplicationService::prepare(MailTransferPreparationRequest request)
     {
         if (request.selection.empty())
             co_return invalidState(i18n("No messages were selected for transfer."));
-        if (const auto error = co_await ensureSelectionMaterialized(
+        if (const auto error = co_await ensureMessageSelectionMaterialized(
+                m_databaseConnection, m_threadMaterializationCoordinator,
                 request.intent.sourceAccountId, request.intent.sourceMailboxId, request.selection))
             co_return *error;
 

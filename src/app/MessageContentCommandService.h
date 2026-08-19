@@ -17,6 +17,8 @@ namespace javelin::app
         requestAttachment(std::string accountId, std::string emailId, std::string partId) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::MessageSourceDownloadResult>
         requestMessageSource(std::string accountId, std::string emailId) override;
+        [[nodiscard]] QCoro::Task<SaveMessagesResult>
+        saveMessages(SaveMessagesIntent intent) override;
 
       private:
         MessageContentApplicationService& m_service;

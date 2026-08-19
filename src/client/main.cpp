@@ -481,7 +481,7 @@ int main(int argc, char* argv[])
             services->identityReader(), services->messageViewReader(), session.databasePath(),
             services->translationService(), services->developerDiagnosticsPort(),
             services->developerMaintenancePort(), services->daemonLogPort(),
-            services->mailCommandPort(), services->sieveCommandPort(),
+            services->mailCommandPort(), services->mailExportPort(), services->sieveCommandPort(),
             services->identityCommandPort(), services->accountRefreshPort(),
             services->onboardingPort(), services->messageContentPort(),
             services->messageListSessionFactory(), services->mailEvents(),

@@ -1,7 +1,11 @@
 #pragma once
 
+#include "app/WorkTaskPort.h"
+#include "jmap/OperationError.h"
 #include "jmap/cache/ThreadReader.h"
 #include "jmap/cache/ThreadRepository.h"
+
+#include <QCoroTask>
 
 #include <QString>
 
@@ -10,8 +14,14 @@
 #include <variant>
 #include <vector>
 
+namespace javelin::jmap::cache
+{
+    class DatabaseConnection;
+}
+
 namespace javelin::app
 {
+    class ThreadMaterializationCoordinator;
 
     struct SelectedEmail
     {
@@ -26,6 +36,13 @@ namespace javelin::app
     using MessageSelectionItem = std::variant<SelectedEmail, SelectedCollapsedThread>;
     using MessageSelection = std::vector<MessageSelectionItem>;
     using ResolvedMessageSelection = std::variant<std::vector<std::string>, QString>;
+
+    [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::OperationError>>
+    ensureMessageSelectionMaterialized(
+        javelin::jmap::cache::DatabaseConnection& databaseConnection,
+        ThreadMaterializationCoordinator* threadMaterializationCoordinator, std::string accountId,
+        std::optional<std::string> sourceMailboxId, MessageSelection selection,
+        WorkPriority priority = WorkPriority::Interactive);
 
     [[nodiscard]] ResolvedMessageSelection
     resolveMessageSelection(const javelin::jmap::cache::ThreadReader& threadReader,

@@ -52,6 +52,7 @@ namespace javelin::gui::shell
         QAction& permanentDelete;
         QAction& move;
         QAction& copy;
+        QAction& save;
         QAction& viewSource;
     };
 

@@ -44,11 +44,6 @@ namespace javelin::app
         prepare(MailTransferPreparationRequest request);
 
       private:
-        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::OperationError>>
-        ensureSelectionMaterialized(std::string accountId,
-                                    std::optional<std::string> sourceMailboxId,
-                                    MessageSelection selection);
-
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
         ThreadMaterializationCoordinator* m_threadMaterializationCoordinator = nullptr;
     };

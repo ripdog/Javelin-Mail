@@ -57,6 +57,7 @@ namespace javelin::gui::contacts
         [[nodiscard]] bool operationInFlight() const;
         [[nodiscard]] bool hasSelectedContact() const;
         [[nodiscard]] bool hasSingleSelectedContact() const;
+        [[nodiscard]] bool canSaveContactAs() const;
         [[nodiscard]] bool canCreateContact() const;
         [[nodiscard]] bool canEditContact() const;
         [[nodiscard]] bool canDeleteContact() const;

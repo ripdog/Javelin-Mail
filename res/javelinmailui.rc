@@ -1,8 +1,13 @@
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
-<gui name="javelinmail" version="19">
+<gui name="javelinmail" version="21">
   <MenuBar>
     <Menu name="file"><text>&amp;File</text>
       <Action name="compose_new_message"/>
+      <Action name="save_current_item"/>
+      <Menu name="export"><text>&amp;Export</text>
+        <Action name="export_mailbox"/>
+        <Action name="export_account"/>
+      </Menu>
       <Separator/>
       <Action name="quit_application"/>
     </Menu>

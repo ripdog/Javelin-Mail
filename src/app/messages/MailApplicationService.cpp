@@ -9,8 +9,10 @@
 
 #include "app/ApplicationErrorCoordinator.h"
 #include "app/EmailMutationBatchSubmitter.h"
+#include "app/MailSaveNaming.h"
 #include "app/MailboxMaintenanceRegistry.h"
 #include "app/MessageSubject.h"
+#include "app/RawMailMaterializer.h"
 #include "app/StateChangePolicy.h"
 #include "app/ThreadMaterializationCoordinator.h"
 #include "app/WorkScheduler.h"
@@ -59,15 +61,21 @@
 
 #include <QCryptographicHash>
 #include <QDebug>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
+#include <QSaveFile>
 #include <QScopeGuard>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QTimer>
 #include <QUuid>
+#include <QtConcurrentRun>
+
 #include <algorithm>
 #include <chrono>
 #include <limits>
@@ -84,6 +92,62 @@ namespace javelin::app
         [[nodiscard]] QString accountSynchronizationNotConfigured()
         {
             return i18n("Account synchronization is not configured.");
+        }
+
+        struct SavedMessageFileResult
+        {
+            QString path;
+            QString error;
+        };
+
+        [[nodiscard]] QString uniqueSavedMessagePath(const QString& directory,
+                                                     const QString& fileName)
+        {
+            const QDir targetDirectory{directory};
+            QString candidate = targetDirectory.filePath(fileName);
+            if (!QFileInfo::exists(candidate))
+                return candidate;
+            const QFileInfo info{fileName};
+            const QString baseName = info.completeBaseName();
+            const QString suffix = info.completeSuffix();
+            for (int discriminator = 2;; ++discriminator)
+            {
+                const QString alternative = truncateGeneratedFileName(
+                    suffix.isEmpty()
+                        ? QStringLiteral("%1-%2").arg(baseName).arg(discriminator)
+                        : QStringLiteral("%1-%2.%3").arg(baseName).arg(discriminator).arg(suffix));
+                candidate = targetDirectory.filePath(alternative);
+                if (!QFileInfo::exists(candidate))
+                    return candidate;
+            }
+        }
+
+        [[nodiscard]] SavedMessageFileResult copySavedMessageFile(const QString& sourcePath,
+                                                                  const QString& targetPath)
+        {
+            QFile source{sourcePath};
+            if (!source.open(QIODevice::ReadOnly))
+                return {.path = targetPath, .error = source.errorString()};
+
+            QSaveFile target{targetPath};
+            if (!target.open(QIODevice::WriteOnly))
+                return {.path = targetPath, .error = target.errorString()};
+
+            QByteArray buffer;
+            buffer.resize(1024 * 1024);
+            while (true)
+            {
+                const auto read = source.read(buffer.data(), buffer.size());
+                if (read < 0)
+                    return {.path = targetPath, .error = source.errorString()};
+                if (read == 0)
+                    break;
+                if (target.write(buffer.constData(), read) != read)
+                    return {.path = targetPath, .error = target.errorString()};
+            }
+            if (!target.commit())
+                return {.path = targetPath, .error = target.errorString()};
+            return {.path = targetPath, .error = {}};
         }
 
         [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
@@ -583,6 +647,12 @@ namespace javelin::app
           m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler),
           m_mailboxMaintenanceRegistry(mailboxMaintenanceRegistry)
     {
+    }
+
+    void MessageContentApplicationService::setThreadMaterializationCoordinator(
+        ThreadMaterializationCoordinator* threadMaterializationCoordinator)
+    {
+        m_threadMaterializationCoordinator = threadMaterializationCoordinator;
     }
 
     MailNotificationService::MailNotificationService(
@@ -1843,58 +1913,6 @@ namespace javelin::app
             m_searchWindowRequests.erase(leaseKey);
     }
 
-    QCoro::Task<std::optional<javelin::jmap::OperationError>>
-    MailMutationApplicationService::ensureMessageSelectionMaterialized(
-        std::string accountId, std::optional<std::string> sourceMailboxId,
-        MessageSelection selection)
-    {
-        // Mailbox-scoped Thread actions resolve directly from the cached Email/mailbox projection.
-        // They must not add a synchronous Thread/get before the mutation request.
-        if (sourceMailboxId.has_value())
-            co_return std::nullopt;
-
-        std::vector<std::string> threadIds;
-        for (const auto& item : selection)
-        {
-            if (const auto* thread = std::get_if<SelectedCollapsedThread>(&item);
-                thread != nullptr && !thread->threadId.empty())
-                threadIds.push_back(thread->threadId);
-        }
-        std::ranges::sort(threadIds);
-        threadIds.erase(std::unique(threadIds.begin(), threadIds.end()), threadIds.end());
-        if (threadIds.empty())
-            co_return std::nullopt;
-
-        javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
-        bool incomplete = false;
-        for (const auto& threadId : threadIds)
-        {
-            const auto coverageResult = threads.coverage(accountId, threadId);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::cache::DatabaseError>(&coverageResult))
-                co_return javelin::jmap::operationError(*error);
-            const auto& coverage =
-                std::get<std::optional<javelin::jmap::cache::ThreadCoverage>>(coverageResult);
-            incomplete = incomplete || !coverage.has_value() || !coverage->childEmailsComplete;
-        }
-        if (!incomplete)
-            co_return std::nullopt;
-        if (m_threadMaterializationCoordinator == nullptr)
-        {
-            co_return javelin::jmap::OperationError{
-                .code = javelin::jmap::OperationErrorCode::NetworkUnavailable,
-                .message = i18n("The selected conversation is not fully available. Connect to "
-                                "the network and try again."),
-            };
-        }
-
-        auto result = co_await m_threadMaterializationCoordinator->waitForThreads(
-            std::move(accountId), std::move(threadIds), WorkPriority::Interactive);
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-            co_return *error;
-        co_return std::nullopt;
-    }
-
     QCoro::Task<QueuedMailboxSelectionMutationResult>
     MailMutationApplicationService::queueMailboxSelectionMutation(
         MailboxSelectionMutationIntent intent)
@@ -1916,8 +1934,9 @@ namespace javelin::app
             intent.sourceMailboxId = inbox->id;
         }
 
-        if (const auto error = co_await ensureMessageSelectionMaterialized(
-                intent.accountId, intent.sourceMailboxId, intent.selection))
+        if (const auto error = co_await javelin::app::ensureMessageSelectionMaterialized(
+                m_databaseConnection, m_threadMaterializationCoordinator, intent.accountId,
+                intent.sourceMailboxId, intent.selection))
             co_return *error;
         co_return queueResolvedMailboxSelectionMutation(std::move(intent));
     }
@@ -2101,8 +2120,9 @@ namespace javelin::app
                                                          std::optional<std::string> sourceMailboxId,
                                                          MessageSelection selection)
     {
-        if (const auto error =
-                co_await ensureMessageSelectionMaterialized(accountId, sourceMailboxId, selection))
+        if (const auto error = co_await javelin::app::ensureMessageSelectionMaterialized(
+                m_databaseConnection, m_threadMaterializationCoordinator, accountId,
+                sourceMailboxId, selection))
             co_return *error;
         co_return queueSelectedMessageMutation(std::move(accountId), std::move(sourceMailboxId),
                                                std::move(selection),
@@ -2114,8 +2134,9 @@ namespace javelin::app
         std::string accountId, std::optional<std::string> sourceMailboxId,
         MessageSelection selection)
     {
-        if (const auto error =
-                co_await ensureMessageSelectionMaterialized(accountId, sourceMailboxId, selection))
+        if (const auto error = co_await javelin::app::ensureMessageSelectionMaterialized(
+                m_databaseConnection, m_threadMaterializationCoordinator, accountId,
+                sourceMailboxId, selection))
             co_return *error;
         co_return queueSelectedMessageMutation(std::move(accountId), std::move(sourceMailboxId),
                                                std::move(selection),
@@ -2341,8 +2362,9 @@ namespace javelin::app
         std::string accountId, std::optional<std::string> sourceMailboxId,
         MessageSelection selection, const bool flagged)
     {
-        if (const auto error =
-                co_await ensureMessageSelectionMaterialized(accountId, sourceMailboxId, selection))
+        if (const auto error = co_await javelin::app::ensureMessageSelectionMaterialized(
+                m_databaseConnection, m_threadMaterializationCoordinator, accountId,
+                sourceMailboxId, selection))
             co_return *error;
         co_return queueSetMessagesKeyword(
             std::move(accountId), std::move(sourceMailboxId), std::move(selection), "$flagged",
@@ -2365,8 +2387,9 @@ namespace javelin::app
             };
         }
 
-        if (const auto error =
-                co_await ensureMessageSelectionMaterialized(accountId, sourceMailboxId, selection))
+        if (const auto error = co_await javelin::app::ensureMessageSelectionMaterialized(
+                m_databaseConnection, m_threadMaterializationCoordinator, accountId,
+                sourceMailboxId, selection))
             co_return *error;
         co_return queueSetMessagesKeyword(
             std::move(accountId), std::move(sourceMailboxId), std::move(selection),
@@ -3065,6 +3088,165 @@ namespace javelin::app
         const ForegroundWorkScope foreground{m_workScheduler};
         co_return co_await m_messageContentClient.loadCachedSource(std::move(accountId),
                                                                    std::move(emailId));
+    }
+
+    QCoro::Task<SaveMessagesResult>
+    MessageContentApplicationService::saveMessages(SaveMessagesIntent intent)
+    {
+        if (intent.accountId.empty() || intent.selection.empty() ||
+            intent.destinationPath.isEmpty())
+        {
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                .message = i18n("The message save request is incomplete."),
+            };
+        }
+        if (!QDir::isAbsolutePath(intent.destinationPath))
+        {
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                .message = i18n("Choose an absolute destination path for the saved message."),
+            };
+        }
+
+        if (const auto error = co_await javelin::app::ensureMessageSelectionMaterialized(
+                m_databaseConnection, m_threadMaterializationCoordinator, intent.accountId,
+                intent.sourceMailboxId, intent.selection))
+            co_return *error;
+
+        javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
+        javelin::jmap::cache::ThreadReadRepository threadReader{m_databaseConnection};
+        auto resolved = resolveMessageSelection(threadReader, threads, intent.accountId,
+                                                intent.sourceMailboxId, intent.selection);
+        if (const auto* error = std::get_if<QString>(&resolved))
+        {
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                .message = *error,
+            };
+        }
+        auto emailIds = std::get<std::vector<std::string>>(std::move(resolved));
+        if (emailIds.empty())
+        {
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::NotFound,
+                .message = i18n("No messages are available to save."),
+            };
+        }
+        if (intent.targetKind == MessageSaveTargetKind::SingleFile && emailIds.size() != 1)
+        {
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                .message = i18n("This selection contains multiple messages. Choose a directory "
+                                "instead of a single file."),
+            };
+        }
+
+        if (intent.targetKind == MessageSaveTargetKind::Directory)
+        {
+            const QDir directory{intent.destinationPath};
+            if (!directory.exists())
+            {
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
+                    .message = i18n("The selected save directory no longer exists: %1",
+                                    intent.destinationPath),
+                };
+            }
+        }
+        else
+        {
+            const QFileInfo target{intent.destinationPath};
+            if (!target.absoluteDir().exists())
+            {
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
+                    .message = i18n("The selected save directory no longer exists: %1",
+                                    target.absolutePath()),
+                };
+            }
+        }
+
+        const auto configuration = m_accountRuntime.configurationFor(intent.accountId);
+        if (!configuration.has_value())
+        {
+            co_return javelin::jmap::OperationError{
+                .message = accountSynchronizationNotConfigured(),
+            };
+        }
+
+        const ForegroundWorkScope foreground{m_workScheduler};
+        javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
+        RawMailMaterializer rawMailMaterializer{m_databaseConnection, m_messageContentClient};
+        std::size_t savedCount = 0;
+        const auto partialFailure = [&savedCount](javelin::jmap::OperationError error)
+        {
+            if (savedCount != 0)
+            {
+                error.message = i18np("One message was saved before the operation failed: %2",
+                                      "%1 messages were saved before the operation failed: %2",
+                                      savedCount, error.message);
+            }
+            return error;
+        };
+
+        for (const auto& emailId : emailIds)
+        {
+            const auto maintenance = emailMaintenanceActive(
+                m_databaseConnection, m_mailboxMaintenanceRegistry, intent.accountId, emailId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&maintenance))
+                co_return partialFailure(javelin::jmap::operationError(*error));
+            if (std::get<bool>(maintenance))
+            {
+                co_return partialFailure(javelin::jmap::OperationError{
+                    .message = i18n("The mailbox cache is being cleared."),
+                });
+            }
+
+            const auto emailResult = emails.find(intent.accountId, emailId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
+                co_return partialFailure(javelin::jmap::operationError(*error));
+            const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
+            if (!email.has_value())
+            {
+                co_return partialFailure(javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::NotFound,
+                    .message = i18n("A selected message is no longer available."),
+                });
+            }
+
+            auto materializedResult =
+                observeResult(m_errorCoordinator, configuration->second.settings, intent.accountId,
+                              QStringLiteral("Save message source"),
+                              co_await rawMailMaterializer.materialize(
+                                  toLiveConnectionSettings(configuration->second.settings),
+                                  intent.accountId, emailId, email->blobId));
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&materializedResult))
+                co_return partialFailure(*error);
+            auto materialized = std::get<MaterializedRawMail>(std::move(materializedResult));
+
+            const QString targetPath =
+                intent.targetKind == MessageSaveTargetKind::SingleFile
+                    ? intent.destinationPath
+                    : uniqueSavedMessagePath(intent.destinationPath,
+                                             suggestedMailSaveFileName(*email));
+            auto writeFuture =
+                QtConcurrent::run(copySavedMessageFile, materialized.filePath, targetPath);
+            const auto written = co_await qCoro(writeFuture).takeResult();
+            if (!written.error.isEmpty())
+            {
+                co_return partialFailure(javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
+                    .message = i18n("Could not save %1: %2", written.path, written.error),
+                });
+            }
+            ++savedCount;
+        }
+
+        co_return SaveMessagesSummary{
+            .savedMessageCount = savedCount,
+            .destinationPath = std::move(intent.destinationPath),
+        };
     }
 
     QCoro::Task<javelin::jmap::LiveRefreshResult>

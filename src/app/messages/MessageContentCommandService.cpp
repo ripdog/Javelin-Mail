@@ -31,4 +31,10 @@ namespace javelin::app
     {
         return m_service.requestMessageSource(std::move(accountId), std::move(emailId));
     }
+
+    QCoro::Task<SaveMessagesResult>
+    MessageContentCommandService::saveMessages(SaveMessagesIntent intent)
+    {
+        return m_service.saveMessages(std::move(intent));
+    }
 } // namespace javelin::app

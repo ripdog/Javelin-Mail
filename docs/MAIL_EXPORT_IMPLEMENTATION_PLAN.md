@@ -32,8 +32,9 @@ restart, pause safely, and never require the GUI process to remain alive.
 - Reuse existing current MailVault objects without downloading them again.
 - Keep network and file I/O bounded and off the GUI thread.
 - Persist enough state to resume large exports safely after daemon restart.
-- Integrate with the existing WorkScheduler/Task Center, including progress, pause, resume, cancel,
-  waiting-for-network/auth/space states, and clear terminal errors.
+- Integrate with the existing WorkScheduler/Task Center, including progress, pause, resume,
+  waiting-for-network/auth/space states, and clear terminal errors. Cancellation follows when the
+  shared scheduler gains a generic cancellation lifecycle.
 - Make filename/path decisions deterministic, portable, collision-safe, and independent of internal
   cache paths.
 - Preserve the current daemon/GUI ownership boundary: GUI chooses intent and filesystem target;
@@ -123,32 +124,28 @@ expose `accountId = "u1"` while the user expects two distinct export roots.
 
 ### 1. One selected Email
 
-Expose **Export Message...** for an exact single-Email selection.
-
-The file chooser defaults to a sanitized descriptive `.eml` filename. Export writes the exact raw
-RFC 5322 bytes to that file.
+Treat extracting selected mail as ordinary **Save**, not as bulk export. **Save Message As...** and
+Ctrl+S for an exact single-Email selection open the standard file chooser with a sanitized,
+descriptive `.eml` filename. Save writes the exact raw RFC 5322 bytes to that file.
 
 If a visible row represents a collapsed Thread rather than exactly one Email, the action must not
-silently export only the representative. Either:
-
-- present the action as **Export Messages...** and preserve the existing whole-Thread
-  `MessageSelection` semantics; or
-- only offer singular **Export Message...** when the resolved selection is exactly one Email.
-
-Prefer the first approach for consistency with Javelin's existing action semantics. The daemon still
-materializes the Thread authoritatively before fixing the manifest.
+silently save only the representative. The action becomes **Save Messages...**, preserving the
+existing whole-Thread `MessageSelection` semantics. The daemon materializes the Thread
+authoritatively before resolving the exact Email set.
 
 ### 2. Multiple selected Emails
 
-Expose **Export Messages...** and choose a target directory.
+Expose **Save Messages...** and choose a target directory.
 
 Each exact Email becomes one `.eml` file. This scope has no mailbox hierarchy requirement because the
 user explicitly selected messages. If the same Email is represented only once in the resolved
-selection, export it once even if it belongs to multiple mailboxes.
+selection, save it once even if it belongs to multiple mailboxes. Selected-message Save is a
+foreground operation rather than a durable bulk-export job, but raw-source materialization and file
+writing use the same bounded daemon-owned primitives as bulk export.
 
 ### 3. One mailbox
 
-Expose **Export Mailbox...** on real mailbox nodes and from mailbox properties.
+Expose **Export Mailbox...** on real mailbox nodes and under **File -> Export**.
 
 Offer two formats:
 
@@ -160,7 +157,7 @@ thread-collapsed rows, quick filters, sort order, or hidden UI state.
 
 ### 4. Entire account
 
-Expose **Export Account...** from the account/server node and account management UI.
+Expose **Export Account...** from the account/server node and under **File -> Export**.
 
 Offer two formats:
 
@@ -203,15 +200,16 @@ pages, records the relevant JMAP query/object states, reconciles changes that oc
 crawl, and **seals** the manifest only after it has reached an authoritative final state for that
 generation. New mail and membership changes after the seal do not alter the export.
 
-For selected-message export, the manifest can normally seal as soon as the exact `MessageSelection`
-has been authoritatively materialized and its source identities captured. For mailbox/account export,
-the UI/Task Center should distinguish **Preparing export** from the later byte-writing phase.
+Selected-message Save does not need a durable export manifest: it authoritatively materializes and
+resolves the stable `MessageSelection`, captures each current blob identity, and writes the selected
+user-owned files as one foreground operation. Mailbox/account export uses the durable manifest and
+the UI/Task Center distinguishes **Preparing export** from the later byte-writing phase.
 
 This rule prevents a 100 GB account export from remaining a moving target, gives restart recovery a
 precise definition, and does not promise cross-object transactional snapshot semantics that JMAP does
 not provide.
 
-### Selected-message manifest
+### Selected-message Save scope
 
 Resolve the stable `MessageSelection` exactly as other mail actions do:
 
@@ -429,7 +427,8 @@ Recommended first-version rule:
 - create files with temporary sibling names and atomically rename each file after complete write;
 - on restart, validate already-completed files by size/hash or durable manifest evidence before
   skipping them;
-- remove only Javelin-owned temporary files when cancelling/cleaning an incomplete job;
+- remove only Javelin-owned temporary files when cleaning an incomplete job (and, once shared
+  cancellation exists, when cancelling one);
 - reject or safely contain unexpected symlink/reparse-point entries inside a Javelin-owned export
   root so a path changed externally during pause cannot redirect later writes outside that root.
 
@@ -541,13 +540,14 @@ PreparingManifest
   -> Complete
 ```
 
-Terminal alternatives:
+Terminal alternatives in the initial implementation:
 
 ```text
-Cancelled
 Partial
 Failed
 ```
+
+`Cancelled` becomes another terminal alternative when WorkScheduler gains shared cancellation.
 
 Per output item:
 
@@ -641,11 +641,15 @@ checkpoint. Never fall back to a whole-message RAM buffer.
 The export journal distinguishes source-cache space from output-filesystem space so the UI can tell
 the user which location is full.
 
-## Cancellation and pause
+## Pause and future cancellation
 
 Pause only at recoverable boundaries and persist the checkpoint before reporting the job paused.
+Pause/resume is part of the initial implementation and uses the existing WorkScheduler control
+surface.
 
-Cancellation semantics:
+Task Center does not currently expose a generic cancellation primitive, so export cancellation is
+intentionally deferred to a scheduler-level follow-up rather than adding an export-only notion of
+cancellation. When WorkScheduler gains cancellation, export should use these semantics:
 
 - stop admitting new source downloads/writes;
 - allow an already-running bounded filesystem write to reach a safe checkpoint or cancel it into a
@@ -682,14 +686,14 @@ failure should normally allow the remaining account/mailbox export to continue a
 
 Do not silently label a partial account export successful.
 
-For a single-message export, any item failure is simply operation failure because there is no useful
-partial set.
+For selected-message Save, a failure reports the number already saved and then fails the foreground
+operation; there is no durable Partial job to resume later.
 
 ## Existing-output and overwrite UX
 
 All destructive filesystem choices happen before the daemon begins writing.
 
-For single `.eml` export, normal save-dialog replace confirmation is sufficient, but the daemon still
+For single `.eml` Save, normal save-dialog replace confirmation is sufficient, but the daemon still
 writes a temporary sibling and atomically replaces/publishes the target where possible.
 
 For mailbox/account export:
@@ -707,16 +711,21 @@ rule that destructive confirmations include relevant object details.
 
 ### Message actions
 
-Add **Export Message...** / **Export Messages...** to the message context menu and appropriate File or
-Message menu. Do not overload **View Message Source**; viewing a temporary source and exporting a
-user-owned file are different actions.
+Use one contextual **Save** action. Ctrl+S and **File -> Save** become **Save Message As...** for one
+exact Email and **Save Messages...** for a multi-Email or collapsed-Thread selection. The default
+message context menu places Save beside **View Message Source**; these remain different operations
+because viewing source owns a temporary file while Save creates a user-owned file.
 
-The action uses the stable `MessageSelection`, not current row indexes after a dialog closes.
+The action uses the stable `MessageSelection`, not current row indexes after a dialog closes. Compose
+continues to interpret Ctrl+S as **Save Draft**. Contact view may likewise expose **Save Contact
+As...** for vCard output, but calendar/iCalendar save/import requires a separate design and is out of
+scope for this mail-export implementation.
 
 ### Mailbox actions
 
-Add **Export Mailbox...** to real mailbox context/properties UI. The format chooser may be part of one
-small export dialog containing:
+Add **Export Mailbox...** to real mailbox context UI and **File -> Export -> Mailbox...**. Do not add
+it to mailbox Properties merely for discoverability. The format chooser may be part of one small
+export dialog containing:
 
 - format: EML folder / mboxrd;
 - destination path;
@@ -725,7 +734,8 @@ small export dialog containing:
 
 ### Account actions
 
-Add **Export Account...** to account/server context and account management. Show:
+Add **Export Account...** to account/server context and **File -> Export -> Account...**. Do not add
+a duplicate action to account management. Show:
 
 - account display name/server context;
 - EML tree / mboxrd tree format;
@@ -750,21 +760,20 @@ Conceptually:
 
 ```cpp
 enum class MailExportFormat { Eml, MboxRd };
-enum class MailExportScopeKind { Selection, Mailbox, Account };
+enum class MailExportScopeKind { Mailbox, Account };
 
 struct MailExportIntent {
-    MailAccountLocator sourceAccount;
+    MailAccountKey sourceAccount;
     MailExportScopeKind scopeKind;
     std::optional<std::string> mailboxId;
-    std::optional<MessageSelection> selection;
     MailExportFormat format;
     QString destinationPath;
 };
 ```
 
-Use separate constructors/variant payloads in production if that makes invalid combinations
-unrepresentable. An Account scope must not carry a message selection; Selection must carry one;
-Mailbox must carry one real mailbox id.
+Selected-message Save has its own typed `SaveMessagesIntent` carrying the stable `MessageSelection`.
+The bulk-export intent therefore represents only Mailbox and Account scope. An Account scope must not
+carry a mailbox id; Mailbox must carry one real mailbox id.
 
 The daemon validates:
 
@@ -840,7 +849,7 @@ Qt GUI code owns only destination selection and presentation.
 - no `..`, separator, or externally introduced symlink escape can leave export root;
 - partial temporary write is not published as complete;
 - restart verifies/skips completed file safely;
-- cancellation removes only owned temporary file;
+- future scheduler cancellation removes only owned temporary files;
 - account message in two mailboxes produces two independent output files;
 - distinct Email objects with identical raw hash remain distinct entries.
 
@@ -878,7 +887,8 @@ Qt GUI code owns only destination selection and presentation.
 - account export includes hidden-mailbox explanation;
 - format and target path are carried through typed JVIP command;
 - destructive replace confirmation names target path/details;
-- keyboard traversal and accessible names cover format, target, progress, pause/cancel, and errors.
+- keyboard traversal and accessible names cover format, target, progress, pause/resume, and errors;
+- cancellation is deferred until the shared WorkScheduler/Task Center lifecycle supports it.
 
 ## Implementation order
 
@@ -894,7 +904,8 @@ Qt GUI code owns only destination selection and presentation.
 7. Add mailbox/account mboxrd tree planning, including parent-mailbox-with-children representation.
 8. Add typed JVIP export command and daemon application service admission/validation.
 9. Add message, mailbox, and account GUI actions/dialogs.
-10. Add Task Center progress, pause/resume/cancel, partial-result details, and owned-output cleanup.
+10. Add Task Center progress, pause/resume, partial-result details, and owned-output cleanup;
+    cancellation follows when WorkScheduler gains a generic cancellation lifecycle.
 11. Run focused production-path tests throughout, then the normal full build/test suite and a separate
     regression review before merging.
 

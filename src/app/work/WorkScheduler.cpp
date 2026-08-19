@@ -39,6 +39,8 @@ namespace javelin::app
                 return WorkKind::TagDeletion;
             if (value == "mail_transfer")
                 return WorkKind::MailTransfer;
+            if (value == "mail_export")
+                return WorkKind::MailExport;
             return WorkKind::Maintenance;
         }
 
@@ -584,6 +586,7 @@ namespace javelin::app
         case WorkKind::TagDeletion:
         case WorkKind::Maintenance:
         case WorkKind::MailTransfer:
+        case WorkKind::MailExport:
             return WorkClass::Maintenance;
         }
         return WorkClass::Maintenance;

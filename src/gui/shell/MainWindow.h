@@ -46,6 +46,7 @@ namespace javelin::app
     class DeveloperMaintenancePort;
     class DaemonLogPort;
     class MailCommandPort;
+    class MailExportPort;
     class SieveCommandPort;
     class IdentityCommandPort;
     class AccountRefreshPort;
@@ -136,6 +137,7 @@ namespace javelin::gui::shell
 {
     class LayeredStatusBar;
     class MailActionController;
+    class MailExportController;
     class MailWorkspaceController;
 
     using CalendarTabControllerFactory =
@@ -171,6 +173,7 @@ namespace javelin::gui::shell
                             javelin::app::DeveloperMaintenancePort& developerMaintenancePort,
                             javelin::app::DaemonLogPort& daemonLogPort,
                             javelin::app::MailCommandPort& mailCommandPort,
+                            javelin::app::MailExportPort& mailExportPort,
                             javelin::app::SieveCommandPort& sieveCommandPort,
                             javelin::app::IdentityCommandPort& identityCommandPort,
                             javelin::app::AccountRefreshPort& accountRefreshPort,
@@ -206,6 +209,10 @@ namespace javelin::gui::shell
         void createActions();
         void routeUndo();
         void routeRedo();
+        void routeSaveCurrent();
+        void saveSelectedMessages();
+        void exportCurrentMailbox();
+        void exportCurrentAccount();
         void updateUndoRedoActions();
         void presentHistoryFailure(const javelin::app::undo::HistoryFailure& failure);
         void presentError(const javelin::jmap::OperationError& error);
@@ -327,6 +334,7 @@ namespace javelin::gui::shell
         MessageCommandController* m_messageCommandController = nullptr;
         MessageContentController* m_messageContentController = nullptr;
         MessageFileController* m_messageFileController = nullptr;
+        MailExportController* m_mailExportController = nullptr;
         std::unique_ptr<MessageListTabBindingPresenter> m_messageListTabBindingPresenter;
         std::unique_ptr<MessageNavigationController> m_messageNavigationController;
         std::unique_ptr<MessageSelectionController> m_messageSelectionController;
@@ -359,6 +367,9 @@ namespace javelin::gui::shell
         QAction* m_undoAction = nullptr;
         QAction* m_redoAction = nullptr;
         QAction* m_refreshAction = nullptr;
+        QAction* m_saveCurrentAction = nullptr;
+        QAction* m_exportMailboxAction = nullptr;
+        QAction* m_exportAccountAction = nullptr;
         QAction* m_quitAction = nullptr;
         QAction* m_preferencesAction = nullptr;
         QAction* m_configureEmailContextMenuAction = nullptr;

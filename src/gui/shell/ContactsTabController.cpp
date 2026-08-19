@@ -148,7 +148,7 @@ namespace javelin::gui::shell
             .canEditContact = !busy && selected && widget->canEditContact(),
             .canDeleteContact = !busy && selected && widget->canDeleteContact(),
             .canCopyContact = !busy && singleSelected,
-            .canExportContact = !busy && singleSelected,
+            .canExportContact = widget->canSaveContactAs(),
             .canFindDuplicates = !busy,
             .canAddToGroup =
                 !busy && (widget->canCreateGroup() || widget->canAddSelectedContactToGroup()),

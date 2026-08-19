@@ -2,6 +2,7 @@
 
 #include "app/AccountConnectionProvider.h"
 #include "app/AccountConnectionSettings.h"
+#include "app/RawMailMaterializer.h"
 #include "app/undo/MailTransferHistoryCoordinator.h"
 #include "jmap/MessageContentClient.h"
 #include "jmap/api/BlobUpload.h"
@@ -280,6 +281,7 @@ namespace javelin::app
 
         javelin::jmap::cache::RawMessageSourceRepository sourceRepository{m_databaseConnection};
         const auto vault = javelin::jmap::cache::MailVault::forDatabase(m_databaseConnection);
+        RawMailMaterializer rawMailMaterializer{m_databaseConnection, m_messageContentClient};
         javelin::jmap::api::MethodCaller methodCaller{m_methodTransport};
         javelin::jmap::EmailMutationEngine sourceMutationEngine{m_databaseConnection,
                                                                 m_methodTransport};
@@ -760,9 +762,10 @@ namespace javelin::app
 
             if (item.phase == MailTransferItemPhase::AcquiringSource)
             {
-                auto refreshed = co_await m_messageContentClient.refresh(
-                    liveSettings(*sourceSettings), operation.sourceAccountId, item.sourceEmailId);
-                if (const auto* error = std::get_if<OperationError>(&refreshed))
+                auto materializedResult = co_await rawMailMaterializer.materialize(
+                    liveSettings(*sourceSettings), operation.sourceAccountId, item.sourceEmailId,
+                    item.sourceBlobId);
+                if (const auto* error = std::get_if<OperationError>(&materializedResult))
                 {
                     if (retryable(*error))
                     {
@@ -781,62 +784,14 @@ namespace javelin::app
                     item.lastError = error->message;
                     continue;
                 }
-                if (const auto* unavailable =
-                        std::get_if<javelin::jmap::MessageContentUnavailable>(&refreshed))
-                {
-                    const auto error = sourceUnavailable(unavailable->message);
-                    if (const auto transitionError = requireTransition(
-                            repository.transitionItem(
-                                item.itemId, MailTransferItemPhase::AcquiringSource,
-                                MailTransferItemPhase::Failed, unavailable->message),
-                            i18n("The source transfer state changed while failing acquisition.")))
-                        co_return *transitionError;
-                    item.phase = MailTransferItemPhase::Failed;
-                    item.lastError = error.message;
-                    continue;
-                }
-
-                auto referenceResult =
-                    sourceRepository.findReference(operation.sourceAccountId, item.sourceEmailId);
-                if (const auto* error = std::get_if<DatabaseError>(&referenceResult))
-                    co_return javelin::jmap::operationError(*error);
-                auto reference =
-                    std::get<std::optional<javelin::jmap::cache::RawMessageSourceReference>>(
-                        std::move(referenceResult));
-                if (!reference.has_value())
-                {
-                    const auto migration = sourceRepository.migrateLegacySources(25);
-                    if (const auto* error = std::get_if<DatabaseError>(&migration))
-                        co_return javelin::jmap::operationError(*error);
-                    referenceResult = sourceRepository.findReference(operation.sourceAccountId,
-                                                                     item.sourceEmailId);
-                    if (const auto* error = std::get_if<DatabaseError>(&referenceResult))
-                        co_return javelin::jmap::operationError(*error);
-                    reference =
-                        std::get<std::optional<javelin::jmap::cache::RawMessageSourceReference>>(
-                            std::move(referenceResult));
-                }
-                if (!reference.has_value() || reference->blobId != item.sourceBlobId)
-                {
-                    const QString message = i18n(
-                        "The exact raw source captured for this transfer is no longer available.");
-                    if (const auto error = requireTransition(
-                            repository.transitionItem(item.itemId,
-                                                      MailTransferItemPhase::AcquiringSource,
-                                                      MailTransferItemPhase::Failed, message),
-                            i18n("The source transfer state changed while validating content.")))
-                        co_return *error;
-                    item.phase = MailTransferItemPhase::Failed;
-                    item.lastError = message;
-                    continue;
-                }
+                auto materialized = std::get<MaterializedRawMail>(std::move(materializedResult));
                 if (const auto error = requireTransition(
                         repository.markSourceReady(item.itemId,
                                                    MailTransferItemPhase::AcquiringSource,
-                                                   reference->object.contentHash),
+                                                   materialized.contentHash),
                         i18n("The source transfer state changed while pinning content.")))
                     co_return *error;
-                item.rawContentHash = reference->object.contentHash;
+                item.rawContentHash = materialized.contentHash;
                 item.phase = MailTransferItemPhase::SourceReady;
             }
 

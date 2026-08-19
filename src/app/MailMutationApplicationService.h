@@ -116,10 +116,6 @@ namespace javelin::app
             MarkUnread,
         };
 
-        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::OperationError>>
-        ensureMessageSelectionMaterialized(std::string accountId,
-                                           std::optional<std::string> sourceMailboxId,
-                                           MessageSelection selection);
         [[nodiscard]] QueuedMailboxSelectionMutationResult
         queueResolvedMailboxSelectionMutation(MailboxSelectionMutationIntent intent);
         [[nodiscard]] QueuedMessageSelectionMutationResult

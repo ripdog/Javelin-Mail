@@ -42,6 +42,8 @@ namespace javelin::gui::shell
         void saveAttachment(std::string accountId, std::string emailId, std::string partId);
         void saveAllAttachments(std::string accountId, std::string emailId);
         void openAttachment(std::string accountId, std::string emailId, std::string partId);
+        void saveMessages(std::string accountId, std::optional<std::string> sourceMailboxId,
+                          javelin::app::MessageSelection selection);
         void viewMessageSource(std::string accountId, std::string emailId);
 
       Q_SIGNALS:

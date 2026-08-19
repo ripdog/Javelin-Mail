@@ -66,6 +66,7 @@ namespace javelin::app
     class InlineMessageSchemeHandler;
     class MailApplicationEventsPort;
     class MailCommandPort;
+    class MailExportPort;
     class MessageContentPort;
     class MessageListSessionFactoryPort;
     class MessageListSessionFactoryService;
@@ -83,6 +84,7 @@ namespace javelin::app
     class RemoteDaemonLogPort;
     class RemoteIdentityCommandPort;
     class RemoteMailCommandPort;
+    class RemoteMailExportPort;
     class RemoteMessageContentPort;
     class RemoteMessageListMaterializationPort;
     class RemoteOnboardingPort;
@@ -121,6 +123,7 @@ namespace javelin::app
         [[nodiscard]] ComposeCommandPort& composeCommandPort();
         [[nodiscard]] ContactCommandPort& contactCommandPort();
         [[nodiscard]] MailCommandPort& mailCommandPort();
+        [[nodiscard]] MailExportPort& mailExportPort();
         [[nodiscard]] SieveCommandPort& sieveCommandPort();
         [[nodiscard]] IdentityCommandPort& identityCommandPort();
         [[nodiscard]] AccountRefreshPort& accountRefreshPort();
@@ -180,6 +183,7 @@ namespace javelin::app
         std::unique_ptr<RemoteDeveloperMaintenancePort> m_developerMaintenance;
         std::unique_ptr<RemoteDaemonLogPort> m_daemonLog;
         std::unique_ptr<RemoteMailCommandPort> m_mailCommands;
+        std::unique_ptr<RemoteMailExportPort> m_mailExport;
         std::unique_ptr<RemoteSieveCommandPort> m_sieveCommands;
         std::unique_ptr<RemoteIdentityCommandPort> m_identityCommands;
         std::unique_ptr<RemoteAccountRefreshPort> m_accountRefresh;
