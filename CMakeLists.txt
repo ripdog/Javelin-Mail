@@ -633,8 +633,6 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageAppearance.cpp
     src/gui/messageview/MessageAppearance.h
-    src/gui/messageview/MessageBannerWidget.cpp
-    src/gui/messageview/MessageBannerWidget.h
     src/gui/messageview/MessageAttachmentPanel.cpp
     src/gui/messageview/MessageAttachmentPanel.h
     src/gui/messageview/MessageBannerCoordinator.cpp
@@ -1473,8 +1471,6 @@ add_library(javelin_gui STATIC
     src/gui/messages/MessageSelectionRestoration.h
     src/gui/messageview/HtmlMessageView.cpp
     src/gui/messageview/HtmlMessageView.h
-    src/gui/messageview/MessageBannerWidget.cpp
-    src/gui/messageview/MessageBannerWidget.h
     src/gui/messageview/MessageAttachmentPanel.cpp
     src/gui/messageview/MessageAttachmentPanel.h
     src/gui/messageview/MessageBannerCoordinator.cpp

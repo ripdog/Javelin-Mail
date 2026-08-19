@@ -17,16 +17,18 @@
 #include <string_view>
 #include <unordered_set>
 
+class QAction;
 class QLabel;
 class QEvent;
 class QGridLayout;
+class QMenu;
 class QProgressBar;
 class QScrollArea;
 class QResizeEvent;
 class QStackedWidget;
 class QTextBrowser;
-class QToolButton;
 class QVBoxLayout;
+class KMessageWidget;
 class QWidget;
 
 namespace javelin::gui::translation
@@ -47,7 +49,6 @@ namespace javelin::gui::messageview
     class HtmlMessageView;
     class MessageAttachmentPanel;
     class MessageBannerCoordinator;
-    class MessageBannerWidget;
     class MessageTranslationController;
     class RemoteContentController;
 
@@ -135,17 +136,17 @@ namespace javelin::gui::messageview
         QLabel* m_placeholderTitleLabel = nullptr;
         QLabel* m_placeholderDetailLabel = nullptr;
         MessageAttachmentPanel* m_attachmentPanel = nullptr;
-        QToolButton* m_permitSenderRemoteContentButton = nullptr;
-        QToolButton* m_permitDomainRemoteContentButton = nullptr;
-        QToolButton* m_remoteContentButton = nullptr;
-        MessageBannerWidget* m_remoteContentBanner = nullptr;
-        MessageBannerWidget* m_junkBanner = nullptr;
-        MessageBannerWidget* m_unsubscribeBanner = nullptr;
-        MessageBannerWidget* m_translationBanner = nullptr;
-        QToolButton* m_notJunkButton = nullptr;
-        QLabel* m_unsubscribeLink = nullptr;
-        QToolButton* m_translateButton = nullptr;
-        QToolButton* m_translateOptionsButton = nullptr;
+        QAction* m_permitSenderRemoteContentAction = nullptr;
+        QAction* m_permitDomainRemoteContentAction = nullptr;
+        QAction* m_remoteContentAction = nullptr;
+        KMessageWidget* m_remoteContentBanner = nullptr;
+        KMessageWidget* m_junkBanner = nullptr;
+        KMessageWidget* m_unsubscribeBanner = nullptr;
+        KMessageWidget* m_translationBanner = nullptr;
+        QAction* m_notJunkAction = nullptr;
+        QAction* m_translateAction = nullptr;
+        QAction* m_translateOptionsAction = nullptr;
+        QMenu* m_translateOptionsMenu = nullptr;
         javelin::gui::settings::GuiSettings& m_settings;
         javelin::gui::translation::TranslationService& m_translationService;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;

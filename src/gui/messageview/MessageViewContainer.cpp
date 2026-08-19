@@ -6,7 +6,6 @@
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/messageview/MessageAttachmentPanel.h"
 #include "gui/messageview/MessageBannerCoordinator.h"
-#include "gui/messageview/MessageBannerWidget.h"
 #include "gui/messageview/MessageTranslationController.h"
 #include "gui/messageview/MessageViewPresentation.h"
 #include "gui/messageview/PlainTextLinkifier.h"
@@ -20,6 +19,7 @@
 #include <QCoroTask>
 
 #include <KLocalizedString>
+#include <KMessageWidget>
 
 #include <QAccessible>
 #include <QAccessibleWidget>
@@ -38,6 +38,7 @@
 #include <QMenu>
 #include <QMimeDatabase>
 #include <QMouseEvent>
+#include <QPoint>
 #include <QProgressBar>
 #include <QScrollArea>
 #include <QSignalBlocker>
@@ -46,7 +47,6 @@
 #include <QStringList>
 #include <QStyle>
 #include <QTextBrowser>
-#include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -430,40 +430,52 @@ namespace javelin::gui::messageview
         headerLayout->addWidget(m_detailLabel);
         headerLayout->addWidget(m_metadataWidget);
 
-        m_remoteContentBanner = new MessageBannerWidget(this);
-        m_remoteContentBanner->setIcon(javelin::gui::themedSvgIcon(
-            QStringLiteral(":/icons/thunderbird-icons/remote-blocked.svg"),
-            palette().color(QPalette::Active, QPalette::Text)));
-        m_permitSenderRemoteContentButton =
-            m_remoteContentBanner->addButton(i18n("Always load sender"));
-        connect(m_permitSenderRemoteContentButton, &QToolButton::clicked, this,
+        const auto makeBanner = [this](const KMessageWidget::MessageType type, const QIcon& icon)
+        {
+            auto* banner = new KMessageWidget(this);
+            banner->setMessageType(type);
+            banner->setIcon(icon);
+            banner->setWordWrap(false);
+            banner->setVisible(false);
+            return banner;
+        };
+
+        m_remoteContentBanner =
+            makeBanner(KMessageWidget::Information,
+                       javelin::gui::themedSvgIcon(
+                           QStringLiteral(":/icons/thunderbird-icons/remote-blocked.svg"),
+                           palette().color(QPalette::Active, QPalette::Text)));
+        m_permitSenderRemoteContentAction = new QAction(i18n("Always load sender"), this);
+        m_remoteContentBanner->addAction(m_permitSenderRemoteContentAction);
+        connect(m_permitSenderRemoteContentAction, &QAction::triggered, this,
                 &MessageViewContainer::permitRemoteContentForCurrentSender);
-        m_permitDomainRemoteContentButton =
-            m_remoteContentBanner->addButton(i18n("Always load domain"));
-        connect(m_permitDomainRemoteContentButton, &QToolButton::clicked, this,
+        m_permitDomainRemoteContentAction = new QAction(i18n("Always load domain"), this);
+        m_remoteContentBanner->addAction(m_permitDomainRemoteContentAction);
+        connect(m_permitDomainRemoteContentAction, &QAction::triggered, this,
                 &MessageViewContainer::permitRemoteContentForCurrentDomain);
-        m_remoteContentButton = m_remoteContentBanner->addButton(i18n("Load remote content"));
-        m_remoteContentButton->setCheckable(true);
-        connect(m_remoteContentButton, &QToolButton::clicked, this,
+        m_remoteContentAction = new QAction(i18n("Load remote content"), this);
+        m_remoteContentAction->setCheckable(true);
+        m_remoteContentBanner->addAction(m_remoteContentAction);
+        connect(m_remoteContentAction, &QAction::triggered, this,
                 [this](const bool checked)
                 {
                     m_htmlView->setRemoteContentEnabled(checked);
                     updateRemoteContentButton();
                 });
-        connect(m_remoteContentBanner, &MessageBannerWidget::dismissed, this,
+        connect(m_remoteContentBanner, &KMessageWidget::hideAnimationFinished, this,
                 [this]
                 {
                     dismissMessageBanner(RemoteContentBannerId);
                     updateRemoteContentButton();
                 });
-        m_remoteContentBanner->setVisible(false);
 
-        m_junkBanner = new MessageBannerWidget(this);
-        m_junkBanner->setIcon(
+        m_junkBanner = makeBanner(
+            KMessageWidget::Warning,
             javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/spam.svg"),
                                         palette().color(QPalette::Active, QPalette::Text)));
-        m_notJunkButton = m_junkBanner->addButton(i18nc("@action:button", "Not Junk"));
-        connect(m_notJunkButton, &QToolButton::clicked, this,
+        m_notJunkAction = new QAction(i18nc("@action:button", "Not Junk"), this);
+        m_junkBanner->addAction(m_notJunkAction);
+        connect(m_notJunkAction, &QAction::triggered, this,
                 [this]
                 {
                     if (!m_accountId.has_value() || !m_emailId.has_value())
@@ -475,58 +487,66 @@ namespace javelin::gui::messageview
                         m_mailboxId.has_value() ? QString::fromStdString(*m_mailboxId) : QString{},
                         QString::fromStdString(*m_emailId));
                 });
-        connect(m_junkBanner, &MessageBannerWidget::dismissed, this,
+        connect(m_junkBanner, &KMessageWidget::hideAnimationFinished, this,
                 [this]
                 {
                     dismissMessageBanner(JunkBannerId);
                     updateJunkBanner();
                 });
-        m_junkBanner->setVisible(false);
 
-        m_unsubscribeBanner = new MessageBannerWidget(this);
-        m_unsubscribeBanner->setIcon(QIcon::fromTheme(QStringLiteral("news-unsubscribe")));
-        m_unsubscribeLink = m_unsubscribeBanner->addLink(i18nc("@action", "Unsubscribe"));
-        connect(m_unsubscribeLink, &QLabel::linkActivated, this, [](const QString& url)
+        m_unsubscribeBanner = makeBanner(KMessageWidget::Information,
+                                         QIcon::fromTheme(QStringLiteral("news-unsubscribe")));
+        m_unsubscribeBanner->setTextFormat(Qt::RichText);
+        connect(m_unsubscribeBanner, &KMessageWidget::linkActivated, this, [](const QString& url)
                 { QDesktopServices::openUrl(QUrl::fromEncoded(url.toUtf8())); });
-        connect(m_unsubscribeLink, &QLabel::linkHovered, this,
+        connect(m_unsubscribeBanner, &KMessageWidget::linkHovered, this,
                 [this](const QString& url) { Q_EMIT hoveredLinkChanged(url); });
-        connect(m_unsubscribeBanner, &MessageBannerWidget::dismissed, this,
+        connect(m_unsubscribeBanner, &KMessageWidget::hideAnimationFinished, this,
                 [this]
                 {
                     dismissMessageBanner(UnsubscribeBannerId);
                     updateUnsubscribeBanner();
                 });
-        m_unsubscribeBanner->setVisible(false);
 
-        m_translationBanner = new MessageBannerWidget(this);
-        m_translationBanner->setIcon(
-            QIcon::fromTheme(QStringLiteral("preferences-desktop-locale")));
-        m_translateButton = m_translationBanner->addButton(i18nc("@action:button", "Translate"));
-        connect(m_translateButton, &QToolButton::clicked, this,
+        m_translationBanner =
+            makeBanner(KMessageWidget::Information,
+                       QIcon::fromTheme(QStringLiteral("preferences-desktop-locale")));
+        m_translateAction = new QAction(i18nc("@action:button", "Translate"), this);
+        m_translationBanner->addAction(m_translateAction);
+        connect(m_translateAction, &QAction::triggered, this,
                 [this]() { translateCurrentMessage(); });
-        m_translateOptionsButton =
-            m_translationBanner->addButton(i18nc("@action:button", "Options"));
-        m_translateOptionsButton->setPopupMode(QToolButton::InstantPopup);
-        m_translateOptionsButton->setToolTip(i18n("Translation options"));
-        auto* translateMenu = new QMenu(m_translateOptionsButton);
-        auto* autoSenderAction = translateMenu->addAction(i18n("Auto-translate sender"));
+        m_translateOptionsAction = new QAction(i18nc("@action:button", "Options"), this);
+        m_translateOptionsAction->setToolTip(i18n("Translation options"));
+        m_translateOptionsMenu = new QMenu(m_translationBanner);
+        auto* autoSenderAction = m_translateOptionsMenu->addAction(i18n("Auto-translate sender"));
         autoSenderAction->setCheckable(true);
         autoSenderAction->setData(QStringLiteral("sender"));
-        auto* autoDomainAction = translateMenu->addAction(i18n("Auto-translate sender domain"));
+        auto* autoDomainAction =
+            m_translateOptionsMenu->addAction(i18n("Auto-translate sender domain"));
         autoDomainAction->setCheckable(true);
         autoDomainAction->setData(QStringLiteral("domain"));
         connect(autoSenderAction, &QAction::toggled, this,
                 &MessageViewContainer::setAutoTranslateSender);
         connect(autoDomainAction, &QAction::toggled, this,
                 &MessageViewContainer::setAutoTranslateDomain);
-        m_translateOptionsButton->setMenu(translateMenu);
-        connect(m_translationBanner, &MessageBannerWidget::dismissed, this,
+        connect(m_translateOptionsAction, &QAction::triggered, this,
+                [this]
+                {
+                    const auto x =
+                        m_translationBanner->layoutDirection() == Qt::RightToLeft
+                            ? 0
+                            : std::max(0, m_translationBanner->width() -
+                                              m_translateOptionsMenu->sizeHint().width());
+                    m_translateOptionsMenu->popup(
+                        m_translationBanner->mapToGlobal(QPoint{x, m_translationBanner->height()}));
+                });
+        m_translationBanner->addAction(m_translateOptionsAction);
+        connect(m_translationBanner, &KMessageWidget::hideAnimationFinished, this,
                 [this]
                 {
                     dismissMessageBanner(TranslationBannerId);
                     updateLanguageBanner();
                 });
-        m_translationBanner->setVisible(false);
 
         m_bodyStack = new QStackedWidget(this);
         m_bodyStack->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -961,12 +981,12 @@ namespace javelin::gui::messageview
         const bool showRemoteContentControls = hasBlockedRemoteContent && !remoteContentAllowed &&
                                                !messageBannerDismissed(RemoteContentBannerId);
         m_remoteContentBanner->setVisible(showRemoteContentControls);
-        m_permitSenderRemoteContentButton->setEnabled(hasBlockedRemoteContent &&
+        m_permitSenderRemoteContentAction->setEnabled(hasBlockedRemoteContent &&
                                                       !currentSenderAddress().isEmpty());
-        m_permitDomainRemoteContentButton->setEnabled(hasBlockedRemoteContent &&
+        m_permitDomainRemoteContentAction->setEnabled(hasBlockedRemoteContent &&
                                                       !currentSenderDomain().isEmpty());
-        m_remoteContentButton->setEnabled(hasBlockedRemoteContent);
-        m_remoteContentButton->setChecked(hasBlockedRemoteContent &&
+        m_remoteContentAction->setEnabled(hasBlockedRemoteContent);
+        m_remoteContentAction->setChecked(hasBlockedRemoteContent &&
                                           m_htmlView->remoteContentEnabled());
         if (hasBlockedRemoteContent)
         {
@@ -978,14 +998,14 @@ namespace javelin::gui::messageview
         {
             m_remoteContentBanner->setText({});
         }
-        m_permitSenderRemoteContentButton->setToolTip(
+        m_permitSenderRemoteContentAction->setToolTip(
             currentSenderAddress().isEmpty() ? i18n("No sender address is available")
                                              : i18n("Always load remote content from this sender"));
-        m_permitDomainRemoteContentButton->setToolTip(
+        m_permitDomainRemoteContentAction->setToolTip(
             currentSenderDomain().isEmpty()
                 ? i18n("No sender domain is available")
                 : i18n("Always load remote content from this sender domain"));
-        m_remoteContentButton->setText(m_htmlView->remoteContentEnabled()
+        m_remoteContentAction->setText(m_htmlView->remoteContentEnabled()
                                            ? i18n("Hide remote content")
                                            : i18n("Load remote content"));
     }
@@ -1030,13 +1050,12 @@ namespace javelin::gui::messageview
         if (!shouldShow)
         {
             m_unsubscribeBanner->setText({});
-            m_unsubscribeBanner->setLinkTarget(m_unsubscribeLink, {});
             return;
         }
 
-        const auto url = QString::fromStdString(*m_snapshot->unsubscribeUrl);
-        m_unsubscribeBanner->setText(i18n("This message is from a mailing list."));
-        m_unsubscribeBanner->setLinkTarget(m_unsubscribeLink, url);
+        const auto url = QString::fromStdString(*m_snapshot->unsubscribeUrl).toHtmlEscaped();
+        m_unsubscribeBanner->setText(
+            i18n("This message is from a mailing list. <a href=\"%1\">Unsubscribe</a>", url));
     }
 
     void MessageViewContainer::updateLanguageBanner()
@@ -1058,11 +1077,11 @@ namespace javelin::gui::messageview
         }
 
         const auto targetName = languageName(m_translationService.targetLanguage().toStdString());
-        m_translateButton->setEnabled(!m_translationController->inProgress());
-        m_translateButton->setText(m_translationController->messageTranslated()
+        m_translateAction->setEnabled(!m_translationController->inProgress());
+        m_translateAction->setText(m_translationController->messageTranslated()
                                        ? i18n("Show original")
                                        : i18nc("@action:button", "Translate"));
-        m_translateButton->setToolTip(m_translationController->messageTranslated()
+        m_translateAction->setToolTip(m_translationController->messageTranslated()
                                           ? i18n("Restore the original message text")
                                           : i18n("Translate this message to %1", targetName));
 
@@ -1092,14 +1111,14 @@ namespace javelin::gui::messageview
 
     void MessageViewContainer::updateTranslateOptionsMenu()
     {
-        if (m_translateOptionsButton == nullptr || m_translateOptionsButton->menu() == nullptr)
+        if (m_translateOptionsMenu == nullptr)
         {
             return;
         }
 
         const auto sender = currentSenderAddress();
         const auto domain = currentSenderDomain();
-        for (auto* action : m_translateOptionsButton->menu()->actions())
+        for (auto* action : m_translateOptionsMenu->actions())
         {
             const auto kind = action->data().toString();
             QSignalBlocker blocker{action};
