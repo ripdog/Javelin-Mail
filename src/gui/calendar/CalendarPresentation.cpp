@@ -6,12 +6,32 @@
 #include <QDateTime>
 #include <QLocale>
 
+#include <array>
+#include <cstdint>
 #include <ranges>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace javelin::gui::calendar
 {
+    namespace
+    {
+        constexpr std::array automaticCalendarHues{210, 24,  145, 282, 355, 45, 180, 320,
+                                                   95,  250, 10,  165, 300, 70, 225, 340};
+
+        void hashCalendarIdentityPart(std::uint64_t& hash, const std::string_view part)
+        {
+            constexpr std::uint64_t fnvPrime = 1099511628211ULL;
+            for (const auto byte : part)
+            {
+                hash ^= static_cast<unsigned char>(byte);
+                hash *= fnvPrime;
+            }
+            hash ^= 0xffU;
+            hash *= fnvPrime;
+        }
+    } // namespace
+
     DayAgendaEvent dayAgendaEventFromMonthEvent(const MonthEvent& event)
     {
         return DayAgendaEvent{
@@ -88,11 +108,25 @@ namespace javelin::gui::calendar
         return i18n("Event: %1\nWhen: %2", title, when);
     }
 
+    QColor automaticCalendarColor(const std::string_view ownerAccountId,
+                                  const std::string_view accountId,
+                                  const std::string_view calendarId, const QColor& surfaceColor)
+    {
+        std::uint64_t hash = 14695981039346656037ULL;
+        hashCalendarIdentityPart(hash, ownerAccountId);
+        hashCalendarIdentityPart(hash, accountId);
+        hashCalendarIdentityPart(hash, calendarId);
+        const auto hue = automaticCalendarHues[hash % automaticCalendarHues.size()];
+        const bool darkSurface = surfaceColor.isValid() && surfaceColor.lightnessF() < 0.5;
+        return QColor::fromHslF(static_cast<float>(hue) / 360.0F, 0.58F,
+                                darkSurface ? 0.64F : 0.46F);
+    }
+
     CalendarAccountPresentation buildCalendarAccountPresentation(
         const javelin::jmap::cache::CalendarAccount& account,
         const std::vector<javelin::jmap::calendar::Calendar>& calendars,
         const std::optional<javelin::jmap::cache::CalendarWindow>& window,
-        const QColor& fallbackColor)
+        const QColor& surfaceColor)
     {
         CalendarAccountPresentation result;
         std::unordered_map<std::string, QColor> colors;
@@ -101,9 +135,14 @@ namespace javelin::gui::calendar
         for (const auto& calendar : calendars)
         {
             const auto key = account.accountId + '\n' + calendar.id;
-            const auto color =
-                calendar.color ? QColor{QString::fromStdString(*calendar.color)} : fallbackColor;
-            colors.emplace(key, color);
+            const auto serverColor =
+                calendar.color ? QColor{QString::fromStdString(*calendar.color)} : QColor{};
+            const auto displayColor =
+                serverColor.isValid()
+                    ? serverColor
+                    : automaticCalendarColor(account.ownerAccountId, account.accountId, calendar.id,
+                                             surfaceColor);
+            colors.emplace(key, displayColor);
             if (calendar.isSubscribed)
                 subscribedCalendars.insert(key);
             result.calendars.push_back({
@@ -113,7 +152,7 @@ namespace javelin::gui::calendar
                 .calendarId = calendar.id,
                 .accountName = QString::fromStdString(account.name),
                 .name = QString::fromStdString(calendar.name),
-                .color = color,
+                .color = serverColor,
                 .subscribed = calendar.isSubscribed,
                 .writable = calendar.myRights.mayWriteAll || calendar.myRights.mayWriteOwn,
                 .deletable = calendar.myRights.mayDelete,
@@ -163,7 +202,10 @@ namespace javelin::gui::calendar
                 .calendarId = displayCalendarId,
                 .eventId = event->second->id,
                 .title = QString::fromStdString(title),
-                .color = color == colors.end() ? fallbackColor : color->second,
+                .color = color == colors.end()
+                             ? automaticCalendarColor(account.ownerAccountId, account.accountId,
+                                                      calendarId->first, surfaceColor)
+                             : color->second,
                 .start = startTime,
                 .end = endTime,
                 .allDay = occurrence.allDay,

@@ -21,6 +21,22 @@ TEST_CASE("month calendar layout honors Sunday locale week starts", "[gui][calen
     CHECK(javelin::gui::calendar::monthGridStart(QDate{2026, 3, 1}, locale) == QDate{2026, 3, 1});
 }
 
+TEST_CASE("automatic calendar colors are stable and adapt only their lightness to the surface",
+          "[gui][calendar][color]")
+{
+    const auto light = javelin::gui::calendar::automaticCalendarColor(
+        "server-1", "account-1", "calendar-1", QColor{Qt::white});
+    const auto repeated = javelin::gui::calendar::automaticCalendarColor(
+        "server-1", "account-1", "calendar-1", QColor{Qt::white});
+    const auto dark = javelin::gui::calendar::automaticCalendarColor(
+        "server-1", "account-1", "calendar-1", QColor{Qt::black});
+
+    CHECK(light == repeated);
+    CHECK(light.hslHue() == dark.hslHue());
+    CHECK(light.hslSaturation() == dark.hslSaturation());
+    CHECK(light.lightness() < dark.lightness());
+}
+
 TEST_CASE("month calendar event capacity follows cell and font geometry", "[gui][calendar]")
 {
     using javelin::gui::calendar::monthCellVisibleEventCount;
@@ -130,14 +146,70 @@ TEST_CASE("calendar presentation includes events from subscribed calendars only"
     };
 
     const auto presentation = javelin::gui::calendar::buildCalendarAccountPresentation(
-        account, calendars, window, QColor{Qt::blue});
+        account, calendars, window, QColor{Qt::white});
 
     REQUIRE(presentation.calendars.size() == 2);
     CHECK(presentation.calendars[0].name == QStringLiteral("Subscribed"));
+    CHECK(presentation.calendars[0].color == QColor{QStringLiteral("#336699")});
     CHECK(presentation.calendars[0].subscribed);
     CHECK_FALSE(presentation.calendars[1].subscribed);
     REQUIRE(presentation.events.size() == 1);
     CHECK(presentation.events.front().eventId == "visible-event");
+    CHECK(presentation.events.front().color == QColor{QStringLiteral("#336699")});
+}
+
+TEST_CASE("calendar presentation leaves missing server colors unset and supplies an automatic "
+          "event color",
+          "[gui][calendar][color]")
+{
+    const javelin::jmap::cache::CalendarAccount account{
+        .ownerAccountId = "server-1",
+        .accountId = "a1",
+        .name = "Personal",
+    };
+    javelin::jmap::calendar::Calendar calendar;
+    calendar.accountId = "a1";
+    calendar.id = "calendar-without-color";
+    calendar.name = "Automatic";
+    calendar.isSubscribed = true;
+
+    javelin::jmap::calendar::CalendarEvent event;
+    event.accountId = "a1";
+    event.id = "event";
+    event.uid = "uid";
+    event.calendarIds = {{calendar.id, true}};
+    event.title = "Automatic color";
+    event.start = {.value = "2026-08-05T09:00:00"};
+    event.duration = {.value = "PT1H"};
+
+    javelin::jmap::calendar::Occurrence occurrence;
+    occurrence.accountId = "a1";
+    occurrence.id = "event";
+    occurrence.eventId = "event";
+    occurrence.localStart = {.value = "2026-08-05T09:00:00"};
+    occurrence.localEnd = {.value = "2026-08-05T10:00:00"};
+
+    const javelin::jmap::cache::CalendarWindow window{
+        .accountId = "a1",
+        .start = {.value = "2026-08-01T00:00:00"},
+        .end = {.value = "2026-09-01T00:00:00"},
+        .displayTimeZone = {.value = "Pacific/Auckland"},
+        .queryState = "q1",
+        .eventState = "e1",
+        .events = {event},
+        .occurrences = {occurrence},
+    };
+
+    const auto surface = QColor{Qt::white};
+    const auto presentation = javelin::gui::calendar::buildCalendarAccountPresentation(
+        account, {calendar}, window, surface);
+
+    REQUIRE(presentation.calendars.size() == 1);
+    CHECK_FALSE(presentation.calendars.front().color.isValid());
+    REQUIRE(presentation.events.size() == 1);
+    CHECK(presentation.events.front().color ==
+          javelin::gui::calendar::automaticCalendarColor(account.ownerAccountId, account.accountId,
+                                                         calendar.id, surface));
 }
 
 TEST_CASE("new event destination prefers the configured global calendar across accounts",

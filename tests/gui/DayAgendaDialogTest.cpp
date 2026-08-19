@@ -64,6 +64,30 @@ namespace
     }
 } // namespace
 
+TEST_CASE("calendar event selection border contrasts with the event fill",
+          "[gui][calendar][selection]")
+{
+    javelin::gui::calendar::CalendarEventButton button;
+    auto palette = button.palette();
+    palette.setColor(QPalette::Text, Qt::white);
+    palette.setColor(QPalette::Base, Qt::black);
+    button.setPalette(palette);
+    button.setEventPresentation(QStringLiteral("Dark event"), QStringLiteral("Dark event"),
+                                QColor{Qt::black});
+
+    CHECK(button.styleSheet().contains(
+        QStringLiteral("QToolButton:checked { border: 2px solid #ffffffff; }")));
+    CHECK_FALSE(button.styleSheet().contains(QStringLiteral("palette(highlight)")));
+
+    palette.setColor(QPalette::Text, Qt::black);
+    palette.setColor(QPalette::Base, Qt::white);
+    button.setPalette(palette);
+    button.setEventPresentation(QStringLiteral("Light event"), QStringLiteral("Light event"),
+                                QColor{Qt::white});
+    CHECK(button.styleSheet().contains(
+        QStringLiteral("QToolButton:checked { border: 2px solid #ff000000; }")));
+}
+
 TEST_CASE("day agenda base events preserve the month presentation without detail data",
           "[gui][calendar][agenda][presentation]")
 {
