@@ -72,6 +72,7 @@ namespace javelin::gui::messageview
                                   std::vector<javelin::jmap::cache::MessageListItem> messages);
         void refresh(javelin::jmap::cache::MessageViewReader& messageViewReader);
         void setErrorState(const QString& errorMessage);
+        void focusMessageBody();
         void appearanceSettingsChanged();
         void translationSettingsChanged();
 

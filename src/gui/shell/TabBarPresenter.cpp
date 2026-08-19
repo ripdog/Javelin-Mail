@@ -159,7 +159,8 @@ namespace javelin::gui::shell
 
         auto* closeButton = new QToolButton(&m_tabBar);
         closeButton->setAutoRaise(true);
-        closeButton->setText(QStringLiteral("x"));
+        closeButton->setIcon(QIcon::fromTheme(QStringLiteral("tab-close"),
+                                              QIcon::fromTheme(QStringLiteral("window-close"))));
         closeButton->setAccessibleName(i18nc("@action:button", "Close tab"));
         closeButton->setToolTip(i18nc("@info:tooltip", "Close tab"));
         connect(closeButton, &QToolButton::clicked, this,

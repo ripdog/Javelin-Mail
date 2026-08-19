@@ -54,7 +54,7 @@ configure_file(
     @ONLY
 )
 
-find_package(KF6 REQUIRED COMPONENTS Codecs ConfigWidgets XmlGui CoreAddons I18n TextEditor Wallet WidgetsAddons)
+find_package(KF6 REQUIRED COMPONENTS Codecs ConfigWidgets XmlGui CoreAddons I18n Sonnet TextEditor Wallet WidgetsAddons)
 find_package(KPim6Mime REQUIRED)
 find_package(KPim6MessageComposer REQUIRED)
 
@@ -1765,6 +1765,7 @@ target_link_libraries(javelin_gui
         Qt::WebEngineWidgets
         KF6::ConfigWidgets
         KF6::I18n
+        KF6::SonnetUi
         KF6::WidgetsAddons
         KF6::XmlGui
         KF6::TextEditor

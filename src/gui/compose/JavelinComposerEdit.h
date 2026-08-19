@@ -6,6 +6,7 @@
 #include <QString>
 #include <QStringList>
 
+class QMenu;
 class QMimeData;
 
 namespace MessageComposer
@@ -34,6 +35,7 @@ namespace javelin::gui::compose
         void inlineImageRequested(const QImage& image);
 
       protected:
+        void addExtraMenuEntry(QMenu* menu, QPoint position) override;
         void insertFromMimeData(const QMimeData* source) override;
         [[nodiscard]] bool canInsertFromMimeData(const QMimeData* source) const override;
     };

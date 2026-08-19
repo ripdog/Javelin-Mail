@@ -99,4 +99,18 @@ namespace javelin::gui::shell
         return std::max(0, closedIndex - 1);
     }
 
+    std::optional<int> activeTabIndexAfterMove(const std::optional<int> activeIndex,
+                                               const int fromIndex, const int toIndex)
+    {
+        if (!activeIndex.has_value() || fromIndex < 0 || toIndex < 0 || fromIndex == toIndex)
+            return activeIndex;
+        if (*activeIndex == fromIndex)
+            return toIndex;
+        if (fromIndex < toIndex && *activeIndex > fromIndex && *activeIndex <= toIndex)
+            return *activeIndex - 1;
+        if (toIndex < fromIndex && *activeIndex >= toIndex && *activeIndex < fromIndex)
+            return *activeIndex + 1;
+        return activeIndex;
+    }
+
 } // namespace javelin::gui::shell

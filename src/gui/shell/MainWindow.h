@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+class KCommandBar;
 class QCloseEvent;
 class QLabel;
 class QLineEdit;
@@ -196,6 +197,8 @@ namespace javelin::gui::shell
         void saveNewToolbarConfig() override;
 
       private:
+        struct ClosedTabState;
+
         static constexpr std::size_t messageWindowSize = 100;
 
         enum class ToolbarContext
@@ -245,7 +248,11 @@ namespace javelin::gui::shell
         void clearSearch();
         void showSortMenu();
         void setEmailListSort(javelin::jmap::query::EmailListSort sort);
+        void initializeCommandPalette();
         void updateTabBar();
+        void activateRelativeTab(int offset);
+        void moveMessageSelection(int direction, bool unreadOnly);
+        void reopenLastClosedTab();
         void activateTab(int index, bool refreshRemote = false);
         void openOrActivateMailboxTab(std::string accountId, std::string mailboxId, QString title,
                                       std::optional<std::string> role, bool refreshRemote);
@@ -340,6 +347,7 @@ namespace javelin::gui::shell
         QuickFilterController* m_quickFilterController = nullptr;
         TabBarPresenter* m_tabBarPresenter = nullptr;
         ThemeController* m_themeController = nullptr;
+        KCommandBar* m_commandBar = nullptr;
         std::unique_ptr<javelin::gui::messages::MessageListPanePresenter>
             m_messageListPanePresenter;
         std::unique_ptr<MessageListTabPresenter> m_messageListTabPresenter;
@@ -365,6 +373,19 @@ namespace javelin::gui::shell
         LayeredStatusBar* m_statusBar = nullptr;
         QAction* m_undoAction = nullptr;
         QAction* m_redoAction = nullptr;
+        QAction* m_searchActionsAction = nullptr;
+        QAction* m_closeTabAction = nullptr;
+        QAction* m_previousTabAction = nullptr;
+        QAction* m_nextTabAction = nullptr;
+        QAction* m_reopenClosedTabAction = nullptr;
+        QAction* m_previousMessageAction = nullptr;
+        QAction* m_nextMessageAction = nullptr;
+        QAction* m_previousUnreadMessageAction = nullptr;
+        QAction* m_nextUnreadMessageAction = nullptr;
+        QAction* m_focusMailboxTreeAction = nullptr;
+        QAction* m_focusMessageListAction = nullptr;
+        QAction* m_focusMessageReaderAction = nullptr;
+        QAction* m_focusSearchAction = nullptr;
         QAction* m_refreshAction = nullptr;
         QAction* m_saveCurrentAction = nullptr;
         QAction* m_exportMailboxAction = nullptr;
@@ -434,6 +455,7 @@ namespace javelin::gui::shell
         std::optional<int>& m_activeTabIndex;
         std::vector<TabState>& m_tabs;
         bool m_modelUpdateInProgress = false;
+        std::unique_ptr<ClosedTabState> m_lastClosedTab;
         javelin::gui::developer::DeveloperOptionsDialog* m_developerOptionsDialog = nullptr;
         std::optional<std::string> m_pendingInitialMailboxAccountId;
     };

@@ -79,6 +79,7 @@
 #include <QCoroTask>
 
 #include <KActionCollection>
+#include <KCommandBar>
 #include <KLocalizedString>
 #include <KStandardAction>
 #include <KToolBar>
@@ -128,6 +129,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <type_traits>
+#include <utility>
+#include <variant>
 
 namespace javelin::gui::shell
 {
@@ -572,9 +576,11 @@ namespace javelin::gui::shell
                     m_calendarTabController->accountsChanged();
                 });
         createActions();
+        setCommandBarEnabled(false);
         setupGUI(KXmlGuiWindow::ToolBar | KXmlGuiWindow::Keys | KXmlGuiWindow::Save |
                      KXmlGuiWindow::Create,
                  QStringLiteral("javelinmailui.rc"));
+        initializeCommandPalette();
         m_emailContextMenu = qobject_cast<QMenu*>(
             guiFactory()->container(QStringLiteral("email_context_menu"), this));
         if (m_emailContextMenu != nullptr)
@@ -696,6 +702,11 @@ namespace javelin::gui::shell
         stateSaveTimer->start();
     }
 
+    struct MainWindow::ClosedTabState
+    {
+        PersistedTab tab;
+    };
+
     MainWindow::~MainWindow() = default;
 
     void MainWindow::openEmailRoute(const javelin::app::OpenEmailRoute& route)
@@ -786,6 +797,130 @@ namespace javelin::gui::shell
         if (!redoShortcuts.contains(controlShiftZ))
             redoShortcuts.prepend(controlShiftZ);
         actionCollection()->setDefaultShortcuts(m_redoAction, redoShortcuts);
+
+        m_searchActionsAction = new QAction(QIcon::fromTheme(QStringLiteral("system-search")),
+                                            i18nc("@action", "Search Actions…"), this);
+        connect(m_searchActionsAction, &QAction::triggered, this,
+                [this]
+                {
+                    if (m_commandBar != nullptr)
+                        m_commandBar->show();
+                });
+        actionCollection()->addAction(QStringLiteral("search_actions"), m_searchActionsAction);
+        actionCollection()->setDefaultShortcut(m_searchActionsAction,
+                                               QKeySequence{Qt::CTRL | Qt::SHIFT | Qt::Key_P});
+
+        m_closeTabAction = new QAction(QIcon::fromTheme(QStringLiteral("tab-close")),
+                                       i18nc("@action", "Close Tab"), this);
+        connect(m_closeTabAction, &QAction::triggered, this,
+                [this]
+                {
+                    if (m_activeTabIndex.has_value())
+                        closeTab(*m_activeTabIndex);
+                });
+        actionCollection()->addAction(QStringLiteral("close_tab"), m_closeTabAction);
+        actionCollection()->setDefaultShortcuts(m_closeTabAction,
+                                                QKeySequence::keyBindings(QKeySequence::Close));
+
+        m_previousTabAction = new QAction(QIcon::fromTheme(QStringLiteral("go-previous")),
+                                          i18nc("@action", "Previous Tab"), this);
+        connect(m_previousTabAction, &QAction::triggered, this,
+                [this] { activateRelativeTab(-1); });
+        actionCollection()->addAction(QStringLiteral("previous_tab"), m_previousTabAction);
+        actionCollection()->setDefaultShortcuts(
+            m_previousTabAction, QKeySequence::keyBindings(QKeySequence::PreviousChild));
+
+        m_nextTabAction = new QAction(QIcon::fromTheme(QStringLiteral("go-next")),
+                                      i18nc("@action", "Next Tab"), this);
+        connect(m_nextTabAction, &QAction::triggered, this, [this] { activateRelativeTab(1); });
+        actionCollection()->addAction(QStringLiteral("next_tab"), m_nextTabAction);
+        actionCollection()->setDefaultShortcuts(m_nextTabAction,
+                                                QKeySequence::keyBindings(QKeySequence::NextChild));
+
+        m_reopenClosedTabAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-undo")),
+                                              i18nc("@action", "Reopen Closed Tab"), this);
+        connect(m_reopenClosedTabAction, &QAction::triggered, this,
+                &MainWindow::reopenLastClosedTab);
+        actionCollection()->addAction(QStringLiteral("reopen_closed_tab"), m_reopenClosedTabAction);
+        actionCollection()->setDefaultShortcut(m_reopenClosedTabAction,
+                                               QKeySequence{Qt::CTRL | Qt::SHIFT | Qt::Key_T});
+        m_reopenClosedTabAction->setEnabled(false);
+
+        m_previousMessageAction = new QAction(QIcon::fromTheme(QStringLiteral("go-up")),
+                                              i18nc("@action", "Previous Message"), this);
+        connect(m_previousMessageAction, &QAction::triggered, this,
+                [this] { moveMessageSelection(-1, false); });
+        actionCollection()->addAction(QStringLiteral("previous_message"), m_previousMessageAction);
+        actionCollection()->setDefaultShortcut(m_previousMessageAction,
+                                               QKeySequence{Qt::ALT | Qt::Key_Up});
+
+        m_nextMessageAction = new QAction(QIcon::fromTheme(QStringLiteral("go-down")),
+                                          i18nc("@action", "Next Message"), this);
+        connect(m_nextMessageAction, &QAction::triggered, this,
+                [this] { moveMessageSelection(1, false); });
+        actionCollection()->addAction(QStringLiteral("next_message"), m_nextMessageAction);
+        actionCollection()->setDefaultShortcut(m_nextMessageAction,
+                                               QKeySequence{Qt::ALT | Qt::Key_Down});
+
+        m_previousUnreadMessageAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("mail-unread")),
+                        i18nc("@action", "Previous Unread Message"), this);
+        connect(m_previousUnreadMessageAction, &QAction::triggered, this,
+                [this] { moveMessageSelection(-1, true); });
+        actionCollection()->addAction(QStringLiteral("previous_unread_message"),
+                                      m_previousUnreadMessageAction);
+        actionCollection()->setDefaultShortcut(m_previousUnreadMessageAction,
+                                               QKeySequence{Qt::CTRL | Qt::ALT | Qt::Key_Up});
+
+        m_nextUnreadMessageAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-unread")),
+                                                i18nc("@action", "Next Unread Message"), this);
+        connect(m_nextUnreadMessageAction, &QAction::triggered, this,
+                [this] { moveMessageSelection(1, true); });
+        actionCollection()->addAction(QStringLiteral("next_unread_message"),
+                                      m_nextUnreadMessageAction);
+        actionCollection()->setDefaultShortcut(m_nextUnreadMessageAction,
+                                               QKeySequence{Qt::CTRL | Qt::ALT | Qt::Key_Down});
+
+        m_focusMailboxTreeAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("mail-folder-inbox")),
+                        i18nc("@action", "Focus Mailbox Tree"), this);
+        connect(m_focusMailboxTreeAction, &QAction::triggered, this,
+                [this] { m_mailboxView->setFocus(Qt::ShortcutFocusReason); });
+        actionCollection()->addAction(QStringLiteral("focus_mailbox_tree"),
+                                      m_focusMailboxTreeAction);
+        actionCollection()->setDefaultShortcut(m_focusMailboxTreeAction,
+                                               QKeySequence{Qt::ALT | Qt::Key_1});
+
+        m_focusMessageListAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("view-list-details")),
+                        i18nc("@action", "Focus Message List"), this);
+        connect(m_focusMessageListAction, &QAction::triggered, this,
+                [this] { m_messageView->setFocus(Qt::ShortcutFocusReason); });
+        actionCollection()->addAction(QStringLiteral("focus_message_list"),
+                                      m_focusMessageListAction);
+        actionCollection()->setDefaultShortcut(m_focusMessageListAction,
+                                               QKeySequence{Qt::ALT | Qt::Key_2});
+
+        m_focusMessageReaderAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-read")),
+                                                 i18nc("@action", "Focus Message Reader"), this);
+        connect(m_focusMessageReaderAction, &QAction::triggered, m_messageViewContainer,
+                &javelin::gui::messageview::MessageViewContainer::focusMessageBody);
+        actionCollection()->addAction(QStringLiteral("focus_message_reader"),
+                                      m_focusMessageReaderAction);
+        actionCollection()->setDefaultShortcut(m_focusMessageReaderAction,
+                                               QKeySequence{Qt::ALT | Qt::Key_3});
+
+        m_focusSearchAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-find")),
+                                          i18nc("@action", "Focus Search Field"), this);
+        connect(m_focusSearchAction, &QAction::triggered, this,
+                [this]
+                {
+                    m_mailboxSearchEdit->setFocus(Qt::ShortcutFocusReason);
+                    m_mailboxSearchEdit->selectAll();
+                });
+        actionCollection()->addAction(QStringLiteral("focus_search_field"), m_focusSearchAction);
+        actionCollection()->setDefaultShortcut(m_focusSearchAction,
+                                               QKeySequence{Qt::ALT | Qt::Key_0});
 
         m_saveCurrentAction = new QAction(QIcon::fromTheme(QStringLiteral("document-save")),
                                           i18nc("@action", "Save"), this);
@@ -1411,11 +1546,13 @@ namespace javelin::gui::shell
         m_tabBar = new QTabBar(this);
         m_tabBar->setDocumentMode(true);
         m_tabBar->setTabsClosable(true);
+        m_tabBar->setMovable(true);
         m_tabBar->setExpanding(false);
         m_tabBar->setElideMode(Qt::ElideRight);
         m_tabBar->setUsesScrollButtons(true);
         m_tabBar->setStyleSheet(
             QStringLiteral("QTabBar::tab { max-width: 220px; min-width: 120px; }"));
+        m_tabBar->installEventFilter(this);
         m_tabBar->hide();
         m_tabBarPresenter = new TabBarPresenter(m_settings, *m_tabBar, *this, this);
 
@@ -1866,6 +2003,19 @@ namespace javelin::gui::shell
                     activateTab(index, true);
                 });
         connect(m_tabBar, &QTabBar::tabCloseRequested, this, &MainWindow::closeTab);
+        connect(m_tabBar, &QTabBar::tabMoved, this,
+                [this](const int fromIndex, const int toIndex)
+                {
+                    if (!m_mailWorkspaceController->moveTab(fromIndex, toIndex))
+                    {
+                        const QSignalBlocker blocker{m_tabBar};
+                        m_tabBar->moveTab(toIndex, fromIndex);
+                        return;
+                    }
+                    updateTabBar();
+                    if (m_activeTabIndex.has_value())
+                        activateTab(*m_activeTabIndex, false);
+                });
         connect(m_tabBarPresenter, &TabBarPresenter::closeRequested, this, &MainWindow::closeTab);
         connect(m_messageListFooterRetryButton, &QToolButton::clicked, this,
                 &MainWindow::loadMoreMessages);
@@ -2236,9 +2386,98 @@ namespace javelin::gui::shell
         return tab == nullptr ? std::optional<std::string>{std::nullopt} : tabMailboxId(*tab);
     }
 
+    void MainWindow::initializeCommandPalette()
+    {
+        m_commandBar = new KCommandBar(this);
+        KCommandBar::ActionGroup group;
+        group.name = i18n("Javelin Mail");
+        for (auto* action : actionCollection()->actions())
+        {
+            if (action == nullptr || action == m_searchActionsAction || action->isSeparator() ||
+                action->text().trimmed().isEmpty())
+            {
+                continue;
+            }
+            group.actions.push_back(action);
+        }
+        m_commandBar->setActions({group});
+    }
+
     void MainWindow::updateTabBar()
     {
         m_tabBarPresenter->refresh(m_tabs, m_activeTabIndex);
+    }
+
+    void MainWindow::activateRelativeTab(const int offset)
+    {
+        if (m_tabs.size() < 2 || offset == 0)
+            return;
+
+        const int count = static_cast<int>(m_tabs.size());
+        const int current = m_activeTabIndex.value_or(0);
+        const int target = ((current + offset) % count + count) % count;
+        activateTab(target, false);
+    }
+
+    void MainWindow::moveMessageSelection(const int direction, const bool unreadOnly)
+    {
+        if (direction == 0 || toolbarContextForActiveTab() != ToolbarContext::Mail ||
+            m_messageModel->rowCount() <= 0)
+        {
+            return;
+        }
+
+        const auto current = m_messageView->currentIndex();
+        int row =
+            current.isValid() ? current.row() : (direction > 0 ? -1 : m_messageModel->rowCount());
+        for (row += direction; row >= 0 && row < m_messageModel->rowCount(); row += direction)
+        {
+            const auto index = m_messageModel->index(row, 0);
+            if (!index.isValid() ||
+                (unreadOnly &&
+                 !index.data(javelin::gui::messages::MessageListModel::IsUnreadRole).toBool()))
+            {
+                continue;
+            }
+
+            m_messageView->selectionModel()->setCurrentIndex(
+                index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+            m_messageView->scrollTo(index);
+            return;
+        }
+    }
+
+    void MainWindow::reopenLastClosedTab()
+    {
+        if (m_lastClosedTab == nullptr)
+            return;
+
+        auto persisted = m_lastClosedTab->tab;
+        const auto previousTabCount = m_tabs.size();
+        std::visit(
+            [this](auto& tab)
+            {
+                using Persisted = std::decay_t<decltype(tab)>;
+                if constexpr (std::is_same_v<Persisted, PersistedMailboxTab>)
+                    restoreMailboxTab(tab);
+                else if constexpr (std::is_same_v<Persisted, PersistedSearchTab>)
+                    restoreSearchTab(std::move(tab));
+                else if constexpr (std::is_same_v<Persisted, PersistedContactsTab>)
+                    restoreContactsTab(tab);
+                else if constexpr (std::is_same_v<Persisted, PersistedCalendarTab>)
+                    m_calendarTabController->open(tab.displayedMonth);
+            },
+            persisted);
+
+        if (m_tabs.size() <= previousTabCount)
+            return;
+
+        m_lastClosedTab.reset();
+        m_reopenClosedTabAction->setEnabled(false);
+        const int index = static_cast<int>(m_tabs.size() - 1);
+        m_mailWorkspaceController->setActiveIndex(index);
+        updateTabBar();
+        activateTab(index, false);
     }
 
     MainWindow::ToolbarContext MainWindow::toolbarContextForActiveTab() const
@@ -2267,6 +2506,21 @@ namespace javelin::gui::shell
     void MainWindow::updateToolbarForActiveTab()
     {
         const auto context = toolbarContextForActiveTab();
+        const bool mailContext = context == ToolbarContext::Mail;
+        m_closeTabAction->setEnabled(
+            m_activeTabIndex.has_value() &&
+            tabCanClose(m_tabs[static_cast<std::size_t>(*m_activeTabIndex)],
+                        static_cast<std::size_t>(*m_activeTabIndex)));
+        m_previousTabAction->setEnabled(m_tabs.size() > 1);
+        m_nextTabAction->setEnabled(m_tabs.size() > 1);
+        m_previousMessageAction->setEnabled(mailContext);
+        m_nextMessageAction->setEnabled(mailContext);
+        m_previousUnreadMessageAction->setEnabled(mailContext);
+        m_nextUnreadMessageAction->setEnabled(mailContext);
+        m_focusMailboxTreeAction->setEnabled(mailContext);
+        m_focusMessageListAction->setEnabled(mailContext);
+        m_focusMessageReaderAction->setEnabled(mailContext);
+        m_focusSearchAction->setEnabled(mailContext);
         m_contactsAction->setEnabled(m_contactsTabController->available());
         const auto selectedAccount = activeAccountId();
         m_exportMailboxAction->setEnabled(context == ToolbarContext::Mail && activeTabIsMailbox() &&
@@ -2488,28 +2742,35 @@ namespace javelin::gui::shell
         {
             return;
         }
-        if (!tabCanClose(m_tabs[static_cast<std::size_t>(index)], static_cast<std::size_t>(index)))
+        auto& tab = m_tabs[static_cast<std::size_t>(index)];
+        if (!tabCanClose(tab, static_cast<std::size_t>(index)))
         {
             return;
         }
 
-        if (tabKind(m_tabs[static_cast<std::size_t>(index)]) == TabKind::Compose &&
-            !closeComposeTab(index))
+        const auto kind = tabKind(tab);
+        std::unique_ptr<ClosedTabState> closedTab;
+        if (kind != TabKind::Compose)
+            closedTab = std::make_unique<ClosedTabState>(ClosedTabState{persistTab(tab)});
+
+        if (kind == TabKind::Compose && !closeComposeTab(index))
         {
             return;
         }
 
-        if (tabKind(m_tabs[static_cast<std::size_t>(index)]) == TabKind::Contacts &&
-            !m_contactsTabController->close(m_tabs[static_cast<std::size_t>(index)]))
+        if (kind == TabKind::Contacts && !m_contactsTabController->close(tab))
         {
             return;
         }
 
-        if (tabKind(m_tabs[static_cast<std::size_t>(index)]) == TabKind::Calendar)
-            static_cast<void>(
-                m_calendarTabController->close(m_tabs[static_cast<std::size_t>(index)]));
+        if (kind == TabKind::Calendar)
+            static_cast<void>(m_calendarTabController->close(tab));
 
-        static_cast<void>(m_mailWorkspaceController->eraseTab(index));
+        if (!m_mailWorkspaceController->eraseTab(index))
+            return;
+
+        m_lastClosedTab = std::move(closedTab);
+        m_reopenClosedTabAction->setEnabled(m_lastClosedTab != nullptr);
         if (!m_activeTabIndex.has_value())
         {
             activateTab(-1, false);
@@ -3076,6 +3337,20 @@ namespace javelin::gui::shell
             event->type() == QEvent::MouseButtonRelease)
         {
             QTimer::singleShot(0, this, &MainWindow::updateUndoRedoActions);
+        }
+
+        if (watched == m_tabBar && event->type() == QEvent::MouseButtonRelease)
+        {
+            const auto* mouseEvent = static_cast<QMouseEvent*>(event);
+            if (mouseEvent->button() == Qt::MiddleButton)
+            {
+                const int index = m_tabBar->tabAt(mouseEvent->position().toPoint());
+                if (index >= 0)
+                {
+                    closeTab(index);
+                    return true;
+                }
+            }
         }
 
         if (watched == m_messageView->viewport() && event->type() == QEvent::MouseButtonPress)

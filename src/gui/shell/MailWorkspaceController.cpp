@@ -1,5 +1,7 @@
 #include "gui/shell/MailWorkspaceController.h"
 
+#include <utility>
+
 namespace javelin::gui::shell
 {
     MailWorkspaceController::MailWorkspaceController(
@@ -149,6 +151,24 @@ namespace javelin::gui::shell
         if (index.has_value() && (*index < 0 || static_cast<std::size_t>(*index) >= m_tabs.size()))
             index.reset();
         m_activeIndex = index;
+    }
+
+    bool MailWorkspaceController::moveTab(const int fromIndex, const int toIndex)
+    {
+        if (fromIndex < 0 || toIndex < 0 || fromIndex == toIndex ||
+            static_cast<std::size_t>(fromIndex) >= m_tabs.size() ||
+            static_cast<std::size_t>(toIndex) >= m_tabs.size())
+            return false;
+
+        const bool hasPinnedHome = !m_tabs.empty() && !tabCanClose(m_tabs.front(), 0);
+        if (hasPinnedHome && (fromIndex == 0 || toIndex == 0))
+            return false;
+
+        m_activeIndex = activeTabIndexAfterMove(m_activeIndex, fromIndex, toIndex);
+        auto moved = std::move(m_tabs[static_cast<std::size_t>(fromIndex)]);
+        m_tabs.erase(m_tabs.begin() + fromIndex);
+        m_tabs.insert(m_tabs.begin() + toIndex, std::move(moved));
+        return true;
     }
 
     bool MailWorkspaceController::eraseTab(const int index)

@@ -106,5 +106,7 @@ namespace javelin::gui::shell
     [[nodiscard]] std::optional<int> activeTabIndexAfterClose(std::size_t tabCountBeforeClose,
                                                               std::optional<int> activeIndex,
                                                               int closedIndex);
+    [[nodiscard]] std::optional<int> activeTabIndexAfterMove(std::optional<int> activeIndex,
+                                                             int fromIndex, int toIndex);
 
 } // namespace javelin::gui::shell

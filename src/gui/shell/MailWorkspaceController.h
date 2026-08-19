@@ -55,6 +55,7 @@ namespace javelin::gui::shell
         [[nodiscard]] int restoreSearch(SearchTabSessionSpec spec);
 
         void setActiveIndex(std::optional<int> index);
+        [[nodiscard]] bool moveTab(int fromIndex, int toIndex);
         [[nodiscard]] bool eraseTab(int index);
         void
         markTabsStaleForAccount(std::string_view accountId,

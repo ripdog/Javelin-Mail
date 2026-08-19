@@ -28,6 +28,21 @@ TEST_CASE("composer paste sanitization preserves content without foreign styling
     CHECK(sanitized.contains(QStringLiteral("https://example.com")));
 }
 
+TEST_CASE("composer enables Sonnet spell checking in rich and plain modes",
+          "[gui][compose][composer][spellcheck]")
+{
+    javelin::gui::compose::JavelinComposerEdit editor;
+
+    CHECK(editor.spellCheckingSupport());
+    CHECK(editor.checkSpellingEnabled());
+    CHECK(editor.activateLanguageMenu());
+
+    editor.switchToPlainText();
+    CHECK(editor.spellCheckingSupport());
+    CHECK(editor.checkSpellingEnabled());
+    CHECK(editor.activateLanguageMenu());
+}
+
 TEST_CASE("KDE body generation produces matching HTML and plain alternatives",
           "[gui][compose][composer]")
 {

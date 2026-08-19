@@ -71,6 +71,19 @@ TEST_CASE("tab workspace close policy matches the existing previous-tab selectio
     CHECK(activeTabIndexAfterClose(4, 2, 8) == std::optional<int>{2});
 }
 
+TEST_CASE("tab workspace tracks the active tab across tab moves", "[gui][tabs]")
+{
+    using javelin::gui::shell::activeTabIndexAfterMove;
+
+    CHECK(activeTabIndexAfterMove(2, 2, 4) == std::optional<int>{4});
+    CHECK(activeTabIndexAfterMove(3, 1, 4) == std::optional<int>{2});
+    CHECK(activeTabIndexAfterMove(2, 4, 1) == std::optional<int>{3});
+    CHECK(activeTabIndexAfterMove(0, 2, 4) == std::optional<int>{0});
+    CHECK(activeTabIndexAfterMove(std::nullopt, 2, 4) == std::nullopt);
+    CHECK(activeTabIndexAfterMove(2, -1, 4) == std::optional<int>{2});
+    CHECK(activeTabIndexAfterMove(2, 2, 2) == std::optional<int>{2});
+}
+
 TEST_CASE("tab workspace exposes one selection state for every tab kind", "[gui][tabs]")
 {
     auto tab = composeTab();

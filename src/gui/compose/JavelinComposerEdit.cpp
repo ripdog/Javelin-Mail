@@ -7,7 +7,12 @@
 #include <KPIMTextEdit/RichTextComposerControler>
 #include <MessageComposer/MessageComposerSettings>
 #include <MessageComposer/TextPart>
+#include <Sonnet/ConfigDialog>
 
+#include <KLocalizedString>
+
+#include <QIcon>
+#include <QMenu>
 #include <QMimeData>
 #include <QRegularExpression>
 #include <QTextBlock>
@@ -191,6 +196,29 @@ namespace javelin::gui::compose
     JavelinComposerEdit::JavelinComposerEdit(QWidget* parent)
         : MessageComposer::RichTextComposerNg(parent)
     {
+        setSpellCheckingSupport(true);
+        setActivateLanguageMenu(true);
+        setCheckSpellingEnabled(true);
+    }
+
+    void JavelinComposerEdit::addExtraMenuEntry(QMenu* menu, const QPoint position)
+    {
+        Q_UNUSED(position);
+        menu->addSeparator();
+        auto* configure = menu->addAction(QIcon::fromTheme(QStringLiteral("tools-check-spelling")),
+                                          i18n("Configure Spell Checking…"));
+        connect(configure, &QAction::triggered, this,
+                [this]
+                {
+                    Sonnet::ConfigDialog dialog(this);
+                    if (!spellCheckingLanguage().isEmpty())
+                        dialog.setLanguage(spellCheckingLanguage());
+                    if (dialog.exec() != QDialog::Accepted)
+                        return;
+                    if (!dialog.language().isEmpty())
+                        setSpellCheckingLanguage(dialog.language());
+                    setCheckSpellingEnabled(true);
+                });
     }
 
     void JavelinComposerEdit::fillComposerTextPart(MessageComposer::TextPart* textPart)

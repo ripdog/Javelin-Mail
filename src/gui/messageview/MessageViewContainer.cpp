@@ -681,6 +681,28 @@ namespace javelin::gui::messageview
 
     MessageViewContainer::~MessageViewContainer() = default;
 
+    void MessageViewContainer::focusMessageBody()
+    {
+        if (m_bodyPresenter == nullptr)
+            return;
+
+        switch (m_bodyPresenter->activeView())
+        {
+        case ActiveView::Html:
+            m_htmlView->setFocus(Qt::ShortcutFocusReason);
+            break;
+        case ActiveView::PlainText:
+            m_plainTextView->setFocus(Qt::ShortcutFocusReason);
+            break;
+        case ActiveView::Multiple:
+            m_multipleSelectionScrollArea->setFocus(Qt::ShortcutFocusReason);
+            break;
+        case ActiveView::Placeholder:
+            m_bodyStack->setFocus(Qt::ShortcutFocusReason);
+            break;
+        }
+    }
+
     void MessageViewContainer::changeEvent(QEvent* event)
     {
         QWidget::changeEvent(event);

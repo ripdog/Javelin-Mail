@@ -1,5 +1,5 @@
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
-<gui name="javelinmail" version="21">
+<gui name="javelinmail" version="22">
   <MenuBar>
     <Menu name="file"><text>&amp;File</text>
       <Action name="compose_new_message"/>
@@ -9,6 +9,7 @@
         <Action name="export_account"/>
       </Menu>
       <Separator/>
+      <Action name="close_tab"/>
       <Action name="quit_application"/>
     </Menu>
     <Menu name="edit"><text>&amp;Edit</text>
@@ -40,6 +41,21 @@
       <Action name="move_email"/>
       <Action name="copy_email"/>
     </Menu>
+    <Menu name="navigate"><text>&amp;Navigate</text>
+      <Action name="previous_message"/>
+      <Action name="next_message"/>
+      <Action name="previous_unread_message"/>
+      <Action name="next_unread_message"/>
+      <Separator/>
+      <Action name="previous_tab"/>
+      <Action name="next_tab"/>
+      <Action name="reopen_closed_tab"/>
+      <Separator/>
+      <Action name="focus_mailbox_tree"/>
+      <Action name="focus_message_list"/>
+      <Action name="focus_message_reader"/>
+      <Action name="focus_search_field"/>
+    </Menu>
     <Menu name="settings"><text>&amp;Settings</text>
       <Action name="options_configure"/>
       <Action name="configure_email_context_menu"/>
@@ -48,6 +64,8 @@
       <Action name="open_developer_options"/>
     </Menu>
     <Menu name="help"><text>&amp;Help</text>
+      <Action name="search_actions"/>
+      <Separator/>
       <Action name="open_application_log"/>
     </Menu>
   </MenuBar>

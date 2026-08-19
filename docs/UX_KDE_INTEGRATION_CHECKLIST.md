@@ -8,24 +8,25 @@ should be suitable for picking up in a separate implementation thread.
 
 Items are ordered approximately from lowest to highest implementation difficulty, not by product
 priority. Preserve the existing daemon/GUI ownership model and SQLite source of truth throughout.
+Check off completed items as you commit.
 
 ## Low difficulty
 
-### [ ] Add Sonnet spell checking to compose
+### [x] Add Sonnet spell checking to compose
 
 - Add KF6 Sonnet spell checking to rich and plain-text composition, including context-menu
   suggestions and the normal dictionary/configuration UI.
 - Reuse Javelin's existing language detection where useful for initial dictionary selection.
 - Do not introduce a second text-editing stack solely for spell checking.
 
-### [ ] Add a command palette
+### [x] Add a command palette
 
 - Add a `KCommandBar`-style "Search Actions…" command palette over Javelin's existing `QAction` /
   KXMLGUI actions.
 - Keep actions as the source of truth so shortcuts, menus, toolbars, and the command palette invoke the
   same commands.
 
-### [ ] Improve tab conventions and keyboard navigation
+### [x] Improve tab conventions and keyboard navigation
 
 - Make tabs movable, use a themed close icon, support middle-click close, `Ctrl+W`, next/previous tab,
   and reopen-last-closed where state can be restored safely.
