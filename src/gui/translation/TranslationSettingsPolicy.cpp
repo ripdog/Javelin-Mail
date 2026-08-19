@@ -92,21 +92,6 @@ namespace javelin::gui::translation
         return canonicalTag.toString();
     }
 
-    QString mozillaLanguageTag(const QStringView canonicalTag)
-    {
-        if (canonicalTag == QStringLiteral("zh-Hans"))
-        {
-            return QStringLiteral("zh");
-        }
-        if (canonicalTag == QStringLiteral("zh-Hant"))
-        {
-            return QStringLiteral("zh_hant");
-        }
-        auto value = canonicalTag.toString();
-        value.replace(QLatin1Char('-'), QLatin1Char('_'));
-        return value;
-    }
-
     QString translationProviderStorageName(const TranslationProvider provider)
     {
         switch (provider)

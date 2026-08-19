@@ -202,9 +202,7 @@ namespace javelin::app
         [[nodiscard]] AccountRuntimeManager& accountRuntimeManager();
         [[nodiscard]] MailQueryApplicationService& mailQueryApplicationService();
         [[nodiscard]] MailMutationApplicationService& mailMutationApplicationService();
-        [[nodiscard]] MessageContentApplicationService& messageContentApplicationService();
         [[nodiscard]] MailNotificationService& mailNotificationService();
-        [[nodiscard]] ContactApplicationService& contactApplicationService();
         [[nodiscard]] CalendarApplicationService& calendarApplicationService();
         [[nodiscard]] SieveApplicationService& sieveApplicationService();
         [[nodiscard]] MessageNavigationPort& messageNavigationPort();

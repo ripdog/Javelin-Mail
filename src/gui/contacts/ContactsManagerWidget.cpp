@@ -3278,21 +3278,6 @@ namespace javelin::gui::contacts
             i18n("Deleting address book…"));
     }
 
-    void ContactsManagerWidget::setDefaultAddressBook(std::string accountId,
-                                                      javelin::jmap::api::AddressBook book)
-    {
-        const auto account = std::ranges::find(m_accounts, accountId,
-                                               &javelin::jmap::cache::ContactAccount::accountId);
-        if (account == m_accounts.end() || account->isReadOnly || !book.myRights.mayWrite)
-            return;
-        applyAddressBookMutation(
-            javelin::app::SetDefaultAddressBookCommand{
-                .accountId = std::move(accountId),
-                .addressBookId = book.id,
-            },
-            i18n("Changing default address book…"));
-    }
-
     bool ContactsManagerWidget::canSetAddressBookSubscription(
         const std::string_view accountId, const javelin::jmap::api::AddressBook& book,
         const bool subscribed) const

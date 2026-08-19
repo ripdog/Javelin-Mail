@@ -44,8 +44,6 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::optional<DatabaseError>
         removePendingCreate(DatabaseTransaction& transaction, std::string_view accountId,
                             std::string_view creationId);
-        [[nodiscard]] std::optional<DatabaseError>
-        removeAllPendingCreates(DatabaseTransaction& transaction, std::string_view accountId);
 
         [[nodiscard]] std::variant<std::vector<javelin::jmap::domain::Identity>, DatabaseError>
         listByAccount(std::string_view accountId) const override;

@@ -75,7 +75,6 @@ namespace javelin::gui::compose
         void switchEditorMode(bool richText);
         void setBusy(bool busy);
         void updateActions();
-        [[nodiscard]] std::optional<AccountEntry> accountEntry(std::string_view accountId) const;
         [[nodiscard]] std::optional<std::string> selectedAccountId() const;
         [[nodiscard]] std::optional<std::string> selectedIdentityId() const;
 

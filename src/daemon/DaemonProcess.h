@@ -118,8 +118,6 @@ namespace javelin::app
 
       Q_SIGNALS:
         void ready();
-        void guiConnected();
-        void guiDisconnected();
         void shutdownRequested();
 
       private:

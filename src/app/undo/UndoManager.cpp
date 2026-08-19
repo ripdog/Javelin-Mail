@@ -328,8 +328,6 @@ namespace javelin::app::undo
             co_return false;
         }
         static_cast<void>(reload());
-        Q_EMIT executionStarted(entry->entryId);
-
         const auto direction = stack == HistoryStack::Undo ? HistoryExecutionDirection::Undo
                                                            : HistoryExecutionDirection::Redo;
         auto result = co_await executor->execute(*entry, direction);
@@ -367,7 +365,6 @@ namespace javelin::app::undo
             break;
         case HistoryExecutionOutcome::Expired:
             entry->status = HistoryEntryStatus::Expired;
-            Q_EMIT entryExpired(entry->entryId);
             break;
         case HistoryExecutionOutcome::Conflict:
         case HistoryExecutionOutcome::DefinitiveFailure:

@@ -336,22 +336,6 @@ namespace javelin::jmap::cache
         return std::nullopt;
     }
 
-    std::optional<DatabaseError>
-    IdentityRepository::removeAllPendingCreates(DatabaseTransaction& transaction,
-                                                const std::string_view accountId)
-    {
-        if (const auto error = requireWritableTransaction(
-                transaction, QStringLiteral("Identity create projection removal")))
-            return error;
-        QSqlQuery query{m_writeConnection->database()};
-        query.prepare(
-            QStringLiteral("DELETE FROM identity_create_projections WHERE account_id=:account"));
-        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
-        if (!query.exec())
-            return queryError(QStringLiteral("Remove Identity create projections"), query);
-        return std::nullopt;
-    }
-
     std::variant<std::vector<Identity>, DatabaseError>
     IdentityRepository::listByAccount(const std::string_view accountId) const
     {

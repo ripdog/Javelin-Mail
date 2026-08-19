@@ -462,9 +462,6 @@ namespace javelin::app
                     Q_EMIT childEmailsCommitted(QString::fromStdString(target.accountId),
                                                 qStringIds(affectedThreadIds),
                                                 qStringIds(committedEmailIds));
-                Q_EMIT childProgressChanged(QString::fromStdString(target.accountId),
-                                            static_cast<quint64>(summary.completedEmailCount));
-
                 if (!membershipRace)
                     continue;
                 if (reconciliationCount >= maximumMembershipReconciliations)

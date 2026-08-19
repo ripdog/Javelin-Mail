@@ -41,7 +41,6 @@ namespace javelin::app
         void childEmailsCommitted(QString accountId, QStringList threadIds, QStringList emailIds);
         void progressChanged(QString accountId, quint64 completedThreadCount,
                              quint64 totalThreadCount);
-        void childProgressChanged(QString accountId, quint64 completedEmailCount);
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;

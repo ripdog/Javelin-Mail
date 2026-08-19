@@ -453,10 +453,7 @@ namespace javelin::gui::translation
                     .translatedText = translated.texts[index],
                 });
             }
-            if (const auto error = m_cache.upsert(records))
-            {
-                Q_EMIT diagnosticOccurred(error->message);
-            }
+            static_cast<void>(m_cache.upsert(records));
         }
 
         TranslationChunks result;

@@ -88,11 +88,6 @@ namespace javelin::app
         m_states.erase(std::string{endpoint});
     }
 
-    void EndpointRetryGate::resetAll()
-    {
-        m_states.clear();
-    }
-
     std::chrono::milliseconds EndpointRetryGate::delayForAttempt(const std::size_t attempt) const
     {
         if (attempt == 0)

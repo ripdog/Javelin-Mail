@@ -174,8 +174,7 @@ namespace javelin::app::remote
 
             bool count(const std::size_t count)
             {
-                if (count > maximumCollectionItems ||
-                    count > std::numeric_limits<std::uint32_t>::max())
+                if (count > maximumCollectionItems)
                     return fail(QStringLiteral("Remote collection exceeds the item limit."));
                 return qtValue(static_cast<quint32>(count));
             }
@@ -738,7 +737,7 @@ namespace javelin::app::remote
     template <std::uint16_t SchemaVersion, typename... Values>
     EncodeResult encodeVersioned(const Values&... values)
     {
-        return encode(static_cast<std::uint16_t>(SchemaVersion), values...);
+        return encode(SchemaVersion, values...);
     }
 
     template <std::uint16_t SchemaVersion, typename... Values>

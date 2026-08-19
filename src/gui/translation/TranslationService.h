@@ -66,7 +66,6 @@ namespace javelin::gui::translation
         void localModelDownloadProgress(QString sourceLanguage, QString targetLanguage,
                                         qint64 received, qint64 total);
         void installedLocalModelsChanged();
-        void diagnosticOccurred(QString message);
 
       private:
         void applySettings(TranslationSettings settings);

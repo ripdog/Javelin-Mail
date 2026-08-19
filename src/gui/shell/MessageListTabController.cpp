@@ -143,20 +143,6 @@ namespace javelin::gui::shell
         }
     }
 
-    bool MessageListTabController::refreshSearchAfterMutation(TabState& tab,
-                                                              const std::string_view accountId)
-    {
-        auto* search = std::get_if<SearchTabState>(&tab.content);
-        if (search == nullptr || search->session == nullptr ||
-            search->session->accountId() != accountId)
-        {
-            return false;
-        }
-
-        search->session->refreshAfterMutation();
-        return true;
-    }
-
     bool MessageListTabController::stateStale(const TabState& tab) const
     {
         const auto* session = messageListSession(tab);

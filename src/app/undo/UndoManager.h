@@ -71,11 +71,9 @@ namespace javelin::app::undo
 
       Q_SIGNALS:
         void historyStateChanged(javelin::app::undo::HistoryState state);
-        void executionStarted(QString entryId);
         void executionCompleted(QString entryId,
                                 javelin::app::undo::HistoryRefreshScope refreshScope);
         void executionFailed(javelin::app::undo::HistoryFailure failure);
-        void entryExpired(QString entryId);
 
       private:
         [[nodiscard]] QCoro::Task<bool> executeTop(HistoryStack stack);

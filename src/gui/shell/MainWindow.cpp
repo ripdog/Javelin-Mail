@@ -2224,12 +2224,6 @@ namespace javelin::gui::shell
         return tab != nullptr && tabKind(*tab) == TabKind::Contacts;
     }
 
-    bool MainWindow::activeTabIsCalendar() const
-    {
-        const auto* tab = activeTab();
-        return tab != nullptr && tabKind(*tab) == TabKind::Calendar;
-    }
-
     std::optional<std::string> MainWindow::activeAccountId() const
     {
         const auto* tab = activeTab();

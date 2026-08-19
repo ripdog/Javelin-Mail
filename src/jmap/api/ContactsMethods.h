@@ -175,7 +175,5 @@ namespace javelin::jmap::api
     parseAddressBookGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<ContactCardGetResponse>
     parseContactCardGetResponse(std::string_view json);
-    [[nodiscard]] ParsedEnvelope<ContactCardQueryChangesResponse>
-    parseContactCardQueryChangesResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<SetResult> parseContactsSetResponse(std::string_view json);
 } // namespace javelin::jmap::api

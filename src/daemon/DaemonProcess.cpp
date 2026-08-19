@@ -369,7 +369,6 @@ namespace javelin::app
                 {
                     m_guiConnected = true;
                     m_guiReady = false;
-                    Q_EMIT guiConnected();
                 });
         connect(m_endpoint.get(), &protocol::SocketDaemonEndpoint::connectionClosed, this,
                 &DaemonProcess::onSocketConnectionClosed);
@@ -1483,10 +1482,7 @@ namespace javelin::app
             QTimer::singleShot(0, this, &DaemonProcess::launchGuiIfNeeded);
         }
         if (wasConnected)
-        {
-            Q_EMIT guiDisconnected();
             publishStatus();
-        }
     }
 
     void DaemonProcess::flushPendingActivations()

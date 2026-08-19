@@ -40,7 +40,6 @@ namespace javelin::app
         void start();
         void deliveryAccepted(const QString& invitationKey);
         void deliveryFailed(const QString& invitationKey);
-        void requestDispatch();
         void calendarCacheCommitted();
         void accountChanged(const QString& ownerAccountId);
         void calendarStateChanged(const QString& ownerAccountId,

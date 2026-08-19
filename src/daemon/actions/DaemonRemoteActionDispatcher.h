@@ -120,8 +120,7 @@ namespace javelin::app
 
         template <typename Action>
         [[nodiscard]] javelin::protocol::CommandReply
-        acceptValue(const javelin::protocol::CommandId& id,
-                    const typename Action::Result& value) const
+        acceptValue(const javelin::protocol::CommandId& id, const Action::Result& value) const
         {
             static_assert(Action::admission ==
                           javelin::protocol::actions::AdmissionSemantics::Immediate);
@@ -153,7 +152,7 @@ namespace javelin::app
                 {
                     QCoro::connect(
                         std::move(task), this,
-                        [this, operation](typename Action::Result result)
+                        [this, operation](Action::Result result)
                         {
                             auto encoded =
                                 remote::encodeVersioned<Action::resultSchemaVersion>(result);

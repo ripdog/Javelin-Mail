@@ -612,17 +612,6 @@ namespace javelin::gui::mailboxes
         rebuild();
     }
 
-    void MailboxTreeModel::setCheckedMailboxIds(QStringList mailboxIds)
-    {
-        mailboxIds.removeDuplicates();
-        if (m_options.checkedMailboxIds == mailboxIds)
-        {
-            return;
-        }
-        m_options.checkedMailboxIds = std::move(mailboxIds);
-        rebuild();
-    }
-
     void MailboxTreeModel::setMailboxPreferences(
         std::unordered_map<std::string, MailboxPreferenceState> preferences)
     {

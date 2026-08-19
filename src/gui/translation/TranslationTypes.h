@@ -102,7 +102,6 @@ namespace javelin::gui::translation
 
     [[nodiscard]] QString canonicalLanguageTag(QString languageTag);
     [[nodiscard]] QString googleLanguageTag(QStringView canonicalTag);
-    [[nodiscard]] QString mozillaLanguageTag(QStringView canonicalTag);
     [[nodiscard]] QString translationProviderStorageName(TranslationProvider provider);
     [[nodiscard]] std::optional<TranslationProvider>
     translationProviderFromStorage(QStringView value);

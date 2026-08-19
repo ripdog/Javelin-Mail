@@ -261,7 +261,6 @@ namespace javelin::gui::shell
         [[nodiscard]] bool activeTabIsSearch() const;
         [[nodiscard]] bool activeTabIsCompose() const;
         [[nodiscard]] bool activeTabIsContacts() const;
-        [[nodiscard]] bool activeTabIsCalendar() const;
         [[nodiscard]] std::optional<std::string> activeAccountId() const;
         [[nodiscard]] std::optional<std::string> activeMailboxId() const;
         [[nodiscard]] const TabState* activeTab() const;

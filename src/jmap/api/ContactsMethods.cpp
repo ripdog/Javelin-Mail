@@ -366,12 +366,6 @@ namespace javelin::jmap::api
         return {.value = std::move(result), .error = std::nullopt};
     }
 
-    ParsedEnvelope<ContactCardQueryChangesResponse>
-    parseContactCardQueryChangesResponse(std::string_view json)
-    {
-        return parseEmailQueryChangesResponse(json);
-    }
-
     ParsedEnvelope<SetResult> parseContactsSetResponse(std::string_view json)
     {
         const auto raw = parse<detail::RawSetResult>(json);

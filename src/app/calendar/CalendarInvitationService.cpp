@@ -1051,12 +1051,6 @@ namespace javelin::app
         dispatchPending();
     }
 
-    void CalendarInvitationService::requestDispatch()
-    {
-        if (!m_dispatchRetryTimer.isActive() && !m_dispatchTimer.isActive())
-            m_dispatchTimer.start();
-    }
-
     void CalendarInvitationService::calendarCacheCommitted()
     {
         refreshPresentationState();

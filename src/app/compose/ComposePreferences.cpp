@@ -18,11 +18,4 @@ namespace javelin::app
         QSettings settings;
         return settings.value(QStringLiteral("compose/undoSendUsesDialog"), false).toBool();
     }
-
-    void ComposePreferences::setUndoSendDelaySeconds(const int seconds)
-    {
-        QSettings settings;
-        settings.setValue(QStringLiteral("compose/undoSendDelaySeconds"),
-                          std::clamp(seconds, 1, 120));
-    }
 } // namespace javelin::app

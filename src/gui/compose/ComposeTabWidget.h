@@ -146,7 +146,6 @@ namespace javelin::gui::compose
         void updateTabTitle();
         void addAttachments();
         void addAttachmentPaths(const QStringList& filePaths);
-        void addInlineImagePath(const QString& filePath);
         void addPastedInlineImage(const QImage& image);
         void insertImage();
         void adoptInsertedComposerImage(int insertionPosition, const QString& sourceFilePath);
@@ -156,7 +155,6 @@ namespace javelin::gui::compose
         void insertEmbeddedImage(std::size_t index);
         void removeEmbeddedImageReference(const std::string& contentId);
         void setEditorHtml(const QString& html);
-        void loadInlineImageResources();
         [[nodiscard]] QString stableEditorHtml();
         void reconcileInlineAttachmentReferences(const QString& html);
         void startSaveDraft(bool closeAfterSave);

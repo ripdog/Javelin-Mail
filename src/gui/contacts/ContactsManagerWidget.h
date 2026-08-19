@@ -123,7 +123,6 @@ namespace javelin::gui::contacts
         void createAddressBook(std::string accountId);
         void editAddressBook(std::string accountId, javelin::jmap::api::AddressBook book);
         void deleteAddressBook(std::string accountId, javelin::jmap::api::AddressBook book);
-        void setDefaultAddressBook(std::string accountId, javelin::jmap::api::AddressBook book);
         void setAddressBookSubscription(std::string accountId, javelin::jmap::api::AddressBook book,
                                         bool subscribed);
         [[nodiscard]] bool

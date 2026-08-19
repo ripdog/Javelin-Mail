@@ -64,7 +64,6 @@ namespace javelin::gui::messages
                       const std::vector<javelin::jmap::cache::MessageListItem>& items);
         void clear();
         [[nodiscard]] bool setThreadExpanded(std::string_view threadId, bool expanded);
-        [[nodiscard]] bool toggleThreadExpanded(std::string_view threadId);
         [[nodiscard]] bool isThreadExpanded(std::string_view threadId) const;
         void refreshExpandedThreadMembers();
         [[nodiscard]] std::optional<std::string>

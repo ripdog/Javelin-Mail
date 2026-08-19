@@ -64,7 +64,6 @@ namespace javelin::gui::translation
         [[nodiscard]] const TranslationModelDirection* direction(QStringView source,
                                                                  QStringView target) const;
         [[nodiscard]] TranslationModelRoute route(QStringView source, QStringView target) const;
-        [[nodiscard]] QStringList supportedTargetLanguages() const;
 
       private:
         QString m_revision;

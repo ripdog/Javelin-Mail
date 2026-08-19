@@ -38,7 +38,6 @@ namespace javelin::app
         void recordSuccess(std::string_view endpoint);
         void releaseProbe(std::string_view endpoint);
         void reset(std::string_view endpoint);
-        void resetAll();
 
       private:
         struct State

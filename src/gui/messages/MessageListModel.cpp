@@ -629,11 +629,6 @@ namespace javelin::gui::messages
         return true;
     }
 
-    bool MessageListModel::toggleThreadExpanded(const std::string_view threadId)
-    {
-        return setThreadExpanded(threadId, !isThreadExpanded(threadId));
-    }
-
     bool MessageListModel::isThreadExpanded(const std::string_view threadId) const
     {
         return containsThreadId(m_expandedThreadIds, threadId);

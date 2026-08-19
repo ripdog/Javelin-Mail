@@ -109,7 +109,6 @@ namespace javelin::gui::mailboxes
         void refresh();
         [[nodiscard]] bool refreshAccount(QStringView accountId);
         void setAccountId(std::optional<std::string> accountId);
-        void setCheckedMailboxIds(QStringList mailboxIds);
         [[nodiscard]] QStringList checkedMailboxIds() const;
         void
         setMailboxPreferences(std::unordered_map<std::string, MailboxPreferenceState> preferences);

@@ -716,19 +716,9 @@ namespace javelin::app
         return *m_mailMutationApplicationService;
     }
 
-    MessageContentApplicationService& DaemonServices::messageContentApplicationService()
-    {
-        return *m_messageContentApplicationService;
-    }
-
     MailNotificationService& DaemonServices::mailNotificationService()
     {
         return *m_mailNotificationService;
-    }
-
-    ContactApplicationService& DaemonServices::contactApplicationService()
-    {
-        return *m_contactApplicationService;
     }
 
     CalendarApplicationService& DaemonServices::calendarApplicationService()

@@ -80,7 +80,6 @@ namespace javelin::gui::shell
         [[nodiscard]] bool canLoadMore(const TabState& tab) const;
         [[nodiscard]] bool loadMore(TabState& tab);
         void setSort(std::vector<TabState>& tabs, javelin::jmap::query::EmailListSort sort);
-        [[nodiscard]] bool refreshSearchAfterMutation(TabState& tab, std::string_view accountId);
         [[nodiscard]] bool stateStale(const TabState& tab) const;
         [[nodiscard]] bool stateRefreshInFlight(const TabState& tab) const;
         [[nodiscard]] bool ownsSession(const TabState& tab,

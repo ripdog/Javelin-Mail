@@ -1190,14 +1190,6 @@ namespace javelin::gui::calendar
     {
         return 42;
     }
-    int MonthCalendarWidget::overflowCount(const QDate& date) const
-    {
-        for (int index = 0; index < 42; ++index)
-            if (cellDate(index) == date)
-                return m_cells[static_cast<std::size_t>(index)]->overflow();
-        return 0;
-    }
-
     std::vector<MonthEvent> MonthCalendarWidget::eventsForDate(const QDate& date) const
     {
         std::vector<MonthEvent> result;
@@ -1207,11 +1199,6 @@ namespace javelin::gui::calendar
                 result.push_back(event);
         }
         return result;
-    }
-
-    QColor MonthCalendarWidget::calendarColor(const QString& calendarId) const
-    {
-        return effectiveCalendarColor(calendarId.toStdString());
     }
 
     QMenu* MonthCalendarWidget::calendarMenu() const

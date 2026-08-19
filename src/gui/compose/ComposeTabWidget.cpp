@@ -1089,11 +1089,6 @@ namespace javelin::gui::compose
         scheduleWorkingCopySave();
     }
 
-    void ComposeTabWidget::addInlineImagePath(const QString& filePath)
-    {
-        m_inlineImageController->addImagePath(filePath);
-    }
-
     void ComposeTabWidget::addPastedInlineImage(const QImage& image)
     {
         m_inlineImageController->addPastedImage(image);
@@ -1249,11 +1244,6 @@ namespace javelin::gui::compose
     void ComposeTabWidget::setEditorHtml(const QString& html)
     {
         m_inlineImageController->setEditorHtml(html);
-    }
-
-    void ComposeTabWidget::loadInlineImageResources()
-    {
-        m_inlineImageController->loadResources();
     }
 
     QString ComposeTabWidget::stableEditorHtml()

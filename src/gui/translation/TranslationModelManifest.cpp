@@ -312,15 +312,4 @@ namespace javelin::gui::translation
         return {};
     }
 
-    QStringList TranslationModelManifest::supportedTargetLanguages() const
-    {
-        QSet<QString> targets;
-        for (const auto& directionValue : m_directions)
-        {
-            targets.insert(directionValue.target);
-        }
-        auto result = targets.values();
-        result.sort(Qt::CaseInsensitive);
-        return result;
-    }
 } // namespace javelin::gui::translation
