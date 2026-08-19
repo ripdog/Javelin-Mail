@@ -46,7 +46,7 @@ Check off completed items as you commit.
   status-bar-only message.
 - Keep modal dialogs for genuinely blocking decisions or intervention.
 
-### [ ] Improve message-list empty states
+### [x] Improve message-list empty states
 
 - Distinguish an actually empty mailbox from no filter matches, no search results, disconnected/auth
   state, failed query, and not-yet-synced state.

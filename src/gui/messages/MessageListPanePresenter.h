@@ -18,19 +18,36 @@ namespace javelin::gui::shell
 
 namespace javelin::gui::messages
 {
-    enum class MessageCollectionKind
+    enum class MessageListEmptyStateKind
     {
-        Mailbox,
-        LocalSearch,
-        OnlineSearch,
+        EmptyMailbox,
+        NoFilterMatches,
+        NoLocalSearchResults,
+        NoSearchResults,
+        Disconnected,
+        Connecting,
+        AuthenticationRequired,
+        RefreshFailed,
+        NotYetLoaded,
+        Loading,
+    };
+
+    enum class MessageListEmptyAction
+    {
+        None,
+        ClearFilters,
+        SearchServer,
+        EditSearch,
+        Retry,
+        SignInAgain,
     };
 
     struct MessageListEmptyState
     {
         std::size_t itemCount = 0;
-        QString refreshError;
-        bool refreshInFlight = false;
-        MessageCollectionKind collection = MessageCollectionKind::Mailbox;
+        MessageListEmptyStateKind kind = MessageListEmptyStateKind::EmptyMailbox;
+        MessageListEmptyAction action = MessageListEmptyAction::None;
+        QString detail;
     };
 
     struct MessageListContextHeader
@@ -56,7 +73,8 @@ namespace javelin::gui::messages
     {
       public:
         MessageListPanePresenter(javelin::gui::shell::ElidingLabel& titleLabel, QLabel& metaLabel,
-                                 QLabel& emptyState, QListView& messageView,
+                                 QWidget& emptyStatePanel, QLabel& emptyState,
+                                 QToolButton& emptyStateAction, QListView& messageView,
                                  QProgressBar& loadingIndicator, QToolButton& searchServerButton,
                                  QWidget& continuationFooter, QLabel& continuationLabel,
                                  QToolButton& continuationRetryButton);
@@ -72,7 +90,9 @@ namespace javelin::gui::messages
 
         javelin::gui::shell::ElidingLabel& m_titleLabel;
         QLabel& m_metaLabel;
+        QWidget& m_emptyStatePanel;
         QLabel& m_emptyState;
+        QToolButton& m_emptyStateAction;
         QListView& m_messageView;
         QProgressBar& m_loadingIndicator;
         QToolButton& m_searchServerButton;

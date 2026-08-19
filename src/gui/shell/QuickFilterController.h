@@ -51,6 +51,7 @@ namespace javelin::gui::shell
                               QObject* parent = nullptr);
 
         void activate(TabState* tab);
+        void clear();
         void syncContinuitySelection(std::optional<std::string> emailId,
                                      std::optional<std::string> threadId);
         void rebuildTagsMenu();

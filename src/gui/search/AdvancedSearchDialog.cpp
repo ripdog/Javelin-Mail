@@ -61,6 +61,22 @@ namespace javelin::gui::search
         resize(420, sizeHint().height());
     }
 
+    AdvancedSearchDialog::AdvancedSearchDialog(
+        const javelin::jmap::search::EmailSearchCriteria& criteria, QWidget* parent)
+        : AdvancedSearchDialog(parent)
+    {
+        const auto set = [](QLineEdit* edit, const std::optional<std::string>& value)
+        { edit->setText(value.has_value() ? QString::fromStdString(*value) : QString{}); };
+        set(m_textEdit, criteria.text);
+        set(m_withEdit, criteria.with);
+        set(m_fromEdit, criteria.from);
+        set(m_toEdit, criteria.to);
+        set(m_ccEdit, criteria.cc);
+        set(m_bccEdit, criteria.bcc);
+        set(m_subjectEdit, criteria.subject);
+        set(m_bodyEdit, criteria.body);
+    }
+
     javelin::jmap::search::EmailSearchCriteria AdvancedSearchDialog::criteria() const
     {
         return javelin::jmap::search::EmailSearchCriteria{

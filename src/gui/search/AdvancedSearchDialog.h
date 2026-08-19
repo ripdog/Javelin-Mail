@@ -16,6 +16,8 @@ namespace javelin::gui::search
 
       public:
         explicit AdvancedSearchDialog(QWidget* parent = nullptr);
+        AdvancedSearchDialog(const javelin::jmap::search::EmailSearchCriteria& criteria,
+                             QWidget* parent);
 
         [[nodiscard]] javelin::jmap::search::EmailSearchCriteria criteria() const;
 

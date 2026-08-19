@@ -13,11 +13,13 @@
 namespace javelin::gui::messages
 {
     MessageListPanePresenter::MessageListPanePresenter(
-        javelin::gui::shell::ElidingLabel& titleLabel, QLabel& metaLabel, QLabel& emptyState,
-        QListView& messageView, QProgressBar& loadingIndicator, QToolButton& searchServerButton,
+        javelin::gui::shell::ElidingLabel& titleLabel, QLabel& metaLabel, QWidget& emptyStatePanel,
+        QLabel& emptyState, QToolButton& emptyStateAction, QListView& messageView,
+        QProgressBar& loadingIndicator, QToolButton& searchServerButton,
         QWidget& continuationFooter, QLabel& continuationLabel,
         QToolButton& continuationRetryButton)
-        : m_titleLabel(titleLabel), m_metaLabel(metaLabel), m_emptyState(emptyState),
+        : m_titleLabel(titleLabel), m_metaLabel(metaLabel), m_emptyStatePanel(emptyStatePanel),
+          m_emptyState(emptyState), m_emptyStateAction(emptyStateAction),
           m_messageView(messageView), m_loadingIndicator(loadingIndicator),
           m_searchServerButton(searchServerButton), m_continuationFooter(continuationFooter),
           m_continuationLabel(continuationLabel), m_continuationRetryButton(continuationRetryButton)
@@ -26,33 +28,58 @@ namespace javelin::gui::messages
 
     void MessageListPanePresenter::showEmptyState(const MessageListEmptyState& state) const
     {
-        if (!state.refreshError.isEmpty())
+        QString text;
+        QString actionText;
+        switch (state.kind)
         {
-            m_emptyState.setText(
-                i18n("Could not refresh the message list.\n%1", state.refreshError));
-            m_emptyState.setStyleSheet(QStringLiteral("color: #e58b8b;"));
+        case MessageListEmptyStateKind::EmptyMailbox:
+            text = i18n("This mailbox is empty.");
+            break;
+        case MessageListEmptyStateKind::NoFilterMatches:
+            text = i18n("No messages match the current filters.");
+            actionText = i18nc("@action:button", "Clear Filters");
+            break;
+        case MessageListEmptyStateKind::NoLocalSearchResults:
+            text = i18n("No indexed messages on this device matched your search.");
+            if (state.action == MessageListEmptyAction::SearchServer)
+                actionText = i18nc("@action:button", "Search Server");
+            else if (state.action == MessageListEmptyAction::EditSearch)
+                actionText = i18nc("@action:button", "Edit Search");
+            break;
+        case MessageListEmptyStateKind::NoSearchResults:
+            text = i18n("No messages matched your search.");
+            actionText = i18nc("@action:button", "Edit Search");
+            break;
+        case MessageListEmptyStateKind::Disconnected:
+            text = i18n("Javelin is offline. No cached messages are available for this view.");
+            actionText = i18nc("@action:button", "Retry");
+            break;
+        case MessageListEmptyStateKind::Connecting:
+            text = i18n("Connecting to the mail server…");
+            break;
+        case MessageListEmptyStateKind::AuthenticationRequired:
+            text = i18n("Sign in again to load messages for this account.");
+            actionText = i18nc("@action:button", "Sign In Again");
+            break;
+        case MessageListEmptyStateKind::RefreshFailed:
+            text = state.detail.isEmpty()
+                       ? i18n("Could not load the message list.")
+                       : i18n("Could not load the message list.\n%1", state.detail);
+            actionText = i18nc("@action:button", "Retry");
+            break;
+        case MessageListEmptyStateKind::NotYetLoaded:
+            text = i18n("Messages have not been loaded for this view yet.");
+            actionText = i18nc("@action:button", "Retry");
+            break;
+        case MessageListEmptyStateKind::Loading:
+            text = i18n("Looking for messages…");
+            break;
         }
-        else if (state.refreshInFlight && state.itemCount == 0)
-        {
-            m_emptyState.setText(i18n("Looking for messages…"));
-            m_emptyState.setStyleSheet(QString{});
-        }
-        else if (state.collection == MessageCollectionKind::LocalSearch)
-        {
-            m_emptyState.setText(i18n("No indexed messages on this device matched your search."));
-            m_emptyState.setStyleSheet(QString{});
-        }
-        else if (state.collection == MessageCollectionKind::OnlineSearch)
-        {
-            m_emptyState.setText(i18n("No messages matched your search."));
-            m_emptyState.setStyleSheet(QString{});
-        }
-        else
-        {
-            m_emptyState.setText(i18n("No messages"));
-            m_emptyState.setStyleSheet(QString{});
-        }
-        m_emptyState.setVisible(state.itemCount == 0);
+
+        m_emptyState.setText(text);
+        m_emptyStateAction.setText(actionText);
+        m_emptyStateAction.setVisible(!actionText.isEmpty());
+        m_emptyStatePanel.setVisible(state.itemCount == 0);
         m_messageView.setVisible(true);
     }
 

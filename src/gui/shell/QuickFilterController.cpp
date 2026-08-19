@@ -152,6 +152,20 @@ namespace javelin::gui::shell
         syncUiFromSession();
     }
 
+    void QuickFilterController::clear()
+    {
+        auto* mailbox = activeMailbox();
+        if (mailbox == nullptr || mailbox->session == nullptr)
+            return;
+
+        m_pinned = false;
+        m_pinnedCriteria = {};
+        m_tags.clear();
+        m_matchAllTags = false;
+        mailbox->session->setQuickFilter({});
+        syncUiFromSession();
+    }
+
     void QuickFilterController::syncContinuitySelection(std::optional<std::string> emailId,
                                                         std::optional<std::string> threadId)
     {

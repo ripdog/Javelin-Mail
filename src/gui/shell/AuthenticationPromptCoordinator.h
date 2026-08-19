@@ -33,6 +33,7 @@ namespace javelin::gui::shell
                                         QWidget& parentWidget, QObject* parent = nullptr);
 
         void updateAccountStatus(const QString& accountId, javelin::app::MailAccountStatus status);
+        void signInAgainForAccount(const QString& accountId);
 
       private:
         void showNextPrompt();

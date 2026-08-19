@@ -629,8 +629,10 @@ namespace javelin::gui::shell
             {
                 modelStatus = Model::ConnectionStatus::AuthenticationPaused;
             }
+            m_accountStatuses[accountId.toStdString()] = status;
             m_mailboxModel->setConnectionStatus(accountId, modelStatus);
             m_authenticationPromptCoordinator->updateAccountStatus(accountId, status);
+            updateEmptyStates();
         };
         connect(&m_mailEvents, &javelin::app::MailApplicationEventsPort::accountStatusChanged, this,
                 applyAccountStatus);
@@ -1821,13 +1823,24 @@ namespace javelin::gui::shell
         auto* messageListAreaLayout = new QGridLayout(messageListArea);
         messageListAreaLayout->setContentsMargins(0, 0, 0, 0);
         messageListAreaLayout->setSpacing(0);
-        m_messageEmptyState = new QLabel(i18n("No messages"), messageListArea);
+        m_messageEmptyStatePanel = new QWidget(messageListArea);
+        m_messageEmptyStatePanel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+        auto* messageEmptyStateLayout = new QVBoxLayout(m_messageEmptyStatePanel);
+        messageEmptyStateLayout->setContentsMargins(24, 24, 24, 24);
+        messageEmptyStateLayout->setSpacing(10);
+        messageEmptyStateLayout->addStretch(1);
+        m_messageEmptyState = new QLabel(i18n("This mailbox is empty."), m_messageEmptyStatePanel);
         m_messageEmptyState->setAlignment(Qt::AlignCenter);
-        m_messageEmptyState->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
         m_messageEmptyState->setWordWrap(true);
-        m_messageEmptyState->setAttribute(Qt::WA_TransparentForMouseEvents);
+        m_messageEmptyState->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        messageEmptyStateLayout->addWidget(m_messageEmptyState);
+        m_messageEmptyStateActionButton = new QToolButton(m_messageEmptyStatePanel);
+        m_messageEmptyStateActionButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        m_messageEmptyStateActionButton->setVisible(false);
+        messageEmptyStateLayout->addWidget(m_messageEmptyStateActionButton, 0, Qt::AlignHCenter);
+        messageEmptyStateLayout->addStretch(1);
         messageListAreaLayout->addWidget(m_messageView, 0, 0);
-        messageListAreaLayout->addWidget(m_messageEmptyState, 0, 0);
+        messageListAreaLayout->addWidget(m_messageEmptyStatePanel, 0, 0);
         m_messageListFooter = new QWidget(messagePane);
         auto* messageListFooterLayout = new QHBoxLayout(m_messageListFooter);
         messageListFooterLayout->setContentsMargins(8, 3, 8, 3);
@@ -1982,9 +1995,10 @@ namespace javelin::gui::shell
 
         m_messageListPanePresenter =
             std::make_unique<javelin::gui::messages::MessageListPanePresenter>(
-                *m_messageListTitleLabel, *m_messageListMetaLabel, *m_messageEmptyState,
-                *m_messageView, *m_messageLoadingIndicator, *m_searchServerButton,
-                *m_messageListFooter, *m_messageListFooterLabel, *m_messageListFooterRetryButton);
+                *m_messageListTitleLabel, *m_messageListMetaLabel, *m_messageEmptyStatePanel,
+                *m_messageEmptyState, *m_messageEmptyStateActionButton, *m_messageView,
+                *m_messageLoadingIndicator, *m_searchServerButton, *m_messageListFooter,
+                *m_messageListFooterLabel, *m_messageListFooterRetryButton);
         m_messageListTabPresenter = std::make_unique<MessageListTabPresenter>(
             *m_messageListPanePresenter, *m_tabBarPresenter);
         updateEmptyStates();
@@ -2017,6 +2031,8 @@ namespace javelin::gui::shell
         connect(m_tabBarPresenter, &TabBarPresenter::closeRequested, this, &MainWindow::closeTab);
         connect(m_messageListFooterRetryButton, &QToolButton::clicked, this,
                 &MainWindow::loadMoreMessages);
+        connect(m_messageEmptyStateActionButton, &QToolButton::clicked, this,
+                &MainWindow::activateMessageListEmptyAction);
         connect(m_messageView->verticalScrollBar(), &QScrollBar::valueChanged, this,
                 [this] { maybeLoadMoreMessages(); });
         connect(m_messageView->verticalScrollBar(), &QScrollBar::rangeChanged, this,
@@ -3373,8 +3389,78 @@ namespace javelin::gui::shell
 
     void MainWindow::updateEmptyStates()
     {
-        m_messageListTabPresenter->showEmptyState(
-            activeTab(), static_cast<std::size_t>(m_messageModel->rowCount()));
+        std::optional<javelin::app::MailAccountStatus> accountStatus;
+        if (const auto accountId = activeAccountId(); accountId.has_value())
+        {
+            if (const auto found = m_accountStatuses.find(*accountId);
+                found != m_accountStatuses.end())
+            {
+                accountStatus = found->second;
+            }
+        }
+        m_messageEmptyStateAction = m_messageListTabPresenter->showEmptyState(
+            activeTab(), static_cast<std::size_t>(m_messageModel->rowCount()), accountStatus);
+    }
+
+    void MainWindow::activateMessageListEmptyAction()
+    {
+        using javelin::gui::messages::MessageListEmptyAction;
+        switch (m_messageEmptyStateAction)
+        {
+        case MessageListEmptyAction::None:
+            return;
+        case MessageListEmptyAction::ClearFilters:
+            m_quickFilterController->clear();
+            return;
+        case MessageListEmptyAction::SearchServer:
+            if (auto* tab = activeTab(); tab != nullptr)
+                static_cast<void>(m_mailWorkspaceController->promoteSearch(*tab));
+            return;
+        case MessageListEmptyAction::EditSearch:
+            editActiveSearch();
+            return;
+        case MessageListEmptyAction::Retry:
+            refreshActiveTabFromServer();
+            return;
+        case MessageListEmptyAction::SignInAgain:
+            if (const auto accountId = activeAccountId(); accountId.has_value())
+            {
+                m_authenticationPromptCoordinator->signInAgainForAccount(
+                    QString::fromStdString(*accountId));
+            }
+            return;
+        }
+    }
+
+    void MainWindow::editActiveSearch()
+    {
+        auto* tab = activeTab();
+        auto* search = tab == nullptr ? nullptr : std::get_if<SearchTabState>(&tab->content);
+        if (search == nullptr || search->session == nullptr || !m_activeTabIndex.has_value())
+            return;
+
+        javelin::gui::search::AdvancedSearchDialog dialog{search->session->criteria(), this};
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+
+        auto criteria = dialog.criteria();
+        if (javelin::jmap::search::isEmpty(criteria))
+        {
+            m_statusBar->showMessage(i18n("Enter at least one search field."), 5000);
+            return;
+        }
+
+        const int oldIndex = *m_activeTabIndex;
+        const int newIndex = m_mailWorkspaceController->openSearch(search->session->accountId(),
+                                                                   std::move(criteria));
+        if (newIndex != oldIndex)
+        {
+            closeTab(oldIndex);
+            return;
+        }
+
+        updateTabBar();
+        activateTab(newIndex, true);
     }
 
     void MainWindow::updateMessageListHeader()

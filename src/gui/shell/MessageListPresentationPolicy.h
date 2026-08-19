@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/MailApplicationEventsPorts.h"
 #include "gui/messages/MessageListPanePresenter.h"
 #include "gui/shell/TabWorkspace.h"
 
@@ -18,7 +19,11 @@ namespace javelin::gui::shell
         std::size_t itemCount = 0;
         QString refreshError;
         bool refreshInFlight = false;
+        bool cacheLoaded = false;
+        bool quickFilterActive = false;
         bool localSearch = false;
+        bool canSearchServer = false;
+        std::optional<javelin::app::MailAccountStatus> accountStatus;
         std::optional<javelin::gui::messages::MessageListHeader> list;
     };
 

@@ -65,6 +65,13 @@ namespace javelin::gui::shell
         QTimer::singleShot(0, this, &AuthenticationPromptCoordinator::showNextPrompt);
     }
 
+    void AuthenticationPromptCoordinator::signInAgainForAccount(const QString& accountId)
+    {
+        const auto account = m_settings.accountForCachedId(accountId);
+        if (!account.id.isEmpty())
+            reauthenticateConnection(account.id);
+    }
+
     void AuthenticationPromptCoordinator::showNextPrompt()
     {
         if (m_promptOpen)

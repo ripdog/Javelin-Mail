@@ -14,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -124,6 +125,7 @@ namespace javelin::gui::shell
 
 namespace javelin::gui::messages
 {
+    enum class MessageListEmptyAction;
     class MessageListPanePresenter;
     class MessageListModel;
 } // namespace javelin::gui::messages
@@ -303,6 +305,8 @@ namespace javelin::gui::shell
         void restoreContactsTab(const PersistedContactsTab& tab);
         void savePersistentState() const;
         void updateEmptyStates();
+        void activateMessageListEmptyAction();
+        void editActiveSearch();
         void updateMessageListHeader();
         void updateSortButton();
         void closeEvent(QCloseEvent* event) override;
@@ -328,6 +332,7 @@ namespace javelin::gui::shell
         javelin::app::OnboardingPort& m_onboardingPort;
         javelin::app::MessageContentPort& m_messageContentPort;
         javelin::app::MailApplicationEventsPort& m_mailEvents;
+        std::unordered_map<std::string, javelin::app::MailAccountStatus> m_accountStatuses;
         javelin::app::MessageNavigationPort& m_messageNavigationPort;
         javelin::app::UndoCommandPort& m_undoCommandPort;
         std::unique_ptr<MailWorkspaceController> m_mailWorkspaceController;
@@ -368,7 +373,10 @@ namespace javelin::gui::shell
         QWidget* m_messageListFooter = nullptr;
         QLabel* m_messageListFooterLabel = nullptr;
         QToolButton* m_messageListFooterRetryButton = nullptr;
+        QWidget* m_messageEmptyStatePanel = nullptr;
         QLabel* m_messageEmptyState = nullptr;
+        QToolButton* m_messageEmptyStateActionButton = nullptr;
+        javelin::gui::messages::MessageListEmptyAction m_messageEmptyStateAction{};
         LayeredStatusBar* m_statusBar = nullptr;
         QAction* m_undoAction = nullptr;
         QAction* m_redoAction = nullptr;

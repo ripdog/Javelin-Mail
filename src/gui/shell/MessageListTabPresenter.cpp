@@ -16,11 +16,14 @@ namespace javelin::gui::shell
     {
     }
 
-    void MessageListTabPresenter::showEmptyState(const TabState* tab,
-                                                 const std::size_t itemCount) const
+    javelin::gui::messages::MessageListEmptyAction MessageListTabPresenter::showEmptyState(
+        const TabState* tab, const std::size_t itemCount,
+        const std::optional<javelin::app::MailAccountStatus> accountStatus) const
     {
-        m_panePresenter.showEmptyState(
-            planMessageListPresentation(inputFor(tab, itemCount)).emptyState);
+        const auto emptyState =
+            planMessageListPresentation(inputFor(tab, itemCount, accountStatus)).emptyState;
+        m_panePresenter.showEmptyState(emptyState);
+        return emptyState.action;
     }
 
     void MessageListTabPresenter::showHeader(const TabState* tab) const
@@ -41,11 +44,13 @@ namespace javelin::gui::shell
             plan.header);
     }
 
-    MessageListPresentationInput
-    MessageListTabPresenter::inputFor(const TabState* tab, const std::size_t itemCount) const
+    MessageListPresentationInput MessageListTabPresenter::inputFor(
+        const TabState* tab, const std::size_t itemCount,
+        const std::optional<javelin::app::MailAccountStatus> accountStatus) const
     {
         MessageListPresentationInput input{};
         input.itemCount = itemCount;
+        input.accountStatus = accountStatus;
         if (tab == nullptr)
             return input;
 
@@ -64,6 +69,8 @@ namespace javelin::gui::shell
                     input.refreshError = state.refreshError;
                     input.refreshInFlight =
                         state.refreshInFlight || state.threadMaterializationInFlight;
+                    input.cacheLoaded = state.cacheLoaded;
+                    input.quickFilterActive = content.session->quickFilterActive();
                     input.list = javelin::gui::messages::MessageListHeader{
                         .title = input.title,
                         .itemCount = state.items.size(),
@@ -87,7 +94,9 @@ namespace javelin::gui::shell
                     input.refreshError = state.refreshError;
                     input.refreshInFlight =
                         state.refreshInFlight || state.threadMaterializationInFlight;
+                    input.cacheLoaded = state.cacheLoaded;
                     input.localSearch = content.session->mode() == javelin::app::SearchMode::Local;
+                    input.canSearchServer = content.session->canPromoteToOnline();
                     input.list = javelin::gui::messages::MessageListHeader{
                         .title = input.title,
                         .itemCount = state.items.size(),
