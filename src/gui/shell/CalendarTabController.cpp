@@ -1105,7 +1105,7 @@ namespace javelin::gui::shell
                                          : std::vector<javelin::jmap::calendar::Calendar>{},
                     window != nullptr ? *window
                                       : std::optional<javelin::jmap::cache::CalendarWindow>{},
-                    widget->palette().color(QPalette::Highlight));
+                    widget->palette().color(QPalette::Base));
                 const auto& configuredDestination =
                     m_settings.workspaceSettings().defaultCalendarDestination;
                 if (hasConfiguredDefaultCalendarDestination(configuredDestination))

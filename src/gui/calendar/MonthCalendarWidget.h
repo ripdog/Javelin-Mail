@@ -149,6 +149,7 @@ namespace javelin::gui::calendar
         void rebuildEvents();
         void rebuildCalendarMenu();
         void applyCalendarColors();
+        [[nodiscard]] QColor defaultCalendarColor(const CalendarDisplay& calendar) const;
         [[nodiscard]] QColor effectiveCalendarColor(const std::string& calendarId) const;
         void selectDate(const QDate& date);
         void scheduleEventRebuild();

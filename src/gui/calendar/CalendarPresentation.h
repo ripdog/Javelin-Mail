@@ -11,6 +11,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace javelin::gui::calendar
@@ -38,11 +39,16 @@ namespace javelin::gui::calendar
 
     [[nodiscard]] DayAgendaEvent dayAgendaEventFromMonthEvent(const MonthEvent& event);
 
+    [[nodiscard]] QColor automaticCalendarColor(std::string_view ownerAccountId,
+                                                std::string_view accountId,
+                                                std::string_view calendarId,
+                                                const QColor& surfaceColor);
+
     [[nodiscard]] CalendarAccountPresentation buildCalendarAccountPresentation(
         const javelin::jmap::cache::CalendarAccount& account,
         const std::vector<javelin::jmap::calendar::Calendar>& calendars,
         const std::optional<javelin::jmap::cache::CalendarWindow>& window,
-        const QColor& fallbackColor);
+        const QColor& surfaceColor);
 
     [[nodiscard]] QString
     eventConfirmationDetails(const javelin::jmap::calendar::CalendarEvent& event);

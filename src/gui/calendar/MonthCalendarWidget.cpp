@@ -1,6 +1,7 @@
 #include "gui/calendar/MonthCalendarWidget.h"
 #include "gui/accessibility/AccessibleFactory.h"
 #include "gui/calendar/CalendarEventButton.h"
+#include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/MonthCalendarLayout.h"
 #include "gui/settings/WorkspaceSettingsPort.h"
 
@@ -918,15 +919,25 @@ namespace javelin::gui::calendar
         Q_EMIT eventPresentationChanged();
     }
 
+    QColor MonthCalendarWidget::defaultCalendarColor(const CalendarDisplay& calendar) const
+    {
+        if (calendar.color.isValid())
+            return calendar.color;
+        return automaticCalendarColor(calendar.ownerAccountId, calendar.accountId,
+                                      calendar.calendarId,
+                                      palette().color(QPalette::Active, QPalette::Base));
+    }
+
     QColor MonthCalendarWidget::effectiveCalendarColor(const std::string& calendarId) const
     {
         if (const auto custom = m_customCalendarColors.find(calendarId);
             custom != m_customCalendarColors.end())
             return custom->second;
         const auto calendar = std::ranges::find(m_calendars, calendarId, &CalendarDisplay::id);
-        if (calendar != m_calendars.end() && calendar->color.isValid())
-            return calendar->color;
-        return palette().color(QPalette::Active, QPalette::Highlight);
+        if (calendar != m_calendars.end())
+            return defaultCalendarColor(*calendar);
+        return automaticCalendarColor({}, {}, calendarId,
+                                      palette().color(QPalette::Active, QPalette::Base));
     }
 
     void MonthCalendarWidget::applyCalendarColors()
@@ -1130,9 +1141,11 @@ namespace javelin::gui::calendar
                     const auto id = item->data(Qt::UserRole).toString().toStdString();
                     pendingColors.erase(id);
                     const auto calendar = std::ranges::find(m_calendars, id, &CalendarDisplay::id);
-                    const auto color = calendar != m_calendars.end() && calendar->color.isValid()
-                                           ? calendar->color
-                                           : palette().color(QPalette::Highlight);
+                    const auto color =
+                        calendar != m_calendars.end()
+                            ? defaultCalendarColor(*calendar)
+                            : automaticCalendarColor(
+                                  {}, {}, id, palette().color(QPalette::Active, QPalette::Base));
                     item->setIcon(colorSwatch(color));
                 });
         auto* buttons =

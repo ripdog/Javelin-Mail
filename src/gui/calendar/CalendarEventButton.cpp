@@ -180,14 +180,13 @@ namespace javelin::gui::calendar
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         const auto leftRadius = m_segmentBegins ? QStringLiteral("3px") : QStringLiteral("0px");
         const auto rightRadius = m_segmentEnds ? QStringLiteral("3px") : QStringLiteral("0px");
-        setStyleSheet(
-            QStringLiteral("QToolButton { background: %1; color: %2; "
-                           "border-top-left-radius: %3; border-bottom-left-radius: %3; "
-                           "border-top-right-radius: %4; border-bottom-right-radius: %4; "
-                           "padding: 1px 4px; text-align: left; } "
-                           "QToolButton:checked { border: 2px solid palette(highlight); }")
-                .arg(color.name(QColor::HexArgb), foreground.name(QColor::HexArgb), leftRadius,
-                     rightRadius));
+        setStyleSheet(QStringLiteral("QToolButton { background: %1; color: %2; "
+                                     "border-top-left-radius: %3; border-bottom-left-radius: %3; "
+                                     "border-top-right-radius: %4; border-bottom-right-radius: %4; "
+                                     "padding: 1px 4px; text-align: left; } "
+                                     "QToolButton:checked { border: 2px solid %2; }")
+                          .arg(color.name(QColor::HexArgb), foreground.name(QColor::HexArgb),
+                               leftRadius, rightRadius));
         setText(fontMetrics().elidedText(m_fullText, Qt::ElideRight, std::max(0, width() - 8)));
     }
 } // namespace javelin::gui::calendar
