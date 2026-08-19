@@ -7,6 +7,9 @@
 #include "jmap/cache/ContactReader.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 
+#include <QApplication>
+#include <QKeyEvent>
+#include <QLineEdit>
 #include <QNetworkAccessManager>
 #include <QTemporaryDir>
 
@@ -101,6 +104,21 @@ TEST_CASE("message view constructs with the find footer")
     javelin::gui::messageview::MessageViewContainer view{settings, translationService,
                                                          contactIdentityLookup};
     CHECK_FALSE(view.readerActionsAvailable());
+
+    auto* findBar = view.findChild<QWidget*>(QStringLiteral("messageFindBar"));
+    auto* findEdit = view.findChild<QLineEdit*>(QStringLiteral("messageFindEdit"));
+    REQUIRE(findBar != nullptr);
+    REQUIRE(findEdit != nullptr);
+
+    view.show();
+    findBar->show();
+    findEdit->setFocus(Qt::ShortcutFocusReason);
+    QApplication::processEvents();
+    REQUIRE(findEdit->hasFocus());
+
+    QKeyEvent escapePress{QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier};
+    QApplication::sendEvent(findEdit, &escapePress);
+    CHECK(findBar->isHidden());
 
     if (previousConfigHome.isNull())
     {

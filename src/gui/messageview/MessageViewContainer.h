@@ -120,6 +120,7 @@ namespace javelin::gui::messageview
         void maybeAutoTranslateCurrentMessage();
         void rebuildMultipleSelectionRows();
         void runFind(bool backwards);
+        void dismissFindBar();
         void clearFindHighlights();
         void updateFindResult(int activeMatch, int matchCount);
         void applyZoom();
@@ -131,6 +132,7 @@ namespace javelin::gui::messageview
         [[nodiscard]] bool messageBannerDismissed(std::string_view bannerId) const;
         void dismissMessageBanner(std::string_view bannerId);
         [[nodiscard]] QString serverDisplayName() const;
+        bool eventFilter(QObject* watched, QEvent* event) override;
         void changeEvent(QEvent* event) override;
 
         std::optional<std::string> m_accountId;

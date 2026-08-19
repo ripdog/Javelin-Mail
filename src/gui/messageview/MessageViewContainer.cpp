@@ -33,6 +33,7 @@
 #include <QFutureWatcher>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
@@ -716,6 +717,7 @@ namespace javelin::gui::messageview
                 &MessageViewContainer::saveAllAttachmentsRequested);
 
         m_findBarContainer = new QWidget(this);
+        m_findBarContainer->setObjectName(QStringLiteral("messageFindBar"));
         auto* findBarStack = new QStackedLayout(m_findBarContainer);
         findBarStack->setContentsMargins(0, 0, 0, 0);
         findBarStack->setStackingMode(QStackedLayout::StackAll);
@@ -735,9 +737,11 @@ namespace javelin::gui::messageview
         findLayout->setSpacing(6);
         auto* findLabel = new QLabel(i18nc("@label", "Find:"), findControls);
         m_findEdit = new QLineEdit(findControls);
+        m_findEdit->setObjectName(QStringLiteral("messageFindEdit"));
         m_findEdit->setClearButtonEnabled(true);
         m_findEdit->setPlaceholderText(i18n("Find in message"));
         m_findEdit->setAccessibleName(i18n("Find in message"));
+        m_findEdit->installEventFilter(this);
         m_findResultLabel = new QLabel(findControls);
         m_findResultLabel->setMinimumWidth(m_findResultLabel->fontMetrics().horizontalAdvance(
             i18nc("@info find result count", "999 of 999")));
@@ -791,16 +795,12 @@ namespace javelin::gui::messageview
         connect(m_findPreviousButton, &QToolButton::clicked, this,
                 &MessageViewContainer::findPrevious);
         connect(m_findNextButton, &QToolButton::clicked, this, &MessageViewContainer::findNext);
-        const auto dismissFindBar = [this]
-        {
-            clearFindHighlights();
-            m_findBarContainer->setVisible(false);
-            focusMessageBody();
-        };
-        connect(closeFindButton, &QToolButton::clicked, this, dismissFindBar);
+        connect(closeFindButton, &QToolButton::clicked, this,
+                &MessageViewContainer::dismissFindBar);
         auto* dismissFindShortcut = new QShortcut(QKeySequence{Qt::Key_Escape}, m_findBarContainer);
         dismissFindShortcut->setContext(Qt::WidgetWithChildrenShortcut);
-        connect(dismissFindShortcut, &QShortcut::activated, this, dismissFindBar);
+        connect(dismissFindShortcut, &QShortcut::activated, this,
+                &MessageViewContainer::dismissFindBar);
 
         layout->addWidget(headerWidget);
         layout->addWidget(m_remoteContentBanner);
@@ -872,6 +872,13 @@ namespace javelin::gui::messageview
         {
             runFind(false);
         }
+    }
+
+    void MessageViewContainer::dismissFindBar()
+    {
+        clearFindHighlights();
+        m_findBarContainer->setVisible(false);
+        focusMessageBody();
     }
 
     void MessageViewContainer::findNext()
@@ -1062,6 +1069,17 @@ namespace javelin::gui::messageview
         {
             m_plainTextView->print(&printer);
         }
+    }
+
+    bool MessageViewContainer::eventFilter(QObject* watched, QEvent* event)
+    {
+        if (watched == m_findEdit && event->type() == QEvent::KeyPress &&
+            static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape)
+        {
+            dismissFindBar();
+            return true;
+        }
+        return QWidget::eventFilter(watched, event);
     }
 
     void MessageViewContainer::changeEvent(QEvent* event)
