@@ -1552,7 +1552,6 @@ namespace javelin::gui::shell
         m_tabBar->setUsesScrollButtons(true);
         m_tabBar->setStyleSheet(
             QStringLiteral("QTabBar::tab { max-width: 220px; min-width: 120px; }"));
-        m_tabBar->installEventFilter(this);
         m_tabBar->hide();
         m_tabBarPresenter = new TabBarPresenter(m_settings, *m_tabBar, *this, this);
 
@@ -3353,7 +3352,8 @@ namespace javelin::gui::shell
             }
         }
 
-        if (watched == m_messageView->viewport() && event->type() == QEvent::MouseButtonPress)
+        if (m_messageView != nullptr && watched == m_messageView->viewport() &&
+            event->type() == QEvent::MouseButtonPress)
         {
             const auto* mouseEvent = static_cast<QMouseEvent*>(event);
             if (mouseEvent->button() == Qt::RightButton)
