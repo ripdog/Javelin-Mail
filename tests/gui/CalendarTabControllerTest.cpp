@@ -5,8 +5,11 @@
 #include "gui/settings/GuiSettings.h"
 #include "jmap/calendar/CalendarReader.h"
 
+#include <QApplication>
 #include <QDate>
+#include <QDialog>
 #include <QStackedWidget>
+#include <QTimer>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -209,6 +212,34 @@ TEST_CASE("workspace Calendar refresh does not duplicate materialization refresh
 
     controller.invokeWorkspace(javelin::gui::shell::CalendarTabCommand::Refresh);
     CHECK(commands.rangeRequestCount == 2);
+}
+
+TEST_CASE("workspace calendar manager command materializes Calendar before opening",
+          "[gui][calendar][actions]")
+{
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    Reader reader;
+    CommandPort commands;
+    QStackedWidget contentStack;
+    std::vector<javelin::gui::shell::TabState> tabs;
+    javelin::gui::shell::CalendarTabController controller{settings, reader, commands, contentStack,
+                                                          tabs};
+    bool managerOpened = false;
+    QTimer::singleShot(0, &contentStack,
+                       [&managerOpened]
+                       {
+                           auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                           REQUIRE(dialog != nullptr);
+                           managerOpened = true;
+                           dialog->reject();
+                       });
+
+    controller.invokeWorkspace(javelin::gui::shell::CalendarTabCommand::ManageCalendars);
+
+    CHECK(managerOpened);
+    REQUIRE(tabs.size() == 1);
+    CHECK(qobject_cast<javelin::gui::calendar::MonthCalendarWidget*>(contentStack.widget(0)) !=
+          nullptr);
 }
 
 TEST_CASE("workspace calendar commands materialize Calendar before executing",

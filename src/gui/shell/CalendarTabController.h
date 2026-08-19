@@ -59,6 +59,7 @@ namespace javelin::gui::shell
         PreviousMonth,
         Today,
         NextMonth,
+        ManageCalendars,
         Refresh,
     };
 

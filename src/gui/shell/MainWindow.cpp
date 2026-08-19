@@ -1285,6 +1285,8 @@ namespace javelin::gui::shell
                                       m_calendarNextMonthAction);
         m_calendarListAction = new QAction(QIcon::fromTheme(QStringLiteral("view-calendar-list")),
                                            i18n("Calendars"), this);
+        connect(m_calendarListAction, &QAction::triggered, this,
+                [invokeCalendar] { invokeCalendar(CalendarTabCommand::ManageCalendars); });
         actionCollection()->addAction(QStringLiteral("calendar_list"), m_calendarListAction);
         m_calendarRefreshAction = new QAction(QIcon::fromTheme(QStringLiteral("view-refresh")),
                                               i18n("Refresh Calendar"), this);

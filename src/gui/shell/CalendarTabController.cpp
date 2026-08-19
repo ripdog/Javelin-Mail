@@ -1865,6 +1865,9 @@ namespace javelin::gui::shell
         case CalendarTabCommand::NextMonth:
             widget->showNextMonth();
             break;
+        case CalendarTabCommand::ManageCalendars:
+            widget->manageCalendars();
+            break;
         case CalendarTabCommand::Refresh:
             static_cast<void>(refresh(tab));
             break;
