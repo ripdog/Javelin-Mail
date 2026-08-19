@@ -2,7 +2,6 @@
 #include "gui/calendar/CalendarEventButton.h"
 #include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/MonthCalendarWidget.h"
-#include "gui/settings/WorkspaceSettingsPort.h"
 
 #include <QAccessible>
 #include <QApplication>
@@ -16,38 +15,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <optional>
 #include <ranges>
 
 namespace
 {
-    class TestWorkspaceSettingsPort final : public javelin::gui::settings::WorkspaceSettingsPort
-    {
-      public:
-        [[nodiscard]] const javelin::protocol::WorkspaceSettings& workspaceSettings() const override
-        {
-            return m_settings;
-        }
-
-        [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
-        updateWorkspace(javelin::protocol::WorkspaceSettings workspace) override
-        {
-            m_settings = std::move(workspace);
-            return std::nullopt;
-        }
-
-        [[nodiscard]] QMetaObject::Connection
-        connectWorkspaceChanged(QObject* context, std::function<void()> callback) override
-        {
-            Q_UNUSED(context);
-            Q_UNUSED(callback);
-            return {};
-        }
-
-      private:
-        javelin::protocol::WorkspaceSettings m_settings;
-    };
-
     [[nodiscard]] QAccessibleInterface*
     cellForDate(javelin::gui::calendar::MonthCalendarWidget& widget, const QDate& date)
     {
@@ -75,8 +46,7 @@ TEST_CASE("calendar accessibility factories ignore Qt objects without C++ RTTI",
 TEST_CASE("automatic calendar presentation ignores the palette current color group",
           "[gui][calendar][color]")
 {
-    TestWorkspaceSettingsPort settings;
-    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    javelin::gui::calendar::MonthCalendarWidget widget;
     auto palette = widget.palette();
     palette.setColor(QPalette::Active, QPalette::Highlight, QColor{QStringLiteral("#f38ba8")});
     palette.setColor(QPalette::Inactive, QPalette::Highlight, QColor{QStringLiteral("#876790")});
@@ -121,8 +91,7 @@ TEST_CASE("automatic calendar presentation ignores the palette current color gro
 TEST_CASE("month calendar publishes committed event presentation replacements",
           "[gui][calendar][presentation]")
 {
-    TestWorkspaceSettingsPort settings;
-    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    javelin::gui::calendar::MonthCalendarWidget widget;
     int presentationChanges = 0;
     QObject::connect(&widget,
                      &javelin::gui::calendar::MonthCalendarWidget::eventPresentationChanged,
@@ -145,8 +114,7 @@ TEST_CASE("month calendar publishes committed event presentation replacements",
 
 TEST_CASE("setting the displayed calendar month is idempotent", "[gui][calendar]")
 {
-    TestWorkspaceSettingsPort settings;
-    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    javelin::gui::calendar::MonthCalendarWidget widget;
     int visibleIntervalChangeCount = 0;
     QObject::connect(&widget, &javelin::gui::calendar::MonthCalendarWidget::visibleIntervalChanged,
                      &widget, [&visibleIntervalChangeCount](const QDate&, const QDate&)
@@ -163,8 +131,7 @@ TEST_CASE("setting the displayed calendar month is idempotent", "[gui][calendar]
 TEST_CASE("month calendar accessibility exposes one named table with concise date cells",
           "[gui][calendar][accessibility]")
 {
-    TestWorkspaceSettingsPort settings;
-    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    javelin::gui::calendar::MonthCalendarWidget widget;
     widget.setLocale(QLocale{QLocale::English, QLocale::UnitedKingdom});
     widget.setDisplayedMonth(QDate{2026, 3, 1});
 
@@ -208,8 +175,7 @@ TEST_CASE("month calendar accessibility exposes one named table with concise dat
 TEST_CASE("month calendar accessibility reports event counts and full event button names",
           "[gui][calendar][accessibility]")
 {
-    TestWorkspaceSettingsPort settings;
-    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    javelin::gui::calendar::MonthCalendarWidget widget;
     widget.setLocale(QLocale{QLocale::English, QLocale::UnitedKingdom});
     widget.setDisplayedMonth(QDate{2026, 3, 1});
     widget.resize(640, 400);
@@ -245,8 +211,7 @@ TEST_CASE("month calendar accessibility reports event counts and full event butt
 TEST_CASE("month calendar pending invitation banner sorts and activates invitations",
           "[gui][calendar][invitation][accessibility]")
 {
-    TestWorkspaceSettingsPort settings;
-    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    javelin::gui::calendar::MonthCalendarWidget widget;
     widget.setLocale(QLocale{QLocale::English, QLocale::NewZealand});
     widget.setDisplayedMonth(QDate{2026, 8, 1});
     widget.setPendingInvitations({
@@ -313,8 +278,7 @@ TEST_CASE("month calendar pending invitation banner sorts and activates invitati
 
 TEST_CASE("month calendar exposes the materialized events for a requested day", "[gui][calendar]")
 {
-    TestWorkspaceSettingsPort settings;
-    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    javelin::gui::calendar::MonthCalendarWidget widget;
     widget.setDisplayedMonth(QDate{2026, 8, 1});
 
     javelin::gui::calendar::MonthEvent event;
@@ -338,8 +302,7 @@ TEST_CASE("month calendar exposes the materialized events for a requested day", 
 
 TEST_CASE("month calendar event activation requests the event's actual day", "[gui][calendar]")
 {
-    TestWorkspaceSettingsPort settings;
-    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    javelin::gui::calendar::MonthCalendarWidget widget;
     widget.setDisplayedMonth(QDate{2026, 8, 1});
     widget.setSelectedDateFromAgenda(QDate{2026, 8, 19});
     widget.resize(900, 700);
@@ -409,8 +372,7 @@ TEST_CASE("month calendar event activation requests the event's actual day", "[g
 TEST_CASE("month calendar page navigation keeps the selected cell in the displayed month",
           "[gui][calendar][accessibility][keyboard]")
 {
-    TestWorkspaceSettingsPort settings;
-    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    javelin::gui::calendar::MonthCalendarWidget widget;
     widget.setLocale(QLocale{QLocale::English, QLocale::UnitedKingdom});
     widget.setDisplayedMonth(QDate{2026, 1, 1});
 
@@ -436,8 +398,7 @@ TEST_CASE("month calendar page navigation keeps the selected cell in the display
 TEST_CASE("month calendar Enter opens the selected day instead of creating immediately",
           "[gui][calendar][accessibility][keyboard]")
 {
-    TestWorkspaceSettingsPort settings;
-    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    javelin::gui::calendar::MonthCalendarWidget widget;
     widget.setDisplayedMonth(QDate{2026, 8, 1});
 
     QDate agendaDate;

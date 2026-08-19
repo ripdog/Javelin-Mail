@@ -1394,7 +1394,7 @@ msgstr ""
 #: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:417
 #, kde-format
 msgctxt "@action:button"
-msgid "Use Calendar Color"
+msgid "Use Automatic Color"
 msgstr ""
 
 #: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:444

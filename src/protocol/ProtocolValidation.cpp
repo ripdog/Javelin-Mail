@@ -348,26 +348,6 @@ namespace javelin::protocol
                             limits))
                         return error;
                 }
-                if (workspace.calendarColorOverrides.size() > limits.maximumCollectionItems)
-                {
-                    return BoundaryError{
-                        .code = BoundaryErrorCode::TooManyValues,
-                        .field = QStringLiteral("update.workspace.calendarColorOverrides"),
-                        .detail = QStringLiteral("collection exceeds the protocol limit")};
-                }
-                for (const auto& overrideValue : workspace.calendarColorOverrides)
-                {
-                    if (auto error = requiredStringError(
-                            overrideValue.calendarId,
-                            QStringLiteral("update.workspace.calendarColorOverrides.calendarId"),
-                            limits))
-                        return error;
-                    if (auto error = requiredStringError(
-                            overrideValue.color,
-                            QStringLiteral("update.workspace.calendarColorOverrides.color"),
-                            limits))
-                        return error;
-                }
                 if (workspace.emailContextMenuLayout.size() > limits.maximumCollectionItems)
                 {
                     return BoundaryError{
@@ -578,10 +558,6 @@ namespace javelin::protocol
                                 value.update.workspace->defaultCalendarDestination.accountId) +
                             stringSize(
                                 value.update.workspace->defaultCalendarDestination.calendarId);
-                        for (const auto& overrideValue :
-                             value.update.workspace->calendarColorOverrides)
-                            size += stringSize(overrideValue.calendarId) +
-                                    stringSize(overrideValue.color);
                         for (const auto& actionId : value.update.workspace->emailContextMenuLayout)
                             size += stringSize(actionId);
                         for (const auto& actionId :

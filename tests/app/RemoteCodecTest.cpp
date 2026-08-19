@@ -408,6 +408,30 @@ TEST_CASE("remote codec preserves scheduled send instants", "[app][remote-codec]
     CHECK(value->snapshot.accountId == "account-1");
 }
 
+TEST_CASE("remote codec preserves server calendar color commands", "[app][remote-codec][calendar]")
+{
+    using Action = javelin::protocol::actions::CalendarSetColor;
+    const auto encoded = javelin::app::remote::encodeVersioned<Action::requestSchemaVersion>(
+        std::string{"owner-account"}, std::string{"calendar-account"}, std::string{"work"},
+        std::optional<std::string>{});
+    const auto* payload = std::get_if<QByteArray>(&encoded);
+    REQUIRE(payload != nullptr);
+    const auto decoded =
+        javelin::app::remote::decodeVersionedValue<Action::requestSchemaVersion, Action::Request>(
+            *payload);
+    const auto* value = std::get_if<Action::Request>(&decoded);
+    REQUIRE(value != nullptr);
+    CHECK(std::get<0>(*value) == "owner-account");
+    CHECK(std::get<1>(*value) == "calendar-account");
+    CHECK(std::get<2>(*value) == "work");
+    CHECK_FALSE(std::get<3>(*value).has_value());
+
+    const auto metadata = javelin::protocol::actions::findActionMetadata(Action::id);
+    REQUIRE(metadata.has_value());
+    CHECK(metadata->id.value == 97);
+    CHECK(metadata->name == "CalendarSetColor");
+}
+
 TEST_CASE("remote codec preserves calendar participant roles", "[app][remote-codec][calendar]")
 {
     const javelin::jmap::calendar::Attendee attendee{

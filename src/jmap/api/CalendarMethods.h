@@ -149,6 +149,7 @@ namespace javelin::jmap::api
         struct Update
         {
             std::optional<bool> isSubscribed;
+            std::optional<std::optional<std::string>> color;
         };
 
         std::string accountId;

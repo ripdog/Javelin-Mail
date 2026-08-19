@@ -356,6 +356,7 @@ namespace javelin::jmap::api::detail
     struct RawCalendarUpdate
     {
         std::optional<bool> isSubscribed;
+        std::optional<std::optional<std::string>> color;
     };
 
     struct RawCalendarSetRequest
@@ -442,7 +443,7 @@ JAVELIN_GLZ_META(RawCalendarGetResponse, "accountId", &T::accountId, "state", &T
 JAVELIN_GLZ_META(RawCalendarCreate, "name", &T::name, "description", &T::description, "color",
                  &T::color, "sortOrder", &T::sortOrder, "isSubscribed", &T::isSubscribed,
                  "isVisible", &T::isVisible, "timeZone", &T::timeZone);
-JAVELIN_GLZ_META(RawCalendarUpdate, "isSubscribed", &T::isSubscribed);
+JAVELIN_GLZ_META(RawCalendarUpdate, "isSubscribed", &T::isSubscribed, "color", &T::color);
 JAVELIN_GLZ_META(RawQueryFilter, "inCalendar", &T::inCalendar, "after", &T::after, "before",
                  &T::before, "text", &T::text, "uid", &T::uid);
 JAVELIN_GLZ_META(RawQueryRequest, "accountId", &T::accountId, "filter", &T::filter,
@@ -1218,8 +1219,10 @@ namespace javelin::jmap::api
         std::unordered_map<std::string, detail::RawCalendarUpdate> update;
         update.reserve(request.update.size());
         for (const auto& [calendarId, patch] : request.update)
-            update.emplace(calendarId,
-                           detail::RawCalendarUpdate{.isSubscribed = patch.isSubscribed});
+            update.emplace(calendarId, detail::RawCalendarUpdate{
+                                           .isSubscribed = patch.isSubscribed,
+                                           .color = patch.color,
+                                       });
         const auto arguments = serialize(
             detail::RawCalendarSetRequest{.accountId = request.accountId,
                                           .ifInState = request.ifInState,

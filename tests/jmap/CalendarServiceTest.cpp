@@ -106,8 +106,8 @@ namespace
     }
 } // namespace
 
-TEST_CASE("calendar subscriptions project and reconcile server outcomes",
-          "[jmap][calendar][subscriptions]")
+TEST_CASE("calendar metadata mutations project and reconcile server outcomes",
+          "[jmap][calendar][subscriptions][color]")
 {
     ensureApplication();
     QTemporaryDir directory;
@@ -161,6 +161,14 @@ TEST_CASE("calendar subscriptions project and reconcile server outcomes",
         REQUIRE(values.size() == 1);
         return values.front().isSubscribed;
     };
+    const auto calendarColor = [&calendars]
+    {
+        const auto listed = calendars.listCalendars("a1");
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::Calendar>>(listed));
+        const auto& values = std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed);
+        REQUIRE(values.size() == 1);
+        return values.front().color;
+    };
 
     SECTION("accepted update commits the projected subscription")
     {
@@ -182,6 +190,117 @@ TEST_CASE("calendar subscriptions project and reconcile server outcomes",
         REQUIRE(transport.request.has_value());
         CHECK(transport.request->envelope.methodCalls.front().arguments.find(
                   R"("update":{"work":{"isSubscribed":false}})") != std::string::npos);
+    }
+
+    SECTION("accepted color update commits the projected server color")
+    {
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "Calendar/set",
+                  .arguments =
+                      R"({"accountId":"a1","oldState":"c1","newState":"c2","created":{},"updated":{"work":{}},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+                  .callId = "calendar-set-color"}},
+            .createdIds = std::nullopt,
+            .sessionState = "s2"});
+        transport.beforeReturn = [&calendarColor]
+        { CHECK(calendarColor() == std::optional<std::string>{"#336699"}); };
+
+        const auto result =
+            QCoro::waitFor(mutation.setCalendarColor(settings, "a1", "a1", "work", "#336699"));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
+        CHECK(calendarColor() == std::optional<std::string>{"#336699"});
+        REQUIRE(transport.request.has_value());
+        CHECK(transport.request->envelope.methodCalls.front().arguments.find(
+                  R"("update":{"work":{"color":"#336699"}})") != std::string::npos);
+    }
+
+    SECTION("clearing a color stores a server null rather than a local fallback")
+    {
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "Calendar/set",
+                  .arguments =
+                      R"({"accountId":"a1","oldState":"c1","newState":"c2","created":{},"updated":{"work":{}},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+                  .callId = "calendar-set-color"}},
+            .createdIds = std::nullopt,
+            .sessionState = "s2"});
+        transport.beforeReturn = [&calendarColor] { CHECK_FALSE(calendarColor().has_value()); };
+
+        const auto result =
+            QCoro::waitFor(mutation.setCalendarColor(settings, "a1", "a1", "work", std::nullopt));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
+        CHECK_FALSE(calendarColor().has_value());
+        REQUIRE(transport.request.has_value());
+        CHECK(transport.request->envelope.methodCalls.front().arguments.find(
+                  R"("update":{"work":{"color":null}})") != std::string::npos);
+    }
+
+    SECTION("definitive color rejection restores the confirmed server color")
+    {
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "Calendar/set",
+                  .arguments =
+                      R"({"accountId":"a1","oldState":"c1","newState":"c1","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{"work":{"type":"forbidden","description":"protected"}},"notDestroyed":{}})",
+                  .callId = "calendar-set-color"}},
+            .createdIds = std::nullopt,
+            .sessionState = "s2"});
+        transport.beforeReturn = [&calendarColor]
+        { CHECK(calendarColor() == std::optional<std::string>{"#336699"}); };
+
+        const auto result =
+            QCoro::waitFor(mutation.setCalendarColor(settings, "a1", "a1", "work", "#336699"));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK(calendarColor() == std::optional<std::string>{"#2457a6"});
+    }
+
+    SECTION("ambiguous color update reconciles against the server")
+    {
+        transport.results.push_back(javelin::jmap::api::TransportError{
+            .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+            .message = "Connection closed after Calendar/set dispatch",
+        });
+
+        const auto result =
+            QCoro::waitFor(mutation.setCalendarColor(settings, "a1", "a1", "work", "#336699"));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK(calendarColor() == std::optional<std::string>{"#336699"});
+        javelin::jmap::sync::MutationJournalRepository journal{connection};
+        const auto active = journal.listActive({.accountId = "a1", .dataType = "Calendar"});
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(active));
+        REQUIRE(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(active).size() == 1);
+        CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(active).front().status ==
+              javelin::jmap::sync::MutationStatus::Unknown);
+
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "Calendar/get",
+                  .arguments =
+                      R"({"accountId":"a1","state":"c2","list":[{"id":"work","name":"Work","color":"#2457a6","sortOrder":0,"isSubscribed":true,"isVisible":true,"isDefault":true,"myRights":{"mayReadFreeBusy":true,"mayReadItems":true,"mayWriteAll":true,"mayWriteOwn":true,"mayUpdatePrivate":true,"mayRSVP":true,"mayShare":false,"mayDelete":false}}],"notFound":[]})",
+                  .callId = "calendar-get"},
+                 {.name = "CalendarEvent/query",
+                  .arguments =
+                      R"({"accountId":"a1","queryState":"q2","canCalculateChanges":false,"position":0,"ids":[],"total":0,"limit":100})",
+                  .callId = "calendar-event-query"},
+                 {.name = "CalendarEvent/query",
+                  .arguments =
+                      R"({"accountId":"a1","queryState":"qb2","canCalculateChanges":false,"position":0,"ids":[],"total":0,"limit":100})",
+                  .callId = "calendar-base-event-query"}},
+            .createdIds = std::nullopt,
+            .sessionState = "s3"});
+        const auto refreshed = QCoro::waitFor(sync.refresh(
+            settings, "a1",
+            {.start = {.value = "2026-08-01T00:00:00"}, .end = {.value = "2026-09-01T00:00:00"}},
+            {.value = "Pacific/Auckland"}));
+        REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(refreshed));
+        const auto resolved = journal.listActive({.accountId = "a1", .dataType = "Calendar"});
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(resolved));
+        CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(resolved).empty());
+        CHECK(calendarColor() == std::optional<std::string>{"#2457a6"});
     }
 
     SECTION("definitive rejection restores the confirmed subscription")

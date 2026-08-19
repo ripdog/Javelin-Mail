@@ -110,8 +110,6 @@ namespace
                                                        .accountId = QStringLiteral("account-1"),
                                                        .calendarId =
                                                            QStringLiteral("calendar-default")},
-                        .calendarColorOverrides = {{.calendarId = QStringLiteral("calendar-1"),
-                                                    .color = QStringLiteral("#123456")}},
                         .emailContextMenuLayout = {QStringLiteral("compose_reply"),
                                                    QStringLiteral("separator"),
                                                    QStringLiteral("archive_email")},
@@ -279,10 +277,6 @@ namespace
               QStringLiteral("account-1"));
         CHECK(settingsSnapshot.workspace.defaultCalendarDestination.calendarId ==
               QStringLiteral("calendar-default"));
-        REQUIRE(settingsSnapshot.workspace.calendarColorOverrides.size() == 1);
-        CHECK(settingsSnapshot.workspace.calendarColorOverrides.front().calendarId ==
-              QStringLiteral("calendar-1"));
-
         const auto settingsUpdate = settingsClient.updateSettings(
             {.baseRevision = {.value = 5},
              .update = {
@@ -321,8 +315,6 @@ namespace
                      .defaultCalendarDestination = {.ownerAccountId = QStringLiteral("server-2"),
                                                     .accountId = QStringLiteral("account-2"),
                                                     .calendarId = QStringLiteral("calendar-2")},
-                     .calendarColorOverrides = {{.calendarId = QStringLiteral("calendar-2"),
-                                                 .color = QStringLiteral("#abcdef")}},
                      .emailContextMenuLayout = {QStringLiteral("archive_email")},
                      .calendarEventContextMenuLayout = {
                          QStringLiteral("calendar_event_copy_details")}}}});
@@ -360,11 +352,6 @@ namespace
                   .accountId == QStringLiteral("account-2"));
         CHECK(handler.receivedSettingsUpdate->update.workspace->defaultCalendarDestination
                   .calendarId == QStringLiteral("calendar-2"));
-        REQUIRE(handler.receivedSettingsUpdate->update.workspace->calendarColorOverrides.size() ==
-                1);
-        CHECK(handler.receivedSettingsUpdate->update.workspace->calendarColorOverrides.front()
-                  .calendarId == QStringLiteral("calendar-2"));
-
         CHECK_FALSE(daemonStatusClient.ping().has_value());
         CHECK_FALSE(activationClient.readyForActivation().has_value());
         CHECK_FALSE(
@@ -633,7 +620,6 @@ TEST_CASE("workspace settings enforce protocol bounds", "[protocol][settings]")
         .mainWindowState = QByteArrayLiteral("large"),
         .composeRichTextDefault = true,
         .defaultCalendarDestination = {},
-        .calendarColorOverrides = {},
         .emailContextMenuLayout = {QStringLiteral("compose_reply")},
         .calendarEventContextMenuLayout = {},
     };
@@ -657,7 +643,6 @@ TEST_CASE("email context menu settings enforce collection bounds", "[protocol][s
         .mainWindowState = {},
         .composeRichTextDefault = true,
         .defaultCalendarDestination = {},
-        .calendarColorOverrides = {},
         .emailContextMenuLayout = {QStringLiteral("compose_reply"),
                                    QStringLiteral("archive_email")},
         .calendarEventContextMenuLayout = {},
@@ -682,7 +667,6 @@ TEST_CASE("calendar event context menu settings enforce collection bounds", "[pr
         .mainWindowState = {},
         .composeRichTextDefault = true,
         .defaultCalendarDestination = {},
-        .calendarColorOverrides = {},
         .emailContextMenuLayout = {},
         .calendarEventContextMenuLayout = {QStringLiteral("calendar_event_edit"),
                                            QStringLiteral("calendar_event_delete")},

@@ -407,6 +407,43 @@ namespace javelin::gui::shell
     {
     }
 
+    QCoro::Task<std::optional<javelin::jmap::OperationError>>
+    CalendarTabController::applyCalendarColors(QStringList calendarIds, QStringList colors)
+    {
+        if (calendarIds.size() != colors.size())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::InvalidRequest,
+                .message = i18n("The calendar color update is invalid."),
+            };
+
+        for (qsizetype index = 0; index < calendarIds.size(); ++index)
+        {
+            const auto& displayId = calendarIds[index];
+            const auto separator = displayId.indexOf(QLatin1Char('\n'));
+            if (separator <= 0 || separator == displayId.size() - 1)
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::InvalidRequest,
+                    .message = i18n("The selected calendar is invalid."),
+                };
+            const auto accountId = displayId.first(separator).toStdString();
+            const auto account = std::ranges::find(
+                m_calendarAccounts, accountId, &javelin::jmap::cache::CalendarAccount::accountId);
+            if (account == m_calendarAccounts.end())
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::NotFound,
+                    .message = i18n("The selected calendar account is no longer available."),
+                };
+            const auto color = colors[index].isEmpty() ? std::optional<std::string>{}
+                                                       : std::optional{colors[index].toStdString()};
+            auto result = co_await m_calendarCommandPort.setCalendarColor(
+                account->ownerAccountId, accountId, displayId.sliced(separator + 1).toStdString(),
+                color);
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                co_return *error;
+        }
+        co_return std::nullopt;
+    }
+
     bool CalendarTabController::refreshAccountSnapshot(
         javelin::gui::calendar::MonthCalendarWidget& widget)
     {
@@ -1025,7 +1062,7 @@ namespace javelin::gui::shell
             }
         }
 
-        auto* widget = new javelin::gui::calendar::MonthCalendarWidget(m_settings, &m_contentStack);
+        auto* widget = new javelin::gui::calendar::MonthCalendarWidget(&m_contentStack);
         if (!refreshAccountSnapshot(*widget))
         {
             widget->deleteLater();
@@ -1350,6 +1387,17 @@ namespace javelin::gui::shell
                         Q_EMIT statusMessage(error->detail, 10000);
                     }
                     loadVisible(widget->visibleStart(), widget->visibleEnd());
+                });
+        connect(widget, &javelin::gui::calendar::MonthCalendarWidget::calendarColorsChanged, widget,
+                [this, widget](QStringList calendarIds, QStringList colors)
+                {
+                    auto task = applyCalendarColors(std::move(calendarIds), std::move(colors));
+                    QCoro::connect(std::move(task), widget,
+                                   [this](std::optional<javelin::jmap::OperationError> error)
+                                   {
+                                       if (error.has_value())
+                                           Q_EMIT operationFailed(*error);
+                                   });
                 });
         connect(
             widget, &javelin::gui::calendar::MonthCalendarWidget::calendarCreationRequested, widget,

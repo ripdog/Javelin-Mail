@@ -5,11 +5,14 @@
 #include "jmap/OperationError.h"
 #include "jmap/cache/CalendarRepository.h"
 
+#include <QCoroTask>
+
 #include <QDate>
 #include <QList>
 #include <QObject>
 #include <QPoint>
 #include <QString>
+#include <QStringList>
 
 #include <functional>
 #include <optional>
@@ -106,6 +109,8 @@ namespace javelin::gui::shell
                                       const QString& actionId, const QString& accountId,
                                       const QString& eventId, const QString& recurrenceId,
                                       const QString& targetCalendarId);
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::OperationError>>
+        applyCalendarColors(QStringList calendarIds, QStringList colors);
 
         javelin::gui::settings::GuiSettings& m_settings;
         javelin::jmap::calendar::CalendarReader& m_calendarReader;

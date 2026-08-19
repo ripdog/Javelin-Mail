@@ -3,7 +3,6 @@
 #include "app/SettingsApplicationPorts.h"
 #include "gui/messageview/MessageAppearance.h"
 #include "gui/settings/ConnectionSettings.h"
-#include "gui/settings/WorkspaceSettingsPort.h"
 
 #include <QMetaObject>
 #include <QStringList>
@@ -22,7 +21,7 @@ namespace javelin::gui::settings
         QString directory;
     };
 
-    class GuiSettings final : public WorkspaceSettingsPort
+    class GuiSettings final
     {
       public:
         explicit GuiSettings(javelin::app::SettingsPort& port);
@@ -40,8 +39,7 @@ namespace javelin::gui::settings
         [[nodiscard]] AttachmentSaveSettings attachmentSaveSettings() const;
         [[nodiscard]] int undoSendDelaySeconds() const;
         [[nodiscard]] bool undoSendUsesDialog() const;
-        [[nodiscard]] const javelin::protocol::WorkspaceSettings&
-        workspaceSettings() const override;
+        [[nodiscard]] const javelin::protocol::WorkspaceSettings& workspaceSettings() const;
 
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
         update(javelin::protocol::SettingsUpdate update);
@@ -49,7 +47,7 @@ namespace javelin::gui::settings
         update(javelin::protocol::SettingsRevision baseRevision,
                javelin::protocol::SettingsUpdate update);
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
-        updateWorkspace(javelin::protocol::WorkspaceSettings workspace) override;
+        updateWorkspace(javelin::protocol::WorkspaceSettings workspace);
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
         associateCachedAccount(const QString& configuredAccountId, const QString& cachedAccountId);
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
@@ -58,8 +56,6 @@ namespace javelin::gui::settings
         saveResolvedSessionUrl(const QString& configuredAccountId, const QString& sessionUrl);
         [[nodiscard]] QMetaObject::Connection connectChanged(QObject* context,
                                                              std::function<void()> callback);
-        [[nodiscard]] QMetaObject::Connection
-        connectWorkspaceChanged(QObject* context, std::function<void()> callback) override;
 
         [[nodiscard]] static std::vector<javelin::protocol::AccountSettings>
         protocolAccounts(const std::vector<ConnectionSettings>& accounts);

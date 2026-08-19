@@ -428,11 +428,6 @@ namespace javelin::protocol
                    writer.string(workspace.defaultCalendarDestination.ownerAccountId) &&
                    writer.string(workspace.defaultCalendarDestination.accountId) &&
                    writer.string(workspace.defaultCalendarDestination.calendarId) &&
-                   writeVector(
-                       writer, workspace.calendarColorOverrides, limits.maximumCollectionItems,
-                       QStringLiteral("workspace.calendarColorOverrides"),
-                       [&writer](const CalendarColorOverride& value)
-                       { return writer.string(value.calendarId) && writer.string(value.color); }) &&
                    writeVector(writer, workspace.emailContextMenuLayout,
                                limits.maximumCollectionItems,
                                QStringLiteral("workspace.emailContextMenuLayout"),
@@ -455,12 +450,7 @@ namespace javelin::protocol
                 static_cast<std::size_t>(workspace.mainWindowState.size()) >
                     limits.maximumWorkspaceBytes)
                 return false;
-            return readVector(
-                       reader, workspace.calendarColorOverrides, limits.maximumCollectionItems,
-                       QStringLiteral("workspace.calendarColorOverrides"),
-                       [&reader](CalendarColorOverride& value)
-                       { return reader.string(value.calendarId) && reader.string(value.color); }) &&
-                   readVector(reader, workspace.emailContextMenuLayout,
+            return readVector(reader, workspace.emailContextMenuLayout,
                               limits.maximumCollectionItems,
                               QStringLiteral("workspace.emailContextMenuLayout"),
                               [&reader](QString& value) { return reader.string(value); }) &&

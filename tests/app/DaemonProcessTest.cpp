@@ -304,7 +304,7 @@ TEST_CASE("daemon process migrates settings before exposing readiness", "[app][d
     const auto settings = process.handleGetSettings({});
     const auto* snapshot = std::get_if<javelin::protocol::SettingsSnapshotReply>(&settings);
     REQUIRE(snapshot != nullptr);
-    CHECK(snapshot->snapshot.schemaVersion == 7);
+    CHECK(snapshot->snapshot.schemaVersion == 8);
     CHECK(snapshot->snapshot.revision.value == 0);
 
     const auto update = process.handleUpdateSettings({

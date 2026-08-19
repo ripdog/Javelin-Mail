@@ -59,14 +59,6 @@ namespace javelin::protocol
         friend bool operator==(const AttachmentSettings&, const AttachmentSettings&) = default;
     };
 
-    struct CalendarColorOverride
-    {
-        QString calendarId;
-        QString color;
-        friend bool operator==(const CalendarColorOverride&,
-                               const CalendarColorOverride&) = default;
-    };
-
     struct CalendarDefaultDestination
     {
         QString ownerAccountId;
@@ -82,7 +74,6 @@ namespace javelin::protocol
         QByteArray mainWindowState;
         bool composeRichTextDefault = true;
         CalendarDefaultDestination defaultCalendarDestination;
-        std::vector<CalendarColorOverride> calendarColorOverrides;
         std::vector<QString> emailContextMenuLayout;
         std::vector<QString> calendarEventContextMenuLayout;
         friend bool operator==(const WorkspaceSettings&, const WorkspaceSettings&) = default;
@@ -111,7 +102,7 @@ namespace javelin::protocol
     struct SettingsSnapshot
     {
         SettingsRevision revision;
-        std::uint32_t schemaVersion = 7;
+        std::uint32_t schemaVersion = 8;
         std::vector<AccountSettings> accounts;
         std::vector<MailboxSelectionSettings> syncedMailboxSelections;
         std::vector<MailboxSelectionSettings> notificationMailboxSelections;

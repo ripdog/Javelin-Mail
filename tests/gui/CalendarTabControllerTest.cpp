@@ -153,6 +153,13 @@ namespace
         }
 
         QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        setCalendarColor(std::string, std::string accountId, std::string,
+                         std::optional<std::string>) override
+        {
+            co_return committed(std::move(accountId));
+        }
+
+        QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         createCalendar(std::string, javelin::jmap::calendar::CreateCalendarCommand command) override
         {
             co_return committed(command.accountId);

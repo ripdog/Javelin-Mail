@@ -236,12 +236,6 @@ namespace javelin::gui::settings
                                  : m_port->connectSettingsChanged(context, std::move(callback));
     }
 
-    QMetaObject::Connection GuiSettings::connectWorkspaceChanged(QObject* context,
-                                                                 std::function<void()> callback)
-    {
-        return connectChanged(context, std::move(callback));
-    }
-
     std::vector<javelin::protocol::AccountSettings>
     GuiSettings::protocolAccounts(const std::vector<ConnectionSettings>& accounts)
     {

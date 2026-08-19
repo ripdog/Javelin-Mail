@@ -1588,7 +1588,6 @@ target_sources(javelin_gui PRIVATE
     src/gui/messageview/MessageAppearance.h
     src/gui/settings/GuiSettings.cpp
     src/gui/settings/GuiSettings.h
-    src/gui/settings/WorkspaceSettingsPort.h
 )
 qt_add_resources(javelin_gui "javelin_darkreader"
     PREFIX "/vendor/darkreader"

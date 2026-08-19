@@ -226,6 +226,15 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+    RemoteCalendarCommandPort::setCalendarColor(std::string ownerAccountId, std::string accountId,
+                                                std::string calendarId,
+                                                std::optional<std::string> color)
+    {
+        co_return co_await call<javelin::protocol::actions::CalendarSetColor>(
+            m_client, ownerAccountId, accountId, calendarId, color);
+    }
+
+    QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     RemoteCalendarCommandPort::createCalendar(
         std::string ownerAccountId, javelin::jmap::calendar::CreateCalendarCommand command)
     {

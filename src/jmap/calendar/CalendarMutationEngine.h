@@ -40,6 +40,10 @@ namespace javelin::jmap::calendar
         setDefaultCalendar(LiveConnectionSettings settings, std::string ownerAccountId,
                            std::string accountId, std::string calendarId);
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
+        setCalendarColor(LiveConnectionSettings settings, std::string ownerAccountId,
+                         std::string accountId, std::string calendarId,
+                         std::optional<std::string> color);
+        [[nodiscard]] QCoro::Task<CalendarMutationResult>
         createCalendar(LiveConnectionSettings settings, std::string ownerAccountId,
                        CreateCalendarCommand command);
         [[nodiscard]] QCoro::Task<CalendarMutationResult>

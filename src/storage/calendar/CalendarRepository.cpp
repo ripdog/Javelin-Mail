@@ -364,6 +364,46 @@ namespace javelin::jmap::cache
         return std::nullopt;
     }
 
+    std::optional<DatabaseError> CalendarRepository::applyCalendarColor(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::string_view calendarId, const std::string_view state,
+        const std::optional<std::string>& color)
+    {
+        if (!transaction.isActive())
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message =
+                                     QStringLiteral("Apply calendar color without transaction")};
+        auto& database = transaction.connection().database();
+        QSqlQuery update{database};
+        update.prepare(QStringLiteral(
+            "UPDATE calendars SET color=:color,state=:state WHERE account_id=:account AND "
+            "calendar_id=:calendar"));
+        update.bindValue(QStringLiteral(":color"), optionalString(color));
+        update.bindValue(QStringLiteral(":state"), QString::fromStdString(std::string{state}));
+        update.bindValue(QStringLiteral(":account"),
+                         QString::fromStdString(std::string{accountId}));
+        update.bindValue(QStringLiteral(":calendar"),
+                         QString::fromStdString(std::string{calendarId}));
+        if (!update.exec())
+            return queryError(QStringLiteral("Apply server calendar color"), update);
+        if (update.numRowsAffected() != 1)
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Calendar color target missing")};
+
+        QSqlQuery stateToken{database};
+        stateToken.prepare(QStringLiteral(
+            "INSERT INTO calendar_state_tokens (account_id,data_type,state) VALUES "
+            "(:account,'Calendar',:state) ON CONFLICT(account_id,data_type) DO UPDATE SET "
+            "state=excluded.state"));
+        stateToken.bindValue(QStringLiteral(":account"),
+                             QString::fromStdString(std::string{accountId}));
+        stateToken.bindValue(QStringLiteral(":state"), QString::fromStdString(std::string{state}));
+        if (!stateToken.exec())
+            return queryError(QStringLiteral("Store Calendar state after color change"),
+                              stateToken);
+        return std::nullopt;
+    }
+
     std::optional<DatabaseError> CalendarRepository::applyCalendarDefaults(
         DatabaseTransaction& transaction, const std::string_view accountId,
         const std::string_view state, const std::unordered_map<std::string, bool>& defaults)

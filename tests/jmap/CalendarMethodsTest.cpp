@@ -239,7 +239,7 @@ TEST_CASE("calendar set serializes an exact subscription update", "[jmap][calend
         .accountId = "a1",
         .ifInState = "c1",
         .create = {},
-        .update = {{"work", {.isSubscribed = false}}},
+        .update = {{"work", {.isSubscribed = false, .color = std::nullopt}}},
         .destroy = {},
         .onDestroyRemoveEvents = false,
         .onSuccessSetIsDefault = std::nullopt,
@@ -249,6 +249,38 @@ TEST_CASE("calendar set serializes an exact subscription update", "[jmap][calend
     CHECK(method->arguments.find(R"("update":{"work":{"isSubscribed":false}})") !=
           std::string::npos);
     CHECK(method->arguments.find(R"("name")") == std::string::npos);
+}
+
+TEST_CASE("calendar set serializes server calendar color updates", "[jmap][calendar]")
+{
+    const std::optional<std::optional<std::string>> selectedColor{
+        std::in_place, std::optional<std::string>{"#336699"}};
+    const auto selected = javelin::jmap::api::calendarSet({
+        .accountId = "a1",
+        .ifInState = "c1",
+        .create = {},
+        .update = {{"work", {.isSubscribed = std::nullopt, .color = selectedColor}}},
+        .destroy = {},
+        .onDestroyRemoveEvents = false,
+        .onSuccessSetIsDefault = std::nullopt,
+    });
+    REQUIRE(selected.has_value());
+    CHECK(selected->arguments.find(R"("update":{"work":{"color":"#336699"}})") !=
+          std::string::npos);
+
+    const std::optional<std::optional<std::string>> automaticColor{std::in_place,
+                                                                   std::optional<std::string>{}};
+    const auto automatic = javelin::jmap::api::calendarSet({
+        .accountId = "a1",
+        .ifInState = "c1",
+        .create = {},
+        .update = {{"work", {.isSubscribed = std::nullopt, .color = automaticColor}}},
+        .destroy = {},
+        .onDestroyRemoveEvents = false,
+        .onSuccessSetIsDefault = std::nullopt,
+    });
+    REQUIRE(automatic.has_value());
+    CHECK(automatic->arguments.find(R"("update":{"work":{"color":null}})") != std::string::npos);
 }
 
 TEST_CASE("calendar set serializes creation and destructive deletion", "[jmap][calendar]")

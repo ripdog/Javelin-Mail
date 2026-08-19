@@ -56,15 +56,12 @@ namespace javelin::app
         constexpr auto workspaceDefaultCalendarOwnerAccountIdKey = "defaultCalendarOwnerAccountId";
         constexpr auto workspaceDefaultCalendarAccountIdKey = "defaultCalendarAccountId";
         constexpr auto workspaceDefaultCalendarIdKey = "defaultCalendarId";
-        constexpr auto workspaceCalendarColorsKey = "calendarColorOverrides";
-        constexpr auto workspaceCalendarIdKey = "calendarId";
-        constexpr auto workspaceColorKey = "color";
         constexpr auto workspaceEmailContextMenuLayoutKey = "emailContextMenuLayout";
         constexpr auto workspaceCalendarEventContextMenuLayoutKey =
             "calendarEventContextMenuLayout";
         constexpr auto legacyWindowGroup = "mainWindow";
         constexpr auto legacyCalendarColorsKey = "calendar/colorOverrides";
-        constexpr int settingsSchemaVersion = 7;
+        constexpr int settingsSchemaVersion = 8;
         constexpr int workspaceFormatVersion = 1;
         constexpr int maximumAccounts = 256;
         constexpr int maximumSelections = 256;
@@ -204,19 +201,6 @@ namespace javelin::app
                     workspace.mainWindowState = std::get<QByteArray>(std::move(encoded));
                 }
 
-                const auto legacyColors =
-                    settings.value(settingKey(legacyCalendarColorsKey)).toMap();
-                workspace.calendarColorOverrides.reserve(
-                    static_cast<std::size_t>(legacyColors.size()));
-                for (auto it = legacyColors.cbegin(); it != legacyColors.cend(); ++it)
-                {
-                    const auto color = it.value().toString().trimmed();
-                    if (!it.key().trimmed().isEmpty() && !color.isEmpty())
-                    {
-                        workspace.calendarColorOverrides.push_back(
-                            {.calendarId = it.key().trimmed(), .color = color});
-                    }
-                }
                 return std::nullopt;
             }
 
@@ -268,32 +252,6 @@ namespace javelin::app
                 return invalidValue(settingKey(workspaceWindowStateKey),
                                     QStringLiteral("workspace state is too large"));
             }
-            const auto colorCount = settings.beginReadArray(settingKey(workspaceCalendarColorsKey));
-            if (colorCount < 0 || colorCount > maximumSelections)
-            {
-                settings.endArray();
-                settings.endGroup();
-                return invalidValue(settingKey(workspaceCalendarColorsKey),
-                                    QStringLiteral("invalid calendar color count"));
-            }
-            workspace.calendarColorOverrides.reserve(static_cast<std::size_t>(colorCount));
-            for (int index = 0; index < colorCount; ++index)
-            {
-                settings.setArrayIndex(index);
-                auto calendarId =
-                    settings.value(settingKey(workspaceCalendarIdKey)).toString().trimmed();
-                auto color = settings.value(settingKey(workspaceColorKey)).toString().trimmed();
-                if (calendarId.isEmpty() || color.isEmpty())
-                {
-                    settings.endArray();
-                    settings.endGroup();
-                    return invalidValue(settingKey(workspaceCalendarColorsKey),
-                                        QStringLiteral("calendar color entry is incomplete"));
-                }
-                workspace.calendarColorOverrides.push_back(
-                    {.calendarId = std::move(calendarId), .color = std::move(color)});
-            }
-            settings.endArray();
             settings.endGroup();
             if (static_cast<int>(workspace.emailContextMenuLayout.size()) > maximumSelections)
                 return invalidValue(settingKey(workspaceEmailContextMenuLayoutKey),
@@ -302,16 +260,6 @@ namespace javelin::app
                 maximumSelections)
                 return invalidValue(settingKey(workspaceCalendarEventContextMenuLayoutKey),
                                     QStringLiteral("too many context menu entries"));
-            std::ranges::sort(workspace.calendarColorOverrides, {},
-                              &javelin::protocol::CalendarColorOverride::calendarId);
-            const auto duplicate =
-                std::ranges::adjacent_find(workspace.calendarColorOverrides, {},
-                                           &javelin::protocol::CalendarColorOverride::calendarId);
-            if (duplicate != workspace.calendarColorOverrides.end())
-            {
-                return invalidValue(settingKey(workspaceCalendarColorsKey),
-                                    QStringLiteral("calendar color ids must be unique"));
-            }
             return std::nullopt;
         }
 
@@ -358,22 +306,6 @@ namespace javelin::app
                  destination.calendarId.isEmpty()))
                 return invalidValue(settingKey(workspaceDefaultCalendarIdKey),
                                     QStringLiteral("default calendar destination is incomplete"));
-            for (auto& overrideValue : snapshot.workspace.calendarColorOverrides)
-            {
-                overrideValue.calendarId = overrideValue.calendarId.trimmed();
-                overrideValue.color = overrideValue.color.trimmed();
-                if (overrideValue.calendarId.isEmpty() || overrideValue.color.isEmpty())
-                    return invalidValue(settingKey(workspaceCalendarColorsKey),
-                                        QStringLiteral("calendar color entry is incomplete"));
-            }
-            std::ranges::sort(snapshot.workspace.calendarColorOverrides, {},
-                              &javelin::protocol::CalendarColorOverride::calendarId);
-            const auto duplicate =
-                std::ranges::adjacent_find(snapshot.workspace.calendarColorOverrides, {},
-                                           &javelin::protocol::CalendarColorOverride::calendarId);
-            if (duplicate != snapshot.workspace.calendarColorOverrides.end())
-                return invalidValue(settingKey(workspaceCalendarColorsKey),
-                                    QStringLiteral("calendar color ids must be unique"));
             return std::nullopt;
         }
     } // namespace
@@ -465,8 +397,9 @@ namespace javelin::app
         {
             bool ok = false;
             const auto version = settings.value(settingKey(schemaVersionKey)).toUInt(&ok);
-            if (!ok || (version != 1 && version != 2 && version != 3 && version != 4 &&
-                        version != 5 && version != 6 && version != settingsSchemaVersion))
+            if (!ok ||
+                (version != 1 && version != 2 && version != 3 && version != 4 && version != 5 &&
+                 version != 6 && version != 7 && version != settingsSchemaVersion))
             {
                 return SettingsRepositoryError{
                     .code = SettingsRepositoryErrorCode::UnsupportedSchema,
@@ -816,19 +749,7 @@ namespace javelin::app
                           toStringList(snapshot.workspace.emailContextMenuLayout));
         settings.setValue(settingKey(workspaceCalendarEventContextMenuLayoutKey),
                           toStringList(snapshot.workspace.calendarEventContextMenuLayout));
-        settings.beginWriteArray(
-            settingKey(workspaceCalendarColorsKey),
-            static_cast<int>(snapshot.workspace.calendarColorOverrides.size()));
-        for (int index = 0;
-             index < static_cast<int>(snapshot.workspace.calendarColorOverrides.size()); ++index)
-        {
-            settings.setArrayIndex(index);
-            const auto& overrideValue =
-                snapshot.workspace.calendarColorOverrides[static_cast<std::size_t>(index)];
-            settings.setValue(settingKey(workspaceCalendarIdKey), overrideValue.calendarId);
-            settings.setValue(settingKey(workspaceColorKey), overrideValue.color);
-        }
-        settings.endArray();
+        settings.remove(QStringLiteral("calendarColorOverrides"));
         settings.endGroup();
         if (includeSchemaVersion)
             settings.setValue(settingKey(schemaVersionKey), snapshot.schemaVersion);

@@ -119,12 +119,12 @@ TEST_CASE("settings repository creates and persists its schema identity", "[app]
     const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
     REQUIRE(snapshot != nullptr);
     CHECK(snapshot->revision.value == 0);
-    CHECK(snapshot->schemaVersion == 7);
+    CHECK(snapshot->schemaVersion == 8);
     CHECK(snapshot->undoSendDelaySeconds == 10);
     CHECK_FALSE(snapshot->undoSendUsesDialog);
 
     QSettings persisted{path, QSettings::IniFormat};
-    CHECK(persisted.value(QStringLiteral("settings/schemaVersion")).toUInt() == 7);
+    CHECK(persisted.value(QStringLiteral("settings/schemaVersion")).toUInt() == 8);
     CHECK(persisted.value(QStringLiteral("settings/revision")).toULongLong() == 0);
 }
 
@@ -168,13 +168,8 @@ TEST_CASE("settings repository migrates the complete legacy operational shape", 
     REQUIRE(workspace.tabs.size() == 1);
     CHECK(std::get<javelin::gui::shell::PersistedMailboxTab>(workspace.tabs.front()).mailboxId ==
           "inbox");
-    REQUIRE(snapshot->workspace.calendarColorOverrides.size() == 1);
-    CHECK(snapshot->workspace.calendarColorOverrides.front().calendarId ==
-          QStringLiteral("calendar-1"));
-    CHECK(snapshot->workspace.calendarColorOverrides.front().color == QStringLiteral("#123456"));
-
     QSettings migrated{path, QSettings::IniFormat};
-    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 7);
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 8);
     CHECK(migrated.value(QStringLiteral("settings/revision")).toULongLong() == 0);
     CHECK_FALSE(migrated.value(QStringLiteral("translation/enabled")).toBool());
     CHECK(migrated.value(QStringLiteral("translation/targetLanguage")).toString() ==
@@ -213,13 +208,13 @@ TEST_CASE("settings repository migrates schema one workspace state", "[app][sett
     const auto result = repository.load();
     const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
     REQUIRE(snapshot != nullptr);
-    CHECK(snapshot->schemaVersion == 7);
+    CHECK(snapshot->schemaVersion == 8);
     CHECK(snapshot->revision.value == 0);
     CHECK(javelin::gui::shell::deserializeMainWindowState(snapshot->workspace.mainWindowState, {})
               .activeTabIndex == 4);
 
     QSettings migrated{path, QSettings::IniFormat};
-    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 7);
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 8);
     CHECK_FALSE(migrated.contains(QStringLiteral("mainWindow/activeTabIndex")));
 }
 
@@ -252,12 +247,12 @@ TEST_CASE("schema four migration retries legacy OAuth grants blocked by missing 
     const auto result = repository.load();
     const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
     REQUIRE(snapshot != nullptr);
-    CHECK(snapshot->schemaVersion == 7);
+    CHECK(snapshot->schemaVersion == 8);
     REQUIRE(snapshot->accounts.size() == 1);
     CHECK_FALSE(snapshot->accounts.front().reauthenticationRequired);
 
     QSettings migrated{path, QSettings::IniFormat};
-    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 7);
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 8);
 }
 
 TEST_CASE("schema five migration adds an empty email context menu override", "[app][settings]")
@@ -277,12 +272,12 @@ TEST_CASE("schema five migration adds an empty email context menu override", "[a
     const auto result = repository.load();
     const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
     REQUIRE(snapshot != nullptr);
-    CHECK(snapshot->schemaVersion == 7);
+    CHECK(snapshot->schemaVersion == 8);
     CHECK(snapshot->workspace.mainWindowState == QByteArrayLiteral("schema-five-window"));
     CHECK(snapshot->workspace.emailContextMenuLayout.empty());
 
     QSettings migrated{path, QSettings::IniFormat};
-    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 7);
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 8);
 }
 
 TEST_CASE("schema six migration adds an empty calendar event context menu override",
@@ -303,9 +298,38 @@ TEST_CASE("schema six migration adds an empty calendar event context menu overri
     const auto result = repository.load();
     const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
     REQUIRE(snapshot != nullptr);
-    CHECK(snapshot->schemaVersion == 7);
+    CHECK(snapshot->schemaVersion == 8);
     CHECK(snapshot->workspace.mainWindowState == QByteArrayLiteral("schema-six-window"));
     CHECK(snapshot->workspace.calendarEventContextMenuLayout.empty());
+}
+
+TEST_CASE("schema seven migration removes local calendar color overrides", "[app][settings]")
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("schema-seven.ini"));
+    QSettings settings{path, QSettings::IniFormat};
+    settings.setValue(QStringLiteral("settings/schemaVersion"), 7);
+    settings.setValue(QStringLiteral("workspace/formatVersion"), 1);
+    settings.beginGroup(QStringLiteral("workspace"));
+    settings.beginWriteArray(QStringLiteral("calendarColorOverrides"), 1);
+    settings.setArrayIndex(0);
+    settings.setValue(QStringLiteral("calendarId"), QStringLiteral("account\ncalendar"));
+    settings.setValue(QStringLiteral("color"), QStringLiteral("#123456"));
+    settings.endArray();
+    settings.endGroup();
+    settings.sync();
+    REQUIRE(settings.status() == QSettings::NoError);
+
+    auto repository = repositoryFor(path);
+    const auto result = repository.load();
+    const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
+    REQUIRE(snapshot != nullptr);
+    CHECK(snapshot->schemaVersion == 8);
+
+    QSettings migrated{path, QSettings::IniFormat};
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 8);
+    CHECK_FALSE(migrated.contains(QStringLiteral("workspace/calendarColorOverrides/size")));
 }
 
 TEST_CASE("settings updates require the current revision and round-trip typed values",
@@ -356,8 +380,6 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
         .defaultCalendarDestination = {.ownerAccountId = QStringLiteral("server-2"),
                                        .accountId = QStringLiteral("account-2"),
                                        .calendarId = QStringLiteral("calendar-default")},
-        .calendarColorOverrides = {{.calendarId = QStringLiteral("calendar-2"),
-                                    .color = QStringLiteral("#abcdef")}},
         .emailContextMenuLayout = {QStringLiteral("compose_reply"), QStringLiteral("separator"),
                                    QStringLiteral("archive_email")},
         .calendarEventContextMenuLayout = {QStringLiteral("calendar_event_edit"),
@@ -403,10 +425,6 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
     CHECK(reloaded->workspace.defaultCalendarDestination.accountId == QStringLiteral("account-2"));
     CHECK(reloaded->workspace.defaultCalendarDestination.calendarId ==
           QStringLiteral("calendar-default"));
-    REQUIRE(reloaded->workspace.calendarColorOverrides.size() == 1);
-    CHECK(reloaded->workspace.calendarColorOverrides.front().calendarId ==
-          QStringLiteral("calendar-2"));
-    CHECK(reloaded->workspace.calendarColorOverrides.front().color == QStringLiteral("#abcdef"));
     CHECK(reloaded->workspace.emailContextMenuLayout ==
           std::vector<QString>{QStringLiteral("compose_reply"), QStringLiteral("separator"),
                                QStringLiteral("archive_email")});

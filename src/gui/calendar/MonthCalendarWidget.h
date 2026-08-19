@@ -4,12 +4,12 @@
 #include <QDate>
 #include <QDateTime>
 #include <QLocale>
+#include <QStringList>
 #include <QWidget>
 
 #include <array>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 class QLabel;
@@ -18,11 +18,6 @@ class QGridLayout;
 class QMenu;
 class QResizeEvent;
 class QToolButton;
-
-namespace javelin::gui::settings
-{
-    class WorkspaceSettingsPort;
-}
 
 namespace javelin::gui::calendar
 {
@@ -82,8 +77,7 @@ namespace javelin::gui::calendar
         Q_OBJECT
 
       public:
-        explicit MonthCalendarWidget(javelin::gui::settings::WorkspaceSettingsPort& settings,
-                                     QWidget* parent = nullptr);
+        explicit MonthCalendarWidget(QWidget* parent = nullptr);
 
         void setLocale(const QLocale& locale);
         void setDisplayedMonth(const QDate& month);
@@ -134,6 +128,7 @@ namespace javelin::gui::calendar
         void calendarCreationRequested(const QString& accountId, const QString& name,
                                        const QString& color);
         void calendarDeletionRequested(const QString& calendarId);
+        void calendarColorsChanged(const QStringList& calendarIds, const QStringList& colors);
 
       protected:
         void keyPressEvent(QKeyEvent* event) override;
@@ -153,12 +148,10 @@ namespace javelin::gui::calendar
         [[nodiscard]] QColor effectiveCalendarColor(const std::string& calendarId) const;
         void selectDate(const QDate& date);
         void scheduleEventRebuild();
-        void reloadCalendarColors();
         [[nodiscard]] DayCellWidget* cellForDate(const QDate& date) const;
         void notifyAccessibilityGridChanged();
         void notifyAccessibilitySelectionChanged();
 
-        javelin::gui::settings::WorkspaceSettingsPort& m_settings;
         QLocale m_locale;
         QDate m_displayedMonth;
         QDate m_selectedDate;
@@ -174,7 +167,6 @@ namespace javelin::gui::calendar
         std::vector<CalendarDisplay> m_calendars;
         std::vector<CalendarAccountDisplay> m_calendarAccounts;
         std::vector<MonthEvent> m_events;
-        std::unordered_map<std::string, QColor> m_customCalendarColors;
         bool m_eventRebuildPending = false;
     };
 } // namespace javelin::gui::calendar

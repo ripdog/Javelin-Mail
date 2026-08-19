@@ -5,6 +5,7 @@
 #include "app/CalendarApplicationPorts.h"
 #include "jmap/calendar/CalendarReader.h"
 
+#include <optional>
 #include <string>
 #include <tuple>
 
@@ -105,6 +106,11 @@ namespace javelin::protocol::actions
                    std::tuple<std::string, javelin::jmap::calendar::VisibleInterval,
                               javelin::jmap::calendar::TimeZoneId>,
                    javelin::jmap::calendar::CalendarLoadResult>;
+    using CalendarSetColor =
+        Descriptor<97, ActionDomain::Calendar, AdmissionSemantics::Asynchronous,
+                   ReplayPolicy::Never, detail::calendarOnly,
+                   std::tuple<std::string, std::string, std::string, std::optional<std::string>>,
+                   javelin::jmap::calendar::CalendarMutationResult>;
     using CalendarActionTypes = std::tuple<
         RegisteredAction<CalendarReadCached, "CalendarReadCached">,
         RegisteredAction<CalendarReadAccounts, "CalendarReadAccounts">,
@@ -122,5 +128,6 @@ namespace javelin::protocol::actions
         RegisteredAction<CalendarReadPendingInvitations, "CalendarReadPendingInvitations">,
         RegisteredAction<CalendarReadEvent, "CalendarReadEvent">,
         RegisteredAction<CalendarReadParticipantIdentities, "CalendarReadParticipantIdentities">,
-        RegisteredAction<CalendarReservedRangeSnapshot, "CalendarReadRangeSnapshot">>;
+        RegisteredAction<CalendarReservedRangeSnapshot, "CalendarReadRangeSnapshot">,
+        RegisteredAction<CalendarSetColor, "CalendarSetColor">>;
 } // namespace javelin::protocol::actions

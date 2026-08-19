@@ -72,6 +72,15 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+    CalendarCommandService::setCalendarColor(std::string ownerAccountId, std::string accountId,
+                                             std::string calendarId,
+                                             std::optional<std::string> color)
+    {
+        return m_service.setCalendarColor(std::move(ownerAccountId), std::move(accountId),
+                                          std::move(calendarId), std::move(color));
+    }
+
+    QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     CalendarCommandService::createCalendar(std::string ownerAccountId,
                                            javelin::jmap::calendar::CreateCalendarCommand command)
     {
