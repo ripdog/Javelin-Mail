@@ -151,6 +151,7 @@ namespace javelin::gui::messageview
         QLabel* m_placeholderTitleLabel = nullptr;
         QLabel* m_placeholderDetailLabel = nullptr;
         MessageAttachmentPanel* m_attachmentPanel = nullptr;
+        QWidget* m_findBarContainer = nullptr;
         KMessageWidget* m_findBar = nullptr;
         QLineEdit* m_findEdit = nullptr;
         QLabel* m_findResultLabel = nullptr;

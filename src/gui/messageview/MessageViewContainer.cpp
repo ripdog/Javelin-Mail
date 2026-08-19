@@ -48,6 +48,7 @@
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSizePolicy>
+#include <QStackedLayout>
 #include <QStackedWidget>
 #include <QStringList>
 #include <QStyle>
@@ -714,17 +715,23 @@ namespace javelin::gui::messageview
         connect(m_attachmentPanel, &MessageAttachmentPanel::saveAllAttachmentsRequested, this,
                 &MessageViewContainer::saveAllAttachmentsRequested);
 
-        m_findBar = new MessageViewBanner(this);
+        m_findBarContainer = new QWidget(this);
+        auto* findBarStack = new QStackedLayout(m_findBarContainer);
+        findBarStack->setContentsMargins(0, 0, 0, 0);
+        findBarStack->setStackingMode(QStackedLayout::StackAll);
+
+        m_findBar = new MessageViewBanner(m_findBarContainer);
         m_findBar->setMessageType(KMessageWidget::Information);
         m_findBar->setPosition(KMessageWidget::Footer);
         m_findBar->setText(QString{});
         m_findBar->setIcon(QIcon{});
         m_findBar->setCloseButtonVisible(false);
-        m_findBar->setVisible(false);
+        findBarStack->addWidget(m_findBar);
 
-        auto* findControls = new QWidget(m_findBar);
+        auto* findControls = new QWidget(m_findBarContainer);
+        findControls->setAttribute(Qt::WA_StyledBackground, false);
         auto* findLayout = new QHBoxLayout(findControls);
-        findLayout->setContentsMargins(0, 0, 0, 0);
+        findLayout->setContentsMargins(12, 6, 8, 6);
         findLayout->setSpacing(6);
         auto* findLabel = new QLabel(i18nc("@label", "Find:"), findControls);
         m_findEdit = new QLineEdit(findControls);
@@ -758,7 +765,9 @@ namespace javelin::gui::messageview
         findLayout->addWidget(m_findPreviousButton);
         findLayout->addWidget(m_findNextButton);
         findLayout->addWidget(closeFindButton);
-        m_findBar->layout()->addWidget(findControls);
+        findBarStack->addWidget(findControls);
+        findControls->raise();
+        m_findBarContainer->setVisible(false);
 
         connect(m_findEdit, &QLineEdit::textChanged, this,
                 [this]
@@ -785,11 +794,11 @@ namespace javelin::gui::messageview
         const auto dismissFindBar = [this]
         {
             clearFindHighlights();
-            m_findBar->setVisible(false);
+            m_findBarContainer->setVisible(false);
             focusMessageBody();
         };
         connect(closeFindButton, &QToolButton::clicked, this, dismissFindBar);
-        auto* dismissFindShortcut = new QShortcut(QKeySequence{Qt::Key_Escape}, m_findBar);
+        auto* dismissFindShortcut = new QShortcut(QKeySequence{Qt::Key_Escape}, m_findBarContainer);
         dismissFindShortcut->setContext(Qt::WidgetWithChildrenShortcut);
         connect(dismissFindShortcut, &QShortcut::activated, this, dismissFindBar);
 
@@ -799,7 +808,7 @@ namespace javelin::gui::messageview
         layout->addWidget(m_junkBanner);
         layout->addWidget(m_unsubscribeBanner);
         layout->addWidget(m_bodyStack, 1);
-        layout->addWidget(m_findBar);
+        layout->addWidget(m_findBarContainer);
         layout->addWidget(m_attachmentPanel);
 
         connect(&m_contactIdentityLookup,
@@ -856,7 +865,7 @@ namespace javelin::gui::messageview
         {
             return;
         }
-        m_findBar->setVisible(true);
+        m_findBarContainer->setVisible(true);
         m_findEdit->setFocus(Qt::ShortcutFocusReason);
         m_findEdit->selectAll();
         if (!m_findEdit->text().isEmpty())
@@ -1100,7 +1109,7 @@ namespace javelin::gui::messageview
         if (!m_emailId.has_value())
         {
             clearFindHighlights();
-            m_findBar->setVisible(false);
+            m_findBarContainer->setVisible(false);
         }
         m_translationController->reset();
         ++m_snapshotLoadToken;
@@ -1122,7 +1131,7 @@ namespace javelin::gui::messageview
         m_junkMailboxId = std::nullopt;
         m_multipleMessages = std::move(messages);
         clearFindHighlights();
-        m_findBar->setVisible(false);
+        m_findBarContainer->setVisible(false);
         m_translationController->reset();
         ++m_snapshotLoadToken;
         m_loading = false;
@@ -1205,7 +1214,7 @@ namespace javelin::gui::messageview
             m_readerActionsAvailable = actionsAreAvailable;
             Q_EMIT readerActionsAvailabilityChanged(actionsAreAvailable);
         }
-        if (m_findBar != nullptr && m_findBar->isVisible() && actionsAreAvailable)
+        if (m_findBarContainer != nullptr && m_findBarContainer->isVisible() && actionsAreAvailable)
         {
             m_plainTextFindQuery.clear();
             m_plainTextFindIndex = -1;
