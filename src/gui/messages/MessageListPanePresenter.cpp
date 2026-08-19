@@ -79,8 +79,9 @@ namespace javelin::gui::messages
         m_emptyState.setText(text);
         m_emptyStateAction.setText(actionText);
         m_emptyStateAction.setVisible(!actionText.isEmpty());
-        m_emptyStatePanel.setVisible(state.itemCount == 0);
-        m_messageView.setVisible(true);
+        const bool empty = state.itemCount == 0;
+        m_emptyStatePanel.setVisible(empty);
+        m_messageView.setVisible(!empty);
     }
 
     void MessageListPanePresenter::showNoContext() const
