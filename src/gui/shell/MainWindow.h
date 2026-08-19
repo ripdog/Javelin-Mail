@@ -189,6 +189,10 @@ namespace javelin::gui::shell
         ~MainWindow() override;
         void openPreferencesForConnection(const QString& connectionId);
         void openMailtoUri(const QString& uri);
+        void openInbox();
+        void openContacts();
+        void openCalendar();
+        void composeNewMessage();
         void restoreDraft(const QString& accountId, const QString& draftEmailId,
                           const QString& composeSessionId);
         void openCalendarEvent(const QString& calendarAccountId, const QString& eventId,
@@ -224,9 +228,6 @@ namespace javelin::gui::shell
         void setupUi();
         void connectSelection();
         void handleCurrentMessageChanged(const QModelIndex& current);
-        void composeNewMessage();
-        void openContacts();
-        void openCalendar();
         void openSieveEditor();
         void openSendingIdentities();
         void openSendingIdentitiesFor(QString accountId, QString identityId);

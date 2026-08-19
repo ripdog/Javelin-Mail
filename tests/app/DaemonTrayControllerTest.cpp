@@ -52,6 +52,15 @@ TEST_CASE("daemon tray tooltip reports unread inbox mail and only running work",
     tray.setInboxUnreadCount(3);
     CHECK(tray.toolTip().title == QStringLiteral("3 unread emails in Inbox"));
     CHECK(tray.toolTip().description.isEmpty());
+    CHECK(tray.status() == QStringLiteral("Active"));
+
+    tray.setAttentionRequired(true);
+    CHECK(tray.status() == QStringLiteral("NeedsAttention"));
+    tray.setInboxUnreadCount(4);
+    CHECK(tray.status() == QStringLiteral("NeedsAttention"));
+    tray.setAttentionRequired(false);
+    CHECK(tray.status() == QStringLiteral("Active"));
+    tray.setInboxUnreadCount(3);
 
     REQUIRE_FALSE(scheduler
                       .ensure({.jobId = "sync",

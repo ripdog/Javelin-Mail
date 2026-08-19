@@ -973,7 +973,9 @@ namespace javelin::gui::shell
         actionCollection()->setDefaultShortcut(m_refreshAction, QKeySequence::Refresh);
 
         m_quitAction = new QAction(QIcon::fromTheme(QStringLiteral("application-exit")),
-                                   i18nc("@action:inmenu", "&Quit"), this);
+                                   i18nc("@action:inmenu", "&Quit Javelin Mail"), this);
+        m_quitAction->setStatusTip(
+            i18n("Close Javelin Mail; the background service keeps running."));
         m_quitAction->setShortcut(QKeySequence::Quit);
         connect(m_quitAction, &QAction::triggered, qApp, &QCoreApplication::quit);
         actionCollection()->addAction(QStringLiteral("quit_application"), m_quitAction);
@@ -2187,6 +2189,54 @@ namespace javelin::gui::shell
         }
 
         m_messageSelectionController->syncTabSelection(activeTab());
+    }
+
+    void MainWindow::openInbox()
+    {
+        const auto accountsResult = m_accountReader.listAll();
+        const auto* accounts =
+            std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult);
+        if (accounts == nullptr)
+        {
+            m_statusBar->showMessage(i18n("Inbox is unavailable."), 5000);
+            return;
+        }
+
+        std::vector<std::string> candidates;
+        const auto appendCandidate = [&candidates](const std::string& accountId)
+        {
+            if (std::ranges::find(candidates, accountId) == candidates.end())
+                candidates.push_back(accountId);
+        };
+        if (const auto preferred = preferredMailAccountId(); preferred.has_value())
+        {
+            const auto account = std::ranges::find(*accounts, *preferred,
+                                                   &javelin::jmap::cache::CachedAccount::accountId);
+            if (account != accounts->end() && account->hasMailCapability)
+                appendCandidate(account->accountId);
+        }
+        for (const auto& account : *accounts)
+        {
+            if (account.isPrimary && account.hasMailCapability)
+                appendCandidate(account.accountId);
+        }
+        for (const auto& account : *accounts)
+        {
+            if (account.hasMailCapability)
+                appendCandidate(account.accountId);
+        }
+
+        for (const auto& accountId : candidates)
+        {
+            const auto inbox = findMailboxByRole(m_mailboxReader, accountId, "inbox");
+            if (!inbox.has_value())
+                continue;
+            activateMailboxInHomeTab(accountId, inbox->id, QString::fromStdString(inbox->name),
+                                     inbox->role, false);
+            return;
+        }
+
+        m_statusBar->showMessage(i18n("No Inbox is available."), 5000);
     }
 
     void MainWindow::openContacts()

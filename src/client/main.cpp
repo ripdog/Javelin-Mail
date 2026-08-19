@@ -219,6 +219,7 @@ int main(int argc, char* argv[])
                          KAboutLicense::GPL_V3);
     aboutData.setOrganizationDomain("javelin.app");
     KAboutData::setApplicationData(aboutData);
+    application.setDesktopFileName(QStringLiteral("javelinmail"));
     application.setWindowIcon(QIcon(QStringLiteral(":/icons/icon.svg")));
     application.setQuitOnLastWindowClosed(false);
 
@@ -244,8 +245,17 @@ int main(int argc, char* argv[])
                                            i18nc("@info:shell command-line value", "directory")};
     const QCommandLineOption socketOption{QStringLiteral("socket"), i18n("Daemon socket path."),
                                           i18nc("@info:shell command-line value", "path")};
+    const QCommandLineOption newMessageOption{QStringLiteral("new-message"),
+                                              i18n("Compose a new message.")};
+    const QCommandLineOption inboxOption{QStringLiteral("inbox"), i18n("Open the Inbox.")};
+    const QCommandLineOption calendarOption{QStringLiteral("calendar"), i18n("Open Calendar.")};
+    const QCommandLineOption contactsOption{QStringLiteral("contacts"), i18n("Open Contacts.")};
     parser.addOption(runtimeOption);
     parser.addOption(socketOption);
+    parser.addOption(newMessageOption);
+    parser.addOption(inboxOption);
+    parser.addOption(calendarOption);
+    parser.addOption(contactsOption);
     parser.addPositionalArgument(QStringLiteral("mailto"), i18n("A mailto: link to compose."),
                                  QStringLiteral("[mailto-url]"));
     parser.process(application);
@@ -264,6 +274,18 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    const int launcherActionCount = static_cast<int>(parser.isSet(newMessageOption)) +
+                                    static_cast<int>(parser.isSet(inboxOption)) +
+                                    static_cast<int>(parser.isSet(calendarOption)) +
+                                    static_cast<int>(parser.isSet(contactsOption));
+    if (launcherActionCount > 1 || (!mailtoUri.isEmpty() && launcherActionCount != 0))
+    {
+        qCritical() << QStringLiteral(
+            "Only one launcher action or mailto: link may be opened at a time.");
+        return 1;
+    }
+    const bool hasExplicitActivation = !mailtoUri.isEmpty() || launcherActionCount == 1;
+
     const auto runtime =
         parser.isSet(runtimeOption) ? parser.value(runtimeOption) : runtimeDirectory();
     if (runtime.isEmpty())
@@ -279,7 +301,7 @@ int main(int argc, char* argv[])
         .runtimeDirectory = runtime,
         .socketPath = socketPath + QStringLiteral(".activation"),
         .limits = {},
-        .protocol = {.major = 5, .minor = 10},
+        .protocol = {.major = 5, .minor = 11},
         .expectedBuild =
             javelin::protocol::BuildIdentity{.application = QStringLiteral("Javelin-Mail"),
                                              .revision = QStringLiteral(JAVELIN_APP_VERSION)},
@@ -290,11 +312,44 @@ int main(int argc, char* argv[])
     };
 
     const auto launchActivationToken = QString::fromUtf8(qgetenv("XDG_ACTIVATION_TOKEN"));
-    const javelin::protocol::ActivationRoute requestedActivation =
-        mailtoUri.isEmpty() ? javelin::protocol::ActivationRoute{javelin::protocol::RaiseGuiRoute{
-                                  .activationToken = launchActivationToken}}
-                            : javelin::protocol::ActivationRoute{javelin::protocol::OpenMailtoRoute{
-                                  .uri = mailtoUri, .activationToken = launchActivationToken}};
+    const javelin::protocol::ActivationRoute requestedActivation = [&]
+    {
+        if (!mailtoUri.isEmpty())
+        {
+            return javelin::protocol::ActivationRoute{javelin::protocol::OpenMailtoRoute{
+                .uri = mailtoUri,
+                .activationToken = launchActivationToken,
+            }};
+        }
+        if (parser.isSet(newMessageOption))
+        {
+            return javelin::protocol::ActivationRoute{
+                javelin::protocol::NewMessageRoute{.activationToken = launchActivationToken}};
+        }
+        if (parser.isSet(inboxOption))
+        {
+            return javelin::protocol::ActivationRoute{javelin::protocol::OpenWorkspaceRoute{
+                .section = javelin::protocol::WorkspaceSection::Inbox,
+                .activationToken = launchActivationToken,
+            }};
+        }
+        if (parser.isSet(calendarOption))
+        {
+            return javelin::protocol::ActivationRoute{javelin::protocol::OpenWorkspaceRoute{
+                .section = javelin::protocol::WorkspaceSection::Calendar,
+                .activationToken = launchActivationToken,
+            }};
+        }
+        if (parser.isSet(contactsOption))
+        {
+            return javelin::protocol::ActivationRoute{javelin::protocol::OpenWorkspaceRoute{
+                .section = javelin::protocol::WorkspaceSection::Contacts,
+                .activationToken = launchActivationToken,
+            }};
+        }
+        return javelin::protocol::ActivationRoute{
+            javelin::protocol::RaiseGuiRoute{.activationToken = launchActivationToken}};
+    }();
 
     auto guiActivationOptions = activationOptions;
     guiActivationOptions.socketPath =
@@ -394,7 +449,7 @@ int main(int argc, char* argv[])
          .socketPath = socketPath,
          .daemonExecutable =
              QDir{QCoreApplication::applicationDirPath()}.filePath(QStringLiteral("javelind")),
-         .protocol = {.major = 5, .minor = 10},
+         .protocol = {.major = 5, .minor = 11},
          .build = {.application = QStringLiteral("Javelin-Mail"),
                    .revision = QStringLiteral(JAVELIN_APP_VERSION)},
          .startTimeoutMilliseconds = 5000,
@@ -430,6 +485,7 @@ int main(int argc, char* argv[])
     QPointer<javelin::gui::onboarding::FirstRunWizard> firstRunWizard;
     QHash<QString, QPointer<javelin::gui::compose::UndoSendDialog>> undoSendDialogs;
     std::vector<javelin::protocol::OpenMailtoRoute> pendingMailtos;
+    std::optional<javelin::protocol::ActivationRoute> pendingInitialActivation;
 
     const auto showRecovery = [&recoveryWindow, recoveryStatus, startDaemon, retry,
                                &session](const QString&, const bool offerDaemonStart)
@@ -656,6 +712,30 @@ int main(int argc, char* argv[])
                                              activationRoute.draftEmailId,
                                              activationRoute.composeSessionId);
                 }
+                else if constexpr (std::is_same_v<Route, javelin::protocol::OpenWorkspaceRoute>)
+                {
+                    restoreMainWindow(activationRoute.activationToken);
+                    if (mainWindow == nullptr)
+                        return;
+                    switch (activationRoute.section)
+                    {
+                    case javelin::protocol::WorkspaceSection::Inbox:
+                        mainWindow->openInbox();
+                        break;
+                    case javelin::protocol::WorkspaceSection::Contacts:
+                        mainWindow->openContacts();
+                        break;
+                    case javelin::protocol::WorkspaceSection::Calendar:
+                        mainWindow->openCalendar();
+                        break;
+                    }
+                }
+                else if constexpr (std::is_same_v<Route, javelin::protocol::NewMessageRoute>)
+                {
+                    restoreMainWindow(activationRoute.activationToken);
+                    if (mainWindow != nullptr)
+                        mainWindow->composeNewMessage();
+                }
                 else if constexpr (std::is_same_v<Route, javelin::protocol::OpenTaskCenterRoute>)
                 {
                     restoreMainWindow(activationRoute.activationToken);
@@ -736,7 +816,16 @@ int main(int argc, char* argv[])
                      [&]
                      {
                          enableGuiActivationHandling();
-                         restoreMainWindow({});
+                         if (pendingInitialActivation.has_value())
+                         {
+                             const auto route =
+                                 std::exchange(pendingInitialActivation, std::nullopt);
+                             handleActivation(*route);
+                         }
+                         else
+                         {
+                             restoreMainWindow({});
+                         }
                      });
     QObject::connect(&session, &javelin::app::GuiDaemonSession::daemonShutdownRequested,
                      &application, &QCoreApplication::quit);
@@ -761,7 +850,15 @@ int main(int argc, char* argv[])
         else
         {
             enableGuiActivationHandling();
-            restoreMainWindow({});
+            if (pendingInitialActivation.has_value())
+            {
+                const auto route = std::exchange(pendingInitialActivation, std::nullopt);
+                handleActivation(*route);
+            }
+            else
+            {
+                restoreMainWindow({});
+            }
         }
     };
 
@@ -794,7 +891,16 @@ int main(int argc, char* argv[])
                          else
                          {
                              enableGuiActivationHandling();
-                             restoreMainWindow({});
+                             if (pendingInitialActivation.has_value())
+                             {
+                                 const auto route =
+                                     std::exchange(pendingInitialActivation, std::nullopt);
+                                 handleActivation(*route);
+                             }
+                             else
+                             {
+                                 restoreMainWindow({});
+                             }
                          }
                      });
 
@@ -808,10 +914,12 @@ int main(int argc, char* argv[])
         }
         else
         {
+            if (hasExplicitActivation && canOfferDaemonStart(*error))
+                pendingInitialActivation = requestedActivation;
             showRecovery(error->detail, canOfferDaemonStart(*error));
         }
     }
-    else if (!mailtoUri.isEmpty())
+    else if (hasExplicitActivation)
     {
         enableGuiActivationHandling();
         handleActivation(requestedActivation);

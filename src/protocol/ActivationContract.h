@@ -4,6 +4,7 @@
 
 #include <QString>
 
+#include <cstdint>
 #include <optional>
 #include <variant>
 
@@ -55,6 +56,24 @@ namespace javelin::protocol
         QString activationToken;
     };
 
+    enum class WorkspaceSection : std::uint8_t
+    {
+        Inbox,
+        Contacts,
+        Calendar,
+    };
+
+    struct OpenWorkspaceRoute
+    {
+        WorkspaceSection section = WorkspaceSection::Inbox;
+        QString activationToken;
+    };
+
+    struct NewMessageRoute
+    {
+        QString activationToken;
+    };
+
     struct OpenTaskCenterRoute
     {
         QString activationToken;
@@ -84,10 +103,11 @@ namespace javelin::protocol
         QString sendId;
     };
 
-    using ActivationRoute = std::variant<OpenMailboxRoute, OpenMessageRoute, OpenComposeRoute,
-                                         RaiseGuiRoute, OpenSettingsRoute, OpenCalendarEventRoute,
-                                         RestoreDraftRoute, OpenTaskCenterRoute, OpenMailtoRoute,
-                                         ShowUndoSendDialogRoute, CloseUndoSendDialogRoute>;
+    using ActivationRoute =
+        std::variant<OpenMailboxRoute, OpenMessageRoute, OpenComposeRoute, RaiseGuiRoute,
+                     OpenSettingsRoute, OpenCalendarEventRoute, RestoreDraftRoute,
+                     OpenTaskCenterRoute, OpenMailtoRoute, ShowUndoSendDialogRoute,
+                     CloseUndoSendDialogRoute, OpenWorkspaceRoute, NewMessageRoute>;
 
     struct ActivationRequested
     {

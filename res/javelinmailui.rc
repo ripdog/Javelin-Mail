@@ -1,5 +1,5 @@
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
-<gui name="javelinmail" version="24">
+<gui name="javelinmail" version="25">
   <MenuBar>
     <Menu name="file"><text>&amp;File</text>
       <Action name="compose_new_message"/>
@@ -89,7 +89,6 @@
     <Action name="toggle_email_starred"/>
     <Action name="tag_email"/>
     <Separator/>
-    <Action name="refresh_from_server"/>
     <Action name="advanced_search"/>
     <Action name="open_contacts"/>
     <Action name="open_calendar"/>
@@ -118,7 +117,6 @@
     <Action name="contact_remove_from_group"/>
     <Separator/>
     <Action name="contact_manage_address_books"/>
-    <Action name="contact_refresh"/>
   </ToolBar>
   <ToolBar name="calendarToolBar"><text>Calendar Toolbar</text>
     <Action name="calendar_new_event"/>
@@ -128,7 +126,6 @@
     <Action name="calendar_next_month"/>
     <Separator/>
     <Action name="calendar_list"/>
-    <Action name="calendar_refresh"/>
   </ToolBar>
   <Menu name="email_context_menu"><text>Email Context Menu</text>
     <ActionList name="email_context_menu_layout"/>

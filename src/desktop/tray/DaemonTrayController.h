@@ -83,6 +83,7 @@ namespace javelin::app
         [[nodiscard]] QString iconName() const;
         [[nodiscard]] TrayToolTip toolTip() const;
         void setInboxUnreadCount(std::uint64_t unreadCount);
+        void setAttentionRequired(bool required);
 
       public Q_SLOTS:
         void Activate(int x, int y);
@@ -93,7 +94,12 @@ namespace javelin::app
 
       Q_SIGNALS:
         void raiseGuiRequested(const QString& activationToken);
-        void quitRequested();
+        void newMessageRequested();
+        void inboxRequested();
+        void contactsRequested();
+        void calendarRequested();
+        void taskCenterRequested();
+        void stopBackgroundServiceRequested();
         void NewTitle();
         void NewIcon();
         void NewMenu();
@@ -105,6 +111,7 @@ namespace javelin::app
 
         void requestToolTipUpdate();
         void updateToolTip();
+        void updateStatus();
 
         WorkScheduler& m_workScheduler;
         QTimer m_toolTipUpdateTimer;
@@ -116,6 +123,7 @@ namespace javelin::app
         QString m_status = QStringLiteral("Passive");
         TrayToolTip m_toolTip;
         std::uint64_t m_inboxUnreadCount = 0;
+        bool m_attentionRequired = false;
         bool m_available = false;
     };
 } // namespace javelin::app

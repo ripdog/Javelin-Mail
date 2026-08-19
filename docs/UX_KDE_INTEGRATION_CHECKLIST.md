@@ -52,7 +52,7 @@ Check off completed items as you commit.
   state, failed query, and not-yet-synced state.
 - Offer the relevant local action such as Clear Filters, Edit Search, Retry, or Sign In Again.
 
-### [ ] Add message reader Find, Zoom, and Print actions
+### [x] Add message reader Find, Zoom, and Print actions
 
 - Add first-class actions for Find in Message, Zoom In/Out/Actual Size, and Print.
 - Make them discoverable through menus, configurable shortcuts, and the command palette rather than
@@ -64,18 +64,18 @@ Check off completed items as you commit.
 - Apply the same principle to calendar notification content where sensitive details may appear.
 - Keep privacy policy in Javelin even though presentation remains through desktop notifications.
 
-### [ ] Expand the tray menu and clarify quit semantics
+### [x] Expand the tray menu and clarify quit semantics
 
-- Add useful daemon-backed actions such as New Message, Check for Mail, Inbox unread count, Contacts,
-  Calendar, and Task Center.
+- Add useful daemon-backed actions such as New Message, Inbox unread count, Contacts, Calendar, and
+  Task Center.
 - Rename the tray daemon-stop action to something explicit such as "Stop Background Service".
 - Avoid using the same "Quit" label for GUI-only exit and daemon shutdown.
 - Use attention state for authentication/sustained failure rather than ordinary unread mail.
 
-### [ ] Improve the desktop entry
+### [x] Improve the desktop entry
 
 - Add `GenericName`, useful `Keywords`, and `SingleMainWindow=true` where appropriate.
-- Add launcher actions for New Message, Inbox, Calendar, Contacts, and possibly Check Mail.
+- Add launcher actions for New Message, Inbox, Calendar, and Contacts.
 - Route launcher actions through Javelin's existing typed/singleton activation path; do not add a
   parallel activation mechanism.
 

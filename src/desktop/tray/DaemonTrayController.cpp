@@ -67,12 +67,15 @@ namespace javelin::app
         using MenuLayout = std::tuple<qint32, QVariantMap, QVariantList>;
 
         [[nodiscard]] QVariantMap actionProperties(const QString& label, const bool enabled,
+                                                   const QString& iconName = {},
                                                    const bool separator = false)
         {
             QVariantMap properties;
             properties.insert(QStringLiteral("label"), label);
             properties.insert(QStringLiteral("enabled"), enabled);
             properties.insert(QStringLiteral("visible"), true);
+            if (!iconName.isEmpty())
+                properties.insert(QStringLiteral("icon-name"), iconName);
             if (separator)
                 properties.insert(QStringLiteral("type"), QStringLiteral("separator"));
             return properties;
@@ -89,17 +92,6 @@ namespace javelin::app
         [[nodiscard]] QDBusVariant variant(const QVariant& value)
         {
             return QDBusVariant{value};
-        }
-
-        [[nodiscard]] QVariant propertyValue(const QString& name, const QString& summary)
-        {
-            if (name == QStringLiteral("label"))
-                return summary;
-            if (name == QStringLiteral("enabled"))
-                return true;
-            if (name == QStringLiteral("visible"))
-                return true;
-            return {};
         }
 
         [[nodiscard]] QString runningWorkSummary(const WorkScheduler& workScheduler)
@@ -190,14 +182,13 @@ namespace javelin::app
                     QVariantList children;
                     if (recursionDepth != 0)
                     {
-                        children.push_back(QVariant::fromValue(
-                            menuLayoutItem(1, actionProperties(i18n("Open Javelin"), true))));
-                        children.push_back(QVariant::fromValue(menuLayoutItem(
-                            2, actionProperties(i18nc("@action:inmenu", "Quit"), true))));
+                        for (int id = 1; id <= 9; ++id)
+                            children.push_back(
+                                QVariant::fromValue(menuLayoutItem(id, itemProperties(id))));
                     }
                     const auto layout = menuLayoutItem(0, {}, children);
                     QList<QVariant> replyArguments;
-                    replyArguments.push_back(QVariant::fromValue(quint32(1)));
+                    replyArguments.push_back(QVariant::fromValue(m_revision));
                     replyArguments.push_back(QVariant::fromValue(layout));
                     return connection.send(message.createReply(replyArguments));
                 }
@@ -223,7 +214,7 @@ namespace javelin::app
                     const auto arguments = message.arguments();
                     const int id = arguments.value(0).toInt();
                     const auto name = arguments.value(1).toString();
-                    const auto value = propertyValue(name, labelFor(id));
+                    const auto value = itemProperties(id).value(name);
                     return connection.send(
                         message.createReply(QVariant::fromValue(variant(value))));
                 }
@@ -272,24 +263,52 @@ namespace javelin::app
             return false;
         }
 
+      public:
+        void notifyLayoutChanged()
+        {
+            ++m_revision;
+            if (m_revision == 0)
+                m_revision = 1;
+            auto signal = QDBusMessage::createSignal(QString::fromLatin1(menuPath),
+                                                     QString::fromLatin1(menuInterface),
+                                                     QStringLiteral("LayoutUpdated"));
+            signal << m_revision << qint32{0};
+            QDBusConnection::sessionBus().send(signal);
+        }
+
       private:
         [[nodiscard]] QVariantMap itemProperties(const int id) const
         {
             switch (id)
             {
             case 1:
-                return actionProperties(i18n("Open Javelin"), true);
+                return actionProperties(i18n("Open Javelin Mail"), true,
+                                        QStringLiteral("javelinmail"));
             case 2:
-                return actionProperties(i18nc("@action:inmenu", "Quit"), true);
+                return actionProperties(i18n("New Message"), true,
+                                        QStringLiteral("mail-message-new"));
+            case 3:
+                return actionProperties({}, false, {}, true);
+            case 4:
+                return actionProperties(i18np("Inbox — %1 unread message",
+                                              "Inbox — %1 unread messages",
+                                              m_controller.m_inboxUnreadCount),
+                                        true, QStringLiteral("mail-folder-inbox"));
+            case 5:
+                return actionProperties(i18n("Contacts"), true,
+                                        QStringLiteral("view-pim-contacts"));
+            case 6:
+                return actionProperties(i18n("Calendar"), true, QStringLiteral("view-calendar"));
+            case 7:
+                return actionProperties(i18n("Task Center"), true, QStringLiteral("view-task"));
+            case 8:
+                return actionProperties({}, false, {}, true);
+            case 9:
+                return actionProperties(i18n("Stop Background Service"), true,
+                                        QStringLiteral("process-stop"));
             default:
                 return {};
             }
-        }
-
-        [[nodiscard]] QString labelFor(const int id) const
-        {
-            const auto properties = itemProperties(id);
-            return properties.value(QStringLiteral("label")).toString();
         }
 
         void activate(const int id)
@@ -300,7 +319,22 @@ namespace javelin::app
                 Q_EMIT m_controller.raiseGuiRequested({});
                 break;
             case 2:
-                Q_EMIT m_controller.quitRequested();
+                Q_EMIT m_controller.newMessageRequested();
+                break;
+            case 4:
+                Q_EMIT m_controller.inboxRequested();
+                break;
+            case 5:
+                Q_EMIT m_controller.contactsRequested();
+                break;
+            case 6:
+                Q_EMIT m_controller.calendarRequested();
+                break;
+            case 7:
+                Q_EMIT m_controller.taskCenterRequested();
+                break;
+            case 9:
+                Q_EMIT m_controller.stopBackgroundServiceRequested();
                 break;
             default:
                 break;
@@ -308,6 +342,7 @@ namespace javelin::app
         }
 
         DaemonTrayController& m_controller;
+        quint32 m_revision = 1;
     };
 
     DaemonTrayController::DaemonTrayController(WorkScheduler& workScheduler, QObject* parent)
@@ -491,7 +526,17 @@ namespace javelin::app
         if (m_inboxUnreadCount == unreadCount)
             return;
         m_inboxUnreadCount = unreadCount;
+        if (m_menu != nullptr)
+            m_menu->notifyLayoutChanged();
         requestToolTipUpdate();
+    }
+
+    void DaemonTrayController::setAttentionRequired(const bool required)
+    {
+        if (m_attentionRequired == required)
+            return;
+        m_attentionRequired = required;
+        updateStatus();
     }
 
     void DaemonTrayController::Activate(const int, const int)
@@ -549,12 +594,17 @@ namespace javelin::app
                 Q_EMIT NewToolTip();
         }
 
-        const auto status = QStringLiteral("Active");
-        if (m_status != status)
-        {
-            m_status = status;
-            if (m_available)
-                Q_EMIT NewStatus(m_status);
-        }
+        updateStatus();
+    }
+
+    void DaemonTrayController::updateStatus()
+    {
+        const auto status =
+            m_attentionRequired ? QStringLiteral("NeedsAttention") : QStringLiteral("Active");
+        if (m_status == status)
+            return;
+        m_status = status;
+        if (m_available)
+            Q_EMIT NewStatus(m_status);
     }
 } // namespace javelin::app

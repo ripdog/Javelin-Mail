@@ -118,6 +118,9 @@ namespace javelin::app
                 refreshTrayUnreadCount();
         };
         connect(&accountRuntime, &AccountRuntimeManager::cacheCommitted, this, cacheCommitted);
+        connect(&accountRuntime, &AccountRuntimeManager::accountStatusChanged, this,
+                [this](const QString&, AccountSyncCoordinator::Status)
+                { refreshTrayUnreadCount(); });
         connect(&m_services.mailQueryApplicationService(),
                 &MailQueryApplicationService::cacheCommitted, this, cacheCommitted);
         connect(&m_services.mailMutationApplicationService(),
@@ -257,7 +260,35 @@ namespace javelin::app
                     Q_EMIT activationRequested(
                         protocol::RaiseGuiRoute{.activationToken = activationToken});
                 });
-        connect(m_tray.get(), &DaemonTrayController::quitRequested, this,
+        connect(m_tray.get(), &DaemonTrayController::newMessageRequested, this,
+                [this] { Q_EMIT activationRequested(protocol::NewMessageRoute{}); });
+        connect(m_tray.get(), &DaemonTrayController::inboxRequested, this,
+                [this]
+                {
+                    Q_EMIT activationRequested(protocol::OpenWorkspaceRoute{
+                        .section = protocol::WorkspaceSection::Inbox,
+                        .activationToken = {},
+                    });
+                });
+        connect(m_tray.get(), &DaemonTrayController::contactsRequested, this,
+                [this]
+                {
+                    Q_EMIT activationRequested(protocol::OpenWorkspaceRoute{
+                        .section = protocol::WorkspaceSection::Contacts,
+                        .activationToken = {},
+                    });
+                });
+        connect(m_tray.get(), &DaemonTrayController::calendarRequested, this,
+                [this]
+                {
+                    Q_EMIT activationRequested(protocol::OpenWorkspaceRoute{
+                        .section = protocol::WorkspaceSection::Calendar,
+                        .activationToken = {},
+                    });
+                });
+        connect(m_tray.get(), &DaemonTrayController::taskCenterRequested, this,
+                [this] { Q_EMIT activationRequested(protocol::OpenTaskCenterRoute{}); });
+        connect(m_tray.get(), &DaemonTrayController::stopBackgroundServiceRequested, this,
                 &DaemonBackgroundController::shutdownRequested);
 
         if (const auto error = notificationService.recoverDispatches())
@@ -330,9 +361,11 @@ namespace javelin::app
     void DaemonBackgroundController::refreshTrayUnreadCount()
     {
         std::uint64_t unreadCount = 0;
+        bool attentionRequired = false;
         for (const auto& [accountId, status] : m_services.accountRuntimeManager().accountStatuses())
         {
-            static_cast<void>(status);
+            attentionRequired =
+                attentionRequired || status == AccountSyncCoordinator::Status::AuthenticationPaused;
             const auto mailboxes = m_services.mailboxReader().listMailboxTree(accountId);
             const auto* items =
                 std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxes);
@@ -346,6 +379,7 @@ namespace javelin::app
             }
         }
         m_tray->setInboxUnreadCount(unreadCount);
+        m_tray->setAttentionRequired(attentionRequired);
     }
 
     void DaemonBackgroundController::queueNotificationRetry(const QString& accountId)

@@ -2,11 +2,35 @@
 Type=Application
 Version=1.0
 Name=Javelin Mail
+GenericName=Email Client
 Comment=A KDE-focused JMAP email client
+Keywords=Email;Mail;JMAP;Calendar;Contacts;
 Exec=javelin %u
 Icon=javelinmail
 Terminal=false
-Categories=Network;Email;Office;
+Categories=Network;Email;
 MimeType=x-scheme-handler/mailto;
 StartupNotify=true
 StartupWMClass=javelin
+SingleMainWindow=true
+Actions=NewMessage;Inbox;Calendar;Contacts;
+
+[Desktop Action NewMessage]
+Name=New Message
+Icon=mail-message-new
+Exec=javelin --new-message
+
+[Desktop Action Inbox]
+Name=Inbox
+Icon=mail-folder-inbox
+Exec=javelin --inbox
+
+[Desktop Action Calendar]
+Name=Calendar
+Icon=view-calendar
+Exec=javelin --calendar
+
+[Desktop Action Contacts]
+Name=Contacts
+Icon=view-pim-contacts
+Exec=javelin --contacts

@@ -1375,6 +1375,10 @@ namespace javelin::protocol
                         return 9;
                     else if constexpr (std::is_same_v<Route, OpenCalendarEventRoute>)
                         return 10;
+                    else if constexpr (std::is_same_v<Route, OpenWorkspaceRoute>)
+                        return 11;
+                    else if constexpr (std::is_same_v<Route, NewMessageRoute>)
+                        return 12;
                     else
                         static_assert(sizeof(Route) == 0, "Unhandled activation route");
                 },
@@ -1427,6 +1431,14 @@ namespace javelin::protocol
                                writer.qword(static_cast<quint64>(value.deadlineEpochMilliseconds));
                     else if constexpr (std::is_same_v<Route, CloseUndoSendDialogRoute>)
                         return writer.string(value.sendId);
+                    else if constexpr (std::is_same_v<Route, OpenWorkspaceRoute>)
+                    {
+                        const auto section = static_cast<quint8>(value.section);
+                        return section <= static_cast<quint8>(WorkspaceSection::Calendar) &&
+                               writer.byte(section) && writer.string(value.activationToken);
+                    }
+                    else if constexpr (std::is_same_v<Route, NewMessageRoute>)
+                        return writer.string(value.activationToken);
                     else
                         return false;
                 },
@@ -1542,6 +1554,26 @@ namespace javelin::protocol
             {
                 CloseUndoSendDialogRoute value;
                 if (!reader.string(value.sendId))
+                    return false;
+                route = std::move(value);
+                return true;
+            }
+            if (kind == 11)
+            {
+                quint8 section = 0;
+                OpenWorkspaceRoute value;
+                if (!reader.byte(section) ||
+                    section > static_cast<quint8>(WorkspaceSection::Calendar) ||
+                    !reader.string(value.activationToken))
+                    return false;
+                value.section = static_cast<WorkspaceSection>(section);
+                route = std::move(value);
+                return true;
+            }
+            if (kind == 12)
+            {
+                NewMessageRoute value;
+                if (!reader.string(value.activationToken))
                     return false;
                 route = std::move(value);
                 return true;

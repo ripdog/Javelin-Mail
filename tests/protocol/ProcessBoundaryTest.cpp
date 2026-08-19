@@ -1107,6 +1107,7 @@ TEST_CASE("activation route wire discriminators remain stable", "[protocol][sock
         {RestoreDraftRoute{}, 5},        {OpenTaskCenterRoute{}, 6},
         {OpenMailtoRoute{}, 7},          {ShowUndoSendDialogRoute{}, 8},
         {CloseUndoSendDialogRoute{}, 9}, {OpenCalendarEventRoute{}, 10},
+        {OpenWorkspaceRoute{}, 11},      {NewMessageRoute{}, 12},
     };
 
     for (const auto& [route, expectedKind] : routes)
@@ -1117,6 +1118,34 @@ TEST_CASE("activation route wire discriminators remain stable", "[protocol][sock
         REQUIRE_FALSE(payload.isEmpty());
         CHECK(static_cast<quint8>(payload.front()) == expectedKind);
     }
+}
+
+TEST_CASE("workspace and new-message activation routes round trip", "[protocol][socket]")
+{
+    const ActivationRoute workspace = OpenWorkspaceRoute{
+        .section = WorkspaceSection::Contacts,
+        .activationToken = QStringLiteral("workspace-token"),
+    };
+    const auto encodedWorkspace = encodeActivationRoute(workspace);
+    REQUIRE(std::holds_alternative<QByteArray>(encodedWorkspace));
+    const auto decodedWorkspace = decodeActivationRoute(std::get<QByteArray>(encodedWorkspace));
+    REQUIRE(std::holds_alternative<ActivationRoute>(decodedWorkspace));
+    const auto* receivedWorkspace =
+        std::get_if<OpenWorkspaceRoute>(&std::get<ActivationRoute>(decodedWorkspace));
+    REQUIRE(receivedWorkspace != nullptr);
+    CHECK(receivedWorkspace->section == WorkspaceSection::Contacts);
+    CHECK(receivedWorkspace->activationToken == QStringLiteral("workspace-token"));
+
+    const ActivationRoute newMessage =
+        NewMessageRoute{.activationToken = QStringLiteral("compose-token")};
+    const auto encodedNewMessage = encodeActivationRoute(newMessage);
+    REQUIRE(std::holds_alternative<QByteArray>(encodedNewMessage));
+    const auto decodedNewMessage = decodeActivationRoute(std::get<QByteArray>(encodedNewMessage));
+    REQUIRE(std::holds_alternative<ActivationRoute>(decodedNewMessage));
+    const auto* receivedNewMessage =
+        std::get_if<NewMessageRoute>(&std::get<ActivationRoute>(decodedNewMessage));
+    REQUIRE(receivedNewMessage != nullptr);
+    CHECK(receivedNewMessage->activationToken == QStringLiteral("compose-token"));
 }
 
 TEST_CASE("activation socket carries typed routes to the daemon", "[protocol][socket]")
