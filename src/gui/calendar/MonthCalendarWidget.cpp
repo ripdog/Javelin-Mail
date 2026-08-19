@@ -1064,7 +1064,8 @@ namespace javelin::gui::calendar
                                               QLineEdit::Normal, {}, &accepted);
                     if (!accepted)
                         return;
-                    if (name.trimmed().isEmpty())
+                    const auto trimmedName = name.trimmed();
+                    if (trimmedName.isEmpty())
                     {
                         QMessageBox::warning(&dialog, i18n("Create Calendar"),
                                              i18n("Enter a calendar name."));
@@ -1085,13 +1086,16 @@ namespace javelin::gui::calendar
                         accountIndex =
                             static_cast<std::size_t>(std::distance(names.begin(), found));
                     }
-                    const auto color = QColorDialog::getColor(palette().color(QPalette::Highlight),
-                                                              &dialog, i18n("Calendar Color"));
+                    const auto& account = m_calendarAccounts[accountIndex];
+                    const auto suggestedColor =
+                        automaticCalendarColor({}, account.id, trimmedName.toStdString(),
+                                               palette().color(QPalette::Active, QPalette::Base));
+                    const auto color =
+                        QColorDialog::getColor(suggestedColor, &dialog, i18n("Calendar Color"));
                     if (!color.isValid())
                         return;
-                    Q_EMIT calendarCreationRequested(
-                        QString::fromStdString(m_calendarAccounts[accountIndex].id), name.trimmed(),
-                        color.name());
+                    Q_EMIT calendarCreationRequested(QString::fromStdString(account.id),
+                                                     trimmedName, color.name());
                     dialog.accept();
                 });
         connect(deleteCalendar, &QPushButton::clicked, &dialog,
