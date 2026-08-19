@@ -170,9 +170,10 @@ namespace javelin::gui::calendar
 
     void CalendarEventButton::applyPresentation()
     {
-        const auto color = m_color.isValid() ? m_color : palette().color(QPalette::Highlight);
-        const auto text = palette().color(QPalette::Text);
-        const auto base = palette().color(QPalette::Base);
+        const auto color =
+            m_color.isValid() ? m_color : palette().color(QPalette::Active, QPalette::Highlight);
+        const auto text = palette().color(QPalette::Active, QPalette::Text);
+        const auto base = palette().color(QPalette::Active, QPalette::Base);
         const auto foreground =
             contrastRatio(color, text) >= contrastRatio(color, base) ? text : base;
 

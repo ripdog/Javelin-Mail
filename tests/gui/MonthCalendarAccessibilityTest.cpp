@@ -1,5 +1,6 @@
 #include "gui/NoRttiAccessibleObject.h"
 #include "gui/calendar/CalendarEventButton.h"
+#include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/MonthCalendarWidget.h"
 #include "gui/settings/WorkspaceSettingsPort.h"
 
@@ -69,6 +70,52 @@ TEST_CASE("calendar accessibility factories ignore Qt objects without C++ RTTI",
     NoRttiAccessibleObjectHandle foreignObject;
 
     CHECK(QAccessible::queryAccessibleInterface(foreignObject.get()) == nullptr);
+}
+
+TEST_CASE("automatic calendar presentation ignores the palette current color group",
+          "[gui][calendar][color]")
+{
+    TestWorkspaceSettingsPort settings;
+    javelin::gui::calendar::MonthCalendarWidget widget{settings};
+    auto palette = widget.palette();
+    palette.setColor(QPalette::Active, QPalette::Highlight, QColor{QStringLiteral("#f38ba8")});
+    palette.setColor(QPalette::Inactive, QPalette::Highlight, QColor{QStringLiteral("#876790")});
+    palette.setColor(QPalette::Active, QPalette::Base, QColor{QStringLiteral("#1e1e2e")});
+    palette.setColor(QPalette::Inactive, QPalette::Base, QColor{QStringLiteral("#313244")});
+    palette.setCurrentColorGroup(QPalette::Inactive);
+    widget.setPalette(palette);
+
+    const std::string displayCalendarId{"account\ncalendar"};
+    widget.setCalendars({{
+        .id = displayCalendarId,
+        .ownerAccountId = "owner",
+        .accountId = "account",
+        .calendarId = "calendar",
+        .accountName = QStringLiteral("Account"),
+        .name = QStringLiteral("Calendar"),
+        .color = {},
+        .subscribed = true,
+        .writable = true,
+        .deletable = true,
+        .defaultDestination = true,
+    }});
+
+    javelin::gui::calendar::MonthEvent event;
+    event.accountId = "account";
+    event.calendarId = displayCalendarId;
+    event.eventId = "event";
+    event.title = QStringLiteral("Presentation event");
+    event.start = QDateTime{QDate{2026, 8, 18}, QTime{9, 0}};
+    event.end = QDateTime{QDate{2026, 8, 18}, QTime{10, 0}};
+    widget.setEvents({event});
+
+    const auto dayEvents = widget.eventsForDate(QDate{2026, 8, 18});
+    REQUIRE(dayEvents.size() == 1);
+    const auto expected = javelin::gui::calendar::automaticCalendarColor(
+        "owner", "account", "calendar", palette.color(QPalette::Active, QPalette::Base));
+    CHECK(dayEvents.front().color == expected);
+    CHECK(dayEvents.front().color != palette.color(QPalette::Active, QPalette::Highlight));
+    CHECK(dayEvents.front().color != palette.color(QPalette::Inactive, QPalette::Highlight));
 }
 
 TEST_CASE("month calendar publishes committed event presentation replacements",
