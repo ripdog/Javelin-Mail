@@ -360,11 +360,16 @@ namespace javelin::app
 
                 if (generation != m_generation ||
                     continuityEmailId != m_quickFilterContinuityEmailId ||
-                    continuityThreadId != m_quickFilterContinuityThreadId ||
-                    !m_refreshGeneration.install(ticket, m_cacheEpoch))
+                    continuityThreadId != m_quickFilterContinuityThreadId)
                 {
                     if (std::exchange(m_projectedReloadPending, false))
                         reloadProjectedWindows();
+                    return;
+                }
+                if (!m_refreshGeneration.install(ticket, m_cacheEpoch))
+                {
+                    m_projectedReloadPending = false;
+                    reloadProjectedWindows();
                     return;
                 }
 

@@ -385,6 +385,49 @@ TEST_CASE("missing initial online-search cache materializes itself after the cac
     QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
 }
 
+TEST_CASE("cached online-search load retries after a superseding same-account invalidation",
+          "[app][search-session][cache-race]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("search-session-cache-race-test"));
+    seedSearchData(context.connection, false);
+    PendingSearchMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::SearchSession session{
+        "account-1",
+        {.from = "sender@example.test"},
+        {},
+        context.queries,
+        materialization,
+        events,
+        2,
+        javelin::app::RestoredSearchState{
+            .mode = javelin::app::SearchMode::Online,
+            .sessionId = "test-session",
+            .windows = {{.offset = 0, .limit = 2}},
+        },
+    };
+
+    session.loadCachedState();
+    events.publish({
+        .epoch = 1,
+        .changedDomains = {},
+        .affectedKeys = {},
+        .change =
+            {
+                .accountId = QStringLiteral("account-1"),
+                .mailboxIds = {},
+                .queryWindows = {},
+                .searchWindows = {},
+            },
+    });
+
+    waitFor([&] { return session.state().cacheLoaded; });
+    REQUIRE(session.state().items.size() == 2);
+    CHECK(session.state().items[0].emailId == "email-1");
+    CHECK(session.state().items[1].emailId == "email-2");
+}
+
 TEST_CASE("online search restores a loaded infinite-scroll prefix from SQLite windows",
           "[app][search-session][infinite-scroll][persistence]")
 {

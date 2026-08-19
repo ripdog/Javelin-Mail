@@ -391,6 +391,40 @@ TEST_CASE("mailbox cache commit terminates its visible refresh", "[app][mailbox-
     CHECK(failureCount == 0);
 }
 
+TEST_CASE("cached mailbox load retries after a superseding same-account invalidation",
+          "[app][mailbox-session][cache-race]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("mailbox-session-cache-race-test"));
+    seedInfiniteScrollData(context.connection, false);
+    PendingMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::MailboxSession session{
+        "account-1", "mailbox-1",     QStringLiteral("Inbox"), std::optional<std::string>{"inbox"},
+        {},          context.queries, materialization,         2,
+        events};
+
+    session.loadCachedState();
+    events.publish({
+        .epoch = 1,
+        .changedDomains = {},
+        .affectedKeys = {},
+        .change =
+            {
+                .accountId = QStringLiteral("account-1"),
+                .mailboxIds = {QStringLiteral("other-mailbox")},
+                .queryWindows = {},
+                .searchWindows = {},
+            },
+    });
+
+    waitFor([&] { return session.state().cacheLoaded; });
+    REQUIRE(session.state().items.size() == 2);
+    CHECK(session.state().items[0].emailId == "email-1");
+    CHECK(session.state().items[1].emailId == "email-2");
+    CHECK_FALSE(materialization.lastMailboxIntent.has_value());
+}
+
 TEST_CASE("missing initial mailbox cache materializes itself after the cache read",
           "[app][mailbox-session][infinite-scroll]")
 {

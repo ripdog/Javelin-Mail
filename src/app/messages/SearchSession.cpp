@@ -540,11 +540,16 @@ namespace javelin::app
                 watcher->deleteLater();
                 m_projectedReloadInFlight = false;
 
-                if (m_closed || m_mode != SearchMode::Online || generation != m_generation ||
-                    !m_refreshGeneration.install(ticket, m_cacheEpoch))
+                if (m_closed || m_mode != SearchMode::Online || generation != m_generation)
                 {
                     if (std::exchange(m_projectedReloadPending, false))
                         reloadProjectedWindows();
+                    return;
+                }
+                if (!m_refreshGeneration.install(ticket, m_cacheEpoch))
+                {
+                    m_projectedReloadPending = false;
+                    reloadProjectedWindows();
                     return;
                 }
 
