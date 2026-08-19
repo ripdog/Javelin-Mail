@@ -96,6 +96,10 @@ namespace javelin::gui::shell
         {
             return activeIndex;
         }
+        if (*activeIndex > closedIndex)
+        {
+            return *activeIndex - 1;
+        }
         return std::max(0, closedIndex - 1);
     }
 

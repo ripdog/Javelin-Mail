@@ -59,14 +59,15 @@ TEST_CASE("tab workspace preserves the non-closeable mail home tab", "[gui][tabs
     CHECK(javelin::gui::shell::tabCanClose(contacts, 0));
 }
 
-TEST_CASE("tab workspace close policy matches the existing previous-tab selection", "[gui][tabs]")
+TEST_CASE("tab workspace close policy preserves the active tab by identity", "[gui][tabs]")
 {
     using javelin::gui::shell::activeTabIndexAfterClose;
 
     CHECK(activeTabIndexAfterClose(1, 0, 0) == std::nullopt);
     CHECK(activeTabIndexAfterClose(4, 0, 2) == std::optional<int>{0});
     CHECK(activeTabIndexAfterClose(4, 2, 2) == std::optional<int>{1});
-    CHECK(activeTabIndexAfterClose(4, 3, 1) == std::optional<int>{0});
+    CHECK(activeTabIndexAfterClose(4, 3, 1) == std::optional<int>{2});
+    CHECK(activeTabIndexAfterClose(4, 3, 2) == std::optional<int>{2});
     CHECK(activeTabIndexAfterClose(4, std::nullopt, 3) == std::optional<int>{2});
     CHECK(activeTabIndexAfterClose(4, 2, 8) == std::optional<int>{2});
 }
