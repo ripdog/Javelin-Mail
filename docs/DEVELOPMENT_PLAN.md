@@ -153,7 +153,8 @@ See [COMPOSE_AND_SEND_PLAN.md](COMPOSE_AND_SEND_PLAN.md) and [UNDO_REDO.md](UNDO
 See [OFFLINE_MAIL_ARCHITECTURE.md](OFFLINE_MAIL_ARCHITECTURE.md),
 [QUERY_WINDOWS.md](QUERY_WINDOWS.md), [MAILBOX_REFRESH_PLAN.md](MAILBOX_REFRESH_PLAN.md),
 [CROSS_SERVER_MAIL_TRANSFER_IMPLEMENTATION_PLAN.md](CROSS_SERVER_MAIL_TRANSFER_IMPLEMENTATION_PLAN.md),
-and [MAIL_EXPORT_IMPLEMENTATION_PLAN.md](MAIL_EXPORT_IMPLEMENTATION_PLAN.md).
+[MAIL_EXPORT_IMPLEMENTATION_PLAN.md](MAIL_EXPORT_IMPLEMENTATION_PLAN.md), and the incremental
+[UX and KDE integration checklist](UX_KDE_INTEGRATION_CHECKLIST.md).
 
 ### 5. Packaging, platform support, and profile security
 
@@ -166,8 +167,8 @@ lifecycle, notification, tray, and peer-authentication paths are exercised.
   prefix.
 - Document and test profile/cache recovery and the distinction between replaceable cache data and
   daemon-owned settings.
-- Move long-lived account credentials from plain settings storage to an appropriate secret service
-  before treating broad end-user distribution as complete.
+- Keep long-lived account credentials in the existing KWallet-backed credential store and verify its
+  installed/runtime behavior before treating broad end-user distribution as complete.
 - Add release metadata, a top-level licence file, screenshots, and contribution templates when the
   repository is prepared for wider public consumption.
 
