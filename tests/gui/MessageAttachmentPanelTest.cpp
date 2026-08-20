@@ -3,6 +3,7 @@
 #include "gui/settings/GuiSettings.h"
 
 #include <QApplication>
+#include <QMenu>
 #include <QToolButton>
 
 #include <catch2/catch_test_macros.hpp>
@@ -61,9 +62,28 @@ TEST_CASE("attachment panel resizes without replacing interactive tiles", "[gui]
     CHECK(originalOpenButton->isVisible());
 
     int openRequests = 0;
+    int openWithRequests = 0;
     QObject::connect(
         &panel, &javelin::gui::messageview::MessageAttachmentPanel::openAttachmentRequested,
         [&openRequests](const QString&, const QString&, const QString&) { ++openRequests; });
+    QObject::connect(
+        &panel, &javelin::gui::messageview::MessageAttachmentPanel::openAttachmentWithRequested,
+        [&openWithRequests](const QString&, const QString&, const QString&)
+        { ++openWithRequests; });
     originalOpenButton->click();
     CHECK(openRequests == 1);
+
+    REQUIRE(originalOpenButton->menu() != nullptr);
+    auto* const openWithAction = [&]() -> QAction*
+    {
+        for (auto* action : originalOpenButton->menu()->actions())
+        {
+            if (action->text() == QStringLiteral("Open With…"))
+                return action;
+        }
+        return nullptr;
+    }();
+    REQUIRE(openWithAction != nullptr);
+    openWithAction->trigger();
+    CHECK(openWithRequests == 1);
 }

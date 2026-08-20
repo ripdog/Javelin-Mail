@@ -5,10 +5,10 @@
 
 #include <QObject>
 #include <QPointer>
-#include <QTemporaryDir>
 
 #include <string>
 
+class KUiServerV2JobTracker;
 class QWidget;
 
 namespace javelin::gui::settings
@@ -42,6 +42,7 @@ namespace javelin::gui::shell
         void saveAttachment(std::string accountId, std::string emailId, std::string partId);
         void saveAllAttachments(std::string accountId, std::string emailId);
         void openAttachment(std::string accountId, std::string emailId, std::string partId);
+        void openAttachmentWith(std::string accountId, std::string emailId, std::string partId);
         void saveMessages(std::string accountId, std::optional<std::string> sourceMailboxId,
                           javelin::app::MessageSelection selection);
         void viewMessageSource(std::string accountId, std::string emailId);
@@ -52,11 +53,14 @@ namespace javelin::gui::shell
         void userInterventionRequired(QString message);
 
       private:
+        void openAttachment(std::string accountId, std::string emailId, std::string partId,
+                            bool chooseApplication);
+        void launchTemporaryFile(QString path, bool chooseApplication, QString successMessage);
         javelin::gui::settings::GuiSettings& m_settings;
         javelin::app::MessageContentPort& m_contentPort;
         javelin::jmap::cache::MessageViewReader& m_messageViewReader;
         QPointer<QWidget> m_dialogParent;
-        QTemporaryDir m_temporaryDirectory;
+        KUiServerV2JobTracker* m_fileJobTracker = nullptr;
     };
 
 } // namespace javelin::gui::shell

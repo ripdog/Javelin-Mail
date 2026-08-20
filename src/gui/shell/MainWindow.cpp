@@ -1919,6 +1919,13 @@ namespace javelin::gui::shell
                         accountId.toStdString(), emailId.toStdString(), partId.toStdString());
                 });
         connect(m_messageViewContainer,
+                &javelin::gui::messageview::MessageViewContainer::openAttachmentWithRequested, this,
+                [this](const QString& accountId, const QString& emailId, const QString& partId)
+                {
+                    m_messageFileController->openAttachmentWith(
+                        accountId.toStdString(), emailId.toStdString(), partId.toStdString());
+                });
+        connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::viewSourceRequested, this,
                 &MainWindow::viewSelectedMessageSource);
         connect(m_messageViewContainer,

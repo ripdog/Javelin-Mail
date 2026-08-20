@@ -27,13 +27,13 @@ host CMake environment.
 ## Dependencies
 
 Required Qt components are Core, DBus, Network, SQL, Widgets, PrintSupport, Concurrent,
-LinguistTools, WebEngine, SVG, and WebSockets. Required KDE components are ConfigWidgets, XmlGui,
-CoreAddons, TextEditor,
-Extra CMake Modules, KPim6Mime, and KPim6MessageComposer. These are product dependencies, not merely
-build conveniences: KXMLGUI owns the main-window action layout, KConfigWidgets owns preferences
-presentation, KTextEditor powers compose/source and Sieve editing, MessageComposer supplies the
-KMail-grade rich-text editor and body conversion, and the daemon publishes a KDE StatusNotifierItem
-directly over D-Bus.
+LinguistTools, WebEngine, SVG, and WebSockets. Required KDE components are ConfigWidgets, XmlGui, CoreAddons, I18n, JobWidgets, KIO, Sonnet,
+TextEditor, Wallet, WidgetsAddons, Extra CMake Modules, KPim6Mime, and KPim6MessageComposer. These are
+product dependencies, not merely build conveniences: KXMLGUI owns the main-window action layout,
+KConfigWidgets owns preferences presentation, KIO owns attachment opening and file-manager reveal,
+KJobWidgets publishes file-save jobs through Plasma's standard job tracker, KTextEditor powers
+compose/source and Sieve editing, MessageComposer supplies the KMail-grade rich-text editor and body
+conversion, and the daemon publishes a KDE StatusNotifierItem directly over D-Bus.
 
 CMake uses installed QCoro, Glaze, and Catch2 packages when available. Otherwise it fetches the
 versions pinned in `cmake/Dependencies.cmake`. fastText is fetched when local language detection is
@@ -52,7 +52,7 @@ A suitable base environment can be installed with:
 sudo pacman -S --needed \
   base-devel ccache cmake extra-cmake-modules git ninja \
   qt6-base qt6-svg qt6-tools qt6-webengine qt6-websockets \
-  kconfigwidgets kcoreaddons ktexteditor kxmlgui kmime messagelib \
+  kconfigwidgets kcoreaddons kio kjobwidgets ktexteditor kxmlgui kmime messagelib \
   blas cblas lapack zstd
 ```
 

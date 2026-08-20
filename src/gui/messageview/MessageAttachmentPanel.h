@@ -38,6 +38,7 @@ namespace javelin::gui::messageview
       Q_SIGNALS:
         void saveAttachmentRequested(QString accountId, QString emailId, QString partId);
         void openAttachmentRequested(QString accountId, QString emailId, QString partId);
+        void openAttachmentWithRequested(QString accountId, QString emailId, QString partId);
         void saveAllAttachmentsRequested(QString accountId, QString emailId);
 
       protected:

@@ -12,6 +12,7 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
+#include <QMenu>
 #include <QMimeDatabase>
 #include <QResizeEvent>
 #include <QSizePolicy>
@@ -86,8 +87,8 @@ namespace javelin::gui::messageview
         {
           public:
             AttachmentTile(const javelin::jmap::cache::MessageAttachment& attachment,
-                           std::function<void()> openAction, std::function<void()> saveAction,
-                           QString saveToolTip, QWidget* parent)
+                           std::function<void()> openAction, std::function<void()> openWithAction,
+                           std::function<void()> saveAction, QString saveToolTip, QWidget* parent)
                 : QFrame(parent)
             {
                 const auto fileName = attachmentName(attachment);
@@ -132,6 +133,16 @@ namespace javelin::gui::messageview
                             if (action)
                                 action();
                         });
+                auto* openMenu = new QMenu(openButton);
+                auto* openWith = openMenu->addAction(i18nc("@action:inmenu", "Open With…"));
+                connect(openWith, &QAction::triggered, this,
+                        [action = std::move(openWithAction)]
+                        {
+                            if (action)
+                                action();
+                        });
+                openButton->setMenu(openMenu);
+                openButton->setPopupMode(QToolButton::MenuButtonPopup);
 
                 auto* saveButton = new QToolButton(this);
                 saveButton->setObjectName(QStringLiteral("saveAttachmentButton"));
@@ -270,6 +281,11 @@ namespace javelin::gui::messageview
                 {
                     Q_EMIT openAttachmentRequested(QString::fromStdString(*m_accountId),
                                                    QString::fromStdString(*m_emailId), partId);
+                },
+                [this, partId]
+                {
+                    Q_EMIT openAttachmentWithRequested(QString::fromStdString(*m_accountId),
+                                                       QString::fromStdString(*m_emailId), partId);
                 },
                 [this, partId]
                 {

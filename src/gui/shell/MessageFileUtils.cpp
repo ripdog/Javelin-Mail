@@ -5,6 +5,7 @@
 #include <QMimeDatabase>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QTemporaryFile>
 
 #include <algorithm>
 #include <cctype>
@@ -28,6 +29,29 @@ namespace javelin::gui::shell
             return name.isEmpty() ? fallback : name;
         }
 
+        [[nodiscard]] QString attachmentFileName(const std::optional<std::string>& name,
+                                                 const std::string& partId,
+                                                 const std::string& mediaType)
+        {
+            QString fileName =
+                name.has_value()
+                    ? QString::fromStdString(*name)
+                    : QStringLiteral("attachment-%1").arg(QString::fromStdString(partId));
+            fileName = sanitizedFileName(
+                fileName, QStringLiteral("attachment-%1").arg(QString::fromStdString(partId)));
+
+            if (!fileName.contains(QLatin1Char('.')))
+            {
+                const QMimeDatabase mimeDatabase;
+                const auto mimeType =
+                    mimeDatabase.mimeTypeForName(QString::fromStdString(mediaType));
+                const auto suffix = mimeType.preferredSuffix();
+                if (!suffix.isEmpty())
+                    fileName += QStringLiteral(".") + suffix;
+            }
+            return fileName;
+        }
+
         [[nodiscard]] bool
         isEmbeddedInline(const javelin::jmap::cache::MessageAttachment& attachment)
         {
@@ -44,24 +68,12 @@ namespace javelin::gui::shell
 
     QString suggestedFileName(const javelin::jmap::AttachmentDownload& download)
     {
-        QString fileName =
-            QString::fromStdString(download.name.value_or("attachment-" + download.partId));
-        fileName = sanitizedFileName(
-            fileName, QStringLiteral("attachment-%1").arg(QString::fromStdString(download.partId)));
+        return attachmentFileName(download.name, download.partId, download.mediaType);
+    }
 
-        if (!fileName.contains(QLatin1Char('.')))
-        {
-            const QMimeDatabase mimeDatabase;
-            const auto mimeType =
-                mimeDatabase.mimeTypeForName(QString::fromStdString(download.mediaType));
-            const auto suffix = mimeType.preferredSuffix();
-            if (!suffix.isEmpty())
-            {
-                fileName += QStringLiteral(".") + suffix;
-            }
-        }
-
-        return fileName;
+    QString suggestedFileName(const javelin::jmap::cache::MessageAttachment& attachment)
+    {
+        return attachmentFileName(attachment.name, attachment.partId, attachment.mediaType);
     }
 
     QString uniqueFilePath(const QString& directoryPath, const QString& fileName)
@@ -110,6 +122,26 @@ namespace javelin::gui::shell
             };
         }
 
+        return FileWriteResult{.path = path, .errorMessage = {}};
+    }
+
+    FileWriteResult writePayloadToTemporaryFile(const QString& suggestedFileName,
+                                                const QByteArray& payload)
+    {
+        const auto fileTemplate = QDir{QDir::tempPath()}.filePath(
+            QStringLiteral("javelin-XXXXXX-%1").arg(suggestedFileName));
+        QTemporaryFile file{fileTemplate};
+        if (!file.open())
+            return FileWriteResult{.path = {}, .errorMessage = file.errorString()};
+
+        if (file.write(payload) != payload.size())
+            return FileWriteResult{.path = file.fileName(), .errorMessage = file.errorString()};
+        if (!file.flush())
+            return FileWriteResult{.path = file.fileName(), .errorMessage = file.errorString()};
+
+        file.setAutoRemove(false);
+        const auto path = file.fileName();
+        file.close();
         return FileWriteResult{.path = path, .errorMessage = {}};
     }
 
@@ -184,13 +216,6 @@ namespace javelin::gui::shell
         co_return result;
     }
 
-    QString tempAttachmentPath(QTemporaryDir& directory,
-                               const javelin::jmap::AttachmentDownload& download)
-    {
-        return directory.filePath(QStringLiteral("%1-%2").arg(
-            QString::fromStdString(download.emailId), suggestedFileName(download)));
-    }
-
     QString suggestedSourceFileName(const javelin::jmap::MessageSourceDownload& download)
     {
         QString baseName = download.subject.has_value()
@@ -203,13 +228,6 @@ namespace javelin::gui::shell
         }
 
         return baseName;
-    }
-
-    QString tempMessageSourcePath(QTemporaryDir& directory,
-                                  const javelin::jmap::MessageSourceDownload& download)
-    {
-        return directory.filePath(QStringLiteral("%1-%2").arg(
-            QString::fromStdString(download.emailId), suggestedSourceFileName(download)));
     }
 
 } // namespace javelin::gui::shell

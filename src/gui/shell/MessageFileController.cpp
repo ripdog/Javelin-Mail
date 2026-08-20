@@ -10,15 +10,109 @@
 
 #include <KLocalizedString>
 
-#include <QDesktopServices>
+#include <KIO/ApplicationLauncherJob>
+#include <KIO/JobUiDelegateFactory>
+#include <KIO/OpenUrlJob>
+#include <KJob>
+#include <KUiServerV2JobTracker>
+
 #include <QDir>
+#include <QFile>
 #include <QFileDialog>
 #include <QFutureWatcher>
+#include <QTimer>
 #include <QUrl>
 #include <QtConcurrentRun>
 
+#include <ranges>
+#include <utility>
+
 namespace javelin::gui::shell
 {
+    namespace
+    {
+        class FileSaveJob final : public KJob
+        {
+          public:
+            FileSaveJob(KUiServerV2JobTracker& tracker, QString activeTitle, QString completedTitle,
+                        QString destinationPath, QObject* parent)
+                : KJob(parent), m_tracker(tracker), m_activeTitle(std::move(activeTitle)),
+                  m_completedTitle(std::move(completedTitle))
+            {
+                setProperty("desktopFileName", QStringLiteral("javelinmail"));
+                setDestination(std::move(destinationPath));
+            }
+
+            void start() override
+            {
+                startElapsedTimer();
+                // Plasma's tracker suppresses jobs that finish during its own delay. Delay
+                // registration here instead so short saves still get a completed-file entry,
+                // while progress UI appears only when the operation lasts long enough to matter.
+                QTimer::singleShot(500, this, [this] { ensureRegistered(); });
+            }
+
+            void setDestination(QString path)
+            {
+                m_destinationPath = std::move(path);
+                if (!m_destinationPath.isEmpty())
+                {
+                    setProperty("destUrl", QUrl::fromLocalFile(m_destinationPath).toString());
+                }
+                if (m_registered)
+                    publishDescription(m_activeTitle);
+            }
+
+            void finishSuccessfully()
+            {
+                setPercent(100);
+                if (!m_registered)
+                    ensureRegistered();
+                publishDescription(m_completedTitle);
+                emitResult();
+            }
+
+            void finishWithError(const QString& errorText)
+            {
+                if (!m_registered)
+                {
+                    deleteLater();
+                    return;
+                }
+                setError(KJob::UserDefinedError);
+                setErrorText(errorText);
+                emitResult();
+            }
+
+          private:
+            void ensureRegistered()
+            {
+                if (m_registered)
+                    return;
+                setProperty("immediateProgressReporting", true);
+                m_registered = true;
+                m_tracker.registerJob(this);
+                publishDescription(m_activeTitle);
+            }
+
+            void publishDescription(const QString& title)
+            {
+                const QPair<QString, QString> destination =
+                    m_destinationPath.isEmpty()
+                        ? QPair<QString, QString>{}
+                        : QPair<QString, QString>{
+                              i18nc("@label file job destination", "Destination"),
+                              m_destinationPath};
+                Q_EMIT description(this, title, destination, {});
+            }
+
+            KUiServerV2JobTracker& m_tracker;
+            QString m_activeTitle;
+            QString m_completedTitle;
+            QString m_destinationPath;
+            bool m_registered = false;
+        };
+    } // namespace
 
     MessageFileController::MessageFileController(
         javelin::gui::settings::GuiSettings& settings,
@@ -28,6 +122,7 @@ namespace javelin::gui::shell
         : QObject(parent), m_settings(settings), m_contentPort(contentPort),
           m_messageViewReader(messageViewReader), m_dialogParent(dialogParent)
     {
+        m_fileJobTracker = new KUiServerV2JobTracker(this);
     }
 
     void MessageFileController::saveAttachment(std::string accountId, std::string emailId,
@@ -42,48 +137,70 @@ namespace javelin::gui::shell
             return;
         }
 
+        QString suggestedName = QStringLiteral("attachment-%1").arg(QString::fromStdString(partId));
+        const auto snapshotResult = m_messageViewReader.load(accountId, emailId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&snapshotResult))
+        {
+            Q_EMIT userInterventionRequired(error->message);
+            return;
+        }
+        const auto& snapshot =
+            std::get<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(snapshotResult);
+        if (snapshot.has_value())
+        {
+            const auto attachment = std::ranges::find(
+                snapshot->attachments, partId, &javelin::jmap::cache::MessageAttachment::partId);
+            if (attachment != snapshot->attachments.end())
+                suggestedName = suggestedFileName(*attachment);
+        }
+
+        const QString targetPath =
+            attachmentSettings.alwaysAsk
+                ? QFileDialog::getSaveFileName(m_dialogParent, i18n("Save Attachment"),
+                                               suggestedName)
+                : uniqueFilePath(attachmentSettings.directory, suggestedName);
+        if (targetPath.isEmpty())
+        {
+            Q_EMIT statusMessage(i18n("Attachment save canceled."), 3000);
+            return;
+        }
+
+        auto* fileJob = new FileSaveJob(*m_fileJobTracker, i18n("Saving attachment"),
+                                        i18n("Attachment saved"), targetPath, this);
+        fileJob->start();
         Q_EMIT statusMessage(i18n("Downloading attachment..."), 0);
         auto task = m_contentPort.requestAttachment(std::move(accountId), std::move(emailId),
                                                     std::move(partId));
         QCoro::connect(
             std::move(task), this,
-            [this, attachmentSettings](javelin::jmap::AttachmentDownloadResult result)
+            [this, fileJob, targetPath](javelin::jmap::AttachmentDownloadResult result)
             {
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
+                    fileJob->finishWithError(error->message);
                     Q_EMIT operationFailed(*error);
                     return;
                 }
 
                 const auto& download = std::get<javelin::jmap::AttachmentDownload>(result);
-                const QString targetPath =
-                    attachmentSettings.alwaysAsk
-                        ? QFileDialog::getSaveFileName(m_dialogParent, i18n("Save Attachment"),
-                                                       suggestedFileName(download))
-                        : uniqueFilePath(attachmentSettings.directory, suggestedFileName(download));
-                if (targetPath.isEmpty())
-                {
-                    Q_EMIT statusMessage(i18n("Attachment save canceled."), 3000);
-                    return;
-                }
-
                 Q_EMIT statusMessage(i18n("Saving attachment..."), 0);
                 auto* watcher = new QFutureWatcher<FileWriteResult>(this);
                 connect(watcher, &QFutureWatcher<FileWriteResult>::finished, this,
-                        [this, watcher]
+                        [this, watcher, fileJob]
                         {
                             const auto writeResult = watcher->result();
+                            watcher->deleteLater();
                             if (!writeResult.errorMessage.isEmpty())
                             {
+                                fileJob->finishWithError(writeResult.errorMessage);
                                 Q_EMIT userInterventionRequired(i18n(
                                     "Failed to save attachment: %1", writeResult.errorMessage));
+                                return;
                             }
-                            else
-                            {
-                                Q_EMIT statusMessage(
-                                    i18n("Saved attachment to %1", writeResult.path), 5000);
-                            }
-                            watcher->deleteLater();
+
+                            fileJob->finishSuccessfully();
+                            Q_EMIT statusMessage(i18n("Saved attachment to %1", writeResult.path),
+                                                 5000);
                         });
                 watcher->setFuture(
                     QtConcurrent::run([targetPath, payload = download.payload]
@@ -133,13 +250,17 @@ namespace javelin::gui::shell
             return;
         }
 
+        auto* fileJob = new FileSaveJob(*m_fileJobTracker, i18n("Saving attachments"),
+                                        i18n("Attachments saved"), targetDirectory, this);
+        fileJob->start();
         Q_EMIT statusMessage(i18n("Downloading attachments..."), 0);
         auto task = downloadAttachments(m_contentPort, accountId, emailId, attachments);
         QCoro::connect(std::move(task), this,
-                       [this, targetDirectory](SaveAllDownloadResult result)
+                       [this, fileJob, targetDirectory](SaveAllDownloadResult result)
                        {
                            if (!result.errorMessage.isEmpty())
                            {
+                               fileJob->finishWithError(result.errorMessage);
                                Q_EMIT userInterventionRequired(result.errorMessage);
                                return;
                            }
@@ -147,23 +268,24 @@ namespace javelin::gui::shell
                            Q_EMIT statusMessage(i18n("Saving attachments..."), 0);
                            auto* watcher = new QFutureWatcher<BatchWriteResult>(this);
                            connect(watcher, &QFutureWatcher<BatchWriteResult>::finished, this,
-                                   [this, watcher]
+                                   [this, watcher, fileJob]
                                    {
                                        const auto writeResult = watcher->result();
+                                       watcher->deleteLater();
                                        if (!writeResult.errorMessage.isEmpty())
                                        {
+                                           fileJob->finishWithError(writeResult.errorMessage);
                                            Q_EMIT userInterventionRequired(i18n(
                                                "Failed to save attachments to %1: %2",
                                                writeResult.failedPath, writeResult.errorMessage));
+                                           return;
                                        }
-                                       else
-                                       {
-                                           Q_EMIT statusMessage(i18np("Saved %1 attachment.",
-                                                                      "Saved %1 attachments.",
-                                                                      writeResult.savedCount),
-                                                                5000);
-                                       }
-                                       watcher->deleteLater();
+
+                                       fileJob->finishSuccessfully();
+                                       Q_EMIT statusMessage(i18np("Saved %1 attachment.",
+                                                                  "Saved %1 attachments.",
+                                                                  writeResult.savedCount),
+                                                            5000);
                                    });
                            watcher->setFuture(QtConcurrent::run(
                                [targetDirectory, files = std::move(result.files)]
@@ -211,6 +333,12 @@ namespace javelin::gui::shell
         if (destinationPath.isEmpty())
             return;
 
+        auto* fileJob = new FileSaveJob(
+            *m_fileJobTracker,
+            singleEmail != nullptr ? i18n("Saving message") : i18n("Saving messages"),
+            singleEmail != nullptr ? i18n("Message saved") : i18n("Messages saved"),
+            destinationPath, this);
+        fileJob->start();
         Q_EMIT statusMessage(
             singleEmail != nullptr ? i18n("Saving message…") : i18n("Saving messages…"), 0);
         auto task = m_contentPort.saveMessages({
@@ -222,14 +350,17 @@ namespace javelin::gui::shell
         });
         QCoro::connect(
             std::move(task), this,
-            [this](javelin::app::SaveMessagesResult result)
+            [this, fileJob](javelin::app::SaveMessagesResult result)
             {
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
+                    fileJob->finishWithError(error->message);
                     Q_EMIT operationFailed(*error);
                     return;
                 }
                 const auto& saved = std::get<javelin::app::SaveMessagesSummary>(result);
+                fileJob->setDestination(saved.destinationPath);
+                fileJob->finishSuccessfully();
                 Q_EMIT statusMessage(i18np("Saved one message to %2.", "Saved %1 messages to %2.",
                                            saved.savedMessageCount, saved.destinationPath),
                                      5000);
@@ -239,19 +370,24 @@ namespace javelin::gui::shell
     void MessageFileController::openAttachment(std::string accountId, std::string emailId,
                                                std::string partId)
     {
-        if (!m_temporaryDirectory.isValid())
-        {
-            Q_EMIT userInterventionRequired(
-                i18n("A temporary directory for attachments is unavailable."));
-            return;
-        }
+        openAttachment(std::move(accountId), std::move(emailId), std::move(partId), false);
+    }
 
+    void MessageFileController::openAttachmentWith(std::string accountId, std::string emailId,
+                                                   std::string partId)
+    {
+        openAttachment(std::move(accountId), std::move(emailId), std::move(partId), true);
+    }
+
+    void MessageFileController::openAttachment(std::string accountId, std::string emailId,
+                                               std::string partId, const bool chooseApplication)
+    {
         Q_EMIT statusMessage(i18n("Downloading attachment..."), 0);
         auto task = m_contentPort.requestAttachment(std::move(accountId), std::move(emailId),
                                                     std::move(partId));
         QCoro::connect(
             std::move(task), this,
-            [this](javelin::jmap::AttachmentDownloadResult result)
+            [this, chooseApplication](javelin::jmap::AttachmentDownloadResult result)
             {
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
@@ -260,45 +396,71 @@ namespace javelin::gui::shell
                 }
 
                 const auto& download = std::get<javelin::jmap::AttachmentDownload>(result);
-                const QString targetPath = tempAttachmentPath(m_temporaryDirectory, download);
+                const auto fileName = suggestedFileName(download);
                 Q_EMIT statusMessage(i18n("Preparing attachment..."), 0);
 
                 auto* watcher = new QFutureWatcher<FileWriteResult>(this);
                 connect(watcher, &QFutureWatcher<FileWriteResult>::finished, this,
-                        [this, watcher]
+                        [this, watcher, chooseApplication]
                         {
                             const auto writeResult = watcher->result();
+                            watcher->deleteLater();
                             if (!writeResult.errorMessage.isEmpty())
                             {
                                 Q_EMIT userInterventionRequired(i18n(
                                     "Failed to prepare attachment: %1", writeResult.errorMessage));
-                                watcher->deleteLater();
                                 return;
                             }
 
-                            const bool opened =
-                                QDesktopServices::openUrl(QUrl::fromLocalFile(writeResult.path));
-                            Q_EMIT statusMessage(
-                                opened ? i18n("Opened attachment.")
-                                       : i18n("The attachment was saved, but no app opened it."),
-                                5000);
-                            watcher->deleteLater();
+                            launchTemporaryFile(writeResult.path, chooseApplication,
+                                                i18n("Opened attachment."));
                         });
                 watcher->setFuture(
-                    QtConcurrent::run([targetPath, payload = download.payload]
-                                      { return writePayloadToPath(targetPath, payload); }));
+                    QtConcurrent::run([fileName, payload = download.payload]
+                                      { return writePayloadToTemporaryFile(fileName, payload); }));
             });
+    }
+
+    void MessageFileController::launchTemporaryFile(QString path, const bool chooseApplication,
+                                                    QString successMessage)
+    {
+        KJob* job = nullptr;
+        if (chooseApplication)
+        {
+            auto* launcher = new KIO::ApplicationLauncherJob(this);
+            launcher->setUrls({QUrl::fromLocalFile(path)});
+            launcher->setRunFlags(KIO::ApplicationLauncherJob::DeleteTemporaryFiles);
+            launcher->setUiDelegate(KIO::createDefaultJobUiDelegate(
+                KJobUiDelegate::AutoHandlingEnabled, m_dialogParent.data()));
+            job = launcher;
+        }
+        else
+        {
+            auto* opener = new KIO::OpenUrlJob(QUrl::fromLocalFile(path), this);
+            opener->setDeleteTemporaryFile(true);
+            opener->setRunExecutables(false);
+            opener->setUiDelegate(KIO::createDefaultJobUiDelegate(
+                KJobUiDelegate::AutoHandlingEnabled, m_dialogParent.data()));
+            job = opener;
+        }
+
+        connect(job, &KJob::result, this,
+                [this, path = std::move(path),
+                 successMessage = std::move(successMessage)](KJob* completedJob)
+                {
+                    if (completedJob->error() != 0)
+                    {
+                        QFile::remove(path);
+                        Q_EMIT statusMessage(i18n("The file was not opened."), 3000);
+                        return;
+                    }
+                    Q_EMIT statusMessage(successMessage, 5000);
+                });
+        job->start();
     }
 
     void MessageFileController::viewMessageSource(std::string accountId, std::string emailId)
     {
-        if (!m_temporaryDirectory.isValid())
-        {
-            Q_EMIT userInterventionRequired(
-                i18n("A temporary directory for message source files is unavailable."));
-            return;
-        }
-
         Q_EMIT statusMessage(i18n("Preparing message source..."), 0);
         auto task = m_contentPort.requestMessageSource(std::move(accountId), std::move(emailId));
         QCoro::connect(
@@ -312,32 +474,27 @@ namespace javelin::gui::shell
                 }
 
                 const auto& download = std::get<javelin::jmap::MessageSourceDownload>(result);
-                const QString targetPath = tempMessageSourcePath(m_temporaryDirectory, download);
+                const auto fileName = suggestedSourceFileName(download);
                 auto* watcher = new QFutureWatcher<FileWriteResult>(this);
                 connect(watcher, &QFutureWatcher<FileWriteResult>::finished, this,
                         [this, watcher]
                         {
                             const auto writeResult = watcher->result();
+                            watcher->deleteLater();
                             if (!writeResult.errorMessage.isEmpty())
                             {
                                 Q_EMIT userInterventionRequired(
                                     i18n("Failed to prepare message source: %1",
                                          writeResult.errorMessage));
-                                watcher->deleteLater();
                                 return;
                             }
 
-                            const bool opened =
-                                QDesktopServices::openUrl(QUrl::fromLocalFile(writeResult.path));
-                            Q_EMIT statusMessage(
-                                opened ? i18n("Opened message source.")
-                                       : i18n("The source file was saved, but no app opened it."),
-                                5000);
-                            watcher->deleteLater();
+                            launchTemporaryFile(writeResult.path, false,
+                                                i18n("Opened message source."));
                         });
                 watcher->setFuture(
-                    QtConcurrent::run([targetPath, payload = download.payload]
-                                      { return writePayloadToPath(targetPath, payload); }));
+                    QtConcurrent::run([fileName, payload = download.payload]
+                                      { return writePayloadToTemporaryFile(fileName, payload); }));
             });
     }
 

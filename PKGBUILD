@@ -12,6 +12,8 @@ depends=(
   'glibc'
   'kconfigwidgets'
   'kcoreaddons'
+  'kio'
+  'kjobwidgets'
   'ktexteditor'
   'kxmlgui'
   'kmime'

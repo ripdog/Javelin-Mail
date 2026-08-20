@@ -58,12 +58,6 @@ Check off completed items as you commit.
 - Make them discoverable through menus, configurable shortcuts, and the command palette rather than
   relying on incidental WebEngine behavior.
 
-### [ ] Add notification privacy controls
-
-- Allow full preview, sender + subject, sender only, or a private generic notification.
-- Apply the same principle to calendar notification content where sensitive details may appear.
-- Keep privacy policy in Javelin even though presentation remains through desktop notifications.
-
 ### [x] Expand the tray menu and clarify quit semantics
 
 - Add useful daemon-backed actions such as New Message, Inbox unread count, Contacts, Calendar, and
@@ -79,11 +73,6 @@ Check off completed items as you commit.
 - Route launcher actions through Javelin's existing typed/singleton activation path; do not add a
   parallel activation mechanism.
 
-### [ ] Make application theme preference explicitly Follow System / Light / Dark
-
-- Treat Follow System as the normal/default behavior.
-- Avoid forcing Breeze Light/Dark when the user has chosen another KDE color scheme.
-- Keep HTML message color handling separate from the application palette.
 
 ### [ ] Prefer theme icons for standard semantic actions
 
@@ -115,7 +104,7 @@ Check off completed items as you commit.
 - Apply the same fuzzy picker pattern used by Move/Copy to tags when the tag set is large.
 - Preserve the ordinary menu/checkable presentation for small sets and mouse-first use.
 
-### [ ] Use KIO for opening attachments
+### [x] Use KIO for opening attachments
 
 - Replace local `QDesktopServices::openUrl()` attachment opening with `KIO::OpenUrlJob` plus the
   appropriate UI delegate.
@@ -123,7 +112,7 @@ Check off completed items as you commit.
   lifecycle.
 - Add Open With… where useful.
 
-### [ ] Keep file choosers separate from KIO opening
+### [x] Keep file choosers separate from KIO opening
 
 - Continue using `QFileDialog` for normal open/save/import/export selection; Plasma's Qt platform
   integration already supplies the native chooser.
@@ -131,10 +120,13 @@ Check off completed items as you commit.
   Flatpak/sandboxed builds.
 - Do not assume `KIO::OpenUrlJob` changes which Open/Save dialog backend is used.
 
-### [ ] Add "Show in Folder" after file saves
+### [x] Add "Show in Folder" after file saves
 
 - After exporting/saving an attachment or message, offer a direct way to reveal the resulting file in
   the user's file manager using the standard KDE/freedesktop mechanism.
+- Publish attachment/message saves through Plasma's standard job tracker with the destination URL so
+  completed jobs retain the desktop's Open File/Open Destination actions; keep status-bar completion
+  text as a fallback.
 
 ### [ ] Add mailbox favourites
 

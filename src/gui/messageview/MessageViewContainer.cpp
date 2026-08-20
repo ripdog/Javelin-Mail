@@ -713,6 +713,8 @@ namespace javelin::gui::messageview
                 &MessageViewContainer::saveAttachmentRequested);
         connect(m_attachmentPanel, &MessageAttachmentPanel::openAttachmentRequested, this,
                 &MessageViewContainer::openAttachmentRequested);
+        connect(m_attachmentPanel, &MessageAttachmentPanel::openAttachmentWithRequested, this,
+                &MessageViewContainer::openAttachmentWithRequested);
         connect(m_attachmentPanel, &MessageAttachmentPanel::saveAllAttachmentsRequested, this,
                 &MessageViewContainer::saveAllAttachmentsRequested);
 
