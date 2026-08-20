@@ -235,6 +235,9 @@ javelin_enable_static_analysis(javelin_app_shared)
 javelin_enable_sanitizers(javelin_app_shared)
 
 set(JAVELIN_FORMAT_FILES
+    src/gui/shell/AccountActionPolicy.cpp
+    src/gui/shell/AccountActionPolicy.h
+    tests/gui/AccountActionPolicyTest.cpp
     src/app/FileNameUtils.h
     src/app/MailSaveNaming.h
     src/app/RawMailMaterializer.h
@@ -1356,6 +1359,8 @@ javelin_enable_static_analysis(javelin_translation)
 javelin_enable_sanitizers(javelin_translation)
 
 add_library(javelin_gui STATIC
+    src/gui/shell/AccountActionPolicy.cpp
+    src/gui/shell/AccountActionPolicy.h
     src/gui/shell/MailExportController.cpp
     src/gui/shell/MailExportController.h
     src/gui/shell/MessageTransferDestinationMenu.cpp

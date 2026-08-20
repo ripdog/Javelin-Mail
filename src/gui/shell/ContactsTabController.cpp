@@ -28,6 +28,9 @@ namespace javelin::gui::shell
           m_refreshPort(refreshPort), m_commandPort(commandPort), m_contentStack(contentStack),
           m_tabs(tabs)
     {
+        m_workspaceState = calculateWorkspaceState();
+        static_cast<void>(m_contactRepository.connectChanged(this, [this](const QString&)
+                                                             { refreshWorkspaceState(); }));
     }
 
     void ContactsTabController::open()
@@ -212,7 +215,12 @@ namespace javelin::gui::shell
             menu.clear();
     }
 
-    ContactsWorkspaceState ContactsTabController::workspaceState() const
+    const ContactsWorkspaceState& ContactsTabController::workspaceState() const
+    {
+        return m_workspaceState;
+    }
+
+    ContactsWorkspaceState ContactsTabController::calculateWorkspaceState() const
     {
         const auto accountsResult = m_contactRepository.listAccounts();
         const auto* accounts =
@@ -241,6 +249,15 @@ namespace javelin::gui::shell
         };
     }
 
+    void ContactsTabController::refreshWorkspaceState()
+    {
+        auto state = calculateWorkspaceState();
+        if (state == m_workspaceState)
+            return;
+        m_workspaceState = std::move(state);
+        Q_EMIT workspaceStateChanged();
+    }
+
     ContactsToolbarState ContactsTabController::toolbarState(const TabState* tab) const
     {
         const auto* widget = widgetForTab(tab);
@@ -265,14 +282,6 @@ namespace javelin::gui::shell
             .canManageAddressBooks = !busy,
             .canRefresh = !busy,
         };
-    }
-
-    bool ContactsTabController::available() const
-    {
-        const auto accounts = m_contactRepository.listAccounts();
-        const auto* values =
-            std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&accounts);
-        return values != nullptr && !values->empty();
     }
 
     bool ContactsTabController::refresh(const TabState* tab)

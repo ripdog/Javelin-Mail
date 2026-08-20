@@ -68,6 +68,9 @@ namespace javelin::gui::shell
         bool canCreateEvent = false;
         bool canManageCalendars = false;
         bool canRefresh = false;
+
+        friend bool operator==(const CalendarWorkspaceState&,
+                               const CalendarWorkspaceState&) = default;
     };
 
     class CalendarTabController final : public QObject
@@ -86,9 +89,7 @@ namespace javelin::gui::shell
                        const QString& recurrenceId, const QDate& navigationDate);
         void invoke(const TabState* tab, CalendarTabCommand command);
         void invokeWorkspace(CalendarTabCommand command);
-        [[nodiscard]] CalendarWorkspaceState workspaceState() const;
-        [[nodiscard]] bool
-        available(std::optional<std::string_view> accountId = std::nullopt) const;
+        [[nodiscard]] const CalendarWorkspaceState& workspaceState() const;
         [[nodiscard]] bool refresh(const TabState* tab);
         void accountsChanged();
         [[nodiscard]] bool close(TabState& tab);
@@ -100,10 +101,13 @@ namespace javelin::gui::shell
 
       Q_SIGNALS:
         void tabReady(int index);
+        void workspaceStateChanged();
         void statusMessage(QString message, int durationMilliseconds);
         void operationFailed(javelin::jmap::OperationError error);
 
       private:
+        [[nodiscard]] CalendarWorkspaceState calculateWorkspaceState() const;
+        void refreshWorkspaceState();
         [[nodiscard]] javelin::gui::calendar::MonthCalendarWidget*
         widgetForTab(const TabState* tab) const;
         [[nodiscard]] bool
@@ -124,6 +128,7 @@ namespace javelin::gui::shell
         QStackedWidget& m_contentStack;
         std::vector<TabState>& m_tabs;
         std::vector<javelin::jmap::cache::CalendarAccount> m_calendarAccounts;
+        CalendarWorkspaceState m_workspaceState;
         std::function<std::vector<QString>()> m_configuredEventContextMenuLayout;
         std::optional<CalendarEventContextActions> m_eventContextActions;
         javelin::gui::calendar::MonthCalendarWidget* m_eventContextWidget = nullptr;

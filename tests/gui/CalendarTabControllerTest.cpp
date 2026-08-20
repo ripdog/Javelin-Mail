@@ -24,6 +24,8 @@ namespace
     {
       public:
         bool writable = true;
+        mutable int accountReadCount = 0;
+        mutable int calendarReadCount = 0;
 
         javelin::jmap::calendar::CalendarLoadResult
         loadCached(const std::string_view accountId,
@@ -45,6 +47,7 @@ namespace
 
         javelin::jmap::calendar::CalendarAccountsResult accounts() const override
         {
+            ++accountReadCount;
             return std::vector<javelin::jmap::cache::CalendarAccount>{{
                 .ownerAccountId = "owner-1",
                 .accountId = "calendar-1",
@@ -55,6 +58,7 @@ namespace
         javelin::jmap::calendar::CalendarListResult
         calendars(const std::string_view accountId) const override
         {
+            ++calendarReadCount;
             return std::vector<javelin::jmap::calendar::Calendar>{{
                 .accountId = std::string{accountId},
                 .id = "cal-1",
@@ -245,9 +249,25 @@ TEST_CASE("calendar workspace state distinguishes availability from event creati
     CHECK_FALSE(state.canCreateEvent);
     CHECK(state.canManageCalendars);
     CHECK(state.canRefresh);
+    CHECK(reader.accountReadCount == 1);
+    CHECK(reader.calendarReadCount == 1);
 
+    static_cast<void>(controller.workspaceState());
     controller.invokeWorkspace(javelin::gui::shell::CalendarTabCommand::CreateEvent);
     CHECK(tabs.empty());
+    CHECK(reader.accountReadCount == 1);
+    CHECK(reader.calendarReadCount == 1);
+
+    int stateChanges = 0;
+    QObject::connect(&controller,
+                     &javelin::gui::shell::CalendarTabController::workspaceStateChanged,
+                     &contentStack, [&stateChanges] { ++stateChanges; });
+    reader.writable = true;
+    controller.accountsChanged();
+    CHECK(stateChanges == 1);
+    CHECK(controller.workspaceState().canCreateEvent);
+    CHECK(reader.accountReadCount == 2);
+    CHECK(reader.calendarReadCount == 2);
 }
 
 TEST_CASE("workspace Calendar refresh does not duplicate materialization refresh",

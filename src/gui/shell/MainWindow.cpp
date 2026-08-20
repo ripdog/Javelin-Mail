@@ -418,6 +418,8 @@ namespace javelin::gui::shell
                     updateTabBar();
                     activateTab(index, false);
                 });
+        connect(m_calendarTabController, &CalendarTabController::workspaceStateChanged, this,
+                &MainWindow::updateActiveContextUi);
         connect(m_calendarTabController, &CalendarTabController::statusMessage, this,
                 [this](const QString& message, const int durationMilliseconds)
                 { m_statusBar->showMessage(message, durationMilliseconds); });
@@ -431,6 +433,8 @@ namespace javelin::gui::shell
                     updateTabBar();
                     activateTab(index, false);
                 });
+        connect(m_contactsTabController, &ContactsTabController::workspaceStateChanged, this,
+                &MainWindow::updateActiveContextUi);
         connect(m_contactsTabController, &ContactsTabController::toolbarStateChanged, this,
                 &MainWindow::updateActiveContextUi);
         connect(m_contactsTabController, &ContactsTabController::statusMessage, this,
@@ -574,6 +578,7 @@ namespace javelin::gui::shell
                     reloadAccounts();
                     m_calendarTabController->accountsChanged();
                 });
+        refreshAccountActionAccounts();
         createActions();
         setupGUI(KXmlGuiWindow::ToolBar | KXmlGuiWindow::Keys | KXmlGuiWindow::Save |
                      KXmlGuiWindow::Create,
@@ -2455,41 +2460,31 @@ namespace javelin::gui::shell
         return tab == nullptr ? std::optional<std::string>{std::nullopt} : tabAccountId(*tab);
     }
 
-    std::optional<std::string> MainWindow::preferredMailAccountId() const
+    std::optional<std::string> MainWindow::preferredAccountId() const
     {
         if (auto accountId = activeAccountId(); accountId.has_value())
             return accountId;
         return currentAccountId(*m_mailboxView);
     }
 
+    std::optional<std::string> MainWindow::preferredMailAccountId() const
+    {
+        const auto preferred = preferredAccountId();
+        return accountWorkspaceActionState(m_accountActionAccounts,
+                                           preferred.has_value()
+                                               ? std::optional<std::string_view>{*preferred}
+                                               : std::nullopt)
+            .preferredMailAccountId;
+    }
+
     std::optional<std::string> MainWindow::preferredSubmissionAccountId() const
     {
-        const auto preferredAccountId = preferredMailAccountId();
-        const auto accountsResult = m_accountReader.listAll();
-        const auto* accounts =
-            std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult);
-        if (accounts == nullptr)
-            return std::nullopt;
-
-        const auto usable = [](const auto& account)
-        {
-            return account.hasMailCapability && account.hasSubmissionCapability &&
-                   !account.isReadOnly;
-        };
-        if (preferredAccountId.has_value())
-        {
-            const auto preferred = std::ranges::find(
-                *accounts, *preferredAccountId, &javelin::jmap::cache::CachedAccount::accountId);
-            if (preferred != accounts->end() && usable(*preferred))
-                return preferred->accountId;
-        }
-        const auto primary = std::ranges::find_if(*accounts, [&usable](const auto& account)
-                                                  { return account.isPrimary && usable(account); });
-        if (primary != accounts->end())
-            return primary->accountId;
-        const auto fallback = std::ranges::find_if(*accounts, usable);
-        return fallback == accounts->end() ? std::nullopt
-                                           : std::optional<std::string>{fallback->accountId};
+        const auto preferred = preferredAccountId();
+        return accountWorkspaceActionState(m_accountActionAccounts,
+                                           preferred.has_value()
+                                               ? std::optional<std::string_view>{*preferred}
+                                               : std::nullopt)
+            .preferredSubmissionAccountId;
     }
 
     std::optional<std::string> MainWindow::activeMailboxId() const
@@ -3379,8 +3374,30 @@ namespace javelin::gui::shell
         static_cast<void>(m_mailWorkspaceController->loadMore(*tab));
     }
 
+    void MainWindow::refreshAccountActionAccounts()
+    {
+        m_accountActionAccounts.clear();
+        const auto accountsResult = m_accountReader.listAll();
+        const auto* accounts =
+            std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult);
+        if (accounts == nullptr)
+            return;
+        m_accountActionAccounts.reserve(accounts->size());
+        for (const auto& account : *accounts)
+        {
+            m_accountActionAccounts.push_back({
+                .accountId = account.accountId,
+                .isReadOnly = account.isReadOnly,
+                .isPrimary = account.isPrimary,
+                .hasMailCapability = account.hasMailCapability,
+                .hasSubmissionCapability = account.hasSubmissionCapability,
+            });
+        }
+    }
+
     void MainWindow::reloadAccounts()
     {
+        refreshAccountActionAccounts();
         m_mailboxModel->refresh();
         m_mailboxView->expandAll();
         if (m_contactsAction != nullptr)

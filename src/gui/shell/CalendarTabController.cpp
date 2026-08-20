@@ -405,6 +405,10 @@ namespace javelin::gui::shell
         : QObject(parent), m_settings(settings), m_calendarReader(calendarReader),
           m_calendarCommandPort(calendarCommandPort), m_contentStack(contentStack), m_tabs(tabs)
     {
+        m_workspaceState = calculateWorkspaceState();
+        connect(&m_calendarCommandPort, &javelin::app::CalendarCommandPort::calendarCacheCommitted,
+                this,
+                [this](const javelin::app::CalendarCacheChange&) { refreshWorkspaceState(); });
     }
 
     bool CalendarTabController::refreshAccountSnapshot(
@@ -1855,7 +1859,12 @@ namespace javelin::gui::shell
         }
     }
 
-    CalendarWorkspaceState CalendarTabController::workspaceState() const
+    const CalendarWorkspaceState& CalendarTabController::workspaceState() const
+    {
+        return m_workspaceState;
+    }
+
+    CalendarWorkspaceState CalendarTabController::calculateWorkspaceState() const
     {
         const auto accounts = m_calendarReader.accounts();
         const auto* values =
@@ -1891,17 +1900,13 @@ namespace javelin::gui::shell
         };
     }
 
-    bool CalendarTabController::available(const std::optional<std::string_view> accountId) const
+    void CalendarTabController::refreshWorkspaceState()
     {
-        const auto accounts = m_calendarReader.accounts();
-        const auto* values =
-            std::get_if<std::vector<javelin::jmap::cache::CalendarAccount>>(&accounts);
-        if (values == nullptr)
-            return false;
-        if (!accountId.has_value())
-            return !values->empty();
-        return std::ranges::any_of(*values, [accountId](const auto& account)
-                                   { return account.accountId == *accountId; });
+        auto state = calculateWorkspaceState();
+        if (state == m_workspaceState)
+            return;
+        m_workspaceState = std::move(state);
+        Q_EMIT workspaceStateChanged();
     }
 
     bool CalendarTabController::refresh(const TabState* tab)
@@ -1917,6 +1922,7 @@ namespace javelin::gui::shell
 
     void CalendarTabController::accountsChanged()
     {
+        refreshWorkspaceState();
         for (auto& tab : m_tabs)
         {
             auto* widget = widgetForTab(&tab);

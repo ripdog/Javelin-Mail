@@ -347,6 +347,18 @@ TEST_CASE("Contacts workspace state distinguishes availability from writable des
 
     controller.invokeWorkspace(javelin::gui::shell::ContactsTabCommand::CreateContact);
     CHECK(tabs.empty());
+
+    int stateChanges = 0;
+    QObject::connect(&controller,
+                     &javelin::gui::shell::ContactsTabController::workspaceStateChanged,
+                     &contentStack, [&stateChanges] { ++stateChanges; });
+    auto writableBook = readOnlyBook;
+    writableBook.myRights.mayWrite = true;
+    REQUIRE_FALSE(repository.replaceAll("a1", {writableBook}, {}, "b2", "c2").has_value());
+
+    CHECK(stateChanges == 1);
+    CHECK(controller.workspaceState().canCreateContact);
+    CHECK(controller.workspaceState().createAccountId == std::optional<std::string>{"a1"});
 }
 
 TEST_CASE("workspace contact creation selects a writable account",

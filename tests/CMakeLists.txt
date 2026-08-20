@@ -288,6 +288,7 @@ javelin_enable_test_localization(javelin_daemon_app_tests)
 
 # Pure presentation/policy tests must stay independent of daemon and writable JMAP targets.
 add_executable(javelin_gui_policy_tests
+    gui/AccountActionPolicyTest.cpp
     gui/ConnectionSettingsAdapterTest.cpp
     gui/GuiSettingsTest.cpp
     gui/ComposeTabPolicyTest.cpp

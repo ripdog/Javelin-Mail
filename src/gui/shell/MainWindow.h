@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gui/shell/AccountActionPolicy.h"
 #include "gui/shell/TabWorkspace.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
@@ -270,6 +271,7 @@ namespace javelin::gui::shell
         [[nodiscard]] bool activeTabIsCompose() const;
         [[nodiscard]] bool activeTabIsContacts() const;
         [[nodiscard]] std::optional<std::string> activeAccountId() const;
+        [[nodiscard]] std::optional<std::string> preferredAccountId() const;
         [[nodiscard]] std::optional<std::string> preferredMailAccountId() const;
         [[nodiscard]] std::optional<std::string> preferredSubmissionAccountId() const;
         [[nodiscard]] std::optional<std::string> activeMailboxId() const;
@@ -292,6 +294,7 @@ namespace javelin::gui::shell
         void openPreferences();
         void configureEmailContextMenu();
         void configureCalendarEventContextMenu();
+        void refreshAccountActionAccounts();
         void reloadAccounts();
         void refreshMessageListPreservingSelection();
         void refreshSelectionFromModels();
@@ -334,6 +337,7 @@ namespace javelin::gui::shell
         javelin::app::MessageContentPort& m_messageContentPort;
         javelin::app::MailApplicationEventsPort& m_mailEvents;
         std::unordered_map<std::string, javelin::app::MailAccountStatus> m_accountStatuses;
+        std::vector<AccountActionAccount> m_accountActionAccounts;
         javelin::app::MessageNavigationPort& m_messageNavigationPort;
         javelin::app::UndoCommandPort& m_undoCommandPort;
         std::unique_ptr<MailWorkspaceController> m_mailWorkspaceController;
