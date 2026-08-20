@@ -269,13 +269,12 @@ namespace javelin::gui::shell
             return;
         }
 
-        if (move)
-            m_commandController.populateDestinationMenus(&menu, nullptr, *accountId,
-                                                         sourceMailboxId, selection);
-        else
-            m_commandController.populateDestinationMenus(nullptr, &menu, *accountId,
-                                                         sourceMailboxId, selection);
-        if (menu.actions().empty())
+        const bool hasDestinations =
+            move ? m_commandController.populateDestinationMenus(&menu, nullptr, *accountId,
+                                                                sourceMailboxId, selection)
+                 : m_commandController.populateDestinationMenus(nullptr, &menu, *accountId,
+                                                                sourceMailboxId, selection);
+        if (!hasDestinations)
         {
             auto* unavailable = menu.addAction(i18n("No writable mailboxes available"));
             unavailable->setEnabled(false);
@@ -344,12 +343,12 @@ namespace javelin::gui::shell
             target->setIcon(move ? QIcon::fromTheme(QStringLiteral("mail-move"))
                                  : QIcon::fromTheme(QStringLiteral("edit-copy")));
             m_contextMenuObjects.push_back(target);
-            if (move)
-                m_commandController.populateDestinationMenus(target, nullptr, *accountId,
-                                                             sourceMailboxId, selection);
-            else
-                m_commandController.populateDestinationMenus(nullptr, target, *accountId,
-                                                             sourceMailboxId, selection);
+            const bool hasDestinations =
+                move ? m_commandController.populateDestinationMenus(target, nullptr, *accountId,
+                                                                    sourceMailboxId, selection)
+                     : m_commandController.populateDestinationMenus(nullptr, target, *accountId,
+                                                                    sourceMailboxId, selection);
+            target->setProperty("javelinHasTransferDestinations", hasDestinations);
             return target;
         };
 
@@ -378,14 +377,18 @@ namespace javelin::gui::shell
                 if (!sourceMailboxId.has_value() && !activeTabIsSearch())
                     return nullptr;
                 auto* menu = destinationMenu(true);
-                return menu->actions().empty() ? nullptr : menu->menuAction();
+                return menu->property("javelinHasTransferDestinations").toBool()
+                           ? menu->menuAction()
+                           : nullptr;
             }
             if (id == QStringLiteral("copy_email"))
             {
                 if (!sourceMailboxId.has_value() && !activeTabIsSearch())
                     return nullptr;
                 auto* menu = destinationMenu(false);
-                return menu->actions().empty() ? nullptr : menu->menuAction();
+                return menu->property("javelinHasTransferDestinations").toBool()
+                           ? menu->menuAction()
+                           : nullptr;
             }
             if (id == QStringLiteral("toggle_email_junk"))
                 return &m_actions.junk;

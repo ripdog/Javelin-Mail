@@ -64,9 +64,10 @@ namespace javelin::gui::shell
         void showTransferMenu(MessageTransferOperation operation,
                               std::optional<std::string> accountId,
                               std::optional<std::string> sourceMailboxId, bool searchTab);
-        void populateDestinationMenus(QMenu* moveMenu, QMenu* copyMenu, std::string accountId,
-                                      std::optional<std::string> sourceMailboxId,
-                                      javelin::app::MessageSelection selection);
+        [[nodiscard]] bool populateDestinationMenus(QMenu* moveMenu, QMenu* copyMenu,
+                                                    std::string accountId,
+                                                    std::optional<std::string> sourceMailboxId,
+                                                    javelin::app::MessageSelection selection);
         void queueTransfer(std::string sourceAccountId, std::optional<std::string> sourceMailboxId,
                            std::string destinationAccountId, std::string destinationMailboxId,
                            javelin::app::MessageSelection selection,

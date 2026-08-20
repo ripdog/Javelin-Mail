@@ -4,7 +4,10 @@
 
 #include <KLocalizedString>
 
+#include <QStringList>
+
 #include <algorithm>
+#include <optional>
 #include <ranges>
 #include <unordered_map>
 #include <unordered_set>
@@ -20,11 +23,33 @@ namespace javelin::gui::shell
         {
             const auto presentation =
                 javelin::gui::mailboxes::buildMailboxPresentation(accountId, mailboxes);
+
+            struct FlatRow
+            {
+                const javelin::gui::mailboxes::MailboxPresentationNode* node = nullptr;
+                std::size_t depth = 0;
+                QString path;
+            };
+            std::vector<FlatRow> flattened;
+            const auto append =
+                [&flattened](const auto& self,
+                             const javelin::gui::mailboxes::MailboxPresentationNode& node,
+                             const std::size_t depth, const QString& parentPath) -> void
+            {
+                const auto name = QString::fromStdString(node.mailbox.name);
+                const auto path =
+                    parentPath.isEmpty() ? name : QStringLiteral("%1 / %2").arg(parentPath, name);
+                flattened.push_back({.node = &node, .depth = depth, .path = path});
+                for (const auto& child : node.children)
+                    self(self, child, depth + 1, path);
+            };
+            for (const auto& root : presentation.roots)
+                append(append, root, 0, {});
+
             std::vector<MessageTransferDestinationRow> result;
             bool displayedSpecialUse = false;
             bool insertedUserSeparator = false;
-            for (const auto& row :
-                 javelin::gui::mailboxes::flattenMailboxPresentation(presentation))
+            for (const auto& row : flattened)
             {
                 const auto& destination = *row.node;
                 if (!destination.mailbox.myRights.mayAddItems)
@@ -37,6 +62,8 @@ namespace javelin::gui::shell
                     .mailboxId = destination.mailbox.id,
                     .mailboxName = destination.mailbox.name,
                     .role = destination.mailbox.role,
+                    .mailboxPath = row.path,
+                    .accountLabel = {},
                     .depth = row.depth,
                     .separatorBefore = separatorBefore,
                 });
@@ -112,6 +139,104 @@ namespace javelin::gui::shell
             static_cast<void>(available(fullCandidate));
             return fullCandidate;
         }
+
+        [[nodiscard]] QString
+        fallbackCurrentAccountLabel(const std::string& accountId,
+                                    const MessageTransferAccountDisplayName& configuredDisplayName)
+        {
+            if (configuredDisplayName)
+            {
+                auto configured =
+                    configuredDisplayName(QString::fromStdString(accountId)).trimmed();
+                if (!configured.isEmpty())
+                    return configured;
+            }
+            return i18n("Current account");
+        }
+
+        void applyAccountLabel(std::vector<MessageTransferDestinationRow>& rows,
+                               const QString& label)
+        {
+            for (auto& row : rows)
+                row.accountLabel = label;
+        }
+
+        [[nodiscard]] QString normalized(QStringView value)
+        {
+            return value.toString().simplified().toCaseFolded();
+        }
+
+        [[nodiscard]] std::optional<int> fuzzyFieldScore(const QString& token, const QString& field)
+        {
+            if (token.isEmpty() || field.isEmpty())
+                return std::nullopt;
+            if (field == token)
+                return 1000;
+            if (field.startsWith(token))
+                return 850 -
+                       static_cast<int>(std::min<qsizetype>(field.size() - token.size(), 100));
+            const auto containedAt = field.indexOf(token);
+            if (containedAt >= 0)
+                return 700 - static_cast<int>(std::min<qsizetype>(containedAt * 4, 200));
+
+            qsizetype cursor = 0;
+            qsizetype first = -1;
+            qsizetype last = -1;
+            int boundaryHits = 0;
+            for (const auto character : token)
+            {
+                const auto found = field.indexOf(character, cursor);
+                if (found < 0)
+                    return std::nullopt;
+                if (first < 0)
+                    first = found;
+                last = found;
+                if (found == 0 || field.at(found - 1).isSpace() || field.at(found - 1) == u'/' ||
+                    field.at(found - 1) == u'-' || field.at(found - 1) == u'_')
+                    ++boundaryHits;
+                cursor = found + 1;
+            }
+            const auto span = last - first + 1;
+            const auto gaps = span - token.size();
+            return 450 + boundaryHits * 20 - std::min(static_cast<int>(gaps * 8), 260) -
+                   std::min(static_cast<int>(first * 2), 120);
+        }
+
+        [[nodiscard]] std::optional<int> searchScore(const MessageTransferDestinationRow& row,
+                                                     const QStringList& tokens,
+                                                     const QString& wholeQuery)
+        {
+            const auto name = normalized(QString::fromStdString(row.mailboxName));
+            const auto path = normalized(row.mailboxPath);
+            const auto account = normalized(row.accountLabel);
+
+            int score = 0;
+            for (const auto& token : tokens)
+            {
+                int best = -1;
+                if (const auto value = fuzzyFieldScore(token, name))
+                    best = std::max(best, *value * 3);
+                if (const auto value = fuzzyFieldScore(token, path))
+                    best = std::max(best, *value * 2);
+                if (const auto value = fuzzyFieldScore(token, account))
+                    best = std::max(best, *value);
+                if (best < 0)
+                    return std::nullopt;
+                score += best;
+            }
+
+            if (name == wholeQuery)
+                score += 5000;
+            else if (name.startsWith(wholeQuery))
+                score += 3500;
+            if (path == wholeQuery)
+                score += 3000;
+            else if (path.contains(wholeQuery))
+                score += 1800;
+            if (account == wholeQuery)
+                score += 1200;
+            return score;
+        }
     } // namespace
 
     MessageTransferDestinationPresentation buildMessageTransferDestinationPresentation(
@@ -127,6 +252,13 @@ namespace javelin::gui::shell
         {
             result.currentAccountRows = writableRows(currentAccountId, current->second);
         }
+
+        const auto currentAccount = std::ranges::find(
+            accounts, currentAccountId, &javelin::jmap::cache::CachedAccount::accountId);
+        const auto currentBaseLabel =
+            currentAccount == accounts.end()
+                ? fallbackCurrentAccountLabel(currentAccountId, configuredDisplayName)
+                : baseLabel(*currentAccount, configuredDisplayName);
 
         struct Candidate
         {
@@ -163,20 +295,83 @@ namespace javelin::gui::shell
                           });
 
         std::unordered_map<QString, std::size_t> labelCounts;
+        if (!result.currentAccountRows.empty())
+            ++labelCounts[currentBaseLabel.toCaseFolded()];
         for (const auto& candidate : candidates)
             ++labelCounts[candidate.baseLabel.toCaseFolded()];
+
         std::unordered_set<QString> usedLabels;
+        if (!result.currentAccountRows.empty())
+        {
+            if (currentAccount != accounts.end())
+            {
+                result.currentAccountLabel =
+                    uniqueLabel(*currentAccount, currentBaseLabel,
+                                labelCounts[currentBaseLabel.toCaseFolded()] > 1, usedLabels);
+            }
+            else
+            {
+                result.currentAccountLabel = currentBaseLabel;
+                usedLabels.insert(currentBaseLabel.toCaseFolded());
+            }
+            applyAccountLabel(result.currentAccountRows, result.currentAccountLabel);
+        }
+
         for (auto& candidate : candidates)
         {
             const bool duplicate = labelCounts[candidate.baseLabel.toCaseFolded()] > 1;
+            auto label =
+                uniqueLabel(*candidate.account, candidate.baseLabel, duplicate, usedLabels);
+            applyAccountLabel(candidate.rows, label);
             result.otherAccounts.push_back({
                 .accountId = candidate.account->accountId,
-                .label =
-                    uniqueLabel(*candidate.account, candidate.baseLabel, duplicate, usedLabels),
+                .label = std::move(label),
                 .rows = std::move(candidate.rows),
             });
         }
         return result;
+    }
+
+    std::vector<MessageTransferDestinationSearchResult>
+    searchMessageTransferDestinations(const MessageTransferDestinationPresentation& presentation,
+                                      const QStringView query)
+    {
+        const auto wholeQuery = normalized(query);
+        if (wholeQuery.isEmpty())
+            return {};
+        const auto tokens = wholeQuery.split(u' ', Qt::SkipEmptyParts);
+
+        std::vector<MessageTransferDestinationSearchResult> results;
+        const auto append =
+            [&results, &tokens, &wholeQuery](const std::vector<MessageTransferDestinationRow>& rows)
+        {
+            for (const auto& row : rows)
+            {
+                const auto score = searchScore(row, tokens, wholeQuery);
+                if (!score.has_value())
+                    continue;
+                results.push_back({.destination = row, .score = *score});
+            }
+        };
+        append(presentation.currentAccountRows);
+        for (const auto& account : presentation.otherAccounts)
+            append(account.rows);
+
+        std::ranges::sort(results,
+                          [](const auto& left, const auto& right)
+                          {
+                              if (left.score != right.score)
+                                  return left.score > right.score;
+                              const auto pathOrder = QString::compare(left.destination.mailboxPath,
+                                                                      right.destination.mailboxPath,
+                                                                      Qt::CaseInsensitive);
+                              if (pathOrder != 0)
+                                  return pathOrder < 0;
+                              return QString::compare(left.destination.accountLabel,
+                                                      right.destination.accountLabel,
+                                                      Qt::CaseInsensitive) < 0;
+                          });
+        return results;
     }
 
 } // namespace javelin::gui::shell

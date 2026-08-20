@@ -98,7 +98,7 @@ Check off completed items as you commit.
 
 ## Low to medium difficulty
 
-### [ ] Add searchable Move/Copy mailbox menus
+### [x] Add searchable Move/Copy mailbox menus
 
 - Refactor mailbox destination discovery away from immediate `QAction` creation so the same collected
   destination model can feed hierarchical and searchable presentations.

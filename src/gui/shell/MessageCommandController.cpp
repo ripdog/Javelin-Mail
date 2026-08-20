@@ -1,9 +1,9 @@
 #include "gui/shell/MessageCommandController.h"
 
-#include "gui/mailboxes/MailboxPresentation.h"
 #include "gui/messages/MessageActionSelection.h"
 #include "gui/messages/MessageConfirmationPresentation.h"
 #include "gui/messages/MessageListModel.h"
+#include "gui/shell/MessageTransferDestinationMenu.h"
 #include "jmap/cache/MailboxReadRepository.h"
 
 #include <QCoroTask>
@@ -17,7 +17,6 @@
 #include <QLoggingCategory>
 #include <QMenu>
 #include <QMessageBox>
-#include <QPalette>
 #include <QPersistentModelIndex>
 #include <QPushButton>
 
@@ -162,10 +161,10 @@ namespace javelin::gui::shell
 
         QMenu menu{m_dialogParent.data()};
         menu.setTitle(move ? i18n("Move to") : i18n("Copy to"));
-        populateDestinationMenus(move ? &menu : nullptr, move ? nullptr : &menu,
-                                 std::move(*accountId), std::move(sourceMailboxId),
-                                 std::move(selection));
-        if (menu.actions().empty())
+        const bool hasDestinations = populateDestinationMenus(
+            move ? &menu : nullptr, move ? nullptr : &menu, std::move(*accountId),
+            std::move(sourceMailboxId), std::move(selection));
+        if (!hasDestinations)
         {
             Q_EMIT statusMessage(i18n("No destination mailboxes available."), 3000);
             return;
@@ -173,7 +172,7 @@ namespace javelin::gui::shell
         menu.exec(QCursor::pos());
     }
 
-    void MessageCommandController::populateDestinationMenus(
+    bool MessageCommandController::populateDestinationMenus(
         QMenu* moveMenu, QMenu* copyMenu, std::string accountId,
         std::optional<std::string> sourceMailboxId, javelin::app::MessageSelection selection)
     {
@@ -183,7 +182,7 @@ namespace javelin::gui::shell
         const auto* current =
             std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&currentMailboxes);
         if (current == nullptr)
-            return;
+            return false;
         mailboxesByAccount.emplace(accountId, *current);
 
         std::vector<javelin::jmap::cache::CachedAccount> accounts;
@@ -207,51 +206,33 @@ namespace javelin::gui::shell
 
         const auto presentation = buildMessageTransferDestinationPresentation(
             accountId, accounts, mailboxesByAccount, m_accountDisplayName);
-        const auto addRows =
-            [this, &accountId, &sourceMailboxId,
-             &selection](QMenu& menu, const std::vector<MessageTransferDestinationRow>& rows,
-                         const MessageTransferOperation operation, const QString& successMessage)
-        {
-            const auto iconColor = menu.palette().color(QPalette::Active, QPalette::Text);
-            for (const auto& row : rows)
-            {
-                if (row.separatorBefore && !menu.actions().empty())
-                    menu.addSeparator();
-                const QString indentation(static_cast<qsizetype>(row.depth), QChar{u'\u2003'});
-                auto* action = menu.addAction(
-                    javelin::gui::mailboxes::mailboxPresentationIcon(row.role, iconColor),
-                    indentation + QString::fromStdString(row.mailboxName));
-                connect(action, &QAction::triggered, this,
-                        [this, sourceAccountId = accountId, sourceMailboxId,
-                         destinationAccountId = row.accountId, destinationMailboxId = row.mailboxId,
-                         selection, operation, successMessage]
-                        {
-                            queueTransfer(sourceAccountId, sourceMailboxId, destinationAccountId,
-                                          destinationMailboxId, selection, operation,
-                                          successMessage);
-                        });
-            }
-        };
-        const auto addDestinations = [&](QMenu* menu, const MessageTransferOperation operation,
-                                         const QString& successMessage)
+        const bool hasDestinations =
+            !presentation.currentAccountRows.empty() || !presentation.otherAccounts.empty();
+        if (!hasDestinations)
+            return false;
+
+        const auto populate = [this, &presentation, &accountId, &sourceMailboxId,
+                               &selection](QMenu* menu, const MessageTransferOperation operation,
+                                           const QString& successMessage)
         {
             if (menu == nullptr)
                 return;
-            addRows(*menu, presentation.currentAccountRows, operation, successMessage);
-            if (!presentation.otherAccounts.empty() && !menu->actions().empty())
-                menu->addSeparator();
-            for (const auto& account : presentation.otherAccounts)
-            {
-                auto* accountMenu = menu->addMenu(account.label);
-                addRows(*accountMenu, account.rows, operation, successMessage);
-            }
+            static_cast<void>(populateMessageTransferDestinationMenu(
+                *menu, presentation,
+                [this, sourceAccountId = accountId, sourceMailboxId, selection, operation,
+                 successMessage](const MessageTransferDestinationRow& destination)
+                {
+                    queueTransfer(sourceAccountId, sourceMailboxId, destination.accountId,
+                                  destination.mailboxId, selection, operation, successMessage);
+                }));
         };
 
         // The open mailbox scopes collapsed-thread resolution; it does not describe the
         // residency of every visible or selected Email. Keep every writable mailbox available so
         // mixed selections can copy or move the members that are not already in that destination.
-        addDestinations(moveMenu, MessageTransferOperation::Move, i18n("Queued move."));
-        addDestinations(copyMenu, MessageTransferOperation::Copy, i18n("Queued copy."));
+        populate(moveMenu, MessageTransferOperation::Move, i18n("Queued move."));
+        populate(copyMenu, MessageTransferOperation::Copy, i18n("Queued copy."));
+        return true;
     }
 
     void MessageCommandController::queueTransfer(std::string sourceAccountId,

@@ -95,6 +95,9 @@ TEST_CASE(
     CHECK_FALSE(presentation.currentAccountRows.at(0).separatorBefore);
     CHECK(presentation.currentAccountRows.at(1).mailboxId == "projects");
     CHECK(presentation.currentAccountRows.at(1).separatorBefore);
+    CHECK(presentation.currentAccountLabel == QStringLiteral("Source server"));
+    CHECK(presentation.currentAccountRows.at(1).mailboxPath == QStringLiteral("Projects"));
+    CHECK(presentation.currentAccountRows.at(1).accountLabel == QStringLiteral("Source server"));
 
     REQUIRE(presentation.otherAccounts.size() == 1);
     const auto& destinationAccount = presentation.otherAccounts.front();
@@ -106,6 +109,18 @@ TEST_CASE(
     CHECK(destinationAccount.rows.at(1).separatorBefore);
     CHECK(destinationAccount.rows.at(2).mailboxId == "child");
     CHECK(destinationAccount.rows.at(2).depth == 1);
+    CHECK(destinationAccount.rows.at(2).mailboxPath == QStringLiteral("Parent / Child"));
+    CHECK(destinationAccount.rows.at(2).accountLabel == QStringLiteral("Work"));
+
+    const auto accountMatches = javelin::gui::shell::searchMessageTransferDestinations(
+        presentation, QStringLiteral("work child"));
+    REQUIRE(accountMatches.size() == 1);
+    CHECK(accountMatches.front().destination.mailboxId == "child");
+
+    const auto pathMatches = javelin::gui::shell::searchMessageTransferDestinations(
+        presentation, QStringLiteral("parent chld"));
+    REQUIRE(pathMatches.size() == 1);
+    CHECK(pathMatches.front().destination.mailboxId == "child");
 }
 
 TEST_CASE("transfer destination presentation disambiguates duplicate configured account names",

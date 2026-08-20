@@ -1358,6 +1358,8 @@ javelin_enable_sanitizers(javelin_translation)
 add_library(javelin_gui STATIC
     src/gui/shell/MailExportController.cpp
     src/gui/shell/MailExportController.h
+    src/gui/shell/MessageTransferDestinationMenu.cpp
+    src/gui/shell/MessageTransferDestinationMenu.h
     src/gui/shell/MessageTransferDestinationPresentation.cpp
     src/gui/shell/MessageTransferDestinationPresentation.h
     src/gui/compose/AddressSuggestionStore.cpp

@@ -21,6 +21,8 @@ namespace javelin::gui::shell
         std::string mailboxId;
         std::string mailboxName;
         std::optional<std::string> role;
+        QString mailboxPath;
+        QString accountLabel;
         std::size_t depth = 0;
         bool separatorBefore = false;
     };
@@ -34,8 +36,15 @@ namespace javelin::gui::shell
 
     struct MessageTransferDestinationPresentation
     {
+        QString currentAccountLabel;
         std::vector<MessageTransferDestinationRow> currentAccountRows;
         std::vector<MessageTransferDestinationAccount> otherAccounts;
+    };
+
+    struct MessageTransferDestinationSearchResult
+    {
+        MessageTransferDestinationRow destination;
+        int score = 0;
     };
 
     using MessageTransferAccountDisplayName = std::function<QString(QStringView)>;
@@ -47,5 +56,9 @@ namespace javelin::gui::shell
         const std::unordered_map<std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>>&
             mailboxesByAccount,
         const MessageTransferAccountDisplayName& configuredDisplayName = {});
+
+    [[nodiscard]] std::vector<MessageTransferDestinationSearchResult>
+    searchMessageTransferDestinations(const MessageTransferDestinationPresentation& presentation,
+                                      QStringView query);
 
 } // namespace javelin::gui::shell
