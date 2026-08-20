@@ -636,12 +636,15 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageAppearance.cpp
     src/gui/messageview/MessageAppearance.h
+    tests/gui/MessageReaderCommandControllerTest.cpp
     src/gui/messageview/MessageAttachmentPanel.cpp
     src/gui/messageview/MessageAttachmentPanel.h
     src/gui/messageview/MessageBannerCoordinator.cpp
     src/gui/messageview/MessageBannerCoordinator.h
     src/gui/messageview/MessageBodyPresenter.cpp
     src/gui/messageview/MessageBodyPresenter.h
+    src/gui/messageview/MessageReaderCommandController.cpp
+    src/gui/messageview/MessageReaderCommandController.h
     src/gui/messageview/MessageTranslationController.cpp
     src/gui/messageview/MessageTranslationController.h
     src/gui/messageview/RemoteContentController.cpp
@@ -1484,6 +1487,8 @@ add_library(javelin_gui STATIC
     src/gui/messageview/MessageBannerCoordinator.h
     src/gui/messageview/MessageBodyPresenter.cpp
     src/gui/messageview/MessageBodyPresenter.h
+    src/gui/messageview/MessageReaderCommandController.cpp
+    src/gui/messageview/MessageReaderCommandController.h
     src/gui/messageview/MessageTranslationController.cpp
     src/gui/messageview/MessageTranslationController.h
     src/gui/messageview/RemoteContentController.cpp
