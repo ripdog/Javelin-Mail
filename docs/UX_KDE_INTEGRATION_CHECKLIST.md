@@ -38,10 +38,12 @@ Check off completed items as you commit.
 - Expose everything through KDE's existing shortcut configuration rather than hard-coding a second
   shortcut system.
 
-### [x] Replace bare transient feedback with actionable inline feedback
+### [ ] Replace bare transient feedback with actionable inline feedback
 
-- Use `KMessageWidget` or equivalent non-modal inline feedback for ordinary operation results and
-  recoverable failures.
+- Reader-condition banners now use subdued `KMessageWidget` presentation, but ordinary operation
+  results and recoverable failures still mostly use transient status-bar messages.
+- Use a low-impact, non-modal feedback surface for operation results; it must not push the message
+  list or reader content down merely to confirm a completed action.
 - Prefer messages such as "Archived 7 messages — Undo" or an error with Retry/Sign In actions over a
   status-bar-only message.
 - Keep modal dialogs for genuinely blocking decisions or intervention.
