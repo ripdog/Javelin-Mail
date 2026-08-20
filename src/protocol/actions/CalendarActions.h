@@ -111,6 +111,11 @@ namespace javelin::protocol::actions
                    ReplayPolicy::Never, detail::calendarOnly,
                    std::tuple<std::string, std::string, std::string, std::optional<std::string>>,
                    javelin::jmap::calendar::CalendarMutationResult>;
+    using CalendarSetColors =
+        Descriptor<98, ActionDomain::Calendar, AdmissionSemantics::Asynchronous,
+                   ReplayPolicy::Never, detail::calendarOnly,
+                   std::tuple<std::vector<javelin::app::CalendarColorChange>>,
+                   javelin::app::CalendarColorBatchResult>;
     using CalendarActionTypes = std::tuple<
         RegisteredAction<CalendarReadCached, "CalendarReadCached">,
         RegisteredAction<CalendarReadAccounts, "CalendarReadAccounts">,
@@ -129,5 +134,6 @@ namespace javelin::protocol::actions
         RegisteredAction<CalendarReadEvent, "CalendarReadEvent">,
         RegisteredAction<CalendarReadParticipantIdentities, "CalendarReadParticipantIdentities">,
         RegisteredAction<CalendarReservedRangeSnapshot, "CalendarReadRangeSnapshot">,
-        RegisteredAction<CalendarSetColor, "CalendarSetColor">>;
+        RegisteredAction<CalendarSetColor, "CalendarSetColor">,
+        RegisteredAction<CalendarSetColors, "CalendarSetColors">>;
 } // namespace javelin::protocol::actions

@@ -432,6 +432,75 @@ TEST_CASE("remote codec preserves server calendar color commands", "[app][remote
     CHECK(metadata->name == "CalendarSetColor");
 }
 
+TEST_CASE("remote codec preserves calendar color batches", "[app][remote-codec][calendar]")
+{
+    using Action = javelin::protocol::actions::CalendarSetColors;
+    const std::vector<javelin::app::CalendarColorChange> changes{
+        {.ownerAccountId = "owner-1",
+         .accountId = "account-1",
+         .calendarId = "work",
+         .color = std::optional<std::string>{"#336699"}},
+        {.ownerAccountId = "owner-2",
+         .accountId = "account-2",
+         .calendarId = "shared",
+         .color = std::nullopt},
+    };
+
+    const auto encoded =
+        javelin::app::remote::encodeVersioned<Action::requestSchemaVersion>(changes);
+    const auto* payload = std::get_if<QByteArray>(&encoded);
+    REQUIRE(payload != nullptr);
+    const auto decoded =
+        javelin::app::remote::decodeVersionedValue<Action::requestSchemaVersion, Action::Request>(
+            *payload);
+    const auto* value = std::get_if<Action::Request>(&decoded);
+    REQUIRE(value != nullptr);
+    const auto& decodedChanges = std::get<0>(*value);
+    REQUIRE(decodedChanges.size() == 2);
+    CHECK(decodedChanges[0].ownerAccountId == "owner-1");
+    CHECK(decodedChanges[0].accountId == "account-1");
+    CHECK(decodedChanges[0].calendarId == "work");
+    CHECK(decodedChanges[0].color == std::optional<std::string>{"#336699"});
+    CHECK(decodedChanges[1].ownerAccountId == "owner-2");
+    CHECK_FALSE(decodedChanges[1].color.has_value());
+
+    const javelin::app::CalendarColorBatchResult result{
+        .requestedCount = 2,
+        .appliedCount = 1,
+        .failures = {{.change = changes[1],
+                      .error = {.code = javelin::jmap::OperationErrorCode::PermissionDenied,
+                                .message = QStringLiteral("The shared calendar is unavailable.")}}},
+        .error =
+            javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PermissionDenied,
+                .message = QStringLiteral("Changed 1 of 2 calendar colors."),
+            },
+    };
+    const auto encodedResult =
+        javelin::app::remote::encodeVersioned<Action::resultSchemaVersion>(result);
+    const auto* resultPayload = std::get_if<QByteArray>(&encodedResult);
+    REQUIRE(resultPayload != nullptr);
+    const auto decodedResult =
+        javelin::app::remote::decodeVersionedValue<Action::resultSchemaVersion, Action::Result>(
+            *resultPayload);
+    const auto* resultValue = std::get_if<Action::Result>(&decodedResult);
+    REQUIRE(resultValue != nullptr);
+    CHECK(resultValue->requestedCount == 2);
+    CHECK(resultValue->appliedCount == 1);
+    REQUIRE(resultValue->failures.size() == 1);
+    CHECK(resultValue->failures.front().change.ownerAccountId == "owner-2");
+    CHECK(resultValue->failures.front().change.calendarId == "shared");
+    CHECK(resultValue->failures.front().error.code ==
+          javelin::jmap::OperationErrorCode::PermissionDenied);
+    REQUIRE(resultValue->error.has_value());
+    CHECK(resultValue->error->code == javelin::jmap::OperationErrorCode::PermissionDenied);
+
+    const auto metadata = javelin::protocol::actions::findActionMetadata(Action::id);
+    REQUIRE(metadata.has_value());
+    CHECK(metadata->id.value == 98);
+    CHECK(metadata->name == "CalendarSetColors");
+}
+
 TEST_CASE("remote codec preserves calendar participant roles", "[app][remote-codec][calendar]")
 {
     const javelin::jmap::calendar::Attendee attendee{

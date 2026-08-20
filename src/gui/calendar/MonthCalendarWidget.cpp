@@ -935,11 +935,14 @@ namespace javelin::gui::calendar
                 action->setCheckable(true);
                 action->setChecked(calendar.subscribed);
                 connect(action, &QAction::toggled, this,
-                        [this, action, id = calendar.id](const bool subscribed)
+                        [this, action,
+                         identity = CalendarIdentity{.ownerAccountId = calendar.ownerAccountId,
+                                                     .accountId = calendar.accountId,
+                                                     .calendarId = calendar.calendarId}](
+                            const bool subscribed)
                         {
                             action->setEnabled(false);
-                            Q_EMIT calendarSubscriptionChanged(QString::fromStdString(id),
-                                                               subscribed);
+                            Q_EMIT calendarSubscriptionChanged(identity, subscribed);
                         });
             }
         }
@@ -1098,7 +1101,14 @@ namespace javelin::gui::calendar
                     prompt.exec();
                     if (prompt.clickedButton() != deleteButton)
                         return;
-                    Q_EMIT calendarDeletionRequested(item->data(Qt::UserRole).toString());
+                    const auto id = item->data(Qt::UserRole).toString().toStdString();
+                    const auto calendar = std::ranges::find(m_calendars, id, &CalendarDisplay::id);
+                    if (calendar == m_calendars.end())
+                        return;
+                    Q_EMIT calendarDeletionRequested(
+                        CalendarIdentity{.ownerAccountId = calendar->ownerAccountId,
+                                         .accountId = calendar->accountId,
+                                         .calendarId = calendar->calendarId});
                     dialog.accept();
                 });
         connect(
@@ -1148,19 +1158,23 @@ namespace javelin::gui::calendar
         if (dialog.exec() != QDialog::Accepted)
             return;
 
-        QStringList changedCalendarIds;
-        QStringList changedColors;
+        std::vector<CalendarColorEdit> changes;
         for (const auto& calendar : m_calendars)
         {
             const auto pending = pendingColors.find(calendar.id);
             if (pending == pendingColors.end() || pending->second == calendar.color)
                 continue;
-            changedCalendarIds.push_back(QString::fromStdString(calendar.id));
-            changedColors.push_back(pending->second.isValid() ? pending->second.name(QColor::HexRgb)
-                                                              : QString{});
+            changes.push_back({
+                .calendar = {.ownerAccountId = calendar.ownerAccountId,
+                             .accountId = calendar.accountId,
+                             .calendarId = calendar.calendarId},
+                .color = pending->second.isValid()
+                             ? std::optional{pending->second.name(QColor::HexRgb).toStdString()}
+                             : std::nullopt,
+            });
         }
-        if (!changedCalendarIds.isEmpty())
-            Q_EMIT calendarColorsChanged(changedCalendarIds, changedColors);
+        if (!changes.empty())
+            Q_EMIT calendarColorsChanged(std::move(changes));
     }
 
     QDate MonthCalendarWidget::displayedMonth() const

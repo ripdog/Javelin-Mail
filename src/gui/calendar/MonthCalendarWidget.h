@@ -4,7 +4,6 @@
 #include <QDate>
 #include <QDateTime>
 #include <QLocale>
-#include <QStringList>
 #include <QWidget>
 
 #include <array>
@@ -55,6 +54,21 @@ namespace javelin::gui::calendar
     {
         std::string id;
         QString name;
+    };
+
+    struct CalendarIdentity
+    {
+        std::string ownerAccountId;
+        std::string accountId;
+        std::string calendarId;
+
+        friend bool operator==(const CalendarIdentity&, const CalendarIdentity&) = default;
+    };
+
+    struct CalendarColorEdit
+    {
+        CalendarIdentity calendar;
+        std::optional<std::string> color;
     };
 
     struct PendingInvitationDisplay
@@ -123,13 +137,13 @@ namespace javelin::gui::calendar
                                          const QString& eventId, const QString& recurrenceId,
                                          const QString& targetCalendarId);
         void emptyTimeActivated(const QDateTime& start, const QDateTime& end);
-        void calendarSubscriptionChanged(const QString& calendarId, bool subscribed);
+        void calendarSubscriptionChanged(CalendarIdentity calendar, bool subscribed);
         void defaultCalendarChanged(const QString& ownerAccountId, const QString& accountId,
                                     const QString& calendarId);
         void calendarCreationRequested(const QString& accountId, const QString& name,
                                        const QString& color);
-        void calendarDeletionRequested(const QString& calendarId);
-        void calendarColorsChanged(const QStringList& calendarIds, const QStringList& colors);
+        void calendarDeletionRequested(CalendarIdentity calendar);
+        void calendarColorsChanged(std::vector<CalendarColorEdit> changes);
 
       protected:
         void keyPressEvent(QKeyEvent* event) override;

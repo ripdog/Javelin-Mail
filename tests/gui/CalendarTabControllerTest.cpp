@@ -102,6 +102,14 @@ namespace
     {
       public:
         int rangeRequestCount = 0;
+        int colorBatchRequestCount = 0;
+        int subscriptionRequestCount = 0;
+        int deleteCalendarRequestCount = 0;
+        std::string lastOwnerAccountId;
+        std::string lastAccountId;
+        std::string lastCalendarId;
+        bool lastSubscribed = false;
+        std::vector<javelin::app::CalendarColorChange> lastColorBatch;
 
         QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
         requestCalendarRange(std::string, javelin::jmap::calendar::VisibleInterval interval,
@@ -145,8 +153,14 @@ namespace
         }
 
         QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
-        setCalendarSubscribed(std::string, std::string accountId, std::string, bool) override
+        setCalendarSubscribed(std::string ownerAccountId, std::string accountId,
+                              std::string calendarId, const bool subscribed) override
         {
+            ++subscriptionRequestCount;
+            lastOwnerAccountId = std::move(ownerAccountId);
+            lastAccountId = accountId;
+            lastCalendarId = std::move(calendarId);
+            lastSubscribed = subscribed;
             co_return committed(std::move(accountId));
         }
 
@@ -164,6 +178,19 @@ namespace
             co_return committed(std::move(accountId));
         }
 
+        QCoro::Task<javelin::app::CalendarColorBatchResult>
+        setCalendarColors(std::vector<javelin::app::CalendarColorChange> changes) override
+        {
+            ++colorBatchRequestCount;
+            lastColorBatch = std::move(changes);
+            co_return javelin::app::CalendarColorBatchResult{
+                .requestedCount = lastColorBatch.size(),
+                .appliedCount = lastColorBatch.size(),
+                .failures = {},
+                .error = std::nullopt,
+            };
+        }
+
         QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         createCalendar(std::string, javelin::jmap::calendar::CreateCalendarCommand command) override
         {
@@ -171,8 +198,13 @@ namespace
         }
 
         QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
-        deleteCalendar(std::string, javelin::jmap::calendar::DeleteCalendarCommand command) override
+        deleteCalendar(std::string ownerAccountId,
+                       javelin::jmap::calendar::DeleteCalendarCommand command) override
         {
+            ++deleteCalendarRequestCount;
+            lastOwnerAccountId = std::move(ownerAccountId);
+            lastAccountId = command.accountId;
+            lastCalendarId = command.calendarId;
             co_return committed(command.accountId);
         }
 
@@ -264,6 +296,67 @@ TEST_CASE("workspace calendar manager command materializes Calendar before openi
     REQUIRE(tabs.size() == 1);
     CHECK(qobject_cast<javelin::gui::calendar::MonthCalendarWidget*>(contentStack.widget(0)) !=
           nullptr);
+}
+
+TEST_CASE("calendar color edits cross the controller as one typed batch",
+          "[gui][calendar][color][actions]")
+{
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    Reader reader;
+    CommandPort commands;
+    QStackedWidget contentStack;
+    std::vector<javelin::gui::shell::TabState> tabs;
+    javelin::gui::shell::CalendarTabController controller{settings, reader, commands, contentStack,
+                                                          tabs};
+
+    controller.invokeWorkspace(javelin::gui::shell::CalendarTabCommand::Today);
+    REQUIRE(tabs.size() == 1);
+    auto* widget =
+        qobject_cast<javelin::gui::calendar::MonthCalendarWidget*>(contentStack.widget(0));
+    REQUIRE(widget != nullptr);
+
+    Q_EMIT widget->calendarColorsChanged({
+        {.calendar = {.ownerAccountId = "owner-1",
+                      .accountId = "calendar-1",
+                      .calendarId = "cal-1"},
+         .color = std::optional<std::string>{"#336699"}},
+        {.calendar = {.ownerAccountId = "owner-2",
+                      .accountId = "calendar-2",
+                      .calendarId = "cal-2"},
+         .color = std::nullopt},
+    });
+    QCoreApplication::processEvents();
+
+    CHECK(commands.colorBatchRequestCount == 1);
+    REQUIRE(commands.lastColorBatch.size() == 2);
+    CHECK(commands.lastColorBatch[0].ownerAccountId == "owner-1");
+    CHECK(commands.lastColorBatch[0].accountId == "calendar-1");
+    CHECK(commands.lastColorBatch[0].calendarId == "cal-1");
+    CHECK(commands.lastColorBatch[0].color == std::optional<std::string>{"#336699"});
+    CHECK(commands.lastColorBatch[1].ownerAccountId == "owner-2");
+    CHECK(commands.lastColorBatch[1].accountId == "calendar-2");
+    CHECK(commands.lastColorBatch[1].calendarId == "cal-2");
+    CHECK_FALSE(commands.lastColorBatch[1].color.has_value());
+
+    const javelin::gui::calendar::CalendarIdentity identity{
+        .ownerAccountId = "owner-1",
+        .accountId = "calendar-1",
+        .calendarId = "cal-1",
+    };
+    Q_EMIT widget->calendarSubscriptionChanged(identity, false);
+    QCoreApplication::processEvents();
+    CHECK(commands.subscriptionRequestCount == 1);
+    CHECK(commands.lastOwnerAccountId == "owner-1");
+    CHECK(commands.lastAccountId == "calendar-1");
+    CHECK(commands.lastCalendarId == "cal-1");
+    CHECK_FALSE(commands.lastSubscribed);
+
+    Q_EMIT widget->calendarDeletionRequested(identity);
+    QCoreApplication::processEvents();
+    CHECK(commands.deleteCalendarRequestCount == 1);
+    CHECK(commands.lastOwnerAccountId == "owner-1");
+    CHECK(commands.lastAccountId == "calendar-1");
+    CHECK(commands.lastCalendarId == "cal-1");
 }
 
 TEST_CASE("workspace calendar commands materialize Calendar before executing",

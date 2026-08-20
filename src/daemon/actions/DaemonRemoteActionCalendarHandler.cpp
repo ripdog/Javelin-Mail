@@ -141,6 +141,14 @@ namespace javelin::app
                                 std::move(ownerAccountId), std::move(accountId),
                                 std::move(calendarId), std::move(color)));
                 });
+        case actions::CalendarSetColors::id.value:
+            return dispatchDecoded<actions::CalendarSetColors>(
+                id, command,
+                [this, &id](std::vector<CalendarColorChange> changes)
+                {
+                    return launchAction<actions::CalendarSetColors>(
+                        id, m_services.calendarCommandPort().setCalendarColors(std::move(changes)));
+                });
         case actions::CalendarCreate::id.value:
             return dispatchDecoded<actions::CalendarCreate>(
                 id, command,
