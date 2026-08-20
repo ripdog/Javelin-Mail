@@ -197,12 +197,15 @@ namespace javelin::gui::shell
         const auto* widget = composeWidgetForTab(tab);
         if (widget == nullptr)
             return {};
+        const bool editable = !widget->operationInFlight();
         return {
             .richText = widget->richTextEnabled(),
             .canSend = widget->canSend(),
             .canScheduleSend = widget->canScheduleSend(),
+            .canSaveDraft = editable,
+            .canAttachFiles = editable,
             .canUseSignature = widget->canSend(),
-            .canToggleRichText = !widget->operationInFlight(),
+            .canToggleRichText = editable,
         };
     }
 

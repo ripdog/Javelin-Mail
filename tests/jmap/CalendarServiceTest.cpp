@@ -215,6 +215,28 @@ TEST_CASE("calendar metadata mutations project and reconcile server outcomes",
                   R"("update":{"work":{"color":"#336699"}})") != std::string::npos);
     }
 
+    SECTION("subscribed read-only calendar may update its per-user color")
+    {
+        auto shared = work;
+        shared.myRights.mayWriteAll = false;
+        shared.myRights.mayWriteOwn = false;
+        REQUIRE_FALSE(calendars.replaceCalendars("a1", "c1", {shared}).has_value());
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "Calendar/set",
+                  .arguments =
+                      R"({"accountId":"a1","oldState":"c1","newState":"c2","created":{},"updated":{"work":{}},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+                  .callId = "calendar-set-color"}},
+            .createdIds = std::nullopt,
+            .sessionState = "s2"});
+
+        const auto result =
+            QCoro::waitFor(mutation.setCalendarColor(settings, "a1", "a1", "work", "#336699"));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
+        CHECK(calendarColor() == std::optional<std::string>{"#336699"});
+    }
+
     SECTION("clearing a color stores a server null rather than a local fallback")
     {
         transport.results.push_back(javelin::jmap::api::ResponseEnvelope{

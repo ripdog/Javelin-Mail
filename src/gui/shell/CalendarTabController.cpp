@@ -1876,6 +1876,15 @@ namespace javelin::gui::shell
 
     void CalendarTabController::invokeWorkspace(const CalendarTabCommand command)
     {
+        const auto state = workspaceState();
+        if (!state.available)
+            return;
+        if (command == CalendarTabCommand::CreateEvent && !state.canCreateEvent)
+        {
+            Q_EMIT statusMessage(i18n("No writable calendar is available."), 5000);
+            return;
+        }
+
         const bool alreadyMaterialized = std::ranges::any_of(
             m_tabs, [this](const auto& tab) { return widgetForTab(&tab) != nullptr; });
         open();
@@ -1889,6 +1898,42 @@ namespace javelin::gui::shell
         }
     }
 
+    CalendarWorkspaceState CalendarTabController::workspaceState() const
+    {
+        const auto accounts = m_calendarReader.accounts();
+        const auto* values =
+            std::get_if<std::vector<javelin::jmap::cache::CalendarAccount>>(&accounts);
+        if (values == nullptr || values->empty())
+            return {};
+
+        bool canCreateEvent = false;
+        for (const auto& account : *values)
+        {
+            const auto calendars = m_calendarReader.calendars(account.accountId);
+            const auto* accountCalendars =
+                std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(&calendars);
+            if (accountCalendars == nullptr)
+                continue;
+            if (std::ranges::any_of(*accountCalendars,
+                                    [](const auto& calendar)
+                                    {
+                                        return calendar.isSubscribed &&
+                                               (calendar.myRights.mayWriteAll ||
+                                                calendar.myRights.mayWriteOwn);
+                                    }))
+            {
+                canCreateEvent = true;
+                break;
+            }
+        }
+        return {
+            .available = true,
+            .canCreateEvent = canCreateEvent,
+            .canManageCalendars = true,
+            .canRefresh = true,
+        };
+    }
+
     bool CalendarTabController::available(const std::optional<std::string_view> accountId) const
     {
         const auto accounts = m_calendarReader.accounts();
@@ -1896,8 +1941,9 @@ namespace javelin::gui::shell
             std::get_if<std::vector<javelin::jmap::cache::CalendarAccount>>(&accounts);
         if (values == nullptr)
             return false;
-        return !accountId.has_value() ||
-               std::ranges::any_of(*values, [accountId](const auto& account)
+        if (!accountId.has_value())
+            return !values->empty();
+        return std::ranges::any_of(*values, [accountId](const auto& account)
                                    { return account.accountId == *accountId; });
     }
 

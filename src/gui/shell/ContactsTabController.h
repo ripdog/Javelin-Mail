@@ -52,6 +52,13 @@ namespace javelin::gui::shell
         Refresh,
     };
 
+    struct ContactsWorkspaceState
+    {
+        bool available = false;
+        bool canCreateContact = false;
+        std::optional<std::string> createAccountId;
+    };
+
     struct ContactsToolbarState
     {
         bool available = false;
@@ -87,6 +94,7 @@ namespace javelin::gui::shell
         void populateAddToGroupMenu(const TabState* tab, QMenu& menu) const;
         void populateRemoveFromGroupMenu(const TabState* tab, QMenu& menu) const;
         void populateAddressBookMenu(const TabState* tab, QMenu& menu) const;
+        [[nodiscard]] ContactsWorkspaceState workspaceState() const;
         [[nodiscard]] ContactsToolbarState toolbarState(const TabState* tab) const;
         [[nodiscard]] bool available() const;
         [[nodiscard]] bool refresh(const TabState* tab);

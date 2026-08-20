@@ -1596,9 +1596,9 @@ namespace javelin::jmap::calendar
         if (selected == available.end())
             co_return error(OperationErrorCode::InvalidRequest,
                             QStringLiteral("The selected calendar is no longer available."));
-        if (!selected->myRights.mayWriteAll && !selected->myRights.mayWriteOwn)
+        if (!selected->isSubscribed)
             co_return error(OperationErrorCode::PermissionDenied,
-                            QStringLiteral("The selected calendar is read-only."));
+                            QStringLiteral("Subscribe to the calendar before changing its color."));
 
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
         if (const auto* serviceError = std::get_if<OperationError>(&sessionResult))

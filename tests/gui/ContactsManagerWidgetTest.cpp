@@ -314,6 +314,83 @@ TEST_CASE("Contacts refresh merges rows without disturbing selection or editor d
     CHECK(save->isEnabled());
 }
 
+TEST_CASE("Contacts workspace state distinguishes availability from writable destinations",
+          "[gui][contacts][actions][rights]")
+{
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contacts-workspace-rights-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    if (const auto error = sessions.replace("a1", session()))
+        FAIL(error->message.toStdString());
+    auto readOnlyBook = book("book-1", "Shared");
+    readOnlyBook.myRights.mayWrite = false;
+    javelin::jmap::cache::ContactRepository repository{connection};
+    REQUIRE_FALSE(repository.replaceAll("a1", {readOnlyBook}, {}, "b1", "c1").has_value());
+
+    RefreshPort refresh;
+    CommandPort commands;
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    QStackedWidget contentStack;
+    std::vector<javelin::gui::shell::TabState> tabs;
+    javelin::gui::shell::ContactsTabController controller{settings, repository,   refresh,
+                                                          commands, contentStack, tabs};
+
+    const auto state = controller.workspaceState();
+    CHECK(state.available);
+    CHECK_FALSE(state.canCreateContact);
+    CHECK_FALSE(state.createAccountId.has_value());
+
+    controller.invokeWorkspace(javelin::gui::shell::ContactsTabCommand::CreateContact);
+    CHECK(tabs.empty());
+}
+
+TEST_CASE("workspace contact creation selects a writable account",
+          "[gui][contacts][actions][rights]")
+{
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contacts-workspace-account-selection-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    if (const auto error = sessions.replace("a1", session("a1", "Shared")))
+        FAIL(error->message.toStdString());
+    if (const auto error = sessions.replace("a2", session("a2", "Writable")))
+        FAIL(error->message.toStdString());
+    auto readOnlyBook = book("book-1", "Shared");
+    readOnlyBook.myRights.mayWrite = false;
+    javelin::jmap::cache::ContactRepository repository{connection};
+    REQUIRE_FALSE(repository.replaceAll("a1", {readOnlyBook}, {}, "b1", "c1").has_value());
+    REQUIRE_FALSE(
+        repository.replaceAll("a2", {book("book-2", "Personal")}, {}, "b2", "c2").has_value());
+
+    RefreshPort refresh;
+    CommandPort commands;
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    QStackedWidget contentStack;
+    std::vector<javelin::gui::shell::TabState> tabs;
+    javelin::gui::shell::ContactsTabController controller{settings, repository,   refresh,
+                                                          commands, contentStack, tabs};
+
+    controller.invokeWorkspace(javelin::gui::shell::ContactsTabCommand::CreateContact);
+
+    REQUIRE(tabs.size() == 1);
+    auto* widget =
+        qobject_cast<javelin::gui::contacts::ContactsManagerWidget*>(contentStack.widget(0));
+    REQUIRE(widget != nullptr);
+    CHECK(widget->viewState().accountId == "a2");
+    auto* details = widget->findChild<QStackedWidget*>(QStringLiteral("contactsDetailStack"));
+    REQUIRE(details != nullptr);
+    CHECK(details->currentIndex() == 3);
+}
+
 TEST_CASE("workspace Contacts refresh does not duplicate materialization refresh",
           "[gui][contacts][actions]")
 {

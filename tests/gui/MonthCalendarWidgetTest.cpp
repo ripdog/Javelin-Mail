@@ -152,7 +152,9 @@ TEST_CASE("calendar presentation includes events from subscribed calendars only"
     CHECK(presentation.calendars[0].name == QStringLiteral("Subscribed"));
     CHECK(presentation.calendars[0].color == QColor{QStringLiteral("#336699")});
     CHECK(presentation.calendars[0].subscribed);
+    CHECK(presentation.calendars[0].canSetColor);
     CHECK_FALSE(presentation.calendars[1].subscribed);
+    CHECK_FALSE(presentation.calendars[1].canSetColor);
     REQUIRE(presentation.events.size() == 1);
     CHECK(presentation.events.front().eventId == "visible-event");
     CHECK(presentation.events.front().color == QColor{QStringLiteral("#336699")});

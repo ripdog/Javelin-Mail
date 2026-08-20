@@ -51,6 +51,8 @@ namespace javelin::gui::shell
         bool richText = true;
         bool canSend = false;
         bool canScheduleSend = false;
+        bool canSaveDraft = false;
+        bool canAttachFiles = false;
         bool canUseSignature = false;
         bool canToggleRichText = false;
     };

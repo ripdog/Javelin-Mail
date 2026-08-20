@@ -1172,13 +1172,6 @@ namespace javelin::gui::shell
         actionCollection()->addAction(QStringLiteral("compose_schedule_send"),
                                       m_composeScheduleSendAction);
 
-        m_composeSaveDraftAction = new QAction(QIcon::fromTheme(QStringLiteral("document-save")),
-                                               i18n("Save Draft"), this);
-        connect(m_composeSaveDraftAction, &QAction::triggered, this,
-                [this] { m_composeTabController->saveDraft(activeTab()); });
-        actionCollection()->addAction(QStringLiteral("compose_save_draft"),
-                                      m_composeSaveDraftAction);
-
         m_composeAttachFilesAction = new QAction(
             QIcon::fromTheme(QStringLiteral("mail-attachment")), i18n("Attach Files"), this);
         connect(m_composeAttachFilesAction, &QAction::triggered, this,
@@ -2609,8 +2602,10 @@ namespace javelin::gui::shell
     {
         const auto context = toolbarContextForActiveTab();
         const bool mailContext = context == ToolbarContext::Mail;
-        const bool contactsAvailable = m_contactsTabController->available();
-        const bool calendarAvailable = m_calendarTabController->available();
+        const auto contactsWorkspace = m_contactsTabController->workspaceState();
+        const auto calendarWorkspace = m_calendarTabController->workspaceState();
+        const bool contactsAvailable = contactsWorkspace.available;
+        const bool calendarAvailable = calendarWorkspace.available;
         const auto selectedAccount = activeAccountId();
         const auto preferredMailAccount = preferredMailAccountId();
         const auto preferredSubmissionAccount = preferredSubmissionAccountId();
@@ -2669,16 +2664,15 @@ namespace javelin::gui::shell
 
         m_composeSendAction->setEnabled(false);
         m_composeScheduleSendAction->setEnabled(false);
-        m_composeSaveDraftAction->setEnabled(false);
         m_composeAttachFilesAction->setEnabled(false);
         m_composeSignatureAction->setEnabled(false);
         m_composeRichTextAction->setEnabled(false);
 
-        m_contactNewAction->setEnabled(contactsAvailable);
+        m_contactNewAction->setEnabled(contactsWorkspace.canCreateContact);
         m_contactEditAction->setEnabled(false);
         m_contactDeleteAction->setEnabled(false);
         m_contactCopyAction->setEnabled(false);
-        m_contactImportAction->setEnabled(contactsAvailable);
+        m_contactImportAction->setEnabled(contactsWorkspace.canCreateContact);
         m_contactExportAction->setEnabled(false);
         m_contactDuplicatesAction->setEnabled(contactsAvailable);
         m_contactAddToGroupAction->setEnabled(false);
@@ -2688,14 +2682,14 @@ namespace javelin::gui::shell
             context == ToolbarContext::Contacts ? m_contactAddressBooksMenu : nullptr);
         m_contactRefreshAction->setEnabled(contactsAvailable);
 
-        m_calendarNewEventAction->setEnabled(calendarAvailable);
+        m_calendarNewEventAction->setEnabled(calendarWorkspace.canCreateEvent);
         m_calendarPreviousMonthAction->setEnabled(calendarAvailable);
         m_calendarTodayAction->setEnabled(calendarAvailable);
         m_calendarNextMonthAction->setEnabled(calendarAvailable);
         m_calendarListAction->setEnabled(false);
         if (context != ToolbarContext::Calendar)
             m_calendarListAction->setMenu(nullptr);
-        m_calendarRefreshAction->setEnabled(calendarAvailable);
+        m_calendarRefreshAction->setEnabled(calendarWorkspace.canRefresh);
 
         setToolBarVisible(QStringLiteral("mainToolBar"), context == ToolbarContext::Mail);
         setToolBarVisible(QStringLiteral("composeToolBar"), context == ToolbarContext::Compose);
@@ -2713,15 +2707,14 @@ namespace javelin::gui::shell
         }
         if (context == ToolbarContext::Compose)
         {
-            m_saveCurrentAction->setText(i18nc("@action", "Save Draft"));
-            m_saveCurrentAction->setEnabled(true);
             const auto state = m_composeTabController->toolbarState(activeTab());
+            m_saveCurrentAction->setText(i18nc("@action", "Save Draft"));
+            m_saveCurrentAction->setEnabled(state.canSaveDraft);
             const QSignalBlocker blocker{m_composeRichTextAction};
             m_composeSendAction->setEnabled(state.canSend);
             m_composeScheduleSendAction->setVisible(state.canScheduleSend);
             m_composeScheduleSendAction->setEnabled(state.canScheduleSend);
-            m_composeSaveDraftAction->setEnabled(state.canToggleRichText);
-            m_composeAttachFilesAction->setEnabled(state.canToggleRichText);
+            m_composeAttachFilesAction->setEnabled(state.canAttachFiles);
             auto* signatureMenu = m_composeTabController->signatureMenuForTab(activeTab());
             m_composeSignatureAction->setMenu(signatureMenu);
             m_composeSignatureAction->setEnabled(state.canUseSignature && signatureMenu != nullptr);
@@ -2733,11 +2726,11 @@ namespace javelin::gui::shell
             const auto state = m_contactsTabController->toolbarState(activeTab());
             m_saveCurrentAction->setText(i18nc("@action", "Save Contact As…"));
             m_saveCurrentAction->setEnabled(state.canExportContact);
-            m_contactNewAction->setEnabled(state.canCreateContact);
+            m_contactNewAction->setEnabled(contactsWorkspace.canCreateContact);
             m_contactEditAction->setEnabled(state.canEditContact);
             m_contactDeleteAction->setEnabled(state.canDeleteContact);
             m_contactCopyAction->setEnabled(state.canCopyContact);
-            m_contactImportAction->setEnabled(state.canCreateContact);
+            m_contactImportAction->setEnabled(contactsWorkspace.canCreateContact);
             m_contactExportAction->setEnabled(state.canExportContact);
             m_contactDuplicatesAction->setEnabled(state.canFindDuplicates);
             m_contactAddToGroupAction->setEnabled(state.canAddToGroup);
@@ -2759,6 +2752,7 @@ namespace javelin::gui::shell
         {
             m_saveCurrentAction->setText(i18nc("@action", "Save"));
             m_saveCurrentAction->setEnabled(false);
+            m_refreshAction->setEnabled(calendarWorkspace.canRefresh);
             auto* menu = m_calendarTabController->calendarMenuForTab(activeTab());
             m_calendarListAction->setMenu(menu);
             m_calendarListAction->setEnabled(menu != nullptr);

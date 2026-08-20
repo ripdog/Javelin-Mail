@@ -5,6 +5,7 @@
 #include "gui/settings/GuiSettings.h"
 #include "gui/shell/MainWindowStateStore.h"
 #include "jmap/cache/ContactReader.h"
+#include "jmap/contacts/ContactTypes.h"
 
 #include <KLocalizedString>
 
@@ -110,6 +111,18 @@ namespace javelin::gui::shell
 
     void ContactsTabController::invokeWorkspace(const ContactsTabCommand command)
     {
+        const auto workspace = workspaceState();
+        if (!workspace.available)
+            return;
+        if ((command == ContactsTabCommand::CreateContact ||
+             command == ContactsTabCommand::CreateGroup ||
+             command == ContactsTabCommand::ImportVCard) &&
+            !workspace.canCreateContact)
+        {
+            Q_EMIT statusMessage(i18n("No writable address book is available."), 5000);
+            return;
+        }
+
         const bool alreadyMaterialized = std::ranges::any_of(
             m_tabs, [this](const auto& tab) { return widgetForTab(&tab) != nullptr; });
         open();
@@ -118,6 +131,21 @@ namespace javelin::gui::shell
             auto* widget = widgetForTab(&tab);
             if (widget == nullptr)
                 continue;
+
+            const bool createCommand = command == ContactsTabCommand::CreateContact ||
+                                       command == ContactsTabCommand::CreateGroup ||
+                                       command == ContactsTabCommand::ImportVCard;
+            if (createCommand && workspace.createAccountId.has_value() &&
+                !widget->canCreateContact())
+            {
+                auto view = widget->viewState();
+                view.accountId = *workspace.createAccountId;
+                view.addressBookId.clear();
+                view.contactId.clear();
+                view.groupId.clear();
+                view.selectedContactKeys.clear();
+                widget->restoreViewState(view);
+            }
 
             const auto state = toolbarState(&tab);
             bool enabled = false;
@@ -182,6 +210,35 @@ namespace javelin::gui::shell
             widget->populateAddressBookMenu(menu);
         else
             menu.clear();
+    }
+
+    ContactsWorkspaceState ContactsTabController::workspaceState() const
+    {
+        const auto accountsResult = m_contactRepository.listAccounts();
+        const auto* accounts =
+            std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&accountsResult);
+        if (accounts == nullptr || accounts->empty())
+            return {};
+
+        std::optional<std::string> createAccountId;
+        for (const auto& account : *accounts)
+        {
+            const auto booksResult = m_contactRepository.listAddressBooks(account.accountId);
+            const auto* books =
+                std::get_if<std::vector<javelin::jmap::api::AddressBook>>(&booksResult);
+            if (books == nullptr)
+                continue;
+            if (javelin::jmap::contacts::contactActionRights(account.isReadOnly, *books).mayCreate)
+            {
+                createAccountId = account.accountId;
+                break;
+            }
+        }
+        return {
+            .available = true,
+            .canCreateContact = createAccountId.has_value(),
+            .createAccountId = std::move(createAccountId),
+        };
     }
 
     ContactsToolbarState ContactsTabController::toolbarState(const TabState* tab) const

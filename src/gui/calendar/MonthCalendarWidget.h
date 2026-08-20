@@ -46,6 +46,7 @@ namespace javelin::gui::calendar
         QColor color;
         bool subscribed = false;
         bool writable = false;
+        bool canSetColor = false;
         bool deletable = false;
         bool defaultDestination = false;
     };

@@ -23,6 +23,8 @@ namespace
     class Reader final : public javelin::jmap::calendar::CalendarReader
     {
       public:
+        bool writable = true;
+
         javelin::jmap::calendar::CalendarLoadResult
         loadCached(const std::string_view accountId,
                    const javelin::jmap::calendar::VisibleInterval& interval,
@@ -68,8 +70,8 @@ namespace
                 .defaultAlertsWithoutTime = {},
                 .myRights = {.mayReadFreeBusy = true,
                              .mayReadItems = true,
-                             .mayWriteAll = true,
-                             .mayWriteOwn = true,
+                             .mayWriteAll = writable,
+                             .mayWriteOwn = writable,
                              .mayUpdatePrivate = true,
                              .mayRSVP = true,
                              .mayShare = false,
@@ -193,6 +195,28 @@ namespace
         }
     };
 } // namespace
+
+TEST_CASE("calendar workspace state distinguishes availability from event creation rights",
+          "[gui][calendar][actions][rights]")
+{
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    Reader reader;
+    reader.writable = false;
+    CommandPort commands;
+    QStackedWidget contentStack;
+    std::vector<javelin::gui::shell::TabState> tabs;
+    javelin::gui::shell::CalendarTabController controller{settings, reader, commands, contentStack,
+                                                          tabs};
+
+    const auto state = controller.workspaceState();
+    CHECK(state.available);
+    CHECK_FALSE(state.canCreateEvent);
+    CHECK(state.canManageCalendars);
+    CHECK(state.canRefresh);
+
+    controller.invokeWorkspace(javelin::gui::shell::CalendarTabCommand::CreateEvent);
+    CHECK(tabs.empty());
+}
 
 TEST_CASE("workspace Calendar refresh does not duplicate materialization refresh",
           "[gui][calendar][actions]")

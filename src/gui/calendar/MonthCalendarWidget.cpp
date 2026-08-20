@@ -999,7 +999,7 @@ namespace javelin::gui::calendar
                 new QListWidgetItem(colorSwatch(effectiveCalendarColor(calendar.id)), label, list);
             item->setData(Qt::UserRole, QString::fromStdString(calendar.id));
             item->setData(Qt::UserRole + 1, calendar.deletable);
-            item->setData(Qt::UserRole + 2, calendar.writable);
+            item->setData(Qt::UserRole + 2, calendar.canSetColor);
             pendingColors.emplace(calendar.id, calendar.color);
         }
         layout->addWidget(list);
@@ -1025,10 +1025,10 @@ namespace javelin::gui::calendar
             list, &QListWidget::currentItemChanged, &dialog,
             [chooseColor, resetColor, deleteCalendar](QListWidgetItem* current, QListWidgetItem*)
             {
-                const bool writable =
+                const bool colorEditable =
                     current != nullptr && current->data(Qt::UserRole + 2).toBool();
-                chooseColor->setEnabled(writable);
-                resetColor->setEnabled(writable);
+                chooseColor->setEnabled(colorEditable);
+                resetColor->setEnabled(colorEditable);
                 deleteCalendar->setEnabled(current != nullptr &&
                                            current->data(Qt::UserRole + 1).toBool());
             });

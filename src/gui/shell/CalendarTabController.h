@@ -63,6 +63,14 @@ namespace javelin::gui::shell
         Refresh,
     };
 
+    struct CalendarWorkspaceState
+    {
+        bool available = false;
+        bool canCreateEvent = false;
+        bool canManageCalendars = false;
+        bool canRefresh = false;
+    };
+
     class CalendarTabController final : public QObject
     {
         Q_OBJECT
@@ -79,6 +87,7 @@ namespace javelin::gui::shell
                        const QString& recurrenceId, const QDate& navigationDate);
         void invoke(const TabState* tab, CalendarTabCommand command);
         void invokeWorkspace(CalendarTabCommand command);
+        [[nodiscard]] CalendarWorkspaceState workspaceState() const;
         [[nodiscard]] bool
         available(std::optional<std::string_view> accountId = std::nullopt) const;
         [[nodiscard]] bool refresh(const TabState* tab);

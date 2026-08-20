@@ -155,6 +155,7 @@ namespace javelin::gui::calendar
                 .color = serverColor,
                 .subscribed = calendar.isSubscribed,
                 .writable = calendar.myRights.mayWriteAll || calendar.myRights.mayWriteOwn,
+                .canSetColor = calendar.isSubscribed,
                 .deletable = calendar.myRights.mayDelete,
                 .defaultDestination = calendar.isDefault,
             });
