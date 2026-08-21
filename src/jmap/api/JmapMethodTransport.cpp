@@ -229,16 +229,32 @@ namespace javelin::jmap::api::detail
             return labels;
         }
 
+        [[nodiscard]] QString boundedDiagnosticText(const std::string_view value,
+                                                    const qsizetype maximumLength = 180)
+        {
+            if (maximumLength <= 0)
+                return {};
+            constexpr std::size_t maximumSourceBytes = 512;
+            const auto sourceBytes = std::min(value.size(), maximumSourceBytes);
+            auto text =
+                QString::fromUtf8(value.data(), static_cast<qsizetype>(sourceBytes)).simplified();
+            const bool truncated = value.size() > sourceBytes || text.size() > maximumLength;
+            if (text.size() > maximumLength)
+                text = text.left(maximumLength);
+            if (truncated)
+            {
+                if (text.size() >= maximumLength)
+                    text = text.left(maximumLength - 1);
+                text += QChar{0x2026};
+            }
+            return text;
+        }
+
         [[nodiscard]] QString diagnosticText(const glz::generic& value, const std::string_view key)
         {
             if (!value.is_object() || !value.contains(key) || !value.at(key).is_string())
                 return {};
-
-            auto text = QString::fromStdString(value.at(key).get_string()).simplified();
-            constexpr qsizetype maxLength = 180;
-            if (text.size() > maxLength)
-                text = text.left(maxLength - 1) + QChar{0x2026};
-            return text;
+            return boundedDiagnosticText(value.at(key).get_string());
         }
     } // namespace
 
@@ -284,6 +300,10 @@ namespace javelin::jmap::api::detail
 
     QString describeWebSocketFrame(const std::string_view payload)
     {
+        constexpr std::size_t maximumDiagnosticParseBytes = 64 * 1024;
+        if (payload.size() > maximumDiagnosticParseBytes)
+            return QStringLiteral("bytes=%1 parse=skipped-large").arg(payload.size());
+
         glz::generic frame;
         auto json = std::string{payload};
         if (glz::read_json(frame, json) || !frame.is_object())
@@ -292,13 +312,20 @@ namespace javelin::jmap::api::detail
         QStringList parts;
         parts.push_back(QStringLiteral("bytes=%1").arg(payload.size()));
 
+        constexpr std::size_t maximumDiagnosticElements = 24;
         QStringList keys;
-        for (const auto& [key, value] : frame.get_object())
+        const auto& object = frame.get_object();
+        std::size_t keyCount = 0;
+        for (const auto& [key, value] : object)
         {
             static_cast<void>(value);
-            keys.push_back(QString::fromStdString(key));
+            if (keyCount++ >= maximumDiagnosticElements)
+                break;
+            keys.push_back(boundedDiagnosticText(key, 80));
         }
         keys.sort(Qt::CaseSensitive);
+        if (object.size() > maximumDiagnosticElements)
+            keys.push_back(QStringLiteral("…(+%1)").arg(object.size() - maximumDiagnosticElements));
         parts.push_back(QStringLiteral("keys=%1").arg(keys.join(QStringLiteral(","))));
 
         const auto type = diagnosticText(frame, "@type");
@@ -313,19 +340,23 @@ namespace javelin::jmap::api::detail
         {
             QStringList responses;
             QStringList errors;
-            for (const auto& invocation : frame.at("methodResponses").get_array())
+            const auto& methodResponses = frame.at("methodResponses").get_array();
+            std::size_t responseCount = 0;
+            for (const auto& invocation : methodResponses)
             {
+                if (responseCount++ >= maximumDiagnosticElements)
+                    break;
                 if (!invocation.is_array())
                     continue;
                 const auto& fields = invocation.get_array();
                 if (fields.size() < 3 || !fields[0].is_string() || !fields[2].is_string())
                     continue;
 
-                const auto method = QString::fromStdString(fields[0].get_string());
-                const auto callId = QString::fromStdString(fields[2].get_string());
+                const auto method = boundedDiagnosticText(fields[0].get_string(), 80);
+                const auto callId = boundedDiagnosticText(fields[2].get_string(), 80);
                 responses.push_back(QStringLiteral("%1(%2)").arg(method, callId));
 
-                if (method == QStringLiteral("error") && fields[1].is_object())
+                if (fields[0].get_string() == "error" && fields[1].is_object())
                 {
                     const auto errorType = diagnosticText(fields[1], "type");
                     const auto description = diagnosticText(fields[1], "description");
@@ -336,6 +367,9 @@ namespace javelin::jmap::api::detail
                     errors.push_back(std::move(error));
                 }
             }
+            if (methodResponses.size() > maximumDiagnosticElements)
+                responses.push_back(QStringLiteral("…(+%1)").arg(methodResponses.size() -
+                                                                 maximumDiagnosticElements));
             if (!responses.isEmpty())
                 parts.push_back(
                     QStringLiteral("methods=%1").arg(responses.join(QStringLiteral(","))));

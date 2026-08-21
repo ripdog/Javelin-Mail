@@ -148,6 +148,38 @@ TEST_CASE("websocket frame diagnostics do not echo unparseable payloads",
     CHECK_FALSE(description.contains(QStringLiteral("sensitive-content")));
 }
 
+TEST_CASE("websocket frame diagnostics bound hostile element counts and fields",
+          "[jmap][method][transport][websocket][logging]")
+{
+    std::string frame = R"({"@type":"Response","methodResponses":[)";
+    for (int index = 0; index < 30; ++index)
+    {
+        if (index != 0)
+            frame += ',';
+        frame += "[\"" + std::string(200, 'm') + "\",{},\"" + std::string(200, 'c') + "\"]";
+    }
+    frame += "]}";
+
+    const auto description = javelin::jmap::api::detail::describeWebSocketFrame(frame);
+
+    CHECK(description.contains(QStringLiteral("…(+6)")));
+    CHECK(description.size() < 6000);
+    CHECK_FALSE(description.contains(QString{100, QLatin1Char('m')}));
+    CHECK_FALSE(description.contains(QString{100, QLatin1Char('c')}));
+}
+
+TEST_CASE("websocket frame diagnostics skip oversized frames",
+          "[jmap][method][transport][websocket][logging]")
+{
+    const std::string frame = std::string{"{\"title\":\""} + std::string(70 * 1024, 'x') + "\"}";
+
+    const auto description = javelin::jmap::api::detail::describeWebSocketFrame(frame);
+
+    CHECK(description.contains(QStringLiteral("parse=skipped-large")));
+    CHECK(description.size() < 100);
+    CHECK_FALSE(description.contains(QString{100, QLatin1Char('x')}));
+}
+
 TEST_CASE("preferred JMAP transport falls back to HTTP before websocket dispatch",
           "[jmap][method][transport][websocket]")
 {
