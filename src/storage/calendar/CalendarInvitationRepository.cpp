@@ -301,7 +301,16 @@ namespace javelin::jmap::cache
             ":event,:recurrence,:participant,:source,:status) ON CONFLICT(account_id,event_id,"
             "recurrence_id) DO UPDATE SET self_participant_id=excluded.self_participant_id,"
             "source_notification_id=COALESCE(excluded.source_notification_id,"
-            "calendar_invitation_outbox.source_notification_id)"));
+            "calendar_invitation_outbox.source_notification_id),status=CASE WHEN "
+            "excluded.status='pending' AND calendar_invitation_outbox.status='resolved' AND "
+            "calendar_invitation_outbox.delivered_at IS NULL THEN 'pending' ELSE "
+            "calendar_invitation_outbox.status END,created_at=CASE WHEN excluded.status='pending' "
+            "AND calendar_invitation_outbox.status='resolved' AND "
+            "calendar_invitation_outbox.delivered_at IS NULL THEN CURRENT_TIMESTAMP ELSE "
+            "calendar_invitation_outbox.created_at END,resolved_at=CASE WHEN "
+            "excluded.status='pending' AND calendar_invitation_outbox.status='resolved' AND "
+            "calendar_invitation_outbox.delivered_at IS NULL THEN NULL ELSE "
+            "calendar_invitation_outbox.resolved_at END"));
         for (const auto& projection : reconciliation.pendingInvitations)
         {
             projectedScopes.insert(scopeKey(projection.eventId, projection.recurrenceId));
