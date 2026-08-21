@@ -92,7 +92,9 @@ workflows.
 Google remains the default translation provider. Text is sent to Google only after an explicit
 Translate action or a saved automatic-translation rule. Choosing **Local (Firefox models)** keeps
 message text on the machine; required Mozilla-hosted model packs are downloaded on demand and remain
-installed until removed. Choosing **Disabled** also disables language detection.
+installed until removed. Building local translation support fetches the pinned translation-engine
+source, not the language model packs themselves. Choosing **Disabled** also disables language
+detection.
 
 ## Requirements
 
