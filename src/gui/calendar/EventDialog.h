@@ -10,12 +10,10 @@ class QCheckBox;
 class QPushButton;
 class QComboBox;
 class QDateEdit;
-class QDateTimeEdit;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
 class QVBoxLayout;
-class QSpinBox;
 
 namespace javelin::gui::widgets
 {
@@ -24,6 +22,8 @@ namespace javelin::gui::widgets
 
 namespace javelin::gui::calendar
 {
+    class CalendarNotificationEditor;
+
     class EventDialog final : public QDialog
     {
         Q_OBJECT
@@ -54,28 +54,9 @@ namespace javelin::gui::calendar
             QPushButton* remove = nullptr;
         };
 
-        struct AlertRow
-        {
-            QWidget* container = nullptr;
-            std::string id;
-            javelin::jmap::calendar::Alert original;
-            QComboBox* triggerKind = nullptr;
-            QSpinBox* amount = nullptr;
-            QComboBox* unit = nullptr;
-            QComboBox* relation = nullptr;
-            QDateTimeEdit* absoluteTime = nullptr;
-            QPushButton* remove = nullptr;
-            bool edited = false;
-        };
-
         void addAttendeeRow(const QString& address = {});
         void removeAttendeeRow(QWidget* row);
         void clearAttendeeRows();
-        void addAlertRow(const std::optional<javelin::jmap::calendar::Alert>& alert = std::nullopt);
-        void removeAlertRow(QWidget* row);
-        void clearAlertRows();
-        void updateAlertRow(AlertRow& row);
-        void markAlertEdited(QWidget* row);
         void updateRecurrenceControls();
 
         std::vector<javelin::jmap::calendar::Calendar> m_calendars;
@@ -97,11 +78,7 @@ namespace javelin::gui::calendar
         QWidget* m_attendees = nullptr;
         QVBoxLayout* m_attendeeRowsLayout = nullptr;
         std::vector<AttendeeRow> m_attendeeRows;
-        QCheckBox* m_useDefaultAlerts = nullptr;
-        QWidget* m_alerts = nullptr;
-        QVBoxLayout* m_alertRowsLayout = nullptr;
-        QPushButton* m_addAlert = nullptr;
-        std::vector<AlertRow> m_alertRows;
+        CalendarNotificationEditor* m_notifications = nullptr;
         QLabel* m_error = nullptr;
         QPushButton* m_delete = nullptr;
         bool m_endEdited = false;
@@ -109,7 +86,6 @@ namespace javelin::gui::calendar
         bool m_timeZoneEdited = false;
         bool m_recurrenceEdited = false;
         bool m_attendeesEdited = false;
-        bool m_alertsEdited = false;
         bool m_occurrenceMode = false;
     };
 } // namespace javelin::gui::calendar

@@ -385,6 +385,7 @@ javelin_enable_test_localization(javelin_integration_tests)
 add_executable(javelin_gui_widget_tests
     gui/ContactsGuiTestMain.cpp
     gui/CalendarTabControllerTest.cpp
+    gui/CalendarNotificationEditorTest.cpp
     gui/DayAgendaDialogTest.cpp
     gui/MonthCalendarAccessibilityTest.cpp
     gui/NoRttiAccessibleObject.cpp

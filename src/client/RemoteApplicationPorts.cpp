@@ -59,7 +59,8 @@ namespace javelin::app
                                                         .objectFailures = {},
                                                         .mayRemoveFromHistory = false,
                                                         .acknowledgeAndRemove = false}};
-            else if constexpr (std::is_same_v<Result, CalendarColorBatchResult>)
+            else if constexpr (std::is_same_v<Result, CalendarColorBatchResult> ||
+                               std::is_same_v<Result, CalendarDefaultAlertsBatchResult>)
                 return {.requestedCount = 0,
                         .appliedCount = 0,
                         .failures = {},
@@ -245,6 +246,23 @@ namespace javelin::app
         const auto requestedCount = changes.size();
         auto result =
             co_await call<javelin::protocol::actions::CalendarSetColors>(m_client, changes);
+        if (result.error.has_value() && result.requestedCount == 0 && requestedCount > 0)
+        {
+            result.requestedCount = requestedCount;
+            result.failures.reserve(changes.size());
+            for (const auto& change : changes)
+                result.failures.push_back({.change = change, .error = *result.error});
+        }
+        co_return result;
+    }
+
+    QCoro::Task<CalendarDefaultAlertsBatchResult>
+    RemoteCalendarCommandPort::setCalendarDefaultAlerts(
+        std::vector<CalendarDefaultAlertsChange> changes)
+    {
+        const auto requestedCount = changes.size();
+        auto result =
+            co_await call<javelin::protocol::actions::CalendarSetDefaultAlerts>(m_client, changes);
         if (result.error.has_value() && result.requestedCount == 0 && requestedCount > 0)
         {
             result.requestedCount = requestedCount;

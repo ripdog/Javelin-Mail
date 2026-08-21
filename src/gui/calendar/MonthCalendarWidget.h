@@ -6,9 +6,12 @@
 #include <QLocale>
 #include <QWidget>
 
+#include "jmap/calendar/CalendarTypes.h"
+
 #include <array>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 class QLabel;
@@ -46,8 +49,12 @@ namespace javelin::gui::calendar
         bool subscribed = false;
         bool writable = false;
         bool canSetColor = false;
+        bool canSetDefaultAlerts = false;
         bool deletable = false;
         bool defaultDestination = false;
+        std::unordered_map<std::string, javelin::jmap::calendar::Alert> defaultAlertsWithTime = {};
+        std::unordered_map<std::string, javelin::jmap::calendar::Alert> defaultAlertsWithoutTime =
+            {};
     };
 
     struct CalendarAccountDisplay
@@ -69,6 +76,13 @@ namespace javelin::gui::calendar
     {
         CalendarIdentity calendar;
         std::optional<std::string> color;
+    };
+
+    struct CalendarDefaultAlertsEdit
+    {
+        CalendarIdentity calendar;
+        std::unordered_map<std::string, javelin::jmap::calendar::Alert> withTime;
+        std::unordered_map<std::string, javelin::jmap::calendar::Alert> withoutTime;
     };
 
     struct PendingInvitationDisplay
@@ -144,6 +158,8 @@ namespace javelin::gui::calendar
                                        const QString& color);
         void calendarDeletionRequested(CalendarIdentity calendar);
         void calendarColorsChanged(std::vector<CalendarColorEdit> changes);
+        void calendarManagerChangesSaved(std::vector<CalendarColorEdit> colorChanges,
+                                         std::vector<CalendarDefaultAlertsEdit> alertChanges);
 
       protected:
         void keyPressEvent(QKeyEvent* event) override;

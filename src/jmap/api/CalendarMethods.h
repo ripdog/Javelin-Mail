@@ -150,6 +150,9 @@ namespace javelin::jmap::api
         {
             std::optional<bool> isSubscribed;
             std::optional<std::optional<std::string>> color;
+            std::optional<std::unordered_map<std::string, calendar::Alert>> defaultAlertsWithTime;
+            std::optional<std::unordered_map<std::string, calendar::Alert>>
+                defaultAlertsWithoutTime;
         };
 
         std::string accountId;

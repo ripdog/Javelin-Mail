@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <functional>
 #include <optional>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -107,7 +108,7 @@ namespace
 } // namespace
 
 TEST_CASE("calendar metadata mutations project and reconcile server outcomes",
-          "[jmap][calendar][subscriptions][color]")
+          "[jmap][calendar][subscriptions][color][notifications]")
 {
     ensureApplication();
     QTemporaryDir directory;
@@ -168,6 +169,15 @@ TEST_CASE("calendar metadata mutations project and reconcile server outcomes",
         const auto& values = std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed);
         REQUIRE(values.size() == 1);
         return values.front().color;
+    };
+    const auto calendarAlerts = [&calendars]
+    {
+        const auto listed = calendars.listCalendars("a1");
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::Calendar>>(listed));
+        const auto& values = std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed);
+        REQUIRE(values.size() == 1);
+        return std::pair{values.front().defaultAlertsWithTime,
+                         values.front().defaultAlertsWithoutTime};
     };
 
     SECTION("accepted update commits the projected subscription")
@@ -323,6 +333,140 @@ TEST_CASE("calendar metadata mutations project and reconcile server outcomes",
         REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(resolved));
         CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(resolved).empty());
         CHECK(calendarColor() == std::optional<std::string>{"#2457a6"});
+    }
+
+    SECTION("accepted default notification update commits the projected alerts")
+    {
+        const std::unordered_map<std::string, javelin::jmap::calendar::Alert> timed{
+            {"reminder",
+             {.id = "reminder",
+              .action = "display",
+              .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+              .relativeTo = "start",
+              .offset = javelin::jmap::calendar::Duration{.value = "-PT15M"},
+              .when = std::nullopt,
+              .acknowledged = std::nullopt}},
+        };
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "Calendar/set",
+                  .arguments =
+                      R"({"accountId":"a1","oldState":"c1","newState":"c2","created":{},"updated":{"work":{}},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+                  .callId = "calendar-set-default-alerts"}},
+            .createdIds = std::nullopt,
+            .sessionState = "s2"});
+        transport.beforeReturn = [&calendarAlerts]
+        {
+            const auto [withTime, withoutTime] = calendarAlerts();
+            REQUIRE(withTime.contains("reminder"));
+            CHECK(withTime.at("reminder").offset->value == "-PT15M");
+            CHECK(withoutTime.empty());
+        };
+
+        const auto result = QCoro::waitFor(
+            mutation.setCalendarDefaultAlerts(settings, "a1", "a1", "work", timed, {}));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
+        const auto [withTime, withoutTime] = calendarAlerts();
+        REQUIRE(withTime.contains("reminder"));
+        CHECK(withTime.at("reminder").offset->value == "-PT15M");
+        CHECK(withoutTime.empty());
+        REQUIRE(transport.request.has_value());
+        CHECK(transport.request->envelope.methodCalls.front().arguments.find(
+                  R"("defaultAlertsWithTime":{"reminder")") != std::string::npos);
+        CHECK(transport.request->envelope.methodCalls.front().arguments.find(
+                  R"("defaultAlertsWithoutTime":{})") != std::string::npos);
+    }
+
+    SECTION("definitive default notification rejection restores confirmed alerts")
+    {
+        const std::unordered_map<std::string, javelin::jmap::calendar::Alert> timed{
+            {"reminder",
+             {.id = "reminder",
+              .action = "display",
+              .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+              .relativeTo = "start",
+              .offset = javelin::jmap::calendar::Duration{.value = "-PT15M"},
+              .when = std::nullopt,
+              .acknowledged = std::nullopt}},
+        };
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "Calendar/set",
+                  .arguments =
+                      R"({"accountId":"a1","oldState":"c1","newState":"c1","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{"work":{"type":"forbidden","description":"protected"}},"notDestroyed":{}})",
+                  .callId = "calendar-set-default-alerts"}},
+            .createdIds = std::nullopt,
+            .sessionState = "s2"});
+        transport.beforeReturn = [&calendarAlerts]
+        { CHECK(calendarAlerts().first.contains("reminder")); };
+
+        const auto result = QCoro::waitFor(
+            mutation.setCalendarDefaultAlerts(settings, "a1", "a1", "work", timed, {}));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        const auto [withTime, withoutTime] = calendarAlerts();
+        CHECK(withTime.empty());
+        CHECK(withoutTime.empty());
+    }
+
+    SECTION("ambiguous default notification update reconciles from authoritative metadata")
+    {
+        const std::unordered_map<std::string, javelin::jmap::calendar::Alert> timed{
+            {"reminder",
+             {.id = "reminder",
+              .action = "display",
+              .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+              .relativeTo = "start",
+              .offset = javelin::jmap::calendar::Duration{.value = "-PT15M"},
+              .when = std::nullopt,
+              .acknowledged = std::nullopt}},
+        };
+        transport.results.push_back(javelin::jmap::api::TransportError{
+            .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+            .message = "Connection closed after Calendar/set dispatch",
+        });
+
+        const auto result = QCoro::waitFor(
+            mutation.setCalendarDefaultAlerts(settings, "a1", "a1", "work", timed, {}));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK(calendarAlerts().first.contains("reminder"));
+        javelin::jmap::sync::MutationJournalRepository journal{connection};
+        const auto active = journal.listActive({.accountId = "a1", .dataType = "Calendar"});
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(active));
+        REQUIRE(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(active).size() == 1);
+        CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(active).front().status ==
+              javelin::jmap::sync::MutationStatus::Unknown);
+
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "Calendar/get",
+                  .arguments =
+                      R"({"accountId":"a1","state":"c2","list":[{"id":"work","name":"Work","color":"#2457a6","sortOrder":0,"isSubscribed":true,"isVisible":true,"isDefault":true,"defaultAlertsWithTime":{"reminder":{"@type":"Alert","action":"display","trigger":{"@type":"OffsetTrigger","relativeTo":"start","offset":"-PT15M"}}},"defaultAlertsWithoutTime":{},"myRights":{"mayReadFreeBusy":true,"mayReadItems":true,"mayWriteAll":true,"mayWriteOwn":true,"mayUpdatePrivate":true,"mayRSVP":true,"mayShare":false,"mayDelete":false}}],"notFound":[]})",
+                  .callId = "calendar-get"},
+                 {.name = "CalendarEvent/query",
+                  .arguments =
+                      R"({"accountId":"a1","queryState":"q2","canCalculateChanges":false,"position":0,"ids":[],"total":0,"limit":100})",
+                  .callId = "calendar-event-query"},
+                 {.name = "CalendarEvent/query",
+                  .arguments =
+                      R"({"accountId":"a1","queryState":"qb2","canCalculateChanges":false,"position":0,"ids":[],"total":0,"limit":100})",
+                  .callId = "calendar-base-event-query"}},
+            .createdIds = std::nullopt,
+            .sessionState = "s3"});
+        const auto refreshed = QCoro::waitFor(sync.refresh(
+            settings, "a1",
+            {.start = {.value = "2026-08-01T00:00:00"}, .end = {.value = "2026-09-01T00:00:00"}},
+            {.value = "Pacific/Auckland"}));
+        REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(refreshed));
+        const auto resolved = journal.listActive({.accountId = "a1", .dataType = "Calendar"});
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(resolved));
+        CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(resolved).empty());
+        const auto [withTime, withoutTime] = calendarAlerts();
+        REQUIRE(withTime.contains("reminder"));
+        CHECK(withTime.at("reminder").offset->value == "-PT15M");
+        CHECK(withoutTime.empty());
     }
 
     SECTION("definitive rejection restores the confirmed subscription")

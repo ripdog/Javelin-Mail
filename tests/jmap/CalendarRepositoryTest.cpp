@@ -731,7 +731,7 @@ TEST_CASE("calendar reminders use their actual trigger rather than occurrence st
 
     auto absoluteEvent = event("future-event", "2028-07-18T10:00:00");
     absoluteEvent.timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Etc/UTC"};
-    absoluteEvent.useDefaultAlerts = true;
+    absoluteEvent.useDefaultAlerts = false;
     absoluteEvent.alerts.emplace(
         "absolute",
         javelin::jmap::calendar::Alert{
@@ -757,17 +757,36 @@ TEST_CASE("calendar reminders use their actual trigger rather than occurrence st
     secondFutureOccurrence.utcEnd =
         javelin::jmap::calendar::UtcInstant{.value = "2028-07-19T11:00:00Z"};
 
-    REQUIRE_FALSE(calendars
-                      .reconcileWindow({.accountId = "a1",
-                                        .start = {.value = "2026-01-01T00:00:00"},
-                                        .end = {.value = "2029-01-01T00:00:00"},
-                                        .displayTimeZone = {.value = "Etc/UTC"},
-                                        .queryState = "q1",
-                                        .eventState = "e1",
-                                        .events = {longEvent, absoluteEvent},
-                                        .occurrences = {longOccurrence, firstFutureOccurrence,
-                                                        secondFutureOccurrence}})
-                      .has_value());
+    auto defaultlessEvent = event("defaultless-event", "2026-07-18T10:00:00");
+    defaultlessEvent.timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Etc/UTC"};
+    defaultlessEvent.useDefaultAlerts = true;
+    defaultlessEvent.alerts.emplace(
+        "ignored-event-alert", javelin::jmap::calendar::Alert{
+                                   .id = "ignored-event-alert",
+                                   .action = "display",
+                                   .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+                                   .relativeTo = "start",
+                                   .offset = javelin::jmap::calendar::Duration{.value = "-PT10M"},
+                                   .when = std::nullopt,
+                                   .acknowledged = std::nullopt});
+    auto defaultlessOccurrence = occurrence("defaultless-event", "2026-07-18T10:00:00");
+    defaultlessOccurrence.utcStart =
+        javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T10:00:00Z"};
+    defaultlessOccurrence.utcEnd =
+        javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T11:00:00Z"};
+
+    REQUIRE_FALSE(
+        calendars
+            .reconcileWindow({.accountId = "a1",
+                              .start = {.value = "2026-01-01T00:00:00"},
+                              .end = {.value = "2029-01-01T00:00:00"},
+                              .displayTimeZone = {.value = "Etc/UTC"},
+                              .queryState = "q1",
+                              .eventState = "e1",
+                              .events = {longEvent, absoluteEvent, defaultlessEvent},
+                              .occurrences = {longOccurrence, firstFutureOccurrence,
+                                              secondFutureOccurrence, defaultlessOccurrence}})
+            .has_value());
 
     javelin::jmap::cache::CalendarNotificationRepository notifications{connection};
     const auto trigger = QDateTime::fromString(QStringLiteral("2026-07-18T09:50:00Z"), Qt::ISODate);
@@ -785,6 +804,8 @@ TEST_CASE("calendar reminders use their actual trigger rather than occurrence st
                              &javelin::jmap::cache::CalendarNotificationCandidate::alertId) == 1);
     CHECK(std::ranges::count(candidates, std::string{"absolute"},
                              &javelin::jmap::cache::CalendarNotificationCandidate::alertId) == 1);
+    CHECK(std::ranges::count(candidates, std::string{"ignored-event-alert"},
+                             &javelin::jmap::cache::CalendarNotificationCandidate::alertId) == 0);
 }
 
 TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not alert twice",

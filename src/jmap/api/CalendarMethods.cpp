@@ -357,6 +357,8 @@ namespace javelin::jmap::api::detail
     {
         std::optional<bool> isSubscribed;
         std::optional<std::optional<std::string>> color;
+        std::optional<std::unordered_map<std::string, RawAlert>> defaultAlertsWithTime;
+        std::optional<std::unordered_map<std::string, RawAlert>> defaultAlertsWithoutTime;
     };
 
     struct RawCalendarSetRequest
@@ -443,7 +445,9 @@ JAVELIN_GLZ_META(RawCalendarGetResponse, "accountId", &T::accountId, "state", &T
 JAVELIN_GLZ_META(RawCalendarCreate, "name", &T::name, "description", &T::description, "color",
                  &T::color, "sortOrder", &T::sortOrder, "isSubscribed", &T::isSubscribed,
                  "isVisible", &T::isVisible, "timeZone", &T::timeZone);
-JAVELIN_GLZ_META(RawCalendarUpdate, "isSubscribed", &T::isSubscribed, "color", &T::color);
+JAVELIN_GLZ_META(RawCalendarUpdate, "isSubscribed", &T::isSubscribed, "color", &T::color,
+                 "defaultAlertsWithTime", &T::defaultAlertsWithTime, "defaultAlertsWithoutTime",
+                 &T::defaultAlertsWithoutTime);
 JAVELIN_GLZ_META(RawQueryFilter, "inCalendar", &T::inCalendar, "after", &T::after, "before",
                  &T::before, "text", &T::text, "uid", &T::uid);
 JAVELIN_GLZ_META(RawQueryRequest, "accountId", &T::accountId, "filter", &T::filter,
@@ -702,6 +706,22 @@ namespace javelin::jmap::api
                                            : std::nullopt};
         }
 
+        detail::RawAlert rawAlert(const calendar::Alert& alert)
+        {
+            return {
+                .type = "Alert",
+                .action = alert.action,
+                .trigger = {.type = alert.triggerKind == calendar::AlertTriggerKind::Absolute
+                                        ? "AbsoluteTrigger"
+                                        : "OffsetTrigger",
+                            .relativeTo = alert.relativeTo,
+                            .offset =
+                                alert.offset ? std::optional{alert.offset->value} : std::nullopt,
+                            .when = alert.when ? std::optional{alert.when->value} : std::nullopt},
+                .acknowledged =
+                    alert.acknowledged ? std::optional{alert.acknowledged->value} : std::nullopt};
+        }
+
         calendar::Attendee attendee(const std::string& id,
                                     const detail::RawParticipant& participant)
         {
@@ -901,24 +921,7 @@ namespace javelin::jmap::api
                 .recurrenceOverrides = {},
                 .participants = {}};
             for (const auto& [id, alert] : value.alerts)
-            {
-                raw.alerts.emplace(
-                    id, detail::RawAlert{
-                            .type = "Alert",
-                            .action = alert.action,
-                            .trigger = {.type = alert.triggerKind ==
-                                                        calendar::AlertTriggerKind::Absolute
-                                                    ? "AbsoluteTrigger"
-                                                    : "OffsetTrigger",
-                                        .relativeTo = alert.relativeTo,
-                                        .offset = alert.offset ? std::optional{alert.offset->value}
-                                                               : std::nullopt,
-                                        .when = alert.when ? std::optional{alert.when->value}
-                                                           : std::nullopt},
-                            .acknowledged = alert.acknowledged
-                                                ? std::optional{alert.acknowledged->value}
-                                                : std::nullopt});
-            }
+                raw.alerts.emplace(id, rawAlert(alert));
             if (value.location)
             {
                 raw.locations.emplace(
@@ -1216,13 +1219,29 @@ namespace javelin::jmap::api
                                                            ? std::optional{calendar.timeZone->value}
                                                            : std::nullopt,
                                        });
+        const auto convertAlerts =
+            [](const std::optional<std::unordered_map<std::string, calendar::Alert>>& alerts)
+            -> std::optional<std::unordered_map<std::string, detail::RawAlert>>
+        {
+            if (!alerts)
+                return std::nullopt;
+            std::unordered_map<std::string, detail::RawAlert> converted;
+            converted.reserve(alerts->size());
+            for (const auto& [id, alert] : *alerts)
+                converted.emplace(id, rawAlert(alert));
+            return converted;
+        };
         std::unordered_map<std::string, detail::RawCalendarUpdate> update;
         update.reserve(request.update.size());
         for (const auto& [calendarId, patch] : request.update)
-            update.emplace(calendarId, detail::RawCalendarUpdate{
-                                           .isSubscribed = patch.isSubscribed,
-                                           .color = patch.color,
-                                       });
+            update.emplace(
+                calendarId,
+                detail::RawCalendarUpdate{
+                    .isSubscribed = patch.isSubscribed,
+                    .color = patch.color,
+                    .defaultAlertsWithTime = convertAlerts(patch.defaultAlertsWithTime),
+                    .defaultAlertsWithoutTime = convertAlerts(patch.defaultAlertsWithoutTime),
+                });
         const auto arguments = serialize(
             detail::RawCalendarSetRequest{.accountId = request.accountId,
                                           .ifInState = request.ifInState,

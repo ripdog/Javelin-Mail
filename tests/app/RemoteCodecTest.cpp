@@ -18,6 +18,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -499,6 +500,72 @@ TEST_CASE("remote codec preserves calendar color batches", "[app][remote-codec][
     REQUIRE(metadata.has_value());
     CHECK(metadata->id.value == 98);
     CHECK(metadata->name == "CalendarSetColors");
+}
+
+TEST_CASE("remote codec preserves calendar default notification batches",
+          "[app][remote-codec][calendar]")
+{
+    using Action = javelin::protocol::actions::CalendarSetDefaultAlerts;
+    const std::unordered_map<std::string, javelin::jmap::calendar::Alert> timed{
+        {"reminder",
+         {.id = "reminder",
+          .action = "display",
+          .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+          .relativeTo = "start",
+          .offset = javelin::jmap::calendar::Duration{.value = "-PT15M"},
+          .when = std::nullopt,
+          .acknowledged = std::nullopt}},
+    };
+    const std::vector<javelin::app::CalendarDefaultAlertsChange> changes{
+        {.ownerAccountId = "owner-1",
+         .accountId = "account-1",
+         .calendarId = "work",
+         .withTime = timed,
+         .withoutTime = {}},
+    };
+
+    const auto encoded =
+        javelin::app::remote::encodeVersioned<Action::requestSchemaVersion>(changes);
+    const auto* payload = std::get_if<QByteArray>(&encoded);
+    REQUIRE(payload != nullptr);
+    const auto decoded =
+        javelin::app::remote::decodeVersionedValue<Action::requestSchemaVersion, Action::Request>(
+            *payload);
+    const auto* value = std::get_if<Action::Request>(&decoded);
+    REQUIRE(value != nullptr);
+    const auto& decodedChanges = std::get<0>(*value);
+    REQUIRE(decodedChanges.size() == 1);
+    CHECK(decodedChanges.front().ownerAccountId == "owner-1");
+    CHECK(decodedChanges.front().calendarId == "work");
+    REQUIRE(decodedChanges.front().withTime.contains("reminder"));
+    REQUIRE(decodedChanges.front().withTime.at("reminder").offset.has_value());
+    CHECK(decodedChanges.front().withTime.at("reminder").offset->value == "-PT15M");
+    CHECK(decodedChanges.front().withoutTime.empty());
+
+    const javelin::app::CalendarDefaultAlertsBatchResult result{
+        .requestedCount = 1,
+        .appliedCount = 1,
+        .failures = {},
+        .error = std::nullopt,
+    };
+    const auto encodedResult =
+        javelin::app::remote::encodeVersioned<Action::resultSchemaVersion>(result);
+    const auto* resultPayload = std::get_if<QByteArray>(&encodedResult);
+    REQUIRE(resultPayload != nullptr);
+    const auto decodedResult =
+        javelin::app::remote::decodeVersionedValue<Action::resultSchemaVersion, Action::Result>(
+            *resultPayload);
+    const auto* resultValue = std::get_if<Action::Result>(&decodedResult);
+    REQUIRE(resultValue != nullptr);
+    CHECK(resultValue->requestedCount == 1);
+    CHECK(resultValue->appliedCount == 1);
+    CHECK(resultValue->failures.empty());
+    CHECK_FALSE(resultValue->error.has_value());
+
+    const auto metadata = javelin::protocol::actions::findActionMetadata(Action::id);
+    REQUIRE(metadata.has_value());
+    CHECK(metadata->id.value == 99);
+    CHECK(metadata->name == "CalendarSetDefaultAlerts");
 }
 
 TEST_CASE("remote codec preserves calendar participant roles", "[app][remote-codec][calendar]")

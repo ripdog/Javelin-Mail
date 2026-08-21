@@ -404,6 +404,101 @@ namespace javelin::jmap::cache
         return std::nullopt;
     }
 
+    std::optional<DatabaseError> CalendarRepository::applyCalendarDefaultAlerts(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::string_view calendarId, const std::string_view state,
+        const std::unordered_map<std::string, calendar::Alert>& withTime,
+        const std::unordered_map<std::string, calendar::Alert>& withoutTime)
+    {
+        if (!transaction.isActive())
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Apply calendar default alerts without transaction")};
+        auto& database = transaction.connection().database();
+        QSqlQuery ensureCalendar{database};
+        ensureCalendar.prepare(QStringLiteral("UPDATE calendars SET state=:state WHERE "
+                                              "account_id=:account AND calendar_id=:calendar"));
+        ensureCalendar.bindValue(QStringLiteral(":state"),
+                                 QString::fromStdString(std::string{state}));
+        ensureCalendar.bindValue(QStringLiteral(":account"),
+                                 QString::fromStdString(std::string{accountId}));
+        ensureCalendar.bindValue(QStringLiteral(":calendar"),
+                                 QString::fromStdString(std::string{calendarId}));
+        if (!ensureCalendar.exec())
+            return queryError(QStringLiteral("Apply calendar default alert state"), ensureCalendar);
+        if (ensureCalendar.numRowsAffected() != 1)
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message =
+                                     QStringLiteral("Calendar default alert target missing")};
+
+        QSqlQuery clear{database};
+        clear.prepare(QStringLiteral("DELETE FROM calendar_default_alerts WHERE "
+                                     "account_id=:account AND calendar_id=:calendar"));
+        clear.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        clear.bindValue(QStringLiteral(":calendar"),
+                        QString::fromStdString(std::string{calendarId}));
+        if (!clear.exec())
+            return queryError(QStringLiteral("Clear calendar default alerts"), clear);
+
+        QSqlQuery insert{database};
+        insert.prepare(QStringLiteral(
+            "INSERT INTO calendar_default_alerts(account_id,calendar_id,alert_id,without_time,"
+            "action,trigger_kind,relative_to,offset,trigger_at,acknowledged) VALUES "
+            "(:account,:calendar,:alert,:without_time,:action,:kind,:relative,:offset,:when,"
+            ":acknowledged)"));
+        const auto writeAlerts = [&](const auto& alerts,
+                                     const bool isWithoutTime) -> std::optional<DatabaseError>
+        {
+            for (const auto& [alertId, alert] : alerts)
+            {
+                insert.bindValue(QStringLiteral(":account"),
+                                 QString::fromStdString(std::string{accountId}));
+                insert.bindValue(QStringLiteral(":calendar"),
+                                 QString::fromStdString(std::string{calendarId}));
+                insert.bindValue(QStringLiteral(":alert"), QString::fromStdString(alertId));
+                insert.bindValue(QStringLiteral(":without_time"), isWithoutTime ? 1 : 0);
+                insert.bindValue(QStringLiteral(":action"), QString::fromStdString(alert.action));
+                insert.bindValue(QStringLiteral(":kind"),
+                                 alert.triggerKind == calendar::AlertTriggerKind::Absolute
+                                     ? QStringLiteral("absolute")
+                                     : QStringLiteral("offset"));
+                insert.bindValue(QStringLiteral(":relative"),
+                                 QString::fromStdString(alert.relativeTo));
+                insert.bindValue(QStringLiteral(":offset"),
+                                 alert.offset
+                                     ? QVariant{QString::fromStdString(alert.offset->value)}
+                                     : QVariant{});
+                insert.bindValue(QStringLiteral(":when"),
+                                 alert.when ? QVariant{QString::fromStdString(alert.when->value)}
+                                            : QVariant{});
+                insert.bindValue(QStringLiteral(":acknowledged"),
+                                 alert.acknowledged
+                                     ? QVariant{QString::fromStdString(alert.acknowledged->value)}
+                                     : QVariant{});
+                if (!insert.exec())
+                    return queryError(QStringLiteral("Store calendar default alert"), insert);
+            }
+            return std::nullopt;
+        };
+        if (const auto error = writeAlerts(withTime, false))
+            return error;
+        if (const auto error = writeAlerts(withoutTime, true))
+            return error;
+
+        QSqlQuery stateToken{database};
+        stateToken.prepare(QStringLiteral(
+            "INSERT INTO calendar_state_tokens (account_id,data_type,state) VALUES "
+            "(:account,'Calendar',:state) ON CONFLICT(account_id,data_type) DO UPDATE SET "
+            "state=excluded.state"));
+        stateToken.bindValue(QStringLiteral(":account"),
+                             QString::fromStdString(std::string{accountId}));
+        stateToken.bindValue(QStringLiteral(":state"), QString::fromStdString(std::string{state}));
+        if (!stateToken.exec())
+            return queryError(QStringLiteral("Store Calendar state after default alert change"),
+                              stateToken);
+        return std::nullopt;
+    }
+
     std::optional<DatabaseError> CalendarRepository::applyCalendarDefaults(
         DatabaseTransaction& transaction, const std::string_view accountId,
         const std::string_view state, const std::unordered_map<std::string, bool>& defaults)

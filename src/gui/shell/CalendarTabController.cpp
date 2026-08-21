@@ -1369,6 +1369,64 @@ namespace javelin::gui::shell
                                            Q_EMIT operationFailed(*result.error);
                                    });
                 });
+        connect(widget, &javelin::gui::calendar::MonthCalendarWidget::calendarManagerChangesSaved,
+                widget,
+                [this,
+                 widget](std::vector<javelin::gui::calendar::CalendarColorEdit> colorEdits,
+                         std::vector<javelin::gui::calendar::CalendarDefaultAlertsEdit> alertEdits)
+                {
+                    std::vector<javelin::app::CalendarColorChange> colorChanges;
+                    colorChanges.reserve(colorEdits.size());
+                    for (auto& edit : colorEdits)
+                    {
+                        colorChanges.push_back({
+                            .ownerAccountId = std::move(edit.calendar.ownerAccountId),
+                            .accountId = std::move(edit.calendar.accountId),
+                            .calendarId = std::move(edit.calendar.calendarId),
+                            .color = std::move(edit.color),
+                        });
+                    }
+                    std::vector<javelin::app::CalendarDefaultAlertsChange> alertChanges;
+                    alertChanges.reserve(alertEdits.size());
+                    for (auto& edit : alertEdits)
+                    {
+                        alertChanges.push_back({
+                            .ownerAccountId = std::move(edit.calendar.ownerAccountId),
+                            .accountId = std::move(edit.calendar.accountId),
+                            .calendarId = std::move(edit.calendar.calendarId),
+                            .withTime = std::move(edit.withTime),
+                            .withoutTime = std::move(edit.withoutTime),
+                        });
+                    }
+
+                    auto task = [this, colorChanges = std::move(colorChanges),
+                                 alertChanges = std::move(alertChanges)]() mutable
+                        -> QCoro::Task<std::optional<javelin::jmap::OperationError>>
+                    {
+                        std::optional<javelin::jmap::OperationError> firstError;
+                        if (!colorChanges.empty())
+                        {
+                            auto result = co_await m_calendarCommandPort.setCalendarColors(
+                                std::move(colorChanges));
+                            if (result.error.has_value())
+                                co_return result.error;
+                        }
+                        if (!alertChanges.empty())
+                        {
+                            auto result = co_await m_calendarCommandPort.setCalendarDefaultAlerts(
+                                std::move(alertChanges));
+                            if (!firstError.has_value() && result.error.has_value())
+                                firstError = result.error;
+                        }
+                        co_return firstError;
+                    }();
+                    QCoro::connect(std::move(task), widget,
+                                   [this](std::optional<javelin::jmap::OperationError> error)
+                                   {
+                                       if (error.has_value())
+                                           Q_EMIT operationFailed(*error);
+                                   });
+                });
         connect(
             widget, &javelin::gui::calendar::MonthCalendarWidget::calendarCreationRequested, widget,
             [this, widget](const QString& accountId, const QString& name, const QString& color)

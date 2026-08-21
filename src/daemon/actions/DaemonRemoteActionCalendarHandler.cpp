@@ -149,6 +149,15 @@ namespace javelin::app
                     return launchAction<actions::CalendarSetColors>(
                         id, m_services.calendarCommandPort().setCalendarColors(std::move(changes)));
                 });
+        case actions::CalendarSetDefaultAlerts::id.value:
+            return dispatchDecoded<actions::CalendarSetDefaultAlerts>(
+                id, command,
+                [this, &id](std::vector<CalendarDefaultAlertsChange> changes)
+                {
+                    return launchAction<actions::CalendarSetDefaultAlerts>(
+                        id, m_services.calendarCommandPort().setCalendarDefaultAlerts(
+                                std::move(changes)));
+                });
         case actions::CalendarCreate::id.value:
             return dispatchDecoded<actions::CalendarCreate>(
                 id, command,

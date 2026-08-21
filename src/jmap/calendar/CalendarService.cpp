@@ -16,6 +16,8 @@
 #include "jmap/sync/MutationJournal.h"
 
 #include <QDateTime>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLoggingCategory>
 #include <QRegularExpression>
 #include <QSqlError>
@@ -47,6 +49,97 @@ namespace javelin::jmap::calendar
             if (!isValidCalendarColor(color))
                 return std::nullopt;
             return std::optional<std::optional<std::string>>{std::in_place, std::move(color)};
+        }
+
+        using DefaultAlertMap = std::unordered_map<std::string, Alert>;
+        using DefaultAlertPair = std::pair<DefaultAlertMap, DefaultAlertMap>;
+
+        QJsonObject defaultAlertMapJson(const DefaultAlertMap& alerts)
+        {
+            QJsonObject result;
+            for (const auto& [id, alert] : alerts)
+            {
+                QJsonObject value;
+                value.insert(QStringLiteral("action"), QString::fromStdString(alert.action));
+                value.insert(QStringLiteral("triggerKind"), static_cast<int>(alert.triggerKind));
+                value.insert(QStringLiteral("relativeTo"),
+                             QString::fromStdString(alert.relativeTo));
+                if (alert.offset)
+                    value.insert(QStringLiteral("offset"),
+                                 QString::fromStdString(alert.offset->value));
+                if (alert.when)
+                    value.insert(QStringLiteral("when"), QString::fromStdString(alert.when->value));
+                if (alert.acknowledged)
+                    value.insert(QStringLiteral("acknowledged"),
+                                 QString::fromStdString(alert.acknowledged->value));
+                result.insert(QString::fromStdString(id), value);
+            }
+            return result;
+        }
+
+        std::string defaultAlertsMutationPayload(const DefaultAlertMap& withTime,
+                                                 const DefaultAlertMap& withoutTime)
+        {
+            QJsonObject root;
+            root.insert(QStringLiteral("withTime"), defaultAlertMapJson(withTime));
+            root.insert(QStringLiteral("withoutTime"), defaultAlertMapJson(withoutTime));
+            return QJsonDocument{root}.toJson(QJsonDocument::Compact).toStdString();
+        }
+
+        std::optional<DefaultAlertMap> defaultAlertMapFromJson(const QJsonValue& value)
+        {
+            if (!value.isObject())
+                return std::nullopt;
+            DefaultAlertMap result;
+            const auto object = value.toObject();
+            result.reserve(static_cast<std::size_t>(object.size()));
+            for (auto it = object.begin(); it != object.end(); ++it)
+            {
+                if (!it.value().isObject())
+                    return std::nullopt;
+                const auto encoded = it.value().toObject();
+                const auto action = encoded.value(QStringLiteral("action"));
+                const auto triggerKind = encoded.value(QStringLiteral("triggerKind"));
+                const auto relativeTo = encoded.value(QStringLiteral("relativeTo"));
+                if (!action.isString() || !triggerKind.isDouble() || !relativeTo.isString())
+                    return std::nullopt;
+                Alert alert{
+                    .id = it.key().toStdString(),
+                    .action = action.toString().toStdString(),
+                    .triggerKind = static_cast<AlertTriggerKind>(triggerKind.toInt()),
+                    .relativeTo = relativeTo.toString().toStdString(),
+                    .offset = std::nullopt,
+                    .when = std::nullopt,
+                    .acknowledged = std::nullopt,
+                };
+                const auto offset = encoded.value(QStringLiteral("offset"));
+                if (offset.isString())
+                    alert.offset = Duration{.value = offset.toString().toStdString()};
+                const auto when = encoded.value(QStringLiteral("when"));
+                if (when.isString())
+                    alert.when = UtcInstant{.value = when.toString().toStdString()};
+                const auto acknowledged = encoded.value(QStringLiteral("acknowledged"));
+                if (acknowledged.isString())
+                    alert.acknowledged = UtcInstant{.value = acknowledged.toString().toStdString()};
+                result.emplace(alert.id, std::move(alert));
+            }
+            return result;
+        }
+
+        std::optional<DefaultAlertPair>
+        calendarDefaultAlertsMutationPayload(const std::string_view payload)
+        {
+            QJsonParseError parseError;
+            const auto document = QJsonDocument::fromJson(
+                QByteArray{payload.data(), static_cast<qsizetype>(payload.size())}, &parseError);
+            if (parseError.error != QJsonParseError::NoError || !document.isObject())
+                return std::nullopt;
+            const auto root = document.object();
+            auto withTime = defaultAlertMapFromJson(root.value(QStringLiteral("withTime")));
+            auto withoutTime = defaultAlertMapFromJson(root.value(QStringLiteral("withoutTime")));
+            if (!withTime || !withoutTime)
+                return std::nullopt;
+            return DefaultAlertPair{std::move(*withTime), std::move(*withoutTime)};
         }
 
         [[nodiscard]] std::variant<javelin::jmap::sync::RefreshFence, OperationError>
@@ -1433,7 +1526,11 @@ namespace javelin::jmap::calendar
             .accountId = accountId,
             .ifInState = state,
             .create = {},
-            .update = {{calendarId, {.isSubscribed = subscribed, .color = std::nullopt}}},
+            .update = {{calendarId,
+                        {.isSubscribed = subscribed,
+                         .color = std::nullopt,
+                         .defaultAlertsWithTime = std::nullopt,
+                         .defaultAlertsWithoutTime = std::nullopt}}},
             .destroy = {},
             .onDestroyRemoveEvents = false,
             .onSuccessSetIsDefault = std::nullopt,
@@ -1639,7 +1736,11 @@ namespace javelin::jmap::calendar
             .accountId = accountId,
             .ifInState = state,
             .create = {},
-            .update = {{calendarId, {.isSubscribed = std::nullopt, .color = colorPatch}}},
+            .update = {{calendarId,
+                        {.isSubscribed = std::nullopt,
+                         .color = colorPatch,
+                         .defaultAlertsWithTime = std::nullopt,
+                         .defaultAlertsWithoutTime = std::nullopt}}},
             .destroy = {},
             .onDestroyRemoveEvents = false,
             .onSuccessSetIsDefault = std::nullopt,
@@ -1760,6 +1861,235 @@ namespace javelin::jmap::calendar
             co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
         if (const auto cacheError = repository.applyCalendarColor(
                 accept.cacheTransaction(), accountId, calendarId, response.newState, color))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        if (const auto cacheError = accept.remove(mutation.mutationId))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        if (const auto cacheError = accept.commit())
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        co_return CommittedMutation{
+            .accountId = std::move(accountId),
+            .newState = response.newState,
+            .createdId = std::nullopt,
+            .receipt =
+                {
+                    .domains = {{
+                        .accountId = response.accountId,
+                        .dataType = "Calendar",
+                        .oldState = response.oldState,
+                        .newState = response.newState,
+                    }},
+                    .acceptedObjectIds = {std::move(calendarId)},
+                    .rejectedObjectIds = {},
+                    .affectedCacheViews = {},
+                    .incompleteMaterialization = false,
+                },
+        };
+    }
+
+    QCoro::Task<CalendarMutationResult> CalendarMutationEngine::setCalendarDefaultAlerts(
+        LiveConnectionSettings settings, std::string ownerAccountId, std::string accountId,
+        std::string calendarId, std::unordered_map<std::string, Alert> withTime,
+        std::unordered_map<std::string, Alert> withoutTime)
+    {
+        const auto validDefaults = [](const auto& alerts)
+        {
+            return std::ranges::all_of(alerts,
+                                       [](const auto& item)
+                                       {
+                                           const auto& [id, alert] = item;
+                                           return !id.empty() && alert.id == id &&
+                                                  alert.triggerKind == AlertTriggerKind::Offset &&
+                                                  alert.offset.has_value() &&
+                                                  !alert.when.has_value();
+                                       });
+        };
+        if (!validDefaults(withTime) || !validDefaults(withoutTime))
+            co_return error(OperationErrorCode::InvalidUserInput,
+                            QStringLiteral("Calendar default notifications must be relative to the "
+                                           "event start or end."));
+
+        const auto listed = m_reader.calendars(accountId);
+        if (const auto* serviceError = std::get_if<OperationError>(&listed))
+            co_return *serviceError;
+        const auto& available = std::get<std::vector<Calendar>>(listed);
+        const auto selected = std::ranges::find(available, calendarId, &Calendar::id);
+        if (selected == available.end())
+            co_return error(OperationErrorCode::InvalidRequest,
+                            QStringLiteral("The selected calendar is no longer available."));
+        if (!selected->isSubscribed)
+            co_return error(
+                OperationErrorCode::PermissionDenied,
+                QStringLiteral(
+                    "Subscribe to the calendar before changing its default notifications."));
+
+        const auto sessionResult = loadSession(m_connection, ownerAccountId);
+        if (const auto* serviceError = std::get_if<OperationError>(&sessionResult))
+            co_return *serviceError;
+        const auto& session = std::get<api::Session>(sessionResult);
+        const auto account = session.accounts.find(accountId);
+        if (account == session.accounts.end() || !account->second.accountCapabilities.calendars)
+            co_return error(OperationErrorCode::UnsupportedCapability,
+                            QStringLiteral("This account does not support JMAP Calendars."));
+
+        cache::CalendarRepository repository{m_connection};
+        const auto stateResult = repository.stateToken(accountId, "Calendar");
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&stateResult))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        const auto& state = std::get<std::optional<std::string>>(stateResult);
+        if (!state.has_value())
+            co_return error(
+                OperationErrorCode::InvalidRequest,
+                QStringLiteral("Refresh calendars before changing default notifications."));
+        if (selected->defaultAlertsWithTime == withTime &&
+            selected->defaultAlertsWithoutTime == withoutTime)
+            co_return CommittedMutation{
+                .accountId = std::move(accountId),
+                .newState = *state,
+                .createdId = std::nullopt,
+                .receipt = {},
+            };
+
+        sync::MutationJournalRepository journal{m_connection};
+        const sync::ConsistencyDomain domain{.accountId = accountId, .dataType = "Calendar"};
+        const auto active = journal.listActive(domain);
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&active))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        if (!std::get<std::vector<sync::MutationRecord>>(active).empty())
+            co_return error(OperationErrorCode::Conflict,
+                            QStringLiteral("Another calendar change is still unresolved."));
+
+        const auto method = api::calendarSet({
+            .accountId = accountId,
+            .ifInState = state,
+            .create = {},
+            .update = {{calendarId,
+                        {.isSubscribed = std::nullopt,
+                         .color = std::nullopt,
+                         .defaultAlertsWithTime = withTime,
+                         .defaultAlertsWithoutTime = withoutTime}}},
+            .destroy = {},
+            .onDestroyRemoveEvents = false,
+            .onSuccessSetIsDefault = std::nullopt,
+        });
+        if (!method)
+            co_return error(
+                OperationErrorCode::InvalidRequest,
+                QStringLiteral("Unable to serialize the calendar default notification change."));
+
+        const sync::MutationRecord mutation{
+            .mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
+            .operationGroupId = std::nullopt,
+            .domain = domain,
+            .objectId = calendarId,
+            .mutationKind = "calendar_set_default_alerts",
+            .status = sync::MutationStatus::Pending,
+            .payloadJson = defaultAlertsMutationPayload(withTime, withoutTime),
+            .baseState = *state,
+            .acceptedState = std::nullopt,
+            .errorJson = std::nullopt,
+        };
+        auto queueResult = sync::MutationProjectionTransaction::begin(
+            m_connection, QStringLiteral("Queue Calendar default notification mutation"));
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&queueResult))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        auto queue = std::get<sync::MutationProjectionTransaction>(std::move(queueResult));
+        if (const auto cacheError = queue.append(mutation))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        const std::array domains{domain};
+        if (const auto cacheError = queue.advance(domains))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        if (const auto cacheError = repository.applyCalendarDefaultAlerts(
+                queue.cacheTransaction(), accountId, calendarId, *state, withTime, withoutTime))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        if (const auto cacheError = queue.commit())
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+
+        const auto transition = [&](const sync::MutationStatus status,
+                                    const std::optional<std::string_view> acceptedState =
+                                        std::nullopt) -> std::optional<OperationError>
+        {
+            auto result = sync::MutationProjectionTransaction::begin(
+                m_connection, QStringLiteral("Transition Calendar default notification mutation"));
+            if (const auto* cacheError = std::get_if<cache::DatabaseError>(&result))
+                return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            auto transaction = std::get<sync::MutationProjectionTransaction>(std::move(result));
+            if (const auto cacheError =
+                    transaction.transition(mutation.mutationId, status, acceptedState))
+                return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            if (status == sync::MutationStatus::Rejected)
+            {
+                if (const auto cacheError = repository.applyCalendarDefaultAlerts(
+                        transaction.cacheTransaction(), accountId, calendarId, *state,
+                        selected->defaultAlertsWithTime, selected->defaultAlertsWithoutTime))
+                    return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            }
+            if (const auto cacheError = transaction.commit())
+                return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            return std::nullopt;
+        };
+        if (const auto transitionError = transition(sync::MutationStatus::InFlight))
+            co_return *transitionError;
+
+        api::RequestBuilder builder;
+        builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
+        const auto handle = builder.call(*method, "calendar-set-default-alerts");
+        const auto result = co_await m_protocolClient.call(context(settings, session, accountId),
+                                                           std::move(builder));
+        const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
+        if (!envelope)
+        {
+            if (const auto transitionError = transition(sync::MutationStatus::Unknown))
+                co_return *transitionError;
+            co_return callError(result);
+        }
+        const auto read = api::ResponseReader{*envelope}.require(handle);
+        if (const auto* readError = std::get_if<api::ResponseReaderError>(&read))
+        {
+            const auto status = readError->methodError.has_value() ? sync::MutationStatus::Rejected
+                                                                   : sync::MutationStatus::Unknown;
+            if (const auto transitionError = transition(status))
+                co_return *transitionError;
+            co_return responseError(*readError);
+        }
+        const auto& response = std::get<api::CalendarSetResponse>(read);
+        if (const auto failed = response.notUpdated.find(calendarId);
+            failed != response.notUpdated.end())
+        {
+            if (const auto transitionError = transition(sync::MutationStatus::Rejected))
+                co_return *transitionError;
+            if (failed->second.type == api::CalendarSetErrorType::StateMismatch)
+                co_return error(
+                    OperationErrorCode::Conflict,
+                    QStringLiteral("Calendars changed on the server. Refresh and try again."));
+            if (failed->second.type == api::CalendarSetErrorType::Forbidden)
+                co_return error(
+                    OperationErrorCode::PermissionDenied,
+                    QStringLiteral("The server denied this default notification change."));
+            co_return error(OperationErrorCode::ProtocolViolation,
+                            QString::fromStdString(failed->second.description.value_or(
+                                "The calendar default notification update was rejected.")));
+        }
+        if (!response.updated.contains(calendarId))
+        {
+            if (const auto transitionError = transition(sync::MutationStatus::Unknown))
+                co_return *transitionError;
+            co_return error(OperationErrorCode::ProtocolViolation,
+                            QStringLiteral("Calendar/set omitted the updated calendar."));
+        }
+
+        auto acceptResult = sync::MutationProjectionTransaction::begin(
+            m_connection, QStringLiteral("Accept Calendar default notification mutation"));
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&acceptResult))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        auto accept = std::get<sync::MutationProjectionTransaction>(std::move(acceptResult));
+        if (const auto cacheError = accept.transition(
+                mutation.mutationId, sync::MutationStatus::Accepted, response.newState))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        if (const auto cacheError = accept.advance(domains))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        if (const auto cacheError = repository.applyCalendarDefaultAlerts(
+                accept.cacheTransaction(), accountId, calendarId, response.newState, withTime,
+                withoutTime))
             co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
         if (const auto cacheError = accept.remove(mutation.mutationId))
             co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
@@ -2585,6 +2915,55 @@ namespace javelin::jmap::calendar
                         if (const auto cacheError = repository.applyCalendarColor(
                                 resolve.cacheTransaction(), accountId, mutation.objectId,
                                 calendars.state, calendar->color))
+                            co_return error(OperationErrorCode::LocalStorageFailure,
+                                            cacheError->message);
+                        if (const auto cacheError = resolve.remove(mutation.mutationId))
+                            co_return error(OperationErrorCode::LocalStorageFailure,
+                                            cacheError->message);
+                        if (const auto cacheError = resolve.commit())
+                            co_return error(OperationErrorCode::LocalStorageFailure,
+                                            cacheError->message);
+                        summary.calendarMetadataAuthoritative = true;
+                        co_return summary;
+                    }
+                    if (mutation.mutationKind == "calendar_set_default_alerts")
+                    {
+                        const auto calendar =
+                            std::ranges::find(calendars.list, mutation.objectId, &Calendar::id);
+                        const auto desired =
+                            calendarDefaultAlertsMutationPayload(mutation.payloadJson);
+                        if (calendar == calendars.list.end() || !desired.has_value())
+                            co_return summary;
+                        const auto status =
+                            calendar->defaultAlertsWithTime == desired->first &&
+                                    calendar->defaultAlertsWithoutTime == desired->second
+                                ? sync::MutationStatus::Accepted
+                                : sync::MutationStatus::Rejected;
+                        auto resolveResult = sync::MutationProjectionTransaction::begin(
+                            m_connection,
+                            QStringLiteral("Resolve Calendar default notification uncertainty"));
+                        if (const auto* cacheError =
+                                std::get_if<cache::DatabaseError>(&resolveResult))
+                            co_return error(OperationErrorCode::LocalStorageFailure,
+                                            cacheError->message);
+                        auto resolve =
+                            std::get<sync::MutationProjectionTransaction>(std::move(resolveResult));
+                        if (const auto cacheError =
+                                resolve.transition(mutation.mutationId, status, calendars.state))
+                            co_return error(OperationErrorCode::LocalStorageFailure,
+                                            cacheError->message);
+                        const std::array domains{sync::ConsistencyDomain{
+                            .accountId = accountId,
+                            .dataType = "Calendar",
+                        }};
+                        if (const auto cacheError = resolve.advance(domains))
+                            co_return error(OperationErrorCode::LocalStorageFailure,
+                                            cacheError->message);
+                        cache::CalendarRepository repository{m_connection};
+                        if (const auto cacheError = repository.applyCalendarDefaultAlerts(
+                                resolve.cacheTransaction(), accountId, mutation.objectId,
+                                calendars.state, calendar->defaultAlertsWithTime,
+                                calendar->defaultAlertsWithoutTime))
                             co_return error(OperationErrorCode::LocalStorageFailure,
                                             cacheError->message);
                         if (const auto cacheError = resolve.remove(mutation.mutationId))

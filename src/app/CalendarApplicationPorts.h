@@ -51,6 +51,8 @@ namespace javelin::app
                          std::optional<std::string> color) = 0;
         [[nodiscard]] virtual QCoro::Task<CalendarColorBatchResult>
         setCalendarColors(std::vector<CalendarColorChange> changes) = 0;
+        [[nodiscard]] virtual QCoro::Task<CalendarDefaultAlertsBatchResult>
+        setCalendarDefaultAlerts(std::vector<CalendarDefaultAlertsChange> changes) = 0;
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         createCalendar(std::string ownerAccountId,
                        javelin::jmap::calendar::CreateCalendarCommand command) = 0;

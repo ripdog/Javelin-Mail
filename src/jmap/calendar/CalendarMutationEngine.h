@@ -9,6 +9,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace javelin::jmap::api
@@ -43,6 +44,11 @@ namespace javelin::jmap::calendar
         setCalendarColor(LiveConnectionSettings settings, std::string ownerAccountId,
                          std::string accountId, std::string calendarId,
                          std::optional<std::string> color);
+        [[nodiscard]] QCoro::Task<CalendarMutationResult>
+        setCalendarDefaultAlerts(LiveConnectionSettings settings, std::string ownerAccountId,
+                                 std::string accountId, std::string calendarId,
+                                 std::unordered_map<std::string, Alert> withTime,
+                                 std::unordered_map<std::string, Alert> withoutTime);
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
         createCalendar(LiveConnectionSettings settings, std::string ownerAccountId,
                        CreateCalendarCommand command);

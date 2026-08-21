@@ -97,6 +97,8 @@ namespace javelin::app
                          std::optional<std::string> color) override;
         [[nodiscard]] QCoro::Task<CalendarColorBatchResult>
         setCalendarColors(std::vector<CalendarColorChange> changes) override;
+        [[nodiscard]] QCoro::Task<CalendarDefaultAlertsBatchResult>
+        setCalendarDefaultAlerts(std::vector<CalendarDefaultAlertsChange> changes) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         createCalendar(std::string ownerAccountId,
                        javelin::jmap::calendar::CreateCalendarCommand command) override;

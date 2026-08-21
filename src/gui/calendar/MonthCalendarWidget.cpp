@@ -1,6 +1,7 @@
 #include "gui/calendar/MonthCalendarWidget.h"
 #include "gui/accessibility/AccessibleFactory.h"
 #include "gui/calendar/CalendarEventButton.h"
+#include "gui/calendar/CalendarNotificationEditor.h"
 #include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/MonthCalendarLayout.h"
 
@@ -28,6 +29,7 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QTabWidget>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -991,7 +993,15 @@ namespace javelin::gui::calendar
         auto* layout = new QVBoxLayout(&dialog);
         auto* list = new QListWidget(&dialog);
         std::unordered_map<std::string, QColor> pendingColors;
+        std::unordered_map<std::string,
+                           std::unordered_map<std::string, javelin::jmap::calendar::Alert>>
+            pendingAlertsWithTime;
+        std::unordered_map<std::string,
+                           std::unordered_map<std::string, javelin::jmap::calendar::Alert>>
+            pendingAlertsWithoutTime;
         pendingColors.reserve(m_calendars.size());
+        pendingAlertsWithTime.reserve(m_calendars.size());
+        pendingAlertsWithoutTime.reserve(m_calendars.size());
         for (const auto& calendar : m_calendars)
         {
             const auto label = m_calendarAccounts.size() > 1
@@ -1003,35 +1013,47 @@ namespace javelin::gui::calendar
             item->setData(Qt::UserRole, QString::fromStdString(calendar.id));
             item->setData(Qt::UserRole + 1, calendar.deletable);
             item->setData(Qt::UserRole + 2, calendar.canSetColor);
+            item->setData(Qt::UserRole + 3, calendar.canSetDefaultAlerts);
             pendingColors.emplace(calendar.id, calendar.color);
+            pendingAlertsWithTime.emplace(calendar.id, calendar.defaultAlertsWithTime);
+            pendingAlertsWithoutTime.emplace(calendar.id, calendar.defaultAlertsWithoutTime);
         }
         layout->addWidget(list);
-        auto* colorButtons = new QHBoxLayout();
+        auto* controls = new QHBoxLayout();
         auto* addCalendar = new QPushButton(QIcon::fromTheme(QStringLiteral("list-add")),
                                             i18nc("@action:button", "Add…"), &dialog);
         addCalendar->setEnabled(!m_calendarAccounts.empty());
         auto* deleteCalendar = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-delete")),
                                                i18nc("@action:button", "Delete"), &dialog);
-        auto* chooseColor = new QPushButton(i18nc("@action:button", "Choose Color…"), &dialog);
-        auto* resetColor = new QPushButton(i18nc("@action:button", "Use Automatic Color"), &dialog);
+        auto* notifications = new QPushButton(QIcon::fromTheme(QStringLiteral("appointment-new")),
+                                              i18nc("@action:button", "Notifications…"), &dialog);
+        auto* colorButton = new QToolButton(&dialog);
+        colorButton->setIcon(QIcon::fromTheme(QStringLiteral("color-management")));
+        colorButton->setText(i18nc("@action:button", "Color"));
+        colorButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        colorButton->setPopupMode(QToolButton::InstantPopup);
+        auto* colorMenu = new QMenu(colorButton);
+        auto* chooseColor = colorMenu->addAction(i18nc("@action:inmenu", "Choose Color…"));
+        auto* resetColor = colorMenu->addAction(i18nc("@action:inmenu", "Use Automatic Color"));
+        colorButton->setMenu(colorMenu);
         deleteCalendar->setEnabled(false);
-        chooseColor->setEnabled(false);
-        resetColor->setEnabled(false);
-        colorButtons->addWidget(addCalendar);
-        colorButtons->addWidget(deleteCalendar);
-        colorButtons->addSpacing(12);
-        colorButtons->addWidget(chooseColor);
-        colorButtons->addWidget(resetColor);
-        colorButtons->addStretch(1);
-        layout->addLayout(colorButtons);
+        notifications->setEnabled(false);
+        colorButton->setEnabled(false);
+        controls->addWidget(addCalendar);
+        controls->addWidget(deleteCalendar);
+        controls->addSpacing(12);
+        controls->addWidget(notifications);
+        controls->addWidget(colorButton);
+        controls->addStretch(1);
+        layout->addLayout(controls);
         connect(
             list, &QListWidget::currentItemChanged, &dialog,
-            [chooseColor, resetColor, deleteCalendar](QListWidgetItem* current, QListWidgetItem*)
+            [colorButton, notifications, deleteCalendar](QListWidgetItem* current, QListWidgetItem*)
             {
-                const bool colorEditable =
-                    current != nullptr && current->data(Qt::UserRole + 2).toBool();
-                chooseColor->setEnabled(colorEditable);
-                resetColor->setEnabled(colorEditable);
+                colorButton->setEnabled(current != nullptr &&
+                                        current->data(Qt::UserRole + 2).toBool());
+                notifications->setEnabled(current != nullptr &&
+                                          current->data(Qt::UserRole + 3).toBool());
                 deleteCalendar->setEnabled(current != nullptr &&
                                            current->data(Qt::UserRole + 1).toBool());
             });
@@ -1111,8 +1133,67 @@ namespace javelin::gui::calendar
                                          .calendarId = calendar->calendarId});
                     dialog.accept();
                 });
+        connect(notifications, &QPushButton::clicked, &dialog,
+                [this, list, &dialog, &pendingAlertsWithTime, &pendingAlertsWithoutTime]
+                {
+                    auto* item = list->currentItem();
+                    if (item == nullptr || !item->data(Qt::UserRole + 3).toBool())
+                        return;
+                    const auto id = item->data(Qt::UserRole).toString().toStdString();
+                    const auto calendar = std::ranges::find(m_calendars, id, &CalendarDisplay::id);
+                    if (calendar == m_calendars.end())
+                        return;
+                    auto withTime = pendingAlertsWithTime.find(id);
+                    auto withoutTime = pendingAlertsWithoutTime.find(id);
+                    if (withTime == pendingAlertsWithTime.end() ||
+                        withoutTime == pendingAlertsWithoutTime.end())
+                        return;
+
+                    QDialog notificationDialog{&dialog};
+                    notificationDialog.setWindowTitle(
+                        i18nc("@title:window", "Default Notifications — %1", calendar->name));
+                    notificationDialog.resize(560, 300);
+                    auto* notificationLayout = new QVBoxLayout(&notificationDialog);
+                    auto* tabs = new QTabWidget(&notificationDialog);
+                    auto* timed = new CalendarNotificationEditor(false, tabs);
+                    timed->setAlerts(withTime->second);
+                    auto* allDay = new CalendarNotificationEditor(false, tabs);
+                    allDay->setAlerts(withoutTime->second);
+                    tabs->addTab(timed, i18nc("@title:tab", "Timed events"));
+                    tabs->addTab(allDay, i18nc("@title:tab", "All-day events"));
+                    notificationLayout->addWidget(tabs);
+                    auto* notificationButtons = new QDialogButtonBox(
+                        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &notificationDialog);
+                    connect(notificationButtons, &QDialogButtonBox::accepted, &notificationDialog,
+                            &QDialog::accept);
+                    connect(notificationButtons, &QDialogButtonBox::rejected, &notificationDialog,
+                            &QDialog::reject);
+                    notificationLayout->addWidget(notificationButtons);
+                    if (notificationDialog.exec() != QDialog::Accepted)
+                        return;
+
+                    const auto mergeDisplayAlerts =
+                        [](auto alerts, const CalendarNotificationEditor& editor)
+                    {
+                        std::erase_if(
+                            alerts,
+                            [](const auto& entry)
+                            {
+                                return entry.second.action == "display" &&
+                                       entry.second.triggerKind ==
+                                           javelin::jmap::calendar::AlertTriggerKind::Offset;
+                            });
+                        for (auto [alertId, alert] : editor.displayAlerts())
+                            alerts.insert_or_assign(std::move(alertId), std::move(alert));
+                        return alerts;
+                    };
+                    pendingAlertsWithTime.insert_or_assign(
+                        id, mergeDisplayAlerts(std::move(withTime->second), *timed));
+                    pendingAlertsWithoutTime.insert_or_assign(
+                        id, mergeDisplayAlerts(std::move(withoutTime->second), *allDay));
+                });
         connect(
-            chooseColor, &QPushButton::clicked, &dialog,
+            chooseColor, &QAction::triggered, &dialog,
             [this, list, &dialog, &pendingColors]
             {
                 auto* item = list->currentItem();
@@ -1135,7 +1216,7 @@ namespace javelin::gui::calendar
                 pendingColors.insert_or_assign(id, color);
                 item->setIcon(colorSwatch(color));
             });
-        connect(resetColor, &QPushButton::clicked, &dialog,
+        connect(resetColor, &QAction::triggered, &dialog,
                 [this, list, &pendingColors]
                 {
                     auto* item = list->currentItem();
@@ -1158,13 +1239,13 @@ namespace javelin::gui::calendar
         if (dialog.exec() != QDialog::Accepted)
             return;
 
-        std::vector<CalendarColorEdit> changes;
+        std::vector<CalendarColorEdit> colorChanges;
         for (const auto& calendar : m_calendars)
         {
             const auto pending = pendingColors.find(calendar.id);
             if (pending == pendingColors.end() || pending->second == calendar.color)
                 continue;
-            changes.push_back({
+            colorChanges.push_back({
                 .calendar = {.ownerAccountId = calendar.ownerAccountId,
                              .accountId = calendar.accountId,
                              .calendarId = calendar.calendarId},
@@ -1173,8 +1254,26 @@ namespace javelin::gui::calendar
                              : std::nullopt,
             });
         }
-        if (!changes.empty())
-            Q_EMIT calendarColorsChanged(std::move(changes));
+        std::vector<CalendarDefaultAlertsEdit> alertChanges;
+        for (const auto& calendar : m_calendars)
+        {
+            const auto withTime = pendingAlertsWithTime.find(calendar.id);
+            const auto withoutTime = pendingAlertsWithoutTime.find(calendar.id);
+            if (withTime == pendingAlertsWithTime.end() ||
+                withoutTime == pendingAlertsWithoutTime.end() ||
+                (withTime->second == calendar.defaultAlertsWithTime &&
+                 withoutTime->second == calendar.defaultAlertsWithoutTime))
+                continue;
+            alertChanges.push_back({
+                .calendar = {.ownerAccountId = calendar.ownerAccountId,
+                             .accountId = calendar.accountId,
+                             .calendarId = calendar.calendarId},
+                .withTime = withTime->second,
+                .withoutTime = withoutTime->second,
+            });
+        }
+        if (!colorChanges.empty() || !alertChanges.empty())
+            Q_EMIT calendarManagerChangesSaved(std::move(colorChanges), std::move(alertChanges));
     }
 
     QDate MonthCalendarWidget::displayedMonth() const

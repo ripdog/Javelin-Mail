@@ -15,6 +15,7 @@
 
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -107,6 +108,7 @@ namespace
       public:
         int rangeRequestCount = 0;
         int colorBatchRequestCount = 0;
+        int defaultAlertsBatchRequestCount = 0;
         int subscriptionRequestCount = 0;
         int deleteCalendarRequestCount = 0;
         std::string lastOwnerAccountId;
@@ -114,6 +116,8 @@ namespace
         std::string lastCalendarId;
         bool lastSubscribed = false;
         std::vector<javelin::app::CalendarColorChange> lastColorBatch;
+        std::vector<javelin::app::CalendarDefaultAlertsChange> lastDefaultAlertsBatch;
+        std::vector<std::string> managerBatchOrder;
 
         QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
         requestCalendarRange(std::string, javelin::jmap::calendar::VisibleInterval interval,
@@ -186,10 +190,25 @@ namespace
         setCalendarColors(std::vector<javelin::app::CalendarColorChange> changes) override
         {
             ++colorBatchRequestCount;
+            managerBatchOrder.push_back("color");
             lastColorBatch = std::move(changes);
             co_return javelin::app::CalendarColorBatchResult{
                 .requestedCount = lastColorBatch.size(),
                 .appliedCount = lastColorBatch.size(),
+                .failures = {},
+                .error = std::nullopt,
+            };
+        }
+
+        QCoro::Task<javelin::app::CalendarDefaultAlertsBatchResult> setCalendarDefaultAlerts(
+            std::vector<javelin::app::CalendarDefaultAlertsChange> changes) override
+        {
+            ++defaultAlertsBatchRequestCount;
+            managerBatchOrder.push_back("alerts");
+            lastDefaultAlertsBatch = std::move(changes);
+            co_return javelin::app::CalendarDefaultAlertsBatchResult{
+                .requestedCount = lastDefaultAlertsBatch.size(),
+                .appliedCount = lastDefaultAlertsBatch.size(),
                 .failures = {},
                 .error = std::nullopt,
             };
@@ -316,6 +335,52 @@ TEST_CASE("workspace calendar manager command materializes Calendar before openi
     REQUIRE(tabs.size() == 1);
     CHECK(qobject_cast<javelin::gui::calendar::MonthCalendarWidget*>(contentStack.widget(0)) !=
           nullptr);
+}
+
+TEST_CASE("calendar manager saves color before default notification changes",
+          "[gui][calendar][notifications][actions]")
+{
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    Reader reader;
+    CommandPort commands;
+    QStackedWidget contentStack;
+    std::vector<javelin::gui::shell::TabState> tabs;
+    javelin::gui::shell::CalendarTabController controller{settings, reader, commands, contentStack,
+                                                          tabs};
+
+    controller.invokeWorkspace(javelin::gui::shell::CalendarTabCommand::Today);
+    REQUIRE(tabs.size() == 1);
+    auto* widget =
+        qobject_cast<javelin::gui::calendar::MonthCalendarWidget*>(contentStack.widget(0));
+    REQUIRE(widget != nullptr);
+    const std::unordered_map<std::string, javelin::jmap::calendar::Alert> timed{
+        {"reminder",
+         {.id = "reminder",
+          .action = "display",
+          .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+          .relativeTo = "start",
+          .offset = javelin::jmap::calendar::Duration{.value = "-PT15M"},
+          .when = std::nullopt,
+          .acknowledged = std::nullopt}},
+    };
+
+    Q_EMIT widget->calendarManagerChangesSaved({{.calendar = {.ownerAccountId = "owner-1",
+                                                              .accountId = "calendar-1",
+                                                              .calendarId = "cal-1"},
+                                                 .color = std::optional<std::string>{"#336699"}}},
+                                               {{.calendar = {.ownerAccountId = "owner-1",
+                                                              .accountId = "calendar-1",
+                                                              .calendarId = "cal-1"},
+                                                 .withTime = timed,
+                                                 .withoutTime = {}}});
+    QCoreApplication::processEvents();
+
+    REQUIRE(commands.managerBatchOrder.size() == 2);
+    CHECK(commands.managerBatchOrder == std::vector<std::string>{"color", "alerts"});
+    REQUIRE(commands.lastDefaultAlertsBatch.size() == 1);
+    REQUIRE(commands.lastDefaultAlertsBatch.front().withTime.contains("reminder"));
+    CHECK(commands.lastDefaultAlertsBatch.front().withTime.at("reminder").offset->value ==
+          "-PT15M");
 }
 
 TEST_CASE("calendar color edits cross the controller as one typed batch",

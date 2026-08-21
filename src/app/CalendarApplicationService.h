@@ -97,6 +97,11 @@ namespace javelin::app
         setCalendarColor(std::string ownerAccountId, std::string accountId, std::string calendarId,
                          std::optional<std::string> color);
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        setCalendarDefaultAlerts(
+            std::string ownerAccountId, std::string accountId, std::string calendarId,
+            std::unordered_map<std::string, javelin::jmap::calendar::Alert> withTime,
+            std::unordered_map<std::string, javelin::jmap::calendar::Alert> withoutTime);
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         createCalendar(std::string ownerAccountId,
                        javelin::jmap::calendar::CreateCalendarCommand command);
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>

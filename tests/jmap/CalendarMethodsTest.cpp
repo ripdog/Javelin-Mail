@@ -3,6 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <unordered_map>
+
 TEST_CASE("calendar event notification methods serialize draft-26 arguments",
           "[jmap][calendar][invitation]")
 {
@@ -239,7 +241,11 @@ TEST_CASE("calendar set serializes an exact subscription update", "[jmap][calend
         .accountId = "a1",
         .ifInState = "c1",
         .create = {},
-        .update = {{"work", {.isSubscribed = false, .color = std::nullopt}}},
+        .update = {{"work",
+                    {.isSubscribed = false,
+                     .color = std::nullopt,
+                     .defaultAlertsWithTime = std::nullopt,
+                     .defaultAlertsWithoutTime = std::nullopt}}},
         .destroy = {},
         .onDestroyRemoveEvents = false,
         .onSuccessSetIsDefault = std::nullopt,
@@ -259,7 +265,11 @@ TEST_CASE("calendar set serializes server calendar color updates", "[jmap][calen
         .accountId = "a1",
         .ifInState = "c1",
         .create = {},
-        .update = {{"work", {.isSubscribed = std::nullopt, .color = selectedColor}}},
+        .update = {{"work",
+                    {.isSubscribed = std::nullopt,
+                     .color = selectedColor,
+                     .defaultAlertsWithTime = std::nullopt,
+                     .defaultAlertsWithoutTime = std::nullopt}}},
         .destroy = {},
         .onDestroyRemoveEvents = false,
         .onSuccessSetIsDefault = std::nullopt,
@@ -274,13 +284,53 @@ TEST_CASE("calendar set serializes server calendar color updates", "[jmap][calen
         .accountId = "a1",
         .ifInState = "c1",
         .create = {},
-        .update = {{"work", {.isSubscribed = std::nullopt, .color = automaticColor}}},
+        .update = {{"work",
+                    {.isSubscribed = std::nullopt,
+                     .color = automaticColor,
+                     .defaultAlertsWithTime = std::nullopt,
+                     .defaultAlertsWithoutTime = std::nullopt}}},
         .destroy = {},
         .onDestroyRemoveEvents = false,
         .onSuccessSetIsDefault = std::nullopt,
     });
     REQUIRE(automatic.has_value());
     CHECK(automatic->arguments.find(R"("update":{"work":{"color":null}})") != std::string::npos);
+}
+
+TEST_CASE("calendar set serializes calendar default notifications", "[jmap][calendar]")
+{
+    const std::unordered_map<std::string, javelin::jmap::calendar::Alert> timed{
+        {"reminder",
+         {.id = "reminder",
+          .action = "display",
+          .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+          .relativeTo = "start",
+          .offset = javelin::jmap::calendar::Duration{.value = "-PT15M"},
+          .when = std::nullopt,
+          .acknowledged = std::nullopt}},
+    };
+    const auto method = javelin::jmap::api::calendarSet({
+        .accountId = "a1",
+        .ifInState = "c1",
+        .create = {},
+        .update = {{"work",
+                    {.isSubscribed = std::nullopt,
+                     .color = std::nullopt,
+                     .defaultAlertsWithTime = timed,
+                     .defaultAlertsWithoutTime =
+                         std::unordered_map<std::string, javelin::jmap::calendar::Alert>{}}}},
+        .destroy = {},
+        .onDestroyRemoveEvents = false,
+        .onSuccessSetIsDefault = std::nullopt,
+    });
+
+    REQUIRE(method.has_value());
+    CHECK(method->arguments.find(R"("defaultAlertsWithTime":{"reminder")") != std::string::npos);
+    CHECK(method->arguments.find(R"("@type":"OffsetTrigger")") != std::string::npos);
+    CHECK(method->arguments.find(R"("offset":"-PT15M")") != std::string::npos);
+    CHECK(method->arguments.find(R"("defaultAlertsWithoutTime":{})") != std::string::npos);
+    CHECK(method->arguments.find(R"("isSubscribed")") == std::string::npos);
+    CHECK(method->arguments.find(R"("color")") == std::string::npos);
 }
 
 TEST_CASE("calendar set serializes creation and destructive deletion", "[jmap][calendar]")

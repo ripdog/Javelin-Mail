@@ -116,6 +116,11 @@ namespace javelin::protocol::actions
                    ReplayPolicy::Never, detail::calendarOnly,
                    std::tuple<std::vector<javelin::app::CalendarColorChange>>,
                    javelin::app::CalendarColorBatchResult>;
+    using CalendarSetDefaultAlerts =
+        Descriptor<99, ActionDomain::Calendar, AdmissionSemantics::Asynchronous,
+                   ReplayPolicy::Never, detail::calendarOnly,
+                   std::tuple<std::vector<javelin::app::CalendarDefaultAlertsChange>>,
+                   javelin::app::CalendarDefaultAlertsBatchResult>;
     using CalendarActionTypes = std::tuple<
         RegisteredAction<CalendarReadCached, "CalendarReadCached">,
         RegisteredAction<CalendarReadAccounts, "CalendarReadAccounts">,
@@ -135,5 +140,6 @@ namespace javelin::protocol::actions
         RegisteredAction<CalendarReadParticipantIdentities, "CalendarReadParticipantIdentities">,
         RegisteredAction<CalendarReservedRangeSnapshot, "CalendarReadRangeSnapshot">,
         RegisteredAction<CalendarSetColor, "CalendarSetColor">,
-        RegisteredAction<CalendarSetColors, "CalendarSetColors">>;
+        RegisteredAction<CalendarSetColors, "CalendarSetColors">,
+        RegisteredAction<CalendarSetDefaultAlerts, "CalendarSetDefaultAlerts">>;
 } // namespace javelin::protocol::actions

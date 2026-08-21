@@ -156,8 +156,11 @@ namespace javelin::gui::calendar
                 .subscribed = calendar.isSubscribed,
                 .writable = calendar.myRights.mayWriteAll || calendar.myRights.mayWriteOwn,
                 .canSetColor = calendar.isSubscribed,
+                .canSetDefaultAlerts = calendar.isSubscribed,
                 .deletable = calendar.myRights.mayDelete,
                 .defaultDestination = calendar.isDefault,
+                .defaultAlertsWithTime = calendar.defaultAlertsWithTime,
+                .defaultAlertsWithoutTime = calendar.defaultAlertsWithoutTime,
             });
         }
         if (!window)

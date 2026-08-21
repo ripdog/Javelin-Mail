@@ -142,6 +142,67 @@ namespace javelin::app
         co_return summary;
     }
 
+    QCoro::Task<CalendarDefaultAlertsBatchResult> CalendarCommandService::setCalendarDefaultAlerts(
+        std::vector<CalendarDefaultAlertsChange> changes)
+    {
+        CalendarDefaultAlertsBatchResult summary{
+            .requestedCount = changes.size(),
+            .appliedCount = 0,
+            .failures = {},
+            .error = std::nullopt,
+        };
+        std::optional<javelin::jmap::OperationError> firstFailure;
+        std::unordered_map<std::string, javelin::jmap::OperationError> unavailableOwners;
+
+        for (const auto& change : changes)
+        {
+            if (const auto unavailable = unavailableOwners.find(change.ownerAccountId);
+                unavailable != unavailableOwners.end())
+            {
+                summary.failures.push_back({.change = change, .error = unavailable->second});
+                continue;
+            }
+
+            auto result = co_await m_service.setCalendarDefaultAlerts(
+                change.ownerAccountId, change.accountId, change.calendarId, change.withTime,
+                change.withoutTime);
+            if (std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result))
+            {
+                ++summary.appliedCount;
+                continue;
+            }
+
+            const auto& error = std::get<javelin::jmap::OperationError>(result);
+            summary.failures.push_back({.change = change, .error = error});
+            if (!firstFailure.has_value())
+                firstFailure = error;
+            if (javelin::jmap::isAuthenticationError(error) ||
+                javelin::jmap::isTransientError(error))
+                unavailableOwners.insert_or_assign(change.ownerAccountId, error);
+        }
+
+        if (firstFailure.has_value())
+        {
+            auto error = *firstFailure;
+            if (summary.appliedCount > 0)
+            {
+                error.message =
+                    i18n("Changed default notifications for %1 of %2 calendars. %3",
+                         static_cast<qulonglong>(summary.appliedCount),
+                         static_cast<qulonglong>(summary.requestedCount), error.message);
+            }
+            else if (summary.requestedCount > 1)
+            {
+                error.message =
+                    i18n("Could not change default notifications for any of %1 "
+                         "calendars. %2",
+                         static_cast<qulonglong>(summary.requestedCount), error.message);
+            }
+            summary.error = std::move(error);
+        }
+        co_return summary;
+    }
+
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     CalendarCommandService::createCalendar(std::string ownerAccountId,
                                            javelin::jmap::calendar::CreateCalendarCommand command)

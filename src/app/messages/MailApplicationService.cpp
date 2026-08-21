@@ -4502,6 +4502,45 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+    CalendarApplicationService::setCalendarDefaultAlerts(
+        std::string ownerAccountId, std::string accountId, std::string calendarId,
+        std::unordered_map<std::string, javelin::jmap::calendar::Alert> withTime,
+        std::unordered_map<std::string, javelin::jmap::calendar::Alert> withoutTime)
+    {
+        const ForegroundWorkScope foreground{m_workScheduler};
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
+                .message = accountSynchronizationNotConfigured(),
+            };
+        auto result = co_await m_calendarMutationEngine.setCalendarDefaultAlerts(
+            toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
+            std::move(accountId), std::move(calendarId), std::move(withTime),
+            std::move(withoutTime));
+        if (std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result))
+        {
+            const auto range = m_visibleCalendarRanges.find(ownerAccountId);
+            if (range != m_visibleCalendarRanges.end())
+                Q_EMIT calendarCacheCommitted(
+                    {.ownerAccountId = QString::fromStdString(ownerAccountId),
+                     .interval = range->second.interval,
+                     .displayTimeZone = range->second.displayTimeZone,
+                     .accountCount = 1,
+                     .eventCount = 0});
+            else
+                Q_EMIT calendarCacheCommitted(
+                    {.ownerAccountId = QString::fromStdString(ownerAccountId),
+                     .interval = {},
+                     .displayTimeZone = {},
+                     .accountCount = 1,
+                     .eventCount = 0});
+        }
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                i18n("Change calendar default notifications"), std::move(result));
+    }
+
+    QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     CalendarApplicationService::createCalendar(
         std::string ownerAccountId, javelin::jmap::calendar::CreateCalendarCommand command)
     {

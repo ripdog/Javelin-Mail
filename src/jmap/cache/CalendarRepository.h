@@ -53,6 +53,11 @@ namespace javelin::jmap::cache
         applyCalendarColor(DatabaseTransaction& transaction, std::string_view accountId,
                            std::string_view calendarId, std::string_view state,
                            const std::optional<std::string>& color);
+        [[nodiscard]] std::optional<DatabaseError> applyCalendarDefaultAlerts(
+            DatabaseTransaction& transaction, std::string_view accountId,
+            std::string_view calendarId, std::string_view state,
+            const std::unordered_map<std::string, calendar::Alert>& withTime,
+            const std::unordered_map<std::string, calendar::Alert>& withoutTime);
         [[nodiscard]] std::optional<DatabaseError>
         applyCalendarDefaults(DatabaseTransaction& transaction, std::string_view accountId,
                               std::string_view state,
