@@ -68,6 +68,8 @@ TEST_CASE("tab workspace close policy preserves the active tab by identity", "[g
     CHECK(activeTabIndexAfterClose(4, 2, 2) == std::optional<int>{1});
     CHECK(activeTabIndexAfterClose(4, 3, 1) == std::optional<int>{2});
     CHECK(activeTabIndexAfterClose(4, 3, 2) == std::optional<int>{2});
+    // Editing a search can append its replacement, then remove the old search before it.
+    CHECK(activeTabIndexAfterClose(5, 4, 2) == std::optional<int>{3});
     CHECK(activeTabIndexAfterClose(4, std::nullopt, 3) == std::optional<int>{2});
     CHECK(activeTabIndexAfterClose(4, 2, 8) == std::optional<int>{2});
 }

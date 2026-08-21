@@ -3577,7 +3577,15 @@ namespace javelin::gui::shell
                                                                    std::move(criteria));
         if (newIndex != oldIndex)
         {
+            const auto replacementIndex =
+                activeTabIndexAfterClose(m_tabs.size(), newIndex, oldIndex);
             closeTab(oldIndex);
+            if (replacementIndex.has_value() &&
+                static_cast<std::size_t>(*replacementIndex) < m_tabs.size())
+            {
+                updateTabBar();
+                activateTab(*replacementIndex, true);
+            }
             return;
         }
 
