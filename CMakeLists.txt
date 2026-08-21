@@ -1968,6 +1968,8 @@ add_library(javelin_daemon_core STATIC
     src/app/MailIndexService.h
     src/app/messages/MessageSelection.cpp
     src/app/MessageSelection.h
+    src/daemon/DaemonAccountConfiguration.cpp
+    src/daemon/DaemonAccountConfiguration.h
     src/daemon/DaemonBackgroundController.cpp
     src/daemon/DaemonBackgroundController.h
     src/daemon/DaemonProcess.cpp

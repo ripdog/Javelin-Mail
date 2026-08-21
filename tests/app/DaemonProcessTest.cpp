@@ -1,4 +1,5 @@
 #include "daemon/DaemonProcess.h"
+#include "daemon/DaemonAccountConfiguration.h"
 #include "app/AccountRuntimeManager.h"
 #include "app/CacheLocationProvider.h"
 #include "app/LogStore.h"
@@ -95,6 +96,69 @@ namespace
         };
     }
 } // namespace
+
+TEST_CASE("daemon account configuration build fails atomically when legacy claim fails",
+          "[app][daemon][settings]")
+{
+    javelin::protocol::SettingsSnapshot snapshot;
+    snapshot.accounts = {
+        {.id = QStringLiteral("connection-ready"),
+         .revision = 0,
+         .displayName = QStringLiteral("Ready"),
+         .sessionUrl = QStringLiteral("https://ready.example.test/jmap"),
+         .loginEmail = QStringLiteral("ready@example.test"),
+         .tokenEndpoint = {},
+         .oauthClientId = {},
+         .oauthIssuer = {},
+         .oauthResource = {},
+         .oauthScope = {},
+         .revocationEndpoint = {},
+         .registrationClientUri = {},
+         .hasCredentials = true,
+         .credentialHandle = {},
+         .tokenExpiresAtEpochSeconds = 0,
+         .reauthenticationRequired = false,
+         .cachedAccountIds = {}},
+        {.id = QStringLiteral("connection-legacy"),
+         .revision = 0,
+         .displayName = QStringLiteral("Legacy"),
+         .sessionUrl = QStringLiteral("https://legacy.example.test/jmap"),
+         .loginEmail = QStringLiteral("legacy@example.test"),
+         .tokenEndpoint = {},
+         .oauthClientId = {},
+         .oauthIssuer = {},
+         .oauthResource = {},
+         .oauthScope = {},
+         .revocationEndpoint = {},
+         .registrationClientUri = {},
+         .hasCredentials = true,
+         .credentialHandle = {},
+         .tokenExpiresAtEpochSeconds = 0,
+         .reauthenticationRequired = false,
+         .cachedAccountIds = {QStringLiteral("legacy-account")}},
+    };
+
+    javelin::app::MemoryAccountCredentialStore credentials;
+    REQUIRE_FALSE(credentials
+                      .store(QStringLiteral("connection-ready"),
+                             {.accessToken = QStringLiteral("ready-token"),
+                              .refreshToken = {},
+                              .registrationAccessToken = {}})
+                      .has_value());
+    REQUIRE_FALSE(credentials
+                      .store(QStringLiteral("connection-legacy"),
+                             {.accessToken = QStringLiteral("legacy-token"),
+                              .refreshToken = {},
+                              .registrationAccessToken = {}})
+                      .has_value());
+
+    javelin::jmap::cache::DatabaseConnection invalidConnection;
+    javelin::jmap::cache::AccountRepository accounts{invalidConnection};
+    const auto result =
+        javelin::app::buildAccountSyncConfigurations(snapshot, credentials, accounts);
+
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseError>(result));
+}
 
 TEST_CASE("daemon log store enforces a bounded history", "[app][daemon][logging]")
 {

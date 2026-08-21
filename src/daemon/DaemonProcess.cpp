@@ -18,12 +18,12 @@
 #include "app/UndoApplicationPorts.h"
 #include "app/WorkScheduler.h"
 #include "app/undo/UndoManager.h"
+#include "daemon/DaemonAccountConfiguration.h"
 #include "daemon/DaemonBackgroundController.h"
 #include "daemon/DaemonServices.h"
 #include "daemon/actions/DaemonRemoteActionDispatcher.h"
 
 #include "jmap/auth/AccountOnboardingService.h"
-#include "jmap/cache/AccountRepository.h"
 
 #include <QCoroTask>
 
@@ -50,127 +50,6 @@ namespace javelin::app
     namespace
     {
         using namespace javelin::protocol;
-
-        [[nodiscard]] AccountConnectionSettings
-        connectionSettings(const AccountSettings& settings,
-                           const AccountCredentialSecrets& credentials)
-        {
-            return {.connectionId = settings.id.toStdString(),
-                    .revision = settings.revision,
-                    .displayName = settings.displayName.toStdString(),
-                    .sessionUrl = settings.sessionUrl.toStdString(),
-                    .loginEmail = settings.loginEmail.toStdString(),
-                    .apiKey = credentials.accessToken.toStdString(),
-                    .refreshToken = credentials.refreshToken.toStdString(),
-                    .tokenEndpoint = settings.tokenEndpoint.toStdString(),
-                    .oauthClientId = settings.oauthClientId.toStdString(),
-                    .oauthIssuer = settings.oauthIssuer.toStdString(),
-                    .oauthResource = settings.oauthResource.toStdString(),
-                    .oauthScope = settings.oauthScope.toStdString(),
-                    .revocationEndpoint = settings.revocationEndpoint.toStdString(),
-                    .registrationClientUri = settings.registrationClientUri.toStdString(),
-                    .registrationAccessToken = credentials.registrationAccessToken.toStdString()};
-        }
-
-        [[nodiscard]] const MailboxSelectionSettings*
-        findSelection(const std::vector<MailboxSelectionSettings>& selections,
-                      const QString& accountId)
-        {
-            const auto found =
-                std::ranges::find(selections, accountId, &MailboxSelectionSettings::accountId);
-            return found == selections.end() ? nullptr : &*found;
-        }
-
-        [[nodiscard]] std::vector<std::string> stringIds(const std::vector<QString>& ids)
-        {
-            std::vector<std::string> result;
-            result.reserve(ids.size());
-            for (const auto& id : ids)
-                result.push_back(id.toStdString());
-            return result;
-        }
-
-        [[nodiscard]] bool
-        shouldConfigureMailAccount(javelin::jmap::cache::AccountReader& accountReader,
-                                   const QString& accountId)
-        {
-            const auto cached = accountReader.findById(accountId.toStdString());
-            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cached))
-            {
-                qWarning().noquote() << QStringLiteral("Could not inspect JMAP account capability")
-                                     << accountId << error->message;
-                return true;
-            }
-            const auto& account =
-                std::get<std::optional<javelin::jmap::cache::CachedAccount>>(cached);
-            return !account.has_value() || account->hasMailCapability;
-        }
-
-        [[nodiscard]] std::vector<AccountSyncConfiguration>
-        accountConfigurations(const SettingsSnapshot& snapshot,
-                              AccountCredentialStore& credentialStore,
-                              javelin::jmap::cache::AccountRepository& accountRepository)
-        {
-            std::vector<AccountSyncConfiguration> result;
-            for (const auto& account : snapshot.accounts)
-            {
-                QStringList knownAccountIds;
-                knownAccountIds.reserve(static_cast<qsizetype>(account.cachedAccountIds.size()));
-                for (const auto& accountId : account.cachedAccountIds)
-                    knownAccountIds.push_back(accountId);
-                if (const auto error = accountRepository.claimLegacyConnection(
-                        account.id.toStdString(), knownAccountIds))
-                {
-                    qWarning().noquote() << "Could not claim cached JMAP accounts for connection"
-                                         << account.id << error->message;
-                    continue;
-                }
-
-                if (account.loginEmail.isEmpty() || !account.hasCredentials)
-                    continue;
-                const auto loaded = credentialStore.load(account.id);
-                const auto* stored = std::get_if<std::optional<AccountCredentialSecrets>>(&loaded);
-                if (stored == nullptr || !stored->has_value() || !(*stored)->hasAccessToken())
-                    continue;
-                const auto& credentials = **stored;
-
-                const auto appendConfiguration = [&](const QString& accountId)
-                {
-                    const auto* synced = findSelection(snapshot.syncedMailboxSelections, accountId);
-                    const auto* notifications =
-                        findSelection(snapshot.notificationMailboxSelections, accountId);
-                    std::vector<QString> mailboxIds;
-                    if (synced != nullptr)
-                        mailboxIds = synced->mailboxIds;
-                    if (notifications != nullptr)
-                    {
-                        mailboxIds.insert(mailboxIds.end(), notifications->mailboxIds.begin(),
-                                          notifications->mailboxIds.end());
-                    }
-                    std::ranges::sort(mailboxIds);
-                    mailboxIds.erase(std::ranges::unique(mailboxIds).begin(), mailboxIds.end());
-
-                    result.push_back({
-                        .settings = connectionSettings(account, credentials),
-                        .accountId = accountId.toStdString(),
-                        .mailboxIds = stringIds(mailboxIds),
-                        .fullSyncMailboxIds = synced == nullptr ? std::vector<std::string>{}
-                                                                : stringIds(synced->mailboxIds),
-                        .notificationMailboxIds = notifications == nullptr
-                                                      ? std::vector<std::string>{}
-                                                      : stringIds(notifications->mailboxIds),
-                    });
-                };
-                for (const auto& accountId : account.cachedAccountIds)
-                {
-                    if (shouldConfigureMailAccount(accountRepository, accountId))
-                        appendConfiguration(accountId);
-                }
-                if (account.cachedAccountIds.empty())
-                    appendConfiguration(account.id);
-            }
-            return result;
-        }
 
         [[nodiscard]] BoundaryError settingsError(const SettingsRepositoryError& error)
         {
@@ -1098,8 +977,19 @@ namespace javelin::app
                                  .arg(m_settingsSnapshot.accounts.size() == 1 ? QString{}
                                                                               : QStringLiteral("s"))
                                  .arg(completeSettings);
-        const auto configurations = accountConfigurations(m_settingsSnapshot, *m_credentialStore,
-                                                          m_services->accountRepository());
+        auto configurationResult = buildAccountSyncConfigurations(
+            m_settingsSnapshot, *m_credentialStore, m_services->accountRepository());
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&configurationResult))
+        {
+            qWarning().noquote()
+                << "Could not rebuild account runtime configuration; keeping the existing runtime "
+                   "configuration"
+                << error->message;
+            return;
+        }
+        auto configurations =
+            std::get<std::vector<AccountSyncConfiguration>>(std::move(configurationResult));
         std::vector<FullSyncAccountConfiguration> fullSync;
         std::vector<std::string> accountIds;
         fullSync.reserve(configurations.size());
