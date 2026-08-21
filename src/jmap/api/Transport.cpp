@@ -344,8 +344,8 @@ namespace javelin::jmap::api
             networkRequest.setRawHeader(header.name, header.value);
         }
 
-        qCInfo(logTransport).noquote() << "request" << request.url.toString()
-                                       << (request.method == HttpMethod::Get ? "GET" : "POST");
+        qCInfo(logTransport) << "request" << (request.method == HttpMethod::Get ? "GET" : "POST")
+                             << "bodyBytes=" << request.body.size();
 
         QNetworkReply* reply = nullptr;
         switch (request.method)

@@ -176,8 +176,7 @@ namespace javelin::jmap::sync
             return;
         }
 
-        qInfo().noquote() << "State-change source aborting active event-source request"
-                          << activeReply->url().toString();
+        qInfo() << "State-change source aborting active event-source request";
         activeReply->abort();
     }
 

@@ -157,15 +157,8 @@ namespace javelin::app
                     return;
                 }
                 if (watchedMailboxesChanged)
-                {
-                    QStringList mailboxNames;
-                    for (const auto& mailbox : updatedConfiguration->mailboxes)
-                    {
-                        mailboxNames.push_back(QString::fromStdString(mailbox.second));
-                    }
-                    qInfo().noquote()
-                        << "Update watched mailboxes to" << mailboxNames.join(QStringLiteral(", "));
-                }
+                    qInfo() << "Update watched mailbox selection"
+                            << "count=" << updatedConfiguration->mailboxes.size();
                 if (!newlyAddedMailboxIds.empty())
                     scheduleDebouncedRefresh(false, std::move(newlyAddedMailboxIds));
                 return;

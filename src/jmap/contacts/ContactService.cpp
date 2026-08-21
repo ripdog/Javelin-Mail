@@ -2236,10 +2236,8 @@ namespace javelin::jmap::contacts
                 co_return *operationError;
             auto rebased = std::get<RebasedContacts>(rebasedResult);
             if (!activeBooks.empty() || !activeContacts.empty())
-                qCInfo(logContactMutations).noquote()
+                qCInfo(logContactMutations)
                     << "Rebase Contacts refresh"
-                    << "account=" << QString::fromStdString(accountId)
-                    << "serverState=" << QString::fromStdString(cards.value->state)
                     << "activeAddressBooks=" << activeBooks.size()
                     << "activeContacts=" << activeContacts.size()
                     << "acceptedAddressBooks=" << rebased.acceptedBooks.size()
@@ -2464,12 +2462,10 @@ namespace javelin::jmap::contacts
             operationError->code == javelin::jmap::OperationErrorCode::Conflict &&
             operationError->protocolType == "stateMismatch")
         {
-            qCInfo(logContactMutations).noquote()
+            qCInfo(logContactMutations)
                 << "action="
                 << QString::fromStdString(options.traceId.value_or(std::string{"<untracked>"}))
                 << "state mismatch; preserve projection and refresh"
-                << "account=" << QString::fromStdString(accountId) << "attemptedState="
-                << QString::fromStdString(request.ifInState.value_or(std::string{"<none>"}))
                 << "mutations=" << prepared.records.size();
             if (const auto cacheError = journal.transition(
                     prepared.records, javelin::jmap::sync::MutationStatus::Pending))
@@ -2501,12 +2497,10 @@ namespace javelin::jmap::contacts
                           javelin::jmap::OperationErrorCode::ProtocolViolation));
 
             request.ifInState = *currentState;
-            qCInfo(logContactMutations).noquote()
+            qCInfo(logContactMutations)
                 << "action="
                 << QString::fromStdString(options.traceId.value_or(std::string{"<untracked>"}))
                 << "retry Contacts mutation"
-                << "account=" << QString::fromStdString(accountId)
-                << "refreshedState=" << QString::fromStdString(*currentState)
                 << "mutations=" << prepared.records.size();
             serialized = javelin::jmap::api::serializeContactCardSetRequest(request);
             if (!serialized.has_value())

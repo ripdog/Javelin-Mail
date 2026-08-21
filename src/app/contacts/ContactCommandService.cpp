@@ -279,9 +279,7 @@ namespace javelin::app
         auto request = std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared));
         if (request.update.empty())
         {
-            qCInfo(logContactCommands).noquote()
-                << actionDescription << "account=" << QString::fromStdString(request.accountId)
-                << "outcome=no_change";
+            qCInfo(logContactCommands) << actionDescription << "outcome=no_change";
             co_return javelin::jmap::contacts::ContactMutationSummary{
                 .accountId = std::move(request.accountId),
                 .newState = request.ifInState.value_or(std::string{}),
@@ -643,10 +641,8 @@ namespace javelin::app
             actionDescription = operationDescription;
         const auto operationGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
         const auto traceId = operationGroupId.left(8).toStdString();
-        qCInfo(logContactCommands).noquote()
+        qCInfo(logContactCommands)
             << "action=" << QString::fromStdString(traceId) << actionDescription
-            << "account=" << QString::fromStdString(request.accountId)
-            << "state=" << QString::fromStdString(request.ifInState.value_or(std::string{"<none>"}))
             << "creates=" << request.create.size() << "updates=" << request.update.size()
             << "destroys=" << request.destroy.size();
         const auto reportError = [this, &settings, &ownerAccountId,
@@ -746,9 +742,8 @@ namespace javelin::app
             co_return reportError(*error);
         }
         const auto& summary = std::get<javelin::jmap::contacts::ContactMutationSummary>(result);
-        qCInfo(logContactCommands).noquote()
+        qCInfo(logContactCommands)
             << "action=" << QString::fromStdString(traceId) << "outcome=accepted"
-            << "state=" << QString::fromStdString(summary.newState)
             << "acceptedObjects=" << summary.receipt.acceptedObjectIds.size()
             << "rejectedObjects=" << summary.receipt.rejectedObjectIds.size();
 

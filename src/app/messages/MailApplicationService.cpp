@@ -1126,10 +1126,8 @@ namespace javelin::app
                 m_errorCoordinator.reportSuccess(appliedSettings.connectionId);
 
                 const auto& summary = std::get<javelin::jmap::SessionRefreshSummary>(result);
-                qInfo().noquote() << "JMAP startup session discovered"
-                                  << QString::fromStdString(ownerAccountId)
-                                  << (summary.websocketAdvertised ? QStringLiteral("WebSocket")
-                                                                  : QStringLiteral("HTTP only"));
+                qInfo() << "JMAP startup session discovered"
+                        << (summary.websocketAdvertised ? "WebSocket" : "HTTP only");
                 for (const auto& [accountId, configuration] : m_configurations)
                 {
                     if (configuration.settings.connectionId == appliedSettings.connectionId)
@@ -1266,10 +1264,8 @@ namespace javelin::app
                             std::get<javelin::jmap::SubmittedEmailMutations>(result);
                         if (summary.attemptedEmailCount == 0)
                             return;
-                        qInfo().noquote()
-                            << "Queued mail replay submitted" << QString::fromStdString(accountId)
-                            << summary.updatedEmailCount << "updated" << summary.failedEmailCount
-                            << "failed";
+                        qInfo() << "Queued mail replay submitted" << summary.updatedEmailCount
+                                << "updated" << summary.failedEmailCount << "failed";
                         if (m_accountRuntime.connectionSettingsFor(accountId).has_value())
                             schedulePendingEmailMutationReplay(accountId);
                     });

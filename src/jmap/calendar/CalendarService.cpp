@@ -3702,10 +3702,8 @@ namespace javelin::jmap::calendar
                                 javelin::jmap::sync::MutationReconciliationDisposition::Applied
                             ? QStringLiteral("applied")
                             : QStringLiteral("superseded");
-                    qCInfo(logCalendarService).noquote()
-                        << "Resolved ambiguous CalendarEvent mutation"
-                        << QString::fromStdString(accountId)
-                        << QString::fromStdString(resolved.record.objectId) << disposition;
+                    qCInfo(logCalendarService)
+                        << "Resolved ambiguous CalendarEvent mutation" << disposition;
                     summary.reconciledMutations.push_back({
                         .accountId = accountId,
                         .dataType = "CalendarEvent",
@@ -4134,10 +4132,7 @@ namespace javelin::jmap::calendar
                 co_return failure;
             }
 
-            qCInfo(logCalendarService).noquote()
-                << "CalendarEvent state mismatch; refresh and retry"
-                << "account=" << QString::fromStdString(request.accountId) << "attemptedState="
-                << QString::fromStdString(request.ifInState.value_or(std::string{"<none>"}));
+            qCInfo(logCalendarService) << "CalendarEvent state mismatch; refresh and retry";
             auto refreshed = co_await m_syncEngine.refreshChanged(
                 settings, ownerAccountId, recoveryMaterialization->interval,
                 recoveryMaterialization->displayTimeZone);
@@ -4231,10 +4226,7 @@ namespace javelin::jmap::calendar
             }
 
             request.ifInState = currentState;
-            qCInfo(logCalendarService).noquote()
-                << "Retry CalendarEvent mutation"
-                << "account=" << QString::fromStdString(request.accountId)
-                << "refreshedState=" << QString::fromStdString(currentState);
+            qCInfo(logCalendarService) << "Retry CalendarEvent mutation";
             bool retryProjectionCommitted = false;
             auto retryCallback = [&projectionCommitted, &retryProjectionCommitted]
             {

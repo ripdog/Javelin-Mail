@@ -806,7 +806,7 @@ namespace javelin::jmap::api
                     options.setSubprotocols({QStringLiteral("jmap")});
                     m_opening = true;
                     m_socket.open(handshake, options);
-                    qCInfo(logJmapWebSocketTransport).noquote() << "connecting" << url.toString();
+                    qCInfo(logJmapWebSocketTransport) << "connecting";
                 }
 
                 QElapsedTimer elapsed;
@@ -1092,9 +1092,7 @@ namespace javelin::jmap::api
             return;
 
         connection->second->invalidate();
-        qCInfo(logJmapWebSocketTransport).noquote()
-            << "invalidated connection after network discontinuity"
-            << QString::fromStdString((*target)->webSocketUrl);
+        qCInfo(logJmapWebSocketTransport) << "invalidated connection after network discontinuity";
     }
 
     QCoro::Task<JmapMethodTransportResult>

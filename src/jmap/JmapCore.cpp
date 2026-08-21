@@ -1305,9 +1305,7 @@ namespace javelin::jmap
             }
         };
 
-        qInfo().noquote() << "Account bootstrap start"
-                          << QString::fromStdString(settings.loginEmail)
-                          << QString::fromStdString(settings.sessionUrl);
+        qInfo() << "Account bootstrap start";
         reportProgress(QStringLiteral("Discovering JMAP session..."));
         if (m_impl->databaseConnection == nullptr || m_impl->resourceTransport == nullptr ||
             m_impl->methodTransport == nullptr)
@@ -1366,9 +1364,8 @@ namespace javelin::jmap
 
         const auto& remoteAccountId = *session.primaryAccounts.mailAccountId;
         javelin::jmap::cache::SessionRepository sessionRepository{*m_impl->databaseConnection};
-        qInfo().noquote() << "Account bootstrap saving session and accounts"
-                          << QString::fromStdString(remoteAccountId)
-                          << static_cast<qulonglong>(session.accounts.size());
+        qInfo() << "Account bootstrap saving session and accounts"
+                << "accountCount=" << static_cast<qulonglong>(session.accounts.size());
         const auto replaceResult =
             sessionRepository.replaceForConnection(connectionId, remoteAccountId, session);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&replaceResult))
@@ -1387,8 +1384,7 @@ namespace javelin::jmap
         const std::string accountId = localAccount->second;
         reportProgress(QStringLiteral("Cached session. Fetching mailboxes..."));
         const auto apiRequestContext = buildApiRequestContext(settings, connectionId, session);
-        qInfo().noquote() << "Account bootstrap mailbox request context ready"
-                          << QString::fromStdString(apiRequestContext.apiUrl);
+        qInfo() << "Account bootstrap mailbox request context ready";
 
         javelin::jmap::api::MethodCaller methodCaller{*m_impl->methodTransport};
         const auto mailboxRequest = javelin::jmap::api::mailboxGet({.accountId = remoteAccountId,
@@ -1401,8 +1397,7 @@ namespace javelin::jmap
                 .message = QStringLiteral("Failed to encode the Mailbox/get request."),
             };
         }
-        qInfo().noquote() << "Account bootstrap Mailbox/get request encoded"
-                          << QString::fromStdString(mailboxRequest->arguments);
+        qInfo() << "Account bootstrap Mailbox/get request encoded";
 
         javelin::jmap::api::RequestBuilder mailboxRequestBuilder;
         mailboxRequestBuilder.useCore().useMail();
@@ -1483,11 +1478,9 @@ namespace javelin::jmap
             reportProgress(QStringLiteral("Cached %1 threaded conversations.").arg(emailCount));
         }
 
-        const auto refreshSummary = QStringLiteral("Loaded %1 mailboxes and %2 messages from %3.")
-                                        .arg(parsedMailboxes.list.size())
-                                        .arg(emailCount)
-                                        .arg(QString::fromStdString(settings.loginEmail));
-        qInfo().noquote() << "Account bootstrap success" << refreshSummary;
+        qInfo() << "Account bootstrap success"
+                << "mailboxCount=" << static_cast<qulonglong>(parsedMailboxes.list.size())
+                << "messageCount=" << static_cast<qulonglong>(emailCount);
 
         co_return LiveRefreshSummary{
             .accountId = accountId,
@@ -3452,10 +3445,10 @@ namespace javelin::jmap
 
         auto query = javelin::jmap::search::displayString(criteria);
         const auto queryKey = windowKey.value_or(javelin::jmap::search::cacheKey(criteria, sort));
-        qInfo().noquote() << "Mail search materialization start"
-                          << QString::fromStdString(accountId) << QString::fromStdString(query)
-                          << "offset" << offset << "limit" << limit << "window"
-                          << QString::fromStdString(queryKey);
+        qInfo() << "Mail search materialization start"
+                << "offset=" << static_cast<qulonglong>(offset)
+                << "limit=" << static_cast<qulonglong>(limit) << "anchored=" << anchor.has_value()
+                << "explicitWindowKey=" << windowKey.has_value();
         reportProgress(QStringLiteral("Searching the server..."));
         if (m_impl->databaseConnection == nullptr || m_impl->queryClient == nullptr)
         {
@@ -3550,9 +3543,9 @@ namespace javelin::jmap
             }
         };
 
-        qInfo().noquote() << "Mailbox page materialization" << QString::fromStdString(accountId)
-                          << QString::fromStdString(mailboxId) << static_cast<qulonglong>(offset)
-                          << static_cast<qulonglong>(limit);
+        qInfo() << "Mailbox page materialization"
+                << "offset=" << static_cast<qulonglong>(offset)
+                << "limit=" << static_cast<qulonglong>(limit) << "anchored=" << anchor.has_value();
         reportProgress(QStringLiteral("Fetching mailbox page from the server..."));
         if (m_impl->databaseConnection == nullptr || m_impl->queryClient == nullptr)
         {
