@@ -2,6 +2,8 @@
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/messageview/MessageBodyPresenter.h"
 
+#include <QCoreApplication>
+#include <QEventLoop>
 #include <QLabel>
 #include <QLineEdit>
 #include <QScrollArea>
@@ -11,6 +13,8 @@
 #include <QWidget>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <memory>
 
 TEST_CASE("reader command controller owns plain-text find traversal")
 {
@@ -76,4 +80,40 @@ TEST_CASE("reader command controller owns plain-text find traversal")
     CHECK_FALSE(controller.available());
     controller.showFindBar();
     CHECK(findBar.isHidden());
+}
+
+TEST_CASE("reader HTML find callback tolerates destroyed controller and view")
+{
+    QWidget dialogParent;
+    QStackedWidget stack;
+    QWidget placeholder;
+    QScrollArea multiple;
+    QTextBrowser plainText;
+    auto html = std::make_unique<javelin::gui::messageview::HtmlMessageView>();
+    stack.addWidget(&placeholder);
+    stack.addWidget(&multiple);
+    stack.addWidget(&plainText);
+    stack.addWidget(html.get());
+
+    javelin::gui::messageview::MessageBodyPresenter bodyPresenter{stack, placeholder, multiple,
+                                                                  plainText, *html};
+    bodyPresenter.setActiveView(javelin::gui::messageview::MessageBodyPresenter::View::Html);
+    html->setDocumentHtml("<p>alpha beta alpha</p>", "find-lifetime");
+
+    QWidget findBar;
+    QLineEdit findEdit;
+    QLabel findResult;
+    QToolButton previous;
+    QToolButton next;
+    auto controller =
+        std::make_unique<javelin::gui::messageview::MessageReaderCommandController>(
+            bodyPresenter, plainText, *html, findBar, findEdit, findResult, previous, next,
+            [] { return true; }, [] {}, [] { return QStringLiteral("Subject"); }, dialogParent);
+
+    controller->showFindBar();
+    findEdit.setText(QStringLiteral("alpha"));
+    html.reset();
+    controller.reset();
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    SUCCEED();
 }

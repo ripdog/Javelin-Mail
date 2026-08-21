@@ -12,6 +12,7 @@
 #include <QLineEdit>
 #include <QPalette>
 #include <QPrintDialog>
+#include <QPointer>
 #include <QPrinter>
 #include <QShortcut>
 #include <QTextBrowser>
@@ -120,16 +121,21 @@ namespace javelin::gui::messageview
 
         if (m_bodyPresenter.activeView() == MessageBodyPresenter::View::Html)
         {
-            m_htmlView.findText(query, backwards,
-                                [this, query](const int activeMatch, const int matchCount)
-                                {
-                                    if (m_findEdit.text() == query &&
-                                        m_bodyPresenter.activeView() ==
-                                            MessageBodyPresenter::View::Html)
-                                    {
-                                        updateFindResult(activeMatch, matchCount);
-                                    }
-                                });
+            const QPointer<MessageReaderCommandController> controller{this};
+            const QPointer<HtmlMessageView> htmlView{&m_htmlView};
+            m_htmlView.findText(
+                query, backwards,
+                [controller, htmlView, query](const int activeMatch, const int matchCount)
+                {
+                    if (controller.isNull() || htmlView.isNull())
+                        return;
+                    if (controller->m_findEdit.text() == query &&
+                        controller->m_bodyPresenter.activeView() ==
+                            MessageBodyPresenter::View::Html)
+                    {
+                        controller->updateFindResult(activeMatch, matchCount);
+                    }
+                });
             return;
         }
 
