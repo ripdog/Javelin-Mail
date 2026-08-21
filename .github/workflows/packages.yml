@@ -28,7 +28,7 @@ jobs:
 
       - name: Prepare makepkg user
         run: |
-          pacman -Syu --noconfirm --needed base-devel git sudo
+          pacman -S --noconfirm --needed base-devel git sudo
           useradd --create-home builder
           printf 'builder ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/builder
           chmod 440 /etc/sudoers.d/builder
@@ -126,7 +126,7 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          pacman -Syu --noconfirm --needed \
+          pacman -S --noconfirm --needed \
             base-devel \
             blas-openblas \
             boost \
