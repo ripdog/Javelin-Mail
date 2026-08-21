@@ -59,43 +59,6 @@ namespace javelin::gui::compose
             PendingCreate,
         };
 
-        [[nodiscard]] std::optional<std::vector<javelin::jmap::domain::EmailAddress>>
-        parseAddresses(const QString& value)
-        {
-            std::vector<javelin::jmap::domain::EmailAddress> result;
-            QString current;
-            bool insideAngleBrackets = false;
-            for (const auto character : value)
-            {
-                if (character == QLatin1Char('<'))
-                    insideAngleBrackets = true;
-                else if (character == QLatin1Char('>'))
-                    insideAngleBrackets = false;
-                if (!insideAngleBrackets &&
-                    (character == QLatin1Char(',') || character == QLatin1Char(';')))
-                {
-                    if (!current.trimmed().isEmpty())
-                    {
-                        const auto parsed = parseAddressToken(current);
-                        if (!parsed.has_value())
-                            return std::nullopt;
-                        result.push_back(*parsed);
-                    }
-                    current.clear();
-                    continue;
-                }
-                current.append(character);
-            }
-            if (!current.trimmed().isEmpty())
-            {
-                const auto parsed = parseAddressToken(current);
-                if (!parsed.has_value())
-                    return std::nullopt;
-                result.push_back(*parsed);
-            }
-            return result;
-        }
-
         [[nodiscard]] QString signatureHtmlWithoutImages(QString html)
         {
             static const QRegularExpression imageTag{QStringLiteral("<img\\b[^>]*>"),
@@ -691,8 +654,8 @@ namespace javelin::gui::compose
                                  i18n("Enter a valid sender email address."));
             return;
         }
-        const auto replyTo = parseAddresses(m_replyToEdit->text());
-        const auto bcc = parseAddresses(m_bccEdit->text());
+        const auto replyTo = parseAddressList(m_replyToEdit->text());
+        const auto bcc = parseAddressList(m_bccEdit->text());
         if (!replyTo.has_value() || !bcc.has_value())
         {
             QMessageBox::warning(this, i18n("Invalid Address"),

@@ -1,5 +1,7 @@
 #include "gui/compose/IdentityPresentation.h"
 
+#include "gui/compose/EmailAddressText.h"
+
 #include <QStringList>
 #include <QTextDocument>
 
@@ -22,10 +24,10 @@ namespace javelin::gui::compose
 
     QString identityAddressLabel(const javelin::jmap::domain::Identity& identity)
     {
-        if (identity.name.empty())
-            return QString::fromStdString(identity.email);
-        return QStringLiteral("%1 <%2>").arg(QString::fromStdString(identity.name),
-                                             QString::fromStdString(identity.email));
+        return displayAddress({.name = identity.name.empty()
+                                           ? std::nullopt
+                                           : std::optional<std::string>{identity.name},
+                               .email = identity.email});
     }
 
     QString identitySignaturePreview(const javelin::jmap::domain::Identity& identity)

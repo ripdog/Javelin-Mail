@@ -293,6 +293,7 @@ add_executable(javelin_gui_policy_tests
     gui/GuiSettingsTest.cpp
     gui/ComposeTabPolicyTest.cpp
     gui/ComposeBodyConverterTest.cpp
+    gui/EmailAddressTextTest.cpp
     gui/IdentityPresentationTest.cpp
     gui/SignatureTrackingPolicyTest.cpp
     gui/MailboxSelectionTest.cpp

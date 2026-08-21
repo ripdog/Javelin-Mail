@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gui/compose/EmailAddressText.h"
 #include "jmap/domain/MailEntities.h"
 
 #include <QUrl>
@@ -23,12 +24,10 @@ namespace javelin::gui::compose
     inline void appendMailtoAddresses(std::vector<javelin::jmap::domain::EmailAddress>& destination,
                                       const QString& value)
     {
-        for (const auto& address : value.split(QLatin1Char(','), Qt::SkipEmptyParts))
-        {
-            const auto trimmed = address.trimmed();
-            if (!trimmed.isEmpty())
-                destination.push_back({.name = std::nullopt, .email = trimmed.toStdString()});
-        }
+        const auto parsed = parseAddressList(value, false);
+        if (!parsed.has_value())
+            return;
+        destination.insert(destination.end(), parsed->begin(), parsed->end());
     }
 
     [[nodiscard]] inline std::optional<ParsedMailto> parseMailtoUri(const QString& value)

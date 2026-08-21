@@ -1,6 +1,7 @@
 #include "gui/compose/ComposeIdentityController.h"
 
 #include "app/ComposeApplicationPorts.h"
+#include "gui/compose/EmailAddressText.h"
 #include "gui/compose/IdentityPresentation.h"
 #include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/GuiSettings.h"
@@ -160,19 +161,7 @@ namespace javelin::gui::compose
                                     ? QString::fromStdString(*option.identity.htmlSignature)
                                     : QString{},
                                 htmlSignatureRole);
-            QStringList bcc;
-            for (const auto& address : option.identity.bcc)
-            {
-                if (address.name.has_value() && !address.name->empty())
-                {
-                    bcc.push_back(
-                        QStringLiteral("%1 <%2>").arg(QString::fromStdString(*address.name),
-                                                      QString::fromStdString(address.email)));
-                }
-                else
-                    bcc.push_back(QString::fromStdString(address.email));
-            }
-            m_combo.setItemData(index, bcc.join(QStringLiteral(", ")), bccRole);
+            m_combo.setItemData(index, formatAddresses(option.identity.bcc), bccRole);
             if (option.accountId == selectedAccount &&
                 QString::fromStdString(option.identity.id) == selectedIdentity)
             {

@@ -19,37 +19,6 @@
 
 namespace javelin::gui::compose
 {
-    namespace
-    {
-        [[nodiscard]] std::vector<javelin::jmap::domain::EmailAddress>
-        parseAddresses(const QString& value)
-        {
-            std::vector<javelin::jmap::domain::EmailAddress> addresses;
-            QString current;
-            bool insideAngleBrackets = false;
-            for (const auto character : value)
-            {
-                if (character == QLatin1Char('<'))
-                    insideAngleBrackets = true;
-                else if (character == QLatin1Char('>'))
-                    insideAngleBrackets = false;
-
-                if (!insideAngleBrackets &&
-                    (character == QLatin1Char(',') || character == QLatin1Char(';')))
-                {
-                    if (const auto parsed = parseAddressToken(current))
-                        addresses.push_back(*parsed);
-                    current.clear();
-                    continue;
-                }
-                current.append(character);
-            }
-            if (const auto parsed = parseAddressToken(current))
-                addresses.push_back(*parsed);
-            return addresses;
-        }
-    } // namespace
-
     struct ComposeRecipientController::RecipientRow
     {
         QWidget* widget = nullptr;
@@ -157,8 +126,9 @@ namespace javelin::gui::compose
         {
             if (row.typeCombo->currentData().toInt() != static_cast<int>(type))
                 continue;
-            const auto parsed = parseAddresses(row.edit->text());
-            result.insert(result.end(), parsed.begin(), parsed.end());
+            const auto parsed = parseAddressList(row.edit->text(), false);
+            if (parsed.has_value())
+                result.insert(result.end(), parsed->begin(), parsed->end());
         }
         return result;
     }
