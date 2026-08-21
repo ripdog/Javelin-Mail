@@ -65,6 +65,11 @@ namespace
         {
             Q_EMIT threadMaterializationProgress(std::move(progress));
         }
+
+        void publishStatus(const QString& accountId, const javelin::app::MailAccountStatus status)
+        {
+            Q_EMIT accountStatusChanged(accountId, status);
+        }
     };
 
     class PendingMaterializationPort final : public javelin::app::MessageListMaterializationPort
@@ -758,6 +763,17 @@ TEST_CASE("mailbox session exposes materialization progress only for visible Thr
                     .error = {}});
     CHECK(session.state().threadMaterializationInFlight);
     CHECK_FALSE(session.state().refreshInFlight);
+
+    events.publishStatus(QStringLiteral("account-1"),
+                         javelin::app::MailAccountStatus::Disconnected);
+    CHECK_FALSE(session.state().threadMaterializationInFlight);
+
+    events.publish({.accountId = QStringLiteral("account-1"),
+                    .threadIds = {QStringLiteral("thread-email-1")},
+                    .inFlight = true,
+                    .success = true,
+                    .error = {}});
+    CHECK(session.state().threadMaterializationInFlight);
 
     events.publish({.accountId = QStringLiteral("account-1"),
                     .threadIds = {QStringLiteral("thread-email-1")},

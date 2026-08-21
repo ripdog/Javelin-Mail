@@ -17,6 +17,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <atomic>
 #include <functional>
 #include <mutex>
 #include <utility>
@@ -134,6 +135,8 @@ namespace
         std::optional<BoundaryError> handlePing(const PingRequest&) override
         {
             pinged = true;
+            if (onPing)
+                onPing();
             return std::nullopt;
         }
 
@@ -174,6 +177,7 @@ namespace
         bool guiReady = false;
         bool returnInvalidBoundaryError = false;
         std::function<void()> onCommand;
+        std::function<void()> onPing;
     };
 
     class RecordingSink final : public BoundaryEventSink
@@ -1039,13 +1043,15 @@ TEST_CASE("socket boundary events permit synchronous follow-up requests", "[prot
     CHECK(client.isConnected());
 }
 
-TEST_CASE("socket command admission does not block the client event loop", "[protocol][socket]")
+TEST_CASE("socket command admission remains pending while a connected daemon is slow",
+          "[protocol][socket]")
 {
     QTemporaryDir runtimeDirectory;
     REQUIRE(runtimeDirectory.isValid());
 
     RecordingHandler handler;
-    const auto options = socketOptions(runtimeDirectory);
+    auto options = socketOptions(runtimeDirectory);
+    options.responseTimeoutMilliseconds = 50;
     SocketEndpointThread endpoint{handler, options};
     REQUIRE_FALSE(endpoint.listen().has_value());
 
@@ -1063,9 +1069,52 @@ TEST_CASE("socket command admission does not block the client event loop", "[pro
     CHECK(elapsed.elapsed() < 50);
     CHECK_FALSE(future.isFinished());
 
+    while (elapsed.elapsed() < 100)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    CHECK_FALSE(future.isFinished());
+    CHECK(client.isConnected());
+
     processUntil([&future] { return future.isFinished(); });
     REQUIRE(future.isFinished());
     CHECK(std::holds_alternative<CommandAccepted>(future.result()));
+    CHECK(client.isConnected());
+}
+
+TEST_CASE("socket synchronous reply timeout does not disconnect a live daemon",
+          "[protocol][socket]")
+{
+    QTemporaryDir runtimeDirectory;
+    REQUIRE(runtimeDirectory.isValid());
+
+    RecordingHandler handler;
+    auto options = socketOptions(runtimeDirectory);
+    options.responseTimeoutMilliseconds = 50;
+    SocketEndpointThread endpoint{handler, options};
+    REQUIRE_FALSE(endpoint.listen().has_value());
+
+    SocketDaemonClient client{options};
+    REQUIRE_FALSE(client.connectToDaemon().has_value());
+    REQUIRE(std::holds_alternative<ReadyReply>(
+        client.hello({.protocol = {.major = 1, .minor = 0},
+                      .build = {.application = QStringLiteral("Javelin-Mail"),
+                                .revision = QStringLiteral("test")}})));
+
+    std::atomic_int pingCount = 0;
+    handler.onPing = [&pingCount]
+    {
+        if (pingCount.fetch_add(1) == 0)
+            QThread::msleep(150);
+    };
+    const auto timeout = client.ping();
+    REQUIRE(timeout.has_value());
+    CHECK(timeout->code == BoundaryErrorCode::TransportUnavailable);
+    CHECK(client.isConnected());
+
+    QThread::msleep(120);
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    CHECK_FALSE(client.ping().has_value());
+    CHECK(pingCount.load() == 2);
+    CHECK(client.isConnected());
 }
 
 TEST_CASE("socket async command admission bounds outstanding replies", "[protocol][socket]")

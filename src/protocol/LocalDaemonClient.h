@@ -65,6 +65,7 @@ namespace javelin::protocol
 
       Q_SIGNALS:
         void connectionClosed(SocketDisconnectReason reason, const QString& detail);
+        void deferredReplyAvailable(SocketFrameKind requestKind);
 
       private:
         struct PendingFrame
@@ -89,6 +90,14 @@ namespace javelin::protocol
             QPromise<AsyncFrameResult> promise;
         };
 
+        struct DeferredReply
+        {
+            SocketFrameKind requestKind = SocketFrameKind::ProtocolError;
+            SocketFrameKind expectedKind = SocketFrameKind::ProtocolError;
+            QByteArray requestPayload;
+            std::optional<ReceivedFrame> received;
+        };
+
         [[nodiscard]] std::optional<SocketTransportError> ensureConnected();
         [[nodiscard]] std::optional<SocketTransportError> enqueue(PendingFrame frame);
         void readSocket();
@@ -103,9 +112,9 @@ namespace javelin::protocol
         [[nodiscard]] QFuture<AsyncFrameResult> requestAsync(SocketFrameKind requestKind,
                                                              const QByteArray& payload,
                                                              SocketFrameKind replyKind);
-        void timeoutAsyncReply(std::uint64_t correlation);
-        [[nodiscard]] std::optional<SocketTransportError> waitForReply(std::uint64_t correlation,
-                                                                       SocketFrameKind replyKind);
+        [[nodiscard]] std::optional<SocketTransportError>
+        waitForReply(std::uint64_t correlation, SocketFrameKind requestKind,
+                     const QByteArray& requestPayload, SocketFrameKind replyKind);
         [[nodiscard]] BoundaryError boundaryError(const SocketTransportError& error) const;
 
         SocketClientOptions m_options;
@@ -115,6 +124,7 @@ namespace javelin::protocol
         std::unique_ptr<PendingFrame> m_currentWrite;
         std::map<std::uint64_t, ReceivedFrame> m_receivedReplies;
         std::map<std::uint64_t, std::unique_ptr<PendingAsyncReply>> m_asyncReplies;
+        std::map<std::uint64_t, DeferredReply> m_abandonedReplies;
         std::size_t m_queuedBytes = 0;
         std::size_t m_receivedBytes = 0;
         std::uint64_t m_nextCorrelation = 1;

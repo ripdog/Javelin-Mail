@@ -20,6 +20,7 @@ namespace javelin::app
     enum class GuiBootstrapErrorCode
     {
         DaemonUnavailable,
+        DaemonBusy,
         DaemonStartFailed,
         IncompatibleDaemon,
         SettingsUnavailable,
@@ -41,6 +42,7 @@ namespace javelin::app
         javelin::protocol::ProtocolVersion protocol;
         javelin::protocol::BuildIdentity build;
         int startTimeoutMilliseconds = 5000;
+        int responseTimeoutMilliseconds = 5000;
         bool startDaemonIfMissing = false;
     };
 
@@ -98,6 +100,7 @@ namespace javelin::app
         void ready();
         void recoveryStarted(const QString& detail);
         void recoveryFinished();
+        void recoveryFailed(javelin::app::GuiBootstrapErrorCode code, const QString& detail);
         void cacheChanged();
         void cacheInvalidated(const javelin::protocol::CacheInvalidation& invalidation);
         void threadMaterializationProgress(
@@ -113,7 +116,25 @@ namespace javelin::app
         void daemonShutdownRequested();
 
       private:
+        enum class BootstrapStage
+        {
+            Hello,
+            Settings,
+            Activation,
+        };
+
+        struct PendingBootstrap
+        {
+            BootstrapStage stage = BootstrapStage::Hello;
+            bool initial = false;
+            bool allowStart = false;
+            std::optional<javelin::protocol::ReadyReply> oldReady;
+        };
+
         [[nodiscard]] std::optional<GuiBootstrapError> connectAndHandshake(bool allowStart);
+        [[nodiscard]] std::optional<GuiBootstrapError>
+        continueBootstrap(PendingBootstrap bootstrap);
+        void resumePendingBootstrap(javelin::protocol::SocketFrameKind requestKind);
         [[nodiscard]] std::optional<GuiBootstrapError> launchDaemon(bool enableService);
         [[nodiscard]] std::optional<GuiBootstrapError> refreshSettings();
         [[nodiscard]] std::optional<GuiBootstrapError> loadSettingsAndCache();
@@ -137,6 +158,7 @@ namespace javelin::app
         CacheAccessBarrier::ParticipantId m_cacheParticipant = 0;
         std::uint64_t m_currentEpoch = 0;
         std::optional<javelin::protocol::ScopeId> m_materializationScope;
+        std::optional<PendingBootstrap> m_pendingBootstrap;
         bool m_inRecovery = false;
     };
 } // namespace javelin::app

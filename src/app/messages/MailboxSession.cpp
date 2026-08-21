@@ -277,6 +277,19 @@ namespace javelin::app
                     if (updateThreadMaterializationState())
                         Q_EMIT stateChanged();
                 });
+        connect(&m_events, &MailApplicationEventsPort::accountStatusChanged, this,
+                [this](const QString& changedAccountId, const MailAccountStatus status)
+                {
+                    if (changedAccountId.toStdString() != m_accountId ||
+                        (status != MailAccountStatus::Disconnected &&
+                         status != MailAccountStatus::AuthenticationPaused))
+                    {
+                        return;
+                    }
+                    m_materializingThreadIds.clear();
+                    if (updateThreadMaterializationState())
+                        Q_EMIT stateChanged();
+                });
     }
 
     MailboxSession::~MailboxSession()

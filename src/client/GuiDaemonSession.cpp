@@ -36,6 +36,19 @@ namespace javelin::app
             return {.code = code, .detail = std::move(detail)};
         }
 
+        [[nodiscard]] GuiBootstrapError daemonBoundaryError(const protocol::BoundaryError& error,
+                                                            const bool transportConnected)
+        {
+            if (error.code == protocol::BoundaryErrorCode::IncompatibleBuild)
+                return detailError(GuiBootstrapErrorCode::IncompatibleDaemon, error.detail);
+            if (error.code == protocol::BoundaryErrorCode::TransportUnavailable &&
+                transportConnected)
+            {
+                return detailError(GuiBootstrapErrorCode::DaemonBusy, error.detail);
+            }
+            return detailError(GuiBootstrapErrorCode::DaemonUnavailable, error.detail);
+        }
+
         [[nodiscard]] QString systemdUnitName()
         {
             return QStringLiteral("javelind.service");
@@ -127,13 +140,15 @@ namespace javelin::app
             .expectedBuild = m_options.build,
             .maximumQueuedFrames = 128,
             .maximumQueuedBytes = 128 * 1024 * 1024,
-            .responseTimeoutMilliseconds = 5000,
+            .responseTimeoutMilliseconds = m_options.responseTimeoutMilliseconds,
             .enforcePeerCredentials = true,
         };
         m_client = std::make_unique<protocol::SocketDaemonClient>(std::move(socketOptions), this);
         static_cast<void>(m_client->attachEventSink(*this));
         connect(m_client.get(), &protocol::SocketDaemonClient::connectionClosed, this,
                 &GuiDaemonSession::onDaemonDisconnected);
+        connect(m_client.get(), &protocol::SocketDaemonClient::deferredReplyAvailable, this,
+                &GuiDaemonSession::resumePendingBootstrap, Qt::QueuedConnection);
 
         m_cacheParticipant = m_cacheAccessBarrier.registerParticipant({
             .name = QStringLiteral("GUI read connections"),
@@ -163,32 +178,21 @@ namespace javelin::app
     std::optional<GuiBootstrapError> GuiDaemonSession::start()
     {
         PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("gui_startup")};
-        if (m_readyReply.has_value())
+        if (m_readyReply.has_value() && !m_inRecovery)
         {
             metrics.finish(QStringLiteral("already_ready"));
             return std::nullopt;
         }
-        if (const auto error = connectAndHandshake(true))
-        {
-            metrics.finish(QStringLiteral("error"), QStringLiteral("stage=handshake"));
-            return error;
-        }
-        if (const auto error = loadSettingsAndCache())
-        {
-            m_client->disconnectFromDaemon();
-            metrics.finish(QStringLiteral("error"), QStringLiteral("stage=cached_view"));
-            return error;
-        }
-        if (const auto error = m_client->readyForActivation())
-        {
-            m_client->disconnectFromDaemon();
-            metrics.finish(QStringLiteral("error"), QStringLiteral("stage=activation"));
-            return detailError(GuiBootstrapErrorCode::DaemonUnavailable, error->detail);
-        }
-        m_inRecovery = false;
-        Q_EMIT ready();
-        metrics.finish(QStringLiteral("ready"), QStringLiteral("cached_view_ready=true"));
-        return std::nullopt;
+        const auto result = m_pendingBootstrap.has_value() ? continueBootstrap(*m_pendingBootstrap)
+                                                           : continueBootstrap({
+                                                                 .stage = BootstrapStage::Hello,
+                                                                 .initial = true,
+                                                                 .allowStart = true,
+                                                                 .oldReady = std::nullopt,
+                                                             });
+        metrics.finish(result.has_value() ? QStringLiteral("error") : QStringLiteral("ready"),
+                       result.has_value() ? QString{} : QStringLiteral("cached_view_ready=true"));
+        return result;
     }
 
     std::optional<GuiBootstrapError> GuiDaemonSession::startDaemon()
@@ -325,42 +329,15 @@ namespace javelin::app
     std::optional<GuiBootstrapError> GuiDaemonSession::reconnect()
     {
         PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("gui_reconnect")};
-        const auto oldReady = m_readyReply;
-        if (const auto error = connectAndHandshake(false))
-        {
-            metrics.finish(QStringLiteral("error"), QStringLiteral("stage=handshake"));
-            return error;
-        }
-        if (const auto error = loadSettingsAndCache())
-        {
-            metrics.finish(QStringLiteral("error"), QStringLiteral("stage=cached_view"));
-            return error;
-        }
-        if (const auto error = m_client->readyForActivation())
-        {
-            m_client->disconnectFromDaemon();
-            metrics.finish(QStringLiteral("error"), QStringLiteral("stage=activation"));
-            return detailError(GuiBootstrapErrorCode::DaemonUnavailable, error->detail);
-        }
-
-        if (oldReady.has_value() && (oldReady->cache.instance != m_readyReply->cache.instance ||
-                                     oldReady->cache.schema != m_readyReply->cache.schema))
-        {
-            if (const auto error = suspendReadAccess())
-            {
-                metrics.finish(QStringLiteral("error"), QStringLiteral("stage=suspend_cache"));
-                return error;
-            }
-            if (const auto error = resumeReadAccess())
-            {
-                metrics.finish(QStringLiteral("error"), QStringLiteral("stage=resume_cache"));
-                return error;
-            }
-        }
-        m_inRecovery = false;
-        Q_EMIT recoveryFinished();
-        metrics.finish(QStringLiteral("ready"));
-        return std::nullopt;
+        const auto result = m_pendingBootstrap.has_value() ? continueBootstrap(*m_pendingBootstrap)
+                                                           : continueBootstrap({
+                                                                 .stage = BootstrapStage::Hello,
+                                                                 .initial = false,
+                                                                 .allowStart = false,
+                                                                 .oldReady = m_readyReply,
+                                                             });
+        metrics.finish(result.has_value() ? QStringLiteral("error") : QStringLiteral("ready"));
+        return result;
     }
 
     void GuiDaemonSession::stop()
@@ -370,6 +347,7 @@ namespace javelin::app
             m_client->disconnectFromDaemon();
         m_readConnection = javelin::jmap::cache::ReadOnlyDatabaseConnection{};
         m_readyReply.reset();
+        m_pendingBootstrap.reset();
         m_inRecovery = false;
     }
 
@@ -613,17 +591,117 @@ namespace javelin::app
             m_client->hello({.protocol = m_options.protocol, .build = m_options.build});
         if (const auto* rejected = std::get_if<protocol::HandshakeRejected>(&handshake))
         {
-            m_client->disconnectFromDaemon();
+            const auto bootstrapError =
+                daemonBoundaryError(rejected->error, m_client->isConnected());
+            if (bootstrapError.code != GuiBootstrapErrorCode::DaemonBusy)
+                m_client->disconnectFromDaemon();
             metrics.finish(QStringLiteral("rejected"));
-            const auto code = rejected->error.code == protocol::BoundaryErrorCode::IncompatibleBuild
-                                  ? GuiBootstrapErrorCode::IncompatibleDaemon
-                                  : GuiBootstrapErrorCode::DaemonUnavailable;
-            return detailError(code, rejected->error.detail);
+            return bootstrapError;
         }
         m_readyReply = std::get<protocol::ReadyReply>(handshake);
         m_currentEpoch = m_readyReply->epoch.value;
         metrics.finish(QStringLiteral("ready"));
         return std::nullopt;
+    }
+
+    std::optional<GuiBootstrapError> GuiDaemonSession::continueBootstrap(PendingBootstrap bootstrap)
+    {
+        const auto recordBootstrapError =
+            [this, &bootstrap](const BootstrapStage stage,
+                               GuiBootstrapError error) -> std::optional<GuiBootstrapError>
+        {
+            m_inRecovery = true;
+            if (error.code == GuiBootstrapErrorCode::DaemonBusy)
+            {
+                bootstrap.stage = stage;
+                m_pendingBootstrap = bootstrap;
+            }
+            else
+            {
+                m_pendingBootstrap.reset();
+            }
+            return error;
+        };
+
+        switch (bootstrap.stage)
+        {
+        case BootstrapStage::Hello:
+            if (const auto error = connectAndHandshake(bootstrap.allowStart))
+                return recordBootstrapError(BootstrapStage::Hello, *error);
+            bootstrap.stage = BootstrapStage::Settings;
+            [[fallthrough]];
+        case BootstrapStage::Settings:
+            if (const auto error = loadSettingsAndCache())
+                return recordBootstrapError(BootstrapStage::Settings, *error);
+            bootstrap.stage = BootstrapStage::Activation;
+            [[fallthrough]];
+        case BootstrapStage::Activation:
+            if (const auto error = m_client->readyForActivation())
+            {
+                auto bootstrapError = daemonBoundaryError(*error, m_client->isConnected());
+                if (bootstrapError.code != GuiBootstrapErrorCode::DaemonBusy &&
+                    m_client->isConnected())
+                {
+                    m_client->disconnectFromDaemon();
+                }
+                return recordBootstrapError(BootstrapStage::Activation, std::move(bootstrapError));
+            }
+            break;
+        }
+
+        if (!bootstrap.initial && bootstrap.oldReady.has_value() && m_readyReply.has_value() &&
+            (bootstrap.oldReady->cache.instance != m_readyReply->cache.instance ||
+             bootstrap.oldReady->cache.schema != m_readyReply->cache.schema))
+        {
+            if (const auto error = suspendReadAccess())
+            {
+                m_pendingBootstrap.reset();
+                return error;
+            }
+            if (const auto error = resumeReadAccess())
+            {
+                m_pendingBootstrap.reset();
+                return error;
+            }
+        }
+
+        const bool wasRecovering = m_inRecovery;
+        m_pendingBootstrap.reset();
+        m_inRecovery = false;
+        if (bootstrap.initial)
+            Q_EMIT ready();
+        if (!bootstrap.initial || wasRecovering)
+            Q_EMIT recoveryFinished();
+        return std::nullopt;
+    }
+
+    void GuiDaemonSession::resumePendingBootstrap(const protocol::SocketFrameKind requestKind)
+    {
+        if (!m_pendingBootstrap.has_value())
+            return;
+
+        const auto expectedRequestKind = [this]()
+        {
+            switch (m_pendingBootstrap->stage)
+            {
+            case BootstrapStage::Hello:
+                return protocol::SocketFrameKind::HelloRequest;
+            case BootstrapStage::Settings:
+                return protocol::SocketFrameKind::GetSettingsRequest;
+            case BootstrapStage::Activation:
+                return protocol::SocketFrameKind::ReadyForActivationRequest;
+            }
+            return protocol::SocketFrameKind::ProtocolError;
+        }();
+        if (requestKind != expectedRequestKind)
+            return;
+
+        const auto bootstrap = *m_pendingBootstrap;
+        if (const auto error = continueBootstrap(bootstrap);
+            error.has_value() && error->code != GuiBootstrapErrorCode::DaemonBusy)
+        {
+            Q_EMIT recoveryFailed(error->code, error->detail);
+        }
     }
 
     std::optional<GuiBootstrapError> GuiDaemonSession::refreshSettings()
@@ -633,6 +711,8 @@ namespace javelin::app
         if (const auto* rejected = std::get_if<protocol::SettingsReadRejected>(&reply))
         {
             metrics.finish(QStringLiteral("rejected"));
+            if (rejected->error.code == protocol::BoundaryErrorCode::TransportUnavailable)
+                return daemonBoundaryError(rejected->error, m_client->isConnected());
             return detailError(GuiBootstrapErrorCode::SettingsUnavailable, rejected->error.detail);
         }
         m_settings = std::get<protocol::SettingsSnapshotReply>(reply).snapshot;
@@ -714,8 +794,12 @@ namespace javelin::app
     void GuiDaemonSession::onDaemonDisconnected(const protocol::SocketDisconnectReason,
                                                 const QString& detail)
     {
+        m_pendingBootstrap.reset();
         if (m_inRecovery)
+        {
+            Q_EMIT recoveryStarted(detail);
             return;
+        }
         beginRecovery(detail);
     }
 

@@ -509,7 +509,9 @@ int main(int argc, char* argv[])
         else
         {
             recoveryStatus->setText(
-                i18n("Javelin couldn’t open its background sync service. Please try again."));
+                i18n("Javelin couldn’t complete communication with its background sync service. "
+                     "If the service is merely busy, Javelin will keep waiting and recover "
+                     "automatically when it responds."));
         }
         startDaemon->setVisible(offerDaemonStart);
         startDaemon->setEnabled(offerDaemonStart);
@@ -803,14 +805,33 @@ int main(int argc, char* argv[])
         guiActivationHandler.setHandler(handleActivation);
     };
 
+    const auto canOfferDaemonStart = [](const javelin::app::GuiBootstrapError& error)
+    {
+        return error.code == javelin::app::GuiBootstrapErrorCode::DaemonUnavailable ||
+               error.code == javelin::app::GuiBootstrapErrorCode::DaemonStartFailed;
+    };
+
     QObject::connect(&session, &javelin::app::GuiDaemonSession::recoveryStarted, &recoveryWindow,
-                     [&](const QString& detail)
+                     [&](const QString&)
                      {
                          guiActivationHandlingEnabled = false;
                          guiActivationHandler.clearHandler();
                          if (mainWindow != nullptr)
                              mainWindow->setEnabled(false);
-                         showRecovery(detail, true);
+
+                         // An established daemon connection disappearing does not by itself prove
+                         // that the daemon stopped. Reconnect immediately; if that cannot establish
+                         // a transport, surface daemon startup at once. A connected-but-slow daemon
+                         // is classified as DaemonBusy and therefore never gets a Start action.
+                         QTimer::singleShot(0, &recoveryWindow,
+                                            [&]
+                                            {
+                                                if (const auto error = session.reconnect())
+                                                {
+                                                    showRecovery(error->detail,
+                                                                 canOfferDaemonStart(*error));
+                                                }
+                                            });
                      });
     QObject::connect(&session, &javelin::app::GuiDaemonSession::recoveryFinished, &recoveryWindow,
                      [&]
@@ -827,16 +848,14 @@ int main(int argc, char* argv[])
                              restoreMainWindow({});
                          }
                      });
+    QObject::connect(
+        &session, &javelin::app::GuiDaemonSession::recoveryFailed, &recoveryWindow,
+        [&](const javelin::app::GuiBootstrapErrorCode code, const QString& detail)
+        { showRecovery(detail, canOfferDaemonStart({.code = code, .detail = detail})); });
     QObject::connect(&session, &javelin::app::GuiDaemonSession::daemonShutdownRequested,
                      &application, &QCoreApplication::quit);
     QObject::connect(&session, &javelin::app::GuiDaemonSession::activationRequested,
                      &recoveryWindow, handleActivation);
-
-    const auto canOfferDaemonStart = [](const javelin::app::GuiBootstrapError& error)
-    {
-        return error.code == javelin::app::GuiBootstrapErrorCode::DaemonUnavailable ||
-               error.code == javelin::app::GuiBootstrapErrorCode::DaemonStartFailed;
-    };
 
     const auto attemptDaemonStart = [&]
     {
@@ -914,7 +933,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            if (hasExplicitActivation && canOfferDaemonStart(*error))
+            if (hasExplicitActivation)
                 pendingInitialActivation = requestedActivation;
             showRecovery(error->detail, canOfferDaemonStart(*error));
         }

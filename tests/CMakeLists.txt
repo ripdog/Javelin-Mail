@@ -365,6 +365,7 @@ javelin_enable_test_localization(javelin_daemon_integration_tests)
 # Cross-layer tests are explicit. They validate integration contracts rather than making every
 # layer-focused target depend on both process halves.
 add_executable(javelin_integration_tests
+    app/GuiDaemonSessionRecoveryTest.cpp
     app/GuiMailApplicationEventsTest.cpp
     app/SettingsRepositoryTest.cpp
     jmap/QueryServiceTest.cpp
