@@ -1,6 +1,7 @@
 #include "gui/shell/CalendarTabController.h"
 
 #include "app/CalendarApplicationPorts.h"
+#include "gui/calendar/CalendarEventButton.h"
 #include "gui/calendar/MonthCalendarWidget.h"
 #include "gui/settings/GuiSettings.h"
 #include "jmap/calendar/CalendarReader.h"
@@ -8,6 +9,7 @@
 #include <QApplication>
 #include <QDate>
 #include <QDialog>
+#include <QPointer>
 #include <QStackedWidget>
 #include <QTimer>
 
@@ -25,6 +27,8 @@ namespace
     {
       public:
         bool writable = true;
+        std::vector<javelin::jmap::calendar::CalendarEvent> cachedEvents;
+        std::vector<javelin::jmap::calendar::Occurrence> cachedOccurrences;
         mutable int accountReadCount = 0;
         mutable int calendarReadCount = 0;
 
@@ -41,8 +45,8 @@ namespace
                     .displayTimeZone = displayTimeZone,
                     .queryState = "q1",
                     .eventState = "e1",
-                    .events = {},
-                    .occurrences = {},
+                    .events = cachedEvents,
+                    .occurrences = cachedOccurrences,
                 }};
         }
 
@@ -309,6 +313,72 @@ TEST_CASE("workspace Calendar refresh does not duplicate materialization refresh
 
     controller.invokeWorkspace(javelin::gui::shell::CalendarTabCommand::Refresh);
     CHECK(commands.rangeRequestCount == 2);
+}
+
+TEST_CASE("calendar cache refresh preserves unchanged rendered event widgets",
+          "[gui][calendar][presentation]")
+{
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    Reader reader;
+    CommandPort commands;
+    QStackedWidget contentStack;
+    std::vector<javelin::gui::shell::TabState> tabs;
+
+    const auto date = QDate::currentDate();
+    const auto dateText = date.toString(Qt::ISODate).toStdString();
+    javelin::jmap::calendar::CalendarEvent event;
+    event.accountId = "calendar-1";
+    event.id = "event-1";
+    event.uid = "uid-1";
+    event.calendarIds = {{"cal-1", true}};
+    event.title = "Original title";
+    event.start = {.value = dateText + "T09:00:00"};
+    event.duration = {.value = "PT1H"};
+    reader.cachedEvents = {event};
+    reader.cachedOccurrences = {{
+        .accountId = "calendar-1",
+        .id = "event-1",
+        .eventId = "event-1",
+        .recurrenceId = std::nullopt,
+        .localStart = {.value = dateText + "T09:00:00"},
+        .localEnd = {.value = dateText + "T10:00:00"},
+        .utcStart = std::nullopt,
+        .utcEnd = std::nullopt,
+        .allDay = false,
+    }};
+
+    javelin::gui::shell::CalendarTabController controller{settings, reader, commands, contentStack,
+                                                          tabs};
+    contentStack.resize(900, 700);
+    controller.invokeWorkspace(javelin::gui::shell::CalendarTabCommand::Today);
+    contentStack.show();
+    QApplication::processEvents();
+
+    REQUIRE(tabs.size() == 1);
+    auto* widget =
+        qobject_cast<javelin::gui::calendar::MonthCalendarWidget*>(contentStack.widget(0));
+    REQUIRE(widget != nullptr);
+    const auto initialButtons =
+        widget->findChildren<javelin::gui::calendar::CalendarEventButton*>();
+    REQUIRE(initialButtons.size() == 1);
+    QPointer<javelin::gui::calendar::CalendarEventButton> retainedButton{initialButtons.front()};
+
+    reader.cachedEvents.front().title = "Updated title";
+    Q_EMIT commands.calendarCacheCommitted({
+        .ownerAccountId = QStringLiteral("owner-1"),
+        .interval = {.start = {.value = dateText + "T00:00:00"},
+                     .end = {.value = date.addDays(1).toString(Qt::ISODate).toStdString() +
+                                      "T00:00:00"}},
+        .displayTimeZone = {.value = "UTC"},
+        .accountCount = 1,
+        .eventCount = 1,
+    });
+    QApplication::processEvents();
+
+    REQUIRE_FALSE(retainedButton.isNull());
+    CHECK(retainedButton->accessibleName().contains(QStringLiteral("Updated title")));
+    CHECK(widget->findChildren<javelin::gui::calendar::CalendarEventButton*>().contains(
+        retainedButton.data()));
 }
 
 TEST_CASE("workspace calendar manager command materializes Calendar before opening",

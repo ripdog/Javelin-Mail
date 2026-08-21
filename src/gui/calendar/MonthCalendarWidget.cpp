@@ -83,6 +83,20 @@ namespace javelin::gui::calendar
 
     class DayCellWidget final : public QWidget
     {
+        struct RenderedEvent
+        {
+            std::string accountId;
+            std::string eventId;
+            std::optional<std::string> recurrenceId;
+            CalendarEventButton* button = nullptr;
+
+            [[nodiscard]] bool matches(const MonthEvent& event) const
+            {
+                return accountId == event.accountId && eventId == event.eventId &&
+                       recurrenceId == event.recurrenceId;
+            }
+        };
+
       public:
         explicit DayCellWidget(const int gridIndex, QWidget* parent = nullptr)
             : QWidget(parent), m_gridIndex(gridIndex)
@@ -126,17 +140,6 @@ namespace javelin::gui::calendar
                               .arg(border, background));
         }
 
-        void clearEvents()
-        {
-            while (m_layout->count() > 2)
-            {
-                auto* item = m_layout->takeAt(1);
-                delete item->widget();
-                delete item;
-            }
-            m_overflow = 0;
-        }
-
         void setEventCount(const int count)
         {
             if (m_eventCount == count)
@@ -149,32 +152,95 @@ namespace javelin::gui::calendar
             }
         }
 
-        void addEvent(const MonthEvent& event, const QDate& cellDate,
-                      std::function<void()> activated,
-                      std::function<void(const QPoint&)> contextMenuRequested)
+        void updateEvents(const std::vector<const MonthEvent*>& events, const std::size_t visible)
         {
-            auto* chip = new CalendarEventButton(this);
-            chip->setCalendarEventPresentation(event.title, event.start, event.end, event.allDay,
-                                               event.recurring, cellDate,
-                                               eventAccessibleName(event, cellDate), event.color);
-            chip->setToolTip(event.title);
-            QObject::connect(chip, &QToolButton::clicked, chip, std::move(activated));
-            QObject::connect(chip, &CalendarEventButton::contextMenuRequested, chip,
-                             [contextMenuRequested = std::move(contextMenuRequested)](
-                                 const QPoint& globalPos) { contextMenuRequested(globalPos); });
-            m_layout->insertWidget(m_layout->count() - 1, chip);
-        }
+            setEventCount(static_cast<int>(events.size()));
 
-        void addOverflow(const int count, std::function<void()> activated)
-        {
-            m_overflow = count;
-            auto* button = new QToolButton(this);
-            button->setText(i18nc("@action:button additional calendar events", "+%1 more", count));
-            button->setAccessibleName(i18ncp("@action:button accessible additional calendar events",
-                                             "Show %1 more event", "Show %1 more events", count));
-            button->setAutoRaise(true);
-            QObject::connect(button, &QToolButton::clicked, button, std::move(activated));
-            m_layout->insertWidget(m_layout->count() - 1, button);
+            std::vector<RenderedEvent> next;
+            next.reserve(visible);
+            for (std::size_t index = 0; index < visible; ++index)
+            {
+                const auto& event = *events[index];
+                const auto found =
+                    std::ranges::find_if(m_renderedEvents, [&event](const RenderedEvent& rendered)
+                                         { return rendered.matches(event); });
+
+                RenderedEvent rendered;
+                if (found != m_renderedEvents.end())
+                {
+                    rendered = std::move(*found);
+                    m_renderedEvents.erase(found);
+                }
+                else
+                {
+                    rendered = RenderedEvent{
+                        .accountId = event.accountId,
+                        .eventId = event.eventId,
+                        .recurrenceId = event.recurrenceId,
+                        .button = new CalendarEventButton(this),
+                    };
+                    auto* button = rendered.button;
+                    QObject::connect(
+                        button, &QToolButton::clicked, button,
+                        [this, button]
+                        {
+                            const auto current =
+                                std::ranges::find(m_renderedEvents, button, &RenderedEvent::button);
+                            if (current != m_renderedEvents.end() && eventActivated)
+                                eventActivated(m_date, current->accountId, current->eventId,
+                                               current->recurrenceId);
+                        });
+                    QObject::connect(
+                        button, &CalendarEventButton::contextMenuRequested, button,
+                        [this, button](const QPoint& globalPosition)
+                        {
+                            const auto current =
+                                std::ranges::find(m_renderedEvents, button, &RenderedEvent::button);
+                            if (current != m_renderedEvents.end() && eventContextMenuRequested)
+                                eventContextMenuRequested(globalPosition, current->accountId,
+                                                          current->eventId, current->recurrenceId);
+                        });
+                }
+
+                rendered.button->setCalendarEventPresentation(
+                    event.title, event.start, event.end, event.allDay, event.recurring, m_date,
+                    eventAccessibleName(event, m_date), event.color);
+                rendered.button->setToolTip(event.title);
+                m_layout->insertWidget(1 + static_cast<int>(index), rendered.button);
+                next.push_back(std::move(rendered));
+            }
+
+            for (const auto& stale : m_renderedEvents)
+                delete stale.button;
+            m_renderedEvents = std::move(next);
+
+            const auto overflow = static_cast<int>(events.size() - visible);
+            if (overflow <= 0)
+            {
+                delete m_overflowButton;
+                m_overflowButton = nullptr;
+                m_overflow = 0;
+                return;
+            }
+
+            m_overflow = overflow;
+            if (m_overflowButton == nullptr)
+            {
+                m_overflowButton = new QToolButton(this);
+                m_overflowButton->setAutoRaise(true);
+                QObject::connect(m_overflowButton, &QToolButton::clicked, m_overflowButton,
+                                 [this]
+                                 {
+                                     if (overflowActivated)
+                                         overflowActivated(m_date);
+                                 });
+            }
+            m_overflowButton->setText(
+                i18nc("@action:button additional calendar events", "+%1 more", overflow));
+            m_overflowButton->setAccessibleName(
+                i18ncp("@action:button accessible additional calendar events", "Show %1 more event",
+                       "Show %1 more events", overflow));
+            m_layout->insertWidget(m_layout->count() - 1, m_overflowButton);
         }
 
         [[nodiscard]] QString accessibleName() const
@@ -215,6 +281,13 @@ namespace javelin::gui::calendar
                 margins.top() + margins.bottom(), m_layout->spacing(), eventCount);
         }
         std::function<void(const QDate&)> clicked;
+        std::function<void(const QDate&, const std::string&, const std::string&,
+                           const std::optional<std::string>&)>
+            eventActivated;
+        std::function<void(const QPoint&, const std::string&, const std::string&,
+                           const std::optional<std::string>&)>
+            eventContextMenuRequested;
+        std::function<void(const QDate&)> overflowActivated;
 
       protected:
         void mousePressEvent(QMouseEvent* event) override
@@ -229,6 +302,8 @@ namespace javelin::gui::calendar
         QString m_accessibleDateLabel;
         QLabel* m_day = nullptr;
         QVBoxLayout* m_layout = nullptr;
+        std::vector<RenderedEvent> m_renderedEvents;
+        QToolButton* m_overflowButton = nullptr;
         int m_gridIndex = 0;
         int m_eventCount = 0;
         int m_overflow = 0;
@@ -240,7 +315,19 @@ namespace javelin::gui::calendar
     {
         [[nodiscard]] QList<QToolButton*> directEventButtons(const DayCellWidget* cell)
         {
-            return cell->findChildren<QToolButton*>(QString{}, Qt::FindDirectChildrenOnly);
+            QList<QToolButton*> result;
+            const auto* layout = cell->layout();
+            if (layout == nullptr)
+                return result;
+            for (int index = 0; index < layout->count(); ++index)
+            {
+                auto* item = layout->itemAt(index);
+                if (item == nullptr)
+                    continue;
+                if (auto* button = qobject_cast<QToolButton*>(item->widget()); button != nullptr)
+                    result.push_back(button);
+            }
+            return result;
         }
 
         class AccessibleCalendarHeader final : public QAccessibleWidget
@@ -788,6 +875,29 @@ namespace javelin::gui::calendar
                 selectDate(date);
                 Q_EMIT dayAgendaRequested(date, {}, {}, {});
             };
+            cell->eventActivated = [this](const QDate& date, const std::string& accountId,
+                                          const std::string& eventId,
+                                          const std::optional<std::string>& recurrenceId)
+            {
+                selectDate(date);
+                Q_EMIT dayAgendaRequested(
+                    date, QString::fromStdString(accountId), QString::fromStdString(eventId),
+                    QString::fromStdString(recurrenceId.value_or(std::string{})));
+            };
+            cell->eventContextMenuRequested =
+                [this](const QPoint& globalPosition, const std::string& accountId,
+                       const std::string& eventId, const std::optional<std::string>& recurrenceId)
+            {
+                Q_EMIT eventContextMenuRequested(
+                    globalPosition, QString::fromStdString(accountId),
+                    QString::fromStdString(eventId),
+                    QString::fromStdString(recurrenceId.value_or(std::string{})));
+            };
+            cell->overflowActivated = [this](const QDate& date)
+            {
+                selectDate(date);
+                Q_EMIT dayAgendaRequested(date, {}, {}, {});
+            };
             m_cells[static_cast<std::size_t>(index)] = cell;
             m_grid->addWidget(cell, 1 + index / 7, index % 7);
         }
@@ -829,7 +939,7 @@ namespace javelin::gui::calendar
     {
         m_events = std::move(events);
         applyCalendarColors();
-        rebuildEvents();
+        updateEventPresentation();
         Q_EMIT eventPresentationChanged();
     }
 
@@ -838,7 +948,18 @@ namespace javelin::gui::calendar
         m_calendars = std::move(calendars);
         applyCalendarColors();
         rebuildCalendarMenu();
-        rebuildEvents();
+        updateEventPresentation();
+    }
+
+    void MonthCalendarWidget::setPresentation(std::vector<CalendarDisplay> calendars,
+                                              std::vector<MonthEvent> events)
+    {
+        m_calendars = std::move(calendars);
+        m_events = std::move(events);
+        applyCalendarColors();
+        rebuildCalendarMenu();
+        updateEventPresentation();
+        Q_EMIT eventPresentationChanged();
     }
 
     void MonthCalendarWidget::setCalendarAccounts(std::vector<CalendarAccountDisplay> accounts)
@@ -894,7 +1015,7 @@ namespace javelin::gui::calendar
         }
         applyCalendarColors();
         rebuildCalendarMenu();
-        rebuildEvents();
+        updateEventPresentation();
         Q_EMIT eventPresentationChanged();
     }
 
@@ -1400,8 +1521,7 @@ namespace javelin::gui::calendar
     void MonthCalendarWidget::resizeEvent(QResizeEvent* event)
     {
         QWidget::resizeEvent(event);
-        rebuildEvents();
-        scheduleEventRebuild();
+        scheduleEventPresentationUpdate();
     }
 
     void MonthCalendarWidget::changeEvent(QEvent* event)
@@ -1411,19 +1531,19 @@ namespace javelin::gui::calendar
             event->type() == QEvent::PaletteChange ||
             event->type() == QEvent::ApplicationPaletteChange ||
             event->type() == QEvent::StyleChange)
-            scheduleEventRebuild();
+            scheduleEventPresentationUpdate();
     }
 
-    void MonthCalendarWidget::scheduleEventRebuild()
+    void MonthCalendarWidget::scheduleEventPresentationUpdate()
     {
-        if (m_eventRebuildPending)
+        if (m_eventPresentationUpdatePending)
             return;
-        m_eventRebuildPending = true;
+        m_eventPresentationUpdatePending = true;
         QTimer::singleShot(0, this,
                            [this]
                            {
-                               m_eventRebuildPending = false;
-                               rebuildEvents();
+                               m_eventPresentationUpdatePending = false;
+                               updateEventPresentation();
                            });
     }
 
@@ -1444,14 +1564,12 @@ namespace javelin::gui::calendar
             m_cells[static_cast<std::size_t>(index)]->setDate(
                 date, date.month() != m_displayedMonth.month(), date == m_selectedDate, m_locale);
         }
-        rebuildEvents();
+        updateEventPresentation();
         Q_EMIT visibleIntervalChanged(visibleStart(), visibleEnd());
     }
 
-    void MonthCalendarWidget::rebuildEvents()
+    void MonthCalendarWidget::updateEventPresentation()
     {
-        for (auto* cell : m_cells)
-            cell->clearEvents();
         for (int index = 0; index < 42; ++index)
         {
             const auto date = cellDate(index);
@@ -1461,8 +1579,6 @@ namespace javelin::gui::calendar
                 if (event.start.date() <= date && eventLastDate(event) >= date)
                     matching.push_back(&event);
             }
-            m_cells[static_cast<std::size_t>(index)]->setEventCount(
-                static_cast<int>(matching.size()));
             std::ranges::sort(matching,
                               [](const auto* left, const auto* right)
                               {
@@ -1478,40 +1594,9 @@ namespace javelin::gui::calendar
                                       return left->start < right->start;
                                   return left->title.localeAwareCompare(right->title) < 0;
                               });
-            const auto visible =
-                m_cells[static_cast<std::size_t>(index)]->visibleEventCount(matching.size());
-            for (std::size_t eventIndex = 0; eventIndex < visible; ++eventIndex)
-            {
-                const auto* event = matching[eventIndex];
-                m_cells[static_cast<std::size_t>(index)]->addEvent(
-                    *event, date,
-                    [this, event, date]
-                    {
-                        selectDate(date);
-                        Q_EMIT dayAgendaRequested(
-                            date, QString::fromStdString(event->accountId),
-                            QString::fromStdString(event->eventId),
-                            QString::fromStdString(event->recurrenceId.value_or(std::string{})));
-                    },
-                    [this, event](const QPoint& globalPosition)
-                    {
-                        Q_EMIT eventContextMenuRequested(
-                            globalPosition, QString::fromStdString(event->accountId),
-                            QString::fromStdString(event->eventId),
-                            QString::fromStdString(event->recurrenceId.value_or(std::string{})));
-                    });
-            }
-            if (matching.size() > visible)
-            {
-                const auto overflow = static_cast<int>(matching.size() - visible);
-                m_cells[static_cast<std::size_t>(index)]->addOverflow(overflow,
-                                                                      [this, date]
-                                                                      {
-                                                                          selectDate(date);
-                                                                          Q_EMIT dayAgendaRequested(
-                                                                              date, {}, {}, {});
-                                                                      });
-            }
+            auto* cell = m_cells[static_cast<std::size_t>(index)];
+            const auto visible = cell->visibleEventCount(matching.size());
+            cell->updateEvents(matching, visible);
         }
     }
 

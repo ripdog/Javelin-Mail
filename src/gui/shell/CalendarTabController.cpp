@@ -1140,8 +1140,7 @@ namespace javelin::gui::shell
                                      std::make_move_iterator(presentation.events.begin()),
                                      std::make_move_iterator(presentation.events.end()));
             }
-            widget->setCalendars(std::move(calendarDisplays));
-            widget->setEvents(std::move(displayEvents));
+            widget->setPresentation(std::move(calendarDisplays), std::move(displayEvents));
         };
         connect(widget, &javelin::gui::calendar::MonthCalendarWidget::visibleIntervalChanged,
                 widget, loadVisible);

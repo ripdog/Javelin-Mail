@@ -112,6 +112,60 @@ TEST_CASE("month calendar publishes committed event presentation replacements",
     CHECK(dayEvents.front().eventId == "event");
 }
 
+TEST_CASE("month calendar incrementally reconciles event widgets across refresh and resize",
+          "[gui][calendar][presentation]")
+{
+    javelin::gui::calendar::MonthCalendarWidget widget;
+    widget.setDisplayedMonth(QDate{2026, 8, 1});
+    widget.resize(900, 700);
+    widget.show();
+    QApplication::processEvents();
+
+    javelin::gui::calendar::MonthEvent retainedEvent;
+    retainedEvent.accountId = "account";
+    retainedEvent.calendarId = "account\\ncalendar";
+    retainedEvent.eventId = "retained";
+    retainedEvent.title = QStringLiteral("Original title");
+    retainedEvent.start = QDateTime{QDate{2026, 8, 18}, QTime{9, 0}};
+    retainedEvent.end = QDateTime{QDate{2026, 8, 18}, QTime{10, 0}};
+    widget.setPresentation({}, {retainedEvent});
+    QApplication::processEvents();
+
+    const auto initialButtons = widget.findChildren<javelin::gui::calendar::CalendarEventButton*>();
+    REQUIRE(initialButtons.size() == 1);
+    QPointer<javelin::gui::calendar::CalendarEventButton> retainedButton{initialButtons.front()};
+
+    retainedEvent.title = QStringLiteral("Updated title");
+    javelin::gui::calendar::MonthEvent addedEvent = retainedEvent;
+    addedEvent.eventId = "added";
+    addedEvent.title = QStringLiteral("Added event");
+    addedEvent.start = QDateTime{QDate{2026, 8, 18}, QTime{11, 0}};
+    addedEvent.end = QDateTime{QDate{2026, 8, 18}, QTime{12, 0}};
+    widget.setPresentation({}, {retainedEvent, addedEvent});
+
+    REQUIRE_FALSE(retainedButton.isNull());
+    CHECK(retainedButton->accessibleName().contains(QStringLiteral("Updated title")));
+    const auto refreshedButtons =
+        widget.findChildren<javelin::gui::calendar::CalendarEventButton*>();
+    REQUIRE(refreshedButtons.size() == 2);
+    CHECK(refreshedButtons.contains(retainedButton.data()));
+
+    widget.setPresentation({}, {retainedEvent});
+    REQUIRE_FALSE(retainedButton.isNull());
+    const auto afterRemoval = widget.findChildren<javelin::gui::calendar::CalendarEventButton*>();
+    REQUIRE(afterRemoval.size() == 1);
+    CHECK(afterRemoval.front() == retainedButton.data());
+
+    widget.resize(1100, 800);
+    REQUIRE_FALSE(retainedButton.isNull());
+    CHECK(widget.findChildren<javelin::gui::calendar::CalendarEventButton*>().contains(
+        retainedButton.data()));
+    QApplication::processEvents();
+    REQUIRE_FALSE(retainedButton.isNull());
+    CHECK(widget.findChildren<javelin::gui::calendar::CalendarEventButton*>().contains(
+        retainedButton.data()));
+}
+
 TEST_CASE("setting the displayed calendar month is idempotent", "[gui][calendar]")
 {
     javelin::gui::calendar::MonthCalendarWidget widget;

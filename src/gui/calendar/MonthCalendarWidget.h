@@ -112,6 +112,8 @@ namespace javelin::gui::calendar
         void setDisplayedMonth(const QDate& month);
         void setEvents(std::vector<MonthEvent> events);
         void setCalendars(std::vector<CalendarDisplay> calendars);
+        void setPresentation(std::vector<CalendarDisplay> calendars,
+                             std::vector<MonthEvent> events);
         void setCalendarAccounts(std::vector<CalendarAccountDisplay> accounts);
         void setPendingInvitations(std::vector<PendingInvitationDisplay> invitations);
         void applicationPaletteChanged();
@@ -172,13 +174,13 @@ namespace javelin::gui::calendar
         friend class AccessibleMonthCalendar;
 
         void rebuildDates();
-        void rebuildEvents();
+        void updateEventPresentation();
         void rebuildCalendarMenu();
         void applyCalendarColors();
         [[nodiscard]] QColor defaultCalendarColor(const CalendarDisplay& calendar) const;
         [[nodiscard]] QColor effectiveCalendarColor(const std::string& calendarId) const;
         void selectDate(const QDate& date);
-        void scheduleEventRebuild();
+        void scheduleEventPresentationUpdate();
         [[nodiscard]] DayCellWidget* cellForDate(const QDate& date) const;
         void notifyAccessibilityGridChanged();
         void notifyAccessibilitySelectionChanged();
@@ -198,6 +200,6 @@ namespace javelin::gui::calendar
         std::vector<CalendarDisplay> m_calendars;
         std::vector<CalendarAccountDisplay> m_calendarAccounts;
         std::vector<MonthEvent> m_events;
-        bool m_eventRebuildPending = false;
+        bool m_eventPresentationUpdatePending = false;
     };
 } // namespace javelin::gui::calendar
