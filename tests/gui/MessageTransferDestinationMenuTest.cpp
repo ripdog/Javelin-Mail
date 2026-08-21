@@ -39,6 +39,15 @@ namespace
         }
         return nullptr;
     }
+
+    [[nodiscard]] QList<QMenu*> presentedSubmenus(QMenu& menu)
+    {
+        QList<QMenu*> result;
+        for (auto* action : menu.actions())
+            if (auto* submenu = action->menu(); submenu != nullptr)
+                result.push_back(submenu);
+        return result;
+    }
 } // namespace
 
 TEST_CASE("transfer destination menu keeps hierarchy until search text is entered",
@@ -68,14 +77,14 @@ TEST_CASE("transfer destination menu keeps hierarchy until search text is entere
     REQUIRE(search != nullptr);
     CHECK(destinationAction(menu, QStringLiteral("inbox")) != nullptr);
     CHECK(destinationAction(menu, QStringLiteral("child")) != nullptr);
-    REQUIRE(menu.findChildren<QMenu*>().size() == 1);
+    REQUIRE(presentedSubmenus(menu).size() == 1);
 
     search->setText(QStringLiteral("work arch"));
     auto* archive = destinationAction(menu, QStringLiteral("archive"));
     REQUIRE(archive != nullptr);
     CHECK(archive->text() == QStringLiteral("Archive — Work"));
     CHECK(destinationAction(menu, QStringLiteral("inbox")) == nullptr);
-    CHECK(menu.findChildren<QMenu*>().empty());
+    CHECK(presentedSubmenus(menu).empty());
     CHECK(menu.activeAction() == archive);
 
     QKeyEvent enter{QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier};

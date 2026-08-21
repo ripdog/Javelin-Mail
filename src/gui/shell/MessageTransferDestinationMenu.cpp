@@ -157,7 +157,11 @@ namespace javelin::gui::shell
                 m_menu.setActiveAction(nullptr);
                 m_resultActions.clear();
                 for (auto* submenu : std::as_const(m_submenus))
-                    delete submenu;
+                {
+                    m_menu.removeAction(submenu->menuAction());
+                    submenu->hide();
+                    submenu->deleteLater();
+                }
                 m_submenus.clear();
                 for (auto* action : std::as_const(m_contentActions))
                     delete action;
