@@ -743,8 +743,17 @@ namespace javelin::app
             if (!baseline)
             {
                 auto sinceState = *previousNotificationState;
+                std::size_t changesPageCount = 0;
                 for (;;)
                 {
+                    if (changesPageCount >= calendarInvitationChangesPageLimit)
+                    {
+                        qWarning() << "CalendarEventNotification/changes exceeded the bounded page "
+                                      "limit; falling back to full reconciliation";
+                        fullNotificationReconciliation = true;
+                        break;
+                    }
+                    ++changesPageCount;
                     const auto changesMethod = javelin::jmap::api::calendarEventNotificationChanges(
                         {.accountId = accountId, .sinceState = sinceState, .maxChanges = 256});
                     if (!changesMethod)
@@ -780,9 +789,17 @@ namespace javelin::app
                                                   changes.destroyed.begin(),
                                                   changes.destroyed.end());
                     notificationState = changes.newState;
-                    sinceState = changes.newState;
                     if (!changes.hasMoreChanges)
                         break;
+                    if (changes.newState == sinceState)
+                    {
+                        qWarning() << "CalendarEventNotification/changes did not advance state while "
+                                      "more changes were advertised; falling back to full "
+                                      "reconciliation";
+                        fullNotificationReconciliation = true;
+                        break;
+                    }
+                    sinceState = changes.newState;
                 }
                 if (!fullNotificationReconciliation && notificationState.empty())
                     continue;

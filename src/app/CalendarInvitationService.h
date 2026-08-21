@@ -9,6 +9,7 @@
 
 #include <QCoroTask>
 
+#include <cstddef>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -26,6 +27,8 @@ namespace javelin::jmap::cache
 
 namespace javelin::app
 {
+    inline constexpr std::size_t calendarInvitationChangesPageLimit = 128;
+
     class CalendarInvitationService final : public QObject
     {
         Q_OBJECT
