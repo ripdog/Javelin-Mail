@@ -9,6 +9,7 @@
 #include <QResizeEvent>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace javelin::gui::calendar
@@ -32,6 +33,31 @@ namespace javelin::gui::calendar
             const auto lighter = std::max(relativeLuminance(left), relativeLuminance(right));
             const auto darker = std::min(relativeLuminance(left), relativeLuminance(right));
             return (lighter + 0.05) / (darker + 0.05);
+        }
+
+        [[nodiscard]] double selectionContrast(const QColor& candidate, const QColor& eventColor,
+                                               const QColor& surfaceColor)
+        {
+            return std::min(contrastRatio(candidate, eventColor),
+                            contrastRatio(candidate, surfaceColor));
+        }
+
+        [[nodiscard]] QColor selectionBorderColor(const QPalette& palette, const QColor& eventColor)
+        {
+            const auto surface = palette.color(QPalette::Active, QPalette::Base);
+            const auto highlight = palette.color(QPalette::Active, QPalette::Highlight);
+            constexpr auto minimumUsefulContrast = 1.5;
+            if (selectionContrast(highlight, eventColor, surface) >= minimumUsefulContrast)
+                return highlight;
+
+            const std::array candidates{
+                highlight,
+                palette.color(QPalette::Active, QPalette::Text),
+                palette.color(QPalette::Active, QPalette::HighlightedText),
+            };
+            return *std::ranges::max_element(
+                candidates, {}, [&eventColor, &surface](const QColor& candidate)
+                { return selectionContrast(candidate, eventColor, surface); });
         }
 
         class AccessibleCalendarEventButton final : public QAccessibleWidget
@@ -176,6 +202,7 @@ namespace javelin::gui::calendar
         const auto base = palette().color(QPalette::Active, QPalette::Base);
         const auto foreground =
             contrastRatio(color, text) >= contrastRatio(color, base) ? text : base;
+        const auto selectionBorder = selectionBorderColor(palette(), color);
 
         setAutoRaise(true);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -185,9 +212,9 @@ namespace javelin::gui::calendar
                                      "border-top-left-radius: %3; border-bottom-left-radius: %3; "
                                      "border-top-right-radius: %4; border-bottom-right-radius: %4; "
                                      "padding: 1px 4px; text-align: left; } "
-                                     "QToolButton:checked { border: 2px solid %2; }")
+                                     "QToolButton:checked { border: 2px solid %5; }")
                           .arg(color.name(QColor::HexArgb), foreground.name(QColor::HexArgb),
-                               leftRadius, rightRadius));
+                               leftRadius, rightRadius, selectionBorder.name(QColor::HexArgb)));
         setText(fontMetrics().elidedText(m_fullText, Qt::ElideRight, std::max(0, width() - 8)));
     }
 } // namespace javelin::gui::calendar

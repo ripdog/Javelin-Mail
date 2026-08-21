@@ -64,28 +64,42 @@ namespace
     }
 } // namespace
 
-TEST_CASE("calendar event selection border contrasts with the event fill",
+TEST_CASE("calendar event selection uses the theme highlight when it remains distinct",
           "[gui][calendar][selection]")
 {
     javelin::gui::calendar::CalendarEventButton button;
     auto palette = button.palette();
-    palette.setColor(QPalette::Text, Qt::white);
-    palette.setColor(QPalette::Base, Qt::black);
-    button.setPalette(palette);
-    button.setEventPresentation(QStringLiteral("Dark event"), QStringLiteral("Dark event"),
-                                QColor{Qt::black});
-
-    CHECK(button.styleSheet().contains(
-        QStringLiteral("QToolButton:checked { border: 2px solid #ffffffff; }")));
-    CHECK_FALSE(button.styleSheet().contains(QStringLiteral("palette(highlight)")));
-
-    palette.setColor(QPalette::Text, Qt::black);
-    palette.setColor(QPalette::Base, Qt::white);
+    palette.setColor(QPalette::Active, QPalette::Text, Qt::black);
+    palette.setColor(QPalette::Active, QPalette::Base, Qt::white);
+    palette.setColor(QPalette::Active, QPalette::Highlight, Qt::red);
+    palette.setColor(QPalette::Active, QPalette::HighlightedText, Qt::white);
     button.setPalette(palette);
     button.setEventPresentation(QStringLiteral("Light event"), QStringLiteral("Light event"),
-                                QColor{Qt::white});
+                                QColor{QStringLiteral("#cccccc")});
+
+    CHECK(button.styleSheet().contains(
+        QStringLiteral("QToolButton:checked { border: 2px solid #ffff0000; }")));
+    CHECK_FALSE(button.styleSheet().contains(
+        QStringLiteral("QToolButton:checked { border: 2px solid #ffffffff; }")));
+}
+
+TEST_CASE("calendar event selection avoids a highlight that merges into the event fill",
+          "[gui][calendar][selection]")
+{
+    javelin::gui::calendar::CalendarEventButton button;
+    auto palette = button.palette();
+    palette.setColor(QPalette::Active, QPalette::Text, Qt::black);
+    palette.setColor(QPalette::Active, QPalette::Base, Qt::white);
+    palette.setColor(QPalette::Active, QPalette::Highlight, Qt::blue);
+    palette.setColor(QPalette::Active, QPalette::HighlightedText, Qt::white);
+    button.setPalette(palette);
+    button.setEventPresentation(QStringLiteral("Blue event"), QStringLiteral("Blue event"),
+                                QColor{Qt::blue});
+
     CHECK(button.styleSheet().contains(
         QStringLiteral("QToolButton:checked { border: 2px solid #ff000000; }")));
+    CHECK_FALSE(button.styleSheet().contains(
+        QStringLiteral("QToolButton:checked { border: 2px solid #ff0000ff; }")));
 }
 
 TEST_CASE("day agenda base events preserve the month presentation without detail data",
