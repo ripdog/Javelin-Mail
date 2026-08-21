@@ -78,12 +78,6 @@ namespace javelin::app
         const auto& event = std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached);
         if (!event)
             return;
-        const auto state = repository.stateToken(candidate.accountId, "CalendarEvent");
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&state))
-        {
-            qWarning().noquote() << error->message;
-            return;
-        }
         auto task = m_calendarService.updateCalendarEvent(
             candidate.ownerAccountId,
             {.accountId = candidate.accountId,
@@ -92,7 +86,7 @@ namespace javelin::app
                  {.value =
                       QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs).toStdString()}),
              .operationGroupId = std::nullopt,
-             .ifInState = std::get<std::optional<std::string>>(state),
+             .ifInState = std::nullopt,
              .materialization = std::nullopt},
             javelin::app::undo::CommandOrigin::SystemChild);
         QCoro::connect(std::move(task), this,

@@ -5,8 +5,10 @@
 
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MethodCaller.h"
+#include "jmap/api/PatchObject.h"
 #include "jmap/api/RequestBuilder.h"
 #include "jmap/api/ResponseReader.h"
+
 #include "jmap/auth/Auth.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/calendar/CalendarColor.h"
@@ -14,6 +16,9 @@
 #include "jmap/calendar/CalendarMutationJournal.h"
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/MutationJournal.h"
+#include <QSqlQuery>
+#include <QTimeZone>
+#include <QUuid>
 
 #include <QDateTime>
 #include <QJsonDocument>
@@ -432,6 +437,71 @@ namespace javelin::jmap::calendar
                 return error(OperationErrorCode::InvalidRequest,
                              QStringLiteral("Refresh the calendar before modifying an event."));
             return *state;
+        }
+
+        [[nodiscard]] bool isStateMismatch(const OperationError& operationError)
+        {
+            return operationError.code == OperationErrorCode::Conflict &&
+                   operationError.protocolType == "stateMismatch";
+        }
+
+        [[nodiscard]] std::variant<CalendarEvent, OperationError>
+        rebaseCalendarEventUpdate(const CalendarEvent& previous, const CalendarEvent& requested,
+                                  const CalendarEvent& refreshed)
+        {
+            const auto previousDocument = api::serializeCalendarEventDocument(previous);
+            const auto requestedDocument = api::serializeCalendarEventDocument(requested);
+            const auto refreshedDocument = api::serializeCalendarEventDocument(refreshed);
+            if (!previousDocument || !requestedDocument || !refreshedDocument)
+                return error(OperationErrorCode::ProtocolViolation,
+                             QStringLiteral("Unable to serialize a calendar event while resolving "
+                                            "a concurrent server change."));
+            const auto patch = api::makePatchObject(*previousDocument, *requestedDocument);
+            const auto* patchDocument = std::get_if<std::string>(&patch);
+            if (patchDocument == nullptr)
+                return error(OperationErrorCode::ProtocolViolation,
+                             QStringLiteral("Unable to preserve the requested calendar edit after "
+                                            "a concurrent server change."));
+            const auto rebased = api::applyPatchObject(*refreshedDocument, *patchDocument);
+            const auto* rebasedDocument = std::get_if<std::string>(&rebased);
+            if (rebasedDocument == nullptr)
+                return error(OperationErrorCode::Conflict,
+                             QStringLiteral("The event changed on the server in a way that "
+                                            "conflicts with this edit."));
+            const auto parsed =
+                api::parseCalendarEventDocument(refreshed.accountId, *rebasedDocument);
+            if (!parsed.ok() || !parsed.value)
+                return error(OperationErrorCode::ProtocolViolation,
+                             QStringLiteral("Unable to decode the rebased calendar edit."));
+            auto event = *parsed.value;
+            event.accountId = refreshed.accountId;
+            event.id = refreshed.id;
+            return event;
+        }
+
+        [[nodiscard]] std::optional<CalendarRangeMaterialization>
+        recoveryMaterializationForEvent(const CalendarEvent& event)
+        {
+            const auto start =
+                QDateTime::fromString(QString::fromStdString(event.start.value), Qt::ISODate);
+            if (!start.isValid())
+                return std::nullopt;
+            const auto firstDate = start.date().addDays(-21);
+            const auto lastDate = start.date().addDays(22);
+            auto displayTimeZone = event.timeZone.value_or(TimeZoneId{
+                .value = QString::fromUtf8(QTimeZone::systemTimeZoneId()).toStdString()});
+            if (displayTimeZone.value.empty())
+                displayTimeZone.value = "UTC";
+            return CalendarRangeMaterialization{
+                .interval =
+                    {
+                        .start = {.value =
+                                      firstDate.toString(Qt::ISODate).toStdString() + "T00:00:00"},
+                        .end = {.value =
+                                    lastDate.toString(Qt::ISODate).toStdString() + "T00:00:00"},
+                    },
+                .displayTimeZone = std::move(displayTimeZone),
+            };
         }
 
         LocalDateTime localEnd(const CalendarEvent& event)
@@ -3676,7 +3746,8 @@ namespace javelin::jmap::calendar
         api::CalendarEventSetRequest request, std::vector<std::string> calendarIds,
         std::optional<std::string> operationGroupId,
         std::optional<CalendarRangeMaterialization> materialization,
-        const MutationPermission permission, std::function<void()> projectionCommitted)
+        const MutationPermission permission, std::function<void()> projectionCommitted,
+        const bool recoverStateMismatch)
     {
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
         if (const auto* serviceError = std::get_if<OperationError>(&sessionResult))
@@ -3714,6 +3785,30 @@ namespace javelin::jmap::calendar
         if (const auto* operationError = std::get_if<OperationError>(&preparedResult))
             co_return *operationError;
         auto prepared = std::get<PreparedCalendarMutations>(preparedResult);
+        auto recoveryMaterialization = materialization;
+        if (!recoveryMaterialization)
+        {
+            const CalendarEvent* anchor = nullptr;
+            if (!request.update.empty())
+                anchor = &request.update.begin()->second.previous;
+            else if (!request.create.empty())
+                anchor = &request.create.begin()->second;
+            if (anchor != nullptr)
+                recoveryMaterialization = recoveryMaterializationForEvent(*anchor);
+            else
+            {
+                const auto baseRecord =
+                    std::ranges::find_if(prepared.records, [](const auto& record)
+                                         { return record.baseDocument.has_value(); });
+                if (baseRecord != prepared.records.end())
+                {
+                    const auto base = eventFromMutationDocument(
+                        *baseRecord, *baseRecord->baseDocument, baseRecord->objectId);
+                    if (const auto* event = std::get_if<CalendarEvent>(&base))
+                        recoveryMaterialization = recoveryMaterializationForEvent(*event);
+                }
+            }
+        }
         CalendarMutationJournal journal{m_connection, repository};
         if (!prepared.records.empty())
         {
@@ -3727,6 +3822,141 @@ namespace javelin::jmap::calendar
                     prepared.records, javelin::jmap::sync::MutationStatus::InFlight))
                 co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
         }
+        const auto recoverFromStateMismatch =
+            [this, &settings, &ownerAccountId, &request, &calendarIds, &operationGroupId,
+             &materialization, permission, &projectionCommitted, &prepared, &journal, &repository,
+             &recoveryMaterialization,
+             recoverStateMismatch](OperationError failure) -> QCoro::Task<CalendarMutationResult>
+        {
+            if (!prepared.records.empty())
+            {
+                if (const auto restoreError = restoreCalendarMutations(
+                        m_connection, repository, prepared.records,
+                        request.ifInState.value_or(std::string{}), failure.message.toStdString()))
+                    co_return *restoreError;
+            }
+            if (!recoverStateMismatch || !recoveryMaterialization)
+            {
+                if (projectionCommitted)
+                    projectionCommitted();
+                co_return failure;
+            }
+
+            qCInfo(logCalendarService).noquote()
+                << "CalendarEvent state mismatch; refresh and retry"
+                << "account=" << QString::fromStdString(request.accountId) << "attemptedState="
+                << QString::fromStdString(request.ifInState.value_or(std::string{"<none>"}));
+            auto refreshed = co_await m_syncEngine.refreshChanged(
+                settings, ownerAccountId, recoveryMaterialization->interval,
+                recoveryMaterialization->displayTimeZone);
+            if (const auto* refreshError = std::get_if<OperationError>(&refreshed))
+            {
+                if (projectionCommitted)
+                    projectionCommitted();
+                co_return *refreshError;
+            }
+
+            const auto currentStateResult = currentEventState(m_connection, request.accountId);
+            if (const auto* stateError = std::get_if<OperationError>(&currentStateResult))
+            {
+                if (projectionCommitted)
+                    projectionCommitted();
+                co_return *stateError;
+            }
+            const auto& currentState = std::get<std::string>(currentStateResult);
+
+            for (auto& [eventId, update] : request.update)
+            {
+                const auto current = repository.findEvent(request.accountId, eventId);
+                if (const auto* cacheError = std::get_if<cache::DatabaseError>(&current))
+                {
+                    if (projectionCommitted)
+                        projectionCommitted();
+                    co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+                }
+                const auto& refreshedEvent = std::get<std::optional<CalendarEvent>>(current);
+                if (!refreshedEvent)
+                {
+                    if (projectionCommitted)
+                        projectionCommitted();
+                    co_return error(OperationErrorCode::NotFound,
+                                    QStringLiteral("The event was removed while this edit was "
+                                                   "being synchronized."));
+                }
+                auto rebased =
+                    rebaseCalendarEventUpdate(update.previous, update.event, *refreshedEvent);
+                if (const auto* rebaseError = std::get_if<OperationError>(&rebased))
+                {
+                    if (projectionCommitted)
+                        projectionCommitted();
+                    co_return *rebaseError;
+                }
+                update.previous = *refreshedEvent;
+                update.event = std::get<CalendarEvent>(std::move(rebased));
+            }
+
+            if (!request.update.empty())
+            {
+                calendarIds.clear();
+                for (const auto& [calendarId, present] :
+                     request.update.begin()->second.event.calendarIds)
+                    if (present)
+                        calendarIds.push_back(calendarId);
+            }
+            else if (!request.destroy.empty())
+            {
+                const auto current =
+                    repository.findEvent(request.accountId, request.destroy.front());
+                if (const auto* cacheError = std::get_if<cache::DatabaseError>(&current))
+                {
+                    if (projectionCommitted)
+                        projectionCommitted();
+                    co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+                }
+                const auto& refreshedEvent = std::get<std::optional<CalendarEvent>>(current);
+                if (!refreshedEvent)
+                {
+                    if (projectionCommitted)
+                        projectionCommitted();
+                    co_return CommittedMutation{
+                        .accountId = request.accountId,
+                        .newState = currentState,
+                        .createdId = std::nullopt,
+                        .receipt =
+                            {
+                                .domains = {},
+                                .acceptedObjectIds = request.destroy,
+                                .rejectedObjectIds = {},
+                                .affectedCacheViews = {"calendar"},
+                                .incompleteMaterialization = false,
+                            },
+                    };
+                }
+                calendarIds.clear();
+                for (const auto& [calendarId, present] : refreshedEvent->calendarIds)
+                    if (present)
+                        calendarIds.push_back(calendarId);
+            }
+
+            request.ifInState = currentState;
+            qCInfo(logCalendarService).noquote()
+                << "Retry CalendarEvent mutation"
+                << "account=" << QString::fromStdString(request.accountId)
+                << "refreshedState=" << QString::fromStdString(currentState);
+            bool retryProjectionCommitted = false;
+            auto retryCallback = [&projectionCommitted, &retryProjectionCommitted]
+            {
+                retryProjectionCommitted = true;
+                if (projectionCommitted)
+                    projectionCommitted();
+            };
+            auto retried =
+                co_await mutate(settings, ownerAccountId, request, calendarIds, operationGroupId,
+                                materialization, permission, std::move(retryCallback), false);
+            if (!retryProjectionCommitted && projectionCommitted)
+                projectionCommitted();
+            co_return retried;
+        };
         api::RequestBuilder builder;
         builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
         const auto handle = builder.call(*method, "calendar-event-set");
@@ -3782,10 +4012,13 @@ namespace javelin::jmap::calendar
         const auto read = api::ResponseReader{*envelope}.require(handle);
         if (const auto* readError = std::get_if<api::ResponseReaderError>(&read))
         {
+            auto failure = responseError(*readError);
+            if (isStateMismatch(failure))
+                co_return co_await recoverFromStateMismatch(std::move(failure));
             if (const auto cacheError = journal.transition(
                     prepared.records, javelin::jmap::sync::MutationStatus::Unknown))
                 co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
-            co_return responseError(*readError);
+            co_return failure;
         }
         const auto& response = std::get<api::CalendarEventSetResponse>(read);
         std::optional<api::CalendarEventQueryResponse> materializedQuery;
@@ -3811,16 +4044,21 @@ namespace javelin::jmap::calendar
         if (setError)
         {
             const auto errorJson = setError->description.value_or("CalendarEvent/set rejected");
+            if (setError->type == api::CalendarSetErrorType::StateMismatch)
+            {
+                auto failure =
+                    error(OperationErrorCode::Conflict,
+                          QString::fromStdString(setError->description.value_or(
+                              "The event changed on the server. Refresh and try again.")));
+                failure.protocolType = "stateMismatch";
+                co_return co_await recoverFromStateMismatch(std::move(failure));
+            }
             if (const auto restoreError =
                     restoreCalendarMutations(m_connection, repository, prepared.records,
                                              request.ifInState.value_or(std::string{}), errorJson))
                 co_return *restoreError;
             if (projectionCommitted)
                 projectionCommitted();
-            if (setError->type == api::CalendarSetErrorType::StateMismatch)
-                co_return error(
-                    OperationErrorCode::Conflict,
-                    QStringLiteral("The event changed on the server. Refresh and try again."));
             if (setError->type == api::CalendarSetErrorType::Forbidden)
                 co_return error(OperationErrorCode::PermissionDenied,
                                 QStringLiteral("The server denied this calendar operation."));

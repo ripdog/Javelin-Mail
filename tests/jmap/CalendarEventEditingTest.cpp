@@ -310,3 +310,24 @@ TEST_CASE("acknowledging a calendar alert materializes it on the base event")
     CHECK(alert.acknowledged ==
           javelin::jmap::calendar::UtcInstant{.value = "2026-07-28T04:05:06.000Z"});
 }
+
+TEST_CASE("acknowledging a removed calendar alert does not restore it")
+{
+    javelin::jmap::calendar::CalendarEvent event;
+    event.id = "event-1";
+    event.useDefaultAlerts = false;
+    const javelin::jmap::calendar::Alert removedAlert{
+        .id = "removed-10m",
+        .action = "display",
+        .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+        .relativeTo = "start",
+        .offset = javelin::jmap::calendar::Duration{.value = "-PT10M"},
+        .when = std::nullopt,
+        .acknowledged = std::nullopt};
+
+    const auto acknowledged = javelin::jmap::calendar::acknowledgeAlert(
+        event, removedAlert, {.value = "2026-07-28T04:05:06.000Z"});
+
+    CHECK(acknowledged == event);
+    CHECK_FALSE(acknowledged.alerts.contains("removed-10m"));
+}

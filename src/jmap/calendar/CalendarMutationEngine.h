@@ -81,7 +81,8 @@ namespace javelin::jmap::calendar
                api::CalendarEventSetRequest request, std::vector<std::string> calendarIds,
                std::optional<std::string> operationGroupId,
                std::optional<CalendarRangeMaterialization> materialization,
-               MutationPermission permission, std::function<void()> projectionCommitted);
+               MutationPermission permission, std::function<void()> projectionCommitted,
+               bool recoverStateMismatch = true);
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
         mutateCalendar(LiveConnectionSettings settings, api::Session session,
                        api::CalendarSetRequest request, std::optional<Calendar> projectedCalendar,

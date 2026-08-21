@@ -1539,6 +1539,18 @@ namespace javelin::jmap::cache
             if (!exec(addToWindows, failure, QStringLiteral("Add projected occurrence to windows")))
                 return failure;
         }
+
+        QSqlQuery stateToken{database};
+        stateToken.prepare(QStringLiteral(
+            "INSERT INTO calendar_state_tokens (account_id,data_type,state) VALUES "
+            "(:account,'CalendarEvent',:state) ON CONFLICT(account_id,data_type) DO UPDATE SET "
+            "state=excluded.state"));
+        stateToken.bindValue(QStringLiteral(":account"),
+                             QString::fromStdString(std::string{accountId}));
+        stateToken.bindValue(QStringLiteral(":state"),
+                             QString::fromStdString(std::string{eventState}));
+        if (!exec(stateToken, failure, QStringLiteral("Store projected CalendarEvent state")))
+            return failure;
         return std::nullopt;
     }
 

@@ -322,6 +322,8 @@ namespace javelin::jmap::calendar
     CalendarEvent acknowledgeAlert(CalendarEvent event, Alert alert,
                                    const UtcInstant acknowledgedAt)
     {
+        if (!event.useDefaultAlerts && !event.alerts.contains(alert.id))
+            return event;
         alert.acknowledged = acknowledgedAt;
         event.alerts.insert_or_assign(alert.id, std::move(alert));
         return event;
