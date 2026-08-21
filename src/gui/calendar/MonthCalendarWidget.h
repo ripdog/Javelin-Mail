@@ -99,7 +99,9 @@ namespace javelin::gui::calendar
 
     class AccessibleDayCell;
     class AccessibleMonthCalendar;
+    class AccessibleMonthCalendarGrid;
     class DayCellWidget;
+    class MonthCalendarGridWidget;
 
     class MonthCalendarWidget final : public QWidget
     {
@@ -173,6 +175,7 @@ namespace javelin::gui::calendar
       private:
         friend class AccessibleDayCell;
         friend class AccessibleMonthCalendar;
+        friend class AccessibleMonthCalendarGrid;
 
         void rebuildDates();
         void updateEventPresentation();
@@ -189,6 +192,7 @@ namespace javelin::gui::calendar
         QLocale m_locale;
         QDate m_displayedMonth;
         QDate m_selectedDate;
+        MonthCalendarGridWidget* m_gridHost = nullptr;
         QGridLayout* m_grid = nullptr;
         QLabel* m_title = nullptr;
         QWidget* m_invitationBanner = nullptr;

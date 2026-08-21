@@ -82,6 +82,15 @@ namespace javelin::gui::calendar
 
     } // namespace
 
+    class MonthCalendarGridWidget final : public QWidget
+    {
+      public:
+        explicit MonthCalendarGridWidget(QWidget* parent = nullptr) : QWidget(parent)
+        {
+            setObjectName(QStringLiteral("calendarGrid"));
+        }
+    };
+
     class DayCellWidget final : public QWidget
     {
         struct RenderedEvent
@@ -341,13 +350,32 @@ namespace javelin::gui::calendar
         };
     } // namespace
 
-    class AccessibleMonthCalendar final : public QAccessibleWidget,
-                                          public QAccessibleTableInterface,
-                                          public QAccessibleSelectionInterface
+    class AccessibleMonthCalendar final : public QAccessibleWidget
     {
       public:
         explicit AccessibleMonthCalendar(MonthCalendarWidget* calendar)
-            : QAccessibleWidget(calendar, QAccessible::Table)
+            : QAccessibleWidget(calendar, QAccessible::Pane)
+        {
+        }
+
+        [[nodiscard]] QString text(const QAccessible::Text type) const override
+        {
+            if (type == QAccessible::Name)
+            {
+                auto* calendar = qobject_cast<MonthCalendarWidget*>(object());
+                return calendar != nullptr ? calendar->m_title->text() : QString{};
+            }
+            return QAccessibleWidget::text(type);
+        }
+    };
+
+    class AccessibleMonthCalendarGrid final : public QAccessibleWidget,
+                                              public QAccessibleTableInterface,
+                                              public QAccessibleSelectionInterface
+    {
+      public:
+        explicit AccessibleMonthCalendarGrid(MonthCalendarGridWidget* grid)
+            : QAccessibleWidget(grid, QAccessible::Table)
         {
         }
 
@@ -613,7 +641,9 @@ namespace javelin::gui::calendar
       private:
         [[nodiscard]] MonthCalendarWidget* calendarWidget() const
         {
-            return qobject_cast<MonthCalendarWidget*>(object());
+            auto* grid = dynamic_cast<MonthCalendarGridWidget*>(object());
+            return grid != nullptr ? qobject_cast<MonthCalendarWidget*>(grid->parentWidget())
+                                   : nullptr;
         }
     };
 
@@ -776,8 +806,8 @@ namespace javelin::gui::calendar
 
         [[nodiscard]] QAccessibleInterface* table() const override
         {
-            auto* calendar = calendarWidget();
-            return calendar != nullptr ? QAccessible::queryAccessibleInterface(calendar) : nullptr;
+            auto* grid = gridWidget();
+            return grid != nullptr ? QAccessible::queryAccessibleInterface(grid) : nullptr;
         }
 
       private:
@@ -787,10 +817,17 @@ namespace javelin::gui::calendar
                 object(), QLatin1StringView{"calendarDayCell"});
         }
 
-        [[nodiscard]] MonthCalendarWidget* calendarWidget() const
+        [[nodiscard]] MonthCalendarGridWidget* gridWidget() const
         {
             auto* cell = cellWidget();
-            return cell != nullptr ? qobject_cast<MonthCalendarWidget*>(cell->parentWidget())
+            return cell != nullptr ? dynamic_cast<MonthCalendarGridWidget*>(cell->parentWidget())
+                                   : nullptr;
+        }
+
+        [[nodiscard]] MonthCalendarWidget* calendarWidget() const
+        {
+            auto* grid = gridWidget();
+            return grid != nullptr ? qobject_cast<MonthCalendarWidget*>(grid->parentWidget())
                                    : nullptr;
         }
     };
@@ -803,6 +840,10 @@ namespace javelin::gui::calendar
             if (auto* calendar = accessibility::factoryObject<MonthCalendarWidget>(key, object);
                 calendar != nullptr)
                 return new AccessibleMonthCalendar(calendar);
+            if (auto* grid = accessibility::namedFactoryObject<MonthCalendarGridWidget, QWidget>(
+                    key, object, QLatin1StringView{"calendarGrid"});
+                grid != nullptr)
+                return new AccessibleMonthCalendarGrid(grid);
             if (auto* cell = accessibility::namedFactoryObject<DayCellWidget, QWidget>(
                     key, object, QLatin1StringView{"calendarDayCell"});
                 cell != nullptr)
@@ -855,12 +896,14 @@ namespace javelin::gui::calendar
         m_invitationBanner->hide();
         outer->addWidget(m_invitationBanner);
         m_calendarMenu = new QMenu(this);
-        m_grid = new QGridLayout;
+        m_gridHost = new MonthCalendarGridWidget(this);
+        m_grid = new QGridLayout(m_gridHost);
+        m_grid->setContentsMargins(0, 0, 0, 0);
         m_grid->setSpacing(0);
         for (int column = 0; column < 7; ++column)
         {
             m_grid->setColumnStretch(column, 1);
-            m_weekdayHeaders[static_cast<std::size_t>(column)] = new QLabel(this);
+            m_weekdayHeaders[static_cast<std::size_t>(column)] = new QLabel(m_gridHost);
             m_weekdayHeaders[static_cast<std::size_t>(column)]->setObjectName(
                 QStringLiteral("calendarWeekdayHeader"));
             m_weekdayHeaders[static_cast<std::size_t>(column)]->setAlignment(Qt::AlignCenter);
@@ -870,7 +913,7 @@ namespace javelin::gui::calendar
         }
         for (int index = 0; index < 42; ++index)
         {
-            auto* cell = new DayCellWidget(index, this);
+            auto* cell = new DayCellWidget(index, m_gridHost);
             cell->clicked = [this](const QDate& date)
             {
                 selectDate(date);
@@ -902,7 +945,7 @@ namespace javelin::gui::calendar
             m_cells[static_cast<std::size_t>(index)] = cell;
             m_grid->addWidget(cell, 1 + index / 7, index % 7);
         }
-        outer->addLayout(m_grid, 1);
+        outer->addWidget(m_gridHost, 1);
         rebuildDates();
     }
 
@@ -1661,9 +1704,9 @@ namespace javelin::gui::calendar
         if (!QAccessible::isActive())
             return;
 
-        QAccessibleEvent nameChanged{this, QAccessible::NameChanged};
+        QAccessibleEvent nameChanged{m_gridHost, QAccessible::NameChanged};
         QAccessible::updateAccessibility(&nameChanged);
-        QAccessibleTableModelChangeEvent modelChanged{this,
+        QAccessibleTableModelChangeEvent modelChanged{m_gridHost,
                                                       QAccessibleTableModelChangeEvent::ModelReset};
         QAccessible::updateAccessibility(&modelChanged);
         if (hasFocus())
@@ -1681,7 +1724,7 @@ namespace javelin::gui::calendar
         if (!QAccessible::isActive())
             return;
 
-        QAccessibleEvent selectionChanged{this, QAccessible::SelectionWithin};
+        QAccessibleEvent selectionChanged{m_gridHost, QAccessible::SelectionWithin};
         QAccessible::updateAccessibility(&selectionChanged);
         if (hasFocus())
         {

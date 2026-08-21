@@ -20,9 +20,17 @@
 namespace
 {
     [[nodiscard]] QAccessibleInterface*
+    calendarGrid(javelin::gui::calendar::MonthCalendarWidget& widget)
+    {
+        auto* grid =
+            widget.findChild<QWidget*>(QStringLiteral("calendarGrid"), Qt::FindDirectChildrenOnly);
+        return grid != nullptr ? QAccessible::queryAccessibleInterface(grid) : nullptr;
+    }
+
+    [[nodiscard]] QAccessibleInterface*
     cellForDate(javelin::gui::calendar::MonthCalendarWidget& widget, const QDate& date)
     {
-        auto* accessible = QAccessible::queryAccessibleInterface(&widget);
+        auto* accessible = calendarGrid(widget);
         if (accessible == nullptr || accessible->tableInterface() == nullptr)
             return nullptr;
         for (int index = 0; index < widget.cellCount(); ++index)
@@ -191,10 +199,17 @@ TEST_CASE("month calendar accessibility exposes one named table with concise dat
 
     auto* accessible = QAccessible::queryAccessibleInterface(&widget);
     REQUIRE(accessible != nullptr);
-    CHECK(accessible->role() == QAccessible::Table);
+    CHECK(accessible->role() == QAccessible::Pane);
     CHECK(accessible->text(QAccessible::Name) == QStringLiteral("March 2026"));
 
-    auto* table = accessible->tableInterface();
+    auto* grid = calendarGrid(widget);
+    REQUIRE(grid != nullptr);
+    CHECK(grid->role() == QAccessible::Table);
+    CHECK(grid->parent() == accessible);
+    CHECK(accessible->indexOfChild(grid) >= 0);
+    CHECK(grid->text(QAccessible::Name) == QStringLiteral("March 2026"));
+
+    auto* table = grid->tableInterface();
     REQUIRE(table != nullptr);
     CHECK(table->rowCount() == 6);
     CHECK(table->columnCount() == 7);
@@ -203,13 +218,17 @@ TEST_CASE("month calendar accessibility exposes one named table with concise dat
     auto* marchTen = cellForDate(widget, QDate{2026, 3, 10});
     REQUIRE(marchTen != nullptr);
     CHECK(marchTen->role() == QAccessible::Cell);
+    CHECK(marchTen->parent() == grid);
+    CHECK(grid->indexOfChild(marchTen) >= 0);
     CHECK(marchTen->text(QAccessible::Name) == QStringLiteral("Tuesday 10"));
     REQUIRE(marchTen->tableCellInterface() != nullptr);
+    CHECK(marchTen->tableCellInterface()->table() == grid);
     CHECK(marchTen->tableCellInterface()->rowIndex() == 2);
     CHECK(marchTen->tableCellInterface()->columnIndex() == 1);
     REQUIRE(marchTen->tableCellInterface()->columnHeaderCells().size() == 1);
     CHECK(marchTen->tableCellInterface()->columnHeaderCells().front()->role() ==
           QAccessible::ColumnHeader);
+    CHECK(marchTen->tableCellInterface()->columnHeaderCells().front()->parent() == grid);
     CHECK(marchTen->tableCellInterface()->columnHeaderCells().front()->text(QAccessible::Name) ==
           QStringLiteral("Tuesday"));
 
@@ -218,7 +237,7 @@ TEST_CASE("month calendar accessibility exposes one named table with concise dat
     CHECK(februaryTwentyThree->text(QAccessible::Name) == QStringLiteral("Monday 23 February"));
     CHECK_FALSE(februaryTwentyThree->text(QAccessible::Name).contains(QStringLiteral("2026")));
 
-    auto* selection = accessible->selectionInterface();
+    auto* selection = grid->selectionInterface();
     REQUIRE(selection != nullptr);
     CHECK(selection->select(marchTen));
     CHECK(selection->selectedItemCount() == 1);
@@ -253,6 +272,7 @@ TEST_CASE("month calendar accessibility reports event counts and full event butt
     CHECK(dynamic_cast<javelin::gui::calendar::CalendarEventButton*>(eventButton->object()) !=
           nullptr);
     CHECK(eventButton->role() == QAccessible::Button);
+    CHECK(eventButton->parent() == cell);
     CHECK_FALSE(eventButton->state().checkable);
     REQUIRE(eventButton->actionInterface() != nullptr);
     CHECK(eventButton->actionInterface()->actionNames().contains(
@@ -432,7 +452,9 @@ TEST_CASE("month calendar page navigation keeps the selected cell in the display
 
     auto* accessible = QAccessible::queryAccessibleInterface(&widget);
     REQUIRE(accessible != nullptr);
-    auto* selection = accessible->selectionInterface();
+    auto* grid = calendarGrid(widget);
+    REQUIRE(grid != nullptr);
+    auto* selection = grid->selectionInterface();
     REQUIRE(selection != nullptr);
     auto* januaryThirtyOne = cellForDate(widget, QDate{2026, 1, 31});
     REQUIRE(januaryThirtyOne != nullptr);
