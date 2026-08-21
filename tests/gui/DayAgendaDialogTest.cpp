@@ -333,7 +333,8 @@ TEST_CASE("day agenda RSVP controls preserve confirmed state and surface failure
     CHECK_FALSE(tentative->isEnabled());
     CHECK_FALSE(decline->isEnabled());
 
-    dialog.setResponseMutationPending(false, QStringLiteral("Server rejected the response."));
+    dialog.setResponseMutationPending(selected.key, false,
+                                      QStringLiteral("Server rejected the response."));
     settleGui();
     CHECK(accept->isEnabled());
     CHECK(tentative->isChecked());
@@ -356,6 +357,57 @@ TEST_CASE("day agenda RSVP controls preserve confirmed state and surface failure
     const auto labels = dialog.findChildren<QLabel*>();
     CHECK(std::ranges::any_of(labels, [](const QLabel* label)
                               { return label->text().contains(QStringLiteral("entire series")); }));
+    dialog.close();
+}
+
+TEST_CASE("day agenda RSVP completion updates the initiating event after selection changes",
+          "[gui][calendar][agenda][invitation][async]")
+{
+    javelin::gui::calendar::DayAgendaDialog dialog;
+    auto first = event(QStringLiteral("first-invitation"), QTime{9, 0}, QTime{10, 0},
+                       QStringLiteral("First invitation"), false);
+    first.rsvpAllowed = true;
+    first.participationStatus = QStringLiteral("needs-action");
+    auto second = event(QStringLiteral("second-invitation"), QTime{11, 0}, QTime{12, 0},
+                        QStringLiteral("Second invitation"), false);
+    second.rsvpAllowed = true;
+    second.participationStatus = QStringLiteral("needs-action");
+    dialog.setDay(QDate{2026, 8, 10}, {first, second}, first.key);
+    dialog.show();
+    settleGui();
+
+    auto* accept = dialog.findChild<QPushButton*>(QStringLiteral("dayAgendaRsvpAccept"));
+    REQUIRE(accept != nullptr);
+    accept->click();
+    settleGui();
+
+    auto buttons = dialog.findChildren<javelin::gui::calendar::CalendarEventButton*>(
+        QStringLiteral("dayAgendaEventButton"));
+    const auto secondButton = std::ranges::find_if(
+        buttons, [](const auto* button)
+        { return button->property("agendaEventId").toString() == QStringLiteral("second-invitation"); });
+    REQUIRE(secondButton != buttons.end());
+    (*secondButton)->click();
+    settleGui();
+    REQUIRE(dialog.selectedEvent().has_value());
+    CHECK(dialog.selectedEvent()->eventId == QStringLiteral("second-invitation"));
+
+    dialog.setResponseMutationPending(first.key, false,
+                                      QStringLiteral("First invitation failed."));
+    settleGui();
+    auto* error = dialog.findChild<QLabel*>(QStringLiteral("dayAgendaResponseError"));
+    REQUIRE(error != nullptr);
+    CHECK_FALSE(error->isVisible());
+
+    const auto firstButton = std::ranges::find_if(
+        buttons, [](const auto* button)
+        { return button->property("agendaEventId").toString() == QStringLiteral("first-invitation"); });
+    REQUIRE(firstButton != buttons.end());
+    (*firstButton)->click();
+    settleGui();
+    CHECK(error->isVisible());
+    CHECK(error->text() == QStringLiteral("First invitation failed."));
+    CHECK(accept->isEnabled());
     dialog.close();
 }
 

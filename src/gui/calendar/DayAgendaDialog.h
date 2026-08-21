@@ -64,7 +64,8 @@ namespace javelin::gui::calendar
 
         void setDay(QDate date, std::vector<DayAgendaEvent> events,
                     std::optional<DayAgendaEventKey> selectedEvent = std::nullopt);
-        void setResponseMutationPending(bool pending, QString error = {});
+        void setResponseMutationPending(const DayAgendaEventKey& eventKey, bool pending,
+                                        QString error = {});
         [[nodiscard]] QDate date() const;
         [[nodiscard]] std::optional<DayAgendaEventKey> selectedEvent() const;
 

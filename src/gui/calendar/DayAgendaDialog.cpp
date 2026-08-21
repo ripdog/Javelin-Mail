@@ -777,16 +777,16 @@ namespace javelin::gui::calendar
             scheduleInitialScroll();
     }
 
-    void DayAgendaDialog::setResponseMutationPending(const bool pending, QString error)
+    void DayAgendaDialog::setResponseMutationPending(const DayAgendaEventKey& eventKey,
+                                                     const bool pending, QString error)
     {
-        if (!m_selectedEvent)
-            return;
-        const auto found = std::ranges::find(m_events, *m_selectedEvent, &DayAgendaEvent::key);
+        const auto found = std::ranges::find(m_events, eventKey, &DayAgendaEvent::key);
         if (found == m_events.end())
             return;
         found->responseMutationPending = pending;
         found->responseError = std::move(error);
-        updateDetails(*found);
+        if (m_selectedEvent && *m_selectedEvent == eventKey)
+            updateDetails(*found);
     }
 
     QDate DayAgendaDialog::date() const

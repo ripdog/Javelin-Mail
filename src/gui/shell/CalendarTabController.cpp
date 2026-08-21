@@ -1225,13 +1225,19 @@ namespace javelin::gui::shell
                         const QString& selectedAccountId, const QString& selectedEventId,
                         const QString& selectedRecurrenceId, const QString& participationStatus)
                     {
+                        const auto responseEventKey = dialog->selectedEvent();
+                        if (!responseEventKey || responseEventKey->accountId != selectedAccountId ||
+                            responseEventKey->eventId != selectedEventId)
+                            return;
+
                         const auto account =
                             std::ranges::find(m_calendarAccounts, selectedAccountId.toStdString(),
                                               &javelin::jmap::cache::CalendarAccount::accountId);
                         if (account == m_calendarAccounts.end())
                         {
                             dialog->setResponseMutationPending(
-                                false, i18n("The calendar account is no longer available."));
+                                *responseEventKey, false,
+                                i18n("The calendar account is no longer available."));
                             return;
                         }
                         const javelin::jmap::calendar::VisibleInterval interval{
@@ -1262,15 +1268,17 @@ namespace javelin::gui::shell
                                  }});
                         QCoro::connect(
                             std::move(task), dialog,
-                            [dialog](javelin::jmap::calendar::CalendarMutationResult result)
+                            [dialog, responseEventKey = *responseEventKey](
+                                javelin::jmap::calendar::CalendarMutationResult result)
                             {
                                 if (const auto* error =
                                         std::get_if<javelin::jmap::OperationError>(&result))
                                 {
-                                    dialog->setResponseMutationPending(false, error->message);
+                                    dialog->setResponseMutationPending(responseEventKey, false,
+                                                                       error->message);
                                     return;
                                 }
-                                dialog->setResponseMutationPending(false);
+                                dialog->setResponseMutationPending(responseEventKey, false);
                             });
                     });
                 connect(dialog, &javelin::gui::calendar::DayAgendaDialog::eventContextMenuRequested,
