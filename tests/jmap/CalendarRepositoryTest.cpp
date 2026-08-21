@@ -848,9 +848,15 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
                      .mayShare = false,
                      .mayDelete = false},
     };
-    REQUIRE_FALSE(calendars.replaceCalendars("a1", "c1", {work}).has_value());
+    auto noRsvp = work;
+    noRsvp.id = "reference";
+    noRsvp.name = "Reference";
+    noRsvp.isDefault = false;
+    noRsvp.myRights.mayRSVP = false;
+    REQUIRE_FALSE(calendars.replaceCalendars("a1", "c1", {work, noRsvp}).has_value());
 
     auto invitation = event("invite-1", "2000-08-20T10:00:00");
+    invitation.calendarIds = {{"work", true}, {"reference", true}};
     invitation.isOrigin = false;
     invitation.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
     invitation.recurrenceRule->frequency = javelin::jmap::calendar::RecurrenceFrequency::Weekly;

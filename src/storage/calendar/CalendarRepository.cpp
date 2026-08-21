@@ -1422,14 +1422,13 @@ namespace javelin::jmap::cache
                                         participant->participationStatus == "needs-action";
                 }
 
-                bool hasCalendarMembership = false;
+                bool mayRsvpInMemberCalendar = false;
                 if (pendingInvitation)
                 {
                     for (const auto& [calendarId, present] : event.calendarIds)
                     {
                         if (!present)
                             continue;
-                        hasCalendarMembership = true;
                         calendarRights.bindValue(QStringLiteral(":account"),
                                                  QString::fromStdString(std::string{accountId}));
                         calendarRights.bindValue(QStringLiteral(":calendar"),
@@ -1437,14 +1436,14 @@ namespace javelin::jmap::cache
                         if (!exec(calendarRights, failure,
                                   QStringLiteral("Read invitation calendar rights")))
                             return failure;
-                        if (!calendarRights.next() ||
-                            (calendarRights.value(0).toUInt() & 32U) == 0U)
+                        if (calendarRights.next() &&
+                            (calendarRights.value(0).toUInt() & 32U) != 0U)
                         {
-                            pendingInvitation = false;
+                            mayRsvpInMemberCalendar = true;
                             break;
                         }
                     }
-                    pendingInvitation = pendingInvitation && hasCalendarMembership;
+                    pendingInvitation = mayRsvpInMemberCalendar;
                 }
 
                 if (pendingInvitation)
