@@ -188,6 +188,7 @@ namespace javelin::app
     std::optional<javelin::jmap::cache::DatabaseError>
     MailExportRepository::createOperation(const MailExportOperationRecord& operation)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "INSERT INTO mail_export_operations(operation_id,account_id,scope_kind,mailbox_id,"
@@ -248,6 +249,7 @@ namespace javelin::app
     MailExportRepository::setStatus(const std::string_view operationId,
                                     const MailExportStatus status, std::optional<QString> lastError)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "UPDATE mail_export_operations SET status=:status,last_error=:error WHERE "
@@ -399,6 +401,7 @@ namespace javelin::app
     std::optional<javelin::jmap::cache::DatabaseError>
     MailExportRepository::sealManifest(const std::string_view operationId, std::string emailState)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "UPDATE mail_export_operations SET manifest_sealed=1,manifest_email_state=:state,"
@@ -432,6 +435,7 @@ namespace javelin::app
     MailExportRepository::markSourceReady(const std::string_view itemId, std::string contentHash,
                                           QString outputRelativePath)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "UPDATE mail_export_items SET phase='source_ready',raw_content_hash=:hash,"
@@ -448,6 +452,7 @@ namespace javelin::app
     MailExportRepository::markWriting(const std::string_view itemId,
                                       const std::optional<std::uint64_t> mboxStartOffset)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "UPDATE mail_export_items SET phase='writing',mbox_start_offset=:offset WHERE "
@@ -466,6 +471,7 @@ namespace javelin::app
     MailExportRepository::markComplete(const std::string_view itemId,
                                        const std::optional<std::uint64_t> mboxEndOffset)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         QSqlQuery query{m_connection.database()};
         query.prepare(
             QStringLiteral("UPDATE mail_export_items SET phase='complete',mbox_start_offset=NULL,"
@@ -483,6 +489,7 @@ namespace javelin::app
     std::optional<javelin::jmap::cache::DatabaseError>
     MailExportRepository::markFailed(const std::string_view itemId, QString error)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "UPDATE mail_export_items SET phase='failed',last_error=:error WHERE item_id=:id"));
