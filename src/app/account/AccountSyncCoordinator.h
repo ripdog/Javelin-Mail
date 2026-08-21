@@ -160,11 +160,14 @@ namespace javelin::app
         [[nodiscard]] bool hasValidSettings() const;
         [[nodiscard]] std::optional<RunConfiguration> resolveConfiguration() const;
         [[nodiscard]] QCoro::Task<void> runLoop(std::shared_ptr<RunContext> runContext);
-        [[nodiscard]] QCoro::Task<void> refreshWatchedMailbox(MailRefreshDemand demand);
+        [[nodiscard]] QCoro::Task<void> refreshWatchedMailbox(MailRefreshDemand demand,
+                                                              EndpointRetryGate::Lease retryLease);
         [[nodiscard]] QCoro::Task<void>
-        refreshWatchedMailboxOnce(std::shared_ptr<RunContext> runContext, MailRefreshDemand demand);
+        refreshWatchedMailboxOnce(std::shared_ptr<RunContext> runContext, MailRefreshDemand demand,
+                                  EndpointRetryGate::Lease& retryLease);
         [[nodiscard]] QCoro::Task<std::optional<bool>>
-        refreshMailboxStateOnce(std::shared_ptr<RunContext> runContext);
+        refreshMailboxStateOnce(std::shared_ptr<RunContext> runContext,
+                                EndpointRetryGate::Lease& retryLease);
         void handleResumeWatchdogTimeout();
         void scheduleDebouncedRefresh(bool forceEmailRefresh = false,
                                       std::vector<std::string> mailboxIds = {});
@@ -189,9 +192,9 @@ namespace javelin::app
                                          std::string rejectedAccessToken);
         void publishOperationError(const QString& operation,
                                    const javelin::jmap::OperationError& error);
-        void recordRefreshFailure(const std::string& endpoint,
+        void recordRefreshFailure(EndpointRetryGate::Lease& retryLease,
                                   const javelin::jmap::OperationError& error);
-        void recordRefreshSuccess(const std::string& endpoint);
+        void recordRefreshSuccess(EndpointRetryGate::Lease& retryLease);
         [[nodiscard]] static bool usesEndpointBackoff(const javelin::jmap::OperationError& error);
 
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
