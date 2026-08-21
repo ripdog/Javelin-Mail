@@ -2,21 +2,21 @@ include_guard(GLOBAL)
 
 include(FetchContent)
 
-function(javelin_fetch_catch2)
+function(javelin_fetch_catch2 out_extras_dir)
     set(CATCH_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
     set(CATCH_INSTALL_EXTRAS ON CACHE BOOL "" FORCE)
 
+    # Catch2 v3.7.1 (fa43b77429ba76c462b1898d6cd2f2d7a9416b14).
     FetchContent_Declare(
         Catch2
-        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG v3.7.1
-        GIT_SHALLOW TRUE
+        URL https://github.com/catchorg/Catch2/archive/fa43b77429ba76c462b1898d6cd2f2d7a9416b14.tar.gz
+        URL_HASH SHA256=e7bbe2a99e111dfc9eb931f5e95b11b02f18f64c4f5b3aff6fdbd118fe440107
+        DOWNLOAD_EXTRACT_TIMESTAMP FALSE
     )
 
     FetchContent_MakeAvailable(Catch2)
 
-    list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
-    set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}" PARENT_SCOPE)
+    set(${out_extras_dir} "${catch2_SOURCE_DIR}/extras" PARENT_SCOPE)
 endfunction()
 
 function(javelin_fetch_qcoro)
@@ -32,11 +32,12 @@ function(javelin_fetch_qcoro)
     set(CMAKE_DISABLE_FIND_PACKAGE_ECM ON)
     set(ECM_FOUND OFF)
 
+    # QCoro v0.13.0 (98f23d8d8d67e9e24217d268927faec97c713fb0).
     FetchContent_Declare(
         qcoro
-        GIT_REPOSITORY https://github.com/qcoro/qcoro.git
-        GIT_TAG v0.13.0
-        GIT_SHALLOW TRUE
+        URL https://github.com/qcoro/qcoro/archive/98f23d8d8d67e9e24217d268927faec97c713fb0.tar.gz
+        URL_HASH SHA256=cd81dbdeab62ad31c84b3f5ec44ffc2ef61288695f33864317c7376a416de801
+        DOWNLOAD_EXTRACT_TIMESTAMP FALSE
     )
 
     FetchContent_MakeAvailable(qcoro)
@@ -46,22 +47,24 @@ function(javelin_fetch_glaze)
     set(glaze_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(glaze_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 
+    # Glaze v7.9.1 (cadcadea26554cc4214769e358f981426e40a02a).
     FetchContent_Declare(
         glaze
-        GIT_REPOSITORY https://github.com/stephenberry/glaze.git
-        GIT_TAG v7.9.1
-        GIT_SHALLOW TRUE
+        URL https://github.com/stephenberry/glaze/archive/cadcadea26554cc4214769e358f981426e40a02a.tar.gz
+        URL_HASH SHA256=b7ee0895009bf988546c9989a3a08ab7cc7ca3a2e98f6582a18642ea4d492e06
+        DOWNLOAD_EXTRACT_TIMESTAMP FALSE
     )
 
     FetchContent_MakeAvailable(glaze)
 endfunction()
 
 function(javelin_fetch_fasttext)
+    # fastText v0.9.2 (5b5943c118b0ec5fb9cd8d20587de2b2d3966dfe).
     FetchContent_Declare(
         fastText
-        GIT_REPOSITORY https://github.com/facebookresearch/fastText.git
-        GIT_TAG v0.9.2
-        GIT_SHALLOW TRUE
+        URL https://github.com/facebookresearch/fastText/archive/5b5943c118b0ec5fb9cd8d20587de2b2d3966dfe.tar.gz
+        URL_HASH SHA256=d8ea020f1df7c88a3fb968f4f20c7b2edfd5c70a3523d7e04c84abb5dedd8439
+        DOWNLOAD_EXTRACT_TIMESTAMP FALSE
     )
 
     FetchContent_GetProperties(fastText)
@@ -185,11 +188,12 @@ function(javelin_configure_dependencies)
     if(BUILD_TESTING)
         find_package(Catch2 3 CONFIG QUIET)
         if(Catch2_FOUND)
-            list(APPEND CMAKE_MODULE_PATH "${Catch2_DIR}")
-            set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}" PARENT_SCOPE)
+            set(catch2_extras_dir "${Catch2_DIR}")
         else()
-            javelin_fetch_catch2()
+            javelin_fetch_catch2(catch2_extras_dir)
         endif()
+        list(APPEND CMAKE_MODULE_PATH "${catch2_extras_dir}")
+        set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}" PARENT_SCOPE)
     endif()
 
     if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION)
