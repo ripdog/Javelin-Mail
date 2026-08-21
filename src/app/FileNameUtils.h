@@ -24,19 +24,29 @@ namespace javelin::app
     [[nodiscard]] inline QString truncateGeneratedFileName(QString fileName,
                                                            const qsizetype maximumUtf8Bytes = 240)
     {
+        if (maximumUtf8Bytes <= 0)
+            return {};
         if (fileName.toUtf8().size() <= maximumUtf8Bytes)
             return fileName;
 
+        const auto truncateToBudget = [](QString value, const qsizetype budget)
+        {
+            while (!value.isEmpty() && value.toUtf8().size() > budget)
+                chopLastUnicodeCodePoint(value);
+            return value;
+        };
+
         const QFileInfo info{fileName};
         const QString suffix = info.completeSuffix();
-        const QString extension = suffix.isEmpty() ? QString{} : QStringLiteral(".") + suffix;
-        QString baseName = info.completeBaseName();
+        QString extension = suffix.isEmpty() ? QString{} : QStringLiteral(".") + suffix;
         const qsizetype extensionBytes = extension.toUtf8().size();
-        const qsizetype baseBudget = std::max<qsizetype>(1, maximumUtf8Bytes - extensionBytes);
-        while (!baseName.isEmpty() && baseName.toUtf8().size() > baseBudget)
-            chopLastUnicodeCodePoint(baseName);
+        if (extensionBytes >= maximumUtf8Bytes)
+            extension.clear();
+
+        const qsizetype baseBudget = maximumUtf8Bytes - extension.toUtf8().size();
+        QString baseName = truncateToBudget(info.completeBaseName(), baseBudget);
         if (baseName.isEmpty())
-            baseName = QStringLiteral("file");
+            baseName = truncateToBudget(QStringLiteral("file"), baseBudget);
         return baseName + extension;
     }
 } // namespace javelin::app
