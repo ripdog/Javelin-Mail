@@ -1025,6 +1025,7 @@ namespace javelin::app
         if (status == Status::Connected && m_shouldCatchUpRefreshOnReconnect &&
             m_runContext != nullptr)
         {
+            Q_EMIT stateChangeCatchUpRequired();
             scheduleDebouncedRefresh(true);
         }
         Q_EMIT statusChanged(m_status);

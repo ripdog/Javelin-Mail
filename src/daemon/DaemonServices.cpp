@@ -534,6 +534,9 @@ namespace javelin::app
         QObject::connect(
             m_accountRuntimeManager.get(), &AccountRuntimeManager::calendarStateChanged,
             m_calendarInvitationService.get(), &CalendarInvitationService::calendarStateChanged);
+        QObject::connect(
+            m_accountRuntimeManager.get(), &AccountRuntimeManager::stateChangeCatchUpRequired,
+            m_calendarInvitationService.get(), &CalendarInvitationService::accountChanged);
         QObject::connect(m_calendarApplicationService.get(),
                          &CalendarApplicationService::calendarCacheCommitted,
                          m_calendarNotificationService.get(), [this](const CalendarCacheChange&)

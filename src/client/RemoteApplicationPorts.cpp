@@ -172,10 +172,10 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
     RemoteCalendarCommandPort::requestCalendarRange(
         std::string ownerAccountId, javelin::jmap::calendar::VisibleInterval interval,
-        javelin::jmap::calendar::TimeZoneId displayTimeZone)
+        javelin::jmap::calendar::TimeZoneId displayTimeZone, const bool forceRefresh)
     {
         co_return co_await call<javelin::protocol::actions::CalendarRequestRange>(
-            m_client, ownerAccountId, interval, displayTimeZone);
+            m_client, ownerAccountId, interval, displayTimeZone, forceRefresh);
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>

@@ -58,12 +58,12 @@ namespace javelin::app
                 id, command,
                 [this, &id](std::string ownerAccountId,
                             javelin::jmap::calendar::VisibleInterval interval,
-                            javelin::jmap::calendar::TimeZoneId timeZone)
+                            javelin::jmap::calendar::TimeZoneId timeZone, const bool forceRefresh)
                 {
                     return launchAction<actions::CalendarRequestRange>(
-                        id,
-                        m_services.calendarCommandPort().requestCalendarRange(
-                            std::move(ownerAccountId), std::move(interval), std::move(timeZone)));
+                        id, m_services.calendarCommandPort().requestCalendarRange(
+                                std::move(ownerAccountId), std::move(interval), std::move(timeZone),
+                                forceRefresh));
                 });
         case actions::CalendarCreateEvent::id.value:
             return dispatchDecoded<actions::CalendarCreateEvent>(

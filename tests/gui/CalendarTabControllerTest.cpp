@@ -111,6 +111,7 @@ namespace
     {
       public:
         int rangeRequestCount = 0;
+        int forcedRangeRequestCount = 0;
         int colorBatchRequestCount = 0;
         int defaultAlertsBatchRequestCount = 0;
         int subscriptionRequestCount = 0;
@@ -125,9 +126,11 @@ namespace
 
         QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
         requestCalendarRange(std::string, javelin::jmap::calendar::VisibleInterval interval,
-                             javelin::jmap::calendar::TimeZoneId displayTimeZone) override
+                             javelin::jmap::calendar::TimeZoneId displayTimeZone,
+                             const bool forceRefresh = false) override
         {
             ++rangeRequestCount;
+            forcedRangeRequestCount += forceRefresh ? 1 : 0;
             co_return javelin::jmap::calendar::RefreshedRange{
                 .interval = std::move(interval),
                 .displayTimeZone = std::move(displayTimeZone),
@@ -295,8 +298,25 @@ TEST_CASE("calendar workspace state distinguishes availability from event creati
     CHECK(reader.calendarReadCount == 2);
 }
 
-TEST_CASE("workspace Calendar refresh does not duplicate materialization refresh",
+TEST_CASE("opening Calendar observes the cached range without forcing a refresh",
           "[gui][calendar][actions]")
+{
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    Reader reader;
+    CommandPort commands;
+    QStackedWidget contentStack;
+    std::vector<javelin::gui::shell::TabState> tabs;
+    javelin::gui::shell::CalendarTabController controller{settings, reader, commands, contentStack,
+                                                          tabs};
+
+    controller.open();
+
+    REQUIRE(tabs.size() == 1);
+    CHECK(commands.rangeRequestCount == 1);
+    CHECK(commands.forcedRangeRequestCount == 0);
+}
+
+TEST_CASE("workspace Calendar refresh explicitly forces a range check", "[gui][calendar][actions]")
 {
     javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
     Reader reader;
@@ -309,10 +329,12 @@ TEST_CASE("workspace Calendar refresh does not duplicate materialization refresh
     controller.invokeWorkspace(javelin::gui::shell::CalendarTabCommand::Refresh);
 
     REQUIRE(tabs.size() == 1);
-    CHECK(commands.rangeRequestCount == 1);
+    CHECK(commands.rangeRequestCount == 2);
+    CHECK(commands.forcedRangeRequestCount == 1);
 
     controller.invokeWorkspace(javelin::gui::shell::CalendarTabCommand::Refresh);
-    CHECK(commands.rangeRequestCount == 2);
+    CHECK(commands.rangeRequestCount == 3);
+    CHECK(commands.forcedRangeRequestCount == 2);
 }
 
 TEST_CASE("calendar cache refresh preserves unchanged rendered event widgets",

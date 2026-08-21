@@ -36,7 +36,7 @@ namespace javelin::protocol::actions
         Descriptor<4, ActionDomain::Calendar, AdmissionSemantics::Asynchronous,
                    ReplayPolicy::Reexecute, detail::calendarOnly,
                    std::tuple<std::string, javelin::jmap::calendar::VisibleInterval,
-                              javelin::jmap::calendar::TimeZoneId>,
+                              javelin::jmap::calendar::TimeZoneId, bool>,
                    javelin::jmap::calendar::CalendarRefreshResult>;
     using CalendarCreateEvent =
         Descriptor<5, ActionDomain::Calendar, AdmissionSemantics::Asynchronous, ReplayPolicy::Never,

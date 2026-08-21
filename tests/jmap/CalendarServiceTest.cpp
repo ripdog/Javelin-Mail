@@ -1495,6 +1495,127 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
           std::optional<std::string>{"calendar-default-resolved"});
 }
 
+TEST_CASE("calendar changes refresh combines metadata and event materialization",
+          "[jmap][calendar][service][requests]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-service-combined-changes"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", session()).has_value());
+
+    javelin::jmap::cache::CalendarRepository calendars{connection};
+    REQUIRE_FALSE(calendars
+                      .replaceCalendars(
+                          "a1", "calendar-state-1",
+                          {javelin::jmap::calendar::Calendar{.accountId = "a1",
+                                                             .id = "work",
+                                                             .name = "Work",
+                                                             .description = std::nullopt,
+                                                             .color = std::nullopt,
+                                                             .sortOrder = 0,
+                                                             .isSubscribed = true,
+                                                             .isVisible = true,
+                                                             .isDefault = true,
+                                                             .timeZone = std::nullopt,
+                                                             .defaultAlertsWithTime = {},
+                                                             .defaultAlertsWithoutTime = {},
+                                                             .myRights = {.mayReadFreeBusy = true,
+                                                                          .mayReadItems = true,
+                                                                          .mayWriteAll = true,
+                                                                          .mayWriteOwn = true,
+                                                                          .mayUpdatePrivate = true,
+                                                                          .mayRSVP = true,
+                                                                          .mayShare = false,
+                                                                          .mayDelete = false}}})
+                      .has_value());
+    auto cachedEvent = event();
+    cachedEvent.title = "Before push";
+    REQUIRE_FALSE(
+        calendars
+            .reconcileWindow({.accountId = "a1",
+                              .start = {.value = "2026-06-29T00:00:00"},
+                              .end = {.value = "2026-08-10T00:00:00"},
+                              .displayTimeZone = {.value = "Pacific/Auckland"},
+                              .queryState = "query-state-1",
+                              .eventState = "event-state-1",
+                              .events = {cachedEvent},
+                              .occurrences = {{.accountId = "a1",
+                                               .id = "event-1",
+                                               .eventId = "event-1",
+                                               .recurrenceId = std::nullopt,
+                                               .localStart = {.value = "2026-07-13T09:00:00"},
+                                               .localEnd = {.value = "2026-07-13T10:00:00"},
+                                               .utcStart = std::nullopt,
+                                               .utcEnd = std::nullopt,
+                                               .allDay = false}}})
+            .has_value());
+
+    FakeMethodTransport transport;
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/changes",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"calendar-state-1","newState":"calendar-state-2","hasMoreChanges":false,"created":[],"updated":["work"],"destroyed":[]})",
+              .callId = "calendar-changes"},
+             {.name = "CalendarEvent/changes",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"event-state-1","newState":"event-state-2","hasMoreChanges":false,"created":[],"updated":["event-1"],"destroyed":[]})",
+              .callId = "calendar-event-changes"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-2"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"calendar-state-2","list":[{"id":"work","name":"Renamed remotely","isSubscribed":true,"isVisible":true,"isDefault":true,"myRights":{"mayReadFreeBusy":true,"mayReadItems":true,"mayWriteAll":true,"mayWriteOwn":true,"mayUpdatePrivate":true,"mayRSVP":true,"mayShare":false,"mayDelete":false}}],"notFound":[]})",
+              .callId = "changed-calendars"},
+             {.name = "CalendarEvent/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"event-state-2","list":[{"@type":"Event","id":"event-1","uid":"uid-1","calendarIds":{"work":true},"title":"Changed remotely","start":"2026-07-13T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true}],"notFound":[]})",
+              .callId = "changed-calendar-events"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-3"});
+
+    javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
+    javelin::jmap::calendar::CalendarSyncEngine sync{connection, protocol};
+    const auto result = QCoro::waitFor(sync.refreshChanged(
+        {.sessionUrl = "https://example.test/.well-known/jmap",
+         .loginEmail = "alice@example.test",
+         .apiKey = "secret"},
+        "a1", {.start = {.value = "2026-06-29T00:00:00"}, .end = {.value = "2026-08-10T00:00:00"}},
+        {.value = "Pacific/Auckland"}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(result));
+    CHECK(std::get<javelin::jmap::calendar::RefreshedRange>(result).accountCount == 1);
+    REQUIRE(transport.requests.size() == 2);
+    REQUIRE(transport.requests[0].envelope.methodCalls.size() == 2);
+    CHECK(transport.requests[0].envelope.methodCalls[0].name == "Calendar/changes");
+    CHECK(transport.requests[0].envelope.methodCalls[1].name == "CalendarEvent/changes");
+    REQUIRE(transport.requests[1].envelope.methodCalls.size() == 2);
+    CHECK(transport.requests[1].envelope.methodCalls[0].name == "Calendar/get");
+    CHECK(transport.requests[1].envelope.methodCalls[1].name == "CalendarEvent/get");
+
+    const auto listed = calendars.listCalendars("a1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::Calendar>>(listed));
+    REQUIRE(std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed).size() == 1);
+    CHECK(std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed).front().name ==
+          "Renamed remotely");
+    const auto window =
+        calendars.loadWindow("a1", {.value = "2026-06-29T00:00:00"},
+                             {.value = "2026-08-10T00:00:00"}, {.value = "Pacific/Auckland"});
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(window));
+    const auto& cached = std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(window);
+    REQUIRE(cached.has_value());
+    REQUIRE(cached->events.size() == 1);
+    CHECK(cached->events.front().title == "Changed remotely");
+}
+
 TEST_CASE("calendar event state mismatch refreshes rebases and retries",
           "[jmap][calendar][service][state-mismatch]")
 {

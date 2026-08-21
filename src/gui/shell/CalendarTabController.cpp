@@ -433,7 +433,8 @@ namespace javelin::gui::shell
 
     void
     CalendarTabController::requestVisibleRange(javelin::gui::calendar::MonthCalendarWidget& widget,
-                                               const QDate& start, const QDate& end)
+                                               const QDate& start, const QDate& end,
+                                               const bool forceRefresh)
     {
         const javelin::jmap::calendar::VisibleInterval interval{
             .start = {.value = start.toString(Qt::ISODate).toStdString() + "T00:00:00"},
@@ -446,7 +447,7 @@ namespace javelin::gui::shell
             if (!owners.insert(account.ownerAccountId).second)
                 continue;
             auto task = m_calendarCommandPort.requestCalendarRange(account.ownerAccountId, interval,
-                                                                   timeZone);
+                                                                   timeZone, forceRefresh);
             QCoro::connect(std::move(task), &widget,
                            [this](javelin::jmap::calendar::CalendarRefreshResult result)
                            {
@@ -1485,7 +1486,7 @@ namespace javelin::gui::shell
                 widget, refreshVisible);
         connect(
             widget, &javelin::gui::calendar::MonthCalendarWidget::emptyTimeActivated, widget,
-            [this, widget, refreshVisible](const QDateTime& start, const QDateTime& end)
+            [this, widget](const QDateTime& start, const QDateTime& end)
             {
                 std::vector<javelin::jmap::calendar::Calendar> choices;
                 std::vector<javelin::gui::calendar::NewEventCalendarCandidate> candidates;
@@ -1617,8 +1618,8 @@ namespace javelin::gui::shell
             });
         connect(
             widget, &javelin::gui::calendar::MonthCalendarWidget::eventEditRequested, widget,
-            [this, widget, refreshVisible](const QString& accountId, const QString& eventId,
-                                           const QString& recurrenceId)
+            [this, widget](const QString& accountId, const QString& eventId,
+                           const QString& recurrenceId)
             {
                 const auto account =
                     std::ranges::find(m_calendarAccounts, accountId.toStdString(),
@@ -1903,15 +1904,12 @@ namespace javelin::gui::shell
             return;
         }
 
-        const bool alreadyMaterialized = std::ranges::any_of(
-            m_tabs, [this](const auto& tab) { return widgetForTab(&tab) != nullptr; });
         open();
         for (auto& tab : m_tabs)
         {
             if (widgetForTab(&tab) == nullptr)
                 continue;
-            if (command != CalendarTabCommand::Refresh || alreadyMaterialized)
-                invoke(&tab, command);
+            invoke(&tab, command);
             return;
         }
     }
@@ -1973,7 +1971,7 @@ namespace javelin::gui::shell
             return false;
         if (!refreshAccountSnapshot(*widget))
             return false;
-        requestVisibleRange(*widget, widget->visibleStart(), widget->visibleEnd());
+        requestVisibleRange(*widget, widget->visibleStart(), widget->visibleEnd(), true);
         return true;
     }
 

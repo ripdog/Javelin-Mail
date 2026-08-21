@@ -2059,7 +2059,7 @@ namespace javelin::gui::shell
                 [this](const int index)
                 {
                     m_messageNavigationPort.cancel();
-                    activateTab(index, true);
+                    activateTab(index, false);
                 });
         connect(m_tabBar, &QTabBar::tabCloseRequested, this, &MainWindow::closeTab);
         connect(m_tabBar, &QTabBar::tabMoved, this,

@@ -23,7 +23,8 @@ namespace javelin::app
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
         requestCalendarRange(std::string ownerAccountId,
                              javelin::jmap::calendar::VisibleInterval interval,
-                             javelin::jmap::calendar::TimeZoneId displayTimeZone) = 0;
+                             javelin::jmap::calendar::TimeZoneId displayTimeZone,
+                             bool forceRefresh = false) = 0;
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         createCalendarEvent(std::string ownerAccountId,
                             javelin::jmap::calendar::CreateEventCommand command,

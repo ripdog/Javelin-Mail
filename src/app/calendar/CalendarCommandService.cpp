@@ -20,10 +20,10 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
     CalendarCommandService::requestCalendarRange(
         std::string ownerAccountId, javelin::jmap::calendar::VisibleInterval interval,
-        javelin::jmap::calendar::TimeZoneId displayTimeZone)
+        javelin::jmap::calendar::TimeZoneId displayTimeZone, const bool forceRefresh)
     {
         return m_service.requestCalendarRange(std::move(ownerAccountId), std::move(interval),
-                                              std::move(displayTimeZone));
+                                              std::move(displayTimeZone), forceRefresh);
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>

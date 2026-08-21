@@ -87,6 +87,7 @@ namespace javelin::app
                                           const QString& mailboxName);
         void operationFailed(const QString& operation, javelin::jmap::OperationError error);
         void operationSucceeded();
+        void stateChangeCatchUpRequired();
 
       private:
         struct RunConfiguration

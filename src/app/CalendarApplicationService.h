@@ -58,7 +58,8 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
         requestCalendarRange(std::string ownerAccountId,
                              javelin::jmap::calendar::VisibleInterval interval,
-                             javelin::jmap::calendar::TimeZoneId displayTimeZone);
+                             javelin::jmap::calendar::TimeZoneId displayTimeZone,
+                             bool forceRefresh = false);
         [[nodiscard]] std::vector<std::string> calendarMetadataReadyOwners() const;
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         createCalendarEvent(std::string ownerAccountId,
@@ -125,6 +126,7 @@ namespace javelin::app
 
       private:
         void scheduleMetadataRefresh(std::string ownerAccountId);
+        void requireCatchUp(std::string ownerAccountId);
         [[nodiscard]] QCoro::Task<std::variant<bool, javelin::jmap::OperationError>>
         requestCalendarMetadata(std::string ownerAccountId);
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
@@ -160,6 +162,7 @@ namespace javelin::app
         std::unordered_set<std::string> m_calendarMetadataRefreshPending;
         std::unordered_map<std::string, QFuture<bool>> m_calendarStateRefreshesInFlight;
         std::unordered_set<std::string> m_calendarStateRefreshPending;
+        std::unordered_set<std::string> m_calendarCatchUpRequiredOwners;
     };
 
 } // namespace javelin::app

@@ -113,7 +113,7 @@ namespace javelin::gui::shell
         [[nodiscard]] bool
         refreshAccountSnapshot(javelin::gui::calendar::MonthCalendarWidget& widget);
         void requestVisibleRange(javelin::gui::calendar::MonthCalendarWidget& widget,
-                                 const QDate& start, const QDate& end);
+                                 const QDate& start, const QDate& end, bool forceRefresh = false);
         void showEventContextMenu(javelin::gui::calendar::MonthCalendarWidget& widget,
                                   QWidget& popupParent, const QPoint& globalPosition,
                                   const QString& accountId, const QString& eventId,

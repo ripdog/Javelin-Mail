@@ -108,6 +108,7 @@ namespace javelin::app
         void accountRemoved(const QString& accountId);
         void networkReachable();
         void sessionRefreshed(const QString& ownerAccountId);
+        void stateChangeCatchUpRequired(const QString& ownerAccountId);
         void configurationSetChanged();
 
       private:
