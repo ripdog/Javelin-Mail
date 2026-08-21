@@ -127,6 +127,12 @@ namespace javelin::gui::calendar
         result.reserve(m_rows.size());
         for (const auto& row : m_rows)
         {
+            if (!row.edited)
+            {
+                result.emplace(row.id, row.original);
+                continue;
+            }
+
             auto alert = row.original;
             alert.id = row.id;
             alert.action = "display";
