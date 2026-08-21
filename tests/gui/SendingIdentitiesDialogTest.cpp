@@ -11,6 +11,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QTimer>
 
@@ -211,13 +212,19 @@ namespace
         }
 
         [[nodiscard]] QCoro::Task<javelin::jmap::identity::IdentityDeleteResult>
-        deleteSenderIdentity(std::string, std::string) override
+        deleteSenderIdentity(std::string accountId, std::string identityId) override
         {
+            ++deleteCalls;
+            deletedAccountId = std::move(accountId);
+            deletedIdentityId = std::move(identityId);
             co_return std::monostate{};
         }
 
         int saveCalls = 0;
+        int deleteCalls = 0;
         std::string savedAccountId;
+        std::string deletedAccountId;
+        std::string deletedIdentityId;
         std::optional<javelin::jmap::domain::Identity> savedIdentity;
     };
 
@@ -228,6 +235,13 @@ namespace
         accountStatuses() const override
         {
             return {};
+        }
+
+        void invalidateIdentities()
+        {
+            javelin::app::MailCacheInvalidation invalidation;
+            invalidation.change.identitiesChanged = true;
+            Q_EMIT cacheInvalidated(invalidation);
         }
     };
 } // namespace
@@ -361,4 +375,50 @@ TEST_CASE("duplicating a sending identity immediately submits a create",
     CHECK(commandPort.savedIdentity->name == "Existing Sender");
     CHECK(commandPort.savedIdentity->email == "sender@example.test");
     CHECK(commandPort.savedIdentity->textSignature == std::optional<std::string>{"Regards"});
+}
+
+TEST_CASE("sending identity deletion keeps the identity confirmed across cache reload",
+          "[gui][identity][delete][reload]")
+{
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    FakeAccountReader accountReader;
+    FakeIdentityReader identityReader;
+    identityReader.identities.emplace(
+        "account-1", std::vector{identity("identity-1", "First Sender", "first@example.test"),
+                                 identity("identity-2", "Second Sender", "second@example.test")});
+    FakeIdentityCommandPort commandPort;
+    FakeMailEvents mailEvents;
+    javelin::gui::compose::SendingIdentitiesDialog dialog{settings, accountReader, identityReader,
+                                                          commandPort, mailEvents};
+
+    auto* deleteButton = dialog.findChild<QPushButton*>(QStringLiteral("identityDeleteButton"));
+    REQUIRE(deleteButton != nullptr);
+    REQUIRE(deleteButton->isEnabled());
+
+    bool completedConfirmation = false;
+    QTimer::singleShot(0,
+                       [&identityReader, &mailEvents, &completedConfirmation]
+                       {
+                           identityReader.identities["account-1"] = {
+                               identity("identity-2", "Second Sender", "second@example.test")};
+                           mailEvents.invalidateIdentities();
+
+                           auto* confirmation =
+                               qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+                           if (confirmation == nullptr)
+                               return;
+                           auto* yesButton = confirmation->button(QMessageBox::Yes);
+                           if (yesButton == nullptr)
+                               return;
+                           completedConfirmation = true;
+                           yesButton->click();
+                       });
+
+    deleteButton->click();
+    QApplication::processEvents();
+
+    REQUIRE(completedConfirmation);
+    REQUIRE(commandPort.deleteCalls == 1);
+    CHECK(commandPort.deletedAccountId == "account-1");
+    CHECK(commandPort.deletedIdentityId == "identity-1");
 }

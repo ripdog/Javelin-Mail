@@ -134,6 +134,7 @@ namespace javelin::gui::compose
         m_duplicateButton->setObjectName(QStringLiteral("identityDuplicateButton"));
         m_deleteButton = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-delete")),
                                          i18n("Delete"), listPane);
+        m_deleteButton->setObjectName(QStringLiteral("identityDeleteButton"));
         m_refreshButton = new QPushButton(QIcon::fromTheme(QStringLiteral("view-refresh")),
                                           i18n("Refresh"), listPane);
         listButtons->addWidget(m_newButton);
@@ -725,15 +726,16 @@ namespace javelin::gui::compose
         if (!m_editorIdentity.has_value() || m_editorPending || m_editorIdentity->id.empty() ||
             !m_editorIdentity->mayDelete || m_busy)
             return;
+        const auto accountId = m_editorAccountId;
+        const auto identityId = m_editorIdentity->id;
+        const auto identityLabel = identityAddressLabel(*m_editorIdentity);
         if (QMessageBox::question(
                 this, i18n("Delete Sending Identity?"),
                 i18n("Delete this sending identity from the server? Existing drafts using it will "
                      "need another sender before they can be sent.\n\nIdentity: %1",
-                     identityAddressLabel(*m_editorIdentity)),
+                     identityLabel),
                 QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes)
             return;
-        const auto accountId = m_editorAccountId;
-        const auto identityId = m_editorIdentity->id;
         setBusy(true);
         auto task = m_commandPort.deleteSenderIdentity(accountId, identityId);
         QCoro::connect(
