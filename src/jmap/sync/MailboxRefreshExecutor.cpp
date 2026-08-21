@@ -406,6 +406,9 @@ namespace javelin::jmap::sync
                 co_return operationError(*error);
             }
             const auto& parsedQuery = std::get<javelin::jmap::api::EmailQueryResponse>(queryResult);
+            if (const auto accountError = validateResponseAccountId(
+                    remoteAccountId, parsedQuery.accountId, u"Email/query"))
+                co_return *accountError;
             qCDebug(logMailboxSync).noquote()
                 << "query result" << QString::fromStdString(remoteAccountId)
                 << QString::fromStdString(mailboxId) << "state"
@@ -425,6 +428,9 @@ namespace javelin::jmap::sync
             }
             const auto& parsedRepresentatives =
                 std::get<javelin::jmap::api::EmailGetResponse>(representativeResult);
+            if (const auto accountError = validateResponseAccountId(
+                    remoteAccountId, parsedRepresentatives.accountId, u"Email/get"))
+                co_return *accountError;
 
             emitProgress(
                 QStringLiteral("Fetched %1 representative emails for the selected mailbox.")
@@ -576,6 +582,9 @@ namespace javelin::jmap::sync
             }
             const auto& queryChanges =
                 std::get<javelin::jmap::api::EmailQueryChangesResponse>(queryChangesResult);
+            if (const auto accountError = validateResponseAccountId(
+                    remoteAccountId, queryChanges.accountId, u"Email/queryChanges"))
+                co_return *accountError;
 
             javelin::jmap::api::EmailChangesResponse emailChanges{
                 .accountId = remoteAccountId,
@@ -614,6 +623,9 @@ namespace javelin::jmap::sync
                 }
                 emailChanges =
                     std::get<javelin::jmap::api::EmailChangesResponse>(emailChangesResult);
+                if (const auto accountError = validateResponseAccountId(
+                        remoteAccountId, emailChanges.accountId, u"Email/changes"))
+                    co_return *accountError;
             }
 
             std::vector<std::string> addedQueryIds;
@@ -739,13 +751,17 @@ namespace javelin::jmap::sync
             {
                 co_return operationError(*error);
             }
+            const auto& updatedEmails =
+                std::get<javelin::jmap::api::EmailGetResponse>(updatedEmailsResult);
+            if (const auto accountError = validateResponseAccountId(
+                    remoteAccountId, updatedEmails.accountId, u"Email/get"))
+                co_return *accountError;
 
             co_return IncrementalCollapsedMailboxRefresh{
                 .requiresFullFetch = requiresFullFetch,
                 .queryState = queryChanges.newQueryState,
                 .emailState = emailChanges.newState,
-                .updatedEmails =
-                    std::get<javelin::jmap::api::EmailGetResponse>(updatedEmailsResult).list,
+                .updatedEmails = updatedEmails.list,
                 .representativeCount = representativeCount,
                 .changedEmailIds = emailChanges.updated,
                 .insertedEmailIds = std::move(addedQueryIds),

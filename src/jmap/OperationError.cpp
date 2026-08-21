@@ -195,4 +195,16 @@ namespace javelin::jmap
         };
     }
 
+    std::optional<OperationError>
+    validateResponseAccountId(const std::string_view expectedAccountId,
+                              const std::string_view actualAccountId, const QStringView operation)
+    {
+        if (expectedAccountId == actualAccountId)
+            return std::nullopt;
+        return OperationError{
+            .code = OperationErrorCode::ProtocolViolation,
+            .message = QStringLiteral("%1 returned data for a different account.").arg(operation),
+        };
+    }
+
 } // namespace javelin::jmap

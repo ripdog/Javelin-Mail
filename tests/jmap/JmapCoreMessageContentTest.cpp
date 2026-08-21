@@ -630,6 +630,86 @@ TEST_CASE("MailQueryClient full mailbox pages stay uncollapsed and within negoti
     CHECK_FALSE(page.emails.front().preview.has_value());
 }
 
+TEST_CASE("collapsed mail queries reject responses for a different remote account",
+          "[jmap][core][search][account-validation]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+    const auto session = loadSessionFixture();
+    const auto firstStored = sessions.replaceForConnection("connection-a", "u1", session);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(firstStored));
+    const auto secondStored = sessions.replaceForConnection("connection-b", "u1", session);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::StoredSessionAccounts>(secondStored));
+    const auto localAccountId =
+        std::get<javelin::jmap::cache::StoredSessionAccounts>(secondStored).ownerAccountId;
+    REQUIRE(localAccountId != "u1");
+
+    bool wrongQueryAccount = false;
+    SECTION("Email query account")
+    {
+        wrongQueryAccount = true;
+    }
+    SECTION("Email get account")
+    {
+        wrongQueryAccount = false;
+    }
+
+    FakeTransport transport;
+    transport.responseFactory = [localAccountId, wrongQueryAccount](
+                                    const javelin::jmap::api::HttpRequest& request)
+    {
+        const auto envelope = javelin::jmap::api::parseRequestEnvelope(request.body.toStdString());
+        REQUIRE(envelope.ok());
+        REQUIRE(envelope.value.has_value());
+        REQUIRE(envelope.value->methodCalls.size() == 2);
+        const auto queryAccountId = wrongQueryAccount ? localAccountId : std::string{"u1"};
+        const auto getAccountId = wrongQueryAccount ? std::string{"u1"} : localAccountId;
+        javelin::jmap::api::ResponseEnvelope response{
+            .methodResponses =
+                {
+                    javelin::jmap::api::MethodInvocation{
+                        .name = "Email/query",
+                        .arguments = std::string{R"({"accountId":")"} + queryAccountId +
+                                     R"(","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["eml-2"],"total":1})",
+                        .callId = envelope.value->methodCalls[0].callId,
+                    },
+                    javelin::jmap::api::MethodInvocation{
+                        .name = "Email/get",
+                        .arguments = std::string{R"({"accountId":")"} + getAccountId +
+                                     R"(","state":"email-state-1","list":[{"id":"eml-2","blobId":"blob-2","threadId":"thr-1","mailboxIds":{"mbx-inbox":true},"keywords":{},"size":42,"receivedAt":"2026-04-06T11:22:33Z","hasAttachment":false,"subject":"Wrong account","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[]}],"notFound":[]})",
+                        .callId = envelope.value->methodCalls[1].callId,
+                    },
+                },
+            .createdIds = std::unordered_map<std::string, std::string>{},
+            .sessionState = "session-state-2",
+        };
+        const auto body = javelin::jmap::api::serializeResponseEnvelope(response);
+        REQUIRE(body.has_value());
+        return javelin::jmap::api::TransportResult{javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body = QByteArray::fromStdString(*body),
+        }};
+    };
+
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(capabilities.materializer.searchMessages(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        localAccountId, "quarterly", 0, 100, {}, std::nullopt, std::string{"session-query"}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+    const auto& error = std::get<javelin::jmap::OperationError>(result);
+    CHECK(error.code == javelin::jmap::OperationErrorCode::ProtocolViolation);
+    CHECK(error.message.contains(wrongQueryAccount ? QStringLiteral("Email/query")
+                                                   : QStringLiteral("Email/get")));
+}
+
 TEST_CASE("MessageContentClient caches content from junk and trash mailboxes",
           "[jmap][core][message-content]")
 {

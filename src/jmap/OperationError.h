@@ -4,6 +4,7 @@
 
 #include <QMetaType>
 #include <QString>
+#include <QStringView>
 
 #include <chrono>
 #include <optional>
@@ -72,6 +73,9 @@ namespace javelin::jmap
     [[nodiscard]] OperationError operationError(const api::MethodError& error);
     [[nodiscard]] OperationError operationError(const api::ResponseReaderError& error);
     [[nodiscard]] OperationError operationError(const cache::DatabaseError& error);
+    [[nodiscard]] std::optional<OperationError>
+    validateResponseAccountId(std::string_view expectedAccountId, std::string_view actualAccountId,
+                              QStringView operation);
 
 } // namespace javelin::jmap
 

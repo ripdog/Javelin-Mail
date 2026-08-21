@@ -541,6 +541,9 @@ namespace javelin::jmap
                 co_return operationError(*error);
             }
             const auto& parsedQuery = std::get<javelin::jmap::api::EmailQueryResponse>(queryResult);
+            if (const auto accountError = validateResponseAccountId(
+                    identity.remoteAccountId, parsedQuery.accountId, u"Email/query"))
+                co_return *accountError;
             if (reportProgress)
             {
                 reportProgress(QStringLiteral("Fetched %1 matching conversations.")
@@ -555,6 +558,9 @@ namespace javelin::jmap
             }
             const auto& parsedRepresentatives =
                 std::get<javelin::jmap::api::EmailGetResponse>(representativeResult);
+            if (const auto accountError = validateResponseAccountId(
+                    identity.remoteAccountId, parsedRepresentatives.accountId, u"Email/get"))
+                co_return *accountError;
 
             std::unordered_map<std::string, const javelin::jmap::domain::Email*>
                 representativesById;
@@ -1431,6 +1437,9 @@ namespace javelin::jmap
         }
         const auto& parsedMailboxes =
             std::get<javelin::jmap::api::MailboxGetResponse>(mailboxResult);
+        if (const auto accountError = validateResponseAccountId(
+                remoteAccountId, parsedMailboxes.accountId, u"Mailbox/get"))
+            co_return *accountError;
         reportProgress(QStringLiteral("Fetched %1 mailboxes. Updating cache...")
                            .arg(parsedMailboxes.list.size()));
 
@@ -1714,6 +1723,9 @@ namespace javelin::jmap
         if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&queryResult))
             co_return operationError(*error);
         const auto& page = std::get<javelin::jmap::api::EmailQueryResponse>(queryResult);
+        if (const auto accountError =
+                validateResponseAccountId(identity.remoteAccountId, page.accountId, u"Email/query"))
+            co_return *accountError;
         co_return EmailIdQueryPage{
             .accountId = std::move(accountId),
             .queryState = page.queryState,
@@ -1819,6 +1831,12 @@ namespace javelin::jmap
 
         const auto& page = std::get<javelin::jmap::api::EmailQueryResponse>(queryResult);
         const auto& emails = std::get<javelin::jmap::api::EmailGetResponse>(getResult);
+        if (const auto accountError =
+                validateResponseAccountId(identity.remoteAccountId, page.accountId, u"Email/query"))
+            co_return *accountError;
+        if (const auto accountError =
+                validateResponseAccountId(identity.remoteAccountId, emails.accountId, u"Email/get"))
+            co_return *accountError;
         if (emails.list.size() != page.ids.size())
         {
             co_return OperationError{
@@ -2411,7 +2429,19 @@ namespace javelin::jmap
             }
             else
             {
-                parsedMailboxes = std::get<javelin::jmap::api::MailboxGetResponse>(mailboxResult);
+                auto response = std::get<javelin::jmap::api::MailboxGetResponse>(mailboxResult);
+                if (const auto accountError = validateResponseAccountId(
+                        identity.remoteAccountId, response.accountId, u"Mailbox/get"))
+                {
+                    qWarning().noquote()
+                        << "Post-mutation Mailbox/get was for another account; a later push will "
+                           "reconcile it"
+                        << accountError->message;
+                }
+                else
+                {
+                    parsedMailboxes = std::move(response);
+                }
             }
         }
 

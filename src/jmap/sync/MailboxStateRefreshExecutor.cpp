@@ -125,7 +125,11 @@ namespace javelin::jmap::sync
                 co_return operationError(*error);
             }
 
-            co_return std::get<javelin::jmap::api::MailboxGetResponse>(mailboxResult);
+            auto response = std::get<javelin::jmap::api::MailboxGetResponse>(mailboxResult);
+            if (const auto accountError =
+                    validateResponseAccountId(accountId, response.accountId, u"Mailbox/get"))
+                co_return *accountError;
+            co_return response;
         }
 
         [[nodiscard]] QCoro::Task<std::variant<IncrementalMailboxFetch, OperationError>>
@@ -202,6 +206,9 @@ namespace javelin::jmap::sync
 
             const auto& changes =
                 std::get<javelin::jmap::api::MailboxChangesResponse>(changesResult);
+            if (const auto accountError =
+                    validateResponseAccountId(accountId, changes.accountId, u"Mailbox/changes"))
+                co_return *accountError;
             const auto createdResult = reader.require(createdHandle);
             if (const auto* error =
                     std::get_if<javelin::jmap::api::ResponseReaderError>(&createdResult))
@@ -216,12 +223,18 @@ namespace javelin::jmap::sync
                 co_return operationError(*error);
             }
 
+            auto created = std::get<javelin::jmap::api::MailboxGetResponse>(createdResult);
+            auto updated = std::get<javelin::jmap::api::MailboxGetResponse>(updatedResult);
+            if (const auto accountError =
+                    validateResponseAccountId(accountId, created.accountId, u"Mailbox/get"))
+                co_return *accountError;
+            if (const auto accountError =
+                    validateResponseAccountId(accountId, updated.accountId, u"Mailbox/get"))
+                co_return *accountError;
+
             co_return IncrementalMailboxFetch{
                 .changes = changes,
-                .fetched = mergeMailboxFetches(
-                    accountId, changes,
-                    std::get<javelin::jmap::api::MailboxGetResponse>(createdResult),
-                    std::get<javelin::jmap::api::MailboxGetResponse>(updatedResult)),
+                .fetched = mergeMailboxFetches(accountId, changes, std::move(created), updated),
             };
         }
 
