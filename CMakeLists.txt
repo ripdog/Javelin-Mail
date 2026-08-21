@@ -55,7 +55,7 @@ configure_file(
 )
 
 find_package(KF6 REQUIRED COMPONENTS Codecs ConfigWidgets XmlGui CoreAddons I18n JobWidgets KIO Sonnet TextEditor Wallet WidgetsAddons)
-find_package(KPim6Mime REQUIRED)
+find_package(KF6Mime REQUIRED)
 find_package(KPim6MessageComposer REQUIRED)
 
 qt_standard_project_setup()
@@ -1278,7 +1278,7 @@ target_link_libraries(javelin_jmap
         Qt::Network
         Qt::Sql
         Qt::WebSockets
-        KPim6::Mime
+        KF6::Mime
     PRIVATE
         KF6::Codecs
         QCoro6::Network

@@ -43,7 +43,7 @@ target_include_directories(javelin_cache_read PUBLIC
 )
 target_link_libraries(javelin_cache_read
     PUBLIC
-        KPim6::Mime
+        KF6::Mime
         Qt::Concurrent
         Qt::Core
         Qt::Sql

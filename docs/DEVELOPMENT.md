@@ -28,7 +28,7 @@ host CMake environment.
 
 Required Qt components are Core, DBus, Network, SQL, Widgets, PrintSupport, Concurrent,
 LinguistTools, WebEngine, SVG, and WebSockets. Required KDE components are ConfigWidgets, XmlGui, CoreAddons, I18n, JobWidgets, KIO, Sonnet,
-TextEditor, Wallet, WidgetsAddons, Extra CMake Modules, KPim6Mime, and KPim6MessageComposer. These are
+TextEditor, Wallet, WidgetsAddons, Extra CMake Modules, KF6Mime, and KPim6MessageComposer. These are
 product dependencies, not merely build conveniences: KXMLGUI owns the main-window action layout,
 KConfigWidgets owns preferences presentation, KIO owns attachment opening and file-manager reveal,
 KJobWidgets publishes file-save jobs through Plasma's standard job tracker, KTextEditor powers
