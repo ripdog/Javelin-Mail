@@ -100,9 +100,11 @@ namespace javelin::jmap
             code = OperationErrorCode::Timeout;
         else if (error.httpStatus == 429)
             code = OperationErrorCode::RateLimited;
+        else if (error.httpStatus == 502 || error.httpStatus == 503 || error.httpStatus == 504)
+            code = OperationErrorCode::ServerUnavailable;
         else if (error.httpStatus.has_value() && *error.httpStatus >= 500 &&
                  *error.httpStatus <= 599)
-            code = OperationErrorCode::ServerUnavailable;
+            code = OperationErrorCode::ServerFailure;
         else if (error.code == api::TransportErrorCode::HttpFailure)
             code = OperationErrorCode::HttpFailure;
         else if (error.code == api::TransportErrorCode::ResponseDecodingFailed)

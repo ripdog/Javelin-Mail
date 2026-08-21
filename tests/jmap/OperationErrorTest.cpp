@@ -46,8 +46,27 @@ TEST_CASE("transport failures are classified for application policy")
         .message = "server error",
         .httpStatus = 500,
     });
-    CHECK(genericServerFailure.code == OperationErrorCode::ServerUnavailable);
-    CHECK(javelin::jmap::isTransientError(genericServerFailure));
+    CHECK(genericServerFailure.code == OperationErrorCode::ServerFailure);
+    CHECK_FALSE(javelin::jmap::isTransientError(genericServerFailure));
+
+    for (const int status : {502, 503, 504})
+    {
+        const auto transientServerFailure = javelin::jmap::operationError(TransportError{
+            .code = TransportErrorCode::HttpFailure,
+            .message = "temporarily unavailable",
+            .httpStatus = status,
+        });
+        CHECK(transientServerFailure.code == OperationErrorCode::ServerUnavailable);
+        CHECK(javelin::jmap::isTransientError(transientServerFailure));
+    }
+
+    const auto notImplemented = javelin::jmap::operationError(TransportError{
+        .code = TransportErrorCode::HttpFailure,
+        .message = "not implemented",
+        .httpStatus = 501,
+    });
+    CHECK(notImplemented.code == OperationErrorCode::ServerFailure);
+    CHECK_FALSE(javelin::jmap::isTransientError(notImplemented));
 }
 
 TEST_CASE("JMAP method failures retain actionable distinctions")
