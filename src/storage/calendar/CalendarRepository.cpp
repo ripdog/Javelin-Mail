@@ -784,14 +784,31 @@ namespace javelin::jmap::cache
 
     std::optional<DatabaseError> CalendarRepository::reconcileWindow(const CalendarWindow& window)
     {
+        auto transactionResult =
+            DatabaseTransaction::begin(m_connection, QStringLiteral("Reconcile calendar window"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = reconcileWindow(transaction, window))
+            return error;
+        return transaction.commit();
+    }
+
+    std::optional<DatabaseError>
+    CalendarRepository::reconcileWindow(DatabaseTransaction& transaction,
+                                        const CalendarWindow& window)
+    {
         if (const auto error = m_connection.validate())
             return error;
-        const DatabaseWriteScope writeScope{m_connection};
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message =
+                    QStringLiteral("Calendar reconciliation requires a matching transaction"),
+            };
+        }
         auto& database = m_connection.database();
-        if (!database.transaction())
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Begin calendar reconciliation: ") +
-                                            database.lastError().text()};
         std::optional<DatabaseError> failure;
         QSqlQuery upsertEvent{database};
         upsertEvent.prepare(QStringLiteral(
@@ -988,16 +1005,7 @@ namespace javelin::jmap::cache
                                   QString::fromStdString(window.accountId));
             exec(pruneEvents, failure, QStringLiteral("Prune unreferenced calendar events"));
         }
-        if (failure)
-        {
-            database.rollback();
-            return failure;
-        }
-        if (!database.commit())
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Commit calendar reconciliation: ") +
-                                            database.lastError().text()};
-        return std::nullopt;
+        return failure;
     }
 
     std::optional<DatabaseError> CalendarRepository::applyEventDelta(

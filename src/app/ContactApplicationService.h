@@ -23,6 +23,10 @@ namespace javelin::app
     class AccountRuntimeManager;
     class ApplicationErrorCoordinator;
     class WorkScheduler;
+    namespace undo
+    {
+        class UndoManager;
+    }
 
     class ContactApplicationService final : public QObject, public ContactRefreshPort
     {
@@ -33,7 +37,8 @@ namespace javelin::app
                                   javelin::jmap::contacts::ContactSyncEngine& syncEngine,
                                   AccountRuntimeManager& accountRuntime,
                                   ApplicationErrorCoordinator& errorCoordinator,
-                                  WorkScheduler& workScheduler, QObject* parent = nullptr);
+                                  WorkScheduler& workScheduler, undo::UndoManager& undoManager,
+                                  QObject* parent = nullptr);
 
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactRefreshResult>
         requestContacts(std::string ownerAccountId) override;
@@ -52,6 +57,7 @@ namespace javelin::app
         AccountRuntimeManager& m_accountRuntime;
         ApplicationErrorCoordinator& m_errorCoordinator;
         WorkScheduler& m_workScheduler;
+        undo::UndoManager& m_undoManager;
         std::unordered_set<std::string> m_pendingContactRefreshes;
         std::unordered_set<std::string> m_runningContactRefreshes;
         bool m_contactRefreshPumpScheduled = false;

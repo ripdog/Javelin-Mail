@@ -246,6 +246,8 @@ namespace javelin::jmap::submission
         if (const auto error =
                 composeSessions.upsert(transaction.cacheTransaction(), group.baseSnapshot))
             return error;
+        if (const auto error = transaction.retireTerminal())
+            return error;
         return transaction.commit();
     }
 
@@ -277,7 +279,7 @@ namespace javelin::jmap::submission
         cache::ComposeSessionRepository composeSessions{m_connection};
         if (const auto error = composeSessions.upsert(transaction.cacheTransaction(), snapshot))
             return error;
-        if (const auto error = transaction.remove(group.createMutationId))
+        if (const auto error = transaction.retireTerminal())
             return error;
         return transaction.commit();
     }
@@ -299,7 +301,7 @@ namespace javelin::jmap::submission
             return error;
         if (const auto error = advanceEmail(transaction, group.accountId))
             return error;
-        if (const auto error = transaction.remove(*group.destroyMutationId))
+        if (const auto error = transaction.retireTerminal())
             return error;
         return transaction.commit();
     }
@@ -328,6 +330,8 @@ namespace javelin::jmap::submission
                 return error;
         }
         if (const auto error = projectQueryWindows(m_connection, transaction, group))
+            return error;
+        if (const auto error = transaction.retireTerminal())
             return error;
         return transaction.commit();
     }

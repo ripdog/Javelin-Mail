@@ -15,6 +15,21 @@ namespace javelin::jmap::sync
         std::string newState;
     };
 
+    enum class MutationReconciliationDisposition
+    {
+        Applied,
+        Superseded,
+    };
+
+    struct ReconciledMutation
+    {
+        std::string accountId;
+        std::string dataType;
+        std::string objectId;
+        std::optional<std::string> operationGroupId;
+        MutationReconciliationDisposition disposition = MutationReconciliationDisposition::Applied;
+    };
+
     struct MutationCommitReceipt
     {
         std::vector<CommittedDomainState> domains;

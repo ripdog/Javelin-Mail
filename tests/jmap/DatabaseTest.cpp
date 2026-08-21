@@ -198,7 +198,7 @@ TEST_CASE("participant identity state migration preserves calendar tokens and wi
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 62);
+    CHECK(migrated.schemaVersion() == 63);
 
     QSqlQuery preserved{migrated.database()};
     REQUIRE(preserved.exec(QStringLiteral(
@@ -216,6 +216,111 @@ TEST_CASE("participant identity state migration preserves calendar tokens and wi
     REQUIRE(widened.exec(
         QStringLiteral("INSERT INTO calendar_state_tokens(account_id,data_type,state) VALUES "
                        "('account-1','ParticipantIdentity','participant-state-1')")));
+}
+
+TEST_CASE("mutation journal retention migrates and follows durable owners",
+          "[jmap][cache][database][mutation-journal]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+    const QString databasePath =
+        temporaryDir.filePath(QStringLiteral("legacy-mutation-retention-cache.sqlite3"));
+    const QString fixtureConnectionName = makeConnectionName();
+    {
+        QSqlDatabase fixture =
+            QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), fixtureConnectionName);
+        fixture.setDatabaseName(databasePath);
+        REQUIRE(fixture.open());
+
+        const auto currentRunner = javelin::jmap::cache::createDefaultMigrationRunner();
+        const auto retention = std::ranges::find_if(currentRunner.steps(), [](const auto& step)
+                                                    { return step.version == 63; });
+        REQUIRE(retention != currentRunner.steps().end());
+        std::vector<javelin::jmap::cache::MigrationStep> legacySteps{currentRunner.steps().begin(),
+                                                                     retention};
+        const javelin::jmap::cache::MigrationRunner legacyRunner{std::move(legacySteps)};
+        REQUIRE_FALSE(legacyRunner.migrate(fixture).has_value());
+
+        QSqlQuery seed{fixture};
+        REQUIRE(seed.exec(QStringLiteral(
+            "INSERT INTO accounts(account_id,email_address,session_url,is_primary) "
+            "VALUES('account-1','alice@example.test','https://example.test/jmap',1)")));
+        REQUIRE(seed.exec(QStringLiteral(
+            "INSERT INTO operation_history(entry_id,stack,stack_order,domain,command_kind,label,"
+            "payload_version,payload_json,status,operation_group_id) VALUES "
+            "('history-1','undo',1,'mail','test','Test',1,'{}','preparing','group-history'),"
+            "('history-2','undo',2,'mail','test','Executing',1,'{}','executing_undo',"
+            "'group-executing')")));
+        REQUIRE(seed.exec(
+            QStringLiteral("INSERT INTO background_jobs(job_id,kind,priority,status,title) VALUES "
+                           "('group-job','test',1,'queued','Test job')")));
+        REQUIRE(seed.exec(QStringLiteral(
+            "INSERT INTO mail_transfer_operations(operation_id,operation_group_id,"
+            "source_account_id,destination_account_id,destination_mailbox_id,operation,topology,"
+            "status) VALUES('transfer-1','group-transfer','account-1','account-1','mailbox-1',"
+            "'copy','same_session_copy','running')")));
+        REQUIRE(seed.exec(QStringLiteral(
+            "INSERT INTO mutation_journal(mutation_id,operation_group_id,account_id,data_type,"
+            "object_id,mutation_kind,status,payload_json,sequence) VALUES "
+            "('orphan-terminal',NULL,'account-1','ContactCard','card-1','test','rejected','{}',1),"
+            "('history-terminal','group-history','account-1','ContactCard','card-2','test',"
+            "'accepted','{}',2),"
+            "('job-terminal','group-job','account-1','Email','email-1','test','rejected','{}',3),"
+            "('transfer-terminal','group-transfer','account-1','Email','email-2','test','accepted',"
+            "'{}',4),"
+            "('unresolved',NULL,'account-1','CalendarEvent','event-1','test','unknown','{}',5),"
+            "('chain-terminal',NULL,'account-1','Email','email-chain','test','accepted','{}',6),"
+            "('chain-active',NULL,'account-1','Email','email-chain','test','pending','{}',7),"
+            "('executing-terminal','group-executing','account-1','Email','email-3','test',"
+            "'accepted','{}',8)")));
+        seed.finish();
+        fixture.close();
+    }
+    QSqlDatabase::removeDatabase(fixtureConnectionName);
+
+    auto migratedResult = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = databasePath,
+    });
+    if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
+        FAIL(error->message.toStdString());
+    auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
+    CHECK(migrated.schemaVersion() == 63);
+
+    QSqlQuery retained{migrated.database()};
+    REQUIRE(retained.exec(
+        QStringLiteral("SELECT mutation_id FROM mutation_journal ORDER BY sequence")));
+    std::vector<QString> mutationIds;
+    while (retained.next())
+        mutationIds.push_back(retained.value(0).toString());
+    CHECK(mutationIds ==
+          std::vector<QString>{QStringLiteral("history-terminal"), QStringLiteral("job-terminal"),
+                               QStringLiteral("transfer-terminal"), QStringLiteral("unresolved"),
+                               QStringLiteral("chain-terminal"), QStringLiteral("chain-active"),
+                               QStringLiteral("executing-terminal")});
+
+    QSqlQuery settle{migrated.database()};
+    REQUIRE(settle.exec(
+        QStringLiteral("UPDATE operation_history SET status='ready' WHERE entry_id='history-1'")));
+    REQUIRE(settle.exec(
+        QStringLiteral("UPDATE operation_history SET status='ready' WHERE entry_id='history-2'")));
+    REQUIRE(settle.exec(
+        QStringLiteral("UPDATE background_jobs SET status='complete' WHERE job_id='group-job'")));
+    REQUIRE(settle.exec(QStringLiteral(
+        "UPDATE mail_transfer_operations SET status='complete' WHERE operation_id='transfer-1'")));
+    REQUIRE(settle.exec(QStringLiteral(
+        "UPDATE mutation_journal SET status='rejected' WHERE mutation_id='unresolved'")));
+    REQUIRE(settle.exec(QStringLiteral(
+        "UPDATE mutation_journal SET status='accepted' WHERE mutation_id='chain-active'")));
+    REQUIRE(settle.exec(
+        QStringLiteral("DELETE FROM mutation_journal WHERE mutation_id IN (SELECT mutation_id FROM "
+                       "mutation_journal_retireable_terminal)")));
+    REQUIRE(settle.exec(QStringLiteral("SELECT COUNT(*) FROM mutation_journal")));
+    REQUIRE(settle.next());
+    CHECK(settle.value(0).toInt() == 0);
 }
 
 TEST_CASE("thread membership migration normalizes JSON members in order",

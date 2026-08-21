@@ -164,14 +164,10 @@ namespace javelin::app
                 if (javelin::jmap::isTransientError(*error) &&
                     !javelin::jmap::isAuthenticationError(*error))
                 {
-                    auto committed = m_undoManager.commitNormal(std::move(*prepared));
+                    auto committed = m_undoManager.commitNormalBlockedUnknown(std::move(*prepared),
+                                                                              error->message);
                     if (const auto* databaseError =
                             std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
-                        co_return javelin::jmap::operationError(*databaseError);
-                    const auto& entry = std::get<javelin::app::undo::HistoryEntry>(committed);
-                    if (const auto databaseError = m_undoManager.setEntryStatus(
-                            entry.entryId, javelin::app::undo::HistoryEntryStatus::BlockedUnknown,
-                            error->message))
                         co_return javelin::jmap::operationError(*databaseError);
                 }
                 else if (const auto databaseError = m_undoManager.discardNormal(prepared->entryId))

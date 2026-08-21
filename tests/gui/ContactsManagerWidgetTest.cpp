@@ -141,6 +141,7 @@ namespace
                 .accountCount = 1,
                 .addressBookCount = 2,
                 .contactCount = 2,
+                .reconciledMutations = {},
             };
         }
     };

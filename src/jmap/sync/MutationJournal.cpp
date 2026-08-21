@@ -244,6 +244,39 @@ namespace javelin::jmap::sync
     }
 
     std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
+    MutationJournalRepository::listForOperationGroup(const std::string_view operationGroupId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(
+            QStringLiteral(
+                "SELECT %1 FROM mutation_journal WHERE operation_group_id=:operation_group_id "
+                "ORDER BY sequence")
+                .arg(selectColumns()));
+        query.bindValue(QStringLiteral(":operation_group_id"),
+                        QString::fromStdString(std::string{operationGroupId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Read mutation journal operation group"), query);
+
+        std::vector<MutationRecord> records;
+        while (query.next())
+        {
+            const auto record = recordFromQuery(query);
+            if (!record.has_value())
+            {
+                return javelin::jmap::cache::DatabaseError{
+                    .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Mutation journal record has an invalid status."),
+                };
+            }
+            records.push_back(*record);
+        }
+        return records;
+    }
+
+    std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
     MutationJournalRepository::listPendingForOperationGroup(const ConsistencyDomain& domain,
                                                             const std::string_view operationGroupId,
                                                             const std::size_t objectLimit) const
@@ -494,6 +527,22 @@ namespace javelin::jmap::sync
         return std::nullopt;
     }
 
+    std::optional<javelin::jmap::cache::DatabaseError> MutationJournalRepository::retireTerminal()
+    {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
+        if (const auto error = m_connection.validate())
+            return error;
+
+        QSqlQuery query{m_connection.database()};
+        if (!query.exec(QStringLiteral(
+                "DELETE FROM mutation_journal WHERE mutation_id IN (SELECT mutation_id FROM "
+                "mutation_journal_retireable_terminal)")))
+        {
+            return queryError(QStringLiteral("Retire terminal mutation journal records"), query);
+        }
+        return std::nullopt;
+    }
+
     MutationProjectionTransaction::MutationProjectionTransaction(
         javelin::jmap::cache::DatabaseConnection& connection,
         javelin::jmap::cache::DatabaseTransaction transaction)
@@ -557,6 +606,13 @@ namespace javelin::jmap::sync
     {
         MutationJournalRepository journal{*m_connection};
         return journal.remove(mutationId);
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    MutationProjectionTransaction::retireTerminal()
+    {
+        MutationJournalRepository journal{*m_connection};
+        return journal.retireTerminal();
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>

@@ -231,11 +231,8 @@ TEST_CASE("contact repository greedily caches, filters, and resolves email addre
     const auto rejectedMutations = contactJournal.listForContact("a1", "c1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
         rejectedMutations));
-    REQUIRE(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(rejectedMutations)
-                .size() == 1);
     CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(rejectedMutations)
-              .front()
-              .status == javelin::jmap::sync::MutationStatus::Rejected);
+              .empty());
     const auto restoredUpdate = repository.findContact("a1", "c1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(
         restoredUpdate));

@@ -203,6 +203,14 @@ namespace javelin::app::undo
             operationGroupId.toStdString());
     }
 
+    std::variant<std::vector<javelin::jmap::sync::MutationRecord>,
+                 javelin::jmap::cache::DatabaseError>
+    HistoryRepository::mutationGroup(const QString& operationGroupId) const
+    {
+        javelin::jmap::sync::MutationJournalRepository journal{m_connection};
+        return journal.listForOperationGroup(operationGroupId.toStdString());
+    }
+
     std::variant<std::int64_t, javelin::jmap::cache::DatabaseError> HistoryRepository::nextOrder()
     {
         QSqlQuery read{m_connection.database()};
@@ -364,6 +372,13 @@ namespace javelin::app::undo
     HistoryRepository::markPreparedReady(HistoryEntry entry)
     {
         return markPrepared(std::move(entry), HistoryEntryStatus::Ready);
+    }
+
+    std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
+    HistoryRepository::markPreparedBlockedUnknown(HistoryEntry entry, QString failure)
+    {
+        entry.failureJson = std::move(failure);
+        return markPrepared(std::move(entry), HistoryEntryStatus::BlockedUnknown);
     }
 
     std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>

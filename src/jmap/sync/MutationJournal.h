@@ -55,6 +55,8 @@ namespace javelin::jmap::sync
         listForOperationGroup(const ConsistencyDomain& domain,
                               std::string_view operationGroupId) const;
         [[nodiscard]] std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
+        listForOperationGroup(std::string_view operationGroupId) const;
+        [[nodiscard]] std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
         listPendingForOperationGroup(const ConsistencyDomain& domain,
                                      std::string_view operationGroupId,
                                      std::size_t objectLimit) const;
@@ -76,6 +78,7 @@ namespace javelin::jmap::sync
         recoverInFlight();
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         remove(std::string_view mutationId);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError> retireTerminal();
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_connection;
@@ -107,6 +110,7 @@ namespace javelin::jmap::sync
                                     std::string_view operationGroupId, std::string_view baseState);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         remove(std::string_view mutationId);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError> retireTerminal();
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         advance(std::span<const ConsistencyDomain> domains);
         [[nodiscard]] javelin::jmap::cache::DatabaseTransaction& cacheTransaction();

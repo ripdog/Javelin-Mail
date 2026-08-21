@@ -1191,10 +1191,8 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
             "a1", "event-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(
         rejectedRecords));
-    CHECK(std::ranges::any_of(
-        std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(rejectedRecords),
-        [](const auto& record)
-        { return record.status == javelin::jmap::sync::MutationStatus::Rejected; }));
+    CHECK(std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(rejectedRecords)
+              .empty());
 
     transport.results.push_back(javelin::jmap::api::TransportError{
         .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
@@ -1232,6 +1230,60 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
         .methodResponses =
             {{.name = "Calendar/get",
               .arguments =
+                  R"({"accountId":"a1","state":"calendar-batched","list":[{"id":"work","name":"Work","isSubscribed":true,"isVisible":true,"isDefault":true,"myRights":{"mayReadFreeBusy":true,"mayReadItems":true,"mayWriteAll":true,"mayWriteOwn":true,"mayUpdatePrivate":true,"mayRSVP":true,"mayShare":false,"mayDelete":false}}],"notFound":[]})",
+              .callId = "calendar-get"},
+             {.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"expanded-same","canCalculateChanges":false,"position":0,"ids":["event-1"],"total":1,"limit":1})",
+              .callId = "calendar-event-query"},
+             {.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"base-same","canCalculateChanges":false,"position":0,"ids":["event-1"],"total":1,"limit":1})",
+              .callId = "calendar-base-event-query"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-same-query"});
+    const auto sameStateEvent =
+        R"({"accountId":"a1","state":"event-batched","list":[{"@type":"Event","id":"event-1","uid":"uid-1","calendarIds":{"work":true},"title":"Original","start":"2026-07-13T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true}],"notFound":[]})";
+    for (const auto* callId :
+         {"calendar-event-get", "calendar-base-event-get", "calendar-history-get"})
+    {
+        transport.results.push_back(
+            javelin::jmap::api::ResponseEnvelope{.methodResponses = {{.name = "CalendarEvent/get",
+                                                                      .arguments = sameStateEvent,
+                                                                      .callId = callId}},
+                                                 .createdIds = std::nullopt,
+                                                 .sessionState = "session-same-get"});
+    }
+
+    const auto sameStateRefresh = QCoro::waitFor(sync.refresh(settings, "a1", interval, zone));
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(sameStateRefresh));
+    CHECK(std::get<javelin::jmap::calendar::RefreshedRange>(sameStateRefresh)
+              .reconciledMutations.empty());
+    const auto sameStateWindow = calendars.loadWindow("a1", interval.start, interval.end, zone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(
+        sameStateWindow));
+    const auto& sameStateProjected =
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(sameStateWindow);
+    REQUIRE(sameStateProjected.has_value());
+    REQUIRE(sameStateProjected->events.size() == 1);
+    CHECK(sameStateProjected->events.front().title == "Uncertain");
+    REQUIRE(sameStateProjected->occurrences.size() == 1);
+    CHECK(sameStateProjected->occurrences.front().id == "event-1");
+    const auto stillUnknown =
+        javelin::jmap::calendar::CalendarMutationJournal{connection, calendars}.listForEvent(
+            "a1", "event-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(
+        stillUnknown));
+    REQUIRE(std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(stillUnknown)
+                .size() == 1);
+    CHECK(std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(stillUnknown)
+              .front()
+              .status == javelin::jmap::sync::MutationStatus::Unknown);
+
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/get",
+              .arguments =
                   R"({"accountId":"a1","state":"calendar-stale","list":[{"id":"work","name":"Work","isSubscribed":true,"isVisible":true,"isDefault":true,"myRights":{"mayReadFreeBusy":true,"mayReadItems":true,"mayWriteAll":true,"mayWriteOwn":true,"mayUpdatePrivate":true,"mayRSVP":true,"mayShare":false,"mayDelete":false}}],"notFound":[]})",
               .callId = "calendar-get"},
              {.name = "CalendarEvent/query",
@@ -1260,10 +1312,22 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
               .callId = "calendar-base-event-get"}},
         .createdIds = std::nullopt,
         .sessionState = "session-stale-base"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"event-stale","list":[{"@type":"Event","id":"event-1","uid":"uid-1","calendarIds":{"work":true},"title":"Stale","start":"2026-07-13T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true,"recurrenceRule":{"@type":"RecurrenceRule","frequency":"daily","interval":1,"count":3}}],"notFound":[]})",
+              .callId = "calendar-history-get"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-stale-authoritative"});
 
     const auto staleRefresh = QCoro::waitFor(sync.refresh(settings, "a1", interval, zone));
 
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(staleRefresh));
+    const auto& staleSummary = std::get<javelin::jmap::calendar::RefreshedRange>(staleRefresh);
+    REQUIRE(staleSummary.reconciledMutations.size() == 1);
+    CHECK(staleSummary.reconciledMutations.front().disposition ==
+          javelin::jmap::sync::MutationReconciliationDisposition::Superseded);
     const auto rebasedWindow = calendars.loadWindow("a1", interval.start, interval.end, zone);
     REQUIRE(
         std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(rebasedWindow));
@@ -1271,10 +1335,17 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
         std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(rebasedWindow);
     REQUIRE(rebased.has_value());
     REQUIRE(rebased->events.size() == 1);
-    CHECK(rebased->events.front().title == "Uncertain");
+    CHECK(rebased->events.front().title == "Stale");
     REQUIRE(rebased->occurrences.size() == 1);
-    CHECK(rebased->occurrences.front().id == "event-1");
+    CHECK(rebased->occurrences.front().id == "occurrence-stale");
     CHECK(rebased->occurrences.front().eventId == "event-1");
+    const auto resolvedRecords =
+        javelin::jmap::calendar::CalendarMutationJournal{connection, calendars}.listForEvent(
+            "a1", "event-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(
+        resolvedRecords));
+    CHECK(std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(resolvedRecords)
+              .empty());
 
     auto listedCalendars = calendars.listCalendars("a1");
     REQUIRE(

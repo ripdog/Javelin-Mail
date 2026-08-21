@@ -27,6 +27,7 @@ namespace javelin::jmap::contacts
         std::size_t accountCount = 0;
         std::size_t addressBookCount = 0;
         std::size_t contactCount = 0;
+        std::vector<javelin::jmap::sync::ReconciledMutation> reconciledMutations;
     };
 
     struct ContactMutationSummary

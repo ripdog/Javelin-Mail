@@ -1,4 +1,5 @@
 #include "app/undo/UndoManager.h"
+#include "jmap/sync/MutationJournal.h"
 
 #include <QCoroTask>
 
@@ -163,6 +164,143 @@ TEST_CASE("failed undo retains its stack position and a new mutation clears redo
     CHECK_FALSE(fixture.manager.state().canRedo);
     REQUIRE(fixture.manager.entries().size() == 1);
     CHECK(fixture.manager.entries().front().label == QStringLiteral("Second"));
+}
+
+TEST_CASE("ambiguous history becomes ready only after its mutation group fully settles",
+          "[app][undo][manager][consistency]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    seedAccount(fixture.database);
+    auto entry = prepareAndCommit(fixture.manager, QStringLiteral("Ambiguous edit"));
+    REQUIRE(entry.operationGroupId.has_value());
+    REQUIRE_FALSE(fixture.manager
+                      .setEntryStatus(entry.entryId, HistoryEntryStatus::BlockedUnknown,
+                                      QStringLiteral("Outcome unknown"))
+                      .has_value());
+
+    javelin::jmap::sync::MutationJournalRepository journal{fixture.database};
+    for (const auto& [mutationId, objectId] :
+         {std::pair{"mutation-1", "object-1"}, std::pair{"mutation-2", "object-2"}})
+    {
+        REQUIRE_FALSE(journal
+                          .put({
+                              .mutationId = mutationId,
+                              .operationGroupId = entry.operationGroupId->toStdString(),
+                              .domain = {.accountId = "account-1", .dataType = "ContactCard"},
+                              .objectId = objectId,
+                              .mutationKind = "test",
+                              .status = javelin::jmap::sync::MutationStatus::Unknown,
+                              .payloadJson = "{}",
+                              .baseState = "state-1",
+                              .acceptedState = std::nullopt,
+                              .errorJson = std::nullopt,
+                          })
+                          .has_value());
+    }
+
+    REQUIRE_FALSE(
+        journal.transition("mutation-1", javelin::jmap::sync::MutationStatus::Accepted, "state-2")
+            .has_value());
+    REQUIRE_FALSE(fixture.manager.settleAmbiguousOperation(*entry.operationGroupId).has_value());
+    REQUIRE(fixture.manager.entries().size() == 1);
+    CHECK(fixture.manager.entries().front().status == HistoryEntryStatus::BlockedUnknown);
+
+    REQUIRE_FALSE(
+        journal.transition("mutation-2", javelin::jmap::sync::MutationStatus::Accepted, "state-2")
+            .has_value());
+    REQUIRE_FALSE(fixture.manager.settleAmbiguousOperation(*entry.operationGroupId).has_value());
+    REQUIRE(fixture.manager.entries().size() == 1);
+    CHECK(fixture.manager.entries().front().status == HistoryEntryStatus::Ready);
+    CHECK_FALSE(fixture.manager.entries().front().failureJson.has_value());
+    CHECK(fixture.manager.state().canUndo);
+    const auto retired = journal.listForOperationGroup(entry.operationGroupId->toStdString());
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(retired));
+    CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(retired).empty());
+}
+
+TEST_CASE("superseded ambiguous history is discarded", "[app][undo][manager][consistency]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    seedAccount(fixture.database);
+    auto entry = prepareAndCommit(fixture.manager, QStringLiteral("Superseded edit"));
+    REQUIRE(entry.operationGroupId.has_value());
+    REQUIRE_FALSE(fixture.manager
+                      .setEntryStatus(entry.entryId, HistoryEntryStatus::BlockedUnknown,
+                                      QStringLiteral("Outcome unknown"))
+                      .has_value());
+    javelin::jmap::sync::MutationJournalRepository journal{fixture.database};
+    REQUIRE_FALSE(journal
+                      .put({
+                          .mutationId = "mutation-superseded",
+                          .operationGroupId = entry.operationGroupId->toStdString(),
+                          .domain = {.accountId = "account-1", .dataType = "CalendarEvent"},
+                          .objectId = "event-1",
+                          .mutationKind = "test",
+                          .status = javelin::jmap::sync::MutationStatus::Unknown,
+                          .payloadJson = "{}",
+                          .baseState = "state-1",
+                          .acceptedState = std::nullopt,
+                          .errorJson = std::nullopt,
+                      })
+                      .has_value());
+    REQUIRE_FALSE(journal
+                      .transition("mutation-superseded",
+                                  javelin::jmap::sync::MutationStatus::Rejected, std::nullopt,
+                                  R"({"type":"supersededByAuthoritativeState"})")
+                      .has_value());
+    REQUIRE_FALSE(fixture.manager.settleAmbiguousOperation(*entry.operationGroupId).has_value());
+    CHECK(fixture.manager.entries().empty());
+    const auto retired = journal.listForOperationGroup(entry.operationGroupId->toStdString());
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(retired));
+    CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(retired).empty());
+}
+
+TEST_CASE("blocked ambiguous history settles from durable mutation outcomes after restart",
+          "[app][undo][manager][consistency]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    seedAccount(fixture.database);
+    auto entry = prepareAndCommit(fixture.manager, QStringLiteral("Recovered edit"));
+    REQUIRE(entry.operationGroupId.has_value());
+    REQUIRE_FALSE(fixture.manager
+                      .setEntryStatus(entry.entryId, HistoryEntryStatus::BlockedUnknown,
+                                      QStringLiteral("Outcome unknown"))
+                      .has_value());
+
+    javelin::jmap::sync::MutationJournalRepository journal{fixture.database};
+    REQUIRE_FALSE(journal
+                      .put({
+                          .mutationId = "mutation-recovered",
+                          .operationGroupId = entry.operationGroupId->toStdString(),
+                          .domain = {.accountId = "account-1", .dataType = "ContactCard"},
+                          .objectId = "contact-1",
+                          .mutationKind = "test",
+                          .status = javelin::jmap::sync::MutationStatus::Unknown,
+                          .payloadJson = "{}",
+                          .baseState = "state-1",
+                          .acceptedState = std::nullopt,
+                          .errorJson = std::nullopt,
+                      })
+                      .has_value());
+    REQUIRE_FALSE(journal
+                      .transition("mutation-recovered",
+                                  javelin::jmap::sync::MutationStatus::Accepted, "state-2")
+                      .has_value());
+
+    UndoManager recovered{fixture.repository};
+    REQUIRE_FALSE(recovered.load().has_value());
+    REQUIRE(recovered.entries().size() == 1);
+    CHECK(recovered.entries().front().status == HistoryEntryStatus::Ready);
+    CHECK_FALSE(recovered.entries().front().failureJson.has_value());
+    const auto retired = journal.listForOperationGroup(entry.operationGroupId->toStdString());
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(retired));
+    CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(retired).empty());
 }
 
 TEST_CASE("impossible history is removed only after acknowledgement", "[app][undo][manager]")
@@ -394,9 +532,26 @@ TEST_CASE("startup recovery blocks entries interrupted while executing", "[app][
     ApplicationGuard application;
     Q_UNUSED(application);
     Fixture fixture;
+    seedAccount(fixture.database);
     auto entry = prepareAndCommit(fixture.manager, QStringLiteral("Move message"));
+    REQUIRE(entry.operationGroupId.has_value());
     entry.status = HistoryEntryStatus::ExecutingUndo;
     REQUIRE_FALSE(fixture.repository.update(entry).has_value());
+    javelin::jmap::sync::MutationJournalRepository journal{fixture.database};
+    REQUIRE_FALSE(journal
+                      .put({
+                          .mutationId = "undo-terminal",
+                          .operationGroupId = entry.operationGroupId->toStdString(),
+                          .domain = {.accountId = "account-1", .dataType = "Email"},
+                          .objectId = "email-1",
+                          .mutationKind = "test",
+                          .status = javelin::jmap::sync::MutationStatus::Accepted,
+                          .payloadJson = "{}",
+                          .baseState = "state-1",
+                          .acceptedState = "state-2",
+                          .errorJson = std::nullopt,
+                      })
+                      .has_value());
 
     UndoManager recovered{fixture.repository};
     REQUIRE_FALSE(recovered.load().has_value());
@@ -405,6 +560,11 @@ TEST_CASE("startup recovery blocks entries interrupted while executing", "[app][
     CHECK(recovered.state().blocked);
     CHECK_FALSE(recovered.state().canUndo);
     CHECK_FALSE(recovered.state().canRedo);
+    const auto retained = journal.listForOperationGroup(entry.operationGroupId->toStdString());
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(retained));
+    REQUIRE(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(retained).size() == 1);
+    CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(retained).front().status ==
+          javelin::jmap::sync::MutationStatus::Accepted);
 }
 
 TEST_CASE("system child mutations do not create operation history", "[app][undo][manager]")

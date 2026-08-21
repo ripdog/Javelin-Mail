@@ -176,6 +176,14 @@ namespace javelin::jmap::sieve
         else if (const auto error = m_repository.project(transaction.cacheTransaction(),
                                                          record.accountId, record.baseScripts))
             return error;
+        const std::array domains{sync::ConsistencyDomain{
+            .accountId = record.accountId,
+            .dataType = "SieveScript",
+        }};
+        if (const auto error = transaction.advance(domains))
+            return error;
+        if (const auto error = transaction.retireTerminal())
+            return error;
         return transaction.commit();
     }
 

@@ -383,6 +383,25 @@ namespace javelin::app
             return result;
         }
 
+        [[nodiscard]] std::optional<javelin::jmap::OperationError> settleReconciledHistory(
+            javelin::app::undo::UndoManager& manager,
+            const std::vector<javelin::jmap::sync::ReconciledMutation>& reconciled)
+        {
+            std::unordered_set<std::string> operationGroups;
+            for (const auto& mutation : reconciled)
+            {
+                if (mutation.operationGroupId.has_value())
+                    operationGroups.insert(*mutation.operationGroupId);
+            }
+            for (const auto& operationGroupId : operationGroups)
+            {
+                if (const auto error =
+                        manager.settleAmbiguousOperation(QString::fromStdString(operationGroupId)))
+                    return javelin::jmap::operationError(*error);
+            }
+            return std::nullopt;
+        }
+
         [[nodiscard]] std::optional<javelin::jmap::OperationError>
         retainUnknownOrDiscard(javelin::app::undo::UndoManager& manager,
                                std::optional<javelin::app::undo::HistoryEntry>& prepared,
@@ -397,13 +416,9 @@ namespace javelin::app
                     return javelin::jmap::operationError(*error);
                 return std::nullopt;
             }
-            auto committed = manager.commitNormal(std::move(*prepared));
+            auto committed =
+                manager.commitNormalBlockedUnknown(std::move(*prepared), operationError.message);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
-                return javelin::jmap::operationError(*error);
-            const auto& entry = std::get<javelin::app::undo::HistoryEntry>(committed);
-            if (const auto error = manager.setEntryStatus(
-                    entry.entryId, javelin::app::undo::HistoryEntryStatus::BlockedUnknown,
-                    operationError.message))
                 return javelin::jmap::operationError(*error);
             return std::nullopt;
         }
@@ -665,9 +680,10 @@ namespace javelin::app
         javelin::jmap::cache::ContactRepository& contactRepository,
         javelin::jmap::contacts::ContactSyncEngine& syncEngine,
         AccountRuntimeManager& accountRuntime, ApplicationErrorCoordinator& errorCoordinator,
-        WorkScheduler& workScheduler, QObject* parent)
+        WorkScheduler& workScheduler, javelin::app::undo::UndoManager& undoManager, QObject* parent)
         : QObject(parent), m_contactSyncEngine(syncEngine), m_accountRuntime(accountRuntime),
-          m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler)
+          m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler),
+          m_undoManager(undoManager)
     {
         connect(&contactRepository, &javelin::jmap::cache::ContactRepository::contactsChanged, this,
                 [this](const QString& accountId)
@@ -3455,6 +3471,14 @@ namespace javelin::app
         }
 
         const auto& summary = std::get<javelin::jmap::contacts::ContactRefreshSummary>(result);
+        if (const auto historyError =
+                settleReconciledHistory(m_undoManager, summary.reconciledMutations))
+        {
+            progress.detail = historyError->message;
+            static_cast<void>(m_workScheduler.update(jobId, WorkStatus::Failed, progress,
+                                                     QStringLiteral("{}"), historyError->message));
+            co_return;
+        }
         progress.completedUnits = summary.contactCount;
         progress.totalUnits = summary.contactCount;
         progress.detail = i18n("%1 contacts across %2 address books", summary.contactCount,
@@ -3724,11 +3748,17 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .message = accountSynchronizationNotConfigured(),
             };
-        co_return observeResult(
-            m_errorCoordinator, configuration->second.settings, accountId,
-            i18n("Synchronize contacts"),
-            co_await m_contactSyncEngine.refreshAll(
-                toLiveConnectionSettings(configuration->second.settings), accountId));
+        auto result = co_await m_contactSyncEngine.refreshAll(
+            toLiveConnectionSettings(configuration->second.settings), accountId);
+        if (const auto* summary =
+                std::get_if<javelin::jmap::contacts::ContactRefreshSummary>(&result))
+        {
+            if (const auto historyError =
+                    settleReconciledHistory(m_undoManager, summary->reconciledMutations))
+                result = *historyError;
+        }
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
+                                i18n("Synchronize contacts"), std::move(result));
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
@@ -3771,7 +3801,8 @@ namespace javelin::app
                     .accountCount = 0,
                     .eventCount = 0,
                     .calendarMetadataAuthoritative =
-                        m_calendarMetadataReadyOwners.contains(ownerAccountId)};
+                        m_calendarMetadataReadyOwners.contains(ownerAccountId),
+                    .reconciledMutations = {}};
             co_return co_await requestCalendarRange(std::move(ownerAccountId), std::move(interval),
                                                     std::move(displayTimeZone));
         }
@@ -3787,7 +3818,8 @@ namespace javelin::app
                     .accountCount = 0,
                     .eventCount = 0,
                     .calendarMetadataAuthoritative =
-                        m_calendarMetadataReadyOwners.contains(ownerAccountId)};
+                        m_calendarMetadataReadyOwners.contains(ownerAccountId),
+                    .reconciledMutations = {}};
             co_return co_await requestCalendarRange(std::move(ownerAccountId), std::move(interval),
                                                     std::move(displayTimeZone));
         }
@@ -3824,6 +3856,10 @@ namespace javelin::app
             displayTimeZone, refreshCalendarMetadata);
 
         const auto* summary = std::get_if<javelin::jmap::calendar::RefreshedRange>(&result);
+        std::optional<javelin::jmap::OperationError> historySettlementError;
+        if (summary != nullptr)
+            historySettlementError =
+                settleReconciledHistory(m_undoManager, summary->reconciledMutations);
         const bool succeeded = summary != nullptr;
         const bool metadataAuthoritative =
             summary != nullptr && summary->calendarMetadataAuthoritative;
@@ -3854,9 +3890,12 @@ namespace javelin::app
         else if (stateRefreshPending)
             scheduleRefresh(ownerAccountId);
 
-        auto observedResult =
-            observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
-                          i18n("Synchronize calendar"), std::move(result));
+        auto observedResult = observeResult(
+            m_errorCoordinator, configuration->second.settings, ownerAccountId,
+            i18n("Synchronize calendar"),
+            historySettlementError.has_value()
+                ? javelin::jmap::calendar::CalendarRefreshResult{*historySettlementError}
+                : std::move(result));
         promise->addResult(observedResult);
         promise->finish();
         co_return observedResult;
@@ -4009,12 +4048,22 @@ namespace javelin::app
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
             range->second.interval, range->second.displayTimeZone);
         if (const auto* summary = std::get_if<javelin::jmap::calendar::RefreshedRange>(&result);
-            summary != nullptr && summary->accountCount > 0)
-            Q_EMIT calendarCacheCommitted({.ownerAccountId = QString::fromStdString(ownerAccountId),
-                                           .interval = summary->interval,
-                                           .displayTimeZone = summary->displayTimeZone,
-                                           .accountCount = summary->accountCount,
-                                           .eventCount = summary->eventCount});
+            summary != nullptr)
+        {
+            if (summary->accountCount > 0)
+                Q_EMIT calendarCacheCommitted(
+                    {.ownerAccountId = QString::fromStdString(ownerAccountId),
+                     .interval = summary->interval,
+                     .displayTimeZone = summary->displayTimeZone,
+                     .accountCount = summary->accountCount,
+                     .eventCount = summary->eventCount});
+            if (const auto historyError =
+                    settleReconciledHistory(m_undoManager, summary->reconciledMutations))
+                co_return observeResult(
+                    m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                    i18n("Synchronize calendar changes"),
+                    javelin::jmap::calendar::CalendarRefreshResult{*historyError});
+        }
         co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
                                 i18n("Synchronize calendar changes"), std::move(result));
     }

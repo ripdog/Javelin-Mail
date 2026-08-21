@@ -88,6 +88,8 @@ namespace javelin::jmap::cache
                                                                     std::string_view eventState);
 
         [[nodiscard]] std::optional<DatabaseError> reconcileWindow(const CalendarWindow& window);
+        [[nodiscard]] std::optional<DatabaseError> reconcileWindow(DatabaseTransaction& transaction,
+                                                                   const CalendarWindow& window);
         [[nodiscard]] std::optional<DatabaseError>
         applyEventDelta(std::string_view accountId, std::string_view calendarState,
                         std::string_view eventState, const calendar::TimeZoneId& displayTimeZone,

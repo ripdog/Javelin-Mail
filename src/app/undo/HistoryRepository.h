@@ -27,6 +27,9 @@ namespace javelin::app::undo
                                    javelin::jmap::cache::DatabaseError>
         mutationGroup(std::string_view accountId, std::string_view dataType,
                       const QString& operationGroupId) const;
+        [[nodiscard]] std::variant<std::vector<javelin::jmap::sync::MutationRecord>,
+                                   javelin::jmap::cache::DatabaseError>
+        mutationGroup(const QString& operationGroupId) const;
 
         [[nodiscard]] std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
         insertPreparing(HistoryEntry entry);
@@ -34,6 +37,8 @@ namespace javelin::app::undo
         pushUndoClearingRedo(HistoryEntry entry);
         [[nodiscard]] std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
         markPreparedReady(HistoryEntry entry);
+        [[nodiscard]] std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
+        markPreparedBlockedUnknown(HistoryEntry entry, QString failure);
         [[nodiscard]] std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
         markPreparedImpossible(HistoryEntry entry);
         [[nodiscard]] std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>

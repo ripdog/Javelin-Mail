@@ -300,6 +300,8 @@ namespace javelin::jmap::identity
         }};
         if (const auto error = transaction.advance(domains))
             return error;
+        if (const auto error = transaction.retireTerminal())
+            return error;
         return transaction.commit();
     }
 
@@ -332,7 +334,7 @@ namespace javelin::jmap::identity
         }};
         if (const auto error = transaction.advance(domains))
             return error;
-        if (const auto error = transaction.remove(record.mutationId))
+        if (const auto error = transaction.retireTerminal())
             return error;
         return transaction.commit();
     }

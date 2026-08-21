@@ -279,7 +279,7 @@ namespace javelin::app
             m_mailNotificationService.get(), &MailNotificationService::mailboxRefreshed);
         m_contactApplicationService = std::make_unique<ContactApplicationService>(
             *m_contactRepository, *m_contactSyncEngine, *m_accountRuntimeManager,
-            *m_errorCoordinator, *m_workScheduler);
+            *m_errorCoordinator, *m_workScheduler, *m_undoManager);
         m_calendarApplicationService = std::make_unique<CalendarApplicationService>(
             m_databaseConnection, *m_calendarReader, *m_calendarProtocolClient,
             *m_calendarSyncEngine, *m_calendarMutationEngine, *m_accountRuntimeManager,

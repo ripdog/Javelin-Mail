@@ -37,6 +37,8 @@ namespace javelin::app::undo
         [[nodiscard]] std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
         commitNormal(HistoryEntry entry);
         [[nodiscard]] std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
+        commitNormalBlockedUnknown(HistoryEntry entry, QString failure);
+        [[nodiscard]] std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
         recordNormal(QString label, HistoryDomain domain, HistoryPayload payload,
                      std::optional<QString> operationGroupId = std::nullopt,
                      std::optional<QDateTime> expiresAt = std::nullopt,
@@ -48,6 +50,8 @@ namespace javelin::app::undo
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         setEntryStatus(const QString& entryId, HistoryEntryStatus status,
                        std::optional<QString> failure = std::nullopt);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        settleAmbiguousOperation(const QString& operationGroupId);
         [[nodiscard]] std::variant<std::optional<HistoryEntry>, javelin::jmap::cache::DatabaseError>
         prepareImpossible(QString label, HistoryDomain domain, QString explanation,
                           std::optional<QString> operationGroupId = std::nullopt);

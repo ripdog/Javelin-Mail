@@ -540,12 +540,7 @@ TEST_CASE("contact group membership uses exact optimistic member patches",
     const auto mutations = journal.listForContact("a1", "group-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
         mutations));
-    REQUIRE(
-        std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations).size() ==
-        1);
-    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations)
-              .front()
-              .status == javelin::jmap::sync::MutationStatus::Rejected);
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations).empty());
 
     transport.results.push_back(javelin::jmap::api::HttpResponse{
         .statusCode = 200,
@@ -896,12 +891,7 @@ TEST_CASE("rejected ContactCard sets restore the confirmed contact",
     const auto mutations = journal.listForContact("a1", "card-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
         mutations));
-    REQUIRE(
-        std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations).size() ==
-        1);
-    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations)
-              .front()
-              .status == javelin::jmap::sync::MutationStatus::Rejected);
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations).empty());
 }
 
 TEST_CASE("partial ContactCard results reconcile each object independently",
@@ -976,14 +966,11 @@ TEST_CASE("partial ContactCard results reconcile each object independently",
         rejectedMutations));
     CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(acceptedMutations)
               .empty());
-    REQUIRE(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(rejectedMutations)
-                .size() == 1);
     CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(rejectedMutations)
-              .front()
-              .status == javelin::jmap::sync::MutationStatus::Rejected);
+              .empty());
 }
 
-TEST_CASE("ambiguous ContactCard outcomes preserve the optimistic contact",
+TEST_CASE("ambiguous ContactCard outcome yields to a later authoritative state",
           "[jmap][contacts][service][consistency]")
 {
     ensureApplication();
@@ -1020,7 +1007,8 @@ TEST_CASE("ambiguous ContactCard outcomes preserve the optimistic contact",
                                  .ifInState = "c1",
                                  .create = {},
                                  .update = {{"card-1", {.json = R"({"name/full":"Uncertain"})"}}},
-                                 .destroy = {}}));
+                                 .destroy = {}},
+                                {.operationGroupId = "history-contact-edit"}));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
 
     const auto projected = contacts.findContact("a1", "card-1");
@@ -1041,6 +1029,41 @@ TEST_CASE("ambiguous ContactCard outcomes preserve the optimistic contact",
     CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations)
               .front()
               .status == javelin::jmap::sync::MutationStatus::Unknown);
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations)
+              .front()
+              .operationGroupId == std::optional<std::string>{"history-contact-edit"});
+
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["AddressBook/get",{"accountId":"a1","state":"b1","list":[{"id":"book-1","name":"Personal","description":null,"sortOrder":0,"isDefault":true,"isSubscribed":true,"shareWith":null,"myRights":{"mayRead":true,"mayWrite":true,"mayShare":false,"mayDelete":true}}],"notFound":[]},"address-books"],["ContactCard/get",{"accountId":"a1","state":"c1","list":[{"id":"card-1","uid":"uid-card-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Original"},"emails":{"email-1":{"address":"original@example.test"}}}],"notFound":[]},"contact-cards"]],"sessionState":"s-same"})"},
+    });
+    const auto sameStateRefresh =
+        QCoro::waitFor(service.refreshAll({.sessionUrl = "https://example.test/.well-known/jmap",
+                                           .loginEmail = "alice@example.test",
+                                           .apiKey = "secret"},
+                                          "a1"));
+    REQUIRE(
+        std::holds_alternative<javelin::jmap::contacts::ContactRefreshSummary>(sameStateRefresh));
+    CHECK(std::get<javelin::jmap::contacts::ContactRefreshSummary>(sameStateRefresh)
+              .reconciledMutations.empty());
+    const auto sameStateProjected = contacts.findContact("a1", "card-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(
+        sameStateProjected));
+    REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(sameStateProjected)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(sameStateProjected)
+              ->displayName == "Uncertain");
+    const auto sameStateMutations = journal.listActive("a1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
+        sameStateMutations));
+    REQUIRE(
+        std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(sameStateMutations)
+            .size() == 1);
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(sameStateMutations)
+              .front()
+              .status == javelin::jmap::sync::MutationStatus::Unknown);
 
     transport.results.push_back(javelin::jmap::api::HttpResponse{
         .statusCode = 200,
@@ -1054,39 +1077,78 @@ TEST_CASE("ambiguous ContactCard outcomes preserve the optimistic contact",
                                            .apiKey = "secret"},
                                           "a1"));
     REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactRefreshSummary>(staleRefresh));
-    const auto stillProjected = contacts.findContact("a1", "card-1");
+    const auto& refreshSummary =
+        std::get<javelin::jmap::contacts::ContactRefreshSummary>(staleRefresh);
+    REQUIRE(refreshSummary.reconciledMutations.size() == 1);
+    CHECK(refreshSummary.reconciledMutations.front().disposition ==
+          javelin::jmap::sync::MutationReconciliationDisposition::Superseded);
+    CHECK(refreshSummary.reconciledMutations.front().operationGroupId ==
+          std::optional<std::string>{"history-contact-edit"});
+    const auto authoritative = contacts.findContact("a1", "card-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(
-        stillProjected));
-    REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(stillProjected)
+        authoritative));
+    REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(authoritative)
                 .has_value());
-    CHECK(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(stillProjected)
-              ->displayName == "Uncertain");
-    REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(stillProjected)
+    CHECK(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(authoritative)
+              ->displayName == "Original");
+    REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(authoritative)
                 ->emails.size() == 1);
-    CHECK(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(stillProjected)
+    CHECK(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(authoritative)
               ->emails.front()
               .address == "server-new@example.test");
+    const auto remaining = journal.listActive("a1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
+        remaining));
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(remaining).empty());
+
+    transport.results.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "Connection closed after dispatch",
+    });
+    const auto appliedUnknown = QCoro::waitFor(
+        service.setContactCards({.sessionUrl = "https://example.test/.well-known/jmap",
+                                 .loginEmail = "alice@example.test",
+                                 .apiKey = "secret"},
+                                "a1",
+                                {.accountId = "a1",
+                                 .ifInState = "c2",
+                                 .create = {},
+                                 .update = {{"card-1", {.json = R"({"name/full":"Confirmed"})"}}},
+                                 .destroy = {}}));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(appliedUnknown));
 
     transport.results.push_back(javelin::jmap::api::HttpResponse{
         .statusCode = 200,
         .body =
             QByteArray{
-                R"({"methodResponses":[["AddressBook/get",{"accountId":"a1","state":"b3","list":[{"id":"book-1","name":"Personal","description":null,"sortOrder":0,"isDefault":true,"isSubscribed":true,"shareWith":null,"myRights":{"mayRead":true,"mayWrite":true,"mayShare":false,"mayDelete":true}}],"notFound":[]},"address-books"],["ContactCard/get",{"accountId":"a1","state":"c3","list":[{"id":"card-1","uid":"uid-card-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Uncertain"},"emails":{"email-1":{"address":"server-new@example.test"}}}],"notFound":[]},"contact-cards"]],"sessionState":"s4"})"},
+                R"({"methodResponses":[["AddressBook/get",{"accountId":"a1","state":"b3","list":[{"id":"book-1","name":"Personal","description":null,"sortOrder":0,"isDefault":true,"isSubscribed":true,"shareWith":null,"myRights":{"mayRead":true,"mayWrite":true,"mayShare":false,"mayDelete":true}}],"notFound":[]},"address-books"],["ContactCard/get",{"accountId":"a1","state":"c3","list":[{"id":"card-1","uid":"uid-card-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Confirmed"},"emails":{"email-1":{"address":"server-new@example.test"}}}],"notFound":[]},"contact-cards"]],"sessionState":"s4"})"},
     });
-    const auto confirmedRefresh =
+    const auto appliedRefresh =
         QCoro::waitFor(service.refreshAll({.sessionUrl = "https://example.test/.well-known/jmap",
                                            .loginEmail = "alice@example.test",
                                            .apiKey = "secret"},
                                           "a1"));
-    REQUIRE(
-        std::holds_alternative<javelin::jmap::contacts::ContactRefreshSummary>(confirmedRefresh));
-    const auto remaining = journal.listActive("a1");
+    REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactRefreshSummary>(appliedRefresh));
+    const auto& appliedSummary =
+        std::get<javelin::jmap::contacts::ContactRefreshSummary>(appliedRefresh);
+    REQUIRE(appliedSummary.reconciledMutations.size() == 1);
+    CHECK(appliedSummary.reconciledMutations.front().disposition ==
+          javelin::jmap::sync::MutationReconciliationDisposition::Applied);
+    const auto appliedContact = contacts.findContact("a1", "card-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(
+        appliedContact));
+    REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(appliedContact)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(appliedContact)
+              ->displayName == "Confirmed");
+    const auto appliedRemaining = journal.listActive("a1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
-        remaining));
-    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(remaining).empty());
+        appliedRemaining));
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(appliedRemaining)
+              .empty());
 }
 
-TEST_CASE("an authoritative deletion rejects an ambiguous ContactCard update",
+TEST_CASE("an authoritative deletion supersedes an ambiguous ContactCard update",
           "[jmap][contacts][service][consistency]")
 {
     ensureApplication();
@@ -1138,6 +1200,10 @@ TEST_CASE("an authoritative deletion rejects an ambiguous ContactCard update",
                                            .apiKey = "secret"},
                                           "a1"));
     REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactRefreshSummary>(refreshed));
+    const auto& summary = std::get<javelin::jmap::contacts::ContactRefreshSummary>(refreshed);
+    REQUIRE(summary.reconciledMutations.size() == 1);
+    CHECK(summary.reconciledMutations.front().disposition ==
+          javelin::jmap::sync::MutationReconciliationDisposition::Superseded);
     const auto missing = contacts.findContact("a1", "card-1");
     REQUIRE(
         std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(missing));
@@ -1148,13 +1214,7 @@ TEST_CASE("an authoritative deletion rejects an ambiguous ContactCard update",
     const auto mutations = journal.listForContact("a1", "card-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
         mutations));
-    REQUIRE(
-        std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations).size() ==
-        1);
-    const auto& rejected =
-        std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations).front();
-    CHECK(rejected.status == javelin::jmap::sync::MutationStatus::Rejected);
-    CHECK(rejected.errorJson == R"({"type":"notFound"})");
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations).empty());
 }
 
 TEST_CASE("accepted ContactCard creation replaces its temporary projection",

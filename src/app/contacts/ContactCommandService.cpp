@@ -576,15 +576,17 @@ namespace javelin::app
             history.beforeDocumentJson = javelin::jmap::api::serializeAddressBookDocument(*found);
             history.afterDocumentJson = history.beforeDocumentJson;
         }
+        const auto operationGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
         auto preparedResult = m_undoManager.prepareNormal(
-            i18n("Change Address Books"), undo::HistoryDomain::Contacts, history, std::nullopt);
+            i18n("Change Address Books"), undo::HistoryDomain::Contacts, history, operationGroupId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
             co_return javelin::jmap::operationError(*error);
         auto prepared = std::get<std::optional<undo::HistoryEntry>>(std::move(preparedResult));
         auto result = observeResult(
             m_errorCoordinator, *settings, ownerAccountId, i18n("Change address books"),
             co_await m_contactMutationEngine.setAddressBooks(toLiveConnectionSettings(*settings),
-                                                             ownerAccountId, std::move(request)));
+                                                             ownerAccountId, std::move(request),
+                                                             operationGroupId.toStdString()));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             if (prepared.has_value())
@@ -592,14 +594,10 @@ namespace javelin::app
                 if (javelin::jmap::isTransientError(*error) &&
                     !javelin::jmap::isAuthenticationError(*error))
                 {
-                    auto committed = m_undoManager.commitNormal(std::move(*prepared));
+                    auto committed = m_undoManager.commitNormalBlockedUnknown(std::move(*prepared),
+                                                                              error->message);
                     if (const auto* databaseError =
                             std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
-                        co_return javelin::jmap::operationError(*databaseError);
-                    const auto& entry = std::get<undo::HistoryEntry>(committed);
-                    if (const auto databaseError = m_undoManager.setEntryStatus(
-                            entry.entryId, undo::HistoryEntryStatus::BlockedUnknown,
-                            error->message))
                         co_return javelin::jmap::operationError(*databaseError);
                 }
                 else
@@ -643,8 +641,8 @@ namespace javelin::app
             co_return missingConfiguration();
         if (actionDescription.isEmpty())
             actionDescription = operationDescription;
-        const auto traceId =
-            QUuid::createUuid().toString(QUuid::WithoutBraces).left(8).toStdString();
+        const auto operationGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        const auto traceId = operationGroupId.left(8).toStdString();
         qCInfo(logContactCommands).noquote()
             << "action=" << QString::fromStdString(traceId) << actionDescription
             << "account=" << QString::fromStdString(request.accountId)
@@ -714,13 +712,15 @@ namespace javelin::app
         }
 
         auto preparedResult = m_undoManager.prepareNormal(
-            operationDescription, undo::HistoryDomain::Contacts, history, std::nullopt);
+            operationDescription, undo::HistoryDomain::Contacts, history, operationGroupId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
             co_return reportError(javelin::jmap::operationError(*error));
         auto prepared = std::get<std::optional<undo::HistoryEntry>>(std::move(preparedResult));
         auto result = co_await m_contactMutationEngine.setContactCards(
             toLiveConnectionSettings(*settings), ownerAccountId, std::move(request),
-            {.refreshAndRetryStateMismatch = true, .traceId = traceId});
+            {.refreshAndRetryStateMismatch = true,
+             .traceId = traceId,
+             .operationGroupId = operationGroupId.toStdString()});
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             qCWarning(logContactCommands).noquote()
@@ -734,14 +734,10 @@ namespace javelin::app
                 if (javelin::jmap::isTransientError(*error) &&
                     !javelin::jmap::isAuthenticationError(*error))
                 {
-                    auto committed = m_undoManager.commitNormal(std::move(*prepared));
+                    auto committed = m_undoManager.commitNormalBlockedUnknown(std::move(*prepared),
+                                                                              error->message);
                     if (const auto* databaseError =
                             std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
-                        co_return reportError(javelin::jmap::operationError(*databaseError));
-                    const auto& entry = std::get<undo::HistoryEntry>(committed);
-                    if (const auto databaseError = m_undoManager.setEntryStatus(
-                            entry.entryId, undo::HistoryEntryStatus::BlockedUnknown,
-                            error->message))
                         co_return reportError(javelin::jmap::operationError(*databaseError));
                 }
                 else if (const auto databaseError = m_undoManager.discardNormal(prepared->entryId))
@@ -839,15 +835,17 @@ namespace javelin::app
             creationItems.emplace(creationId, history.items.size());
             history.items.push_back(std::move(*item));
         }
+        const auto operationGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
         auto preparedResult = m_undoManager.prepareNormal(
-            operationDescription, undo::HistoryDomain::Contacts, history, std::nullopt);
+            operationDescription, undo::HistoryDomain::Contacts, history, operationGroupId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
             co_return javelin::jmap::operationError(*error);
         auto prepared = std::get<std::optional<undo::HistoryEntry>>(std::move(preparedResult));
         auto result = observeResult(
             m_errorCoordinator, *settings, ownerAccountId, std::move(operationDescription),
             co_await m_contactMutationEngine.copyContactCards(toLiveConnectionSettings(*settings),
-                                                              ownerAccountId, std::move(request)));
+                                                              ownerAccountId, std::move(request),
+                                                              operationGroupId.toStdString()));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             if (prepared.has_value())
@@ -855,14 +853,10 @@ namespace javelin::app
                 if (javelin::jmap::isTransientError(*error) &&
                     !javelin::jmap::isAuthenticationError(*error))
                 {
-                    auto committed = m_undoManager.commitNormal(std::move(*prepared));
+                    auto committed = m_undoManager.commitNormalBlockedUnknown(std::move(*prepared),
+                                                                              error->message);
                     if (const auto* databaseError =
                             std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
-                        co_return javelin::jmap::operationError(*databaseError);
-                    const auto& entry = std::get<undo::HistoryEntry>(committed);
-                    if (const auto databaseError = m_undoManager.setEntryStatus(
-                            entry.entryId, undo::HistoryEntryStatus::BlockedUnknown,
-                            error->message))
                         co_return javelin::jmap::operationError(*databaseError);
                 }
                 else if (const auto databaseError = m_undoManager.discardNormal(prepared->entryId))

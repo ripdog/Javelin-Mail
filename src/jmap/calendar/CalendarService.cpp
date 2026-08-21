@@ -657,7 +657,6 @@ namespace javelin::jmap::calendar
         struct RebasedCalendarEvents
         {
             std::vector<CalendarEvent> events;
-            std::vector<const CalendarMutationRecord*> acceptedUnknown;
             std::unordered_set<std::string> suppressedExpansionIds;
             std::unordered_set<std::string> suppressedExpansionUids;
         };
@@ -668,7 +667,6 @@ namespace javelin::jmap::calendar
         {
             RebasedCalendarEvents result{
                 .events = std::move(serverEvents),
-                .acceptedUnknown = {},
                 .suppressedExpansionIds = {},
                 .suppressedExpansionUids = {},
             };
@@ -686,9 +684,8 @@ namespace javelin::jmap::calendar
                     std::ranges::find(serverSnapshot, mutation.objectId, &CalendarEvent::id);
                 if (mutation.kind == CalendarMutationKind::Destroy)
                 {
-                    if (mutation.status == javelin::jmap::sync::MutationStatus::Unknown &&
-                        server == serverSnapshot.end())
-                        result.acceptedUnknown.push_back(&mutation);
+                    // Absence from the visible-range snapshot is not proof that an ambiguous
+                    // destroy succeeded: the event may simply have moved outside this range.
                     if (server != serverSnapshot.end())
                     {
                         result.suppressedExpansionIds.insert(mutation.objectId);
@@ -717,10 +714,26 @@ namespace javelin::jmap::calendar
                         confirmed = true;
                     }
                 }
+                else if (server != serverSnapshot.end() && mutation.baseDocument.has_value())
+                {
+                    auto previous = eventFromMutationDocument(mutation, *mutation.baseDocument,
+                                                              mutation.objectId);
+                    auto requested = eventFromMutationDocument(mutation, mutation.requestedDocument,
+                                                               mutation.objectId);
+                    if (const auto* operationError = std::get_if<OperationError>(&previous))
+                        return *operationError;
+                    if (const auto* operationError = std::get_if<OperationError>(&requested))
+                        return *operationError;
+                    auto rebased = rebaseCalendarEventUpdate(
+                        std::get<CalendarEvent>(std::move(previous)),
+                        std::get<CalendarEvent>(std::move(requested)), *server);
+                    if (const auto* operationError = std::get_if<OperationError>(&rebased))
+                        return *operationError;
+                    visible = std::get<CalendarEvent>(std::move(rebased));
+                    confirmed = sameDocument(visible, *server);
+                }
                 else if (server != serverSnapshot.end())
                     confirmed = sameDocument(visible, *server);
-                if (mutation.status == javelin::jmap::sync::MutationStatus::Unknown && confirmed)
-                    result.acceptedUnknown.push_back(&mutation);
                 if (!confirmed)
                 {
                     result.suppressedExpansionIds.insert(mutation.objectId);
@@ -732,6 +745,170 @@ namespace javelin::jmap::calendar
                 result.events.push_back(std::move(visible));
             }
             return result;
+        }
+
+        struct ResolvedCalendarMutation
+        {
+            CalendarMutationRecord record;
+            javelin::jmap::sync::MutationReconciliationDisposition disposition =
+                javelin::jmap::sync::MutationReconciliationDisposition::Applied;
+            std::optional<CalendarEvent> authoritativeEvent;
+            std::vector<std::string> removedEventIds;
+        };
+
+        struct CalendarUnknownReconciliation
+        {
+            std::vector<CalendarMutationRecord> unresolved;
+            std::vector<ResolvedCalendarMutation> resolved;
+        };
+
+        [[nodiscard]] QCoro::Task<std::variant<CalendarUnknownReconciliation, OperationError>>
+        reconcileUnknownCalendarMutations(CalendarProtocolClient& protocolClient,
+                                          const LiveConnectionSettings& settings,
+                                          const std::string& ownerAccountId,
+                                          const std::string& accountId,
+                                          const std::string_view authoritativeState,
+                                          const std::vector<CalendarMutationRecord>& mutations)
+        {
+            CalendarUnknownReconciliation result;
+            result.unresolved.reserve(mutations.size());
+            for (const auto& mutation : mutations)
+            {
+                if (mutation.status != javelin::jmap::sync::MutationStatus::Unknown)
+                {
+                    result.unresolved.push_back(mutation);
+                    continue;
+                }
+
+                std::optional<std::string> eventId;
+                std::string uid;
+                if (mutation.kind == CalendarMutationKind::Create)
+                {
+                    const auto requested = eventFromMutationDocument(
+                        mutation, mutation.requestedDocument, mutation.objectId);
+                    if (const auto* operationError = std::get_if<OperationError>(&requested))
+                        co_return *operationError;
+                    uid = std::get<CalendarEvent>(requested).uid;
+                    if (uid.empty())
+                    {
+                        result.unresolved.push_back(mutation);
+                        continue;
+                    }
+                }
+                else
+                    eventId = mutation.objectId;
+
+                auto authoritative = co_await protocolClient.getAuthoritativeEvent(
+                    settings, ownerAccountId, accountId, eventId, uid);
+                if (const auto* operationError = std::get_if<OperationError>(&authoritative))
+                {
+                    qCWarning(logCalendarService).noquote()
+                        << "Unable to reconcile ambiguous CalendarEvent mutation"
+                        << QString::fromStdString(accountId)
+                        << QString::fromStdString(mutation.objectId) << operationError->message;
+                    result.unresolved.push_back(mutation);
+                    continue;
+                }
+                auto current = std::get<AuthoritativeCalendarEvent>(std::move(authoritative));
+                if (current.state != authoritativeState)
+                {
+                    qCDebug(logCalendarService).noquote()
+                        << "Defer ambiguous CalendarEvent reconciliation because collection state "
+                           "advanced during refresh"
+                        << QString::fromStdString(accountId)
+                        << QString::fromStdString(mutation.objectId)
+                        << QString::fromStdString(current.state)
+                        << QString::fromStdString(std::string{authoritativeState});
+                    result.unresolved.push_back(mutation);
+                    continue;
+                }
+
+                if (!mutation.baseState.has_value() || *mutation.baseState == authoritativeState)
+                {
+                    // A lost response can race a request that is still completing on the server.
+                    // Seeing the exact pre-dispatch state therefore is not proof of rejection.
+                    // Keep the projection until the collection advances or the mutation can be
+                    // correlated positively.
+                    result.unresolved.push_back(mutation);
+                    continue;
+                }
+                ResolvedCalendarMutation resolved{
+                    .record = mutation,
+                    .disposition = javelin::jmap::sync::MutationReconciliationDisposition::Applied,
+                    .authoritativeEvent = std::nullopt,
+                    .removedEventIds = {},
+                };
+                if (mutation.kind == CalendarMutationKind::Create)
+                {
+                    resolved.removedEventIds.push_back(mutation.objectId);
+                    if (current.event.has_value())
+                    {
+                        resolved.disposition =
+                            javelin::jmap::sync::MutationReconciliationDisposition::Applied;
+                        resolved.authoritativeEvent = std::move(current.event);
+                    }
+                    else
+                    {
+                        resolved.disposition =
+                            javelin::jmap::sync::MutationReconciliationDisposition::Superseded;
+                    }
+                }
+                else if (mutation.kind == CalendarMutationKind::Destroy)
+                {
+                    if (!current.event.has_value())
+                    {
+                        resolved.disposition =
+                            javelin::jmap::sync::MutationReconciliationDisposition::Applied;
+                        resolved.removedEventIds.push_back(mutation.objectId);
+                    }
+                    else
+                    {
+                        resolved.disposition =
+                            javelin::jmap::sync::MutationReconciliationDisposition::Superseded;
+                        resolved.authoritativeEvent = std::move(current.event);
+                    }
+                }
+                else
+                {
+                    if (!current.event.has_value())
+                    {
+                        resolved.disposition =
+                            javelin::jmap::sync::MutationReconciliationDisposition::Superseded;
+                        resolved.removedEventIds.push_back(mutation.objectId);
+                    }
+                    else
+                    {
+                        if (!mutation.baseDocument.has_value())
+                        {
+                            result.unresolved.push_back(mutation);
+                            continue;
+                        }
+                        auto previous = eventFromMutationDocument(mutation, *mutation.baseDocument,
+                                                                  mutation.objectId);
+                        auto requested = eventFromMutationDocument(
+                            mutation, mutation.requestedDocument, mutation.objectId);
+                        if (const auto* operationError = std::get_if<OperationError>(&previous))
+                            co_return *operationError;
+                        if (const auto* operationError = std::get_if<OperationError>(&requested))
+                            co_return *operationError;
+                        auto rebased = rebaseCalendarEventUpdate(
+                            std::get<CalendarEvent>(std::move(previous)),
+                            std::get<CalendarEvent>(std::move(requested)), *current.event);
+                        if (const auto* operationError = std::get_if<OperationError>(&rebased))
+                            co_return *operationError;
+                        const bool intentSatisfied = api::calendarEventWritablePropertiesEqual(
+                            std::get<CalendarEvent>(rebased), *current.event);
+                        resolved.disposition =
+                            intentSatisfied
+                                ? javelin::jmap::sync::MutationReconciliationDisposition::Applied
+                                : javelin::jmap::sync::MutationReconciliationDisposition::
+                                      Superseded;
+                        resolved.authoritativeEvent = std::move(current.event);
+                    }
+                }
+                result.resolved.push_back(std::move(resolved));
+            }
+            co_return result;
         }
 
         [[nodiscard]] std::optional<OperationError> restoreCalendarMutations(
@@ -776,6 +953,14 @@ namespace javelin::jmap::calendar
             if (const auto cacheError = repository.projectEvents(
                     transaction.cacheTransaction(), records.front().accountId, eventState,
                     restoredEvents, restoredOccurrences, removedIds))
+                return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            const std::array domains{javelin::jmap::sync::ConsistencyDomain{
+                .accountId = records.front().accountId,
+                .dataType = "CalendarEvent",
+            }};
+            if (const auto cacheError = transaction.advance(domains))
+                return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            if (const auto cacheError = transaction.retireTerminal())
                 return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             if (const auto cacheError = transaction.commit())
                 return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
@@ -856,11 +1041,8 @@ namespace javelin::jmap::calendar
                     transaction.cacheTransaction(), response.accountId, response.newState,
                     acceptedEvents, acceptedOccurrences, removedTemporaryIds))
                 return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
-            for (const auto& record : records)
-            {
-                if (const auto cacheError = transaction.remove(record.mutationId))
-                    return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
-            }
+            if (const auto cacheError = transaction.retireTerminal())
+                return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             if (const auto cacheError = transaction.commit())
                 return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             return CommittedMutation{
@@ -2526,7 +2708,8 @@ namespace javelin::jmap::calendar
                                .displayTimeZone = displayTimeZone,
                                .accountCount = 0,
                                .eventCount = 0,
-                               .calendarMetadataAuthoritative = true};
+                               .calendarMetadataAuthoritative = true,
+                               .reconciledMutations = {}};
         bool fullRefreshRequired = false;
         for (const auto& [accountId, account] : session.accounts)
         {
@@ -2747,7 +2930,8 @@ namespace javelin::jmap::calendar
                                .displayTimeZone = displayTimeZone,
                                .accountCount = 0,
                                .eventCount = 0,
-                               .calendarMetadataAuthoritative = !refreshCalendarMetadata};
+                               .calendarMetadataAuthoritative = !refreshCalendarMetadata,
+                               .reconciledMutations = {}};
         for (const auto& [accountId, account] : session.accounts)
         {
             if (!account.accountCapabilities.calendars)
@@ -3297,8 +3481,15 @@ namespace javelin::jmap::calendar
                 co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             const auto& activeMutations =
                 std::get<std::vector<CalendarMutationRecord>>(activeResult);
+            auto reconciliationResult = co_await reconcileUnknownCalendarMutations(
+                m_protocolClient, settings, ownerAccountId, accountId, baseResponse.state,
+                activeMutations);
+            if (const auto* operationError = std::get_if<OperationError>(&reconciliationResult))
+                co_return *operationError;
+            auto reconciliation =
+                std::get<CalendarUnknownReconciliation>(std::move(reconciliationResult));
             const auto rebasedResult =
-                rebaseCalendarEvents(std::move(baseResponse.list), activeMutations);
+                rebaseCalendarEvents(std::move(baseResponse.list), reconciliation.unresolved);
             if (const auto* operationError = std::get_if<OperationError>(&rebasedResult))
                 co_return *operationError;
             auto rebased = std::get<RebasedCalendarEvents>(rebasedResult);
@@ -3393,9 +3584,12 @@ namespace javelin::jmap::calendar
                                          .eventState = baseResponse.state,
                                          .events = std::move(baseResponse.list),
                                          .occurrences = std::move(occurrences)};
-            if (const auto cacheError = repository.reconcileWindow(window))
-                co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
-            if (!rebased.acceptedUnknown.empty())
+            if (reconciliation.resolved.empty())
+            {
+                if (const auto cacheError = repository.reconcileWindow(window))
+                    co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            }
+            else
             {
                 auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
                     m_connection, QStringLiteral("Resolve CalendarEvent uncertainty"));
@@ -3403,25 +3597,73 @@ namespace javelin::jmap::calendar
                     co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
                 auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
                     std::move(transactionResult));
+                if (const auto cacheError =
+                        repository.reconcileWindow(transaction.cacheTransaction(), window))
+                    co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+                std::vector<CalendarEvent> authoritativeEvents;
+                std::vector<std::string> removedEventIds;
+                for (const auto& resolved : reconciliation.resolved)
+                {
+                    if (resolved.authoritativeEvent.has_value())
+                        authoritativeEvents.push_back(*resolved.authoritativeEvent);
+                    removedEventIds.insert(removedEventIds.end(), resolved.removedEventIds.begin(),
+                                           resolved.removedEventIds.end());
+                }
+                if (const auto cacheError = repository.projectEvents(
+                        transaction.cacheTransaction(), accountId, baseResponse.state,
+                        authoritativeEvents, {}, removedEventIds))
+                    co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
                 const std::array domains{javelin::jmap::sync::ConsistencyDomain{
                     .accountId = accountId,
                     .dataType = "CalendarEvent",
                 }};
                 if (const auto cacheError = transaction.advance(domains))
                     co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
-                for (const auto* mutation : rebased.acceptedUnknown)
+                for (const auto& resolved : reconciliation.resolved)
                 {
+                    const auto status =
+                        resolved.disposition ==
+                                javelin::jmap::sync::MutationReconciliationDisposition::Applied
+                            ? javelin::jmap::sync::MutationStatus::Accepted
+                            : javelin::jmap::sync::MutationStatus::Rejected;
+                    const auto rejection =
+                        status == javelin::jmap::sync::MutationStatus::Rejected
+                            ? std::optional<
+                                  std::string_view>{R"({"type":"supersededByAuthoritativeState"})"}
+                            : std::nullopt;
                     if (const auto cacheError = transaction.transition(
-                            mutation->mutationId, javelin::jmap::sync::MutationStatus::Accepted,
-                            baseResponse.state))
-                        co_return error(OperationErrorCode::LocalStorageFailure,
-                                        cacheError->message);
-                    if (const auto cacheError = transaction.remove(mutation->mutationId))
+                            resolved.record.mutationId, status,
+                            status == javelin::jmap::sync::MutationStatus::Accepted
+                                ? std::optional<std::string_view>{baseResponse.state}
+                                : std::nullopt,
+                            rejection))
                         co_return error(OperationErrorCode::LocalStorageFailure,
                                         cacheError->message);
                 }
+                if (const auto cacheError = transaction.retireTerminal())
+                    co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
                 if (const auto cacheError = transaction.commit())
                     co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+
+                for (const auto& resolved : reconciliation.resolved)
+                {
+                    const auto disposition =
+                        resolved.disposition ==
+                                javelin::jmap::sync::MutationReconciliationDisposition::Applied
+                            ? QStringLiteral("applied")
+                            : QStringLiteral("superseded");
+                    qCInfo(logCalendarService).noquote()
+                        << "Resolved ambiguous CalendarEvent mutation"
+                        << QString::fromStdString(accountId)
+                        << QString::fromStdString(resolved.record.objectId) << disposition;
+                    summary.reconciledMutations.push_back({
+                        .accountId = accountId,
+                        .dataType = "CalendarEvent",
+                        .objectId = resolved.record.objectId,
+                        .operationGroupId = resolved.record.operationGroupId,
+                        .disposition = resolved.disposition,
+                    });
+                }
             }
             ++summary.accountCount;
             summary.eventCount += window.occurrences.size();

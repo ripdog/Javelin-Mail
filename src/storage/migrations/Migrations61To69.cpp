@@ -66,6 +66,78 @@ namespace javelin::jmap::cache::migrations
                                        "mail_export_items(operation_id,phase,ordinal)"),
                     },
             },
+            MigrationStep{
+                .version = 63,
+                .name = QStringLiteral("mutation_journal_terminal_retention"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "CREATE VIEW mutation_journal_retireable_terminal AS SELECT "
+                            "m.mutation_id FROM mutation_journal m WHERE m.status IN "
+                            "('accepted','rejected') AND NOT EXISTS(SELECT 1 FROM "
+                            "mutation_journal a WHERE a.account_id=m.account_id AND "
+                            "a.data_type=m.data_type AND a.object_id=m.object_id AND a.status IN "
+                            "('pending','in_flight','unknown')) AND (m.operation_group_id IS NULL "
+                            "OR NOT EXISTS(SELECT 1 FROM mutation_journal g WHERE "
+                            "g.operation_group_id=m.operation_group_id AND g.status IN "
+                            "('pending','in_flight','unknown'))) AND (m.operation_group_id IS NULL "
+                            "OR (NOT EXISTS(SELECT 1 FROM operation_history h WHERE "
+                            "h.operation_group_id=m.operation_group_id AND h.status IN "
+                            "('preparing','executing_forward','executing_undo','executing_redo',"
+                            "'blocked_unknown','blocked_partial')) AND NOT EXISTS(SELECT 1 FROM "
+                            "background_jobs j WHERE j.job_id=m.operation_group_id AND j.status IN "
+                            "('queued','running','paused','waiting_for_space','waiting_for_network'"
+                            ","
+                            "'waiting_for_auth')) AND NOT EXISTS(SELECT 1 FROM "
+                            "mail_transfer_operations t WHERE (t.operation_group_id="
+                            "m.operation_group_id OR t.operation_id=m.operation_group_id) AND "
+                            "t.status IN ('preparing','running','waiting_for_network',"
+                            "'waiting_for_auth','waiting_for_space','blocked_unknown','partial')))"
+                            ")"),
+                        QStringLiteral(
+                            "DELETE FROM mutation_journal WHERE mutation_id IN (SELECT mutation_id "
+                            "FROM mutation_journal_retireable_terminal)"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mutation_journal_release_history_owner AFTER UPDATE OF "
+                            "status ON operation_history WHEN OLD.status IN "
+                            "('preparing','executing_forward','executing_undo','executing_redo',"
+                            "'blocked_unknown','blocked_partial') AND NEW.status NOT IN "
+                            "('preparing','executing_forward','executing_undo','executing_redo',"
+                            "'blocked_unknown','blocked_partial') BEGIN DELETE FROM "
+                            "mutation_journal "
+                            "WHERE mutation_id IN (SELECT mutation_id FROM "
+                            "mutation_journal_retireable_terminal); END"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mutation_journal_release_history_delete AFTER DELETE "
+                            "ON operation_history BEGIN DELETE FROM mutation_journal WHERE "
+                            "mutation_id IN (SELECT mutation_id FROM "
+                            "mutation_journal_retireable_terminal); END"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mutation_journal_release_job_owner AFTER UPDATE OF "
+                            "status ON background_jobs WHEN OLD.status NOT IN "
+                            "('failed','complete') "
+                            "AND NEW.status IN ('failed','complete') BEGIN DELETE FROM "
+                            "mutation_journal WHERE mutation_id IN (SELECT mutation_id FROM "
+                            "mutation_journal_retireable_terminal); END"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mutation_journal_release_job_delete AFTER DELETE ON "
+                            "background_jobs BEGIN DELETE FROM mutation_journal WHERE mutation_id "
+                            "IN (SELECT mutation_id FROM mutation_journal_retireable_terminal); "
+                            "END"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mutation_journal_release_transfer_owner AFTER UPDATE "
+                            "OF status ON mail_transfer_operations WHEN OLD.status NOT IN "
+                            "('failed','cancelled','complete') AND NEW.status IN "
+                            "('failed','cancelled','complete') BEGIN DELETE FROM mutation_journal "
+                            "WHERE mutation_id IN (SELECT mutation_id FROM "
+                            "mutation_journal_retireable_terminal); END"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mutation_journal_release_transfer_delete AFTER DELETE "
+                            "ON mail_transfer_operations BEGIN DELETE FROM mutation_journal WHERE "
+                            "mutation_id IN (SELECT mutation_id FROM "
+                            "mutation_journal_retireable_terminal); END"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

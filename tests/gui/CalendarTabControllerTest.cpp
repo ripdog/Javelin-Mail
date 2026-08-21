@@ -129,6 +129,8 @@ namespace
                 .displayTimeZone = std::move(displayTimeZone),
                 .accountCount = 1,
                 .eventCount = 0,
+                .calendarMetadataAuthoritative = true,
+                .reconciledMutations = {},
             };
         }
 

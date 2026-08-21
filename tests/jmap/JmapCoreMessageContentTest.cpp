@@ -1662,10 +1662,7 @@ TEST_CASE("EmailMutationEngine rejects authoritative keyword mutations without f
     javelin::jmap::sync::EmailMutationJournal journal{databaseContext.connection};
     const auto records = journal.listForOperationGroup("u1", "tag-delete:test");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records));
-    const auto& mutations =
-        std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records);
-    REQUIRE(mutations.size() == 1);
-    CHECK(mutations.front().status == javelin::jmap::sync::MutationStatus::Rejected);
+    CHECK(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records).empty());
 }
 
 TEST_CASE(
@@ -1844,11 +1841,7 @@ TEST_CASE("EmailMutationEngine keeps newer optimistic mutations projected while 
 
     const auto settled = journal.listForEmail("u1", "eml-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(settled));
-    const auto& settledRecords =
-        std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(settled);
-    REQUIRE(settledRecords.size() == 1);
-    CHECK(settledRecords.front().operationGroupId == std::optional<std::string>{"group-2"});
-    CHECK(settledRecords.front().status == javelin::jmap::sync::MutationStatus::Rejected);
+    CHECK(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(settled).empty());
 }
 
 TEST_CASE("EmailMutationEngine keeps newer optimistic mutations projected when an older submit is "
@@ -2085,9 +2078,7 @@ TEST_CASE("EmailMutationEngine restores rejected mutations immediately",
     javelin::jmap::sync::MutationJournalRepository journal{databaseContext.connection};
     const auto mutation = journal.find(mutationId);
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::sync::MutationRecord>>(mutation));
-    REQUIRE(std::get<std::optional<javelin::jmap::sync::MutationRecord>>(mutation).has_value());
-    CHECK(std::get<std::optional<javelin::jmap::sync::MutationRecord>>(mutation)->status ==
-          javelin::jmap::sync::MutationStatus::Rejected);
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::sync::MutationRecord>>(mutation).has_value());
 }
 
 TEST_CASE("EmailMutationEngine submits queued read keyword mutations through Email/set",

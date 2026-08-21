@@ -27,6 +27,7 @@ namespace javelin::jmap::contacts
     {
         bool refreshAndRetryStateMismatch = false;
         std::optional<std::string> traceId = std::nullopt;
+        std::optional<std::string> operationGroupId = std::nullopt;
     };
 
     struct CreateContactGroupCommand
@@ -53,7 +54,8 @@ namespace javelin::jmap::contacts
 
         [[nodiscard]] QCoro::Task<ContactMutationResult>
         setAddressBooks(LiveConnectionSettings settings, std::string ownerAccountId,
-                        api::AddressBookSetRequest request);
+                        api::AddressBookSetRequest request,
+                        std::optional<std::string> operationGroupId = std::nullopt);
         [[nodiscard]] QCoro::Task<ContactMutationResult>
         setContactCards(LiveConnectionSettings settings, std::string ownerAccountId,
                         api::ContactCardSetRequest request, ContactSetOptions options = {});
@@ -69,7 +71,8 @@ namespace javelin::jmap::contacts
                            SetContactGroupMembershipCommand command);
         [[nodiscard]] QCoro::Task<ContactMutationResult>
         copyContactCards(LiveConnectionSettings settings, std::string ownerAccountId,
-                         api::ContactCardCopyRequest request);
+                         api::ContactCardCopyRequest request,
+                         std::optional<std::string> operationGroupId = std::nullopt);
 
       private:
         cache::DatabaseConnection& m_connection;

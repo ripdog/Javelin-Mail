@@ -63,13 +63,24 @@ Every durable mutation has one of these states:
 
 `pending`, `in_flight`, and `unknown` records remain projected. An accepted result is folded into
 confirmed state atomically and advances the domain generation. A rejected result removes its
-projection and restores the current confirmed state. Unknown results are reconciled with a
-targeted `/get` or `/changes` request before retry or rollback.
-When a protocol cannot safely correlate a server-created object after a lost create response, the
-record remains unknown and the same logical command is blocked from being submitted again.
+projection and restores the current confirmed state. Terminal `accepted` and `rejected` rows are not mutation history. A typed adapter retires them only
+after it has consumed any ordered mutation chain needed to rebuild effective state, and only when no
+unresolved sibling or durable workflow owner still needs the outcome.
+
+Unknown results are resolved from authoritative server evidence, never from age. A refresh that
+still reports the mutation's exact `baseState` is not proof that a lost request failed: the original
+request may still be completing after the client lost its response. The projection therefore remains
+active until the adapter can either correlate the requested result or observe a later collection
+state. At a later state, the adapter compares the exact original intent with the authoritative
+object: a satisfied intent is accepted, while a contradictory later object supersedes the stale
+projection. Creates are correlated only by a service-specific immutable or otherwise unambiguous
+identifier. When no safe correlation exists, the record remains unknown and the same logical command
+is blocked from being submitted again.
 
 On startup, persisted `in_flight` records become `unknown`; a process restart cannot prove that the
-server did not apply them.
+server did not apply them. Terminal rows survive while an explicit durable owner still needs them,
+such as preparing or blocked history, an interrupted history execution, an active resumable job, or
+an active mail transfer. Settling or deleting the final owner releases any now-retireable rows.
 
 ## One-Request Acceptance
 
@@ -140,8 +151,8 @@ These transitions are single SQLite transactions:
 
 - append mutation and materialize its projection;
 - mark accepted, update confirmed fields, advance generation, and retire the projection;
-- mark rejected and rebuild effective state;
-- commit a refresh snapshot, its state tokens, and reapplied projections.
+- mark rejected, rebuild effective state, and retire unowned terminal bookkeeping;
+- commit a refresh snapshot, its state tokens, uncertainty resolution, and reapplied projections.
 
 Repositories expose transaction-compatible primitives. Service code does not compose several
 independent repository transactions for one consistency transition. Persistence implementations
@@ -180,9 +191,9 @@ to decide product behavior.
 | --- | --- | --- |
 | `Email/set` mailbox, keyword, and destroy changes | Exact Email patch projected into SQLite | Refreshed server Email is compared with the requested patch; satisfied unknown patches retire atomically |
 | `Mailbox/set` subscription, create, and destroy changes | Visibility and deletion project into the confirmed mailbox tree; creates use a separate noninteractive pending projection until the server assigns an ID | Unknown creates correlate by sibling-unique `(parentId, name)` against an authoritative full mailbox snapshot; absent creates rebase to that snapshot before retry, while visibility and deletion reconcile exact server state |
-| `ContactCard/set` and `AddressBook/set` | Full typed document projection; contact-group membership uses exact `members/{uid}` patches | Full snapshots are rebased; exact updates, absent destroys, and correlatable creates retire unknown records |
+| `ContactCard/set` and `AddressBook/set` | Full typed document projection; contact-group membership uses exact `members/{uid}` patches | A snapshot at the mutation base state preserves uncertainty; a later authoritative snapshot either confirms the exact intent or supersedes it. ContactCard creates correlate by immutable UID; AddressBook creates remain conservative without an unambiguous identifier |
 | `ContactCard/copy` move/copy workflows | Destination and optional source projections are one operation group | Destination and source outcomes reconcile independently, preserving RFC 8620 non-atomic copy semantics |
-| `CalendarEvent/set` | Event and visible occurrence projection | Full ranges are rebased; stale recurrence expansions are suppressed until the base event is confirmed |
+| `CalendarEvent/set` | Event and visible occurrence projection | Visible ranges are rebased while unresolved. Unknown events are reconciled by targeted object reads (creates by UID); visible-range absence is never deletion proof. Once the collection advances, confirmed intent is accepted and contradictory authoritative state supersedes the projection |
 | `SieveScript/set` | Complete effective script-list projection | Full script snapshots are correlated and rebased |
 | `Identity/set` | Updates and destroys project into confirmed Identity rows; creates use separate pending projections until a server ID exists | Full or incremental Identity refreshes reconcile exact updates and destroys; uncertain creates remain visibly pending rather than masquerading as confirmed identities |
 | Draft `Email/set` replacement | New local draft is projected before dispatch; old draft remains hidden | Lost creates remain unknown and duplicate saves for that compose session are blocked |
@@ -195,7 +206,15 @@ update, and destroy operations are stateful `Identity/set` mutations and follow 
 Calendar recurrence expansion remains server-owned. While a recurring CalendarEvent mutation is
 active, the cache uses one local anchor occurrence and suppresses stale expanded occurrences. The
 normal mutation envelope queries and gets the visible expansion after the set, replacing that
-anchor without a second API request.
+anchor without a second API request. An ambiguous recurring mutation suppresses expansion only while
+it is genuinely unresolved; targeted reconciliation at a later CalendarEvent state retires the old
+projection and lets the authoritative server expansion reappear in the same cache transaction.
+
+A user-visible Undo/Redo entry that was blocked because its forward mutation became unknown follows
+the same reconciliation outcome. It becomes ready only after every mutation in that operation group
+has been proven applied. If authoritative later state supersedes any part of the ambiguous command,
+the blocked history entry is discarded rather than advertising an inverse for an operation that no
+longer describes current state.
 
 ## Required Invariants
 

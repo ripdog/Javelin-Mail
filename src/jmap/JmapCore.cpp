@@ -415,7 +415,7 @@ namespace javelin::jmap
                                                               activeEmailMutations(records));
         }
 
-        [[nodiscard]] std::optional<OperationError> compactSettledAcceptedEmailMutations(
+        [[nodiscard]] std::optional<OperationError> compactSettledEmailMutations(
             javelin::jmap::sync::MutationProjectionTransaction& transaction,
             const EmailMutationRecords& records)
         {
@@ -429,13 +429,8 @@ namespace javelin::jmap
                 });
             if (unresolved)
                 return std::nullopt;
-            for (const auto& record : records)
-            {
-                if (record.status != javelin::jmap::sync::MutationStatus::Accepted)
-                    continue;
-                if (const auto error = transaction.remove(record.mutationId))
-                    return javelin::jmap::operationError(*error);
-            }
+            if (const auto error = transaction.retireTerminal())
+                return javelin::jmap::operationError(*error);
             return std::nullopt;
         }
 
@@ -2343,7 +2338,7 @@ namespace javelin::jmap
                         return javelin::jmap::operationError(*error);
                     }
                 }
-                if (const auto error = compactSettledAcceptedEmailMutations(transaction, records))
+                if (const auto error = compactSettledEmailMutations(transaction, records))
                     return *error;
             }
             if (const auto error = transaction.commit())
@@ -2529,7 +2524,7 @@ namespace javelin::jmap
                         co_return javelin::jmap::operationError(*error);
                     }
                 }
-                if (const auto error = compactSettledAcceptedEmailMutations(transaction, records))
+                if (const auto error = compactSettledEmailMutations(transaction, records))
                     co_return *error;
                 continue;
             }
@@ -2572,7 +2567,7 @@ namespace javelin::jmap
                         co_return javelin::jmap::operationError(*error);
                     }
                 }
-                if (const auto error = compactSettledAcceptedEmailMutations(transaction, records))
+                if (const auto error = compactSettledEmailMutations(transaction, records))
                     co_return *error;
                 continue;
             }

@@ -196,12 +196,7 @@ TEST_CASE("Email mutation operation groups settle sequential bounded batches",
     javelin::jmap::sync::EmailMutationJournal journal{fixture->database};
     const auto records = journal.listForOperationGroup("u1", "thread-command");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records));
-    const auto& remaining =
-        std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records);
-    REQUIRE(remaining.size() == 1);
-    CHECK(remaining.front().patch.emailId == "eml-3");
-    CHECK(remaining.front().status == javelin::jmap::sync::MutationStatus::Rejected);
-    CHECK(remaining.front().baseState == std::optional<std::string>{"email-state-2"});
+    CHECK(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records).empty());
 }
 
 TEST_CASE("Email mutation batching preserves accepted work across an ambiguous later batch",
@@ -236,7 +231,12 @@ TEST_CASE("Email mutation batching preserves accepted work across an ambiguous l
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records));
     const auto& remaining =
         std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records);
-    REQUIRE(remaining.size() == 1);
-    CHECK(remaining.front().patch.emailId == "eml-3");
-    CHECK(remaining.front().status == javelin::jmap::sync::MutationStatus::Unknown);
+    REQUIRE(remaining.size() == 3);
+    CHECK(remaining[0].patch.emailId == "eml-1");
+    CHECK(remaining[0].status == javelin::jmap::sync::MutationStatus::Accepted);
+    CHECK(remaining[1].patch.emailId == "eml-2");
+    CHECK(remaining[1].status == javelin::jmap::sync::MutationStatus::Accepted);
+    CHECK(remaining[2].patch.emailId == "eml-3");
+    CHECK(remaining[2].status == javelin::jmap::sync::MutationStatus::Unknown);
+    CHECK(remaining[2].baseState == std::optional<std::string>{"email-state-2"});
 }

@@ -117,6 +117,19 @@ namespace javelin::app::undo
     }
 
     std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
+    UndoManager::commitNormalBlockedUnknown(HistoryEntry entry, QString failure)
+    {
+        auto result = m_repository.markPreparedBlockedUnknown(std::move(entry), std::move(failure));
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+            return *error;
+        if (const auto error = prune())
+            return *error;
+        if (const auto error = reload())
+            return *error;
+        return std::get<HistoryEntry>(std::move(result));
+    }
+
+    std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
     UndoManager::recordNormal(QString label, const HistoryDomain domain, HistoryPayload payload,
                               std::optional<QString> operationGroupId,
                               std::optional<QDateTime> expiresAt, const CommandOrigin origin)
@@ -187,6 +200,54 @@ namespace javelin::app::undo
         entry.status = status;
         entry.failureJson = std::move(failure);
         return replaceEntry(std::move(entry));
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    UndoManager::settleAmbiguousOperation(const QString& operationGroupId)
+    {
+        const auto groupResult = m_repository.mutationGroup(operationGroupId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&groupResult))
+            return *error;
+        const auto& records =
+            std::get<std::vector<javelin::jmap::sync::MutationRecord>>(groupResult);
+        if (records.empty())
+            return std::nullopt;
+
+        const bool unresolved = std::ranges::any_of(
+            records,
+            [](const auto& record)
+            {
+                return record.status == javelin::jmap::sync::MutationStatus::Pending ||
+                       record.status == javelin::jmap::sync::MutationStatus::InFlight ||
+                       record.status == javelin::jmap::sync::MutationStatus::Unknown;
+            });
+        if (unresolved)
+            return std::nullopt;
+        const bool superseded = std::ranges::any_of(
+            records, [](const auto& record)
+            { return record.status == javelin::jmap::sync::MutationStatus::Rejected; });
+
+        bool changed = false;
+        for (auto entry : m_entries)
+        {
+            if (entry.operationGroupId != std::optional<QString>{operationGroupId} ||
+                entry.status != HistoryEntryStatus::BlockedUnknown)
+                continue;
+            if (superseded)
+            {
+                if (const auto error = m_repository.remove(entry.entryId))
+                    return error;
+            }
+            else
+            {
+                entry.status = HistoryEntryStatus::Ready;
+                entry.failureJson.reset();
+                if (const auto error = m_repository.update(entry))
+                    return error;
+            }
+            changed = true;
+        }
+        return changed ? reload() : std::nullopt;
     }
 
     std::variant<std::optional<HistoryEntry>, javelin::jmap::cache::DatabaseError>
@@ -473,8 +534,22 @@ namespace javelin::app::undo
 
     std::optional<javelin::jmap::cache::DatabaseError> UndoManager::recoverInterruptedEntries()
     {
+        std::vector<QString> forwardAmbiguousGroups;
+        const auto rememberForwardAmbiguity = [&forwardAmbiguousGroups](const HistoryEntry& entry)
+        {
+            if (!entry.operationGroupId.has_value() ||
+                std::ranges::find(forwardAmbiguousGroups, *entry.operationGroupId) !=
+                    forwardAmbiguousGroups.end())
+                return;
+            forwardAmbiguousGroups.push_back(*entry.operationGroupId);
+        };
         for (auto entry : m_entries)
         {
+            if (entry.status == HistoryEntryStatus::BlockedUnknown)
+            {
+                rememberForwardAmbiguity(entry);
+                continue;
+            }
             if (entry.status == HistoryEntryStatus::Preparing)
             {
                 bool hasMutations = false;
@@ -562,6 +637,7 @@ namespace javelin::app::undo
                     "The application stopped while this operation was being prepared.");
                 if (const auto error = m_repository.update(entry))
                     return error;
+                rememberForwardAmbiguity(entry);
                 continue;
             }
             if (entry.status != HistoryEntryStatus::ExecutingUndo &&
@@ -574,6 +650,14 @@ namespace javelin::app::undo
             entry.failureJson =
                 QStringLiteral("The application stopped while this operation was in flight.");
             if (const auto error = m_repository.update(entry))
+                return error;
+        }
+
+        if (const auto error = reload())
+            return error;
+        for (const auto& operationGroupId : forwardAmbiguousGroups)
+        {
+            if (const auto error = settleAmbiguousOperation(operationGroupId))
                 return error;
         }
         return std::nullopt;

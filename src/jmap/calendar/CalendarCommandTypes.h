@@ -19,6 +19,7 @@ namespace javelin::jmap::calendar
         std::size_t accountCount = 0;
         std::size_t eventCount = 0;
         bool calendarMetadataAuthoritative = true;
+        std::vector<javelin::jmap::sync::ReconciledMutation> reconciledMutations;
     };
 
     struct CommittedMutation

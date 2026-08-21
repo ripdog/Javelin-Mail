@@ -355,6 +355,14 @@ namespace javelin::jmap::contacts
                 return error;
             }
         }
+        std::vector<sync::ConsistencyDomain> domains;
+        domains.reserve(projections.size());
+        for (const auto& projection : projections)
+            domains.push_back({.accountId = projection.accountId, .dataType = "ContactCard"});
+        if (const auto error = transaction.advance(domains))
+            return error;
+        if (const auto error = transaction.retireTerminal())
+            return error;
         if (const auto error = transaction.commit())
         {
             return error;
