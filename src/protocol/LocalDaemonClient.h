@@ -94,7 +94,7 @@ namespace javelin::protocol
         {
             SocketFrameKind requestKind = SocketFrameKind::ProtocolError;
             SocketFrameKind expectedKind = SocketFrameKind::ProtocolError;
-            QByteArray requestPayload;
+            std::optional<QByteArray> resumableRequestPayload;
             std::optional<ReceivedFrame> received;
         };
 

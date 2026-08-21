@@ -406,7 +406,8 @@ namespace javelin::protocol
             for (const auto& [correlation, deferred] : m_abandonedReplies)
             {
                 if (deferred.requestKind == requestKind && deferred.expectedKind == replyKind &&
-                    deferred.requestPayload == payload)
+                    deferred.resumableRequestPayload.has_value() &&
+                    *deferred.resumableRequestPayload == payload)
                 {
                     deferredCorrelation = correlation;
                     break;
@@ -573,11 +574,14 @@ namespace javelin::protocol
                         .reason = SocketDisconnectReason::PeerClosed,
                         .detail = QStringLiteral("daemon disconnected before the reply")});
                 }
-                m_abandonedReplies.try_emplace(correlation,
-                                               DeferredReply{.requestKind = requestKind,
-                                                             .expectedKind = replyKind,
-                                                             .requestPayload = requestPayload,
-                                                             .received = std::nullopt});
+                m_abandonedReplies.try_emplace(
+                    correlation, DeferredReply{.requestKind = requestKind,
+                                               .expectedKind = replyKind,
+                                               .resumableRequestPayload =
+                                                   isResumableBootstrapRequest(requestKind)
+                                                       ? std::optional<QByteArray>{requestPayload}
+                                                       : std::nullopt,
+                                               .received = std::nullopt});
                 return SocketTransportError{
                     .reason = SocketDisconnectReason::TransportFailure,
                     .detail = QStringLiteral(
