@@ -9,6 +9,7 @@
 #include <QString>
 #include <QStringView>
 
+#include <algorithm>
 #include <utility>
 
 namespace javelin::app
@@ -48,6 +49,33 @@ namespace javelin::app
             chopLastUnicodeCodePoint(sanitized);
         sanitized = sanitized.trimmed();
         return sanitized;
+    }
+
+    [[nodiscard]] inline QString collisionMailSaveFileName(const QString& fileName,
+                                                           const quint64 discriminator,
+                                                           const qsizetype maximumUtf8Bytes = 240)
+    {
+        const QFileInfo info{fileName};
+        const QString suffix = info.completeSuffix();
+        QString extension = suffix.isEmpty() ? QString{} : QStringLiteral(".") + suffix;
+        const QString marker = QStringLiteral("-%1").arg(discriminator);
+
+        while (!extension.isEmpty() &&
+               marker.toUtf8().size() + extension.toUtf8().size() > maximumUtf8Bytes)
+            chopLastUnicodeCodePoint(extension);
+
+        const auto baseBudget = std::max<qsizetype>(0, maximumUtf8Bytes - marker.toUtf8().size() -
+                                                           extension.toUtf8().size());
+        QString baseName = info.completeBaseName();
+        while (!baseName.isEmpty() && baseName.toUtf8().size() > baseBudget)
+            chopLastUnicodeCodePoint(baseName);
+        if (baseName.isEmpty() && baseBudget > 0)
+        {
+            baseName = QStringLiteral("file");
+            while (!baseName.isEmpty() && baseName.toUtf8().size() > baseBudget)
+                chopLastUnicodeCodePoint(baseName);
+        }
+        return baseName + marker + extension;
     }
 
     [[nodiscard]] inline QString

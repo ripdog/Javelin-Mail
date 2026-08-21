@@ -43,3 +43,17 @@ TEST_CASE("generic generated filename truncation counts UTF-8 bytes")
     CHECK(truncated.toUtf8().size() <= 64);
     CHECK(truncated.size() > 4);
 }
+
+TEST_CASE("mail save collision names reserve space for their discriminator")
+{
+    const QString input = QString{200, QChar{0x754c}} + QStringLiteral(".eml");
+
+    const auto second = javelin::app::collisionMailSaveFileName(input, 2, 64);
+    const auto later = javelin::app::collisionMailSaveFileName(input, 123456, 64);
+
+    CHECK(second.endsWith(QStringLiteral("-2.eml")));
+    CHECK(later.endsWith(QStringLiteral("-123456.eml")));
+    CHECK(second.toUtf8().size() <= 64);
+    CHECK(later.toUtf8().size() <= 64);
+    CHECK(second != later);
+}

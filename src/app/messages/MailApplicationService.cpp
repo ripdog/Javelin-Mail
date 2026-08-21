@@ -100,28 +100,6 @@ namespace javelin::app
             QString error;
         };
 
-        [[nodiscard]] QString uniqueSavedMessagePath(const QString& directory,
-                                                     const QString& fileName)
-        {
-            const QDir targetDirectory{directory};
-            QString candidate = targetDirectory.filePath(fileName);
-            if (!QFileInfo::exists(candidate))
-                return candidate;
-            const QFileInfo info{fileName};
-            const QString baseName = info.completeBaseName();
-            const QString suffix = info.completeSuffix();
-            for (int discriminator = 2;; ++discriminator)
-            {
-                const QString alternative = truncateGeneratedFileName(
-                    suffix.isEmpty()
-                        ? QStringLiteral("%1-%2").arg(baseName).arg(discriminator)
-                        : QStringLiteral("%1-%2.%3").arg(baseName).arg(discriminator).arg(suffix));
-                candidate = targetDirectory.filePath(alternative);
-                if (!QFileInfo::exists(candidate))
-                    return candidate;
-            }
-        }
-
         [[nodiscard]] SavedMessageFileResult copySavedMessageFile(const QString& sourcePath,
                                                                   const QString& targetPath)
         {
@@ -148,6 +126,71 @@ namespace javelin::app
             if (!target.commit())
                 return {.path = targetPath, .error = target.errorString()};
             return {.path = targetPath, .error = {}};
+        }
+
+        [[nodiscard]] SavedMessageFileResult
+        copySavedMessageFileExclusively(const QString& sourcePath, const QString& directory,
+                                        const QString& fileName)
+        {
+            QFile source{sourcePath};
+            if (!source.open(QIODevice::ReadOnly))
+                return {.path = directory, .error = source.errorString()};
+
+            const QDir targetDirectory{directory};
+            constexpr quint64 maximumCollisionAttempts = 10000;
+            for (quint64 attempt = 1; attempt <= maximumCollisionAttempts; ++attempt)
+            {
+                const QString candidateName = attempt == 1
+                                                  ? truncateGeneratedFileName(fileName)
+                                                  : collisionMailSaveFileName(fileName, attempt);
+                const QString candidatePath = targetDirectory.filePath(candidateName);
+                QFile target{candidatePath};
+                if (!target.open(QIODevice::WriteOnly | QIODevice::NewOnly))
+                {
+                    if (QFileInfo::exists(candidatePath))
+                        continue;
+                    return {.path = candidatePath, .error = target.errorString()};
+                }
+
+                QByteArray buffer;
+                buffer.resize(1024 * 1024);
+                bool failed = false;
+                QString error;
+                source.seek(0);
+                while (true)
+                {
+                    const auto read = source.read(buffer.data(), buffer.size());
+                    if (read < 0)
+                    {
+                        failed = true;
+                        error = source.errorString();
+                        break;
+                    }
+                    if (read == 0)
+                        break;
+                    if (target.write(buffer.constData(), read) != read)
+                    {
+                        failed = true;
+                        error = target.errorString();
+                        break;
+                    }
+                }
+                if (!failed && !target.flush())
+                {
+                    failed = true;
+                    error = target.errorString();
+                }
+                target.close();
+                if (failed)
+                {
+                    QFile::remove(candidatePath);
+                    return {.path = candidatePath, .error = std::move(error)};
+                }
+                return {.path = candidatePath, .error = {}};
+            }
+
+            return {.path = directory,
+                    .error = QStringLiteral("Unable to allocate a unique destination filename")};
         }
 
         [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
@@ -3263,13 +3306,12 @@ namespace javelin::app
                 co_return partialFailure(*error);
             auto materialized = std::get<MaterializedRawMail>(std::move(materializedResult));
 
-            const QString targetPath =
-                intent.targetKind == MessageSaveTargetKind::SingleFile
-                    ? intent.destinationPath
-                    : uniqueSavedMessagePath(intent.destinationPath,
-                                             suggestedMailSaveFileName(*email));
             auto writeFuture =
-                QtConcurrent::run(copySavedMessageFile, materialized.filePath, targetPath);
+                intent.targetKind == MessageSaveTargetKind::SingleFile
+                    ? QtConcurrent::run(copySavedMessageFile, materialized.filePath,
+                                        intent.destinationPath)
+                    : QtConcurrent::run(copySavedMessageFileExclusively, materialized.filePath,
+                                        intent.destinationPath, suggestedMailSaveFileName(*email));
             const auto written = co_await qCoro(writeFuture).takeResult();
             if (!written.error.isEmpty())
             {
