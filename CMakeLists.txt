@@ -1,5 +1,9 @@
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.25)
 project(Javelin-Mail VERSION 0.1.0 LANGUAGES CXX)
+
+set(JAVELIN_MIN_QT_VERSION "6.10.0")
+set(JAVELIN_MIN_KF_VERSION "6.27.0")
+set(JAVELIN_MIN_PIM_VERSION "6.8.0")
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -29,15 +33,14 @@ include(cmake/Sanitizers.cmake)
 include(CTest)
 
 # 1. Find Qt6 FIRST
-find_package(Qt6 6.6 REQUIRED COMPONENTS Core DBus Network Sql Widgets PrintSupport Concurrent WebEngineCore WebEngineWidgets Svg WebSockets)
+find_package(Qt6 ${JAVELIN_MIN_QT_VERSION} REQUIRED COMPONENTS Core DBus Network Sql Widgets PrintSupport Concurrent WebEngineCore WebEngineWidgets Svg WebSockets)
 
 # 2. Fetch Dependencies BEFORE KDE is allowed to load
 javelin_configure_dependencies()
 qcoro_enable_coroutines()
 
 # 3. NOW it is safe to load ECM and KDE Frameworks
-set(KF_MIN_VERSION "6.0.0")
-find_package(ECM ${KF_MIN_VERSION} REQUIRED NO_MODULE)
+find_package(ECM ${JAVELIN_MIN_KF_VERSION} REQUIRED NO_MODULE)
 list(APPEND CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
 include(KDEInstallDirs)
 include(KDECMakeSettings)
@@ -54,9 +57,9 @@ configure_file(
     @ONLY
 )
 
-find_package(KF6 REQUIRED COMPONENTS Codecs ConfigWidgets XmlGui CoreAddons I18n JobWidgets KIO Sonnet TextEditor Wallet WidgetsAddons)
-find_package(KF6Mime REQUIRED)
-find_package(KPim6MessageComposer REQUIRED)
+find_package(KF6 ${JAVELIN_MIN_KF_VERSION} REQUIRED COMPONENTS Codecs ConfigWidgets XmlGui CoreAddons I18n JobWidgets KIO Sonnet TextEditor Wallet WidgetsAddons)
+find_package(KF6Mime ${JAVELIN_MIN_KF_VERSION} REQUIRED)
+find_package(KPim6MessageComposer ${JAVELIN_MIN_PIM_VERSION} REQUIRED)
 
 qt_standard_project_setup()
 

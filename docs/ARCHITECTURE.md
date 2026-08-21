@@ -21,7 +21,7 @@ specified in [THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZAT
 The long-term, behavior-preserving module and ownership cleanup is tracked in
 [STRUCTURAL_REFACTOR_IMPLEMENTATION_PLAN.md](STRUCTURAL_REFACTOR_IMPLEMENTATION_PLAN.md).
 
-Javelin targets Qt 6.6 or newer, KDE Frameworks 6, and C++23. Glaze provides typed JSON parsing at
+Javelin targets Qt 6.10 or newer, KDE Frameworks 6.27 or newer, KDE PIM 6.8 or newer, and C++23. Glaze provides typed JSON parsing at
 the JMAP boundary; QCoro provides coroutine-based Qt networking. KDE Plasma is the primary desktop
 integration target rather than merely one supported shell.
 

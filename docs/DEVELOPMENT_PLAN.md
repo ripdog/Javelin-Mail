@@ -56,7 +56,7 @@ The daemon/GUI implementation history and remaining release validation are recor
 
 ## Non-negotiable engineering rules
 
-- Target Qt 6.6 or newer and C++23 directly.
+- Target the CI-tested minimum stack directly: Qt 6.10+, KDE Frameworks 6.27+, KDE PIM 6.8+, and C++23.
 - Keep wire JSON and JMAP method names inside `javelin_jmap`.
 - Use Glaze for typed protocol serialization and QCoro for asynchronous Qt networking.
 - Keep the GUI operationally read-only; all persistent commands and settings updates cross IPC.

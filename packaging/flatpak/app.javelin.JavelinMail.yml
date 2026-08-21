@@ -93,17 +93,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/akonadi.git
-        commit: 7dda0c9f3039a4e3c5fdcb1fd7dae299671a1c00
-        disable-shallow-clone: true
-
-  - name: kmime
-    buildsystem: cmake-ninja
-    config-opts:
-      - -DBUILD_TESTING=OFF
-    sources:
-      - type: archive
-        url: https://download.kde.org/stable/release-service/26.04.2/src/kmime-26.04.2.tar.xz
-        sha256: 7473522f42d84684cd71fe7549cc668a1fcfd91716a72860dc9bcbaa8569ed6d
+        tag: v26.08.0
+        commit: 0c0252f5f33dc29e9e5f107cb330205e716e1e96
 
   - name: grantleetheme
     buildsystem: cmake-ninja
@@ -112,8 +103,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/grantleetheme.git
-        commit: afde076aa0ae177156ac5423c35b62e5ea760809
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: 491a0d6f58ea02a2a60721ee7e46ef35dd3fa810
 
   - name: qtkeychain
     buildsystem: cmake-ninja
@@ -146,8 +137,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/akonadi-contacts.git
-        commit: 34e0cd577b33ccdf9ecacba7fee55429cb02ed37
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: 87965874a1151603f8ef4b1b95e3a341644ee955
 
   - name: akonadi-mime
     buildsystem: cmake-ninja
@@ -156,8 +147,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/akonadi-mime.git
-        commit: 0cb924b47363ee4a419fcfeeedf6879e3edf6ecd
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: de7031722ba4c2ac7ef9f7eccd9170b80aea64ea
 
   - name: boost-headers
     buildsystem: cmake-ninja
@@ -177,8 +168,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/libkleo.git
-        commit: d0543d84bab62c4aa095ff61c37a2fdfee8de710
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: 78b5f554f1e0faef7b97260b97d4f0ca654217bd
 
   - name: libkgapi
     buildsystem: cmake-ninja
@@ -187,8 +178,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/libkgapi.git
-        commit: 375c0c1fd8a88b3abb4a7c4111d43d35f97fc62e
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: 80c5549a86c858ab6bc6f09b3877ea155106a166
 
   - name: ksmtp
     buildsystem: cmake-ninja
@@ -197,8 +188,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/ksmtp.git
-        commit: 9413931e6749df2ec35bfd0907dad6f02272fba3
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: 0cc466b5cea6b11a5cf4af7006e0e3eded5bd2b2
 
   - name: kmailtransport
     buildsystem: cmake-ninja
@@ -207,8 +198,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/kmailtransport.git
-        commit: 5026f6a236c18e737e19feb8c49390006095da60
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: 3bfed8eb0529f9491576ff13ae1e41dc1445d65b
 
   - name: kpimtextedit
     buildsystem: cmake-ninja
@@ -218,8 +209,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/kpimtextedit.git
-        commit: e72432e781a158cf3c90af60e43ea52fb1d5ccec
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: 65c7eed44a15548fbfd2a2abe7495bfe7259f6ab
 
   - name: kidentitymanagement
     buildsystem: cmake-ninja
@@ -228,8 +219,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/kidentitymanagement.git
-        commit: 61a0371b6bd32c074fad58fd835648534562535c
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: 7f2f953a550aa7f8053529dcc94d49dd3bce1929
 
   - name: kldap
     buildsystem: cmake-ninja
@@ -238,8 +229,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/kldap.git
-        commit: e6645c8f516eea8b63bdab86c89b47faa2e4c0b3
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: 021eae271b9d8167d94f7160374ed1993c6e67c9
 
   - name: kimap
     buildsystem: cmake-ninja
@@ -248,8 +239,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/kimap.git
-        commit: 55c8d5c493a9e9b116c68a6c701992973776fc3b
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: 46fb2eb9b61962e7a048a2b843862ffaafa77d2a
 
   - name: kmbox
     buildsystem: cmake-ninja
@@ -258,8 +249,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/kmbox.git
-        commit: 12c6bfe5bd33c0ae08dfa400e9b3a6fee45ca0e4
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: a4972afd9f8f6b61ec519bad5386aace308a21e0
 
   - name: libkdepim
     buildsystem: cmake-ninja
@@ -269,8 +260,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/libkdepim.git
-        commit: ce5bdf05bd4861072a566fffa24d94607d454502
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: 2444639505f07076675e9b92ff471af199d3ab37
 
   - name: pimcommon
     buildsystem: cmake-ninja
@@ -280,8 +271,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/pimcommon.git
-        commit: 655594ee9765899eb0ad8b1847cdace493cf9891
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: 3a96a3b70f7cbbe5ce00cf5a25c584bdf77e0251
 
   - name: libgravatar
     buildsystem: cmake-ninja
@@ -290,8 +281,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/libgravatar.git
-        commit: 7abb325ba333aaadba20848505ae588a8f81d590
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: a4d9975393f8aab4aa794058ac4e19f3d5e43fe5
 
   - name: messagelib
     buildsystem: cmake-ninja
@@ -301,8 +292,8 @@ modules:
     sources:
       - type: git
         url: https://invent.kde.org/pim/messagelib.git
-        commit: 58b48987cc8201d54bf451adedd396d63ac36c6c
-        disable-shallow-clone: true
+        tag: v26.08.0
+        commit: 269f4a2f3ba96b3821404fd08748e0b1263ede86
 
   - name: javelin-mail
     buildsystem: simple

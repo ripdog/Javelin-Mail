@@ -16,10 +16,11 @@ best-effort compatibility target rather than the environment that drives design 
 The codebase targets:
 
 - C++23
-- CMake 3.25 or newer for the supplied presets
+- CMake 3.25 or newer
 - Ninja
-- Qt 6.6 or newer
-- KDE Frameworks 6
+- Qt 6.10 or newer
+- KDE Frameworks / Extra CMake Modules 6.27 or newer
+- KDE PIM MessageComposer 6.8 or newer (KDE Gear 26.08 generation)
 
 Both GCC and Clang should work, but the normal repository workflow uses the compiler selected by the
 host CMake environment.
@@ -28,7 +29,9 @@ host CMake environment.
 
 Required Qt components are Core, DBus, Network, SQL, Widgets, PrintSupport, Concurrent,
 LinguistTools, WebEngine, SVG, and WebSockets. Required KDE components are ConfigWidgets, XmlGui, CoreAddons, I18n, JobWidgets, KIO, Sonnet,
-TextEditor, Wallet, WidgetsAddons, Extra CMake Modules, KF6Mime, and KPim6MessageComposer. These are
+TextEditor, Wallet, WidgetsAddons, Extra CMake Modules, KF6Mime, and KPim6MessageComposer. The supported
+minimum is intentionally the oldest dependency stack built in CI, not an inferred API floor: Qt 6.10,
+Frameworks/ECM/KMime 6.27, and PIM 6.8. These are
 product dependencies, not merely build conveniences: KXMLGUI owns the main-window action layout,
 KConfigWidgets owns preferences presentation, KIO owns attachment opening and file-manager reveal,
 KJobWidgets publishes file-save jobs through Plasma's standard job tracker, KTextEditor powers
@@ -204,7 +207,7 @@ GitHub Actions runs two test configurations for every pull request and every pus
 A separate packaging workflow produces downloadable CI artifacts:
 
 - an Arch Linux `javelin-mail-git` package built through the repository `PKGBUILD`;
-- a Flatpak bundle based on `org.kde.Platform//6.9`; and
+- a Flatpak bundle based on `org.kde.Platform//6.10`; and
 - an x86-64 AppImage containing both `javelin` and `javelind`.
 
 The Flatpak and AppImage deliberately omit the host systemd unit. The GUI launches the adjacent

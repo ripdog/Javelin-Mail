@@ -52,14 +52,42 @@ jobs:
           if-no-files-found: error
 
   flatpak:
-    name: Flatpak
+    name: "Flatpak (minimum stack: Qt 6.10 / KF 6.27 / PIM 6.8)"
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10
       options: --privileged
+    env:
+      KDE_SDK_COMMIT: 452efb9324e6d96a5e94786fc66ad4b86c1f954023c01e31300d05d84e305745
+      KDE_PLATFORM_COMMIT: d0d8f7888350e93c0e6d009d79c5b143f6f6dde09de28ff93a7dc8a14a848c16
+      QTWEBENGINE_BASEAPP_COMMIT: dd4e9c5120bc85d02d5f68864dc838e3a17b73523bfe4e83b192f260b5d5133f
     steps:
       - name: Check out source
         uses: actions/checkout@v5
+
+      - name: Pin minimum KDE runtime
+        run: |
+          flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --noninteractive flathub \
+            org.kde.Sdk//6.10 \
+            org.kde.Platform//6.10 \
+            io.qt.qtwebengine.BaseApp//6.10
+          flatpak update --noninteractive --commit="$KDE_SDK_COMMIT" org.kde.Sdk//6.10
+          flatpak update --noninteractive --commit="$KDE_PLATFORM_COMMIT" org.kde.Platform//6.10
+          flatpak update --noninteractive --commit="$QTWEBENGINE_BASEAPP_COMMIT" io.qt.qtwebengine.BaseApp//6.10
+
+      - name: Verify minimum dependency versions
+        run: |
+          test "$(flatpak info --show-commit org.kde.Sdk//6.10)" = "$KDE_SDK_COMMIT"
+          test "$(flatpak info --show-commit org.kde.Platform//6.10)" = "$KDE_PLATFORM_COMMIT"
+          test "$(flatpak info --show-commit io.qt.qtwebengine.BaseApp//6.10)" = "$QTWEBENGINE_BASEAPP_COMMIT"
+          flatpak run --command=sh org.kde.Sdk//6.10 -c '
+            set -eu
+            test "$(qtpaths6 --qt-version)" = "6.10.3"
+            grep -q '\''set(PACKAGE_VERSION "6.27.0")'\'' /usr/share/ECM/cmake/ECMConfigVersion.cmake
+            grep -q '\''set(PACKAGE_VERSION "6.27.0")'\'' /usr/lib/x86_64-linux-gnu/cmake/KF6CoreAddons/KF6CoreAddonsConfigVersion.cmake
+            grep -q '\''set(PACKAGE_VERSION "6.27.0")'\'' /usr/lib/x86_64-linux-gnu/cmake/KF6Mime/KF6MimeConfigVersion.cmake
+          '
 
       # Bootstrap the corrected cache namespace from the most recent cache
       # created by the old SHA-first key. Remove this step after migration.
