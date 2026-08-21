@@ -7,6 +7,7 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QMetaObject>
+#include <QPointer>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QUuid>
@@ -162,21 +163,21 @@ namespace
             : m_endpoint(new SocketDaemonEndpoint(handler, std::move(options)))
         {
             m_endpoint->moveToThread(&m_thread);
+            QObject::connect(&m_thread, &QThread::finished, m_endpoint, &QObject::deleteLater);
             m_thread.start();
         }
 
         ~SocketEndpointThread()
         {
-            if (m_endpoint != nullptr)
+            if (m_endpoint != nullptr && m_thread.isRunning())
             {
-                auto* endpoint = m_endpoint;
+                const QPointer<SocketDaemonEndpoint> endpoint = m_endpoint;
                 QMetaObject::invokeMethod(
-                    endpoint,
-                    [this, endpoint]
+                    endpoint.data(),
+                    [endpoint]
                     {
-                        endpoint->close();
-                        delete endpoint;
-                        m_endpoint = nullptr;
+                        if (endpoint != nullptr)
+                            endpoint->close();
                     },
                     Qt::BlockingQueuedConnection);
             }
@@ -195,7 +196,7 @@ namespace
 
       private:
         QThread m_thread;
-        SocketDaemonEndpoint* m_endpoint = nullptr;
+        QPointer<SocketDaemonEndpoint> m_endpoint;
     };
 
     template <typename Predicate> void processUntil(Predicate predicate)

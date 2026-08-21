@@ -11,6 +11,7 @@
 #include <QEventLoop>
 #include <QLocalSocket>
 #include <QMetaObject>
+#include <QPointer>
 #include <QTemporaryDir>
 #include <QThread>
 
@@ -396,6 +397,7 @@ namespace
             : m_endpoint(new SocketDaemonEndpoint(handler, std::move(options)))
         {
             m_endpoint->moveToThread(&m_thread);
+            QObject::connect(&m_thread, &QThread::finished, m_endpoint, &QObject::deleteLater);
             m_thread.start();
         }
 
@@ -404,16 +406,15 @@ namespace
 
         ~SocketEndpointThread()
         {
-            if (m_endpoint != nullptr)
+            if (m_endpoint != nullptr && m_thread.isRunning())
             {
-                auto* endpoint = m_endpoint;
+                const QPointer<SocketDaemonEndpoint> endpoint = m_endpoint;
                 QMetaObject::invokeMethod(
-                    endpoint,
-                    [this, endpoint]
+                    endpoint.data(),
+                    [endpoint]
                     {
-                        endpoint->close();
-                        delete endpoint;
-                        m_endpoint = nullptr;
+                        if (endpoint != nullptr)
+                            endpoint->close();
                     },
                     Qt::BlockingQueuedConnection);
             }
@@ -457,9 +458,15 @@ namespace
             return m_endpoint;
         }
 
+        void stopWorkerThread()
+        {
+            m_thread.quit();
+            m_thread.wait();
+        }
+
       private:
         QThread m_thread;
-        SocketDaemonEndpoint* m_endpoint = nullptr;
+        QPointer<SocketDaemonEndpoint> m_endpoint;
     };
 
     class SocketActivationEndpointThread final
@@ -864,6 +871,22 @@ TEST_CASE("socket frame decoder handles every deterministic chunk boundary",
             CHECK_FALSE(frame->has_value());
         }
     }
+}
+
+TEST_CASE("socket endpoint teardown tolerates an already-stopped worker", "[protocol][socket]")
+{
+    QTemporaryDir runtimeDirectory;
+    REQUIRE(runtimeDirectory.isValid());
+
+    RecordingHandler handler;
+    const auto options = socketOptions(runtimeDirectory);
+    {
+        SocketEndpointThread endpoint{handler, options};
+        REQUIRE_FALSE(endpoint.listen().has_value());
+        endpoint.stopWorkerThread();
+    }
+
+    SUCCEED();
 }
 
 TEST_CASE("socket endpoint runs the transport-neutral typed surface", "[protocol][socket]")
