@@ -3,6 +3,7 @@
 #include "gui/FontUtils.h"
 #include "gui/IconUtils.h"
 #include "gui/accessibility/AccessibleFactory.h"
+#include "gui/messageview/ExternalMessageLinkPolicy.h"
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/messageview/MessageAttachmentPanel.h"
 #include "gui/messageview/MessageBannerCoordinator.h"
@@ -521,8 +522,13 @@ namespace javelin::gui::messageview
         m_unsubscribeBanner = makeBanner(KMessageWidget::Information,
                                          QIcon::fromTheme(QStringLiteral("news-unsubscribe")));
         m_unsubscribeBanner->setTextFormat(Qt::RichText);
-        connect(m_unsubscribeBanner, &KMessageWidget::linkActivated, this, [](const QString& url)
-                { QDesktopServices::openUrl(QUrl::fromEncoded(url.toUtf8())); });
+        connect(m_unsubscribeBanner, &KMessageWidget::linkActivated, this,
+                [](const QString& value)
+                {
+                    const auto url = QUrl::fromEncoded(value.toUtf8());
+                    if (isSafeExternalMessageUrl(url))
+                        QDesktopServices::openUrl(url);
+                });
         connect(m_unsubscribeBanner, &KMessageWidget::linkHovered, this,
                 [this](const QString& url) { Q_EMIT hoveredLinkChanged(url); });
         connect(m_unsubscribeBanner, &KMessageWidget::hideAnimationFinished, this,
@@ -1192,9 +1198,11 @@ namespace javelin::gui::messageview
 
     void MessageViewContainer::updateUnsubscribeBanner()
     {
-        const bool hasUnsubscribeUrl = m_snapshot.has_value() &&
-                                       m_snapshot->unsubscribeUrl.has_value() &&
-                                       !m_snapshot->unsubscribeUrl->empty();
+        const auto unsubscribeUrl =
+            m_snapshot.has_value() && m_snapshot->unsubscribeUrl.has_value()
+                ? QUrl::fromEncoded(QByteArray::fromStdString(*m_snapshot->unsubscribeUrl))
+                : QUrl{};
+        const bool hasUnsubscribeUrl = isSafeExternalMessageUrl(unsubscribeUrl);
         const bool shouldShow = hasUnsubscribeUrl && !messageBannerDismissed(UnsubscribeBannerId);
         m_unsubscribeBanner->setVisible(shouldShow);
         if (!shouldShow)
@@ -1203,7 +1211,7 @@ namespace javelin::gui::messageview
             return;
         }
 
-        const auto url = QString::fromStdString(*m_snapshot->unsubscribeUrl).toHtmlEscaped();
+        const auto url = QString::fromUtf8(unsubscribeUrl.toEncoded()).toHtmlEscaped();
         m_unsubscribeBanner->setText(
             QStringLiteral("<table width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>"
                            "<td>%1</td><td align=\"right\"><a href=\"%2\">%3</a></td>"

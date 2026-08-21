@@ -1,5 +1,6 @@
 #include "gui/messageview/HtmlMessageView.h"
 
+#include "gui/messageview/ExternalMessageLinkPolicy.h"
 #include "jmap/render/InlineMessageUrl.h"
 
 #include <KLocalizedString>
@@ -47,13 +48,6 @@ namespace javelin::gui::messageview
     namespace
     {
         constexpr auto darkModeBootstrapId = "__javelin-dark-mode-bootstrap";
-
-        [[nodiscard]] bool shouldOpenExternally(const QUrl& url)
-        {
-            const auto scheme = url.scheme();
-            return scheme == QStringLiteral("http") || scheme == QStringLiteral("https") ||
-                   scheme == QStringLiteral("mailto");
-        }
 
         [[nodiscard]] const QString& darkReaderSource()
         {
@@ -140,7 +134,7 @@ namespace javelin::gui::messageview
           protected:
             bool acceptNavigationRequest(const QUrl& url, NavigationType, bool) override
             {
-                if (shouldOpenExternally(url))
+                if (isSafeExternalMessageUrl(url))
                 {
                     QDesktopServices::openUrl(url);
                 }
@@ -165,7 +159,7 @@ namespace javelin::gui::messageview
             {
                 if (type == QWebEnginePage::NavigationTypeLinkClicked && isMainFrame)
                 {
-                    if (shouldOpenExternally(url))
+                    if (isSafeExternalMessageUrl(url))
                     {
                         QDesktopServices::openUrl(url);
                     }

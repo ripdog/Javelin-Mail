@@ -1,4 +1,5 @@
 #include "gui/messageview/PlainTextLinkifier.h"
+#include "gui/messageview/ExternalMessageLinkPolicy.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -28,4 +29,16 @@ TEST_CASE("short numbers in plain text are not treated as phone numbers", "[gui]
         javelin::gui::messageview::linkifyPlainText(QStringLiteral("Order 123456 is ready."));
 
     CHECK_FALSE(html.contains(QStringLiteral("tel:")));
+}
+
+TEST_CASE("message external links only allow supported safe schemes", "[gui][message-view]")
+{
+    using javelin::gui::messageview::isSafeExternalMessageUrl;
+
+    CHECK(isSafeExternalMessageUrl(QUrl{QStringLiteral("https://example.test/unsubscribe")}));
+    CHECK(isSafeExternalMessageUrl(QUrl{QStringLiteral("HTTP://example.test/")}));
+    CHECK(isSafeExternalMessageUrl(QUrl{QStringLiteral("mailto:list@example.test")}));
+    CHECK_FALSE(isSafeExternalMessageUrl(QUrl{QStringLiteral("javascript:alert(1)")}));
+    CHECK_FALSE(isSafeExternalMessageUrl(QUrl{QStringLiteral("data:text/plain,hello")}));
+    CHECK_FALSE(isSafeExternalMessageUrl(QUrl{QStringLiteral("file:///tmp/message")}));
 }
