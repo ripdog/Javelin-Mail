@@ -1316,6 +1316,12 @@ namespace javelin::gui::shell
         connect(m_calendarTodayAction, &QAction::triggered, this,
                 [invokeCalendar] { invokeCalendar(CalendarTabCommand::Today); });
         actionCollection()->addAction(QStringLiteral("calendar_today"), m_calendarTodayAction);
+        m_calendarGoToMonthAction = new QAction(
+            QIcon::fromTheme(QStringLiteral("view-calendar-month")), i18n("Go to Month…"), this);
+        connect(m_calendarGoToMonthAction, &QAction::triggered, this,
+                [invokeCalendar] { invokeCalendar(CalendarTabCommand::GoToMonth); });
+        actionCollection()->addAction(QStringLiteral("calendar_go_to_month"),
+                                      m_calendarGoToMonthAction);
         m_calendarNextMonthAction =
             new QAction(QIcon::fromTheme(QStringLiteral("go-next")), i18n("Next Month"), this);
         connect(m_calendarNextMonthAction, &QAction::triggered, this,
@@ -2680,6 +2686,7 @@ namespace javelin::gui::shell
         m_calendarNewEventAction->setEnabled(calendarWorkspace.canCreateEvent);
         m_calendarPreviousMonthAction->setEnabled(calendarAvailable);
         m_calendarTodayAction->setEnabled(calendarAvailable);
+        m_calendarGoToMonthAction->setEnabled(calendarAvailable);
         m_calendarNextMonthAction->setEnabled(calendarAvailable);
         m_calendarListAction->setEnabled(false);
         if (context != ToolbarContext::Calendar)

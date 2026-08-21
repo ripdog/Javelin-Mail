@@ -57,6 +57,7 @@ namespace javelin::gui::shell
         CreateEvent,
         PreviousMonth,
         Today,
+        GoToMonth,
         NextMonth,
         ManageCalendars,
         Refresh,

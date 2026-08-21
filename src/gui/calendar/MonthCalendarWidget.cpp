@@ -5,6 +5,7 @@
 #include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/MonthCalendarLayout.h"
 
+#include <KDatePicker>
 #include <KLocalizedString>
 
 #include <QAccessible>
@@ -1465,6 +1466,24 @@ namespace javelin::gui::calendar
             notifyAccessibilitySelectionChanged();
         if (m_selectedDate != previousSelection)
             Q_EMIT selectionChanged(m_selectedDate);
+    }
+
+    void MonthCalendarWidget::showDatePicker()
+    {
+        QDialog dialog{this};
+        dialog.setWindowTitle(i18n("Go to Month"));
+        auto* layout = new QVBoxLayout(&dialog);
+        auto* picker = new KDatePicker(m_selectedDate, &dialog);
+        picker->setAccessibleName(i18n("Date to show"));
+        layout->addWidget(picker);
+        auto* buttons =
+            new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        layout->addWidget(buttons);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        selectDate(picker->date());
     }
 
     void MonthCalendarWidget::setSelectedDateFromAgenda(const QDate& date)

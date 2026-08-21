@@ -466,6 +466,7 @@ namespace javelin::gui::shell
         QAction* m_calendarNewEventAction = nullptr;
         QAction* m_calendarPreviousMonthAction = nullptr;
         QAction* m_calendarTodayAction = nullptr;
+        QAction* m_calendarGoToMonthAction = nullptr;
         QAction* m_calendarNextMonthAction = nullptr;
         QAction* m_calendarListAction = nullptr;
         QAction* m_calendarRefreshAction = nullptr;

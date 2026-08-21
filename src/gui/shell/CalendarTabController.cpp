@@ -1881,6 +1881,9 @@ namespace javelin::gui::shell
         case CalendarTabCommand::Today:
             widget->showToday();
             break;
+        case CalendarTabCommand::GoToMonth:
+            widget->showDatePicker();
+            break;
         case CalendarTabCommand::NextMonth:
             widget->showNextMonth();
             break;

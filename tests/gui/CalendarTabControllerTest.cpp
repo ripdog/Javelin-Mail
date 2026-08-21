@@ -6,6 +6,8 @@
 #include "gui/settings/GuiSettings.h"
 #include "jmap/calendar/CalendarReader.h"
 
+#include <KDatePicker>
+
 #include <QApplication>
 #include <QDate>
 #include <QDialog>
@@ -401,6 +403,43 @@ TEST_CASE("calendar cache refresh preserves unchanged rendered event widgets",
     CHECK(retainedButton->accessibleName().contains(QStringLiteral("Updated title")));
     CHECK(widget->findChildren<javelin::gui::calendar::CalendarEventButton*>().contains(
         retainedButton.data()));
+}
+
+TEST_CASE("workspace calendar go-to-month command selects the picked day",
+          "[gui][calendar][actions]")
+{
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    Reader reader;
+    CommandPort commands;
+    QStackedWidget contentStack;
+    std::vector<javelin::gui::shell::TabState> tabs;
+    javelin::gui::shell::CalendarTabController controller{settings, reader, commands, contentStack,
+                                                          tabs};
+    const auto targetMonth = QDate::currentDate().addMonths(5);
+    const QDate targetDate{targetMonth.year(), targetMonth.month(), 17};
+    bool pickerOpened = false;
+    QTimer::singleShot(0, &contentStack,
+                       [&pickerOpened, targetDate]
+                       {
+                           auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                           REQUIRE(dialog != nullptr);
+                           auto* picker = dialog->findChild<KDatePicker*>();
+                           REQUIRE(picker != nullptr);
+                           CHECK(picker->date() == QDate::currentDate());
+                           REQUIRE(picker->setDate(targetDate));
+                           pickerOpened = true;
+                           dialog->accept();
+                       });
+
+    controller.invokeWorkspace(javelin::gui::shell::CalendarTabCommand::GoToMonth);
+
+    CHECK(pickerOpened);
+    REQUIRE(tabs.size() == 1);
+    auto* widget =
+        qobject_cast<javelin::gui::calendar::MonthCalendarWidget*>(contentStack.widget(0));
+    REQUIRE(widget != nullptr);
+    CHECK(widget->displayedMonth() == QDate{targetDate.year(), targetDate.month(), 1});
+    CHECK(widget->selectedDate() == targetDate);
 }
 
 TEST_CASE("workspace calendar manager command materializes Calendar before opening",

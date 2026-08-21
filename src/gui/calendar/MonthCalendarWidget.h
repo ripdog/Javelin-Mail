@@ -133,6 +133,7 @@ namespace javelin::gui::calendar
         void showPreviousMonth();
         void showNextMonth();
         void showToday();
+        void showDatePicker();
         void setSelectedDateFromAgenda(const QDate& date);
 
       Q_SIGNALS:

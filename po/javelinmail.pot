@@ -1446,6 +1446,16 @@ msgid ""
 "%1"
 msgstr ""
 
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:1474
+#, kde-format
+msgid "Go to Month"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:1477
+#, kde-format
+msgid "Date to show"
+msgstr ""
+
 #: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/RecurrenceDialog.cpp:33
 #, kde-format
 msgctxt "@item ordinal in a monthly recurrence"
@@ -4499,6 +4509,11 @@ msgstr ""
 #: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:970
 #, kde-format
 msgid "Today"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:1320
+#, kde-format
+msgid "Go to Month…"
 msgstr ""
 
 #: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/MainWindow.cpp:975

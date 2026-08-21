@@ -123,6 +123,7 @@
     <Separator/>
     <Action name="calendar_previous_month"/>
     <Action name="calendar_today"/>
+    <Action name="calendar_go_to_month"/>
     <Action name="calendar_next_month"/>
     <Separator/>
     <Action name="calendar_list"/>
