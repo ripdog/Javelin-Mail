@@ -14,8 +14,9 @@ release validation are tracked in
 in the focused documents for [optimistic consistency](OPTIMISTIC_CONSISTENCY.md),
 [offline mail](OFFLINE_MAIL_ARCHITECTURE.md), [query windows](QUERY_WINDOWS.md),
 [database access](DATABASE_ACCESS.md), [Undo/Redo](UNDO_REDO.md),
-[email signatures](EMAIL_SIGNATURES_DESIGN.md), [message rendering](RENDERING.md), and
-[mail export](MAIL_EXPORT_IMPLEMENTATION_PLAN.md). The planned
+[email signatures](EMAIL_SIGNATURES_DESIGN.md), [message rendering](RENDERING.md),
+[mail export](MAIL_EXPORT_IMPLEMENTATION_PLAN.md), and
+[mail import](MAIL_IMPORT_IMPLEMENTATION_PLAN.md). The planned
 split between foreground collapsed-query materialization and bounded background thread hydration is
 specified in [THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md).
 The long-term, behavior-preserving module and ownership cleanup is tracked in
