@@ -12,6 +12,7 @@
 #include <memory>
 
 class QDBusArgument;
+class QDBusServiceWatcher;
 
 namespace javelin::app
 {
@@ -106,17 +107,23 @@ namespace javelin::app
         void NewToolTip();
         void NewStatus(const QString& status);
 
+      private Q_SLOTS:
+        void onStatusNotifierWatcherRegistered(const QString& serviceName);
+        void onStatusNotifierWatcherUnregistered(const QString& serviceName);
+
       private:
         class Menu;
 
         void requestToolTipUpdate();
         void updateToolTip();
         void updateStatus();
+        void registerWithStatusNotifierWatcher();
 
         WorkScheduler& m_workScheduler;
         QTimer m_toolTipUpdateTimer;
         bool m_toolTipUpdatePending = false;
         std::unique_ptr<Menu> m_menu;
+        std::unique_ptr<QDBusServiceWatcher> m_statusNotifierWatcher;
         QString m_activationToken;
         QString m_serviceName;
         QString m_title = QStringLiteral("Javelin Mail");
@@ -125,6 +132,7 @@ namespace javelin::app
         std::uint64_t m_inboxUnreadCount = 0;
         bool m_attentionRequired = false;
         bool m_available = false;
+        bool m_registeredWithStatusNotifierWatcher = false;
     };
 } // namespace javelin::app
 

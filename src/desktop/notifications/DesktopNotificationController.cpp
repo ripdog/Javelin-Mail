@@ -303,6 +303,12 @@ namespace javelin::app
                                                            const int timeoutMs)
     {
         closeUndoableSendNotification(sendId);
+        if (!m_actionInvokedConnected || !m_notificationClosedConnected ||
+            !m_transport->supportsActions())
+        {
+            return false;
+        }
+
         const QStringList actions = {undoActionKey(sendId),
                                      i18nc("@action:button desktop notification", "Undo Send")};
         // Plasma retains non-transient notifications in history after the popup disappears, so
@@ -325,8 +331,7 @@ namespace javelin::app
                                                                     .calendarNotificationKey = {},
                                                                     .sendId = sendId,
                                                                     .opensSettings = false});
-        return m_actionInvokedConnected && m_notificationClosedConnected &&
-               m_transport->supportsActions();
+        return true;
     }
 
     void DesktopNotificationController::closeUndoableSendNotification(const QString& sendId)

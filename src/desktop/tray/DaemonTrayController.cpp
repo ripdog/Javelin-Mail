@@ -10,6 +10,7 @@
 #include <QDBusInterface>
 #include <QDBusMessage>
 #include <QDBusMetaType>
+#include <QDBusServiceWatcher>
 #include <QDBusVariant>
 #include <QDBusVirtualObject>
 #include <QDebug>
@@ -430,22 +431,15 @@ namespace javelin::app
             m_toolTipUpdateTimer.start();
         m_available = true;
 
-        QDBusInterface watcher{QString::fromLatin1(watcherService),
-                               QString::fromLatin1(watcherPath),
-                               QString::fromLatin1(watcherInterface), bus};
-        if (!watcher.isValid())
-        {
-            qWarning() << QStringLiteral(
-                "StatusNotifier watcher unavailable; daemon tray controls remain on D-Bus");
-        }
-        else
-        {
-            const auto reply =
-                watcher.call(QStringLiteral("RegisterStatusNotifierItem"), m_serviceName);
-            if (reply.type() == QDBusMessage::ErrorMessage)
-                qWarning().noquote() << QStringLiteral("StatusNotifier item registration failed:")
-                                     << reply.errorMessage();
-        }
+        m_statusNotifierWatcher = std::make_unique<QDBusServiceWatcher>(
+            QString::fromLatin1(watcherService), bus,
+            QDBusServiceWatcher::WatchForRegistration | QDBusServiceWatcher::WatchForUnregistration,
+            this);
+        connect(m_statusNotifierWatcher.get(), &QDBusServiceWatcher::serviceRegistered, this,
+                &DaemonTrayController::onStatusNotifierWatcherRegistered);
+        connect(m_statusNotifierWatcher.get(), &QDBusServiceWatcher::serviceUnregistered, this,
+                &DaemonTrayController::onStatusNotifierWatcherUnregistered);
+        registerWithStatusNotifierWatcher();
         return true;
     }
 
@@ -461,9 +455,51 @@ namespace javelin::app
             if (!m_serviceName.isEmpty())
                 bus.unregisterService(m_serviceName);
         }
+        m_statusNotifierWatcher.reset();
+        m_registeredWithStatusNotifierWatcher = false;
         m_serviceName.clear();
         m_menu.reset();
         m_available = false;
+    }
+
+    void DaemonTrayController::onStatusNotifierWatcherRegistered(const QString& serviceName)
+    {
+        if (serviceName != QString::fromLatin1(watcherService))
+            return;
+        m_registeredWithStatusNotifierWatcher = false;
+        registerWithStatusNotifierWatcher();
+    }
+
+    void DaemonTrayController::onStatusNotifierWatcherUnregistered(const QString& serviceName)
+    {
+        if (serviceName == QString::fromLatin1(watcherService))
+            m_registeredWithStatusNotifierWatcher = false;
+    }
+
+    void DaemonTrayController::registerWithStatusNotifierWatcher()
+    {
+        if (!m_available || m_registeredWithStatusNotifierWatcher || m_serviceName.isEmpty())
+            return;
+
+        QDBusInterface watcher{
+            QString::fromLatin1(watcherService), QString::fromLatin1(watcherPath),
+            QString::fromLatin1(watcherInterface), QDBusConnection::sessionBus()};
+        if (!watcher.isValid())
+        {
+            qWarning() << QStringLiteral(
+                "StatusNotifier watcher unavailable; daemon tray controls remain on D-Bus");
+            return;
+        }
+
+        const auto reply =
+            watcher.call(QStringLiteral("RegisterStatusNotifierItem"), m_serviceName);
+        if (reply.type() == QDBusMessage::ErrorMessage)
+        {
+            qWarning().noquote() << QStringLiteral("StatusNotifier item registration failed:")
+                                 << reply.errorMessage();
+            return;
+        }
+        m_registeredWithStatusNotifierWatcher = true;
     }
 
     bool DaemonTrayController::isAvailable() const

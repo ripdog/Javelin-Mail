@@ -82,6 +82,7 @@ namespace
                                          const QString& message, const QStringList& actions,
                                          const QVariantMap& hints, const int timeoutMs) override
         {
+            ++sendCount;
             request = NotificationRequest{
                 .icon = icon,
                 .summary = summary,
@@ -111,6 +112,7 @@ namespace
 
         uint nextNotificationId = 73;
         uint notificationId = 73;
+        std::size_t sendCount = 0;
         bool actionsSupported = true;
         std::optional<QString> sendError;
         std::optional<NotificationRequest> request;
@@ -322,21 +324,50 @@ TEST_CASE("undoable send notification does not gate when delivery or actions are
     SECTION("missing action capability")
     {
         auto transport = std::make_unique<FakeNotificationTransport>();
+        auto* observer = transport.get();
         transport->actionsSupported = false;
         javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
         CHECK_FALSE(controller.notifyUndoableSend(QStringLiteral("send-1"),
                                                   QStringLiteral("Scheduled"),
                                                   QStringLiteral("Subject"), 1'000));
+        CHECK(observer->sendCount == 0);
+        CHECK_FALSE(observer->request.has_value());
     }
 
     SECTION("failed signal subscription")
     {
         auto transport = std::make_unique<FakeNotificationTransport>();
+        auto* observer = transport.get();
         javelin::app::DesktopNotificationController controller{std::move(transport), false, false};
         CHECK_FALSE(controller.notifyUndoableSend(QStringLiteral("send-1"),
                                                   QStringLiteral("Scheduled"),
                                                   QStringLiteral("Subject"), 1'000));
+        CHECK(observer->sendCount == 0);
+        CHECK_FALSE(observer->request.has_value());
     }
+}
+
+TEST_CASE("losing notification action support removes an existing Undo popup without replacement",
+          "[app][daemon][notification][deferred-send]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+
+    REQUIRE(controller.notifyUndoableSend(QStringLiteral("send-1"), QStringLiteral("Scheduled"),
+                                          QStringLiteral("Subject"), 1'000));
+    const auto originalNotificationId = observer->notificationId;
+    CHECK(observer->sendCount == 1);
+
+    observer->actionsSupported = false;
+    observer->request.reset();
+    CHECK_FALSE(controller.notifyUndoableSend(QStringLiteral("send-1"), QStringLiteral("Scheduled"),
+                                              QStringLiteral("Subject"), 1'000));
+    CHECK(observer->closedId == originalNotificationId);
+    CHECK(observer->sendCount == 1);
+    CHECK_FALSE(observer->request.has_value());
 }
 
 TEST_CASE("undoable send closure reasons end the window exactly once",
