@@ -137,7 +137,6 @@ namespace javelin::gui::shell
             return;
         }
 
-        QString suggestedName = QStringLiteral("attachment-%1").arg(QString::fromStdString(partId));
         const auto snapshotResult = m_messageViewReader.load(accountId, emailId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&snapshotResult))
         {
@@ -146,13 +145,21 @@ namespace javelin::gui::shell
         }
         const auto& snapshot =
             std::get<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(snapshotResult);
-        if (snapshot.has_value())
+        if (!snapshot.has_value())
         {
-            const auto attachment = std::ranges::find(
-                snapshot->attachments, partId, &javelin::jmap::cache::MessageAttachment::partId);
-            if (attachment != snapshot->attachments.end())
-                suggestedName = suggestedFileName(*attachment);
+            Q_EMIT statusMessage(i18n("The selected message is unavailable."), 5000);
+            return;
         }
+
+        const auto downloadableAttachments = visibleDownloadableAttachments(*snapshot);
+        const auto attachment = std::ranges::find(
+            downloadableAttachments, partId, &javelin::jmap::cache::MessageAttachment::partId);
+        if (attachment == downloadableAttachments.end())
+        {
+            Q_EMIT statusMessage(i18n("The selected attachment is not downloadable."), 5000);
+            return;
+        }
+        const QString suggestedName = suggestedFileName(*attachment);
 
         const QString targetPath =
             attachmentSettings.alwaysAsk
