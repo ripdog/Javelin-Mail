@@ -10,6 +10,8 @@
 namespace javelin::app
 {
 
+    [[nodiscard]] QByteArray unavailableInlineImagePlaceholder(const QString& label);
+
     class InlineMessageSchemeHandler : public QWebEngineUrlSchemeHandler
     {
       public:
@@ -27,7 +29,6 @@ namespace javelin::app
         };
 
         [[nodiscard]] std::optional<ReplyPayload> buildReply(const QUrl& url) const;
-        [[nodiscard]] static QByteArray unavailableInlineImageSvg(const QString& label);
 
         const javelin::jmap::cache::ReadOnlyDatabaseConnection& m_connection;
     };

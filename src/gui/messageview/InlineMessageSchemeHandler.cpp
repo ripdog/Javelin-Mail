@@ -23,8 +23,12 @@ namespace javelin::app
                        .size() > 0;
         }
 
+        constexpr qsizetype maxInlinePlaceholderLabelLength = 256;
+
         [[nodiscard]] QString escapedSvgText(QString value)
         {
+            if (value.size() > maxInlinePlaceholderLabelLength)
+                value = value.left(maxInlinePlaceholderLabelLength) + QChar{0x2026};
             value.replace(QLatin1String("&"), QStringLiteral("&amp;"));
             value.replace(QLatin1String("<"), QStringLiteral("&lt;"));
             value.replace(QLatin1String(">"), QStringLiteral("&gt;"));
@@ -103,14 +107,14 @@ namespace javelin::app
                                       : QString::fromStdString(parsedPart->part.partId);
             return ReplyPayload{
                 .mimeType = QByteArrayLiteral("image/svg+xml"),
-                .body = unavailableInlineImageSvg(label),
+                .body = unavailableInlineImagePlaceholder(label),
             };
         }
 
         return std::nullopt;
     }
 
-    QByteArray InlineMessageSchemeHandler::unavailableInlineImageSvg(const QString& label)
+    QByteArray unavailableInlineImagePlaceholder(const QString& label)
     {
         return QStringLiteral(
                    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"480\" height=\"160\" "
