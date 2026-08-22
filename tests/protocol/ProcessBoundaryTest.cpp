@@ -1140,6 +1140,47 @@ TEST_CASE("socket synchronous reply timeout does not disconnect a live daemon",
     CHECK(client.isConnected());
 }
 
+TEST_CASE("socket timed-out non-resumable reply does not consume pending reply capacity",
+          "[protocol][socket]")
+{
+    QTemporaryDir runtimeDirectory;
+    REQUIRE(runtimeDirectory.isValid());
+
+    RecordingHandler handler;
+    const auto endpointOptions = socketOptions(runtimeDirectory);
+    auto clientOptions = endpointOptions;
+    clientOptions.maximumQueuedFrames = 1;
+    clientOptions.responseTimeoutMilliseconds = 50;
+    SocketEndpointThread endpoint{handler, endpointOptions};
+    REQUIRE_FALSE(endpoint.listen().has_value());
+
+    SocketDaemonClient client{clientOptions};
+    REQUIRE_FALSE(client.connectToDaemon().has_value());
+    REQUIRE(std::holds_alternative<ReadyReply>(
+        client.hello({.protocol = {.major = 1, .minor = 0},
+                      .build = {.application = QStringLiteral("Javelin-Mail"),
+                                .revision = QStringLiteral("test")}})));
+
+    std::atomic_bool delayedPing = true;
+    handler.onPing = [&delayedPing]
+    {
+        if (delayedPing.exchange(false))
+            QThread::msleep(150);
+    };
+
+    const auto timeout = client.ping();
+    REQUIRE(timeout.has_value());
+    CHECK(timeout->code == BoundaryErrorCode::TransportUnavailable);
+    CHECK(client.isConnected());
+
+    auto command = client.submitCommandAsync(refreshRequest());
+    CHECK_FALSE(command.isFinished());
+    processUntil([&command] { return command.isFinished(); });
+    REQUIRE(command.isFinished());
+    CHECK(std::holds_alternative<CommandAccepted>(command.result()));
+    CHECK(client.isConnected());
+}
+
 TEST_CASE("socket async command admission bounds outstanding replies", "[protocol][socket]")
 {
     QTemporaryDir runtimeDirectory;

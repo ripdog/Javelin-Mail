@@ -255,6 +255,18 @@ namespace javelin::protocol
             reply->promise.finish();
             return;
         }
+        if (const auto discarded = m_discardedReplies.find(frame.correlation);
+            discarded != m_discardedReplies.end())
+        {
+            if (frame.kind != discarded->second)
+            {
+                clearSocket(SocketDisconnectReason::ProtocolViolation,
+                            QStringLiteral("late socket reply kind is unexpected"));
+                return;
+            }
+            m_discardedReplies.erase(discarded);
+            return;
+        }
         if (const auto deferred = m_abandonedReplies.find(frame.correlation);
             deferred != m_abandonedReplies.end())
         {
@@ -379,6 +391,7 @@ namespace javelin::protocol
         auto asyncReplies = std::move(m_asyncReplies);
         m_asyncReplies.clear();
         m_abandonedReplies.clear();
+        m_discardedReplies.clear();
         m_queuedBytes = 0;
         m_receivedBytes = 0;
         m_clearScheduled = false;
@@ -574,14 +587,25 @@ namespace javelin::protocol
                         .reason = SocketDisconnectReason::PeerClosed,
                         .detail = QStringLiteral("daemon disconnected before the reply")});
                 }
-                m_abandonedReplies.try_emplace(
-                    correlation, DeferredReply{.requestKind = requestKind,
-                                               .expectedKind = replyKind,
-                                               .resumableRequestPayload =
-                                                   isResumableBootstrapRequest(requestKind)
-                                                       ? std::optional<QByteArray>{requestPayload}
-                                                       : std::nullopt,
-                                               .received = std::nullopt});
+                if (isResumableBootstrapRequest(requestKind))
+                {
+                    m_abandonedReplies.try_emplace(
+                        correlation, DeferredReply{.requestKind = requestKind,
+                                                   .expectedKind = replyKind,
+                                                   .resumableRequestPayload = requestPayload,
+                                                   .received = std::nullopt});
+                }
+                else
+                {
+                    if (m_discardedReplies.size() >= m_options.maximumQueuedFrames)
+                    {
+                        clearSocket(
+                            SocketDisconnectReason::TransportFailure,
+                            QStringLiteral("too many timed-out socket replies remain outstanding"));
+                        return m_lastError;
+                    }
+                    m_discardedReplies.try_emplace(correlation, replyKind);
+                }
                 return SocketTransportError{
                     .reason = SocketDisconnectReason::TransportFailure,
                     .detail = QStringLiteral(

@@ -125,6 +125,7 @@ namespace javelin::protocol
         std::map<std::uint64_t, ReceivedFrame> m_receivedReplies;
         std::map<std::uint64_t, std::unique_ptr<PendingAsyncReply>> m_asyncReplies;
         std::map<std::uint64_t, DeferredReply> m_abandonedReplies;
+        std::map<std::uint64_t, SocketFrameKind> m_discardedReplies;
         std::size_t m_queuedBytes = 0;
         std::size_t m_receivedBytes = 0;
         std::uint64_t m_nextCorrelation = 1;
