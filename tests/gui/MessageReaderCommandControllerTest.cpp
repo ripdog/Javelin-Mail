@@ -72,6 +72,13 @@ TEST_CASE("reader command controller owns plain-text find traversal")
     controller.findPrevious();
     CHECK(findResult.text() == QStringLiteral("2 of 2"));
 
+    controller.resetFind(false);
+    CHECK(findEdit.text().isEmpty());
+    CHECK(findResult.text().isEmpty());
+    CHECK_FALSE(findBar.isHidden());
+    CHECK_FALSE(previous.isEnabled());
+    CHECK_FALSE(next.isEnabled());
+
     controller.dismissFindBar();
     CHECK(findBar.isHidden());
     CHECK(focusRestored);
@@ -105,10 +112,9 @@ TEST_CASE("reader HTML find callback tolerates destroyed controller and view")
     QLabel findResult;
     QToolButton previous;
     QToolButton next;
-    auto controller =
-        std::make_unique<javelin::gui::messageview::MessageReaderCommandController>(
-            bodyPresenter, plainText, *html, findBar, findEdit, findResult, previous, next,
-            [] { return true; }, [] {}, [] { return QStringLiteral("Subject"); }, dialogParent);
+    auto controller = std::make_unique<javelin::gui::messageview::MessageReaderCommandController>(
+        bodyPresenter, plainText, *html, findBar, findEdit, findResult, previous, next,
+        [] { return true; }, [] {}, [] { return QStringLiteral("Subject"); }, dialogParent);
 
     controller->showFindBar();
     findEdit.setText(QStringLiteral("alpha"));

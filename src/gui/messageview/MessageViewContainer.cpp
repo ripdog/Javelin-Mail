@@ -905,14 +905,15 @@ namespace javelin::gui::messageview
             return;
         }
 
+        const bool messageChanged = m_accountId != accountId || m_emailId != emailId;
         m_htmlView->clearDocument();
         m_accountId = std::move(accountId);
         m_mailboxId = std::move(mailboxId);
         m_emailId = std::move(emailId);
         m_junkMailboxId = std::move(junkMailboxId);
         m_multipleMessages.clear();
-        if (!m_emailId.has_value())
-            m_readerCommandController->resetFind(true);
+        if (messageChanged)
+            m_readerCommandController->resetFind(!m_emailId.has_value());
         m_translationController->reset();
         ++m_snapshotLoadToken;
         m_loading = m_emailId.has_value();

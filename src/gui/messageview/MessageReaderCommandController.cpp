@@ -11,10 +11,11 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPalette>
-#include <QPrintDialog>
 #include <QPointer>
+#include <QPrintDialog>
 #include <QPrinter>
 #include <QShortcut>
+#include <QSignalBlocker>
 #include <QTextBrowser>
 #include <QTextCursor>
 #include <QTextEdit>
@@ -204,6 +205,8 @@ namespace javelin::gui::messageview
 
     void MessageReaderCommandController::resetFind(const bool hideBar)
     {
+        const QSignalBlocker blocker{&m_findEdit};
+        m_findEdit.clear();
         clearFindHighlights();
         if (hideBar)
             m_findBarContainer.setVisible(false);
