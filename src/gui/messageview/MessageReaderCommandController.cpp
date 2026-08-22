@@ -128,13 +128,14 @@ namespace javelin::gui::messageview
                 query, backwards,
                 [controller, htmlView, query](const int activeMatch, const int matchCount)
                 {
-                    if (controller.isNull() || htmlView.isNull())
+                    auto* activeController = controller.data();
+                    if (activeController == nullptr || htmlView.isNull())
                         return;
-                    if (controller->m_findEdit.text() == query &&
-                        controller->m_bodyPresenter.activeView() ==
+                    if (activeController->m_findEdit.text() == query &&
+                        activeController->m_bodyPresenter.activeView() ==
                             MessageBodyPresenter::View::Html)
                     {
-                        controller->updateFindResult(activeMatch, matchCount);
+                        activeController->updateFindResult(activeMatch, matchCount);
                     }
                 });
             return;
