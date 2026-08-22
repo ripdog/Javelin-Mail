@@ -7,6 +7,7 @@
 #include "gui/contacts/ContactGroupController.h"
 #include "gui/contacts/ContactPhotoController.h"
 #include "gui/contacts/ContactsBrowser.h"
+#include "gui/contacts/ContactsItemRoles.h"
 #include "gui/widgets/EmailAddressLineEdit.h"
 
 #include "gui/FontUtils.h"
@@ -68,26 +69,6 @@ namespace javelin::gui::contacts
 {
     namespace
     {
-        enum class GroupFilterMode
-        {
-            All = 0,
-            Starred = 1,
-            Group = 2,
-            Divider = 3,
-            Ungrouped = 4,
-            AddressBook = 5,
-            AccountStarred = 6,
-            NoSubscribedAddressBooks = 7,
-        };
-
-        constexpr int groupFilterModeRole = Qt::UserRole + 10;
-        constexpr int groupIdRole = Qt::UserRole + 11;
-        constexpr int contactAccountIdRole = Qt::UserRole + 12;
-        constexpr int contactUidRole = Qt::UserRole + 13;
-        constexpr int stableItemKeyRole = Qt::UserRole + 14;
-        constexpr int groupAccountIdRole = Qt::UserRole + 15;
-        constexpr int groupAddressBookIdRole = Qt::UserRole + 16;
-
         [[nodiscard]] std::string contactSelectionKey(const std::string_view accountId,
                                                       const std::string_view contactId)
         {

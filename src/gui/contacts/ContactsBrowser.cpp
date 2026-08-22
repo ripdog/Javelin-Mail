@@ -1,5 +1,7 @@
 #include "gui/contacts/ContactsBrowser.h"
 
+#include "gui/contacts/ContactsItemRoles.h"
+
 #include <QComboBox>
 #include <QListWidget>
 
@@ -8,18 +10,6 @@
 
 namespace javelin::gui::contacts
 {
-    namespace
-    {
-        constexpr int groupFilterModeRole = Qt::UserRole + 10;
-        constexpr int groupIdRole = Qt::UserRole + 11;
-        constexpr int contactAccountIdRole = Qt::UserRole + 12;
-        constexpr int groupAccountIdRole = Qt::UserRole + 15;
-        constexpr int groupAddressBookIdRole = Qt::UserRole + 16;
-
-        constexpr int allFilterMode = 0;
-        constexpr int groupFilterMode = 2;
-        constexpr int ungroupedFilterMode = 4;
-    } // namespace
 
     ContactsBrowser::ContactsBrowser(
         QComboBox& accountCombo, QComboBox& addressBookCombo, QListWidget& groupList,
@@ -35,9 +25,10 @@ namespace javelin::gui::contacts
     {
         if (const auto* item = m_groupList.currentItem())
         {
-            const auto mode = item->data(groupFilterModeRole).toInt();
+            const auto mode = static_cast<GroupFilterMode>(item->data(groupFilterModeRole).toInt());
             const auto accountId = item->data(groupAccountIdRole).toString();
-            if (mode != allFilterMode && mode != ungroupedFilterMode && !accountId.isEmpty())
+            if (mode != GroupFilterMode::All && mode != GroupFilterMode::Ungrouped &&
+                !accountId.isEmpty())
                 return accountId.toStdString();
         }
         const auto contacts = selectedContacts();
@@ -88,7 +79,9 @@ namespace javelin::gui::contacts
     const javelin::jmap::contacts::ContactSummary* ContactsBrowser::currentGroup() const
     {
         const auto* item = m_groupList.currentItem();
-        if (item == nullptr || item->data(groupFilterModeRole).toInt() != groupFilterMode)
+        if (item == nullptr ||
+            static_cast<GroupFilterMode>(item->data(groupFilterModeRole).toInt()) !=
+                GroupFilterMode::Group)
             return nullptr;
         const auto id = item->data(groupIdRole).toString().toStdString();
         const auto accountId = item->data(groupAccountIdRole).toString().toStdString();
