@@ -89,6 +89,7 @@ modules:
     config-opts:
       - -DBUILD_TESTING=OFF
       - -DBUILD_TOOLS=OFF
+      - -DBUILD_PYTHON_BINDINGS=OFF
       - -DDATABASE_BACKEND=SQLITE
     sources:
       - type: git
