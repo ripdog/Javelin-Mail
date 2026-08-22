@@ -12,6 +12,7 @@
 #include <QDateEdit>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QLocale>
 #include <QMenu>
 #include <QPushButton>
 #include <QStackedWidget>
@@ -23,6 +24,22 @@
 
 namespace
 {
+    class ScopedDefaultLocale final
+    {
+      public:
+        explicit ScopedDefaultLocale(const QLocale locale) : m_previous{}
+        {
+            QLocale::setDefault(locale);
+        }
+        ~ScopedDefaultLocale()
+        {
+            QLocale::setDefault(m_previous);
+        }
+
+      private:
+        QLocale m_previous;
+    };
+
     [[nodiscard]] javelin::jmap::api::Session session(std::string accountId = "a1",
                                                       std::string accountName = "Personal",
                                                       std::string username = "alice@example.test")
@@ -313,6 +330,48 @@ TEST_CASE("Contacts refresh merges rows without disturbing selection or editor d
     CHECK(groups->isEnabled());
     CHECK(contacts->isEnabled());
     CHECK(save->isEnabled());
+}
+
+TEST_CASE("Contact groups use locale-aware name ordering", "[gui][contacts][groups][sorting]")
+{
+    const ScopedDefaultLocale locale{QLocale{QLocale::German, QLocale::Germany}};
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contacts-group-locale-sort-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    if (const auto error = sessions.replace("a1", session()))
+        FAIL(error->message.toStdString());
+    javelin::jmap::cache::ContactRepository repository{connection};
+    REQUIRE_FALSE(repository
+                      .replaceAll("a1", {book("book-1", "Personal")},
+                                  {group("Zebra", "a1", "group-z", "uid-group-z"),
+                                   group("Äpfel", "a1", "group-a", "uid-group-a")},
+                                  "b1", "c1")
+                      .has_value());
+
+    RefreshPort refresh;
+    CommandPort commands;
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    javelin::gui::contacts::ContactsManagerWidget widget{settings, repository, refresh, commands};
+    auto* groups = widget.findChild<QListWidget*>(QStringLiteral("contactsGroupList"));
+    REQUIRE(groups != nullptr);
+
+    int applesRow = -1;
+    int zebraRow = -1;
+    for (int row = 0; row < groups->count(); ++row)
+    {
+        if (groups->item(row)->text() == QStringLiteral("Äpfel"))
+            applesRow = row;
+        else if (groups->item(row)->text() == QStringLiteral("Zebra"))
+            zebraRow = row;
+    }
+    REQUIRE(applesRow >= 0);
+    REQUIRE(zebraRow >= 0);
+    CHECK(applesRow < zebraRow);
 }
 
 TEST_CASE("Contacts workspace state distinguishes availability from writable destinations",

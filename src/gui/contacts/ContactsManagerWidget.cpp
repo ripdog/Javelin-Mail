@@ -1459,7 +1459,13 @@ namespace javelin::gui::contacts
         if (m_optimisticContact.has_value() && m_optimisticContact->kind == "group" &&
             belongsToSubscribedAddressBook(*m_optimisticContact))
             m_groups.push_back(*m_optimisticContact);
-        std::ranges::sort(m_groups, {}, &javelin::jmap::contacts::ContactSummary::displayName);
+        std::ranges::sort(m_groups,
+                          [](const auto& left, const auto& right)
+                          {
+                              return QString::localeAwareCompare(
+                                         QString::fromStdString(left.displayName),
+                                         QString::fromStdString(right.displayName)) < 0;
+                          });
 
         {
             QSignalBlocker blocker{m_groupList};
