@@ -16,7 +16,7 @@
 
 #include <memory>
 
-TEST_CASE("reader command controller owns plain-text find traversal")
+TEST_CASE("reader command controller owns plain-text find traversal", "[qtwebengine]")
 {
     QWidget dialogParent;
     QStackedWidget stack;
@@ -89,7 +89,7 @@ TEST_CASE("reader command controller owns plain-text find traversal")
     CHECK(findBar.isHidden());
 }
 
-TEST_CASE("reader HTML find callback tolerates destroyed controller and view")
+TEST_CASE("reader HTML find callback tolerates destroyed controller and view", "[qtwebengine]")
 {
     QWidget dialogParent;
     QStackedWidget stack;

@@ -169,9 +169,12 @@ namespace javelin::gui::messageview
     } // namespace
 
     MessageAttachmentPanel::MessageAttachmentPanel(
-        javelin::gui::settings::GuiSettings& settings, const std::optional<std::string>& accountId,
-        const std::optional<std::string>& emailId,
-        const std::optional<javelin::jmap::cache::MessageViewSnapshot>& snapshot, QWidget* parent)
+        javelin::gui::settings::GuiSettings& settings,
+        std::reference_wrapper<const std::optional<std::string>> accountId,
+        std::reference_wrapper<const std::optional<std::string>> emailId,
+        std::reference_wrapper<const std::optional<javelin::jmap::cache::MessageViewSnapshot>>
+            snapshot,
+        QWidget* parent)
         : QWidget(parent), m_settings(settings), m_accountId(accountId), m_emailId(emailId),
           m_snapshot(snapshot)
     {
@@ -198,10 +201,13 @@ namespace javelin::gui::messageview
         connect(m_saveAllButton, &QToolButton::clicked, this,
                 [this]
                 {
-                    if (m_accountId.has_value() && m_emailId.has_value())
+                    const auto& observedAccountId = m_accountId.get();
+                    const auto& observedEmailId = m_emailId.get();
+                    if (observedAccountId.has_value() && observedEmailId.has_value())
                     {
-                        Q_EMIT saveAllAttachmentsRequested(QString::fromStdString(*m_accountId),
-                                                           QString::fromStdString(*m_emailId));
+                        Q_EMIT saveAllAttachmentsRequested(
+                            QString::fromStdString(*observedAccountId),
+                            QString::fromStdString(*observedEmailId));
                     }
                 });
 
@@ -213,21 +219,22 @@ namespace javelin::gui::messageview
 
     bool MessageAttachmentPanel::hasVisibleAttachments() const
     {
-        return !visibleAttachments(m_snapshot).empty();
+        return !visibleAttachments(m_snapshot.get()).empty();
     }
 
     QString MessageAttachmentPanel::statusText() const
     {
-        if (!m_snapshot.has_value())
+        const auto& snapshot = m_snapshot.get();
+        if (!snapshot.has_value())
             return {};
-        const auto attachments = visibleAttachments(m_snapshot);
+        const auto attachments = visibleAttachments(snapshot);
         if (!attachments.empty())
             return i18np("%1 attachment", "%1 attachments", attachments.size());
-        if (m_snapshot->htmlRenderDocument.has_value() &&
-            m_snapshot->htmlRenderDocument->inlineResourceCount > 0)
+        if (snapshot->htmlRenderDocument.has_value() &&
+            snapshot->htmlRenderDocument->inlineResourceCount > 0)
         {
             return i18np("Inline resource: %1", "Inline resources: %1",
-                         m_snapshot->htmlRenderDocument->inlineResourceCount);
+                         snapshot->htmlRenderDocument->inlineResourceCount);
         }
         return {};
     }
@@ -252,8 +259,10 @@ namespace javelin::gui::messageview
             delete tile;
         m_attachmentTiles.clear();
 
-        const auto attachments = visibleAttachments(m_snapshot);
-        if (attachments.empty() || !m_accountId.has_value() || !m_emailId.has_value())
+        const auto& accountId = m_accountId.get();
+        const auto& emailId = m_emailId.get();
+        const auto attachments = visibleAttachments(m_snapshot.get());
+        if (attachments.empty() || !accountId.has_value() || !emailId.has_value())
             return;
 
         m_attachmentTiles.reserve(attachments.size());
@@ -270,18 +279,21 @@ namespace javelin::gui::messageview
                 *attachment,
                 [this, partId]
                 {
-                    Q_EMIT openAttachmentRequested(QString::fromStdString(*m_accountId),
-                                                   QString::fromStdString(*m_emailId), partId);
+                    Q_EMIT openAttachmentRequested(QString::fromStdString(*m_accountId.get()),
+                                                   QString::fromStdString(*m_emailId.get()),
+                                                   partId);
                 },
                 [this, partId]
                 {
-                    Q_EMIT openAttachmentWithRequested(QString::fromStdString(*m_accountId),
-                                                       QString::fromStdString(*m_emailId), partId);
+                    Q_EMIT openAttachmentWithRequested(QString::fromStdString(*m_accountId.get()),
+                                                       QString::fromStdString(*m_emailId.get()),
+                                                       partId);
                 },
                 [this, partId]
                 {
-                    Q_EMIT saveAttachmentRequested(QString::fromStdString(*m_accountId),
-                                                   QString::fromStdString(*m_emailId), partId);
+                    Q_EMIT saveAttachmentRequested(QString::fromStdString(*m_accountId.get()),
+                                                   QString::fromStdString(*m_emailId.get()),
+                                                   partId);
                 },
                 saveToolTip, m_listWidget));
         }

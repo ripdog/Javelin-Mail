@@ -59,6 +59,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <variant>
 #include <vector>
 
@@ -707,8 +708,8 @@ namespace javelin::gui::messageview
         m_bodyStack->addWidget(m_plainTextView);
         m_bodyStack->addWidget(m_htmlView);
 
-        m_attachmentPanel =
-            new MessageAttachmentPanel(m_settings, m_accountId, m_emailId, m_snapshot, this);
+        m_attachmentPanel = new MessageAttachmentPanel(
+            m_settings, std::cref(m_accountId), std::cref(m_emailId), std::cref(m_snapshot), this);
         connect(m_attachmentPanel, &MessageAttachmentPanel::saveAttachmentRequested, this,
                 &MessageViewContainer::saveAttachmentRequested);
         connect(m_attachmentPanel, &MessageAttachmentPanel::openAttachmentRequested, this,

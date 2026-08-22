@@ -14,6 +14,9 @@ function(javelin_configure_catch_test target)
 endfunction()
 
 function(javelin_configure_gui_catch_test target)
+    set(options QTWEBENGINE_PROCESS_LEAKS)
+    cmake_parse_arguments(ARG "${options}" "" "" ${ARGN})
+
     target_include_directories(${target}
         PRIVATE
             ${PROJECT_SOURCE_DIR}/tests
@@ -23,7 +26,22 @@ function(javelin_configure_gui_catch_test target)
     javelin_set_project_warnings(${target})
     javelin_enable_static_analysis(${target})
     javelin_enable_sanitizers(${target})
-    catch_discover_tests(${target} DISCOVERY_MODE PRE_TEST)
+
+    if(ARG_QTWEBENGINE_PROCESS_LEAKS)
+        catch_discover_tests(${target}
+            TEST_SPEC "~[qtwebengine]"
+            DISCOVERY_MODE PRE_TEST
+        )
+        # Chromium and Mesa keep process-global allocations alive after QWebEnginePage teardown.
+        # Keep ASan/UBSan active for WebEngine tests, but do not fail them on those external leaks.
+        catch_discover_tests(${target}
+            TEST_SPEC "[qtwebengine]"
+            DISCOVERY_MODE PRE_TEST
+            PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1"
+        )
+    else()
+        catch_discover_tests(${target} DISCOVERY_MODE PRE_TEST)
+    endif()
 endfunction()
 
 function(javelin_enable_test_localization target)
@@ -423,7 +441,7 @@ target_compile_definitions(javelin_gui_widget_tests
     PRIVATE
         JAVELIN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
 )
-javelin_configure_gui_catch_test(javelin_gui_widget_tests)
+javelin_configure_gui_catch_test(javelin_gui_widget_tests QTWEBENGINE_PROCESS_LEAKS)
 javelin_enable_test_localization(javelin_gui_widget_tests)
 
 # GUI/cache integration tests use writable repositories only as fixture setup. Keeping them out of

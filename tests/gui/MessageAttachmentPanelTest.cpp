@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -22,9 +23,11 @@ TEST_CASE("attachment panel hides non-downloadable attachment parts", "[gui][mes
     attachment.disposition = "attachment";
     message.attachments.push_back(std::move(attachment));
 
+    const std::optional<std::string> accountId{"account-a"};
+    const std::optional<std::string> emailId{"email-a"};
+    const std::optional<javelin::jmap::cache::MessageViewSnapshot> snapshot{std::move(message)};
     javelin::gui::messageview::MessageAttachmentPanel panel{
-        settings, std::optional<std::string>{"account-a"}, std::optional<std::string>{"email-a"},
-        std::optional<javelin::jmap::cache::MessageViewSnapshot>{std::move(message)}};
+        settings, std::cref(accountId), std::cref(emailId), std::cref(snapshot)};
 
     CHECK_FALSE(panel.hasVisibleAttachments());
     CHECK(panel.findChild<QWidget*>(QStringLiteral("attachmentTile")) == nullptr);
@@ -53,7 +56,8 @@ TEST_CASE("attachment panel resizes without replacing interactive tiles", "[gui]
     message.attachments.push_back(std::move(attachment));
     const std::optional<javelin::jmap::cache::MessageViewSnapshot> snapshot{std::move(message)};
 
-    javelin::gui::messageview::MessageAttachmentPanel panel{settings, accountId, emailId, snapshot};
+    javelin::gui::messageview::MessageAttachmentPanel panel{
+        settings, std::cref(accountId), std::cref(emailId), std::cref(snapshot)};
     panel.resize(900, 80);
     panel.show();
     QApplication::processEvents();

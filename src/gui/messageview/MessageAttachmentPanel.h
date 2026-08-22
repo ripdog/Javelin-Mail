@@ -4,6 +4,7 @@
 
 #include <QWidget>
 
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -27,8 +28,10 @@ namespace javelin::gui::messageview
       public:
         MessageAttachmentPanel(
             javelin::gui::settings::GuiSettings& settings,
-            const std::optional<std::string>& accountId, const std::optional<std::string>& emailId,
-            const std::optional<javelin::jmap::cache::MessageViewSnapshot>& snapshot,
+            std::reference_wrapper<const std::optional<std::string>> accountId,
+            std::reference_wrapper<const std::optional<std::string>> emailId,
+            std::reference_wrapper<const std::optional<javelin::jmap::cache::MessageViewSnapshot>>
+                snapshot,
             QWidget* parent = nullptr);
 
         void refresh();
@@ -49,9 +52,10 @@ namespace javelin::gui::messageview
         void reflowRows();
 
         javelin::gui::settings::GuiSettings& m_settings;
-        const std::optional<std::string>& m_accountId;
-        const std::optional<std::string>& m_emailId;
-        const std::optional<javelin::jmap::cache::MessageViewSnapshot>& m_snapshot;
+        std::reference_wrapper<const std::optional<std::string>> m_accountId;
+        std::reference_wrapper<const std::optional<std::string>> m_emailId;
+        std::reference_wrapper<const std::optional<javelin::jmap::cache::MessageViewSnapshot>>
+            m_snapshot;
         QLabel* m_statusLabel = nullptr;
         QToolButton* m_saveAllButton = nullptr;
         QWidget* m_listWidget = nullptr;

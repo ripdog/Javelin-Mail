@@ -82,7 +82,7 @@ namespace
     };
 } // namespace
 
-TEST_CASE("message view constructs with the find footer")
+TEST_CASE("message view constructs with the find footer", "[qtwebengine]")
 {
     QTemporaryDir temporaryDirectory;
     REQUIRE(temporaryDirectory.isValid());
