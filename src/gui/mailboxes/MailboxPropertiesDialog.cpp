@@ -82,12 +82,12 @@ namespace javelin::gui::mailboxes
 
         auto* mailboxGroup = new QGroupBox(i18n("Mailbox"), this);
         auto* mailboxLayout = new QFormLayout(mailboxGroup);
+        const QString displayedParent = mailbox.parentId.has_value()
+                                            ? parentMailboxName
+                                            : i18nc("@item no mailbox parent", "None");
         addValue(*mailboxLayout, i18n("Name:"), QString::fromStdString(mailbox.name), mailboxGroup);
-        addValue(*mailboxLayout, i18n("Account:"), std::move(accountName), mailboxGroup);
-        addValue(*mailboxLayout, i18n("Parent:"),
-                 mailbox.parentId.has_value() ? std::move(parentMailboxName)
-                                              : i18nc("@item no mailbox parent", "None"),
-                 mailboxGroup);
+        addValue(*mailboxLayout, i18n("Account:"), accountName, mailboxGroup);
+        addValue(*mailboxLayout, i18n("Parent:"), displayedParent, mailboxGroup);
         addValue(*mailboxLayout, i18n("Type:"), mailboxType(mailbox.role), mailboxGroup);
         addValue(*mailboxLayout, i18n("Visibility:"),
                  mailbox.isSubscribed ? i18n("Shown") : i18n("Hidden"), mailboxGroup);
@@ -149,25 +149,27 @@ namespace javelin::gui::mailboxes
             deleteButton->setToolTip(deletionExplanation(mailbox));
 
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-        connect(deleteButton, &QPushButton::clicked, this,
-                [this, mailboxName = QString::fromStdString(mailbox.name)]
-                {
-                    QMessageBox confirmation{QMessageBox::Warning, i18n("Delete Mailbox"),
-                                             i18n("Delete “%1”?", mailboxName),
-                                             QMessageBox::NoButton, this};
-                    confirmation.setInformativeText(
-                        i18n("The empty mailbox will be permanently removed. No messages will be "
-                             "deleted."));
-                    auto* confirmDelete = confirmation.addButton(i18n("Delete Mailbox"),
-                                                                 QMessageBox::DestructiveRole);
-                    confirmation.addButton(QMessageBox::Cancel);
-                    confirmation.setDefaultButton(QMessageBox::Cancel);
-                    confirmation.exec();
-                    if (confirmation.clickedButton() != confirmDelete)
-                        return;
-                    m_deleteRequested = true;
-                    accept();
-                });
+        connect(
+            deleteButton, &QPushButton::clicked, this,
+            [this, mailboxName = QString::fromStdString(mailbox.name), accountName, displayedParent]
+            {
+                QMessageBox confirmation{QMessageBox::Warning, i18n("Delete Mailbox"),
+                                         i18n("Delete “%1”?\n\nAccount: %2\nParent: %3",
+                                              mailboxName, accountName, displayedParent),
+                                         QMessageBox::NoButton, this};
+                confirmation.setInformativeText(
+                    i18n("The empty mailbox will be permanently removed. No messages will be "
+                         "deleted."));
+                auto* confirmDelete =
+                    confirmation.addButton(i18n("Delete Mailbox"), QMessageBox::DestructiveRole);
+                confirmation.addButton(QMessageBox::Cancel);
+                confirmation.setDefaultButton(QMessageBox::Cancel);
+                confirmation.exec();
+                if (confirmation.clickedButton() != confirmDelete)
+                    return;
+                m_deleteRequested = true;
+                accept();
+            });
         layout->addWidget(buttons);
     }
 

@@ -1,7 +1,10 @@
 #include "gui/mailboxes/MailboxPropertiesDialog.h"
 
+#include <QApplication>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPushButton>
+#include <QTimer>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -67,6 +70,36 @@ TEST_CASE("mailbox properties present user-facing details and allow safe deletio
     auto* deleteButton = dialog.findChild<QPushButton*>(QStringLiteral("deleteMailboxButton"));
     REQUIRE(deleteButton != nullptr);
     CHECK(deleteButton->isEnabled());
+    CHECK_FALSE(dialog.deleteRequested());
+}
+
+TEST_CASE("mailbox deletion confirmation identifies its account and parent",
+          "[gui][mailbox][properties][delete]")
+{
+    auto value = mailbox();
+    value.parentId = "parent-1";
+    javelin::gui::mailboxes::MailboxPropertiesDialog dialog{
+        QStringLiteral("Personal Account"), QStringLiteral("Inbox"), value, false, false};
+    auto* deleteButton = dialog.findChild<QPushButton*>(QStringLiteral("deleteMailboxButton"));
+    REQUIRE(deleteButton != nullptr);
+
+    QString confirmationText;
+    QTimer::singleShot(0, &dialog,
+                       [&confirmationText]
+                       {
+                           auto* confirmation =
+                               qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+                           REQUIRE(confirmation != nullptr);
+                           confirmationText = confirmation->text();
+                           auto* cancel = confirmation->button(QMessageBox::Cancel);
+                           REQUIRE(cancel != nullptr);
+                           cancel->click();
+                       });
+    deleteButton->click();
+
+    CHECK(confirmationText.contains(QStringLiteral("Projects")));
+    CHECK(confirmationText.contains(QStringLiteral("Personal Account")));
+    CHECK(confirmationText.contains(QStringLiteral("Inbox")));
     CHECK_FALSE(dialog.deleteRequested());
 }
 
