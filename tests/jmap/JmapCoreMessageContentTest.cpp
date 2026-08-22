@@ -658,8 +658,8 @@ TEST_CASE("collapsed mail queries reject responses for a different remote accoun
     }
 
     FakeTransport transport;
-    transport.responseFactory = [localAccountId, wrongQueryAccount](
-                                    const javelin::jmap::api::HttpRequest& request)
+    transport.responseFactory =
+        [localAccountId, wrongQueryAccount](const javelin::jmap::api::HttpRequest& request)
     {
         const auto envelope = javelin::jmap::api::parseRequestEnvelope(request.body.toStdString());
         REQUIRE(envelope.ok());
@@ -672,14 +672,16 @@ TEST_CASE("collapsed mail queries reject responses for a different remote accoun
                 {
                     javelin::jmap::api::MethodInvocation{
                         .name = "Email/query",
-                        .arguments = std::string{R"({"accountId":")"} + queryAccountId +
-                                     R"(","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["eml-2"],"total":1})",
+                        .arguments =
+                            std::string{R"({"accountId":")"} + queryAccountId +
+                            R"(","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["eml-2"],"total":1})",
                         .callId = envelope.value->methodCalls[0].callId,
                     },
                     javelin::jmap::api::MethodInvocation{
                         .name = "Email/get",
-                        .arguments = std::string{R"({"accountId":")"} + getAccountId +
-                                     R"(","state":"email-state-1","list":[{"id":"eml-2","blobId":"blob-2","threadId":"thr-1","mailboxIds":{"mbx-inbox":true},"keywords":{},"size":42,"receivedAt":"2026-04-06T11:22:33Z","hasAttachment":false,"subject":"Wrong account","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[]}],"notFound":[]})",
+                        .arguments =
+                            std::string{R"({"accountId":")"} + getAccountId +
+                            R"(","state":"email-state-1","list":[{"id":"eml-2","blobId":"blob-2","threadId":"thr-1","mailboxIds":{"mbx-inbox":true},"keywords":{},"size":42,"receivedAt":"2026-04-06T11:22:33Z","hasAttachment":false,"subject":"Wrong account","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[]}],"notFound":[]})",
                         .callId = envelope.value->methodCalls[1].callId,
                     },
                 },

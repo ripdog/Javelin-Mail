@@ -48,10 +48,8 @@ TEST_CASE("generated filename truncation honors pathological byte budgets")
 {
     const auto longExtension = javelin::app::truncateGeneratedFileName(
         QStringLiteral("name.abcdefghijklmnopqrstuvwxyz"), 8);
-    const auto fallback =
-        javelin::app::truncateGeneratedFileName(QString::fromUtf8("😀.x"), 1);
-    const auto zeroBudget =
-        javelin::app::truncateGeneratedFileName(QStringLiteral("name.ext"), 0);
+    const auto fallback = javelin::app::truncateGeneratedFileName(QString::fromUtf8("😀.x"), 1);
+    const auto zeroBudget = javelin::app::truncateGeneratedFileName(QStringLiteral("name.ext"), 0);
 
     CHECK(longExtension.toUtf8().size() <= 8);
     CHECK(fallback.toUtf8().size() <= 1);

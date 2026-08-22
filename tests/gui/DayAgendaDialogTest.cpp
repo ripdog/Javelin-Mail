@@ -383,25 +383,32 @@ TEST_CASE("day agenda RSVP completion updates the initiating event after selecti
 
     auto buttons = dialog.findChildren<javelin::gui::calendar::CalendarEventButton*>(
         QStringLiteral("dayAgendaEventButton"));
-    const auto secondButton = std::ranges::find_if(
-        buttons, [](const auto* button)
-        { return button->property("agendaEventId").toString() == QStringLiteral("second-invitation"); });
+    const auto secondButton =
+        std::ranges::find_if(buttons,
+                             [](const auto* button)
+                             {
+                                 return button->property("agendaEventId").toString() ==
+                                        QStringLiteral("second-invitation");
+                             });
     REQUIRE(secondButton != buttons.end());
     (*secondButton)->click();
     settleGui();
     REQUIRE(dialog.selectedEvent().has_value());
     CHECK(dialog.selectedEvent()->eventId == QStringLiteral("second-invitation"));
 
-    dialog.setResponseMutationPending(first.key, false,
-                                      QStringLiteral("First invitation failed."));
+    dialog.setResponseMutationPending(first.key, false, QStringLiteral("First invitation failed."));
     settleGui();
     auto* error = dialog.findChild<QLabel*>(QStringLiteral("dayAgendaResponseError"));
     REQUIRE(error != nullptr);
     CHECK_FALSE(error->isVisible());
 
-    const auto firstButton = std::ranges::find_if(
-        buttons, [](const auto* button)
-        { return button->property("agendaEventId").toString() == QStringLiteral("first-invitation"); });
+    const auto firstButton =
+        std::ranges::find_if(buttons,
+                             [](const auto* button)
+                             {
+                                 return button->property("agendaEventId").toString() ==
+                                        QStringLiteral("first-invitation");
+                             });
     REQUIRE(firstButton != buttons.end());
     (*firstButton)->click();
     settleGui();

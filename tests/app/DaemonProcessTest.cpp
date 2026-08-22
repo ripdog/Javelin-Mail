@@ -1,5 +1,4 @@
 #include "daemon/DaemonProcess.h"
-#include "daemon/DaemonAccountConfiguration.h"
 #include "app/AccountRuntimeManager.h"
 #include "app/CacheLocationProvider.h"
 #include "app/LogStore.h"
@@ -9,6 +8,7 @@
 #include "app/MessageListMaterializationPort.h"
 #include "app/RemoteCodec.h"
 #include "app/undo/UndoManager.h"
+#include "daemon/DaemonAccountConfiguration.h"
 #include "daemon/DaemonServices.h"
 #include "daemon/actions/DaemonRemoteActionDispatcher.h"
 #include "jmap/cache/EmailRepository.h"

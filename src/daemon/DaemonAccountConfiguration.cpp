@@ -69,10 +69,10 @@ namespace javelin::app
         }
     } // namespace
 
-    AccountSyncConfigurationsResult buildAccountSyncConfigurations(
-        const javelin::protocol::SettingsSnapshot& snapshot,
-        AccountCredentialStore& credentialStore,
-        javelin::jmap::cache::AccountRepository& accountRepository)
+    AccountSyncConfigurationsResult
+    buildAccountSyncConfigurations(const javelin::protocol::SettingsSnapshot& snapshot,
+                                   AccountCredentialStore& credentialStore,
+                                   javelin::jmap::cache::AccountRepository& accountRepository)
     {
         std::vector<AccountSyncConfiguration> result;
         for (const auto& account : snapshot.accounts)
@@ -81,8 +81,8 @@ namespace javelin::app
             knownAccountIds.reserve(static_cast<qsizetype>(account.cachedAccountIds.size()));
             for (const auto& accountId : account.cachedAccountIds)
                 knownAccountIds.push_back(accountId);
-            if (const auto error = accountRepository.claimLegacyConnection(
-                    account.id.toStdString(), knownAccountIds))
+            if (const auto error = accountRepository.claimLegacyConnection(account.id.toStdString(),
+                                                                           knownAccountIds))
             {
                 return *error;
             }

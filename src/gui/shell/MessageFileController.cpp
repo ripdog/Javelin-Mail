@@ -152,8 +152,8 @@ namespace javelin::gui::shell
         }
 
         const auto downloadableAttachments = visibleDownloadableAttachments(*snapshot);
-        const auto attachment = std::ranges::find(
-            downloadableAttachments, partId, &javelin::jmap::cache::MessageAttachment::partId);
+        const auto attachment = std::ranges::find(downloadableAttachments, partId,
+                                                  &javelin::jmap::cache::MessageAttachment::partId);
         if (attachment == downloadableAttachments.end())
         {
             Q_EMIT statusMessage(i18n("The selected attachment is not downloadable."), 5000);

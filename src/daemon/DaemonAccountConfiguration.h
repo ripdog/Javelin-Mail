@@ -23,8 +23,8 @@ namespace javelin::app
     using AccountSyncConfigurationsResult =
         std::variant<std::vector<AccountSyncConfiguration>, javelin::jmap::cache::DatabaseError>;
 
-    [[nodiscard]] AccountSyncConfigurationsResult buildAccountSyncConfigurations(
-        const javelin::protocol::SettingsSnapshot& snapshot,
-        AccountCredentialStore& credentialStore,
-        javelin::jmap::cache::AccountRepository& accountRepository);
+    [[nodiscard]] AccountSyncConfigurationsResult
+    buildAccountSyncConfigurations(const javelin::protocol::SettingsSnapshot& snapshot,
+                                   AccountCredentialStore& credentialStore,
+                                   javelin::jmap::cache::AccountRepository& accountRepository);
 } // namespace javelin::app

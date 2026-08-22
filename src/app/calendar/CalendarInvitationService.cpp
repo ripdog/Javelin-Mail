@@ -793,9 +793,10 @@ namespace javelin::app
                         break;
                     if (changes.newState == sinceState)
                     {
-                        qWarning() << "CalendarEventNotification/changes did not advance state while "
-                                      "more changes were advertised; falling back to full "
-                                      "reconciliation";
+                        qWarning()
+                            << "CalendarEventNotification/changes did not advance state while "
+                               "more changes were advertised; falling back to full "
+                               "reconciliation";
                         fullNotificationReconciliation = true;
                         break;
                     }

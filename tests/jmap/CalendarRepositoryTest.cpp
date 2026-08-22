@@ -1046,23 +1046,22 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
               restoredClaim)
               .empty());
 
-    REQUIRE_FALSE(
-        invitations
-            .reconcile({.accountId = "a1",
-                        .notificationState = "n-delivered-requeue",
-                        .eventState = "e3",
-                        .replaceNotifications = false,
-                        .notifications = {},
-                        .deletedNotificationIds = {},
-                        .events = {invitation},
-                        .nonRecurringOccurrences = {},
-                        .destroyedEventIds = {},
-                        .consideredEventIds = {"invite-1"},
-                        .pendingInvitations = {{.eventId = "invite-1",
-                                                .selfParticipantId = "self",
-                                                .sourceNotificationId = "notification-2",
-                                                .enqueueDesktopNotification = true}}})
-            .has_value());
+    REQUIRE_FALSE(invitations
+                      .reconcile({.accountId = "a1",
+                                  .notificationState = "n-delivered-requeue",
+                                  .eventState = "e3",
+                                  .replaceNotifications = false,
+                                  .notifications = {},
+                                  .deletedNotificationIds = {},
+                                  .events = {invitation},
+                                  .nonRecurringOccurrences = {},
+                                  .destroyedEventIds = {},
+                                  .consideredEventIds = {"invite-1"},
+                                  .pendingInvitations = {{.eventId = "invite-1",
+                                                          .selfParticipantId = "self",
+                                                          .sourceNotificationId = "notification-2",
+                                                          .enqueueDesktopNotification = true}}})
+                      .has_value());
     QSqlQuery deliveredRequeue{connection.database()};
     REQUIRE(deliveredRequeue.exec(QStringLiteral(
         "SELECT status,delivered_at FROM calendar_invitation_outbox WHERE account_id='a1' AND "

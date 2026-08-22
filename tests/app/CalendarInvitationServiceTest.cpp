@@ -651,25 +651,25 @@ TEST_CASE("calendar invitation changes page cap falls back to full reconciliatio
     {
         const auto oldState = std::string{"n"} + std::to_string(page);
         const auto newState = std::string{"n"} + std::to_string(page + 1);
-        transport.results.push_back(response(
-            "CalendarEventNotification/changes",
-            std::string{R"({"accountId":"calendar-account","oldState":")"} + oldState +
-                R"(","newState":")" + newState +
-                R"(","hasMoreChanges":true,"created":[],"updated":[],"destroyed":[]})",
-            "calendar-invitation-notification-changes"));
+        transport.results.push_back(
+            response("CalendarEventNotification/changes",
+                     std::string{R"({"accountId":"calendar-account","oldState":")"} + oldState +
+                         R"(","newState":")" + newState +
+                         R"(","hasMoreChanges":true,"created":[],"updated":[],"destroyed":[]})",
+                     "calendar-invitation-notification-changes"));
     }
     transport.results.push_back(response(
         "CalendarEventNotification/query",
         R"({"accountId":"calendar-account","queryState":"nq-full","canCalculateChanges":false,"position":0,"ids":[],"total":0})",
         "calendar-invitation-query"));
-    transport.results.push_back(response(
-        "CalendarEventNotification/get",
-        R"({"accountId":"calendar-account","state":"n-full","list":[],"notFound":[]})",
-        "calendar-invitation-notification-get"));
-    transport.results.push_back(response(
-        "CalendarEvent/get",
-        R"({"accountId":"calendar-account","state":"e1","list":[],"notFound":[]})",
-        "calendar-invitation-event-get"));
+    transport.results.push_back(
+        response("CalendarEventNotification/get",
+                 R"({"accountId":"calendar-account","state":"n-full","list":[],"notFound":[]})",
+                 "calendar-invitation-notification-get"));
+    transport.results.push_back(
+        response("CalendarEvent/get",
+                 R"({"accountId":"calendar-account","state":"e1","list":[],"notFound":[]})",
+                 "calendar-invitation-event-get"));
 
     javelin::jmap::calendar::CalendarCacheReader reader{connection};
     javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
@@ -678,11 +678,11 @@ TEST_CASE("calendar invitation changes page cap falls back to full reconciliatio
 
     REQUIRE(runUntilCacheChanged(service));
     CHECK(transport.results.empty());
-    REQUIRE(transport.requests.size() ==
-            javelin::app::calendarInvitationChangesPageLimit + 4);
+    REQUIRE(transport.requests.size() == javelin::app::calendarInvitationChangesPageLimit + 4);
     CHECK(transport.requests
               .at(static_cast<qsizetype>(javelin::app::calendarInvitationChangesPageLimit + 1))
-              .envelope.methodCalls.front().name == "CalendarEventNotification/query");
+              .envelope.methodCalls.front()
+              .name == "CalendarEventNotification/query");
 
     javelin::jmap::cache::CalendarRepository repository{connection};
     const auto notificationState =

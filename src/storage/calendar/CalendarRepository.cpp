@@ -1436,8 +1436,7 @@ namespace javelin::jmap::cache
                         if (!exec(calendarRights, failure,
                                   QStringLiteral("Read invitation calendar rights")))
                             return failure;
-                        if (calendarRights.next() &&
-                            (calendarRights.value(0).toUInt() & 32U) != 0U)
+                        if (calendarRights.next() && (calendarRights.value(0).toUInt() & 32U) != 0U)
                         {
                             mayRsvpInMemberCalendar = true;
                             break;
