@@ -66,6 +66,11 @@ namespace javelin::gui::shell
 
     } // namespace
 
+    bool isDownloadableAttachment(const javelin::jmap::cache::MessageAttachment& attachment)
+    {
+        return !isEmbeddedInline(attachment) && attachment.blobId.has_value();
+    }
+
     QString suggestedFileName(const javelin::jmap::AttachmentDownload& download)
     {
         return attachmentFileName(download.name, download.partId, download.mediaType);
@@ -177,7 +182,7 @@ namespace javelin::gui::shell
         attachments.reserve(snapshot.attachments.size());
         for (const auto& attachment : snapshot.attachments)
         {
-            if (!isEmbeddedInline(attachment) && attachment.blobId.has_value())
+            if (isDownloadableAttachment(attachment))
             {
                 attachments.push_back(attachment);
             }

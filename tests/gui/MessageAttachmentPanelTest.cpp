@@ -11,6 +11,25 @@
 #include <optional>
 #include <string>
 
+TEST_CASE("attachment panel hides non-downloadable attachment parts", "[gui][messageview]")
+{
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    javelin::jmap::cache::MessageViewSnapshot message;
+    javelin::jmap::cache::MessageAttachment attachment;
+    attachment.partId = "attachment-without-blob";
+    attachment.mediaType = "text/plain";
+    attachment.name = "missing.txt";
+    attachment.disposition = "attachment";
+    message.attachments.push_back(std::move(attachment));
+
+    javelin::gui::messageview::MessageAttachmentPanel panel{
+        settings, std::optional<std::string>{"account-a"}, std::optional<std::string>{"email-a"},
+        std::optional<javelin::jmap::cache::MessageViewSnapshot>{std::move(message)}};
+
+    CHECK_FALSE(panel.hasVisibleAttachments());
+    CHECK(panel.findChild<QWidget*>(QStringLiteral("attachmentTile")) == nullptr);
+}
+
 TEST_CASE("attachment panel resizes without replacing interactive tiles", "[gui][messageview]")
 {
     javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};

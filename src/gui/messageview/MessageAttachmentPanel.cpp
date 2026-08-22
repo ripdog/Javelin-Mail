@@ -1,5 +1,7 @@
 #include "gui/messageview/MessageAttachmentPanel.h"
 
+#include "gui/shell/MessageFileUtils.h"
+
 #include "gui/settings/GuiSettings.h"
 
 #include <KLocalizedString>
@@ -20,10 +22,7 @@
 #include <QToolButton>
 
 #include <algorithm>
-#include <cctype>
 #include <functional>
-#include <ranges>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -69,15 +68,7 @@ namespace javelin::gui::messageview
             attachments.reserve(snapshot->attachments.size());
             for (const auto& attachment : snapshot->attachments)
             {
-                const bool isEmbeddedInline =
-                    attachment.cid.has_value() && attachment.disposition.has_value() &&
-                    std::ranges::equal(*attachment.disposition, std::string_view{"inline"},
-                                       [](const char left, const char right)
-                                       {
-                                           return std::tolower(static_cast<unsigned char>(left)) ==
-                                                  std::tolower(static_cast<unsigned char>(right));
-                                       });
-                if (!isEmbeddedInline)
+                if (javelin::gui::shell::isDownloadableAttachment(attachment))
                     attachments.push_back(&attachment);
             }
             return attachments;

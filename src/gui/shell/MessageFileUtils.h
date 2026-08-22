@@ -39,6 +39,8 @@ namespace javelin::gui::shell
         QString failedPath;
     };
 
+    [[nodiscard]] bool
+    isDownloadableAttachment(const javelin::jmap::cache::MessageAttachment& attachment);
     [[nodiscard]] QString suggestedFileName(const javelin::jmap::AttachmentDownload& download);
     [[nodiscard]] QString
     suggestedFileName(const javelin::jmap::cache::MessageAttachment& attachment);
