@@ -170,6 +170,16 @@ TEST_CASE("work scheduler preserves mail transfer jobs across restart",
                          .detail = QStringLiteral("Waiting for network")},
                         QStringLiteral("{\"operationId\":\"operation-1\",\"canRetry\":false}"))
                 .has_value());
+        REQUIRE_FALSE(
+            scheduler
+                .ensure({.jobId = "mail-import:operation-2",
+                         .parentJobId = std::nullopt,
+                         .accountId = "destination-account",
+                         .kind = javelin::app::WorkKind::MailImport,
+                         .priority = javelin::app::WorkPriority::Bulk,
+                         .title = QStringLiteral("Import mail"),
+                         .checkpointJson = QStringLiteral("{\"operationId\":\"operation-2\"}")})
+                .has_value());
     }
 
     javelin::app::WorkScheduler recovered{connection, nullptr, std::chrono::milliseconds{0}};
@@ -185,6 +195,15 @@ TEST_CASE("work scheduler preserves mail transfer jobs across restart",
           QStringLiteral("{\"operationId\":\"operation-1\",\"canRetry\":false}"));
     CHECK(javelin::app::classify(job->kind, job->priority) ==
           javelin::app::WorkClass::ForegroundCommand);
+
+    const auto importResult = recovered.find("mail-import:operation-2");
+    REQUIRE(std::holds_alternative<std::optional<javelin::app::WorkRecord>>(importResult));
+    const auto& importJob = std::get<std::optional<javelin::app::WorkRecord>>(importResult);
+    REQUIRE(importJob.has_value());
+    CHECK(importJob->kind == javelin::app::WorkKind::MailImport);
+    CHECK(importJob->status == javelin::app::WorkStatus::Queued);
+    CHECK(importJob->checkpointJson == QStringLiteral("{\"operationId\":\"operation-2\"}"));
+    CHECK(javelin::app::classify(importJob->kind) == javelin::app::WorkClass::Maintenance);
 }
 
 TEST_CASE("work scheduler requeues configured failed work and preserves checkpoints",

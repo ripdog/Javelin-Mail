@@ -2980,6 +2980,17 @@ namespace javelin::jmap
     MailboxMutationEngine::create(LiveConnectionSettings settings, std::string accountId,
                                   std::string name, std::function<void()> projectionCommitted)
     {
+        co_return co_await createInParent(std::move(settings), std::move(accountId),
+                                          std::move(name), std::nullopt, std::nullopt,
+                                          std::move(projectionCommitted));
+    }
+
+    QCoro::Task<MailboxCreateResult>
+    MailboxMutationEngine::createInParent(LiveConnectionSettings settings, std::string accountId,
+                                          std::string name, std::optional<std::string> parentId,
+                                          std::optional<std::string> operationGroupId,
+                                          std::function<void()> projectionCommitted)
+    {
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
             co_return OperationError{
@@ -3022,27 +3033,64 @@ namespace javelin::jmap
             };
         }
         if (account->second.isReadOnly ||
-            !account->second.accountCapabilities.mailDetails.has_value() ||
-            !account->second.accountCapabilities.mailDetails->mayCreateTopLevelMailbox)
+            !account->second.accountCapabilities.mailDetails.has_value())
         {
             co_return OperationError{
                 .code = OperationErrorCode::PermissionDenied,
-                .message = QStringLiteral("You do not have permission to create top-level "
-                                          "mailboxes in this account."),
+                .message = QStringLiteral("You do not have permission to create mailboxes in this "
+                                          "account."),
             };
         }
 
         javelin::jmap::cache::MailboxRepository repository{*m_impl->databaseConnection};
-        const auto topLevel = repository.listByParent(accountId, std::nullopt);
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&topLevel))
+        if (!parentId.has_value())
+        {
+            if (!account->second.accountCapabilities.mailDetails->mayCreateTopLevelMailbox)
+            {
+                co_return OperationError{
+                    .code = OperationErrorCode::PermissionDenied,
+                    .message = QStringLiteral("You do not have permission to create top-level "
+                                              "mailboxes in this account."),
+                };
+            }
+        }
+        else
+        {
+            const auto parent = repository.find(accountId, *parentId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&parent))
+                co_return operationError(*error);
+            const auto& resolvedParent =
+                std::get<std::optional<javelin::jmap::domain::Mailbox>>(parent);
+            if (!resolvedParent.has_value())
+            {
+                co_return OperationError{
+                    .code = OperationErrorCode::NotFound,
+                    .message = QStringLiteral("The parent mailbox no longer exists."),
+                };
+            }
+            if (!resolvedParent->myRights.mayCreateChild)
+            {
+                co_return OperationError{
+                    .code = OperationErrorCode::PermissionDenied,
+                    .message =
+                        QStringLiteral("You do not have permission to create a child mailbox "
+                                       "under this mailbox."),
+                };
+            }
+        }
+
+        const auto siblings = repository.listByParent(
+            accountId,
+            parentId.has_value() ? std::optional<std::string_view>{*parentId} : std::nullopt);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&siblings))
             co_return operationError(*error);
-        if (std::ranges::find(std::get<std::vector<javelin::jmap::domain::Mailbox>>(topLevel), name,
+        if (std::ranges::find(std::get<std::vector<javelin::jmap::domain::Mailbox>>(siblings), name,
                               &javelin::jmap::domain::Mailbox::name) !=
-            std::get<std::vector<javelin::jmap::domain::Mailbox>>(topLevel).end())
+            std::get<std::vector<javelin::jmap::domain::Mailbox>>(siblings).end())
         {
             co_return OperationError{
                 .code = OperationErrorCode::InvalidUserInput,
-                .message = QStringLiteral("A top-level mailbox with this name already exists."),
+                .message = QStringLiteral("A sibling mailbox with this name already exists."),
             };
         }
 
@@ -3075,11 +3123,11 @@ namespace javelin::jmap
 
         javelin::jmap::sync::MailboxCreateMutationRecord mutation{
             .mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
-            .operationGroupId = std::nullopt,
+            .operationGroupId = std::move(operationGroupId),
             .accountId = accountId,
             .creationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
             .name = name,
-            .parentId = std::nullopt,
+            .parentId = parentId,
             .sortOrder = 0,
             .isSubscribed = true,
             .status = javelin::jmap::sync::MutationStatus::Pending,
@@ -3106,7 +3154,8 @@ namespace javelin::jmap
     }
 
     QCoro::Task<MailboxCreateResult>
-    MailboxMutationEngine::reconcileCreate(LiveConnectionSettings settings, std::string accountId)
+    MailboxMutationEngine::reconcileCreate(LiveConnectionSettings settings, std::string accountId,
+                                           std::optional<std::string> operationGroupId)
     {
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
@@ -3135,6 +3184,15 @@ namespace javelin::jmap
             co_return operationError(*error);
         auto active = std::get<std::vector<javelin::jmap::sync::MailboxCreateMutationRecord>>(
             std::move(activeResult));
+        if (operationGroupId.has_value())
+        {
+            std::erase_if(active,
+                          [operationGroupId](const auto& mutation)
+                          {
+                              return !mutation.operationGroupId.has_value() ||
+                                     *mutation.operationGroupId != *operationGroupId;
+                          });
+        }
         if (active.empty())
         {
             co_return MailboxCreateChange{

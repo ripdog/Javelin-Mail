@@ -138,6 +138,51 @@ namespace javelin::jmap::cache::migrations
                             "mutation_journal_retireable_terminal); END"),
                     },
             },
+            MigrationStep{
+                .version = 64,
+                .name = QStringLiteral("mail_import_journal"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "CREATE TABLE mail_import_operations (operation_id TEXT PRIMARY KEY,"
+                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
+                            "CASCADE,mailbox_id TEXT,source_paths_json TEXT NOT NULL,"
+                            "recreate_hierarchy INTEGER NOT NULL DEFAULT 0 "
+                            "CHECK(recreate_hierarchy "
+                            "IN (0,1)),status TEXT NOT NULL CHECK(status IN ('preparing','running',"
+                            "'waiting_network','waiting_auth','waiting_space','blocked_unknown',"
+                            "'partial','failed','complete')),scan_sealed INTEGER NOT NULL DEFAULT "
+                            "0 "
+                            "CHECK(scan_sealed IN (0,1)),title TEXT NOT NULL,created_at TEXT NOT "
+                            "NULL,last_error TEXT) STRICT"),
+                        QStringLiteral("CREATE INDEX idx_mail_import_operations_recoverable ON "
+                                       "mail_import_operations(status,created_at)"),
+                        QStringLiteral(
+                            "CREATE TABLE mail_import_mailboxes (operation_id TEXT NOT NULL "
+                            "REFERENCES mail_import_operations(operation_id) ON DELETE CASCADE,"
+                            "ordinal INTEGER NOT NULL,relative_path TEXT NOT NULL,"
+                            "parent_relative_path TEXT,display_name TEXT NOT NULL,phase TEXT NOT "
+                            "NULL CHECK(phase IN ('pending','reused','created','failed')),"
+                            "resolved_mailbox_id TEXT,last_error TEXT,PRIMARY KEY(operation_id,"
+                            "relative_path),UNIQUE(operation_id,ordinal)) STRICT"),
+                        QStringLiteral(
+                            "CREATE TABLE mail_import_items (item_id TEXT PRIMARY KEY,operation_id "
+                            "TEXT NOT NULL REFERENCES mail_import_operations(operation_id) ON "
+                            "DELETE CASCADE,ordinal INTEGER NOT NULL,source_path TEXT NOT NULL,"
+                            "source_relative_path TEXT,source_kind TEXT NOT NULL CHECK(source_kind "
+                            "IN ('eml','mbox')),content_offset INTEGER,content_end INTEGER,"
+                            "decoded_size INTEGER NOT NULL,source_canonical_path TEXT NOT NULL,"
+                            "source_size INTEGER NOT NULL,source_mtime_ms INTEGER NOT NULL,"
+                            "received_at TEXT,destination_relative_path TEXT,resolved_mailbox_id "
+                            "TEXT,phase TEXT NOT NULL CHECK(phase IN ('pending','uploading',"
+                            "'uploaded','creating','unknown','created','reused','no_destination',"
+                            "'failed')),source_sha256 TEXT,uploaded_blob_id TEXT,pre_state TEXT,"
+                            "created_email_id TEXT,existing_email_id TEXT,last_error TEXT,"
+                            "UNIQUE(operation_id,ordinal)) STRICT"),
+                        QStringLiteral("CREATE INDEX idx_mail_import_items_next ON "
+                                       "mail_import_items(operation_id,phase,ordinal)"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

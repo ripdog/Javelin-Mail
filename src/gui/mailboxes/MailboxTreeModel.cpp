@@ -7,11 +7,13 @@
 #include <KLocalizedString>
 
 #include <QApplication>
+#include <QFileInfo>
 #include <QFutureWatcher>
 #include <QIcon>
 #include <QMimeData>
 #include <QPalette>
 #include <QSize>
+#include <QUrl>
 #include <QtConcurrentRun>
 
 #include <algorithm>
@@ -459,7 +461,8 @@ namespace javelin::gui::mailboxes
 
     QStringList MailboxTreeModel::mimeTypes() const
     {
-        return {QString::fromLatin1(javelin::gui::messages::messageDragMimeType)};
+        return {QString::fromLatin1(javelin::gui::messages::messageDragMimeType),
+                QStringLiteral("text/uri-list")};
     }
 
     bool MailboxTreeModel::canDropMimeData(const QMimeData* data, const Qt::DropAction action,
@@ -470,12 +473,26 @@ namespace javelin::gui::mailboxes
         Q_UNUSED(column);
         const auto* node = nodeForIndex(parentIndex);
         if ((action != Qt::MoveAction && action != Qt::CopyAction) || data == nullptr ||
-            !data->hasFormat(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)) ||
             node == nullptr || node->mailboxId.empty() || !node->mayAddItems)
             return false;
-        return javelin::gui::messages::decodeMessageDragPayload(
-                   data->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)))
-            .has_value();
+
+        const auto messageMime = QString::fromLatin1(javelin::gui::messages::messageDragMimeType);
+        if (data->hasFormat(messageMime))
+        {
+            return javelin::gui::messages::decodeMessageDragPayload(data->data(messageMime))
+                .has_value();
+        }
+        if (!data->hasUrls() || data->urls().isEmpty())
+            return false;
+        return std::ranges::all_of(data->urls(),
+                                   [](const QUrl& url)
+                                   {
+                                       if (!url.isLocalFile())
+                                           return false;
+                                       const QFileInfo info{url.toLocalFile()};
+                                       return info.exists() && info.isReadable() &&
+                                              !info.isSymLink() && (info.isFile() || info.isDir());
+                                   });
     }
 
     bool MailboxTreeModel::dropMimeData(const QMimeData* data, const Qt::DropAction action,
@@ -483,18 +500,29 @@ namespace javelin::gui::mailboxes
                                         const QModelIndex& parentIndex)
     {
         if (!canDropMimeData(data, action, row, column, parentIndex))
-        {
             return false;
+
+        const auto* node = nodeForIndex(parentIndex);
+        if (node == nullptr)
+            return false;
+        const auto messageMime = QString::fromLatin1(javelin::gui::messages::messageDragMimeType);
+        if (data->hasFormat(messageMime))
+        {
+            const auto payload =
+                javelin::gui::messages::decodeMessageDragPayload(data->data(messageMime));
+            if (!payload.has_value())
+                return false;
+            Q_EMIT emailsDropped(*payload, QString::fromStdString(node->accountId),
+                                 QString::fromStdString(node->mailboxId), action);
+            return true;
         }
 
-        const auto payload = javelin::gui::messages::decodeMessageDragPayload(
-            data->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)));
-        const auto* node = nodeForIndex(parentIndex);
-        if (!payload.has_value() || node == nullptr)
-            return false;
-
-        Q_EMIT emailsDropped(*payload, QString::fromStdString(node->accountId),
-                             QString::fromStdString(node->mailboxId), action);
+        QStringList paths;
+        paths.reserve(data->urls().size());
+        for (const auto& url : data->urls())
+            paths.push_back(QFileInfo{url.toLocalFile()}.absoluteFilePath());
+        Q_EMIT filesDropped(paths, QString::fromStdString(node->accountId),
+                            QString::fromStdString(node->mailboxId));
         return true;
     }
 

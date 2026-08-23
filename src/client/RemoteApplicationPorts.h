@@ -13,6 +13,7 @@
 #include "app/LogStore.h"
 #include "app/MailApplicationPorts.h"
 #include "app/MailExportApplicationPorts.h"
+#include "app/MailImportApplicationPorts.h"
 #include "app/MessageContentApplicationPorts.h"
 #include "app/MessageListMaterializationPort.h"
 #include "app/SieveApplicationPorts.h"
@@ -307,6 +308,17 @@ namespace javelin::app
         explicit RemoteMailExportPort(RemoteActionClient& client);
         [[nodiscard]] QCoro::Task<MailExportStartResult>
         startExport(MailExportIntent intent) override;
+
+      private:
+        RemoteActionClient& m_client;
+    };
+
+    class RemoteMailImportPort final : public MailImportPort
+    {
+      public:
+        explicit RemoteMailImportPort(RemoteActionClient& client);
+        [[nodiscard]] QCoro::Task<MailImportStartResult>
+        startImport(MailImportIntent intent) override;
 
       private:
         RemoteActionClient& m_client;

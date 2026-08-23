@@ -120,6 +120,8 @@ namespace javelin::gui::mailboxes
         void emailsDropped(const javelin::gui::messages::MessageDragPayload& payload,
                            const QString& destinationAccountId, const QString& destinationMailboxId,
                            Qt::DropAction action);
+        void filesDropped(const QStringList& paths, const QString& destinationAccountId,
+                          const QString& destinationMailboxId);
 
       private:
         // Each node represents either an account (mailboxId empty, children = mailboxes)

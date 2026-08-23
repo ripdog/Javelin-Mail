@@ -1387,6 +1387,15 @@ namespace javelin::app
         return coordinator->second->requestSynchronization();
     }
 
+    bool AccountRuntimeManager::requestMailboxSynchronization(const std::string_view accountId,
+                                                              const std::string_view mailboxId)
+    {
+        const auto coordinator = m_coordinators.find(std::string{accountId});
+        if (coordinator == m_coordinators.end())
+            return false;
+        return coordinator->second->requestMailboxSynchronization(mailboxId);
+    }
+
     void MailNotificationService::mailboxRefreshed(const QString& accountId,
                                                    const QString& mailboxId,
                                                    const QString& mailboxName)

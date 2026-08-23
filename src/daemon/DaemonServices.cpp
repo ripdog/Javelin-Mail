@@ -25,6 +25,7 @@
 #include "app/MailApplicationEventsService.h"
 #include "app/MailCommandService.h"
 #include "app/MailExportService.h"
+#include "app/MailImportService.h"
 #include "app/MailIndexService.h"
 #include "app/MailMutationApplicationService.h"
 #include "app/MailNotificationService.h"
@@ -402,6 +403,32 @@ namespace javelin::app
                              if (!paused)
                                  m_mailExportService->authenticationBecameAvailable();
                          });
+        m_mailImportService = std::make_unique<MailImportService>(
+            m_databaseConnection, *m_transport, *m_methodTransport, *m_accountRuntimeManager,
+            *m_workScheduler,
+            [this](const std::string_view accountId, const std::string_view mailboxId)
+            {
+                if (!m_accountRuntimeManager->requestMailboxSynchronization(accountId, mailboxId))
+                    qWarning().noquote() << "Could not queue post-import mailbox synchronization"
+                                         << QString::fromStdString(std::string{accountId})
+                                         << QString::fromStdString(std::string{mailboxId});
+            });
+        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::accountConfigured,
+                         m_mailImportService.get(),
+                         [this](const QString&) { m_mailImportService->restoreRecoverable(); });
+        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::sessionRefreshed,
+                         m_mailImportService.get(),
+                         [this](const QString&) { m_mailImportService->restoreRecoverable(); });
+        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::networkReachable,
+                         m_mailImportService.get(), &MailImportService::networkBecameReachable);
+        QObject::connect(m_errorCoordinator.get(),
+                         &ApplicationErrorCoordinator::authenticationPauseChanged,
+                         m_mailImportService.get(),
+                         [this](const QString&, const bool paused)
+                         {
+                             if (!paused)
+                                 m_mailImportService->authenticationBecameAvailable();
+                         });
         m_mailTransferCommandService = std::make_unique<MailTransferCommandService>(
             m_databaseConnection, *m_transport, *m_methodTransport, *m_messageContentClient,
             *m_accountRuntimeManager, *m_mailTransferHistoryCoordinator,
@@ -652,6 +679,11 @@ namespace javelin::app
     MailExportPort& DaemonServices::mailExportPort()
     {
         return *m_mailExportService;
+    }
+
+    MailImportPort& DaemonServices::mailImportPort()
+    {
+        return *m_mailImportService;
     }
 
     SieveCommandPort& DaemonServices::sieveCommandPort()

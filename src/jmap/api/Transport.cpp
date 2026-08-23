@@ -137,6 +137,22 @@ namespace javelin::jmap::api
         };
     }
 
+    QCoro::Task<TransportResult>
+    AbstractTransport::sendFromDevice(HttpRequest request, QIODevice& device,
+                                      const std::uint64_t contentLength)
+    {
+        static_cast<void>(request);
+        static_cast<void>(device);
+        static_cast<void>(contentLength);
+        co_return TransportError{
+            .code = TransportErrorCode::LocalIoFailure,
+            .message = "This HTTP transport does not support device-backed request bodies",
+            .httpStatus = std::nullopt,
+            .networkError = std::nullopt,
+            .retryAfter = std::nullopt,
+        };
+    }
+
     QCoro::Task<FileTransportResult> AbstractTransport::sendToFile(HttpRequest request,
                                                                    QString filePath)
     {
@@ -258,6 +274,55 @@ namespace javelin::jmap::api
         replaceBearerToken(retryRequest, *refreshedAccessToken);
         retryRequest.dispatched = {};
         co_return co_await m_transport.sendFromFile(std::move(retryRequest), std::move(filePath));
+    }
+
+    QCoro::Task<TransportResult>
+    RefreshingTransport::sendFromDevice(HttpRequest request, QIODevice& device,
+                                        const std::uint64_t contentLength)
+    {
+        if (request.authentication.has_value() && m_accessTokenProvider)
+        {
+            const auto currentAccessToken =
+                m_accessTokenProvider(request.authentication->accountId);
+            if (currentAccessToken.has_value() &&
+                *currentAccessToken != request.authentication->accessToken)
+                replaceBearerToken(request, *currentAccessToken);
+        }
+
+        const auto initialPosition = device.pos();
+        auto retryRequest = request;
+        auto result =
+            co_await m_transport.sendFromDevice(std::move(request), device, contentLength);
+        if (!isUnauthorized(result) || !retryRequest.authentication.has_value() ||
+            !m_refreshHandler)
+            co_return result;
+
+        const auto rejectedAccessToken = retryRequest.authentication->accessToken;
+        auto refreshedAccessToken =
+            co_await m_refreshHandler(retryRequest.authentication->accountId, rejectedAccessToken);
+        if (!refreshedAccessToken.has_value() || *refreshedAccessToken == rejectedAccessToken)
+            co_return result;
+        if (retryRequest.cancellation.isCancellationRequested())
+        {
+            co_return TransportError{
+                .code = TransportErrorCode::Cancelled,
+                .message = "HTTP request cancelled while refreshing authentication",
+                .httpStatus = std::nullopt,
+            };
+        }
+        if (!device.seek(initialPosition))
+        {
+            co_return TransportError{
+                .code = TransportErrorCode::LocalIoFailure,
+                .message = "Could not rewind streamed HTTP request body for authentication retry",
+                .httpStatus = std::nullopt,
+            };
+        }
+
+        replaceBearerToken(retryRequest, *refreshedAccessToken);
+        retryRequest.dispatched = {};
+        co_return co_await m_transport.sendFromDevice(std::move(retryRequest), device,
+                                                      contentLength);
     }
 
     QCoro::Task<FileTransportResult> RefreshingTransport::sendToFile(HttpRequest request,
@@ -440,6 +505,17 @@ namespace javelin::jmap::api
     QCoro::Task<TransportResult> QtNetworkTransport::sendFromFile(HttpRequest request,
                                                                   QString filePath)
     {
+        QFile file{filePath};
+        if (!file.open(QIODevice::ReadOnly))
+            co_return localIoError(QStringLiteral("Open streamed HTTP request"), file);
+        co_return co_await sendFromDevice(std::move(request), file,
+                                          static_cast<std::uint64_t>(file.size()));
+    }
+
+    QCoro::Task<TransportResult>
+    QtNetworkTransport::sendFromDevice(HttpRequest request, QIODevice& device,
+                                       const std::uint64_t contentLength)
+    {
         if (request.cancellation.isCancellationRequested())
         {
             co_return TransportError{
@@ -448,29 +524,27 @@ namespace javelin::jmap::api
                 .httpStatus = std::nullopt,
             };
         }
-        if (request.method != HttpMethod::Post)
+        if (request.method != HttpMethod::Post || !device.isReadable())
         {
             co_return TransportError{
                 .code = TransportErrorCode::LocalIoFailure,
-                .message = "File-backed HTTP request bodies require POST",
+                .message = "Device-backed HTTP request bodies require POST and a readable device",
                 .httpStatus = std::nullopt,
             };
         }
 
-        QFile file{filePath};
-        if (!file.open(QIODevice::ReadOnly))
-            co_return localIoError(QStringLiteral("Open streamed HTTP request"), file);
-
         QNetworkRequest networkRequest{request.url};
         networkRequest.setTransferTimeout(requestTimeoutMs);
-        networkRequest.setHeader(QNetworkRequest::ContentLengthHeader, file.size());
+        networkRequest.setHeader(QNetworkRequest::ContentLengthHeader,
+                                 QVariant::fromValue<qulonglong>(contentLength));
         for (const HttpHeader& header : request.headers)
             networkRequest.setRawHeader(header.name, header.value);
 
         qCDebug(logTransport).noquote()
-            << "request" << request.url.toString() << "POST streamed request body" << file.size();
+            << "request" << request.url.toString() << "POST streamed request body"
+            << static_cast<qulonglong>(contentLength);
 
-        QNetworkReply* reply = m_networkAccessManager.post(networkRequest, &file);
+        QNetworkReply* reply = m_networkAccessManager.post(networkRequest, &device);
         m_activeReplies.emplace_back(reply);
         const auto unregisterReply = qScopeGuard(
             [this, reply]()

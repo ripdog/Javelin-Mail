@@ -8,6 +8,7 @@
 
 #include <QCoroTask>
 
+#include <QBuffer>
 #include <QCoreApplication>
 #include <QFile>
 #include <QTemporaryDir>
@@ -78,6 +79,15 @@ namespace
             QFile file{filePath};
             REQUIRE(file.open(QIODevice::ReadOnly));
             request.body = file.readAll();
+            co_return co_await send(std::move(request));
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::api::TransportResult>
+        sendFromDevice(javelin::jmap::api::HttpRequest request, QIODevice& device,
+                       const std::uint64_t contentLength) override
+        {
+            request.body = device.read(static_cast<qint64>(contentLength));
+            REQUIRE(request.body.size() == static_cast<qsizetype>(contentLength));
             co_return co_await send(std::move(request));
         }
     };
@@ -606,6 +616,63 @@ TEST_CASE("refreshing HTTP file upload retries unauthorized requests from the sa
         header(rawTransport.requests[1], QByteArrayLiteral("Authorization"));
     REQUIRE(refreshedAuthorization != nullptr);
     CHECK(refreshedAuthorization->value == "Bearer refreshed-token");
+}
+
+TEST_CASE("refreshing HTTP device upload rewinds the streamed body after authentication refresh",
+          "[jmap][transport][auth][device]")
+{
+    ensureApplication();
+
+    QByteArray payload =
+        QByteArrayLiteral("From: sender@example.com\r\n\r\nstreamed device upload");
+    QBuffer source{&payload};
+    REQUIRE(source.open(QIODevice::ReadOnly));
+
+    FakeTransport rawTransport;
+    rawTransport.queuedResults.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::HttpFailure,
+        .message = "Unauthorized",
+        .httpStatus = 401,
+    });
+    rawTransport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 201,
+        .body = "{\"blobId\":\"blob-1\"}",
+    });
+    javelin::jmap::api::RefreshingTransport transport{rawTransport};
+    int refreshCalls = 0;
+    transport.setRefreshHandler(
+        [&](std::string, std::string) -> QCoro::Task<std::optional<std::string>>
+        {
+            ++refreshCalls;
+            co_return std::string{"refreshed-token"};
+        });
+    int dispatchCalls = 0;
+
+    const auto result = QCoro::waitFor(transport.sendFromDevice(
+        {
+            .method = javelin::jmap::api::HttpMethod::Post,
+            .url = QUrl{QStringLiteral("https://mail.example.com/upload/u1")},
+            .headers = {{.name = "Authorization", .value = "Bearer access-token"},
+                        {.name = "Content-Type", .value = "message/rfc822"}},
+            .body = {},
+            .authentication =
+                javelin::jmap::api::BearerAuthentication{
+                    .accountId = "u1",
+                    .accessToken = "access-token",
+                },
+            .cancellation = {},
+            .dispatched = [&dispatchCalls] { ++dispatchCalls; },
+        },
+        source, static_cast<std::uint64_t>(payload.size())));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::HttpResponse>(result));
+    CHECK(refreshCalls == 1);
+    CHECK(dispatchCalls == 1);
+    REQUIRE(rawTransport.requests.size() == 2);
+    CHECK(rawTransport.requests[0].body == payload);
+    CHECK(rawTransport.requests[1].body == payload);
+    REQUIRE(rawTransport.requests[1].authentication.has_value());
+    CHECK(rawTransport.requests[1].authentication->accessToken == "refreshed-token");
 }
 
 TEST_CASE("refreshing HTTP transport resolves current tokens for stale request scopes",

@@ -69,6 +69,7 @@ namespace javelin::app
         void pauseForAuthentication();
         void networkBecameReachable();
         [[nodiscard]] bool requestSynchronization();
+        [[nodiscard]] bool requestMailboxSynchronization(std::string_view mailboxId);
         [[nodiscard]] Status status() const;
 
         [[nodiscard]] QCoro::Task<void>

@@ -794,10 +794,17 @@ namespace javelin::app
     void GuiDaemonSession::onDaemonDisconnected(const protocol::SocketDisconnectReason,
                                                 const QString& detail)
     {
+        const bool wasWaitingForLateReply = m_pendingBootstrap.has_value();
         m_pendingBootstrap.reset();
         if (m_inRecovery)
         {
-            Q_EMIT recoveryStarted(detail);
+            // Recovery may itself attempt one reconnect. A failed reconnect emits another socket
+            // disconnect, but must not recursively start recovery again: the caller of reconnect()
+            // will surface that failure. If a connected-but-slow daemon finally disconnects while
+            // we are waiting for its late bootstrap reply, there is no synchronous caller left to
+            // report that transition, so terminate the pending recovery exactly once.
+            if (wasWaitingForLateReply)
+                Q_EMIT recoveryFailed(GuiBootstrapErrorCode::DaemonUnavailable, detail);
             return;
         }
         beginRecovery(detail);

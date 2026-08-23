@@ -7,6 +7,7 @@
 #include <QCoroTask>
 
 #include <QByteArray>
+#include <QIODevice>
 #include <QList>
 #include <QNetworkAccessManager>
 #include <QPair>
@@ -78,6 +79,8 @@ namespace javelin::jmap::api
         [[nodiscard]] virtual QCoro::Task<TransportResult> send(HttpRequest request) = 0;
         [[nodiscard]] virtual QCoro::Task<TransportResult> sendFromFile(HttpRequest request,
                                                                         QString filePath);
+        [[nodiscard]] virtual QCoro::Task<TransportResult>
+        sendFromDevice(HttpRequest request, QIODevice& device, std::uint64_t contentLength);
         [[nodiscard]] virtual QCoro::Task<FileTransportResult> sendToFile(HttpRequest request,
                                                                           QString filePath);
     };
@@ -94,6 +97,9 @@ namespace javelin::jmap::api
         [[nodiscard]] QCoro::Task<TransportResult> send(HttpRequest request) override;
         [[nodiscard]] QCoro::Task<TransportResult> sendFromFile(HttpRequest request,
                                                                 QString filePath) override;
+        [[nodiscard]] QCoro::Task<TransportResult>
+        sendFromDevice(HttpRequest request, QIODevice& device,
+                       std::uint64_t contentLength) override;
         [[nodiscard]] QCoro::Task<FileTransportResult> sendToFile(HttpRequest request,
                                                                   QString filePath) override;
 
@@ -114,6 +120,9 @@ namespace javelin::jmap::api
         [[nodiscard]] QCoro::Task<TransportResult> send(HttpRequest request) override;
         [[nodiscard]] QCoro::Task<TransportResult> sendFromFile(HttpRequest request,
                                                                 QString filePath) override;
+        [[nodiscard]] QCoro::Task<TransportResult>
+        sendFromDevice(HttpRequest request, QIODevice& device,
+                       std::uint64_t contentLength) override;
         [[nodiscard]] QCoro::Task<FileTransportResult> sendToFile(HttpRequest request,
                                                                   QString filePath) override;
 

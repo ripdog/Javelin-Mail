@@ -218,6 +218,19 @@ namespace javelin::app
         return true;
     }
 
+    bool AccountSyncCoordinator::requestMailboxSynchronization(const std::string_view mailboxId)
+    {
+        if (mailboxId.empty())
+            return false;
+        if (m_status == Status::AuthenticationPaused)
+            return true;
+        if (m_runContext == nullptr)
+            return false;
+        m_endpointRetryGate.reset(m_runContext->configuration.apiUrl);
+        scheduleDebouncedRefresh(false, {std::string{mailboxId}});
+        return true;
+    }
+
     QCoro::Task<void>
     AccountSyncCoordinator::onStateChange(javelin::jmap::sync::StateChangeEvent event)
     {

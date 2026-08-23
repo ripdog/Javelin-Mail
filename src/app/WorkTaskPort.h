@@ -29,6 +29,7 @@ namespace javelin::app
         Maintenance,
         MailTransfer,
         MailExport,
+        MailImport,
     };
 
     enum class WorkPriority : int
@@ -104,6 +105,8 @@ namespace javelin::app
             return "mail_transfer";
         case WorkKind::MailExport:
             return "mail_export";
+        case WorkKind::MailImport:
+            return "mail_import";
         }
         return "maintenance";
     }

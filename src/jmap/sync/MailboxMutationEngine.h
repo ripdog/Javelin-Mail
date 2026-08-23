@@ -66,7 +66,13 @@ namespace javelin::jmap
         create(LiveConnectionSettings settings, std::string accountId, std::string name,
                std::function<void()> projectionCommitted = {});
         [[nodiscard]] QCoro::Task<MailboxCreateResult>
-        reconcileCreate(LiveConnectionSettings settings, std::string accountId);
+        createInParent(LiveConnectionSettings settings, std::string accountId, std::string name,
+                       std::optional<std::string> parentId,
+                       std::optional<std::string> operationGroupId = std::nullopt,
+                       std::function<void()> projectionCommitted = {});
+        [[nodiscard]] QCoro::Task<MailboxCreateResult>
+        reconcileCreate(LiveConnectionSettings settings, std::string accountId,
+                        std::optional<std::string> operationGroupId = std::nullopt);
         [[nodiscard]] QCoro::Task<MailboxDestroyResult>
         destroy(LiveConnectionSettings settings, std::string accountId, std::string mailboxId,
                 std::function<void()> projectionCommitted = {});

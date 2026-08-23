@@ -3,7 +3,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <QFile>
+#include <QFileInfo>
 #include <QMimeData>
+#include <QTemporaryDir>
+#include <QUrl>
 
 #include <algorithm>
 #include <memory>
@@ -226,6 +230,51 @@ TEST_CASE("mailbox drop emits stable selection and Qt copy action across account
     CHECK(emittedAccount == QStringLiteral("destination-account"));
     CHECK(emittedMailbox == QStringLiteral("archive"));
     CHECK(emittedAction == Qt::CopyAction);
+}
+
+TEST_CASE(
+    "mailbox tree routes external local files to mail import without decoding them as messages",
+    "[gui][mailbox][drag][mail-import]")
+{
+    AccountReader accounts;
+    MailboxReader mailboxes;
+    javelin::gui::mailboxes::MailboxTreeModel model{accounts, mailboxes};
+    const auto destinationAccount = accountIndex(model, QStringLiteral("destination-account"));
+    REQUIRE(destinationAccount.isValid());
+    const auto archive = mailboxIndex(model, destinationAccount, QStringLiteral("archive"));
+    const auto locked = mailboxIndex(model, destinationAccount, QStringLiteral("locked"));
+    REQUIRE(archive.isValid());
+    REQUIRE(locked.isValid());
+
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const auto path = directory.filePath(QStringLiteral("message.eml"));
+    QFile source{path};
+    REQUIRE(source.open(QIODevice::WriteOnly));
+    REQUIRE(source.write("From: alice@example.test\r\nSubject: Import\r\n\r\nBody\r\n") > 0);
+    source.close();
+
+    QMimeData mime;
+    mime.setUrls({QUrl::fromLocalFile(path)});
+    CHECK(model.mimeTypes().contains(QStringLiteral("text/uri-list")));
+    CHECK(model.canDropMimeData(&mime, Qt::CopyAction, -1, 0, archive));
+    CHECK_FALSE(model.canDropMimeData(&mime, Qt::CopyAction, -1, 0, locked));
+
+    QStringList emittedPaths;
+    QString emittedAccount;
+    QString emittedMailbox;
+    QObject::connect(
+        &model, &javelin::gui::mailboxes::MailboxTreeModel::filesDropped, &model,
+        [&](const QStringList& paths, const QString& accountId, const QString& mailboxId)
+        {
+            emittedPaths = paths;
+            emittedAccount = accountId;
+            emittedMailbox = mailboxId;
+        });
+    REQUIRE(model.dropMimeData(&mime, Qt::CopyAction, -1, 0, archive));
+    CHECK(emittedPaths == QStringList{QFileInfo{path}.absoluteFilePath()});
+    CHECK(emittedAccount == QStringLiteral("destination-account"));
+    CHECK(emittedMailbox == QStringLiteral("archive"));
 }
 
 TEST_CASE("mailbox drop rejects malformed transfer payload", "[gui][mailbox][drag][mail-transfer]")

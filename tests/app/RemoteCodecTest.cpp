@@ -249,6 +249,46 @@ TEST_CASE("remote codec round-trips message save and bulk mail export payloads",
     CHECK(std::get<javelin::app::MailExportAdmission>(*decodedExportResult).jobId ==
           "mail-export:export-operation");
 
+    using ImportAction = javelin::protocol::actions::StartMailImport;
+    const javelin::app::MailImportIntent importIntent{
+        .accountId = "account-local",
+        .mailboxId = std::optional<std::string>{"mailbox-1"},
+        .sourcePaths = {QStringLiteral("/tmp/one.eml"), QStringLiteral("/tmp/two.mbox")},
+        .recreateHierarchy = false,
+    };
+    const auto importEncoded =
+        javelin::app::remote::encodeVersioned<ImportAction::requestSchemaVersion>(importIntent);
+    const auto* importPayload = std::get_if<QByteArray>(&importEncoded);
+    REQUIRE(importPayload != nullptr);
+    const auto importDecoded =
+        javelin::app::remote::decodeVersionedValue<ImportAction::requestSchemaVersion,
+                                                   javelin::app::MailImportIntent>(*importPayload);
+    const auto* decodedImport = std::get_if<javelin::app::MailImportIntent>(&importDecoded);
+    REQUIRE(decodedImport != nullptr);
+    CHECK(decodedImport->accountId == importIntent.accountId);
+    CHECK(decodedImport->mailboxId == importIntent.mailboxId);
+    CHECK(decodedImport->sourcePaths == importIntent.sourcePaths);
+    CHECK_FALSE(decodedImport->recreateHierarchy);
+
+    javelin::app::MailImportStartResult importResult = javelin::app::MailImportAdmission{
+        .operationId = "import-operation",
+        .jobId = "mail-import:import-operation",
+    };
+    const auto importResultEncoded =
+        javelin::app::remote::encodeVersioned<ImportAction::resultSchemaVersion>(importResult);
+    const auto* importResultPayload = std::get_if<QByteArray>(&importResultEncoded);
+    REQUIRE(importResultPayload != nullptr);
+    const auto importResultDecoded =
+        javelin::app::remote::decodeVersionedValue<ImportAction::resultSchemaVersion,
+                                                   javelin::app::MailImportStartResult>(
+            *importResultPayload);
+    const auto* decodedImportResult =
+        std::get_if<javelin::app::MailImportStartResult>(&importResultDecoded);
+    REQUIRE(decodedImportResult != nullptr);
+    REQUIRE(std::holds_alternative<javelin::app::MailImportAdmission>(*decodedImportResult));
+    CHECK(std::get<javelin::app::MailImportAdmission>(*decodedImportResult).jobId ==
+          "mail-import:import-operation");
+
     const auto saveMetadata = javelin::protocol::actions::findActionMetadata(SaveAction::id);
     REQUIRE(saveMetadata.has_value());
     CHECK(saveMetadata->id.value == 95);
@@ -257,6 +297,10 @@ TEST_CASE("remote codec round-trips message save and bulk mail export payloads",
     REQUIRE(exportMetadata.has_value());
     CHECK(exportMetadata->id.value == 96);
     CHECK(exportMetadata->name == "StartMailExport");
+    const auto importMetadata = javelin::protocol::actions::findActionMetadata(ImportAction::id);
+    REQUIRE(importMetadata.has_value());
+    CHECK(importMetadata->id.value == 100);
+    CHECK(importMetadata->name == "StartMailImport");
 }
 
 TEST_CASE("remote codec preserves calendar delete range materialization",

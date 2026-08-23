@@ -690,6 +690,15 @@ namespace javelin::app
         return call<javelin::protocol::actions::StartMailExport>(m_client, std::move(intent));
     }
 
+    RemoteMailImportPort::RemoteMailImportPort(RemoteActionClient& client) : m_client(client)
+    {
+    }
+
+    QCoro::Task<MailImportStartResult> RemoteMailImportPort::startImport(MailImportIntent intent)
+    {
+        return call<javelin::protocol::actions::StartMailImport>(m_client, std::move(intent));
+    }
+
     RemoteMessageContentPort::RemoteMessageContentPort(RemoteActionClient& client)
         : m_client(client)
     {

@@ -4,6 +4,7 @@
 
 #include "app/MailApplicationPorts.h"
 #include "app/MailExportApplicationPorts.h"
+#include "app/MailImportApplicationPorts.h"
 #include "app/MessageContentApplicationPorts.h"
 #include "app/MessageListMaterializationPort.h"
 
@@ -130,6 +131,10 @@ namespace javelin::protocol::actions
     using StartMailExport =
         Descriptor<96, ActionDomain::Mail, AdmissionSemantics::Asynchronous, ReplayPolicy::Never, 0,
                    std::tuple<javelin::app::MailExportIntent>, javelin::app::MailExportStartResult>;
+    using StartMailImport =
+        Descriptor<100, ActionDomain::Mail, AdmissionSemantics::Asynchronous, ReplayPolicy::Never,
+                   detail::mailMutation, std::tuple<javelin::app::MailImportIntent>,
+                   javelin::app::MailImportStartResult>;
 
     using MailActionTypes =
         std::tuple<RegisteredAction<MailQueueMailboxMutation, "MailQueueMailboxMutation">,
@@ -156,5 +161,6 @@ namespace javelin::protocol::actions
                    RegisteredAction<ThreadEnsure, "ThreadEnsure">,
                    RegisteredAction<MailTransferAcrossAccounts, "MailTransferAcrossAccounts">,
                    RegisteredAction<SaveMessages, "SaveMessages">,
-                   RegisteredAction<StartMailExport, "StartMailExport">>;
+                   RegisteredAction<StartMailExport, "StartMailExport">,
+                   RegisteredAction<StartMailImport, "StartMailImport">>;
 } // namespace javelin::protocol::actions

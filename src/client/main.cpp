@@ -516,9 +516,12 @@ int main(int argc, char* argv[])
         startDaemon->setVisible(offerDaemonStart);
         startDaemon->setEnabled(offerDaemonStart);
         retry->setEnabled(true);
-        recoveryWindow.show();
-        recoveryWindow.raise();
-        recoveryWindow.activateWindow();
+        if (!recoveryWindow.isVisible())
+        {
+            recoveryWindow.show();
+            recoveryWindow.raise();
+            recoveryWindow.activateWindow();
+        }
     };
 
     std::function<void(const QString&)> restoreMainWindow;
@@ -539,11 +542,11 @@ int main(int argc, char* argv[])
             services->identityReader(), services->messageViewReader(), session.databasePath(),
             services->translationService(), services->developerDiagnosticsPort(),
             services->developerMaintenancePort(), services->daemonLogPort(),
-            services->mailCommandPort(), services->mailExportPort(), services->sieveCommandPort(),
-            services->identityCommandPort(), services->accountRefreshPort(),
-            services->onboardingPort(), services->messageContentPort(),
-            services->messageListSessionFactory(), services->mailEvents(),
-            services->messageNavigationPort(), services->undoCommandPort(),
+            services->mailCommandPort(), services->mailExportPort(), services->mailImportPort(),
+            services->sieveCommandPort(), services->identityCommandPort(),
+            services->accountRefreshPort(), services->onboardingPort(),
+            services->messageContentPort(), services->messageListSessionFactory(),
+            services->mailEvents(), services->messageNavigationPort(), services->undoCommandPort(),
             {.calendar =
                  [guiServices](QStackedWidget& contentStack,
                                std::vector<javelin::gui::shell::TabState>& tabs, QObject* parent)

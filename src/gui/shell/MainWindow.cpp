@@ -48,6 +48,7 @@
 #include "gui/shell/LayeredStatusBar.h"
 #include "gui/shell/MailActionController.h"
 #include "gui/shell/MailExportController.h"
+#include "gui/shell/MailImportController.h"
 #include "gui/shell/MailWorkspaceController.h"
 #include "gui/shell/MainWindowStateStore.h"
 #include "gui/shell/MessageCommandController.h"
@@ -288,6 +289,7 @@ namespace javelin::gui::shell
                            javelin::app::DaemonLogPort& daemonLogPort,
                            javelin::app::MailCommandPort& mailCommandPort,
                            javelin::app::MailExportPort& mailExportPort,
+                           javelin::app::MailImportPort& mailImportPort,
                            javelin::app::SieveCommandPort& sieveCommandPort,
                            javelin::app::IdentityCommandPort& identityCommandPort,
                            javelin::app::AccountRefreshPort& accountRefreshPort,
@@ -338,6 +340,13 @@ namespace javelin::gui::shell
                 [this](const QString& message, const int durationMilliseconds)
                 { m_statusBar->showMessage(message, durationMilliseconds); });
         connect(m_mailExportController, &MailExportController::operationFailed, this,
+                [this](const javelin::jmap::OperationError& error) { presentError(error); });
+        m_mailImportController =
+            new MailImportController(mailImportPort, m_accountReader, m_mailboxReader, *this, this);
+        connect(m_mailImportController, &MailImportController::statusMessage, this,
+                [this](const QString& message, const int durationMilliseconds)
+                { m_statusBar->showMessage(message, durationMilliseconds); });
+        connect(m_mailImportController, &MailImportController::operationFailed, this,
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
         setupUi();
         connect(&m_undoCommandPort, &javelin::app::UndoCommandPort::historyStateChanged, this,
@@ -968,6 +977,19 @@ namespace javelin::gui::shell
         connect(m_exportAccountAction, &QAction::triggered, this,
                 &MainWindow::exportCurrentAccount);
         actionCollection()->addAction(QStringLiteral("export_account"), m_exportAccountAction);
+
+        m_importMessagesAction = new QAction(QIcon::fromTheme(QStringLiteral("document-import")),
+                                             i18n("Messages…"), this);
+        connect(m_importMessagesAction, &QAction::triggered, m_mailImportController,
+                [this] { m_mailImportController->importMessages(); });
+        actionCollection()->addAction(QStringLiteral("import_messages"), m_importMessagesAction);
+
+        m_importFolderTreeAction = new QAction(QIcon::fromTheme(QStringLiteral("document-import")),
+                                               i18n("Folder Tree…"), this);
+        connect(m_importFolderTreeAction, &QAction::triggered, m_mailImportController,
+                [this] { m_mailImportController->importFolderTree(); });
+        actionCollection()->addAction(QStringLiteral("import_folder_tree"),
+                                      m_importFolderTreeAction);
 
         m_refreshAction = new QAction(
             thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/cloud-download.svg")),
@@ -1710,6 +1732,14 @@ namespace javelin::gui::shell
                         payload.selection,
                         copy ? MessageTransferOperation::Copy : MessageTransferOperation::Move,
                         copy ? i18n("Queued copy.") : i18n("Queued move."));
+                });
+        connect(m_mailboxModel, &javelin::gui::mailboxes::MailboxTreeModel::filesDropped, this,
+                [this](QStringList paths, const QString& destinationAccountId,
+                       const QString& destinationMailboxId)
+                {
+                    m_mailImportController->importDroppedPaths(std::move(paths),
+                                                               destinationAccountId.toStdString(),
+                                                               destinationMailboxId.toStdString());
                 });
 
         auto* messagePane = new QWidget(this);
@@ -2662,6 +2692,8 @@ namespace javelin::gui::shell
         m_exportMailboxAction->setEnabled(mailContext && activeTabIsMailbox() &&
                                           activeMailboxId().has_value());
         m_exportAccountAction->setEnabled(preferredMailAccount.has_value());
+        m_importMessagesAction->setEnabled(preferredMailAccount.has_value());
+        m_importFolderTreeAction->setEnabled(preferredMailAccount.has_value());
 
         m_composeSendAction->setEnabled(false);
         m_composeScheduleSendAction->setEnabled(false);
@@ -3910,6 +3942,18 @@ namespace javelin::gui::shell
                 QIcon::fromTheme(QStringLiteral("document-export")), i18n("Export Account…"));
             connect(exportAccountAction, &QAction::triggered, this, [this, accountId]
                     { m_mailExportController->exportAccount(accountId.toStdString()); });
+            auto* importMessagesAction = menu.addAction(
+                QIcon::fromTheme(QStringLiteral("document-import")), i18n("Import Messages…"));
+            importMessagesAction->setEnabled(account != nullptr && account->has_value() &&
+                                             !(*account)->isReadOnly &&
+                                             (*account)->hasMailCapability);
+            connect(importMessagesAction, &QAction::triggered, this, [this, accountId]
+                    { m_mailImportController->importMessages(accountId.toStdString()); });
+            auto* importTreeAction = menu.addAction(
+                QIcon::fromTheme(QStringLiteral("document-import")), i18n("Import Folder Tree…"));
+            importTreeAction->setEnabled(importMessagesAction->isEnabled());
+            connect(importTreeAction, &QAction::triggered, this, [this, accountId]
+                    { m_mailImportController->importFolderTree(accountId.toStdString()); });
             menu.exec(m_mailboxView->viewport()->mapToGlobal(position));
             return;
         }
@@ -3981,6 +4025,25 @@ namespace javelin::gui::shell
                 {
                     m_mailExportController->exportMailbox(accountId.toStdString(),
                                                           mailboxId.toStdString());
+                });
+        auto* importMailboxAction = menu.addAction(
+            QIcon::fromTheme(QStringLiteral("document-import")), i18n("Import Into This Mailbox…"));
+        importMailboxAction->setEnabled(currentMailbox->myRights.mayAddItems);
+        connect(importMailboxAction, &QAction::triggered, this,
+                [this, accountId, mailboxId]
+                {
+                    m_mailImportController->importMessages(accountId.toStdString(),
+                                                           mailboxId.toStdString());
+                });
+        auto* importTreeAction = menu.addAction(QIcon::fromTheme(QStringLiteral("document-import")),
+                                                i18n("Import Folder Tree Under This Mailbox…"));
+        importTreeAction->setEnabled(currentMailbox->myRights.mayAddItems &&
+                                     currentMailbox->myRights.mayCreateChild);
+        connect(importTreeAction, &QAction::triggered, this,
+                [this, accountId, mailboxId]
+                {
+                    m_mailImportController->importFolderTree(accountId.toStdString(),
+                                                             mailboxId.toStdString());
                 });
         auto* propertiesAction = menu.addAction(i18n("Properties…"));
         connect(

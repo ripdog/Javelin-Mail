@@ -10,6 +10,7 @@
 #include <QPointer>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QTimer>
 #include <QUuid>
 
 #include <catch2/catch_test_macros.hpp>
@@ -169,20 +170,24 @@ namespace
 
         ~SocketEndpointThread()
         {
-            if (m_endpoint != nullptr && m_thread.isRunning())
-            {
-                const QPointer<SocketDaemonEndpoint> endpoint = m_endpoint;
-                QMetaObject::invokeMethod(
-                    endpoint.data(),
-                    [endpoint]
-                    {
-                        if (endpoint != nullptr)
-                            endpoint->close();
-                    },
-                    Qt::BlockingQueuedConnection);
-            }
+            close();
             m_thread.quit();
             m_thread.wait();
+        }
+
+        void close()
+        {
+            if (m_endpoint == nullptr || !m_thread.isRunning())
+                return;
+            const QPointer<SocketDaemonEndpoint> endpoint = m_endpoint;
+            QMetaObject::invokeMethod(
+                endpoint.data(),
+                [endpoint]
+                {
+                    if (endpoint != nullptr)
+                        endpoint->close();
+                },
+                Qt::BlockingQueuedConnection);
         }
 
         [[nodiscard]] std::optional<SocketTransportError> listen()
@@ -233,6 +238,83 @@ TEST_CASE("GUI bootstrap reports an absent daemon as unavailable immediately",
     REQUIRE(error.has_value());
     CHECK(error->code == javelin::app::GuiBootstrapErrorCode::DaemonUnavailable);
     CHECK_FALSE(session.isReady());
+}
+
+TEST_CASE("GUI recovery performs only one automatic reconnect when the daemon is gone",
+          "[app][gui][recovery]")
+{
+    ApplicationGuard application;
+    QTemporaryDir runtimeDirectory;
+    REQUIRE(runtimeDirectory.isValid());
+
+    const auto cachePath =
+        QDir{runtimeDirectory.path()}.filePath(QStringLiteral("javelin-cache.sqlite3"));
+    {
+        auto opened = javelin::jmap::cache::DatabaseConnection::open({
+            .connectionName = QStringLiteral("gui-recovery-writer-%1")
+                                  .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)),
+            .databasePath = cachePath,
+        });
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&opened))
+            FAIL(error->message.toStdString());
+    }
+
+    const auto socketPath = QDir{runtimeDirectory.path()}.filePath(QStringLiteral("javelind.sock"));
+    SlowBootstrapHandler handler{cachePath, SlowBootstrapStage::Hello};
+    SocketEndpointThread endpoint{
+        handler,
+        {.runtimeDirectory = runtimeDirectory.path(),
+         .socketPath = socketPath,
+         .limits = {},
+         .protocol = {.major = 5, .minor = 11},
+         .expectedBuild = BuildIdentity{.application = QStringLiteral("Javelin-Mail"),
+                                        .revision = QStringLiteral("test")},
+         .maximumQueuedFrames = 8,
+         .maximumQueuedBytes = 4 * 1024 * 1024,
+         .responseTimeoutMilliseconds = 2000,
+         .enforcePeerCredentials = true}};
+    REQUIRE_FALSE(endpoint.listen().has_value());
+
+    javelin::app::GuiDaemonSession session{{.runtimeDirectory = runtimeDirectory.path(),
+                                            .socketPath = socketPath,
+                                            .daemonExecutable = {},
+                                            .protocol = {.major = 5, .minor = 11},
+                                            .build = {.application = QStringLiteral("Javelin-Mail"),
+                                                      .revision = QStringLiteral("test")},
+                                            .startTimeoutMilliseconds = 500,
+                                            .responseTimeoutMilliseconds = 500,
+                                            .startDaemonIfMissing = false}};
+    REQUIRE_FALSE(session.start().has_value());
+    REQUIRE(session.isReady());
+
+    int recoveryStarts = 0;
+    int reconnectAttempts = 0;
+    QObject::connect(&session, &javelin::app::GuiDaemonSession::recoveryStarted, &session,
+                     [&](const QString&)
+                     {
+                         ++recoveryStarts;
+                         QTimer::singleShot(0, &session,
+                                            [&]
+                                            {
+                                                ++reconnectAttempts;
+                                                static_cast<void>(session.reconnect());
+                                            });
+                     });
+
+    endpoint.close();
+    processUntil([&] { return reconnectAttempts > 0; });
+    CHECK(recoveryStarts == 1);
+    CHECK(reconnectAttempts == 1);
+
+    QElapsedTimer settleTimer;
+    settleTimer.start();
+    while (settleTimer.elapsed() < 100)
+    {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        QThread::msleep(1);
+    }
+    CHECK(recoveryStarts == 1);
+    CHECK(reconnectAttempts == 1);
 }
 
 TEST_CASE("GUI bootstrap automatically resumes the exact late daemon reply at every stage",

@@ -49,6 +49,7 @@ namespace javelin::app
     class DaemonLogPort;
     class MailCommandPort;
     class MailExportPort;
+    class MailImportPort;
     class SieveCommandPort;
     class IdentityCommandPort;
     class AccountRefreshPort;
@@ -141,6 +142,7 @@ namespace javelin::gui::shell
     class LayeredStatusBar;
     class MailActionController;
     class MailExportController;
+    class MailImportController;
     class MailWorkspaceController;
 
     using CalendarTabControllerFactory =
@@ -177,6 +179,7 @@ namespace javelin::gui::shell
                             javelin::app::DaemonLogPort& daemonLogPort,
                             javelin::app::MailCommandPort& mailCommandPort,
                             javelin::app::MailExportPort& mailExportPort,
+                            javelin::app::MailImportPort& mailImportPort,
                             javelin::app::SieveCommandPort& sieveCommandPort,
                             javelin::app::IdentityCommandPort& identityCommandPort,
                             javelin::app::AccountRefreshPort& accountRefreshPort,
@@ -351,6 +354,7 @@ namespace javelin::gui::shell
         MessageContentController* m_messageContentController = nullptr;
         MessageFileController* m_messageFileController = nullptr;
         MailExportController* m_mailExportController = nullptr;
+        MailImportController* m_mailImportController = nullptr;
         std::unique_ptr<MessageListTabBindingPresenter> m_messageListTabBindingPresenter;
         std::unique_ptr<MessageNavigationController> m_messageNavigationController;
         std::unique_ptr<MessageSelectionController> m_messageSelectionController;
@@ -406,6 +410,8 @@ namespace javelin::gui::shell
         QAction* m_saveCurrentAction = nullptr;
         QAction* m_exportMailboxAction = nullptr;
         QAction* m_exportAccountAction = nullptr;
+        QAction* m_importMessagesAction = nullptr;
+        QAction* m_importFolderTreeAction = nullptr;
         QAction* m_quitAction = nullptr;
         QAction* m_preferencesAction = nullptr;
         QAction* m_configureEmailContextMenuAction = nullptr;

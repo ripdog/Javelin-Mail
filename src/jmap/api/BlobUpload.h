@@ -6,6 +6,7 @@
 
 #include <QCoroTask>
 
+#include <QIODevice>
 #include <QString>
 
 #include <cstdint>
@@ -44,5 +45,12 @@ namespace javelin::jmap::api
                        std::string authenticationAccountId, std::string accountId,
                        std::string accessToken, QString filePath, std::string mediaType,
                        CancellationToken cancellation = {}, std::function<void()> dispatched = {});
+
+    [[nodiscard]] QCoro::Task<BlobUploadResult>
+    uploadBlobFromDevice(AbstractTransport& transport, BlobUploadContext context,
+                         std::string authenticationAccountId, std::string accountId,
+                         std::string accessToken, QIODevice& device, std::uint64_t contentLength,
+                         std::string mediaType, CancellationToken cancellation = {},
+                         std::function<void()> dispatched = {});
 
 } // namespace javelin::jmap::api

@@ -252,10 +252,25 @@ set(JAVELIN_FORMAT_FILES
     src/app/messages/MailExportRepository.cpp
     src/app/messages/MailExportService.cpp
     src/app/messages/MailExportWriter.cpp
+    src/app/MailImportApplicationPorts.h
+    src/app/MailImportPlanner.h
+    src/app/MailImportRepository.h
+    src/app/MailImportService.h
+    src/app/MailImportSource.h
+    src/app/messages/MailImportPlanner.cpp
+    src/app/messages/MailImportRepository.cpp
+    src/app/messages/MailImportService.cpp
+    src/app/messages/MailImportSource.cpp
+    tests/app/MailImportPlannerTest.cpp
+    tests/app/MailImportServiceTest.cpp
+    tests/app/MailImportSourceTest.cpp
     src/gui/shell/MailExportController.cpp
     src/gui/shell/MailExportController.h
+    src/gui/shell/MailImportController.cpp
+    src/gui/shell/MailImportController.h
     tests/app/MailExportRepositoryTest.cpp
     tests/app/MailExportWriterTest.cpp
+    tests/app/MailImportRepositoryTest.cpp
     tests/gui/MailSaveNamingTest.cpp
     src/gui/widgets/IndeterminateProgressBar.h
     src/gui/developer/DeveloperOptionsDialog.cpp
@@ -1371,6 +1386,8 @@ add_library(javelin_gui STATIC
     src/gui/shell/AccountActionPolicy.h
     src/gui/shell/MailExportController.cpp
     src/gui/shell/MailExportController.h
+    src/gui/shell/MailImportController.cpp
+    src/gui/shell/MailImportController.h
     src/gui/shell/MessageTransferDestinationMenu.cpp
     src/gui/shell/MessageTransferDestinationMenu.h
     src/gui/shell/MessageTransferDestinationPresentation.cpp
@@ -1814,6 +1831,15 @@ add_library(javelin_daemon_core STATIC
     src/app/messages/MailExportRepository.cpp
     src/app/messages/MailExportService.cpp
     src/app/messages/MailExportWriter.cpp
+    src/app/MailImportApplicationPorts.h
+    src/app/MailImportPlanner.h
+    src/app/MailImportRepository.h
+    src/app/MailImportService.h
+    src/app/MailImportSource.h
+    src/app/messages/MailImportPlanner.cpp
+    src/app/messages/MailImportRepository.cpp
+    src/app/messages/MailImportService.cpp
+    src/app/messages/MailImportSource.cpp
     src/app/AccountApplicationPorts.h
     src/app/DeveloperDiagnostics.h
     src/app/developer/DeveloperDiagnosticsService.cpp

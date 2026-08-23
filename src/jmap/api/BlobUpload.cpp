@@ -44,6 +44,79 @@ namespace
         };
     }
 
+    [[nodiscard]] javelin::jmap::api::HttpRequest
+    uploadRequest(const javelin::jmap::api::BlobUploadContext& context,
+                  const std::string& authenticationAccountId, const std::string& accountId,
+                  const std::string& accessToken, const std::string& mediaType,
+                  javelin::jmap::api::CancellationToken cancellation,
+                  std::function<void()> dispatched)
+    {
+        return {
+            .method = javelin::jmap::api::HttpMethod::Post,
+            .url = uploadUrl(context.uploadUrl, accountId),
+            .headers =
+                {
+                    javelin::jmap::api::HttpHeader{
+                        .name = QByteArrayLiteral("Authorization"),
+                        .value =
+                            QByteArrayLiteral("Bearer ") + QByteArray::fromStdString(accessToken),
+                    },
+                    javelin::jmap::api::HttpHeader{
+                        .name = QByteArrayLiteral("Accept"),
+                        .value = QByteArrayLiteral("application/json"),
+                    },
+                    javelin::jmap::api::HttpHeader{
+                        .name = QByteArrayLiteral("Content-Type"),
+                        .value = QByteArray::fromStdString(mediaType),
+                    },
+                },
+            .body = {},
+            .authentication =
+                javelin::jmap::api::BearerAuthentication{
+                    .accountId = authenticationAccountId,
+                    .accessToken = accessToken,
+                },
+            .cancellation = std::move(cancellation),
+            .dispatched = std::move(dispatched),
+        };
+    }
+
+    [[nodiscard]] javelin::jmap::api::BlobUploadResult
+    decodeUploadResult(javelin::jmap::api::TransportResult transportResult,
+                       const std::string_view expectedAccountId)
+    {
+        using namespace javelin::jmap::api;
+        if (const auto* error = std::get_if<TransportError>(&transportResult))
+            return *error;
+
+        const auto& response = std::get<HttpResponse>(transportResult);
+        if (response.statusCode < 200 || response.statusCode >= 300)
+        {
+            return TransportError{
+                .code = TransportErrorCode::HttpFailure,
+                .message = "JMAP blob upload failed with HTTP status " +
+                           std::to_string(response.statusCode),
+                .httpStatus = response.statusCode,
+            };
+        }
+        RawBlobUploadResponse raw;
+        std::string json = response.body.toStdString();
+        const auto parseError = glz::read<glz::opts{.error_on_unknown_keys = false}>(raw, json);
+        if (parseError)
+            return invalidResponse("Failed to decode the JMAP blob upload response");
+        if (raw.accountId.empty() || raw.blobId.empty() || raw.type.empty())
+            return invalidResponse("The JMAP blob upload response is missing required fields");
+        if (raw.accountId != expectedAccountId)
+            return invalidResponse("The JMAP blob upload response returned the wrong account id");
+
+        return BlobUploadResponse{
+            .accountId = std::move(raw.accountId),
+            .blobId = std::move(raw.blobId),
+            .type = std::move(raw.type),
+            .size = raw.size,
+        };
+    }
+
 } // namespace
 
 template <> struct glz::meta<RawBlobUploadResponse>
@@ -102,66 +175,44 @@ namespace javelin::jmap::api
         if (context.maxSizeUpload.has_value() && sourceSize > *context.maxSizeUpload)
             co_return invalidRequest("Blob upload exceeds the server maxSizeUpload limit");
 
-        const auto transportResult = co_await transport.sendFromFile(
-            HttpRequest{
-                .method = HttpMethod::Post,
-                .url = uploadUrl(context.uploadUrl, accountId),
-                .headers =
-                    {
-                        HttpHeader{
-                            .name = QByteArrayLiteral("Authorization"),
-                            .value = QByteArrayLiteral("Bearer ") +
-                                     QByteArray::fromStdString(accessToken),
-                        },
-                        HttpHeader{
-                            .name = QByteArrayLiteral("Accept"),
-                            .value = QByteArrayLiteral("application/json"),
-                        },
-                        HttpHeader{
-                            .name = QByteArrayLiteral("Content-Type"),
-                            .value = QByteArray::fromStdString(mediaType),
-                        },
-                    },
-                .body = {},
-                .authentication =
-                    BearerAuthentication{
-                        .accountId = std::move(authenticationAccountId),
-                        .accessToken = std::move(accessToken),
-                    },
-                .cancellation = std::move(cancellation),
-                .dispatched = std::move(dispatched),
-            },
-            std::move(filePath));
-        if (const auto* error = std::get_if<TransportError>(&transportResult))
-            co_return *error;
+        auto request = uploadRequest(context, authenticationAccountId, accountId, accessToken,
+                                     mediaType, std::move(cancellation), std::move(dispatched));
+        auto transportResult =
+            co_await transport.sendFromFile(std::move(request), std::move(filePath));
+        co_return decodeUploadResult(std::move(transportResult), accountId);
+    }
 
-        const auto& response = std::get<HttpResponse>(transportResult);
-        if (response.statusCode < 200 || response.statusCode >= 300)
+    QCoro::Task<BlobUploadResult>
+    uploadBlobFromDevice(AbstractTransport& transport, BlobUploadContext context,
+                         std::string authenticationAccountId, std::string accountId,
+                         std::string accessToken, QIODevice& device,
+                         const std::uint64_t contentLength, std::string mediaType,
+                         CancellationToken cancellation, std::function<void()> dispatched)
+    {
+        if (accountId.empty() || authenticationAccountId.empty() || accessToken.empty())
+            co_return invalidRequest("Blob upload requires account and authentication identifiers");
+        if (mediaType.empty())
+            co_return invalidRequest("Blob upload requires a media type");
+        if (context.uploadUrl.empty())
+            co_return invalidRequest("Blob upload requires an upload URL");
+        if (!device.isOpen() || !device.isReadable())
         {
             co_return TransportError{
-                .code = TransportErrorCode::HttpFailure,
-                .message = "JMAP blob upload failed with HTTP status " +
-                           std::to_string(response.statusCode),
-                .httpStatus = response.statusCode,
+                .code = TransportErrorCode::LocalIoFailure,
+                .message = "The blob upload source device is not readable",
+                .httpStatus = std::nullopt,
+                .networkError = std::nullopt,
+                .retryAfter = std::nullopt,
             };
         }
-        RawBlobUploadResponse raw;
-        std::string json = response.body.toStdString();
-        const auto parseError = glz::read<glz::opts{.error_on_unknown_keys = false}>(raw, json);
-        if (parseError)
-            co_return invalidResponse("Failed to decode the JMAP blob upload response");
-        if (raw.accountId.empty() || raw.blobId.empty() || raw.type.empty())
-            co_return invalidResponse("The JMAP blob upload response is missing required fields");
-        if (raw.accountId != accountId)
-            co_return invalidResponse(
-                "The JMAP blob upload response returned the wrong account id");
+        if (context.maxSizeUpload.has_value() && contentLength > *context.maxSizeUpload)
+            co_return invalidRequest("Blob upload exceeds the server maxSizeUpload limit");
 
-        co_return BlobUploadResponse{
-            .accountId = std::move(raw.accountId),
-            .blobId = std::move(raw.blobId),
-            .type = std::move(raw.type),
-            .size = raw.size,
-        };
+        auto request = uploadRequest(context, authenticationAccountId, accountId, accessToken,
+                                     mediaType, std::move(cancellation), std::move(dispatched));
+        auto transportResult =
+            co_await transport.sendFromDevice(std::move(request), device, contentLength);
+        co_return decodeUploadResult(std::move(transportResult), accountId);
     }
 
 } // namespace javelin::jmap::api

@@ -41,6 +41,8 @@ namespace javelin::app
                 return WorkKind::MailTransfer;
             if (value == "mail_export")
                 return WorkKind::MailExport;
+            if (value == "mail_import")
+                return WorkKind::MailImport;
             return WorkKind::Maintenance;
         }
 
@@ -587,6 +589,7 @@ namespace javelin::app
         case WorkKind::Maintenance:
         case WorkKind::MailTransfer:
         case WorkKind::MailExport:
+        case WorkKind::MailImport:
             return WorkClass::Maintenance;
         }
         return WorkClass::Maintenance;

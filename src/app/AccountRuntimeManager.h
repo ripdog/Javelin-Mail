@@ -88,6 +88,8 @@ namespace javelin::app
         [[nodiscard]] std::optional<AccountSyncConfigurationView>
         configurationFor(std::string_view accountId) const;
         [[nodiscard]] bool requestAccountSynchronization(std::string_view accountId);
+        [[nodiscard]] bool requestMailboxSynchronization(std::string_view accountId,
+                                                         std::string_view mailboxId);
         [[nodiscard]] std::vector<std::string> configuredAccountIds() const override;
         void refreshAccountConfiguration(std::string_view accountId);
         [[nodiscard]] QCoro::Task<javelin::jmap::LiveRefreshResult>

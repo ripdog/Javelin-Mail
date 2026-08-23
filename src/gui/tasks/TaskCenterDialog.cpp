@@ -46,7 +46,8 @@ namespace javelin::gui::tasks
                 return checkpoint.value(QStringLiteral("canRetry")).toBool() ? RowAction::Retry
                                                                              : RowAction::None;
             }
-            if (record.kind == WorkKind::MailExport && record.status == WorkStatus::WaitingForSpace)
+            if ((record.kind == WorkKind::MailExport || record.kind == WorkKind::MailImport) &&
+                record.status == WorkStatus::WaitingForSpace)
                 return RowAction::Retry;
             switch (record.status)
             {

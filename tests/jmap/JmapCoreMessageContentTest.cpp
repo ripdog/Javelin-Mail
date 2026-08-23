@@ -2670,6 +2670,56 @@ TEST_CASE(
     REQUIRE(std::get<std::optional<javelin::jmap::domain::Mailbox>>(stored).has_value());
 }
 
+TEST_CASE("MailboxMutationEngine reconciles only the requested mailbox creation operation group",
+          "[jmap][mailbox-mutation][create][mutation-journal][recovery]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+    REQUIRE_FALSE(sessions.replace("u1", mailboxCreateSession()).has_value());
+    seedMailbox(databaseContext.connection);
+
+    FakeTransport transport;
+    transport.invokeDispatched = true;
+    transport.queuedResults.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "Connection closed after request dispatch",
+    });
+    javelin::jmap::MailboxMutationEngine mailboxMutations{databaseContext.connection,
+                                                          transport.methodTransport};
+    const auto ambiguous = QCoro::waitFor(mailboxMutations.createInParent(
+        {.sessionUrl = "https://mail.example.com/.well-known/jmap",
+         .loginEmail = "alice@example.com",
+         .apiKey = "access-token"},
+        "u1", "Projects", std::nullopt, std::string{"mail-import:operation-1"}));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(ambiguous));
+    REQUIRE(transport.requests.size() == 1);
+
+    const auto unrelated = QCoro::waitFor(
+        mailboxMutations.reconcileCreate({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                          .loginEmail = "alice@example.com",
+                                          .apiKey = "access-token"},
+                                         "u1", std::string{"mail-import:operation-2"}));
+    REQUIRE(std::holds_alternative<javelin::jmap::MailboxCreateChange>(unrelated));
+    CHECK(std::get<javelin::jmap::MailboxCreateChange>(unrelated).mailboxId.empty());
+    CHECK(transport.requests.size() == 1);
+
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral(
+            R"({"methodResponses":[["Mailbox/get",{"accountId":"u1","state":"mailbox-state-2","list":[{"id":"mbx-projects","name":"Projects","parentId":null,"role":null,"sortOrder":0,"totalEmails":0,"unreadEmails":0,"totalThreads":0,"unreadThreads":0,"isSubscribed":true,"myRights":{"mayReadItems":true,"mayAddItems":true,"mayRemoveItems":true,"maySetSeen":true,"maySetKeywords":true,"mayCreateChild":true,"mayRename":true,"mayDelete":true,"maySubmit":true}}],"notFound":[]},"mailbox-create-reconcile"]],"createdIds":{},"sessionState":"session-state-2"})"),
+    });
+    const auto recovered = QCoro::waitFor(
+        mailboxMutations.reconcileCreate({.sessionUrl = "https://mail.example.com/.well-known/jmap",
+                                          .loginEmail = "alice@example.com",
+                                          .apiKey = "access-token"},
+                                         "u1", std::string{"mail-import:operation-1"}));
+    REQUIRE(std::holds_alternative<javelin::jmap::MailboxCreateChange>(recovered));
+    CHECK(std::get<javelin::jmap::MailboxCreateChange>(recovered).mailboxId == "mbx-projects");
+    CHECK(transport.requests.size() == 2);
+}
+
 TEST_CASE("MailboxMutationEngine safely retries an ambiguous mailbox creation proven absent",
           "[jmap][mailbox-mutation][create][mutation-journal][recovery]")
 {

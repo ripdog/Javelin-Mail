@@ -189,6 +189,14 @@ namespace javelin::app
                     return launchAction<actions::StartMailExport>(
                         id, m_services.mailExportPort().startExport(std::move(intent)));
                 });
+        case actions::StartMailImport::id.value:
+            return dispatchDecoded<actions::StartMailImport>(
+                id, command,
+                [this, &id](MailImportIntent intent)
+                {
+                    return launchAction<actions::StartMailImport>(
+                        id, m_services.mailImportPort().startImport(std::move(intent)));
+                });
         case actions::MailboxObserve::id.value:
             return dispatchDecoded<actions::MailboxObserve>(
                 id, command,
