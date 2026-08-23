@@ -185,8 +185,6 @@ namespace javelin::app
         MailImportScanPlan plan;
         std::size_t ordinal = 0;
         std::set<QString> mailboxPaths;
-        bool sawEml = false;
-        bool sawMbox = false;
 
         if (operation.recreateHierarchy && operation.sourcePaths.size() != 1)
         {
@@ -196,6 +194,8 @@ namespace javelin::app
 
         for (const auto& sourceRoot : operation.sourcePaths)
         {
+            bool sawEml = false;
+            bool sawMbox = false;
             const QFileInfo sourceInfo{sourceRoot};
             if (!sourceInfo.exists() || !sourceInfo.isReadable() || sourceInfo.isSymLink())
             {

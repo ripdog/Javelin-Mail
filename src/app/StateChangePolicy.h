@@ -83,6 +83,21 @@ namespace javelin::app
                                           std::span<const std::string>{}, mailboxId);
     }
 
+    [[nodiscard]] inline std::vector<std::pair<std::string, std::string>> mailboxRefreshTargets(
+        const std::span<const std::pair<std::string, std::string>> watchedMailboxes,
+        const std::span<const std::string> explicitlyRequestedMailboxIds)
+    {
+        std::vector<std::pair<std::string, std::string>> result{watchedMailboxes.begin(),
+                                                                watchedMailboxes.end()};
+        for (const auto& mailboxId : explicitlyRequestedMailboxIds)
+        {
+            if (std::ranges::none_of(result, [&](const auto& mailbox)
+                                     { return mailbox.first == mailboxId; }))
+                result.emplace_back(mailboxId, std::string{});
+        }
+        return result;
+    }
+
     [[nodiscard]] inline std::vector<std::string> newlyWatchedMailboxIds(
         const std::span<const std::pair<std::string, std::string>> previousMailboxes,
         const std::span<const std::pair<std::string, std::string>> updatedMailboxes)

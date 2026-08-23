@@ -45,7 +45,7 @@ namespace javelin::gui::shell
       private:
         void promptAndStart(QStringList sourcePaths, std::optional<std::string> accountId,
                             std::optional<std::string> mailboxId, bool hierarchySource,
-                            bool forceHierarchyChoice);
+                            bool hierarchyDefault);
 
         javelin::app::MailImportPort& m_importPort;
         javelin::jmap::cache::AccountReader& m_accountReader;

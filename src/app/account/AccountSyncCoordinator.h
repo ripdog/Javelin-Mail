@@ -134,14 +134,7 @@ namespace javelin::app
             {
                 mailboxState = mailboxState || other.mailboxState;
                 emailState = emailState || other.emailState;
-                if (other.allMailboxes)
-                {
-                    allMailboxes = true;
-                    mailboxIds.clear();
-                    return;
-                }
-                if (allMailboxes)
-                    return;
+                allMailboxes = allMailboxes || other.allMailboxes;
                 for (const auto& mailboxId : other.mailboxIds)
                 {
                     if (std::ranges::find(mailboxIds, mailboxId) == mailboxIds.end())

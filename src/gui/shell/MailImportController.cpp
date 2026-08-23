@@ -165,23 +165,19 @@ namespace javelin::gui::shell
                 byId.reserve(mailboxes->size());
                 for (const auto& mailbox : *mailboxes)
                     byId.emplace(mailbox.id, &mailbox);
-                std::vector<const javelin::jmap::cache::MailboxTreeItem*> writable;
+                std::vector<std::pair<QString, const javelin::jmap::cache::MailboxTreeItem*>>
+                    writable;
                 for (const auto& mailbox : *mailboxes)
                 {
                     if (!mailbox.pendingCreate && mailbox.myRights.mayAddItems)
-                        writable.push_back(&mailbox);
+                        writable.emplace_back(mailboxPath(mailbox, byId), &mailbox);
                 }
-                std::ranges::sort(writable,
-                                  [&](const auto* left, const auto* right)
-                                  {
-                                      return QString::localeAwareCompare(
-                                                 mailboxPath(*left, byId),
-                                                 mailboxPath(*right, byId)) < 0;
-                                  });
-                for (const auto* mailbox : writable)
+                std::ranges::sort(
+                    writable, [](const auto& left, const auto& right)
+                    { return QString::localeAwareCompare(left.first, right.first) < 0; });
+                for (const auto& [path, mailbox] : writable)
                 {
-                    mailboxCombo->addItem(mailboxPath(*mailbox, byId),
-                                          QString::fromStdString(mailbox->id));
+                    mailboxCombo->addItem(path, QString::fromStdString(mailbox->id));
                     mailboxCombo->setItemData(mailboxCombo->count() - 1,
                                               mailbox->myRights.mayCreateChild, Qt::UserRole + 1);
                 }

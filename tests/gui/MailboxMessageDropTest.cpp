@@ -258,7 +258,24 @@ TEST_CASE(
     mime.setUrls({QUrl::fromLocalFile(path)});
     CHECK(model.mimeTypes().contains(QStringLiteral("text/uri-list")));
     CHECK(model.canDropMimeData(&mime, Qt::CopyAction, -1, 0, archive));
+    CHECK_FALSE(model.canDropMimeData(&mime, Qt::MoveAction, -1, 0, archive));
     CHECK_FALSE(model.canDropMimeData(&mime, Qt::CopyAction, -1, 0, locked));
+
+    QMimeData remote;
+    remote.setUrls({QUrl{QStringLiteral("https://example.test/message.eml")}});
+    CHECK_FALSE(model.canDropMimeData(&remote, Qt::CopyAction, -1, 0, archive));
+
+    QMimeData missing;
+    missing.setUrls(
+        {QUrl::fromLocalFile(directory.filePath(QStringLiteral("missing-message.eml")))});
+    CHECK_FALSE(model.canDropMimeData(&missing, Qt::CopyAction, -1, 0, archive));
+
+    const auto linkPath = directory.filePath(QStringLiteral("message-link.eml"));
+    REQUIRE(QFile::link(path, linkPath));
+    QMimeData symlink;
+    symlink.setUrls({QUrl::fromLocalFile(linkPath)});
+    CHECK(QFileInfo{linkPath}.isSymLink());
+    CHECK_FALSE(model.canDropMimeData(&symlink, Qt::CopyAction, -1, 0, archive));
 
     QStringList emittedPaths;
     QString emittedAccount;
@@ -271,6 +288,7 @@ TEST_CASE(
             emittedAccount = accountId;
             emittedMailbox = mailboxId;
         });
+    CHECK_FALSE(model.dropMimeData(&mime, Qt::MoveAction, -1, 0, archive));
     REQUIRE(model.dropMimeData(&mime, Qt::CopyAction, -1, 0, archive));
     CHECK(emittedPaths == QStringList{QFileInfo{path}.absoluteFilePath()});
     CHECK(emittedAccount == QStringLiteral("destination-account"));

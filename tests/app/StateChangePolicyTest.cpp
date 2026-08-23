@@ -95,6 +95,15 @@ TEST_CASE("mail state changes refresh every affected watched mailbox window", "[
     CHECK(javelin::app::shouldRefreshMailboxWindow(true, affectedMailboxIds, "archive"));
 }
 
+TEST_CASE("explicit mailbox refresh includes unwatched destinations", "[app][sync][mail]")
+{
+    const std::vector<std::pair<std::string, std::string>> watched{{"inbox", "Inbox"}};
+    const std::vector<std::string> requested{"archive", "inbox"};
+
+    CHECK(javelin::app::mailboxRefreshTargets(watched, requested) ==
+          std::vector<std::pair<std::string, std::string>>{{"inbox", "Inbox"}, {"archive", ""}});
+}
+
 TEST_CASE("mailbox watch updates only materialize newly watched mailboxes", "[app][sync][mail]")
 {
     const std::vector<std::pair<std::string, std::string>> previous{{"inbox", "Inbox"},

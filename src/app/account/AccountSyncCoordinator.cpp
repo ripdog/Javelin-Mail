@@ -587,8 +587,28 @@ namespace javelin::app
             m_databaseConnection, methodCaller, apiRequestContext};
         bool watchedMailboxRefreshed = false;
         std::vector<MailboxQueryWindowChange> materializedWindows;
-        const auto watchedMailboxes = runContext->configuration.mailboxes;
-        for (const auto& [mailboxId, mailboxName] : watchedMailboxes)
+        auto refreshMailboxes =
+            mailboxRefreshTargets(runContext->configuration.mailboxes, demand.mailboxIds);
+        if (!demand.mailboxIds.empty())
+        {
+            const auto mailboxTreeResult =
+                m_mailboxReader.listMailboxTree(runContext->configuration.accountId);
+            const auto* mailboxTree =
+                std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxTreeResult);
+            if (mailboxTree != nullptr)
+            {
+                for (auto& [mailboxId, mailboxName] : refreshMailboxes)
+                {
+                    if (!mailboxName.empty())
+                        continue;
+                    if (const auto found = std::ranges::find(
+                            *mailboxTree, mailboxId, &javelin::jmap::cache::MailboxTreeItem::id);
+                        found != mailboxTree->end())
+                        mailboxName = found->name;
+                }
+            }
+        }
+        for (const auto& [mailboxId, mailboxName] : refreshMailboxes)
         {
             if (!shouldRefreshMailboxWindow(refreshEveryMailbox, queryAffectedMailboxIds,
                                             demand.mailboxIds, mailboxId))

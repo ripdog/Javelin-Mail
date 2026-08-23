@@ -3951,7 +3951,25 @@ namespace javelin::gui::shell
                     { m_mailImportController->importMessages(accountId.toStdString()); });
             auto* importTreeAction = menu.addAction(
                 QIcon::fromTheme(QStringLiteral("document-import")), i18n("Import Folder Tree…"));
-            importTreeAction->setEnabled(importMessagesAction->isEnabled());
+            bool canImportTree = importMessagesAction->isEnabled() && account != nullptr &&
+                                 account->has_value() && (*account)->mayCreateTopLevelMailbox;
+            if (!canImportTree && importMessagesAction->isEnabled())
+            {
+                const auto mailboxResult = m_mailboxReader.listMailboxTree(accountId.toStdString());
+                if (const auto* mailboxes =
+                        std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(
+                            &mailboxResult))
+                {
+                    canImportTree = std::ranges::any_of(*mailboxes,
+                                                        [](const auto& mailbox)
+                                                        {
+                                                            return !mailbox.pendingCreate &&
+                                                                   mailbox.myRights.mayAddItems &&
+                                                                   mailbox.myRights.mayCreateChild;
+                                                        });
+                }
+            }
+            importTreeAction->setEnabled(canImportTree);
             connect(importTreeAction, &QAction::triggered, this, [this, accountId]
                     { m_mailImportController->importFolderTree(accountId.toStdString()); });
             menu.exec(m_mailboxView->viewport()->mapToGlobal(position));

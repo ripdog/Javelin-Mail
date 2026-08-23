@@ -6,10 +6,12 @@
 
 #include <QObject>
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace javelin::app
@@ -54,6 +56,10 @@ namespace javelin::app
         [[nodiscard]] std::optional<javelin::jmap::OperationError>
         ensureTracked(std::string_view operationId);
         void requeueWaiting(bool authentication);
+        void scheduleTransientRetry(std::string operationId,
+                                    const javelin::jmap::OperationError& error);
+        void resetTransientRetry(std::string_view operationId);
+        void requeueWaitingOperation(std::string_view operationId);
         [[nodiscard]] QCoro::Task<void> runOne(std::string operationId, std::string jobId);
         [[nodiscard]] QCoro::Task<void> advanceOne(std::string operationId, std::string jobId);
         [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::OperationError>>
@@ -74,8 +80,16 @@ namespace javelin::app
         javelin::jmap::api::JmapMethodTransport& m_methodTransport;
         const AccountConnectionProvider& m_connectionProvider;
         WorkScheduler& m_workScheduler;
+        struct TransientRetryState
+        {
+            std::size_t attempts = 0;
+            std::uint64_t generation = 0;
+            bool scheduled = false;
+        };
+
         std::function<void(std::string_view, std::string_view)> m_requestMailboxResync;
         std::unordered_set<std::string> m_runningOperations;
+        std::unordered_map<std::string, TransientRetryState> m_transientRetries;
         bool m_pumpScheduled = false;
         bool m_backgroundEnabled = false;
     };

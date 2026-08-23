@@ -122,6 +122,38 @@ TEST_CASE("Javelin mbox backup planning preserves an empty mailbox file",
           std::optional<QString>{QStringLiteral("Inbox")});
 }
 
+TEST_CASE("mail import layout detection is isolated per source root", "[app][mail-import][planner]")
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const auto eml = QDir{directory.path()}.filePath(QStringLiteral("message.eml"));
+    writeFile(eml, QByteArrayLiteral("From: alice@example.test\r\nSubject: EML\r\n\r\nBody\r\n"));
+
+    const auto mboxRoot = QDir{directory.path()}.filePath(QStringLiteral("mbox-source"));
+    REQUIRE(QDir{directory.path()}.mkpath(QStringLiteral("mbox-source")));
+    const auto mboxMessage = QDir{directory.path()}.filePath(QStringLiteral("mbox-message.eml"));
+    const auto mbox = QDir{mboxRoot}.filePath(QStringLiteral("Archive.mbox"));
+    writeFile(mboxMessage,
+              QByteArrayLiteral("From: bob@example.test\r\nSubject: mbox\r\n\r\nBody\r\n"));
+    const auto written = javelin::app::appendMboxRdRecord(
+        mboxMessage, mbox, std::optional<std::string>{"bob@example.test"}, "2026-08-22T10:00:00Z");
+    REQUIRE(written.error.isEmpty());
+    REQUIRE(QFile::remove(mboxMessage));
+
+    auto request = operation(directory.path());
+    request.mailboxId = std::optional<std::string>{"archive"};
+    request.sourcePaths = {eml, mboxRoot};
+    request.recreateHierarchy = false;
+    const auto result = javelin::app::planMailImportSources(request);
+    const auto* plan = std::get_if<MailImportScanPlan>(&result);
+    REQUIRE(plan != nullptr);
+    CHECK(plan->items.size() == 2);
+    CHECK(std::ranges::count(plan->items, javelin::app::MailImportFileKind::Eml,
+                             &javelin::app::MailImportItemRecord::sourceKind) == 1);
+    CHECK(std::ranges::count(plan->items, javelin::app::MailImportFileKind::Mbox,
+                             &javelin::app::MailImportItemRecord::sourceKind) == 1);
+}
+
 TEST_CASE("unfinished Javelin backup is rejected before import planning",
           "[app][mail-import][planner][javelin-export]")
 {

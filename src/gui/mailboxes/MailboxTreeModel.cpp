@@ -482,7 +482,7 @@ namespace javelin::gui::mailboxes
             return javelin::gui::messages::decodeMessageDragPayload(data->data(messageMime))
                 .has_value();
         }
-        if (!data->hasUrls() || data->urls().isEmpty())
+        if (!data->hasUrls() || data->urls().isEmpty() || action != Qt::CopyAction)
             return false;
         return std::ranges::all_of(data->urls(),
                                    [](const QUrl& url)

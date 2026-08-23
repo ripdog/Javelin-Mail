@@ -233,6 +233,7 @@ namespace
         int stateCalls = 0;
         int importCalls = 0;
         int existingGetCalls = 0;
+        int transientStateFailuresRemaining = 0;
         int setCalls = 0;
         int changesCalls = 0;
         int candidateGetCalls = 0;
@@ -305,6 +306,12 @@ namespace
                 }
 
                 ++stateCalls;
+                if (transientStateFailuresRemaining > 0)
+                {
+                    --transientStateFailuresRemaining;
+                    co_return TransportError{.code = TransportErrorCode::NetworkFailure,
+                                             .message = "temporary state lookup failure"};
+                }
                 co_return ResponseEnvelope{
                     .methodResponses = {{
                         .name = "Email/get",
@@ -588,6 +595,24 @@ TEST_CASE("mail import service reuses server duplicate and adds only target memb
     CHECK(progress.createdItems == 0);
     CHECK(progress.reusedItems == 1);
     CHECK(progress.failedItems == 0);
+}
+
+TEST_CASE("mail import service retries transient failures without a reachability transition",
+          "[app][mail-import][service][retry]")
+{
+    Fixture fixture;
+    fixture.methodTransport.transientStateFailuresRemaining = 1;
+    const auto admission = fixture.start();
+    const bool completed = spinUntil(
+        [&]
+        { return fixture.operation(admission.operationId).status == MailImportStatus::Complete; });
+    if (!completed)
+        fixture.captureState(admission);
+    REQUIRE(completed);
+
+    CHECK(fixture.methodTransport.stateCalls == 2);
+    CHECK(fixture.methodTransport.importCalls == 1);
+    CHECK(fixture.resourceTransport.uploadCalls == 1);
 }
 
 TEST_CASE("mail import service reconciles ambiguous Email import without replaying creation",
