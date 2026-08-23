@@ -582,8 +582,10 @@ namespace javelin::app
         const auto* job = std::get_if<std::optional<WorkRecord>>(&jobResult);
         const auto waitingWorkStatus =
             authentication ? WorkStatus::WaitingForAuth : WorkStatus::WaitingForNetwork;
-        if (job == nullptr || !job->has_value() || (*job)->status != waitingWorkStatus ||
-            (*job)->pauseRequested)
+        if (job == nullptr || !job->has_value() || (*job)->pauseRequested)
+            return;
+        const auto workStatus = (*job)->status;
+        if (workStatus != waitingWorkStatus && workStatus != WorkStatus::Running)
             return;
 
         if ((*operation)->status == waitingStatus)
@@ -669,12 +671,21 @@ namespace javelin::app
         {
             if (retryable(*error))
             {
-                static_cast<void>(
-                    repository.setStatus(operationId, waitStatus(*error), error->message));
-                if (javelin::jmap::isAuthenticationError(*error))
+                const bool authentication = javelin::jmap::isAuthenticationError(*error);
+                if (const auto statusError =
+                        repository.setStatus(operationId, waitStatus(*error), error->message))
+                {
+                    scheduleTransientRetry(operationId, javelin::jmap::operationError(*statusError),
+                                           authentication);
+                }
+                else if (authentication)
+                {
                     resetTransientRetry(operationId);
+                }
                 else
+                {
                     scheduleTransientRetry(operationId, *error);
+                }
             }
             else
             {
@@ -698,8 +709,14 @@ namespace javelin::app
         operation = std::get_if<std::optional<MailImportOperationRecord>>(&result);
         if (operation != nullptr && operation->has_value())
         {
-            static_cast<void>(syncJob(m_workScheduler, repository, **operation, jobId));
+            const auto syncError = syncJob(m_workScheduler, repository, **operation, jobId);
             const auto currentStatus = (*operation)->status;
+            if (syncError.has_value() && (currentStatus == MailImportStatus::WaitingForNetwork ||
+                                          currentStatus == MailImportStatus::WaitingForAuth))
+            {
+                scheduleTransientRetry(operationId, *syncError,
+                                       currentStatus == MailImportStatus::WaitingForAuth);
+            }
             bool synchronize = currentStatus != MailImportStatus::Preparing &&
                                currentStatus != MailImportStatus::Running;
             if (!synchronize && currentStatus == MailImportStatus::Running)

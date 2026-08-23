@@ -618,6 +618,75 @@ TEST_CASE("mail import service retries transient failures without a reachability
     CHECK(fixture.resourceTransport.uploadCalls == 1);
 }
 
+TEST_CASE("mail import retry repairs partial waiting-state persistence",
+          "[app][mail-import][service][retry][database]")
+{
+    std::vector<std::function<void()>> deferred;
+    std::vector<std::function<void()>> retries;
+    Fixture fixture{MailImportScheduling{
+        .defer = [&deferred](std::function<void()> callback)
+        { deferred.push_back(std::move(callback)); },
+        .retry = [&retries](const std::chrono::milliseconds, std::function<void()> callback)
+        { retries.push_back(std::move(callback)); },
+    }};
+    const auto admission = fixture.start();
+
+    MailImportRepository repository{fixture.database};
+    REQUIRE_FALSE(repository.replaceScan(admission.operationId, {}, {}).has_value());
+    REQUIRE_FALSE(repository
+                      .setStatus(admission.operationId, MailImportStatus::WaitingForNetwork,
+                                 QStringLiteral("temporary network failure"))
+                      .has_value());
+    const auto initialJobResult = fixture.scheduler.find(admission.jobId);
+    const auto* initialJob = std::get_if<std::optional<WorkRecord>>(&initialJobResult);
+    REQUIRE(initialJob != nullptr);
+    REQUIRE(initialJob->has_value());
+    REQUIRE_FALSE(fixture.scheduler
+                      .update(admission.jobId, WorkStatus::Running, (*initialJob)->progress,
+                              (*initialJob)->checkpointJson)
+                      .has_value());
+
+    SECTION("waiting operation with a failed waiting work write")
+    {
+        QSqlQuery setup{fixture.database.database()};
+        REQUIRE(setup.exec(QStringLiteral(
+            "CREATE TEMP TRIGGER fail_import_waiting_work BEFORE UPDATE OF status ON "
+            "background_jobs WHEN NEW.status='waiting_network' "
+            "BEGIN SELECT RAISE(ABORT, 'forced waiting work failure'); END")));
+        fixture.service.restoreRecoverable();
+        REQUIRE(setup.exec(QStringLiteral("DROP TRIGGER fail_import_waiting_work")));
+        REQUIRE(fixture.operation(admission.operationId).status ==
+                MailImportStatus::WaitingForNetwork);
+    }
+
+    SECTION("ready operation after a failed waiting operation write")
+    {
+        fixture.service.restoreRecoverable();
+        REQUIRE_FALSE(
+            repository.setStatus(admission.operationId, MailImportStatus::Running).has_value());
+        const auto runningJobResult = fixture.scheduler.find(admission.jobId);
+        const auto* runningJob = std::get_if<std::optional<WorkRecord>>(&runningJobResult);
+        REQUIRE(runningJob != nullptr);
+        REQUIRE(runningJob->has_value());
+        REQUIRE_FALSE(fixture.scheduler
+                          .update(admission.jobId, WorkStatus::Running, (*runningJob)->progress,
+                                  (*runningJob)->checkpointJson)
+                          .has_value());
+    }
+
+    REQUIRE(retries.size() == 1);
+    auto retry = std::move(retries.front());
+    retries.clear();
+    retry();
+
+    REQUIRE(fixture.operation(admission.operationId).status == MailImportStatus::Running);
+    const auto queuedJobResult = fixture.scheduler.find(admission.jobId);
+    const auto* queuedJob = std::get_if<std::optional<WorkRecord>>(&queuedJobResult);
+    REQUIRE(queuedJob != nullptr);
+    REQUIRE(queuedJob->has_value());
+    CHECK((*queuedJob)->status == WorkStatus::Queued);
+}
+
 TEST_CASE("mail import retry recovers when queuing persistence fails once",
           "[app][mail-import][service][retry][database]")
 {
