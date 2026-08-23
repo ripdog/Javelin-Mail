@@ -572,8 +572,12 @@ namespace javelin::app
         const auto operationResult = repository.findOperation(operationId);
         const auto* operation =
             std::get_if<std::optional<MailImportOperationRecord>>(&operationResult);
-        if (operation == nullptr || !operation->has_value() ||
-            (*operation)->status != MailImportStatus::WaitingForNetwork)
+        if (operation == nullptr || !operation->has_value())
+            return;
+        const auto readyStatus =
+            (*operation)->scanSealed ? MailImportStatus::Running : MailImportStatus::Preparing;
+        if ((*operation)->status != MailImportStatus::WaitingForNetwork &&
+            (*operation)->status != readyStatus)
             return;
 
         const auto jobId = jobIdFor(operationId);
@@ -583,15 +587,22 @@ namespace javelin::app
             (*job)->status != WorkStatus::WaitingForNetwork || (*job)->pauseRequested)
             return;
 
-        if (repository
-                .setStatus(operationId, (*operation)->scanSealed ? MailImportStatus::Running
-                                                                 : MailImportStatus::Preparing)
-                .has_value())
+        if ((*operation)->status == MailImportStatus::WaitingForNetwork)
+        {
+            if (const auto error = repository.setStatus(operationId, readyStatus))
+            {
+                scheduleTransientRetry(std::string{operationId},
+                                       javelin::jmap::operationError(*error));
+                return;
+            }
+        }
+        if (const auto error = m_workScheduler.update(jobId, WorkStatus::Queued, (*job)->progress,
+                                                      (*job)->checkpointJson))
+        {
+            scheduleTransientRetry(std::string{operationId}, javelin::jmap::operationError(*error));
             return;
-        if (m_workScheduler
-                .update(jobId, WorkStatus::Queued, (*job)->progress, (*job)->checkpointJson)
-                .has_value())
-            return;
+        }
+        resetTransientRetry(operationId);
         schedulePump();
     }
 

@@ -15,6 +15,7 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QUuid>
@@ -59,11 +60,12 @@ namespace
         std::unique_ptr<QCoreApplication> m_application;
     };
 
-    [[nodiscard]] bool spinUntil(const std::function<bool()>& predicate)
+    [[nodiscard]] bool spinUntil(const std::function<bool()>& predicate,
+                                 const qint64 timeoutMilliseconds = 3000)
     {
         QElapsedTimer timer;
         timer.start();
-        while (!predicate() && timer.elapsed() < 3000)
+        while (!predicate() && timer.elapsed() < timeoutMilliseconds)
         {
             QCoreApplication::processEvents();
             QThread::msleep(1);
@@ -606,6 +608,55 @@ TEST_CASE("mail import service retries transient failures without a reachability
     const bool completed = spinUntil(
         [&]
         { return fixture.operation(admission.operationId).status == MailImportStatus::Complete; });
+    if (!completed)
+        fixture.captureState(admission);
+    REQUIRE(completed);
+
+    CHECK(fixture.methodTransport.stateCalls == 2);
+    CHECK(fixture.methodTransport.importCalls == 1);
+    CHECK(fixture.resourceTransport.uploadCalls == 1);
+}
+
+TEST_CASE("mail import retry recovers when queuing persistence fails once",
+          "[app][mail-import][service][retry][database]")
+{
+    Fixture fixture;
+    fixture.methodTransport.transientStateFailuresRemaining = 1;
+    const auto admission = fixture.start();
+    REQUIRE(spinUntil(
+        [&]
+        {
+            return fixture.operation(admission.operationId).status ==
+                   MailImportStatus::WaitingForNetwork;
+        }));
+
+    QSqlQuery setup{fixture.database.database()};
+    REQUIRE(setup.exec(QStringLiteral("CREATE TEMP TABLE retry_gate(block INTEGER NOT NULL)")));
+    REQUIRE(setup.exec(QStringLiteral("INSERT INTO retry_gate(block) VALUES(1)")));
+    REQUIRE(setup.exec(QStringLiteral(
+        "CREATE TEMP TRIGGER fail_import_requeue BEFORE UPDATE OF status ON background_jobs "
+        "WHEN NEW.status='queued' AND (SELECT block FROM retry_gate LIMIT 1)=1 "
+        "BEGIN SELECT RAISE(ABORT, 'forced retry queue failure'); END")));
+
+    const bool splitStateObserved = spinUntil(
+        [&]
+        {
+            const auto operation = fixture.operation(admission.operationId);
+            const auto jobResult = fixture.scheduler.find(admission.jobId);
+            const auto* job = std::get_if<std::optional<WorkRecord>>(&jobResult);
+            return operation.status == MailImportStatus::Running && job != nullptr &&
+                   job->has_value() && (*job)->status == WorkStatus::WaitingForNetwork;
+        },
+        2500);
+    if (!splitStateObserved)
+        fixture.captureState(admission);
+    REQUIRE(splitStateObserved);
+
+    REQUIRE(setup.exec(QStringLiteral("UPDATE retry_gate SET block=0")));
+    const bool completed = spinUntil(
+        [&]
+        { return fixture.operation(admission.operationId).status == MailImportStatus::Complete; },
+        4000);
     if (!completed)
         fixture.captureState(admission);
     REQUIRE(completed);
