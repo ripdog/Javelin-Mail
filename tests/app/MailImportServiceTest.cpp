@@ -445,7 +445,7 @@ namespace
         QByteArray raw =
             QByteArrayLiteral("From: sender@example.test\r\nSubject: Imported\r\n\r\nBody\r\n");
 
-        Fixture()
+        explicit Fixture(MailImportScheduling scheduling = {})
             : database(openDatabase(
                   [this]
                   {
@@ -454,9 +454,10 @@ namespace
                   }())),
               accountId(storeSession(database)),
               scheduler(database, nullptr, std::chrono::milliseconds{0}),
-              service(database, resourceTransport, methodTransport, connections, scheduler,
-                      [this](const std::string_view account, const std::string_view mailboxId)
-                      { resyncs.emplace_back(account, mailboxId); })
+              service(
+                  database, resourceTransport, methodTransport, connections, scheduler,
+                  [this](const std::string_view account, const std::string_view mailboxId)
+                  { resyncs.emplace_back(account, mailboxId); }, std::move(scheduling))
         {
             connections.settings.emplace(
                 accountId,
@@ -670,17 +671,19 @@ TEST_CASE("mail import retry recovers when queuing persistence fails once",
 TEST_CASE("mail import authentication requeue recovers when queuing persistence fails once",
           "[app][mail-import][service][retry][authentication][database]")
 {
-    Fixture fixture;
-    fixture.methodTransport.transientStateFailuresRemaining = 1;
+    std::vector<std::function<void()>> deferred;
+    std::vector<std::function<void()>> retries;
+    Fixture fixture{MailImportScheduling{
+        .defer = [&deferred](std::function<void()> callback)
+        { deferred.push_back(std::move(callback)); },
+        .retry = [&retries](const std::chrono::milliseconds, std::function<void()> callback)
+        { retries.push_back(std::move(callback)); },
+    }};
     const auto admission = fixture.start();
-    REQUIRE(spinUntil(
-        [&]
-        {
-            return fixture.operation(admission.operationId).status ==
-                   MailImportStatus::WaitingForNetwork;
-        }));
+    REQUIRE(deferred.size() == 1);
 
     MailImportRepository repository{fixture.database};
+    REQUIRE_FALSE(repository.replaceScan(admission.operationId, {}, {}).has_value());
     REQUIRE_FALSE(
         repository.setStatus(admission.operationId, MailImportStatus::WaitingForAuth).has_value());
     const auto waitingJob = fixture.scheduler.find(admission.jobId);
@@ -702,32 +705,38 @@ TEST_CASE("mail import authentication requeue recovers when queuing persistence 
         "BEGIN SELECT RAISE(ABORT, 'forced auth retry queue failure'); END")));
 
     fixture.service.authenticationBecameAvailable();
-    const bool splitStateObserved = spinUntil(
-        [&]
-        {
-            const auto operation = fixture.operation(admission.operationId);
-            const auto jobResult = fixture.scheduler.find(admission.jobId);
-            const auto* job = std::get_if<std::optional<WorkRecord>>(&jobResult);
-            return operation.status == MailImportStatus::Running && job != nullptr &&
-                   job->has_value() && (*job)->status == WorkStatus::WaitingForAuth;
-        },
-        1000);
-    if (!splitStateObserved)
-        fixture.captureState(admission);
-    REQUIRE(splitStateObserved);
+    REQUIRE(fixture.operation(admission.operationId).status == MailImportStatus::Running);
+    const auto splitJob = fixture.scheduler.find(admission.jobId);
+    const auto* splitRecord = std::get_if<std::optional<WorkRecord>>(&splitJob);
+    REQUIRE(splitRecord != nullptr);
+    REQUIRE(splitRecord->has_value());
+    REQUIRE((*splitRecord)->status == WorkStatus::WaitingForAuth);
+    REQUIRE(retries.size() == 1);
 
     REQUIRE(setup.exec(QStringLiteral("UPDATE auth_retry_gate SET block=0")));
-    const bool completed = spinUntil(
-        [&]
-        { return fixture.operation(admission.operationId).status == MailImportStatus::Complete; },
-        4000);
-    if (!completed)
-        fixture.captureState(admission);
-    REQUIRE(completed);
+    auto retry = std::move(retries.front());
+    retries.clear();
+    retry();
 
-    CHECK(fixture.methodTransport.stateCalls == 2);
-    CHECK(fixture.methodTransport.importCalls == 1);
-    CHECK(fixture.resourceTransport.uploadCalls == 1);
+    const auto queuedJob = fixture.scheduler.find(admission.jobId);
+    const auto* queuedRecord = std::get_if<std::optional<WorkRecord>>(&queuedJob);
+    REQUIRE(queuedRecord != nullptr);
+    REQUIRE(queuedRecord->has_value());
+    REQUIRE((*queuedRecord)->status == WorkStatus::Queued);
+
+    auto runPump = std::move(deferred.front());
+    deferred.clear();
+    runPump();
+
+    REQUIRE(fixture.operation(admission.operationId).status == MailImportStatus::Complete);
+    const auto completedJob = fixture.scheduler.find(admission.jobId);
+    const auto* completedRecord = std::get_if<std::optional<WorkRecord>>(&completedJob);
+    REQUIRE(completedRecord != nullptr);
+    REQUIRE(completedRecord->has_value());
+    CHECK((*completedRecord)->status == WorkStatus::Complete);
+    CHECK(fixture.methodTransport.stateCalls == 0);
+    CHECK(fixture.methodTransport.importCalls == 0);
+    CHECK(fixture.resourceTransport.uploadCalls == 0);
 }
 
 TEST_CASE("mail import service reconciles ambiguous Email import without replaying creation",

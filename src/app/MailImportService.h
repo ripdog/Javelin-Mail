@@ -6,6 +6,7 @@
 
 #include <QObject>
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -33,6 +34,12 @@ namespace javelin::jmap::cache
 
 namespace javelin::app
 {
+    struct MailImportScheduling
+    {
+        std::function<void(std::function<void()>)> defer;
+        std::function<void(std::chrono::milliseconds, std::function<void()>)> retry;
+    };
+
     class MailImportService final : public QObject, public MailImportPort
     {
       public:
@@ -42,7 +49,7 @@ namespace javelin::app
             javelin::jmap::api::JmapMethodTransport& methodTransport,
             const AccountConnectionProvider& connectionProvider, WorkScheduler& workScheduler,
             std::function<void(std::string_view, std::string_view)> requestMailboxResync = {},
-            QObject* parent = nullptr);
+            MailImportScheduling scheduling = {}, QObject* parent = nullptr);
 
         [[nodiscard]] QCoro::Task<MailImportStartResult>
         startImport(MailImportIntent intent) override;
@@ -90,6 +97,8 @@ namespace javelin::app
         };
 
         std::function<void(std::string_view, std::string_view)> m_requestMailboxResync;
+        std::function<void(std::function<void()>)> m_defer;
+        std::function<void(std::chrono::milliseconds, std::function<void()>)> m_retry;
         std::unordered_set<std::string> m_runningOperations;
         std::unordered_map<std::string, TransientRetryState> m_transientRetries;
         bool m_pumpScheduled = false;

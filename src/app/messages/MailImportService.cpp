@@ -314,12 +314,19 @@ namespace javelin::app
         javelin::jmap::api::JmapMethodTransport& methodTransport,
         const AccountConnectionProvider& connectionProvider, WorkScheduler& workScheduler,
         std::function<void(std::string_view, std::string_view)> requestMailboxResync,
-        QObject* parent)
+        MailImportScheduling scheduling, QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection),
           m_resourceTransport(resourceTransport), m_methodTransport(methodTransport),
           m_connectionProvider(connectionProvider), m_workScheduler(workScheduler),
           m_requestMailboxResync(std::move(requestMailboxResync))
     {
+        m_defer = scheduling.defer ? std::move(scheduling.defer)
+                                   : [this](std::function<void()> callback)
+        { QTimer::singleShot(0, this, std::move(callback)); };
+        m_retry = scheduling.retry ? std::move(scheduling.retry)
+                                   : [this](const std::chrono::milliseconds delay,
+                                            std::function<void()> callback)
+        { QTimer::singleShot(delay, this, std::move(callback)); };
         connect(&m_workScheduler, &WorkScheduler::jobsChanged, this, [this] { schedulePump(); });
         connect(&m_workScheduler, &WorkScheduler::foregroundAvailabilityChanged, this,
                 [this] { schedulePump(); });
@@ -443,12 +450,12 @@ namespace javelin::app
         if (m_pumpScheduled)
             return;
         m_pumpScheduled = true;
-        QTimer::singleShot(0, this,
-                           [this]
-                           {
-                               m_pumpScheduled = false;
-                               pump();
-                           });
+        m_defer(
+            [this]
+            {
+                m_pumpScheduled = false;
+                pump();
+            });
     }
 
     void MailImportService::pump()
@@ -538,16 +545,15 @@ namespace javelin::app
                 delay, std::chrono::duration_cast<std::chrono::milliseconds>(*error.retryAfter));
         }
         const auto generation = state.generation;
-        QTimer::singleShot(delay, this,
-                           [this, operationId = std::move(operationId), generation, authentication]
-                           {
-                               const auto found = m_transientRetries.find(operationId);
-                               if (found == m_transientRetries.end() ||
-                                   found->second.generation != generation)
-                                   return;
-                               found->second.scheduled = false;
-                               requeueWaitingOperation(operationId, authentication);
-                           });
+        m_retry(delay,
+                [this, operationId = std::move(operationId), generation, authentication]
+                {
+                    const auto found = m_transientRetries.find(operationId);
+                    if (found == m_transientRetries.end() || found->second.generation != generation)
+                        return;
+                    found->second.scheduled = false;
+                    requeueWaitingOperation(operationId, authentication);
+                });
     }
 
     void MailImportService::resetTransientRetry(const std::string_view operationId)
