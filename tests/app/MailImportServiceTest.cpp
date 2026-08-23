@@ -638,6 +638,7 @@ TEST_CASE("mail import retry recovers when queuing persistence fails once",
         "WHEN NEW.status='queued' AND (SELECT block FROM retry_gate LIMIT 1)=1 "
         "BEGIN SELECT RAISE(ABORT, 'forced retry queue failure'); END")));
 
+    fixture.service.networkBecameReachable();
     const bool splitStateObserved = spinUntil(
         [&]
         {
@@ -653,6 +654,69 @@ TEST_CASE("mail import retry recovers when queuing persistence fails once",
     REQUIRE(splitStateObserved);
 
     REQUIRE(setup.exec(QStringLiteral("UPDATE retry_gate SET block=0")));
+    const bool completed = spinUntil(
+        [&]
+        { return fixture.operation(admission.operationId).status == MailImportStatus::Complete; },
+        4000);
+    if (!completed)
+        fixture.captureState(admission);
+    REQUIRE(completed);
+
+    CHECK(fixture.methodTransport.stateCalls == 2);
+    CHECK(fixture.methodTransport.importCalls == 1);
+    CHECK(fixture.resourceTransport.uploadCalls == 1);
+}
+
+TEST_CASE("mail import authentication requeue recovers when queuing persistence fails once",
+          "[app][mail-import][service][retry][authentication][database]")
+{
+    Fixture fixture;
+    fixture.methodTransport.transientStateFailuresRemaining = 1;
+    const auto admission = fixture.start();
+    REQUIRE(spinUntil(
+        [&]
+        {
+            return fixture.operation(admission.operationId).status ==
+                   MailImportStatus::WaitingForNetwork;
+        }));
+
+    MailImportRepository repository{fixture.database};
+    REQUIRE_FALSE(
+        repository.setStatus(admission.operationId, MailImportStatus::WaitingForAuth).has_value());
+    const auto waitingJob = fixture.scheduler.find(admission.jobId);
+    const auto* waitingRecord = std::get_if<std::optional<WorkRecord>>(&waitingJob);
+    REQUIRE(waitingRecord != nullptr);
+    REQUIRE(waitingRecord->has_value());
+    REQUIRE_FALSE(fixture.scheduler
+                      .update(admission.jobId, WorkStatus::WaitingForAuth,
+                              (*waitingRecord)->progress, (*waitingRecord)->checkpointJson)
+                      .has_value());
+
+    QSqlQuery setup{fixture.database.database()};
+    REQUIRE(
+        setup.exec(QStringLiteral("CREATE TEMP TABLE auth_retry_gate(block INTEGER NOT NULL)")));
+    REQUIRE(setup.exec(QStringLiteral("INSERT INTO auth_retry_gate(block) VALUES(1)")));
+    REQUIRE(setup.exec(QStringLiteral(
+        "CREATE TEMP TRIGGER fail_auth_import_requeue BEFORE UPDATE OF status ON background_jobs "
+        "WHEN NEW.status='queued' AND (SELECT block FROM auth_retry_gate LIMIT 1)=1 "
+        "BEGIN SELECT RAISE(ABORT, 'forced auth retry queue failure'); END")));
+
+    fixture.service.authenticationBecameAvailable();
+    const bool splitStateObserved = spinUntil(
+        [&]
+        {
+            const auto operation = fixture.operation(admission.operationId);
+            const auto jobResult = fixture.scheduler.find(admission.jobId);
+            const auto* job = std::get_if<std::optional<WorkRecord>>(&jobResult);
+            return operation.status == MailImportStatus::Running && job != nullptr &&
+                   job->has_value() && (*job)->status == WorkStatus::WaitingForAuth;
+        },
+        1000);
+    if (!splitStateObserved)
+        fixture.captureState(admission);
+    REQUIRE(splitStateObserved);
+
+    REQUIRE(setup.exec(QStringLiteral("UPDATE auth_retry_gate SET block=0")));
     const bool completed = spinUntil(
         [&]
         { return fixture.operation(admission.operationId).status == MailImportStatus::Complete; },

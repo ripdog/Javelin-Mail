@@ -502,7 +502,6 @@ namespace javelin::app
 
     void MailImportService::requeueWaiting(const bool authentication)
     {
-        MailImportRepository repository{m_databaseConnection};
         const auto listed = m_workScheduler.list();
         const auto* jobs = std::get_if<std::vector<WorkRecord>>(&listed);
         if (jobs == nullptr)
@@ -516,31 +515,21 @@ namespace javelin::app
             const auto operationId = operationIdFor(job.jobId);
             if (!operationId.has_value())
                 continue;
-            const auto operationResult = repository.findOperation(*operationId);
-            const auto* operation =
-                std::get_if<std::optional<MailImportOperationRecord>>(&operationResult);
-            if (operation == nullptr || !operation->has_value())
-                continue;
-            static_cast<void>(repository.setStatus(
-                *operationId, (*operation)->scanSealed ? MailImportStatus::Running
-                                                       : MailImportStatus::Preparing));
-            static_cast<void>(m_workScheduler.update(job.jobId, WorkStatus::Queued, job.progress,
-                                                     job.checkpointJson));
-            if (!authentication)
-                resetTransientRetry(*operationId);
+            requeueWaitingOperation(*operationId, authentication);
         }
-        schedulePump();
     }
 
     void MailImportService::scheduleTransientRetry(std::string operationId,
-                                                   const OperationError& error)
+                                                   const OperationError& error,
+                                                   const bool authentication)
     {
         auto& state = m_transientRetries[operationId];
-        if (state.scheduled)
+        if (state.scheduled && state.authentication == authentication)
             return;
         ++state.attempts;
         ++state.generation;
         state.scheduled = true;
+        state.authentication = authentication;
 
         auto delay = javelin::jmap::sync::BackoffPolicy{}.delayForAttempt(state.attempts);
         if (error.retryAfter.has_value())
@@ -550,14 +539,14 @@ namespace javelin::app
         }
         const auto generation = state.generation;
         QTimer::singleShot(delay, this,
-                           [this, operationId = std::move(operationId), generation]
+                           [this, operationId = std::move(operationId), generation, authentication]
                            {
                                const auto found = m_transientRetries.find(operationId);
                                if (found == m_transientRetries.end() ||
                                    found->second.generation != generation)
                                    return;
                                found->second.scheduled = false;
-                               requeueWaitingOperation(operationId);
+                               requeueWaitingOperation(operationId, authentication);
                            });
     }
 
@@ -566,7 +555,8 @@ namespace javelin::app
         m_transientRetries.erase(std::string{operationId});
     }
 
-    void MailImportService::requeueWaitingOperation(const std::string_view operationId)
+    void MailImportService::requeueWaitingOperation(const std::string_view operationId,
+                                                    const bool authentication)
     {
         MailImportRepository repository{m_databaseConnection};
         const auto operationResult = repository.findOperation(operationId);
@@ -576,30 +566,34 @@ namespace javelin::app
             return;
         const auto readyStatus =
             (*operation)->scanSealed ? MailImportStatus::Running : MailImportStatus::Preparing;
-        if ((*operation)->status != MailImportStatus::WaitingForNetwork &&
-            (*operation)->status != readyStatus)
+        const auto waitingStatus =
+            authentication ? MailImportStatus::WaitingForAuth : MailImportStatus::WaitingForNetwork;
+        if ((*operation)->status != waitingStatus && (*operation)->status != readyStatus)
             return;
 
         const auto jobId = jobIdFor(operationId);
         const auto jobResult = m_workScheduler.find(jobId);
         const auto* job = std::get_if<std::optional<WorkRecord>>(&jobResult);
-        if (job == nullptr || !job->has_value() ||
-            (*job)->status != WorkStatus::WaitingForNetwork || (*job)->pauseRequested)
+        const auto waitingWorkStatus =
+            authentication ? WorkStatus::WaitingForAuth : WorkStatus::WaitingForNetwork;
+        if (job == nullptr || !job->has_value() || (*job)->status != waitingWorkStatus ||
+            (*job)->pauseRequested)
             return;
 
-        if ((*operation)->status == MailImportStatus::WaitingForNetwork)
+        if ((*operation)->status == waitingStatus)
         {
             if (const auto error = repository.setStatus(operationId, readyStatus))
             {
                 scheduleTransientRetry(std::string{operationId},
-                                       javelin::jmap::operationError(*error));
+                                       javelin::jmap::operationError(*error), authentication);
                 return;
             }
         }
         if (const auto error = m_workScheduler.update(jobId, WorkStatus::Queued, (*job)->progress,
                                                       (*job)->checkpointJson))
         {
-            scheduleTransientRetry(std::string{operationId}, javelin::jmap::operationError(*error));
+            scheduleTransientRetry(std::string{operationId}, javelin::jmap::operationError(*error),
+                                   authentication);
             return;
         }
         resetTransientRetry(operationId);

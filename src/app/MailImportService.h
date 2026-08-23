@@ -57,9 +57,10 @@ namespace javelin::app
         ensureTracked(std::string_view operationId);
         void requeueWaiting(bool authentication);
         void scheduleTransientRetry(std::string operationId,
-                                    const javelin::jmap::OperationError& error);
+                                    const javelin::jmap::OperationError& error,
+                                    bool authentication = false);
         void resetTransientRetry(std::string_view operationId);
-        void requeueWaitingOperation(std::string_view operationId);
+        void requeueWaitingOperation(std::string_view operationId, bool authentication = false);
         [[nodiscard]] QCoro::Task<void> runOne(std::string operationId, std::string jobId);
         [[nodiscard]] QCoro::Task<void> advanceOne(std::string operationId, std::string jobId);
         [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::OperationError>>
@@ -85,6 +86,7 @@ namespace javelin::app
             std::size_t attempts = 0;
             std::uint64_t generation = 0;
             bool scheduled = false;
+            bool authentication = false;
         };
 
         std::function<void(std::string_view, std::string_view)> m_requestMailboxResync;
