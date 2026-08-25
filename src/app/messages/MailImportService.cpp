@@ -188,15 +188,32 @@ namespace javelin::app
 
         [[nodiscard]] std::optional<OperationError>
         syncJob(WorkScheduler& scheduler, MailImportRepository& repository,
-                const MailImportOperationRecord& operation, const std::string_view jobId)
+                const MailImportOperationRecord& operation, const std::string_view jobId,
+                const bool admitted = false)
         {
             const auto progressResult = repository.progress(operation.operationId);
             if (const auto* error = std::get_if<DatabaseError>(&progressResult))
                 return javelin::jmap::operationError(*error);
             const auto& progress = std::get<MailImportProgressSnapshot>(progressResult);
-            if (const auto error = scheduler.update(
-                    jobId, workStatus(operation.status), progressFor(operation, progress),
-                    checkpoint(operation.operationId), operation.lastError))
+
+            auto status = workStatus(operation.status);
+            const auto jobResult = scheduler.find(jobId);
+            if (const auto* error = std::get_if<DatabaseError>(&jobResult))
+                return javelin::jmap::operationError(*error);
+            if (const auto& job = std::get<std::optional<WorkRecord>>(jobResult);
+                job.has_value() && job->pauseRequested)
+            {
+                status = WorkStatus::Paused;
+            }
+            else if (admitted && (operation.status == MailImportStatus::Preparing ||
+                                  operation.status == MailImportStatus::Running))
+            {
+                status = WorkStatus::Running;
+            }
+
+            if (const auto error =
+                    scheduler.update(jobId, status, progressFor(operation, progress),
+                                     checkpoint(operation.operationId), operation.lastError))
                 return javelin::jmap::operationError(*error);
             return std::nullopt;
         }
@@ -627,6 +644,7 @@ namespace javelin::app
             if ((*operation)->status == MailImportStatus::WaitingForNetwork ||
                 (*operation)->status == MailImportStatus::WaitingForAuth ||
                 (*operation)->status == MailImportStatus::WaitingForSpace ||
+                (*operation)->status == MailImportStatus::BlockedUnknown ||
                 (*operation)->status == MailImportStatus::Failed)
                 static_cast<void>(repository.setStatus(
                     operationId, (*operation)->scanSealed ? MailImportStatus::Running
@@ -643,7 +661,24 @@ namespace javelin::app
                                                              checkpoint(operationId)));
             }
         }
-        co_await advanceOne(operationId, jobId);
+        while (true)
+        {
+            const auto jobResult = m_workScheduler.find(jobId);
+            const auto* job = std::get_if<std::optional<WorkRecord>>(&jobResult);
+            if (job == nullptr || !job->has_value() || (*job)->pauseRequested)
+                co_return;
+
+            const auto operationResult = repository.findOperation(operationId);
+            const auto* operation =
+                std::get_if<std::optional<MailImportOperationRecord>>(&operationResult);
+            if (operation == nullptr || !operation->has_value())
+                co_return;
+            if ((*operation)->status != MailImportStatus::Preparing &&
+                (*operation)->status != MailImportStatus::Running)
+                co_return;
+
+            co_await advanceOne(operationId, jobId);
+        }
     }
 
     QCoro::Task<void> MailImportService::advanceOne(std::string operationId, std::string jobId)
@@ -709,7 +744,7 @@ namespace javelin::app
         operation = std::get_if<std::optional<MailImportOperationRecord>>(&result);
         if (operation != nullptr && operation->has_value())
         {
-            const auto syncError = syncJob(m_workScheduler, repository, **operation, jobId);
+            const auto syncError = syncJob(m_workScheduler, repository, **operation, jobId, true);
             const auto currentStatus = (*operation)->status;
             if (syncError.has_value() && (currentStatus == MailImportStatus::WaitingForNetwork ||
                                           currentStatus == MailImportStatus::WaitingForAuth))

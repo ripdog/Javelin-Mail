@@ -219,6 +219,23 @@ namespace
                     .toUtf8();
             co_return HttpResponse{.statusCode = 201, .body = body};
         }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::api::TransportResult>
+        sendFromDevice(HttpRequest request, QIODevice& device,
+                       const std::uint64_t contentLength) override
+        {
+            ++uploadCalls;
+            if (request.dispatched)
+                request.dispatched();
+            uploadedPayload = device.readAll();
+            REQUIRE(uploadedPayload.size() == static_cast<qsizetype>(contentLength));
+            const auto body =
+                QStringLiteral(
+                    R"({"accountId":"u1","blobId":"uploaded-blob","type":"message/rfc822","size":%1})")
+                    .arg(uploadedPayload.size())
+                    .toUtf8();
+            co_return HttpResponse{.statusCode = 201, .body = body};
+        }
     };
 
     enum class ImportBehavior
@@ -497,6 +514,18 @@ namespace
             return std::get<MailImportAdmission>(result);
         }
 
+        void useTwoMessageMbox()
+        {
+            const QByteArray mbox = QByteArrayLiteral(
+                "From first@example.test Sat Aug 22 10:20:30 2026\n"
+                "From: first@example.test\r\nSubject: First\r\n\r\nFirst body\r\n"
+                "From second@example.test Sat Aug 22 10:21:30 2026\n"
+                "From: second@example.test\r\nSubject: Second\r\n\r\nSecond body\r\n");
+            QFile source{sourcePath};
+            REQUIRE(source.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            REQUIRE(source.write(mbox) == mbox.size());
+        }
+
         [[nodiscard]] MailImportOperationRecord operation(const std::string_view operationId)
         {
             MailImportRepository repository{database};
@@ -573,6 +602,26 @@ TEST_CASE("mail import service streams raw EML and completes through Email impor
     CHECK(progress.failedItems == 0);
     REQUIRE(fixture.resyncs.size() == 1);
     CHECK(fixture.resyncs.front() == std::pair{fixture.accountId, std::string{"archive"}});
+}
+
+TEST_CASE("mail import keeps one scheduler admission across a multi-message operation",
+          "[app][mail-import][service][scheduler]")
+{
+    Fixture fixture;
+    fixture.useTwoMessageMbox();
+    const auto admission = fixture.start();
+    const bool completed = spinUntil(
+        [&]
+        { return fixture.operation(admission.operationId).status == MailImportStatus::Complete; });
+    if (!completed)
+        fixture.captureState(admission);
+    REQUIRE(completed);
+
+    CHECK(fixture.resourceTransport.uploadCalls == 2);
+    CHECK(fixture.methodTransport.importCalls == 2);
+    const auto metrics = fixture.scheduler.admissionMetrics();
+    CHECK(metrics.admitted == 1);
+    CHECK(metrics.completed == 1);
 }
 
 TEST_CASE("mail import service reuses server duplicate and adds only target membership",
