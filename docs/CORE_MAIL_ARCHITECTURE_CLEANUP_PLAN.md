@@ -55,16 +55,16 @@ what must remain user-visible after the cleanup.
 
 ## 0.1 Global Email-state ownership regression
 
-- [ ] Construct an account with at least two cached mailboxes, such as Inbox and Archive.
-- [ ] Establish global account `Email` state `S1`.
-- [ ] Simulate a cached Archive Email changing on the server so account `Email` state becomes `S2`.
-- [ ] Perform an Inbox-only full/collapsed materialization whose representative `Email/get` reports
+- [x] Construct an account with at least two cached mailboxes, such as Inbox and Archive.
+- [x] Establish global account `Email` state `S1`.
+- [x] Simulate a cached Archive Email changing on the server so account `Email` state becomes `S2`.
+- [x] Perform an Inbox-only full/collapsed materialization whose representative `Email/get` reports
       state `S2`, without fetching the changed Archive Email.
-- [ ] Assert that the global account `Email` sync state remains `S1` after the Inbox-only
+- [x] Assert that the global account `Email` sync state remains `S1` after the Inbox-only
       materialization.
-- [ ] Run account-wide Email reconciliation from `S1` and prove the changed Archive Email is
+- [x] Run account-wide Email reconciliation from `S1` and prove the changed Archive Email is
       reconciled before the global state advances to `S2`.
-- [ ] Cover ordinary forced mailbox refresh.
+- [x] Cover ordinary forced mailbox refresh.
 - [ ] Cover mailbox `Email/queryChanges` returning `cannotCalculateChanges`.
 - [ ] Cover mailbox `Email/queryChanges` returning `tooManyChanges`.
 - [ ] Cover a mailbox refresh whose `Email/get.state` is newer than the stored global Email state.
@@ -183,27 +183,27 @@ be advanced by a mailbox/query materializer that only fetched a subset of accoun
 
 ## 1.2 Stop full mailbox materialization from advancing global Email state
 
-- [ ] Remove the global Email-state write from the full mailbox materialization path in
+- [x] Remove the global Email-state write from the full mailbox materialization path in
       `MailboxRefreshExecutor`.
-- [ ] Continue to commit fetched representative Emails normally.
-- [ ] Continue to rebase active optimistic projections against confirmed Email objects.
-- [ ] Keep the response Email state available only where it is useful for validation/debugging; do not
+- [x] Continue to commit fetched representative Emails normally.
+- [x] Continue to rebase active optimistic projections against confirmed Email objects.
+- [x] Keep the response Email state available only where it is useful for validation/debugging; do not
       install it as the account synchronization cursor.
-- [ ] Add/adjust focused tests proving a forced mailbox refresh cannot skip unrelated Email changes.
+- [x] Add/adjust focused tests proving a forced mailbox refresh cannot skip unrelated Email changes.
 
 This should be a narrow correctness change, not a sync rewrite.
 
 ## 1.3 Separate account Email delta work from mailbox query delta work
 
-- [ ] Audit `refreshCollapsedMailboxThreadsIncrementally()` and related paths for bundled
+- [x] Audit `refreshCollapsedMailboxThreadsIncrementally()` and related paths for bundled
       `Email/changes` ownership.
-- [ ] Move account-wide `Email/changes` progression into the account Email synchronizer/
+- [x] Move account-wide `Email/changes` progression into the account Email synchronizer/
       `MailDeltaRefreshExecutor` path.
-- [ ] Keep mailbox synchronization responsible for `Email/queryChanges`, ordered query membership,
+- [x] Keep mailbox synchronization responsible for `Email/queryChanges`, ordered query membership,
       and bounded window materialization.
-- [ ] Ensure mailbox-query failure does not discard or roll back an independently valid account Email
+- [x] Ensure mailbox-query failure does not discard or roll back an independently valid account Email
       delta merely because both happened to be sent in one JMAP request envelope.
-- [ ] Ensure account Email-delta failure does not force mailbox code to invent a new global Email
+- [x] Ensure account Email-delta failure does not force mailbox code to invent a new global Email
       baseline from representative data.
 
 Target responsibility split:
@@ -223,13 +223,13 @@ Mailbox synchronizer
 
 ## 1.4 Preserve least-request ordering in `AccountSyncCoordinator`
 
-- [ ] Reconcile account Email object state before performing query work that depends on the new object
+- [x] Reconcile account Email object state before performing query work that depends on the new object
       state.
-- [ ] After the Email commit, determine which tracked mailbox/query windows actually require
+- [x] After the Email commit, determine which tracked mailbox/query windows actually require
       reconciliation.
-- [ ] Avoid turning every Email metadata/keyword change into an `Email/queryChanges` request.
-- [ ] Preserve existing cheap paths for changes that cannot affect query membership/order.
-- [ ] Publish cache invalidation only for committed changes.
+- [x] Avoid turning every Email metadata/keyword change into an `Email/queryChanges` request.
+- [x] Preserve existing cheap paths for changes that cannot affect query membership/order.
+- [x] Publish cache invalidation only for committed changes.
 
 Logical ordering:
 
@@ -248,23 +248,23 @@ When account-wide `Email/changes` itself returns `cannotCalculateChanges`, `tooM
 otherwise unrecoverable delta gap, recover without using mailbox representative windows as an
 account-state substitute.
 
-- [ ] Define the locally relevant Email working set from SQLite.
-- [ ] Include cached Email rows.
-- [ ] Include complete-offline membership that must remain complete.
-- [ ] Include active query-window representatives.
-- [ ] Include materialized Thread children whose Email state is retained.
-- [ ] Include Emails required by active optimistic mutations.
-- [ ] Include other durable Email references whose correctness requires object reconciliation, such as
+- [x] Define the locally relevant Email working set from SQLite.
+- [x] Include cached Email rows.
+- [x] Include complete-offline membership that must remain complete.
+- [x] Include active query-window representatives.
+- [x] Include materialized Thread children whose Email state is retained.
+- [x] Include Emails required by active optimistic mutations.
+- [x] Include other durable Email references whose correctness requires object reconciliation, such as
       retained raw-message/vault references, if they can outlive normal Email cache membership.
-- [ ] Fetch the working set in bounded `Email/get` batches respecting negotiated JMAP limits.
-- [ ] Account for every requested Email ID as either returned or `notFound`.
-- [ ] Apply returned Email replacements through normal optimistic-projection rebasing.
-- [ ] Reconcile confirmed destroyed/`notFound` Emails through normal deletion/membership cleanup.
-- [ ] Mark affected query windows stale/reconcilable where object changes invalidate their retained
+- [x] Fetch the working set in bounded `Email/get` batches respecting negotiated JMAP limits.
+- [x] Account for every requested Email ID as either returned or `notFound`.
+- [x] Apply returned Email replacements through normal optimistic-projection rebasing.
+- [x] Reconcile confirmed destroyed/`notFound` Emails through normal deletion/membership cleanup.
+- [x] Mark affected query windows stale/reconcilable where object changes invalidate their retained
       representation.
-- [ ] Install the new global Email state only after every locally relevant Email has been accounted
+- [x] Install the new global Email state only after every locally relevant Email has been accounted
       for against that state.
-- [ ] Ensure cancellation/supersession cannot install a partially reconciled state token.
+- [x] Ensure cancellation/supersession cannot install a partially reconciled state token.
 
 The key invariant is:
 
@@ -274,13 +274,13 @@ Never install Snew until every locally relevant retained Email has been reconcil
 
 ## 1.6 Keep bounded recovery crash-safe without inventing a new framework
 
-- [ ] Prefer one transaction if the working set is small enough and existing repository boundaries
+- [x] Prefer one transaction if the working set is small enough and existing repository boundaries
       support it safely.
-- [ ] If recovery must commit in bounded chunks, keep the old global Email state until the final
+- [x] If recovery must commit in bounded chunks, keep the old global Email state until the final
       successful accounting step.
-- [ ] Ensure a daemon restart can safely retry the rebaseline from the old state without duplicate or
+- [x] Ensure a daemon restart can safely retry the rebaseline from the old state without duplicate or
       destructive side effects.
-- [ ] Reuse existing synchronization generations/cancellation where sufficient; do not add a general
+- [x] Reuse existing synchronization generations/cancellation where sufficient; do not add a general
       transaction coordinator.
 
 ## 1.7 Separate initial bootstrap from steady-state mailbox refresh
@@ -288,24 +288,24 @@ Never install Snew until every locally relevant retained Email has been reconcil
 Fresh account bootstrap is allowed to establish an initial account baseline, but ordinary mailbox
 refresh must not retain that hidden responsibility.
 
-- [ ] Introduce or clarify an explicit initial mail-baseline/bootstrap operation.
-- [ ] Establish the initial global Email state deliberately as part of bootstrap.
+- [x] Introduce or clarify an explicit initial mail-baseline/bootstrap operation.
+- [x] Establish the initial global Email state deliberately as part of bootstrap.
 - [ ] Materialize configured initial mailbox windows through their normal query/window ownership.
-- [ ] Ensure steady-state `MailboxRefreshExecutor` no longer has a "sometimes establishes account
+- [x] Ensure steady-state `MailboxRefreshExecutor` no longer has a "sometimes establishes account
       object state" mode.
-- [ ] Add tests distinguishing initial bootstrap from an ordinary forced mailbox refresh.
+- [x] Add tests distinguishing initial bootstrap from an ordinary forced mailbox refresh.
 
 ## 1.8 Validate Phase 1
 
-- [ ] Test an Email changed outside the currently refreshed mailbox.
+- [x] Test an Email changed outside the currently refreshed mailbox.
 - [ ] Test an Email destroyed outside the currently refreshed mailbox.
-- [ ] Test an active optimistic mutation during account rebaseline.
-- [ ] Test `Email/get.notFound` during rebaseline.
-- [ ] Test server state advancing while bounded rebaseline work is in progress.
-- [ ] Test refresh supersession/cancellation during recovery.
+- [x] Test an active optimistic mutation during account rebaseline.
+- [x] Test `Email/get.notFound` during rebaseline.
+- [x] Test server state advancing while bounded rebaseline work is in progress.
+- [x] Test refresh supersession/cancellation during recovery.
 - [ ] Test daemon restart/retry behavior for any durable recovery checkpoint that is introduced.
-- [ ] Confirm keyword-only changes still avoid unnecessary query requests.
-- [ ] Run the focused sync suite.
+- [x] Confirm keyword-only changes still avoid unnecessary query requests.
+- [x] Run the focused sync suite.
 - [ ] Run `scripts/check-debug.sh --full`.
 
 ---
@@ -1026,11 +1026,11 @@ Every item below must be directly testable before this project is considered com
 Keep the work reviewable. One item below should normally correspond to one logical commit; split an
 item further if implementation naturally contains independently reviewable behavioral changes.
 
-- [ ] 1. Add global Email-state ownership regression tests.
-- [ ] 2. Stop full mailbox refresh from advancing global Email state.
-- [ ] 3. Separate account Email delta progression from mailbox query delta progression.
-- [ ] 4. Add safe bounded account Email rebaseline recovery.
-- [ ] 5. Separate initial bootstrap Email-state establishment from steady-state mailbox refresh.
+- [x] 1. Add global Email-state ownership regression tests.
+- [x] 2. Stop full mailbox refresh from advancing global Email state.
+- [x] 3. Separate account Email delta progression from mailbox query delta progression.
+- [x] 4. Add safe bounded account Email rebaseline recovery.
+- [x] 5. Separate initial bootstrap Email-state establishment from steady-state mailbox refresh.
 - [ ] 6. Add the complete notification behavioral-contract regression matrix.
 - [ ] 7. Add per-Email notification-consumption state with safe lifetime cleanup semantics.
 - [ ] 8. Add explicit notification baseline/horizon handling for bootstrap and notification
