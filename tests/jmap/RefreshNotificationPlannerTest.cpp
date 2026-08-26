@@ -4,6 +4,7 @@
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/NotificationRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
+#include "jmap/sync/MailNotificationEligibility.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 
 #include <QCoreApplication>
@@ -175,6 +176,94 @@ TEST_CASE("refresh notification planner returns empty candidates when nothing wa
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
         result));
     CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(result).empty());
+}
+
+TEST_CASE("mail notification eligibility requires a legitimate incoming transition",
+          "[jmap][sync][notification][eligibility]")
+{
+    auto previous = loadEmailFixture();
+    previous.id = "eml-transition";
+    previous.threadId = "thr-transition";
+    previous.mailboxIds = {"mbx-archive"};
+    previous.keywords = {};
+
+    auto current = previous;
+    const std::vector<std::string> enabled{"mbx-inbox", "mbx-projects"};
+    const auto evaluate = [&](const javelin::jmap::domain::Email* before, const bool serverCreated,
+                              const bool withinHorizon, const bool suppressed)
+    {
+        return javelin::jmap::sync::evaluateMailNotificationTransition({
+            .previous = before,
+            .current = &current,
+            .notificationMailboxIds = enabled,
+            .serverCreated = serverCreated,
+            .withinNotificationHorizon = withinHorizon,
+            .suppressedByLocalOperation = suppressed,
+        });
+    };
+
+    SECTION("new unread mail in one enabled mailbox")
+    {
+        current.mailboxIds = {"mbx-inbox"};
+        const auto decision = evaluate(nullptr, true, true, false);
+        CHECK(decision.qualifyingMailboxIds == std::vector<std::string>{"mbx-inbox"});
+    }
+
+    SECTION("new unread mail in several enabled mailboxes is still one Email event")
+    {
+        current.mailboxIds = {"mbx-projects", "mbx-inbox"};
+        const auto decision = evaluate(nullptr, true, true, false);
+        CHECK(decision.qualifyingMailboxIds ==
+              std::vector<std::string>{"mbx-inbox", "mbx-projects"});
+    }
+
+    SECTION("new mail already read is not eligible")
+    {
+        current.mailboxIds = {"mbx-inbox"};
+        current.keywords = {"$seen"};
+        CHECK_FALSE(evaluate(nullptr, true, true, false).eligible());
+    }
+
+    SECTION("server-side unread move into an enabled mailbox is eligible")
+    {
+        current.mailboxIds = {"mbx-inbox"};
+        const auto decision = evaluate(&previous, false, true, false);
+        CHECK(decision.qualifyingMailboxIds == std::vector<std::string>{"mbx-inbox"});
+    }
+
+    SECTION("move between enabled mailboxes is not another incoming transition")
+    {
+        previous.mailboxIds = {"mbx-inbox"};
+        current.mailboxIds = {"mbx-projects"};
+        CHECK_FALSE(evaluate(&previous, false, true, false).eligible());
+    }
+
+    SECTION("seen to unread in an already enabled mailbox is not arrival")
+    {
+        previous.mailboxIds = {"mbx-inbox"};
+        previous.keywords = {"$seen"};
+        current.mailboxIds = {"mbx-inbox"};
+        current.keywords = {};
+        CHECK_FALSE(evaluate(&previous, false, true, false).eligible());
+    }
+
+    SECTION("uncached updated mail is not guessed to be newly eligible")
+    {
+        current.mailboxIds = {"mbx-inbox"};
+        CHECK_FALSE(evaluate(nullptr, false, true, false).eligible());
+    }
+
+    SECTION("pre-horizon transition is historical")
+    {
+        current.mailboxIds = {"mbx-inbox"};
+        CHECK_FALSE(evaluate(nullptr, true, false, false).eligible());
+    }
+
+    SECTION("local import provenance suppresses a server-created Email")
+    {
+        current.mailboxIds = {"mbx-inbox"};
+        CHECK_FALSE(evaluate(nullptr, true, true, true).eligible());
+    }
 }
 
 TEST_CASE("notification outbox persists pending mail until delivery", "[jmap][cache][notification]")
