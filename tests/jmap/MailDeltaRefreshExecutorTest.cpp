@@ -10,6 +10,7 @@
 #include "jmap/cache/QueryWindowReadRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
+#include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
@@ -21,6 +22,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <variant>
@@ -61,11 +63,14 @@ namespace
         javelin::jmap::api::HttpJmapMethodTransport methodTransport;
         std::vector<javelin::jmap::api::HttpRequest> requests;
         std::vector<javelin::jmap::api::TransportResult> queuedResults;
+        std::function<void(std::size_t)> onSend;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::api::TransportResult>
         send(javelin::jmap::api::HttpRequest request) override
         {
             requests.push_back(request);
+            if (onSend)
+                onSend(requests.size());
             REQUIRE_FALSE(queuedResults.empty());
             auto result = std::move(queuedResults.front());
             queuedResults.erase(queuedResults.begin());
@@ -167,13 +172,20 @@ namespace
         };
     }
 
-    [[nodiscard]] std::string emailJson(const std::string& mailboxId, const bool seen)
+    [[nodiscard]] std::string emailJsonWithIdentity(const std::string& emailId,
+                                                    const std::string& threadId,
+                                                    const std::string& mailboxId, const bool seen)
     {
-        return std::string{
-                   R"({"id":"email-1","blobId":"blob-1","threadId":"thread-1","mailboxIds":{")"} +
-               mailboxId + R"(":true},"keywords":{)" +
+        return std::string{R"({"id":")"} + emailId + R"(","blobId":"blob-)" + emailId +
+               R"(","threadId":")" + threadId + R"(","mailboxIds":{")" + mailboxId +
+               R"(":true},"keywords":{)" +
                (seen ? std::string{R"("$seen":true)"} : std::string{}) +
                R"(},"size":42,"receivedAt":"2026-07-28T01:00:00Z","subject":"Subject","preview":"Preview"})";
+    }
+
+    [[nodiscard]] std::string emailJson(const std::string& mailboxId, const bool seen)
+    {
+        return emailJsonWithIdentity("email-1", "thread-1", mailboxId, seen);
     }
 
     [[nodiscard]] std::string mailboxJson(const std::string& id, const std::uint64_t unread)
@@ -283,6 +295,82 @@ namespace
         };
     }
 
+    [[nodiscard]] javelin::jmap::api::TransportResult
+    recoverableEmailDeltaResponse(const std::string_view errorType)
+    {
+        const auto envelope = javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {
+                    {.name = "error",
+                     .arguments = std::string{R"({"type":")"} + std::string{errorType} +
+                                  R"(","description":"delta unavailable"})",
+                     .callId = "email-changes"},
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "session-state",
+        };
+        const auto serialized = javelin::jmap::api::serializeResponseEnvelope(envelope);
+        REQUIRE(serialized.has_value());
+        return javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body = QByteArray::fromStdString(*serialized),
+        };
+    }
+
+    [[nodiscard]] javelin::jmap::api::TransportResult
+    rebaselineEmailResponse(const std::string& state, const std::string& objects,
+                            const std::string& notFound = {},
+                            const std::string& callId = "email-rebaseline-0")
+    {
+        const auto envelope = javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {
+                    {.name = "Email/get",
+                     .arguments = std::string{R"({"accountId":"account-1","state":")"} + state +
+                                  R"(","list":[)" + objects + R"(],"notFound":[)" + notFound +
+                                  R"(]})",
+                     .callId = callId},
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "session-state",
+        };
+        const auto serialized = javelin::jmap::api::serializeResponseEnvelope(envelope);
+        REQUIRE(serialized.has_value());
+        return javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body = QByteArray::fromStdString(*serialized),
+        };
+    }
+
+    [[nodiscard]] javelin::jmap::api::TransportResult twoRebaselineEmailResponse(
+        const std::string& firstState, const std::string& firstObject,
+        const std::string& secondState, const std::string& secondObject)
+    {
+        const auto envelope = javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {
+                    {.name = "Email/get",
+                     .arguments = std::string{R"({"accountId":"account-1","state":")"} +
+                                  firstState + R"(","list":[)" + firstObject +
+                                  R"(],"notFound":[]})",
+                     .callId = "email-rebaseline-0"},
+                    {.name = "Email/get",
+                     .arguments = std::string{R"({"accountId":"account-1","state":")"} +
+                                  secondState + R"(","list":[)" + secondObject +
+                                  R"(],"notFound":[]})",
+                     .callId = "email-rebaseline-1"},
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "session-state",
+        };
+        const auto serialized = javelin::jmap::api::serializeResponseEnvelope(envelope);
+        REQUIRE(serialized.has_value());
+        return javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body = QByteArray::fromStdString(*serialized),
+        };
+    }
+
     void seedEmailState(javelin::jmap::cache::DatabaseConnection& connection)
     {
         javelin::jmap::cache::SyncStateRepository states{connection};
@@ -342,6 +430,281 @@ namespace
     }
 
 } // namespace
+
+TEST_CASE("account Email rebaseline reconciles cached mail before advancing state",
+          "[jmap][sync][mail-delta][rebaseline]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    const auto runCase = [](const std::string_view errorType)
+    {
+        auto database = makeDatabaseContext();
+        seedAccount(database.connection);
+        seedEmailState(database.connection);
+        javelin::jmap::cache::EmailRepository emails{database.connection};
+        REQUIRE_FALSE(emails.upsertMany("account-1", {email({"archive"}, {})}).has_value());
+
+        FakeTransport transport;
+        transport.queuedResults.push_back(recoverableEmailDeltaResponse(errorType));
+        transport.queuedResults.push_back(
+            rebaselineEmailResponse("email-state-2", emailJson("inbox", true)));
+        javelin::jmap::api::MethodCaller caller{transport};
+        javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                               requestContext()};
+        const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+        const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
+        CHECK_FALSE(summary.emailNeedsFullRefresh);
+        CHECK(summary.emailChanged);
+        CHECK(summary.queryAffectedMailboxIds == std::vector<std::string>{"archive", "inbox"});
+        REQUIRE(transport.requests.size() == 2);
+        CHECK(transport.requests.front().body.contains("\"Email/changes\""));
+        CHECK(transport.requests.back().body.contains("\"Email/get\""));
+        CHECK(transport.requests.back().body.contains("email-1"));
+        CHECK_FALSE(transport.requests.back().body.contains("\"Email/query\""));
+
+        const auto cachedResult = emails.find("account-1", "email-1");
+        REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cachedResult));
+        const auto& cached = std::get<std::optional<javelin::jmap::domain::Email>>(cachedResult);
+        REQUIRE(cached.has_value());
+        CHECK(cached->mailboxIds == std::vector<std::string>{"inbox"});
+        CHECK(cached->keywords == std::vector<std::string>{"$seen"});
+
+        javelin::jmap::cache::SyncStateRepository states{database.connection};
+        const auto stateResult =
+            states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+        REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(
+            stateResult));
+        REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult)
+                    .has_value());
+        CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult)
+                  ->stateToken == "email-state-2");
+    };
+
+    SECTION("cannotCalculateChanges")
+    {
+        runCase("cannotCalculateChanges");
+    }
+    SECTION("tooManyChanges")
+    {
+        runCase("tooManyChanges");
+    }
+}
+
+TEST_CASE("account Email rebaseline removes locally retained notFound mail before advancing state",
+          "[jmap][sync][mail-delta][rebaseline]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {email({"archive"}, {})}).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(recoverableEmailDeltaResponse("cannotCalculateChanges"));
+    transport.queuedResults.push_back(rebaselineEmailResponse("email-state-2", {}, R"("email-1")"));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
+    CHECK_FALSE(summary.emailNeedsFullRefresh);
+    CHECK(summary.emailChanged);
+    CHECK(summary.queryAffectedMailboxIds == std::vector<std::string>{"archive"});
+
+    const auto cachedResult = emails.find("account-1", "email-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cachedResult));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(cachedResult).has_value());
+
+    javelin::jmap::cache::SyncStateRepository states{database.connection};
+    const auto stateResult =
+        states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult));
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult)->stateToken ==
+          "email-state-2");
+}
+
+TEST_CASE("account Email rebaseline reapplies active optimistic mutations",
+          "[jmap][sync][mail-delta][rebaseline][mutation]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {email({"archive"}, {})}).has_value());
+    javelin::jmap::sync::EmailMutationJournal mutations{database.connection};
+    REQUIRE_FALSE(mutations
+                      .put({
+                          .mutationId = "pending-unread",
+                          .operationGroupId = std::nullopt,
+                          .accountId = "account-1",
+                          .status = javelin::jmap::sync::MutationStatus::Pending,
+                          .patch =
+                              {
+                                  .emailId = "email-1",
+                                  .addMailboxIds = {},
+                                  .removeMailboxIds = {},
+                                  .addKeywords = {},
+                                  .removeKeywords = {"$seen"},
+                                  .destroy = false,
+                              },
+                          .baseMailboxIds = std::vector<std::string>{"archive"},
+                          .baseKeywords = std::vector<std::string>{"$seen"},
+                          .baseState = "email-state-1",
+                          .acceptedState = std::nullopt,
+                          .errorJson = std::nullopt,
+                      })
+                      .has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(recoverableEmailDeltaResponse("cannotCalculateChanges"));
+    transport.queuedResults.push_back(
+        rebaselineEmailResponse("email-state-2", emailJson("archive", true)));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    const auto cachedResult = emails.find("account-1", "email-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cachedResult));
+    const auto& cached = std::get<std::optional<javelin::jmap::domain::Email>>(cachedResult);
+    REQUIRE(cached.has_value());
+    CHECK(cached->keywords.empty());
+
+    const auto activeResult = mutations.listActive("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
+        activeResult));
+    REQUIRE(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(activeResult).size() ==
+            1);
+}
+
+TEST_CASE("account Email rebaseline is superseded by a concurrent Email mutation",
+          "[jmap][sync][mail-delta][rebaseline][race]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {email({"archive"}, {})}).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(recoverableEmailDeltaResponse("cannotCalculateChanges"));
+    transport.queuedResults.push_back(
+        rebaselineEmailResponse("email-state-2", emailJson("inbox", true)));
+    transport.onSend = [&database](const std::size_t requestNumber)
+    {
+        if (requestNumber != 2)
+            return;
+        javelin::jmap::sync::ConsistencyDomainRepository consistency{database.connection};
+        const auto advanced = consistency.advanceMutation({
+            .accountId = "account-1",
+            .dataType = "Email",
+        });
+        REQUIRE(std::holds_alternative<std::uint64_t>(advanced));
+    };
+
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
+    CHECK(summary.superseded);
+
+    const auto cachedResult = emails.find("account-1", "email-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cachedResult));
+    const auto& cached = std::get<std::optional<javelin::jmap::domain::Email>>(cachedResult);
+    REQUIRE(cached.has_value());
+    CHECK(cached->mailboxIds == std::vector<std::string>{"archive"});
+    CHECK(cached->keywords.empty());
+
+    javelin::jmap::cache::SyncStateRepository states{database.connection};
+    const auto stateResult =
+        states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult));
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult)->stateToken ==
+          "email-state-1");
+}
+
+TEST_CASE("account Email rebaseline retries a bounded pass when Email state advances",
+          "[jmap][sync][mail-delta][rebaseline][state-race]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+
+    auto first = email({"archive"}, {});
+    auto second = email({"archive"}, {});
+    second.id = "email-2";
+    second.blobId = "blob-2";
+    second.threadId = "thread-2";
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {first, second}).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(recoverableEmailDeltaResponse("cannotCalculateChanges"));
+    transport.queuedResults.push_back(twoRebaselineEmailResponse(
+        "email-state-2", emailJsonWithIdentity("email-1", "thread-1", "inbox", true),
+        "email-state-3", emailJsonWithIdentity("email-2", "thread-2", "inbox", true)));
+    transport.queuedResults.push_back(twoRebaselineEmailResponse(
+        "email-state-3", emailJsonWithIdentity("email-1", "thread-1", "archive", false),
+        "email-state-3", emailJsonWithIdentity("email-2", "thread-2", "archive", false)));
+
+    auto context = requestContext();
+    context.requestLimits = javelin::jmap::api::CoreRequestLimits{
+        .maxSizeRequest = 1024 * 1024,
+        .maxConcurrentRequests = 1,
+        .maxCallsInRequest = 2,
+        .maxObjectsInGet = 1,
+        .maxObjectsInSet = 1,
+    };
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller, context};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    REQUIRE(transport.requests.size() == 3);
+    const auto firstCachedResult = emails.find("account-1", "email-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(
+        firstCachedResult));
+    const auto& firstCached =
+        std::get<std::optional<javelin::jmap::domain::Email>>(firstCachedResult);
+    REQUIRE(firstCached.has_value());
+    CHECK(firstCached->mailboxIds == std::vector<std::string>{"archive"});
+    CHECK(firstCached->keywords.empty());
+
+    javelin::jmap::cache::SyncStateRepository states{database.connection};
+    const auto stateResult =
+        states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult));
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult)->stateToken ==
+          "email-state-3");
+}
 
 TEST_CASE("account mail delta applies an external seen change without invalidating mailbox queries",
           "[jmap][sync][mail-delta]")
