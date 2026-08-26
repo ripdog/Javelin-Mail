@@ -5,7 +5,6 @@
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
-#include "jmap/cache/NotificationRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
@@ -139,16 +138,6 @@ namespace javelin::jmap::sync
             std::ranges::sort(left);
             std::ranges::sort(right);
             return left == right;
-        }
-
-        [[nodiscard]] bool notificationEligible(const javelin::jmap::domain::Email& email,
-                                                const std::string_view mailboxId)
-        {
-            const bool inMailbox =
-                std::ranges::find(email.mailboxIds, mailboxId) != email.mailboxIds.end();
-            const bool seen = std::ranges::find(email.keywords, std::string_view{"$seen"}) !=
-                              email.keywords.end();
-            return inMailbox && !seen;
         }
 
         [[nodiscard]] EmailWorkingSetResult
@@ -552,11 +541,8 @@ namespace javelin::jmap::sync
             appendUnique(destination.changedMailboxIds, source.changedMailboxIds);
             appendUnique(destination.queryAffectedMailboxIds, source.queryAffectedMailboxIds);
             appendUnique(destination.insertedEmailIds, source.insertedEmailIds);
-            appendUnique(destination.notificationEventMailboxIds,
-                         source.notificationEventMailboxIds);
             std::ranges::sort(destination.changedMailboxIds);
             std::ranges::sort(destination.queryAffectedMailboxIds);
-            std::ranges::sort(destination.notificationEventMailboxIds);
         }
 
         [[nodiscard]] QCoro::Task<MailDeltaRefreshResult>
@@ -786,14 +772,10 @@ namespace javelin::jmap::sync
 
     QCoro::Task<MailDeltaRefreshResult>
     MailDeltaRefreshExecutor::refresh(std::string accountId, const MailDeltaRefreshRequest request,
-                                      std::string remoteAccountId,
-                                      std::vector<std::string> notificationMailboxIds) const
+                                      std::string remoteAccountId) const
     {
         if (remoteAccountId.empty())
             remoteAccountId = accountId;
-        std::ranges::sort(notificationMailboxIds);
-        notificationMailboxIds.erase(std::ranges::unique(notificationMailboxIds).begin(),
-                                     notificationMailboxIds.end());
 
         MailDeltaRefreshSummary summary;
         javelin::jmap::cache::SyncStateRepository states{m_databaseConnection};
@@ -951,12 +933,10 @@ namespace javelin::jmap::sync
         javelin::jmap::cache::SearchWindowRepository searchWindows{m_databaseConnection};
         javelin::jmap::sync::EmailMutationJournal emailMutations{m_databaseConnection};
         std::unordered_map<std::string, std::vector<std::string>> trackedMailboxIds;
-        std::unordered_set<std::string> activeMutationEmailIds;
         bool searchWindowsAffected =
             parsed.emailChanges.has_value() && !parsed.emailChanges->created.empty();
         if (parsed.emailChanges.has_value() && !parsed.emailChanges->updated.empty())
         {
-            const bool notificationTrackingEnabled = !notificationMailboxIds.empty();
             std::vector<std::string> relevantUpdatedIds;
             for (const auto& emailId : parsed.emailChanges->updated)
             {
@@ -991,10 +971,7 @@ namespace javelin::jmap::sync
                 const bool mutationActive = std::ranges::any_of(
                     std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(mutationResult),
                     [](const auto& mutation) { return projectsOptimistically(mutation.status); });
-                if (mutationActive)
-                    activeMutationEmailIds.insert(emailId);
-                if (cached || trackedByMailbox || trackedBySearch || mutationActive ||
-                    notificationTrackingEnabled)
+                if (cached || trackedByMailbox || trackedBySearch || mutationActive)
                     relevantUpdatedIds.push_back(emailId);
             }
 
@@ -1051,7 +1028,6 @@ namespace javelin::jmap::sync
 
         std::unordered_set<std::string> createdIds;
         std::vector<std::string> staleThreadIds;
-        std::vector<javelin::jmap::cache::MailNotificationEventInput> notificationEvents;
         if (parsed.emailChanges.has_value())
             createdIds.insert(parsed.emailChanges->created.begin(),
                               parsed.emailChanges->created.end());
@@ -1063,27 +1039,6 @@ namespace javelin::jmap::sync
                 co_return operationError(*error);
             const auto& previous =
                 std::get<std::optional<javelin::jmap::domain::Email>>(previousResult);
-            const bool created = createdIds.contains(email.id);
-            const bool beforeStateReliable =
-                created || (previous.has_value() && !activeMutationEmailIds.contains(email.id));
-            if (beforeStateReliable)
-            {
-                for (const auto& mailboxId : notificationMailboxIds)
-                {
-                    const bool beforeEligible =
-                        !created && previous.has_value() && notificationEligible(*previous, mailboxId);
-                    if (beforeEligible || !notificationEligible(email, mailboxId))
-                        continue;
-                    notificationEvents.push_back(javelin::jmap::cache::MailNotificationEventInput{
-                        .mailboxId = mailboxId,
-                        .emailId = email.id,
-                        .threadId = email.threadId,
-                        .subject = email.subject,
-                        .receivedAt = email.receivedAt,
-                    });
-                    appendUnique(summary.notificationEventMailboxIds, mailboxId);
-                }
-            }
             appendUnique(summary.changedMailboxIds, email.mailboxIds);
             if (previous.has_value())
                 appendUnique(summary.changedMailboxIds, previous->mailboxIds);
@@ -1273,16 +1228,6 @@ namespace javelin::jmap::sync
                                                                 accountId, std::move(changedIds),
                                                                 parsed.emailChanges->newState))
                 co_return *error;
-
-            javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
-            for (const auto& event : notificationEvents)
-            {
-                const auto enqueued =
-                    notifications.enqueueEvent(transaction.cacheTransaction(), accountId, event);
-                if (const auto* error =
-                        std::get_if<javelin::jmap::cache::DatabaseError>(&enqueued))
-                    co_return operationError(*error);
-            }
         }
         if (const auto error = transaction.commit())
             co_return operationError(*error);
@@ -1297,8 +1242,7 @@ namespace javelin::jmap::sync
         };
         if (continuation.mailbox || continuation.email)
         {
-            const auto continued = co_await refresh(accountId, continuation, remoteAccountId,
-                                                    notificationMailboxIds);
+            const auto continued = co_await refresh(accountId, continuation, remoteAccountId);
             if (const auto* error = std::get_if<OperationError>(&continued))
                 co_return *error;
             const auto& next = std::get<MailDeltaRefreshSummary>(continued);
@@ -1312,10 +1256,8 @@ namespace javelin::jmap::sync
             appendUnique(summary.changedMailboxIds, next.changedMailboxIds);
             appendUnique(summary.queryAffectedMailboxIds, next.queryAffectedMailboxIds);
             appendUnique(summary.insertedEmailIds, next.insertedEmailIds);
-            appendUnique(summary.notificationEventMailboxIds, next.notificationEventMailboxIds);
             std::ranges::sort(summary.changedMailboxIds);
             std::ranges::sort(summary.queryAffectedMailboxIds);
-            std::ranges::sort(summary.notificationEventMailboxIds);
         }
         co_return summary;
     }

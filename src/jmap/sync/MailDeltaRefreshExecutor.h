@@ -29,7 +29,6 @@ namespace javelin::jmap::sync
         std::vector<std::string> changedMailboxIds;
         std::vector<std::string> queryAffectedMailboxIds;
         std::vector<std::string> insertedEmailIds;
-        std::vector<std::string> notificationEventMailboxIds;
     };
 
     using MailDeltaRefreshResult = std::variant<MailDeltaRefreshSummary, OperationError>;
@@ -43,8 +42,7 @@ namespace javelin::jmap::sync
 
         [[nodiscard]] QCoro::Task<MailDeltaRefreshResult>
         refresh(std::string accountId, MailDeltaRefreshRequest request,
-                std::string remoteAccountId = {},
-                std::vector<std::string> notificationMailboxIds = {}) const;
+                std::string remoteAccountId = {}) const;
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
