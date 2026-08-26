@@ -5,6 +5,8 @@
 #include <QSqlError>
 #include <QSqlQuery>
 
+#include <unordered_set>
+
 namespace javelin::jmap::cache
 {
     namespace
@@ -19,6 +21,13 @@ namespace javelin::jmap::cache
         {
             return std::to_string(accountId.size()) + ":" + std::string{accountId} +
                    std::string{emailId};
+        }
+
+        [[nodiscard]] std::string mailEventClaimKey(const std::string_view accountId,
+                                                    const std::int64_t eventId)
+        {
+            return std::string{"event:"} + std::to_string(accountId.size()) + ":" +
+                   std::string{accountId} + ":" + std::to_string(eventId);
         }
     } // namespace
 
@@ -81,6 +90,147 @@ namespace javelin::jmap::cache
             });
         }
         return events;
+    }
+
+    std::variant<std::vector<MailNotificationEventRecord>, DatabaseError>
+    NotificationRepository::claimEligibleEvents(const std::string_view accountId,
+                                                const std::span<const std::string> mailboxIds)
+    {
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Claim mail notification events"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        auto& database = m_connection.database();
+
+        const std::unordered_set<std::string> mailboxFilter(mailboxIds.begin(), mailboxIds.end());
+        QSqlQuery pending{database};
+        pending.prepare(QStringLiteral(
+            "SELECT event_id,mailbox_id,email_id,thread_id,subject,received_at FROM "
+            "mail_notification_events WHERE account_id=:account_id ORDER BY event_id"));
+        pending.bindValue(QStringLiteral(":account_id"),
+                          QString::fromStdString(std::string{accountId}));
+        if (!pending.exec())
+            return queryError(QStringLiteral("Read pending mail notification events"), pending);
+
+        QSqlQuery eligible{database};
+        eligible.prepare(QStringLiteral(
+            "SELECT EXISTS(SELECT 1 FROM emails e JOIN email_mailboxes m ON "
+            "m.account_id=e.account_id AND m.email_id=e.email_id AND m.mailbox_id=:mailbox_id "
+            "WHERE e.account_id=:account_id AND e.email_id=:email_id AND NOT EXISTS(SELECT 1 "
+            "FROM email_keywords k WHERE k.account_id=e.account_id AND k.email_id=e.email_id "
+            "AND k.keyword='$seen'))"));
+        QSqlQuery remove{database};
+        remove.prepare(QStringLiteral(
+            "DELETE FROM mail_notification_events WHERE account_id=:account_id AND "
+            "event_id=:event_id"));
+        NotificationDispatchRepository dispatches{m_connection};
+        std::vector<MailNotificationEventRecord> claimedEvents;
+
+        while (pending.next())
+        {
+            MailNotificationEventRecord event{
+                .eventId = pending.value(0).toLongLong(),
+                .accountId = std::string{accountId},
+                .mailboxId = pending.value(1).toString().toStdString(),
+                .emailId = pending.value(2).toString().toStdString(),
+                .threadId = pending.value(3).toString().toStdString(),
+                .subject = pending.value(4).isNull()
+                               ? std::nullopt
+                               : std::optional{pending.value(4).toString().toStdString()},
+                .receivedAt = pending.value(5).toString().toStdString(),
+            };
+            if (!mailboxFilter.empty() && !mailboxFilter.contains(event.mailboxId))
+                continue;
+
+            eligible.bindValue(QStringLiteral(":account_id"),
+                               QString::fromStdString(std::string{accountId}));
+            eligible.bindValue(QStringLiteral(":mailbox_id"),
+                               QString::fromStdString(event.mailboxId));
+            eligible.bindValue(QStringLiteral(":email_id"), QString::fromStdString(event.emailId));
+            if (!eligible.exec() || !eligible.next())
+                return queryError(QStringLiteral("Validate pending mail notification"), eligible);
+            const bool stillEligible = eligible.value(0).toBool();
+            eligible.finish();
+
+            const auto claimKey = mailEventClaimKey(accountId, event.eventId);
+            if (!stillEligible)
+            {
+                if (const auto error = dispatches.release(
+                        transaction, NotificationDispatchKind::Mail, claimKey))
+                    return *error;
+                remove.bindValue(QStringLiteral(":account_id"),
+                                 QString::fromStdString(std::string{accountId}));
+                remove.bindValue(QStringLiteral(":event_id"),
+                                 static_cast<qlonglong>(event.eventId));
+                if (!remove.exec())
+                    return queryError(QStringLiteral("Cancel stale mail notification event"), remove);
+                remove.finish();
+                continue;
+            }
+
+            const auto claimed =
+                dispatches.claim(transaction, NotificationDispatchKind::Mail, claimKey);
+            if (const auto* error = std::get_if<DatabaseError>(&claimed))
+                return *error;
+            if (std::get<bool>(claimed))
+                claimedEvents.push_back(std::move(event));
+        }
+        if (const auto error = transaction.commit())
+            return *error;
+        return claimedEvents;
+    }
+
+    std::optional<DatabaseError>
+    NotificationRepository::completeEvents(const std::string_view accountId,
+                                           const std::span<const std::int64_t> eventIds)
+    {
+        if (eventIds.empty())
+            return std::nullopt;
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Complete mail notification events"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        QSqlQuery remove{m_connection.database()};
+        remove.prepare(QStringLiteral(
+            "DELETE FROM mail_notification_events WHERE account_id=:account_id AND "
+            "event_id=:event_id"));
+        NotificationDispatchRepository dispatches{m_connection};
+        for (const auto eventId : eventIds)
+        {
+            remove.bindValue(QStringLiteral(":account_id"),
+                             QString::fromStdString(std::string{accountId}));
+            remove.bindValue(QStringLiteral(":event_id"), static_cast<qlonglong>(eventId));
+            if (!remove.exec())
+                return queryError(QStringLiteral("Complete mail notification event"), remove);
+            remove.finish();
+            if (const auto error = dispatches.release(
+                    transaction, NotificationDispatchKind::Mail,
+                    mailEventClaimKey(accountId, eventId)))
+                return error;
+        }
+        return transaction.commit();
+    }
+
+    std::optional<DatabaseError>
+    NotificationRepository::releaseEventDispatches(
+        const std::string_view accountId, const std::span<const std::int64_t> eventIds)
+    {
+        if (eventIds.empty())
+            return std::nullopt;
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Release mail notification event dispatches"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        NotificationDispatchRepository dispatches{m_connection};
+        for (const auto eventId : eventIds)
+            if (const auto error = dispatches.release(
+                    transaction, NotificationDispatchKind::Mail,
+                    mailEventClaimKey(accountId, eventId)))
+                return error;
+        return transaction.commit();
     }
 
     std::variant<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>, DatabaseError>
