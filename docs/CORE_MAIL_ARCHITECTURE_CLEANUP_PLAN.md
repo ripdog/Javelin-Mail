@@ -384,12 +384,12 @@ mail_notification_state (
 The exact schema may vary, but the semantics may not.
 
 - [ ] Create the state only when Javelin creates a legitimate new-mail notification event.
-- [ ] Never populate it merely because an Email is downloaded, cached, indexed, opened, searched,
+- [x] Never populate it merely because an Email is downloaded, cached, indexed, opened, searched,
       offline-synchronized, or exposed by a query window.
-- [ ] Keep server-derived Email state separate from Javelin-local notification bookkeeping.
-- [ ] Enforce uniqueness at the database layer so replay/races cannot create a second consumed event
+- [x] Keep server-derived Email state separate from Javelin-local notification bookkeeping.
+- [x] Enforce uniqueness at the database layer so replay/races cannot create a second consumed event
       for the same retained Email.
-- [ ] Tie ordinary cleanup to the Email lifetime where safe.
+- [x] Tie ordinary cleanup to the Email lifetime where safe.
 
 This table is not a renamed `observed_notification_emails`. The old table means "Javelin encountered
 this Email while scanning cached presentation state"; the new table means "Javelin actually created
@@ -400,14 +400,19 @@ this Email's one new-mail event."
 A simple `ON DELETE CASCADE` is desirable only if cache deletion cannot later make a still-existing
 server Email look newly arrived.
 
-- [ ] Audit all paths that remove normal `emails` cache rows.
-- [ ] Distinguish server-confirmed destruction from local cache eviction/retention cleanup.
-- [ ] Prove that an Email whose notification marker cascades away cannot later be rediscovered as an
+- [x] Audit all paths that remove normal `emails` cache rows.
+- [x] Distinguish server-confirmed destruction from local cache eviction/retention cleanup.
+- [x] Prove that an Email whose notification marker cascades away cannot later be rediscovered as an
       old server Email and generate a false new-mail event.
-- [ ] If local Email rows can be evicted while the server object still exists, tie notification
+- [x] If local Email rows can be evicted while the server object still exists, tie notification
       deduplication lifetime to the account synchronization/notification horizon rather than naïvely
       to row residency.
-- [ ] Add a regression test for any cache-evict-and-rediscover path that exists.
+- [x] Add a regression test for any cache-evict-and-rediscover path that exists.
+
+Audit result: normal production code does not evict an `emails` row while retaining the same live
+server Email for later rediscovery. Email-row deletion is server-confirmed destruction/`notFound` or
+local temporary-draft replacement; developer cache clearing removes memberships/windows rather than
+the Email row. The consumption marker therefore follows ordinary Email lifetime safely.
 
 Do not recreate an unbounded forever ledger merely to avoid doing this analysis.
 
@@ -423,10 +428,10 @@ mail_notification_outbox
     "Which already-created notification events still need desktop delivery?"
 ```
 
-- [ ] Keep outbox delivery state separate from per-Email event-consumption state.
-- [ ] Do not make deletion of a delivered outbox row make the Email eligible again.
-- [ ] Do not use mailbox ID as part of the uniqueness boundary that permits another new-mail event.
-- [ ] Allow the outbox to record mailbox ID as presentation/navigation/batching context only.
+- [x] Keep outbox delivery state separate from per-Email event-consumption state.
+- [x] Do not make deletion of a delivered outbox row make the Email eligible again.
+- [x] Do not use mailbox ID as part of the uniqueness boundary that permits another new-mail event.
+- [x] Allow the outbox to record mailbox ID as presentation/navigation/batching context only.
 
 ## 2.6 Create event-consumption state and outbox atomically with Email reconciliation
 
@@ -949,7 +954,7 @@ unless a prior phase proves they are required.
 
 ## Notification migration
 
-- [ ] Introduce the new notification-consumption representation through a normal schema migration.
+- [x] Introduce the new notification-consumption representation through a normal schema migration.
 - [ ] Do not reinterpret `observed_notification_emails` as proof that an Email already generated a
       legitimate notification event.
 - [ ] Remove/retire the old observation table after the scanner is gone.
@@ -1032,7 +1037,7 @@ item further if implementation naturally contains independently reviewable behav
 - [x] 4. Add safe bounded account Email rebaseline recovery.
 - [x] 5. Separate initial bootstrap Email-state establishment from steady-state mailbox refresh.
 - [ ] 6. Add the complete notification behavioral-contract regression matrix.
-- [ ] 7. Add per-Email notification-consumption state with safe lifetime cleanup semantics.
+- [x] 7. Add per-Email notification-consumption state with safe lifetime cleanup semantics.
 - [ ] 8. Add explicit notification baseline/horizon handling for bootstrap and notification
       enablement.
 - [ ] 9. Generate one per-Email notification event from proven committed Email transitions,
