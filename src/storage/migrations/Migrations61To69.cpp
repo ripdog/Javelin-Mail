@@ -183,6 +183,23 @@ namespace javelin::jmap::cache::migrations
                                        "mail_import_items(operation_id,phase,ordinal)"),
                     },
             },
+            MigrationStep{
+                .version = 65,
+                .name = QStringLiteral("mail_notification_event_outbox"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "CREATE TABLE mail_notification_events ("
+                            "event_id INTEGER PRIMARY KEY AUTOINCREMENT,account_id TEXT NOT NULL "
+                            "REFERENCES accounts(account_id) ON DELETE CASCADE,mailbox_id TEXT NOT "
+                            "NULL,email_id TEXT NOT NULL,thread_id TEXT NOT NULL,subject TEXT,"
+                            "received_at TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT "
+                            "CURRENT_TIMESTAMP) STRICT"),
+                        QStringLiteral(
+                            "CREATE INDEX idx_mail_notification_events_pending ON "
+                            "mail_notification_events(account_id,mailbox_id,event_id)"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

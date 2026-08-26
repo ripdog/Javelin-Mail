@@ -177,6 +177,47 @@ TEST_CASE("refresh notification planner returns empty candidates when nothing wa
     CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(result).empty());
 }
 
+TEST_CASE("notification event outbox gives repeated Email arrivals distinct identities",
+          "[jmap][cache][notification][event-outbox]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
+
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Queue notification events"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+
+    const javelin::jmap::cache::MailNotificationEventInput event{
+        .mailboxId = "mbx-inbox",
+        .emailId = "eml-1",
+        .threadId = "thr-1",
+        .subject = std::optional<std::string>{"Subject"},
+        .receivedAt = "2026-08-27T00:00:00Z",
+    };
+    const auto first = notifications.enqueueEvent(transaction, "account-1", event);
+    const auto second = notifications.enqueueEvent(transaction, "account-1", event);
+    REQUIRE(std::holds_alternative<std::int64_t>(first));
+    REQUIRE(std::holds_alternative<std::int64_t>(second));
+    CHECK(std::get<std::int64_t>(second) > std::get<std::int64_t>(first));
+    REQUIRE_FALSE(transaction.commit().has_value());
+
+    const auto listed = notifications.listEvents("account-1");
+    REQUIRE(std::holds_alternative<
+            std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed));
+    const auto& events =
+        std::get<std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed);
+    REQUIRE(events.size() == 2);
+    CHECK(events[0].emailId == "eml-1");
+    CHECK(events[1].emailId == "eml-1");
+    CHECK(events[0].eventId != events[1].eventId);
+}
+
 TEST_CASE("notification outbox persists pending mail until delivery", "[jmap][cache][notification]")
 {
     ApplicationGuard application;
