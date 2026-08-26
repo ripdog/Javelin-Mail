@@ -3153,6 +3153,28 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .message = accountSynchronizationNotConfigured(),
             };
+        auto refreshed = observeResult(
+            m_errorCoordinator, configuration->second.settings, accountId,
+            QStringLiteral("Materialize attachment source"),
+            co_await m_messageContentClient.refresh(
+                toLiveConnectionSettings(configuration->second.settings), accountId, emailId));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshed))
+            co_return *error;
+        if (const auto* unavailable =
+                std::get_if<javelin::jmap::MessageContentUnavailable>(&refreshed))
+        {
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::NotFound,
+                .message = unavailable->message,
+            };
+        }
+        if (const auto* summary =
+                std::get_if<javelin::jmap::MessageContentRefreshSummary>(&refreshed);
+            summary != nullptr && !summary->usedCachedContent)
+        {
+            publishMessageContentCommitted(QString::fromStdString(summary->accountId),
+                                           QString::fromStdString(summary->emailId));
+        }
         co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
                                 QStringLiteral("Download attachment"),
                                 co_await m_messageContentClient.loadAttachment(

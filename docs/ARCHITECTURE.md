@@ -316,6 +316,16 @@ calendar, account refresh, message navigation, content loading, message-list ses
 follow the same pattern: GUI controllers own interaction and presentation lifetime, while daemon
 services own application policy and operational execution.
 
+External file drag-out follows the same boundary. Attachment drags request the exact attachment
+through `MessageContentPort`, which materializes the raw message source when necessary before
+extracting the part. Message drags retain Javelin's private mail-transfer MIME unchanged and add a
+separate `text/uri-list` containing `.eml` files produced through the existing selected-message Save
+and `RawMailMaterializer` path. Drag files live in a GUI-owned cache staging area rather than
+`QTemporaryFile` scope: each staging directory is private to the user, remains available for 24 hours
+so asynchronous drop consumers do not race source cleanup, and is pruned by later drag preparation.
+The staging files are never treated as user-owned exports or as the source of an internal mailbox
+move/copy operation.
+
 The mailbox associated with a list tab is selection context, not proof that every visible Email is
 resident in that mailbox: an expanded conversation can expose members from other mailboxes. Move,
 copy, delete, and junk planning therefore evaluates each resolved Email's effective cached

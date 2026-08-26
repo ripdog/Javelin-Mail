@@ -1651,6 +1651,16 @@ namespace javelin::gui::shell
         m_messageView->setDragEnabled(true);
         m_messageView->setDragDropMode(QAbstractItemView::DragOnly);
         m_messageView->setDefaultDropAction(Qt::MoveAction);
+        auto* messageDragView =
+            static_cast<javelin::gui::messages::MessageDragListView*>(m_messageView);
+        messageDragView->setExternalFileDragEnabled(true);
+        connect(messageDragView,
+                &javelin::gui::messages::MessageDragListView::externalDragPreparationRequested,
+                m_messageFileController, &MessageFileController::prepareMessageDrag);
+        connect(m_messageFileController, &MessageFileController::messageDragReady, messageDragView,
+                &javelin::gui::messages::MessageDragListView::externalDragPreparationReady);
+        connect(m_messageFileController, &MessageFileController::messageDragFailed, messageDragView,
+                &javelin::gui::messages::MessageDragListView::externalDragPreparationFailed);
         m_messageView->setStyleSheet(QStringLiteral("QListView { border: none; padding: 3px; }"));
         m_messageView->setMouseTracking(true);
         m_messageView->viewport()->setMouseTracking(true);
@@ -1959,6 +1969,9 @@ namespace javelin::gui::shell
                     m_messageFileController->openAttachmentWith(
                         accountId.toStdString(), emailId.toStdString(), partId.toStdString());
                 });
+        connect(m_messageViewContainer,
+                &javelin::gui::messageview::MessageViewContainer::dragAttachmentRequested,
+                m_messageFileController, &MessageFileController::dragAttachment);
         connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::viewSourceRequested, this,
                 &MainWindow::viewSelectedMessageSource);

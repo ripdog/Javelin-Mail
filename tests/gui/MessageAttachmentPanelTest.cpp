@@ -4,6 +4,7 @@
 
 #include <QApplication>
 #include <QMenu>
+#include <QMouseEvent>
 #include <QToolButton>
 
 #include <catch2/catch_test_macros.hpp>
@@ -86,6 +87,7 @@ TEST_CASE("attachment panel resizes without replacing interactive tiles", "[gui]
 
     int openRequests = 0;
     int openWithRequests = 0;
+    int dragRequests = 0;
     QObject::connect(
         &panel, &javelin::gui::messageview::MessageAttachmentPanel::openAttachmentRequested,
         [&openRequests](const QString&, const QString&, const QString&) { ++openRequests; });
@@ -93,6 +95,10 @@ TEST_CASE("attachment panel resizes without replacing interactive tiles", "[gui]
         &panel, &javelin::gui::messageview::MessageAttachmentPanel::openAttachmentWithRequested,
         [&openWithRequests](const QString&, const QString&, const QString&)
         { ++openWithRequests; });
+    QObject::connect(&panel,
+                     &javelin::gui::messageview::MessageAttachmentPanel::dragAttachmentRequested,
+                     [&dragRequests](const QString&, const QString&, const QString&, QWidget*)
+                     { ++dragRequests; });
     originalOpenButton->click();
     CHECK(openRequests == 1);
 
@@ -109,4 +115,27 @@ TEST_CASE("attachment panel resizes without replacing interactive tiles", "[gui]
     REQUIRE(openWithAction != nullptr);
     openWithAction->trigger();
     CHECK(openWithRequests == 1);
+
+    const QPoint pressPoint{4, 4};
+    const QPoint dragPoint{pressPoint.x() + QApplication::startDragDistance() + 2, pressPoint.y()};
+    QMouseEvent pressEvent{QEvent::MouseButtonPress,
+                           QPointF{pressPoint},
+                           QPointF{originalOpenButton->mapToGlobal(pressPoint)},
+                           Qt::LeftButton,
+                           Qt::LeftButton,
+                           Qt::NoModifier};
+    QApplication::sendEvent(originalOpenButton, &pressEvent);
+    QMouseEvent moveEvent{
+        QEvent::MouseMove, QPointF{dragPoint}, QPointF{originalOpenButton->mapToGlobal(dragPoint)},
+        Qt::NoButton,      Qt::LeftButton,     Qt::NoModifier};
+    QApplication::sendEvent(originalOpenButton, &moveEvent);
+    QMouseEvent releaseEvent{QEvent::MouseButtonRelease,
+                             QPointF{dragPoint},
+                             QPointF{originalOpenButton->mapToGlobal(dragPoint)},
+                             Qt::LeftButton,
+                             Qt::NoButton,
+                             Qt::NoModifier};
+    QApplication::sendEvent(originalOpenButton, &releaseEvent);
+    CHECK(dragRequests == 1);
+    CHECK(openRequests == 1);
 }

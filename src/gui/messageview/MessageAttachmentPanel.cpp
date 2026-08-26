@@ -16,6 +16,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMimeDatabase>
+#include <QMouseEvent>
 #include <QResizeEvent>
 #include <QSizePolicy>
 #include <QStyle>
@@ -74,12 +75,63 @@ namespace javelin::gui::messageview
             return attachments;
         }
 
+        class AttachmentDragButton final : public QToolButton
+        {
+          public:
+            explicit AttachmentDragButton(std::function<void(QWidget*)> dragAction,
+                                          QWidget* parent = nullptr)
+                : QToolButton(parent), m_dragAction(std::move(dragAction))
+            {
+            }
+
+          protected:
+            void mousePressEvent(QMouseEvent* event) override
+            {
+                m_dragStarted = false;
+                if (event->button() == Qt::LeftButton)
+                    m_pressPosition = event->position().toPoint();
+                QToolButton::mousePressEvent(event);
+            }
+
+            void mouseMoveEvent(QMouseEvent* event) override
+            {
+                if (!m_dragStarted && event->buttons().testFlag(Qt::LeftButton) &&
+                    (event->position().toPoint() - m_pressPosition).manhattanLength() >=
+                        QApplication::startDragDistance())
+                {
+                    m_dragStarted = true;
+                    if (m_dragAction)
+                        m_dragAction(this);
+                    return;
+                }
+                QToolButton::mouseMoveEvent(event);
+            }
+
+            void mouseReleaseEvent(QMouseEvent* event) override
+            {
+                if (m_dragStarted)
+                {
+                    setDown(false);
+                    event->accept();
+                    return;
+                }
+                QToolButton::mouseReleaseEvent(event);
+            }
+
+          private:
+            std::function<void(QWidget*)> m_dragAction;
+            QPoint m_pressPosition;
+            bool m_dragStarted = false;
+        };
+
         class AttachmentTile final : public QFrame
         {
           public:
             AttachmentTile(const javelin::jmap::cache::MessageAttachment& attachment,
                            std::function<void()> openAction, std::function<void()> openWithAction,
-                           std::function<void()> saveAction, QString saveToolTip, QWidget* parent)
+                           std::function<void()> saveAction,
+                           std::function<void(QWidget*)> dragAction, QString saveToolTip,
+                           QWidget* parent)
                 : QFrame(parent)
             {
                 const auto fileName = attachmentName(attachment);
@@ -112,7 +164,7 @@ namespace javelin::gui::messageview
                 layout->setContentsMargins(0, 0, 0, 0);
                 layout->setSpacing(0);
 
-                auto* openButton = new QToolButton(this);
+                auto* openButton = new AttachmentDragButton(std::move(dragAction), this);
                 openButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
                 openButton->setIcon(attachmentIcon(attachment));
                 openButton->setText(fileName);
@@ -294,6 +346,12 @@ namespace javelin::gui::messageview
                     Q_EMIT saveAttachmentRequested(QString::fromStdString(*m_accountId.get()),
                                                    QString::fromStdString(*m_emailId.get()),
                                                    partId);
+                },
+                [this, partId](QWidget* source)
+                {
+                    Q_EMIT dragAttachmentRequested(QString::fromStdString(*m_accountId.get()),
+                                                   QString::fromStdString(*m_emailId.get()), partId,
+                                                   source);
                 },
                 saveToolTip, m_listWidget));
         }

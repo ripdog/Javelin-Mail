@@ -1,4 +1,5 @@
 #include "gui/messages/MessageListModel.h"
+#include "gui/messages/MessageDragListView.h"
 #include "gui/messages/MessageDragPayload.h"
 #include "gui/messages/MessageSelectionRestoration.h"
 #include "jmap/cache/ThreadRepository.h"
@@ -416,8 +417,29 @@ TEST_CASE("message list drag payload preserves collapsed Thread intent and sourc
         std::holds_alternative<javelin::app::SelectedCollapsedThread>(decoded->selection.at(1)));
     CHECK(std::get<javelin::app::SelectedCollapsedThread>(decoded->selection.at(1)).threadId ==
           "thread-2");
+    CHECK_FALSE(mime->hasUrls());
     CHECK(model.supportedDragActions().testFlag(Qt::MoveAction));
     CHECK(model.supportedDragActions().testFlag(Qt::CopyAction));
+
+    const QList<QUrl> externalUrls{
+        QUrl::fromLocalFile(QStringLiteral("/tmp/message-1.eml")),
+        QUrl::fromLocalFile(QStringLiteral("/tmp/message-2.eml")),
+    };
+    std::unique_ptr<QMimeData> externalMime{javelin::gui::messages::buildMessageDragMimeData(
+        mime->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)),
+        externalUrls)};
+    REQUIRE(externalMime != nullptr);
+    CHECK(externalMime->urls() == externalUrls);
+    CHECK(externalMime->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)) ==
+          mime->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)));
+
+    std::unique_ptr<QMimeData> advertisedMime{javelin::gui::messages::buildMessageDragMimeData(
+        mime->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)), {}, true)};
+    REQUIRE(advertisedMime != nullptr);
+    CHECK(advertisedMime->hasFormat(QStringLiteral("text/uri-list")));
+    CHECK(advertisedMime->urls().isEmpty());
+    CHECK(advertisedMime->hasFormat(
+        QString::fromLatin1(javelin::gui::messages::messageDragMimeType)));
 }
 
 TEST_CASE("message list drag payload records search selection without a source mailbox",

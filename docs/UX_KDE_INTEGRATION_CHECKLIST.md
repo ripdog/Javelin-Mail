@@ -172,14 +172,14 @@ Check off completed items as you commit.
 - Preserve sender/subject legibility and accessibility rather than making every delegate metric freely
   configurable.
 
-### [ ] Add external drag-out for attachments
+### [x] Add external drag-out for attachments
 
 - Allow attachments to be dragged from Javelin to Dolphin/other applications, materializing or
   downloading the file as required.
 - Define temporary-file lifetime carefully so the drag target does not receive a path that disappears
   too early.
 
-### [ ] Add external drag-out for messages
+### [x] Add external drag-out for messages
 
 - Extend drag-out to messages by materializing RFC 5322 `.eml` using the existing export/raw-message
   infrastructure.
