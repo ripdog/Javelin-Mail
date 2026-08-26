@@ -3062,15 +3062,9 @@ namespace javelin::gui::shell
 
         if (!m_mailWorkspaceController->loadCachedState(*tab, forceReload))
         {
-            const auto plan = planTabActivation({
-                .kind = tabKind(*tab),
-                .homeTab = m_activeTabIndex == std::optional<int>{0},
-            });
-            if (plan.clearMessagePresentation)
-            {
-                m_messageListTabBindingPresenter->applyItems(nullptr);
-                setMessageViewSelection(std::nullopt, std::nullopt, std::nullopt);
-            }
+            // Non-mail tabs own their own content widget. Switching to one must not disturb the
+            // latent mail projection: the message list and selection remain ready for the next
+            // mail-tab activation even though they are not currently visible.
             m_mailActionController->update();
             metrics.finish(QStringLiteral("cache_miss"));
             return;

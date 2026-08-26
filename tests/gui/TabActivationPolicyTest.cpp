@@ -2,12 +2,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-TEST_CASE("empty tab activation clears message presentation", "[gui][tabs][activation]")
+TEST_CASE("empty tab activation restores the mailbox pane without refreshing",
+          "[gui][tabs][activation]")
 {
     const auto plan = javelin::gui::shell::planTabActivation({});
 
     CHECK(plan.showMailboxPane);
-    CHECK(plan.clearMessagePresentation);
     CHECK_FALSE(plan.refreshRemote);
 }
 
@@ -70,8 +70,7 @@ TEST_CASE("search activation refreshes only stale or explicitly requested result
     CHECK(requested.refreshRemote);
 }
 
-TEST_CASE("compose activation preserves the message presentation behind the editor",
-          "[gui][tabs][activation]")
+TEST_CASE("compose activation hides mail chrome without refreshing mail", "[gui][tabs][activation]")
 {
     const auto plan = javelin::gui::shell::planTabActivation({
         .kind = javelin::gui::shell::TabKind::Compose,
@@ -81,11 +80,10 @@ TEST_CASE("compose activation preserves the message presentation behind the edit
     });
 
     CHECK_FALSE(plan.showMailboxPane);
-    CHECK_FALSE(plan.clearMessagePresentation);
     CHECK_FALSE(plan.refreshRemote);
 }
 
-TEST_CASE("contacts and calendar activation clear mail and refresh only on request",
+TEST_CASE("contacts and calendar activation hide mail chrome and refresh only on request",
           "[gui][tabs][activation]")
 {
     const auto contacts = javelin::gui::shell::planTabActivation({
@@ -97,8 +95,8 @@ TEST_CASE("contacts and calendar activation clear mail and refresh only on reque
         .remoteRefreshRequested = true,
     });
 
-    CHECK(contacts.clearMessagePresentation);
+    CHECK_FALSE(contacts.showMailboxPane);
     CHECK_FALSE(contacts.refreshRemote);
-    CHECK(calendar.clearMessagePresentation);
+    CHECK_FALSE(calendar.showMailboxPane);
     CHECK(calendar.refreshRemote);
 }
