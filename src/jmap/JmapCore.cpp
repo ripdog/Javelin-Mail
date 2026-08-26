@@ -1475,7 +1475,7 @@ namespace javelin::jmap
             {
                 reportProgress(QStringLiteral("Refreshing selected mailbox..."));
                 const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
-                    accountId, mailboxId, reportProgress, true, true, remoteAccountId);
+                    accountId, mailboxId, reportProgress, true, remoteAccountId);
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
                 {
                     co_return *error;
