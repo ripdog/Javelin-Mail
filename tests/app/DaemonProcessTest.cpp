@@ -160,6 +160,66 @@ TEST_CASE("daemon account configuration build fails atomically when legacy claim
     REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseError>(result));
 }
 
+TEST_CASE("notification-only mailboxes are not presentation sync interests",
+          "[app][daemon][settings][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("notification-interest-test"),
+        .databasePath = temporaryDirectory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::AccountRepository accounts{connection};
+
+    javelin::protocol::SettingsSnapshot snapshot;
+    snapshot.accounts = {{.id = QStringLiteral("connection-1"),
+                          .revision = 0,
+                          .displayName = QStringLiteral("Example"),
+                          .sessionUrl = QStringLiteral("https://example.test/jmap"),
+                          .loginEmail = QStringLiteral("user@example.test"),
+                          .tokenEndpoint = {},
+                          .oauthClientId = {},
+                          .oauthIssuer = {},
+                          .oauthResource = {},
+                          .oauthScope = {},
+                          .revocationEndpoint = {},
+                          .registrationClientUri = {},
+                          .hasCredentials = true,
+                          .credentialHandle = {},
+                          .tokenExpiresAtEpochSeconds = 0,
+                          .reauthenticationRequired = false,
+                          .cachedAccountIds = {}}};
+    snapshot.syncedMailboxSelections = {{.accountId = QStringLiteral("connection-1"),
+                                         .mailboxIds = {QStringLiteral("opened")}}};
+    snapshot.notificationMailboxSelections = {
+        {.accountId = QStringLiteral("connection-1"),
+         .mailboxIds = {QStringLiteral("notify-only")}}};
+
+    javelin::app::MemoryAccountCredentialStore credentials;
+    REQUIRE_FALSE(credentials
+                      .store(QStringLiteral("connection-1"),
+                             {.accessToken = QStringLiteral("secret"),
+                              .refreshToken = {},
+                              .registrationAccessToken = {}})
+                      .has_value());
+
+    const auto result =
+        javelin::app::buildAccountSyncConfigurations(snapshot, credentials, accounts);
+    REQUIRE(std::holds_alternative<std::vector<javelin::app::AccountSyncConfiguration>>(result));
+    const auto& configurations =
+        std::get<std::vector<javelin::app::AccountSyncConfiguration>>(result);
+    REQUIRE(configurations.size() == 1);
+    CHECK(configurations.front().mailboxIds == std::vector<std::string>{"opened"});
+    CHECK(configurations.front().fullSyncMailboxIds == std::vector<std::string>{"opened"});
+    CHECK(configurations.front().notificationMailboxIds ==
+          std::vector<std::string>{"notify-only"});
+}
+
 TEST_CASE("daemon log store enforces a bounded history", "[app][daemon][logging]")
 {
     auto& logs = javelin::app::LogStore::instance();
