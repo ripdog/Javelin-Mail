@@ -25,6 +25,7 @@ namespace javelin::jmap::sync
         bool emailChanged = false;
         bool mailboxNeedsFullRefresh = false;
         bool emailNeedsFullRefresh = false;
+        bool notificationEventsCreated = false;
         bool superseded = false;
         std::vector<std::string> changedMailboxIds;
         std::vector<std::string> queryAffectedMailboxIds;

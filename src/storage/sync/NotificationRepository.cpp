@@ -184,6 +184,23 @@ namespace javelin::jmap::cache
         return mailboxIds;
     }
 
+    std::variant<bool, DatabaseError>
+    NotificationRepository::wasCreatedByMailImport(const std::string_view accountId,
+                                                   const std::string_view emailId) const
+    {
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT 1 FROM mail_import_items item JOIN mail_import_operations operation ON "
+            "operation.operation_id=item.operation_id WHERE operation.account_id=:account_id AND "
+            "item.created_email_id=:email_id LIMIT 1"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":email_id"), QString::fromStdString(std::string{emailId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Read mail import notification provenance"), query);
+        return query.next();
+    }
+
     std::optional<DatabaseError> NotificationRepository::advanceMailboxHorizons(
         DatabaseTransaction& transaction, const std::string_view accountId,
         const std::string_view expectedEmailState, const std::string_view newEmailState)

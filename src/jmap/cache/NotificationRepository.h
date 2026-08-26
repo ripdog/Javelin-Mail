@@ -47,6 +47,8 @@ namespace javelin::jmap::cache
                                    std::optional<std::string_view> currentEmailState);
         [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
         mailboxHorizonsAtState(std::string_view accountId, std::string_view emailState) const;
+        [[nodiscard]] std::variant<bool, DatabaseError>
+        wasCreatedByMailImport(std::string_view accountId, std::string_view emailId) const;
         [[nodiscard]] std::optional<DatabaseError>
         advanceMailboxHorizons(DatabaseTransaction& transaction, std::string_view accountId,
                                std::string_view expectedEmailState, std::string_view newEmailState);

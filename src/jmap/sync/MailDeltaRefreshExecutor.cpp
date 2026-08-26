@@ -11,6 +11,7 @@
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/EmailMutationJournal.h"
+#include "jmap/sync/MailNotificationEligibility.h"
 #include "jmap/sync/MailboxMutationJournal.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 #include "jmap/sync/MutationJournal.h"
@@ -139,6 +140,29 @@ namespace javelin::jmap::sync
             std::ranges::sort(left);
             std::ranges::sort(right);
             return left == right;
+        }
+
+        using NotificationMailboxSelectionResult =
+            std::variant<std::string, javelin::jmap::cache::DatabaseError>;
+
+        [[nodiscard]] NotificationMailboxSelectionResult
+        chooseNotificationMailbox(javelin::jmap::cache::MailboxRepository& mailboxes,
+                                  const std::string_view accountId,
+                                  std::vector<std::string> qualifyingMailboxIds)
+        {
+            std::ranges::sort(qualifyingMailboxIds);
+            for (const auto& mailboxId : qualifyingMailboxIds)
+            {
+                const auto mailboxResult = mailboxes.find(accountId, mailboxId);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxResult))
+                    return *error;
+                const auto& mailbox =
+                    std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailboxResult);
+                if (mailbox.has_value() && mailbox->role == std::optional<std::string>{"inbox"})
+                    return mailboxId;
+            }
+            return qualifyingMailboxIds.front();
         }
 
         [[nodiscard]] EmailWorkingSetResult
@@ -538,6 +562,8 @@ namespace javelin::jmap::sync
                 destination.mailboxNeedsFullRefresh || source.mailboxNeedsFullRefresh;
             destination.emailNeedsFullRefresh =
                 destination.emailNeedsFullRefresh || source.emailNeedsFullRefresh;
+            destination.notificationEventsCreated =
+                destination.notificationEventsCreated || source.notificationEventsCreated;
             destination.superseded = destination.superseded || source.superseded;
             appendUnique(destination.changedMailboxIds, source.changedMailboxIds);
             appendUnique(destination.queryAffectedMailboxIds, source.queryAffectedMailboxIds);
@@ -937,7 +963,9 @@ namespace javelin::jmap::sync
         }
 
         javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
+        javelin::jmap::cache::MailboxRepository mailboxes{m_databaseConnection};
         javelin::jmap::cache::MailboxWindowRepository mailboxWindows{m_databaseConnection};
+        javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
         javelin::jmap::cache::SearchWindowRepository searchWindows{m_databaseConnection};
         javelin::jmap::sync::EmailMutationJournal emailMutations{m_databaseConnection};
         std::unordered_map<std::string, std::vector<std::string>> trackedMailboxIds;
@@ -1034,8 +1062,20 @@ namespace javelin::jmap::sync
             }
         }
 
+        std::vector<std::string> notificationMailboxIds;
+        if (parsed.emailChanges.has_value())
+        {
+            const auto horizonResult =
+                notifications.mailboxHorizonsAtState(accountId, parsed.emailChanges->oldState);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&horizonResult))
+                co_return operationError(*error);
+            notificationMailboxIds = std::get<std::vector<std::string>>(horizonResult);
+        }
+
         std::unordered_set<std::string> createdIds;
         std::vector<std::string> staleThreadIds;
+        std::vector<javelin::jmap::cache::MailNotificationEventInput> notificationEvents;
         if (parsed.emailChanges.has_value())
             createdIds.insert(parsed.emailChanges->created.begin(),
                               parsed.emailChanges->created.end());
@@ -1070,6 +1110,50 @@ namespace javelin::jmap::sync
                 if (const auto tracked = trackedMailboxIds.find(email.id);
                     tracked != trackedMailboxIds.end())
                     appendUnique(summary.queryAffectedMailboxIds, tracked->second);
+            }
+
+            if (!notificationMailboxIds.empty())
+            {
+                const auto mutationResult = emailMutations.listForEmail(accountId, email.id);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&mutationResult))
+                    co_return operationError(*error);
+                auto effectiveCurrent = projectEmailMutations(
+                    email, std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
+                               mutationResult));
+                bool imported = false;
+                if (createdIds.contains(email.id))
+                {
+                    const auto importedResult =
+                        notifications.wasCreatedByMailImport(accountId, email.id);
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::cache::DatabaseError>(&importedResult))
+                        co_return operationError(*error);
+                    imported = std::get<bool>(importedResult);
+                }
+                const auto eligibility = evaluateMailNotificationTransition({
+                    .previous = previous.has_value() ? &*previous : nullptr,
+                    .current = &effectiveCurrent,
+                    .notificationMailboxIds = notificationMailboxIds,
+                    .serverCreated = createdIds.contains(email.id),
+                    .withinNotificationHorizon = true,
+                    .suppressedByLocalOperation = imported,
+                });
+                if (eligibility.eligible())
+                {
+                    const auto mailboxResult = chooseNotificationMailbox(
+                        mailboxes, accountId, eligibility.qualifyingMailboxIds);
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxResult))
+                        co_return operationError(*error);
+                    notificationEvents.push_back({
+                        .mailboxId = std::get<std::string>(mailboxResult),
+                        .emailId = effectiveCurrent.id,
+                        .threadId = effectiveCurrent.threadId,
+                        .subject = effectiveCurrent.subject,
+                        .receivedAt = effectiveCurrent.receivedAt,
+                    });
+                }
             }
         }
         if (parsed.emailChanges.has_value())
@@ -1172,14 +1256,12 @@ namespace javelin::jmap::sync
                 summary.superseded = true;
                 co_return summary;
             }
-            javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
             if (const auto error = notifications.advanceMailboxHorizons(
                     transaction.cacheTransaction(), accountId, parsed.emailChanges->oldState,
                     parsed.emailChanges->newState))
                 co_return operationError(*error);
         }
 
-        javelin::jmap::cache::MailboxRepository mailboxes{m_databaseConnection};
         if (parsed.mailboxChanges.has_value())
         {
             if (const auto error = mailboxes.upsertMany(transaction.cacheTransaction(), accountId,
@@ -1241,6 +1323,15 @@ namespace javelin::jmap::sync
                                                                 accountId, std::move(changedIds),
                                                                 parsed.emailChanges->newState))
                 co_return *error;
+            for (const auto& event : notificationEvents)
+            {
+                const auto created = notifications.createEventIfUnconsumed(
+                    transaction.cacheTransaction(), accountId, event);
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&created))
+                    co_return operationError(*error);
+                summary.notificationEventsCreated =
+                    summary.notificationEventsCreated || std::get<bool>(created);
+            }
         }
         if (const auto error = transaction.commit())
             co_return operationError(*error);
@@ -1265,6 +1356,8 @@ namespace javelin::jmap::sync
                 summary.mailboxNeedsFullRefresh || next.mailboxNeedsFullRefresh;
             summary.emailNeedsFullRefresh =
                 summary.emailNeedsFullRefresh || next.emailNeedsFullRefresh;
+            summary.notificationEventsCreated =
+                summary.notificationEventsCreated || next.notificationEventsCreated;
             summary.superseded = summary.superseded || next.superseded;
             appendUnique(summary.changedMailboxIds, next.changedMailboxIds);
             appendUnique(summary.queryAffectedMailboxIds, next.queryAffectedMailboxIds);
