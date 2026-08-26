@@ -19,6 +19,8 @@ namespace javelin::gui::calendar
 {
     class CalendarNotificationEditor final : public QWidget
     {
+        Q_OBJECT
+
       public:
         explicit CalendarNotificationEditor(bool allowCalendarDefaults, QWidget* parent = nullptr);
 
@@ -30,6 +32,9 @@ namespace javelin::gui::calendar
         [[nodiscard]] bool useCalendarDefaults() const;
         [[nodiscard]] bool edited() const;
         void resetEdited();
+
+      Q_SIGNALS:
+        void useCalendarDefaultsChanged(bool enabled);
 
       private:
         struct AlertRow

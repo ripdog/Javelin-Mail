@@ -618,6 +618,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/widgets/EmailAddressLineEdit.h
     src/gui/calendar/MonthCalendarWidget.cpp
     src/gui/calendar/MonthCalendarWidget.h
+    src/gui/calendar/CalendarDefaultNotificationsDialog.cpp
+    src/gui/calendar/CalendarDefaultNotificationsDialog.h
     src/gui/calendar/CalendarNotificationEditor.cpp
     src/gui/calendar/CalendarNotificationEditor.h
     src/gui/calendar/MonthCalendarLayout.cpp
@@ -1463,6 +1465,8 @@ add_library(javelin_gui STATIC
     src/gui/widgets/EmailAddressLineEdit.h
     src/gui/calendar/MonthCalendarWidget.cpp
     src/gui/calendar/MonthCalendarWidget.h
+    src/gui/calendar/CalendarDefaultNotificationsDialog.cpp
+    src/gui/calendar/CalendarDefaultNotificationsDialog.h
     src/gui/calendar/CalendarNotificationEditor.cpp
     src/gui/calendar/CalendarNotificationEditor.h
     src/gui/calendar/MonthCalendarLayout.cpp

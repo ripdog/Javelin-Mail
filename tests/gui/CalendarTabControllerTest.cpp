@@ -1,18 +1,24 @@
 #include "gui/shell/CalendarTabController.h"
 
 #include "app/CalendarApplicationPorts.h"
+#include "gui/calendar/CalendarDefaultNotificationsDialog.h"
 #include "gui/calendar/CalendarEventButton.h"
+#include "gui/calendar/CalendarNotificationEditor.h"
+#include "gui/calendar/EventDialog.h"
 #include "gui/calendar/MonthCalendarWidget.h"
 #include "gui/settings/GuiSettings.h"
 #include "jmap/calendar/CalendarReader.h"
 
 #include <KDatePicker>
 
+#include <QAction>
 #include <QApplication>
 #include <QDate>
 #include <QDialog>
 #include <QPointer>
+#include <QPushButton>
 #include <QStackedWidget>
+#include <QTabWidget>
 #include <QTimer>
 
 #include <catch2/catch_test_macros.hpp>
@@ -298,6 +304,66 @@ TEST_CASE("calendar workspace state distinguishes availability from event creati
     CHECK(controller.workspaceState().canCreateEvent);
     CHECK(reader.accountReadCount == 2);
     CHECK(reader.calendarReadCount == 2);
+}
+
+TEST_CASE("event default notification configuration uses the calendar command path",
+          "[gui][calendar][notifications][actions]")
+{
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    Reader reader;
+    CommandPort commands;
+    QStackedWidget contentStack;
+    std::vector<javelin::gui::shell::TabState> tabs;
+    javelin::gui::shell::CalendarTabController controller{settings, reader, commands, contentStack,
+                                                          tabs};
+
+    QTimer::singleShot(
+        0, &contentStack,
+        []
+        {
+            auto* eventDialog = qobject_cast<javelin::gui::calendar::EventDialog*>(
+                QApplication::activeModalWidget());
+            REQUIRE(eventDialog != nullptr);
+            auto* notifications =
+                eventDialog->findChild<javelin::gui::calendar::CalendarNotificationEditor*>();
+            REQUIRE(notifications != nullptr);
+            notifications->setUseCalendarDefaults(true);
+            auto* configure =
+                eventDialog->findChild<QAction*>(QStringLiteral("configureDefaultNotifications"));
+            REQUIRE(configure != nullptr);
+
+            QTimer::singleShot(
+                0, eventDialog,
+                []
+                {
+                    auto* defaultsDialog =
+                        qobject_cast<javelin::gui::calendar::CalendarDefaultNotificationsDialog*>(
+                            QApplication::activeModalWidget());
+                    REQUIRE(defaultsDialog != nullptr);
+                    auto* notificationTabs = defaultsDialog->findChild<QTabWidget*>();
+                    REQUIRE(notificationTabs != nullptr);
+                    auto* timed = qobject_cast<javelin::gui::calendar::CalendarNotificationEditor*>(
+                        notificationTabs->currentWidget());
+                    REQUIRE(timed != nullptr);
+                    auto* add = timed->findChild<QPushButton*>(QStringLiteral("addNotification"));
+                    REQUIRE(add != nullptr);
+                    add->click();
+                    defaultsDialog->accept();
+                });
+            configure->trigger();
+            eventDialog->reject();
+        });
+
+    controller.invokeWorkspace(javelin::gui::shell::CalendarTabCommand::CreateEvent);
+    QCoreApplication::processEvents();
+
+    REQUIRE(commands.defaultAlertsBatchRequestCount == 1);
+    REQUIRE(commands.lastDefaultAlertsBatch.size() == 1);
+    const auto& change = commands.lastDefaultAlertsBatch.front();
+    CHECK(change.ownerAccountId == "owner-1");
+    CHECK(change.accountId == "calendar-1");
+    CHECK(change.calendarId == "cal-1");
+    CHECK(change.withTime.size() == 1);
 }
 
 TEST_CASE("opening Calendar observes the cached range without forcing a refresh",

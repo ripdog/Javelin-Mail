@@ -30,8 +30,9 @@ namespace javelin::jmap::calendar
 
 namespace javelin::gui::calendar
 {
+    class EventDialog;
     class MonthCalendarWidget;
-}
+} // namespace javelin::gui::calendar
 
 namespace javelin::gui::settings
 {
@@ -123,6 +124,7 @@ namespace javelin::gui::shell
                                       const QString& actionId, const QString& accountId,
                                       const QString& eventId, const QString& recurrenceId,
                                       const QString& targetCalendarId);
+        void configureEventDialog(javelin::gui::calendar::EventDialog& dialog);
         javelin::gui::settings::GuiSettings& m_settings;
         javelin::jmap::calendar::CalendarReader& m_calendarReader;
         javelin::app::CalendarCommandPort& m_calendarCommandPort;

@@ -25,6 +25,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPalette>
+#include <QPointer>
 #include <QPushButton>
 #include <QStackedWidget>
 #include <QTime>
@@ -409,6 +410,57 @@ namespace javelin::gui::shell
         connect(&m_calendarCommandPort, &javelin::app::CalendarCommandPort::calendarCacheCommitted,
                 this,
                 [this](const javelin::app::CalendarCacheChange&) { refreshWorkspaceState(); });
+    }
+
+    void CalendarTabController::configureEventDialog(javelin::gui::calendar::EventDialog& dialog)
+    {
+        connect(&dialog, &javelin::gui::calendar::EventDialog::defaultNotificationsChangeRequested,
+                &dialog,
+                [this, &dialog](
+                    const QString& accountId, const QString& calendarId,
+                    std::unordered_map<std::string, javelin::jmap::calendar::Alert> withTime,
+                    std::unordered_map<std::string, javelin::jmap::calendar::Alert> withoutTime)
+                {
+                    const auto account =
+                        std::ranges::find(m_calendarAccounts, accountId.toStdString(),
+                                          &javelin::jmap::cache::CalendarAccount::accountId);
+                    if (account == m_calendarAccounts.end())
+                    {
+                        dialog.completeDefaultNotificationsChange(
+                            accountId, calendarId, false,
+                            i18n("The selected calendar account is no longer available."));
+                        return;
+                    }
+
+                    std::vector<javelin::app::CalendarDefaultAlertsChange> changes;
+                    changes.push_back({
+                        .ownerAccountId = account->ownerAccountId,
+                        .accountId = accountId.toStdString(),
+                        .calendarId = calendarId.toStdString(),
+                        .withTime = std::move(withTime),
+                        .withoutTime = std::move(withoutTime),
+                    });
+                    auto task = m_calendarCommandPort.setCalendarDefaultAlerts(std::move(changes));
+                    const QPointer<javelin::gui::calendar::EventDialog> dialogGuard{&dialog};
+                    QCoro::connect(
+                        std::move(task), this,
+                        [this, dialogGuard, accountId,
+                         calendarId](javelin::app::CalendarDefaultAlertsBatchResult result)
+                        {
+                            if (result.error.has_value())
+                            {
+                                if (dialogGuard != nullptr)
+                                    dialogGuard->completeDefaultNotificationsChange(
+                                        accountId, calendarId, false, result.error->message);
+                                else
+                                    Q_EMIT operationFailed(*result.error);
+                                return;
+                            }
+                            if (dialogGuard != nullptr)
+                                dialogGuard->completeDefaultNotificationsChange(accountId,
+                                                                                calendarId, true);
+                        });
+                });
     }
 
     bool CalendarTabController::refreshAccountSnapshot(
@@ -969,6 +1021,7 @@ namespace javelin::gui::shell
             duplicate.recurrenceOverrides.clear();
         }
         auto* dialog = new javelin::gui::calendar::EventDialog(writableCalendars, &widget);
+        configureEventDialog(*dialog);
         dialog->setAttribute(Qt::WA_DeleteOnClose, false);
         dialog->setEvent(duplicate);
         if (dialog->exec() != QDialog::Accepted)
@@ -1539,6 +1592,7 @@ namespace javelin::gui::shell
                 }
                 const auto& destination = choices[*destinationIndex];
                 auto* dialog = new javelin::gui::calendar::EventDialog(choices, widget);
+                configureEventDialog(*dialog);
                 dialog->setAttribute(Qt::WA_DeleteOnClose, false);
                 dialog->setEvent(javelin::jmap::calendar::CalendarEvent{
                     .accountId = destination.accountId,
@@ -1732,6 +1786,7 @@ namespace javelin::gui::shell
                 std::ranges::copy_if(*calendars, std::back_inserter(subscribedCalendars),
                                      [](const auto& calendar) { return calendar.isSubscribed; });
                 auto* dialog = new javelin::gui::calendar::EventDialog(subscribedCalendars, widget);
+                configureEventDialog(*dialog);
                 dialog->setAttribute(Qt::WA_DeleteOnClose, false);
                 dialog->setEvent(editableEvent);
                 dialog->setOccurrenceMode(editScope == EditScope::Occurrence);

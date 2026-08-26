@@ -6,6 +6,7 @@
 
 #include <vector>
 
+class QAction;
 class QCheckBox;
 class QPushButton;
 class QComboBox;
@@ -14,6 +15,7 @@ class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
 class QVBoxLayout;
+class KMessageWidget;
 
 namespace javelin::gui::widgets
 {
@@ -38,6 +40,14 @@ namespace javelin::gui::calendar
         void setOccurrenceMode(bool occurrenceMode);
         [[nodiscard]] javelin::jmap::calendar::CalendarEvent eventDocument() const;
         void showMutationError(const QString& message);
+        void completeDefaultNotificationsChange(const QString& accountId, const QString& calendarId,
+                                                bool success, const QString& errorMessage = {});
+
+      Q_SIGNALS:
+        void defaultNotificationsChangeRequested(
+            QString accountId, QString calendarId,
+            std::unordered_map<std::string, javelin::jmap::calendar::Alert> withTime,
+            std::unordered_map<std::string, javelin::jmap::calendar::Alert> withoutTime);
 
       private Q_SLOTS:
         void validateAndAccept();
@@ -58,6 +68,18 @@ namespace javelin::gui::calendar
         void removeAttendeeRow(QWidget* row);
         void clearAttendeeRows();
         void updateRecurrenceControls();
+        void updateDefaultNotificationsWarning();
+        void editCurrentCalendarDefaultNotifications();
+        [[nodiscard]] javelin::jmap::calendar::Calendar* currentCalendar();
+        [[nodiscard]] const javelin::jmap::calendar::Calendar* currentCalendar() const;
+
+        struct PendingDefaultNotificationsChange
+        {
+            QString accountId;
+            QString calendarId;
+            std::unordered_map<std::string, javelin::jmap::calendar::Alert> originalWithTime;
+            std::unordered_map<std::string, javelin::jmap::calendar::Alert> originalWithoutTime;
+        };
 
         std::vector<javelin::jmap::calendar::Calendar> m_calendars;
         javelin::jmap::calendar::CalendarEvent m_event;
@@ -79,6 +101,9 @@ namespace javelin::gui::calendar
         QVBoxLayout* m_attendeeRowsLayout = nullptr;
         std::vector<AttendeeRow> m_attendeeRows;
         CalendarNotificationEditor* m_notifications = nullptr;
+        KMessageWidget* m_defaultNotificationsWarning = nullptr;
+        QAction* m_configureDefaultNotifications = nullptr;
+        std::optional<PendingDefaultNotificationsChange> m_pendingDefaultNotificationsChange;
         QLabel* m_error = nullptr;
         QPushButton* m_delete = nullptr;
         bool m_endEdited = false;

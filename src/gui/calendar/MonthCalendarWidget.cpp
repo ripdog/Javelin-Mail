@@ -1,7 +1,7 @@
 #include "gui/calendar/MonthCalendarWidget.h"
 #include "gui/accessibility/AccessibleFactory.h"
+#include "gui/calendar/CalendarDefaultNotificationsDialog.h"
 #include "gui/calendar/CalendarEventButton.h"
-#include "gui/calendar/CalendarNotificationEditor.h"
 #include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/MonthCalendarLayout.h"
 
@@ -30,7 +30,6 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
-#include <QTabWidget>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -1314,48 +1313,13 @@ namespace javelin::gui::calendar
                         withoutTime == pendingAlertsWithoutTime.end())
                         return;
 
-                    QDialog notificationDialog{&dialog};
-                    notificationDialog.setWindowTitle(
-                        i18nc("@title:window", "Default Notifications — %1", calendar->name));
-                    notificationDialog.resize(560, 300);
-                    auto* notificationLayout = new QVBoxLayout(&notificationDialog);
-                    auto* tabs = new QTabWidget(&notificationDialog);
-                    auto* timed = new CalendarNotificationEditor(false, tabs);
-                    timed->setAlerts(withTime->second);
-                    auto* allDay = new CalendarNotificationEditor(false, tabs);
-                    allDay->setAlerts(withoutTime->second);
-                    tabs->addTab(timed, i18nc("@title:tab", "Timed events"));
-                    tabs->addTab(allDay, i18nc("@title:tab", "All-day events"));
-                    notificationLayout->addWidget(tabs);
-                    auto* notificationButtons = new QDialogButtonBox(
-                        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &notificationDialog);
-                    connect(notificationButtons, &QDialogButtonBox::accepted, &notificationDialog,
-                            &QDialog::accept);
-                    connect(notificationButtons, &QDialogButtonBox::rejected, &notificationDialog,
-                            &QDialog::reject);
-                    notificationLayout->addWidget(notificationButtons);
+                    CalendarDefaultNotificationsDialog notificationDialog{
+                        calendar->name, withTime->second, withoutTime->second, false, &dialog};
                     if (notificationDialog.exec() != QDialog::Accepted)
                         return;
-
-                    const auto mergeDisplayAlerts =
-                        [](auto alerts, const CalendarNotificationEditor& editor)
-                    {
-                        std::erase_if(
-                            alerts,
-                            [](const auto& entry)
-                            {
-                                return entry.second.action == "display" &&
-                                       entry.second.triggerKind ==
-                                           javelin::jmap::calendar::AlertTriggerKind::Offset;
-                            });
-                        for (auto [alertId, alert] : editor.displayAlerts())
-                            alerts.insert_or_assign(std::move(alertId), std::move(alert));
-                        return alerts;
-                    };
-                    pendingAlertsWithTime.insert_or_assign(
-                        id, mergeDisplayAlerts(std::move(withTime->second), *timed));
+                    pendingAlertsWithTime.insert_or_assign(id, notificationDialog.alertsWithTime());
                     pendingAlertsWithoutTime.insert_or_assign(
-                        id, mergeDisplayAlerts(std::move(withoutTime->second), *allDay));
+                        id, notificationDialog.alertsWithoutTime());
                 });
         connect(
             chooseColor, &QAction::triggered, &dialog,

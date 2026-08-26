@@ -90,6 +90,7 @@ namespace javelin::gui::calendar
                         if (!m_loading)
                             m_edited = true;
                         updateEnabledState();
+                        Q_EMIT useCalendarDefaultsChanged(m_useCalendarDefaults->isChecked());
                     });
         }
         m_addAlert = new QPushButton(i18n("+ Add notification"), this);
