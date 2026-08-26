@@ -136,12 +136,6 @@ Check off completed items as you commit.
   the server hierarchy.
 - Keep this as local presentation preference, not a new mailbox/sync concept.
 
-### [ ] Fill common mail-navigation/action gaps
-
-- Add Mark All Read and make next/previous unread navigation first-class configurable actions.
-- Evaluate Snooze and Mute Conversation separately as product features rather than folding them into
-  basic keyboard/navigation work.
-
 ### [ ] Open `.eml` files in Javelin
 
 - Advertise `message/rfc822` in the desktop file association and accept `.eml` through the existing
