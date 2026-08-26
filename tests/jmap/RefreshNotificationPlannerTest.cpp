@@ -252,3 +252,97 @@ TEST_CASE("notification outbox persists pending mail until delivery", "[jmap][ca
         second));
     CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(second).empty());
 }
+
+TEST_CASE("per-Email notification consumption survives delivery and mailbox movement",
+          "[jmap][cache][notification][consumption]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    auto email = loadEmailFixture();
+    email.id = "eml-one-shot";
+    email.threadId = "thr-one-shot";
+    email.mailboxIds = {"mbx-inbox", "mbx-archive"};
+    email.keywords = {};
+    email.subject = "One shot";
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(emails.replaceAll("account-1", {email}).has_value());
+    javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
+
+    auto firstTransactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Create first notification event"));
+    REQUIRE(
+        std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(firstTransactionResult));
+    auto firstTransaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(firstTransactionResult));
+    const auto first = notifications.createEventIfUnconsumed(firstTransaction, "account-1",
+                                                             {
+                                                                 .mailboxId = "mbx-inbox",
+                                                                 .emailId = email.id,
+                                                                 .threadId = email.threadId,
+                                                                 .subject = email.subject,
+                                                                 .receivedAt = email.receivedAt,
+                                                             });
+    REQUIRE(std::holds_alternative<bool>(first));
+    CHECK(std::get<bool>(first));
+    REQUIRE_FALSE(firstTransaction.commit().has_value());
+
+    const auto firstPending = notifications.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        firstPending));
+    const auto& pendingEvents =
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(firstPending);
+    REQUIRE(pendingEvents.size() == 1);
+    CHECK(pendingEvents.front().emailId == email.id);
+    CHECK(pendingEvents.front().mailboxId == "mbx-inbox");
+
+    QSqlQuery delivered{databaseContext.connection.database()};
+    REQUIRE(delivered.exec(QStringLiteral(
+        "DELETE FROM mail_notification_event_outbox WHERE account_id='account-1' AND "
+        "email_id='eml-one-shot'")));
+
+    auto secondTransactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Reject duplicate notification event"));
+    REQUIRE(
+        std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(secondTransactionResult));
+    auto secondTransaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(secondTransactionResult));
+    const auto second = notifications.createEventIfUnconsumed(secondTransaction, "account-1",
+                                                              {
+                                                                  .mailboxId = "mbx-archive",
+                                                                  .emailId = email.id,
+                                                                  .threadId = email.threadId,
+                                                                  .subject = email.subject,
+                                                                  .receivedAt = email.receivedAt,
+                                                              });
+    REQUIRE(std::holds_alternative<bool>(second));
+    CHECK_FALSE(std::get<bool>(second));
+    REQUIRE_FALSE(secondTransaction.commit().has_value());
+
+    const auto afterDelivery = notifications.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        afterDelivery));
+    CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(afterDelivery)
+              .empty());
+
+    const std::vector<std::string> ids{email.id};
+    REQUIRE_FALSE(emails.removeFromMailbox("account-1", "mbx-inbox", ids).has_value());
+    QSqlQuery retainedState{databaseContext.connection.database()};
+    REQUIRE(retainedState.exec(QStringLiteral(
+        "SELECT COUNT(*) FROM mail_notification_state WHERE account_id='account-1' AND "
+        "email_id='eml-one-shot'")));
+    REQUIRE(retainedState.next());
+    CHECK(retainedState.value(0).toInt() == 1);
+
+    REQUIRE_FALSE(emails.removeMany("account-1", ids).has_value());
+    QSqlQuery removedState{databaseContext.connection.database()};
+    REQUIRE(removedState.exec(QStringLiteral(
+        "SELECT COUNT(*) FROM mail_notification_state WHERE account_id='account-1' AND "
+        "email_id='eml-one-shot'")));
+    REQUIRE(removedState.next());
+    CHECK(removedState.value(0).toInt() == 0);
+}

@@ -12,10 +12,35 @@
 namespace javelin::jmap::cache
 {
 
+    struct MailNotificationEventInput
+    {
+        std::string mailboxId;
+        std::string emailId;
+        std::string threadId;
+        std::optional<std::string> subject;
+        std::string receivedAt;
+    };
+
+    struct MailNotificationPendingEvent
+    {
+        std::string accountId;
+        std::string mailboxId;
+        std::string emailId;
+        std::string threadId;
+        std::optional<std::string> subject;
+        std::string receivedAt;
+    };
+
     class NotificationRepository
     {
       public:
         explicit NotificationRepository(DatabaseConnection& connection);
+
+        [[nodiscard]] std::variant<bool, DatabaseError>
+        createEventIfUnconsumed(DatabaseTransaction& transaction, std::string_view accountId,
+                                const MailNotificationEventInput& event);
+        [[nodiscard]] std::variant<std::vector<MailNotificationPendingEvent>, DatabaseError>
+        listPendingEvents(std::string_view accountId) const;
 
         [[nodiscard]] std::variant<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>,
                                    DatabaseError>

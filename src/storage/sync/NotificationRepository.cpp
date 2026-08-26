@@ -27,6 +27,82 @@ namespace javelin::jmap::cache
     {
     }
 
+    std::variant<bool, DatabaseError>
+    NotificationRepository::createEventIfUnconsumed(DatabaseTransaction& transaction,
+                                                    const std::string_view accountId,
+                                                    const MailNotificationEventInput& event)
+    {
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral(
+                    "Mail notification event creation requires an active matching transaction."),
+            };
+        }
+
+        QSqlQuery consume{m_connection.database()};
+        consume.prepare(
+            QStringLiteral("INSERT OR IGNORE INTO mail_notification_state(account_id,email_id) "
+                           "VALUES(:account_id,:email_id)"));
+        consume.bindValue(QStringLiteral(":account_id"),
+                          QString::fromStdString(std::string{accountId}));
+        consume.bindValue(QStringLiteral(":email_id"), QString::fromStdString(event.emailId));
+        if (!consume.exec())
+            return queryError(QStringLiteral("Consume mail notification event"), consume);
+        if (consume.numRowsAffected() == 0)
+            return false;
+
+        QSqlQuery enqueue{m_connection.database()};
+        enqueue.prepare(
+            QStringLiteral("INSERT INTO mail_notification_event_outbox "
+                           "(account_id,email_id,mailbox_id,thread_id,subject,received_at) VALUES "
+                           "(:account_id,:email_id,:mailbox_id,:thread_id,:subject,:received_at)"));
+        enqueue.bindValue(QStringLiteral(":account_id"),
+                          QString::fromStdString(std::string{accountId}));
+        enqueue.bindValue(QStringLiteral(":email_id"), QString::fromStdString(event.emailId));
+        enqueue.bindValue(QStringLiteral(":mailbox_id"), QString::fromStdString(event.mailboxId));
+        enqueue.bindValue(QStringLiteral(":thread_id"), QString::fromStdString(event.threadId));
+        if (event.subject.has_value())
+            enqueue.bindValue(QStringLiteral(":subject"), QString::fromStdString(*event.subject));
+        else
+            enqueue.bindValue(QStringLiteral(":subject"), QVariant{});
+        enqueue.bindValue(QStringLiteral(":received_at"), QString::fromStdString(event.receivedAt));
+        if (!enqueue.exec())
+            return queryError(QStringLiteral("Queue mail notification delivery"), enqueue);
+        return true;
+    }
+
+    std::variant<std::vector<MailNotificationPendingEvent>, DatabaseError>
+    NotificationRepository::listPendingEvents(const std::string_view accountId) const
+    {
+        QSqlQuery query{m_connection.database()};
+        query.prepare(
+            QStringLiteral("SELECT mailbox_id,email_id,thread_id,subject,received_at FROM "
+                           "mail_notification_event_outbox WHERE account_id=:account_id ORDER BY "
+                           "created_at,email_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("List pending mail notification events"), query);
+
+        std::vector<MailNotificationPendingEvent> events;
+        while (query.next())
+        {
+            events.push_back(MailNotificationPendingEvent{
+                .accountId = std::string{accountId},
+                .mailboxId = query.value(0).toString().toStdString(),
+                .emailId = query.value(1).toString().toStdString(),
+                .threadId = query.value(2).toString().toStdString(),
+                .subject = query.value(3).isNull()
+                               ? std::nullopt
+                               : std::optional{query.value(3).toString().toStdString()},
+                .receivedAt = query.value(4).toString().toStdString(),
+            });
+        }
+        return events;
+    }
+
     std::variant<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>, DatabaseError>
     NotificationRepository::enqueueUnreadMailboxEmails(const std::string_view accountId,
                                                        const std::string_view mailboxId)
