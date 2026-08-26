@@ -46,6 +46,9 @@ namespace javelin::jmap::sync
                                  std::string_view accountId, std::vector<std::string> emailIds,
                                  std::string_view serverState);
 
+    // Owns mailbox query/window state only: Email/queryChanges, ordered membership and bounded
+    // materialization. Email/get state observed while filling a window is not authority for the
+    // account-wide Email sync token and must never advance that cursor.
     class MailboxRefreshExecutor
     {
       public:

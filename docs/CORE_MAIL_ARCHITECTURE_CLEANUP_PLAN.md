@@ -172,13 +172,13 @@ be advanced by a mailbox/query materializer that only fetched a subset of accoun
 
 ## 1.1 Make the ownership invariant explicit
 
-- [ ] Document in the relevant sync interfaces that global `Email` state may be advanced only by code
+- [x] Document in the relevant sync interfaces that global `Email` state may be advanced only by code
       that has reconciled the locally relevant account-wide Email object delta represented by that
       transition.
-- [ ] Treat mailbox `EmailQuery` state as query/window-owned state only.
-- [ ] Treat `mailbox_query_windows`, ordered query membership, window coverage, and window provenance
+- [x] Treat mailbox `EmailQuery` state as query/window-owned state only.
+- [x] Treat `mailbox_query_windows`, ordered query membership, window coverage, and window provenance
       as mailbox/query-owned state only.
-- [ ] Ensure an arbitrary `Email/get.state` received while populating a mailbox window is not treated
+- [x] Ensure an arbitrary `Email/get.state` received while populating a mailbox window is not treated
       as authority to install the global account Email token.
 
 ## 1.2 Stop full mailbox materialization from advancing global Email state

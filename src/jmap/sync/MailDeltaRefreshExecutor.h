@@ -33,6 +33,9 @@ namespace javelin::jmap::sync
 
     using MailDeltaRefreshResult = std::variant<MailDeltaRefreshSummary, OperationError>;
 
+    // Owns account-wide Mailbox/Email object-state progression. In particular, the global Email
+    // sync token may advance here only after every locally relevant Email represented by that
+    // transition has been reconciled (or explicitly accounted for during rebaseline recovery).
     class MailDeltaRefreshExecutor
     {
       public:
