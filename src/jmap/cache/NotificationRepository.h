@@ -41,6 +41,15 @@ namespace javelin::jmap::cache
                                 const MailNotificationEventInput& event);
         [[nodiscard]] std::variant<std::vector<MailNotificationPendingEvent>, DatabaseError>
         listPendingEvents(std::string_view accountId) const;
+        [[nodiscard]] std::optional<DatabaseError>
+        synchronizeMailboxHorizons(std::string_view accountId,
+                                   const std::vector<std::string>& enabledMailboxIds,
+                                   std::optional<std::string_view> currentEmailState);
+        [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
+        mailboxHorizonsAtState(std::string_view accountId, std::string_view emailState) const;
+        [[nodiscard]] std::optional<DatabaseError>
+        advanceMailboxHorizons(DatabaseTransaction& transaction, std::string_view accountId,
+                               std::string_view expectedEmailState, std::string_view newEmailState);
 
         [[nodiscard]] std::variant<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>,
                                    DatabaseError>

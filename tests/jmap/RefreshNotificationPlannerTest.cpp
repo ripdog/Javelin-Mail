@@ -435,3 +435,56 @@ TEST_CASE("per-Email notification consumption survives delivery and mailbox move
     REQUIRE(removedState.next());
     CHECK(removedState.value(0).toInt() == 0);
 }
+
+TEST_CASE("notification mailbox horizons linearize enablement against Email state",
+          "[jmap][cache][notification][horizon]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
+
+    REQUIRE_FALSE(notifications
+                      .synchronizeMailboxHorizons("account-1", {"mbx-inbox", "mbx-archive"},
+                                                  std::string_view{"email-state-1"})
+                      .has_value());
+    const auto initial = notifications.mailboxHorizonsAtState("account-1", "email-state-1");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(initial));
+    CHECK(std::get<std::vector<std::string>>(initial) ==
+          std::vector<std::string>{"mbx-archive", "mbx-inbox"});
+
+    REQUIRE_FALSE(notifications
+                      .synchronizeMailboxHorizons("account-1", {"mbx-archive"},
+                                                  std::string_view{"email-state-1"})
+                      .has_value());
+    const auto afterDisable = notifications.mailboxHorizonsAtState("account-1", "email-state-1");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(afterDisable));
+    CHECK(std::get<std::vector<std::string>>(afterDisable) ==
+          std::vector<std::string>{"mbx-archive"});
+
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Advance notification horizon"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    REQUIRE_FALSE(
+        notifications
+            .advanceMailboxHorizons(transaction, "account-1", "email-state-1", "email-state-2")
+            .has_value());
+    REQUIRE_FALSE(transaction.commit().has_value());
+
+    const auto advanced = notifications.mailboxHorizonsAtState("account-1", "email-state-2");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(advanced));
+    CHECK(std::get<std::vector<std::string>>(advanced) == std::vector<std::string>{"mbx-archive"});
+
+    REQUIRE_FALSE(notifications
+                      .synchronizeMailboxHorizons("account-1", {"mbx-archive", "mbx-projects"},
+                                                  std::string_view{"email-state-2"})
+                      .has_value());
+    const auto afterEnable = notifications.mailboxHorizonsAtState("account-1", "email-state-2");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(afterEnable));
+    CHECK(std::get<std::vector<std::string>>(afterEnable) ==
+          std::vector<std::string>{"mbx-archive", "mbx-projects"});
+}

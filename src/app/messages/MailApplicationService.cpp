@@ -1287,6 +1287,31 @@ namespace javelin::app
         configuration.mailboxIds.erase(std::ranges::unique(configuration.mailboxIds).begin(),
                                        configuration.mailboxIds.end());
 
+        std::optional<std::string> currentEmailState;
+        javelin::jmap::cache::SyncStateRepository syncStates{m_databaseConnection};
+        const auto emailState =
+            syncStates.find({.accountId = accountId, .objectType = "Email", .queryKey = {}});
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailState))
+        {
+            qWarning().noquote() << "Could not read Email state for notification horizon"
+                                 << QString::fromStdString(accountId) << error->message;
+        }
+        else if (const auto& state =
+                     std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState);
+                 state.has_value())
+        {
+            currentEmailState = state->stateToken;
+        }
+        javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
+        if (const auto error = notifications.synchronizeMailboxHorizons(
+                accountId, configuration.notificationMailboxIds,
+                currentEmailState.has_value() ? std::optional<std::string_view>{*currentEmailState}
+                                              : std::nullopt))
+        {
+            qWarning().noquote() << "Could not synchronize notification horizons"
+                                 << QString::fromStdString(accountId) << error->message;
+        }
+
         auto [coordinatorIt, inserted] = m_coordinators.try_emplace(accountId);
         if (inserted)
         {

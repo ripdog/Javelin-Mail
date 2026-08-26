@@ -198,7 +198,7 @@ TEST_CASE("participant identity state migration preserves calendar tokens and wi
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 65);
+    CHECK(migrated.schemaVersion() == 66);
 
     QSqlQuery preserved{migrated.database()};
     REQUIRE(preserved.exec(QStringLiteral(
@@ -288,7 +288,7 @@ TEST_CASE("mutation journal retention migrates and follows durable owners",
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 65);
+    CHECK(migrated.schemaVersion() == 66);
 
     QSqlQuery retained{migrated.database()};
     REQUIRE(retained.exec(

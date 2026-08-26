@@ -7,6 +7,7 @@
 #include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
+#include "jmap/cache/NotificationRepository.h"
 #include "jmap/cache/QueryWindowReadRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
@@ -178,8 +179,7 @@ namespace
     {
         return std::string{R"({"id":")"} + emailId + R"(","blobId":"blob-)" + emailId +
                R"(","threadId":")" + threadId + R"(","mailboxIds":{")" + mailboxId +
-               R"(":true},"keywords":{)" +
-               (seen ? std::string{R"("$seen":true)"} : std::string{}) +
+               R"(":true},"keywords":{)" + (seen ? std::string{R"("$seen":true)"} : std::string{}) +
                R"(},"size":42,"receivedAt":"2026-07-28T01:00:00Z","subject":"Subject","preview":"Preview"})";
     }
 
@@ -342,9 +342,9 @@ namespace
         };
     }
 
-    [[nodiscard]] javelin::jmap::api::TransportResult twoRebaselineEmailResponse(
-        const std::string& firstState, const std::string& firstObject,
-        const std::string& secondState, const std::string& secondObject)
+    [[nodiscard]] javelin::jmap::api::TransportResult
+    twoRebaselineEmailResponse(const std::string& firstState, const std::string& firstObject,
+                               const std::string& secondState, const std::string& secondObject)
     {
         const auto envelope = javelin::jmap::api::ResponseEnvelope{
             .methodResponses =
@@ -444,6 +444,11 @@ TEST_CASE("account Email rebaseline reconciles cached mail before advancing stat
         seedEmailState(database.connection);
         javelin::jmap::cache::EmailRepository emails{database.connection};
         REQUIRE_FALSE(emails.upsertMany("account-1", {email({"archive"}, {})}).has_value());
+        javelin::jmap::cache::NotificationRepository notifications{database.connection};
+        REQUIRE_FALSE(notifications
+                          .synchronizeMailboxHorizons("account-1", {"inbox"},
+                                                      std::string_view{"email-state-1"})
+                          .has_value());
 
         FakeTransport transport;
         transport.queuedResults.push_back(recoverableEmailDeltaResponse(errorType));
@@ -481,6 +486,9 @@ TEST_CASE("account Email rebaseline reconciles cached mail before advancing stat
                     .has_value());
         CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult)
                   ->stateToken == "email-state-2");
+        const auto horizon = notifications.mailboxHorizonsAtState("account-1", "email-state-2");
+        REQUIRE(std::holds_alternative<std::vector<std::string>>(horizon));
+        CHECK(std::get<std::vector<std::string>>(horizon) == std::vector<std::string>{"inbox"});
     };
 
     SECTION("cannotCalculateChanges")
@@ -687,8 +695,7 @@ TEST_CASE("account Email rebaseline retries a bounded pass when Email state adva
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
     REQUIRE(transport.requests.size() == 3);
     const auto firstCachedResult = emails.find("account-1", "email-1");
-    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(
-        firstCachedResult));
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(firstCachedResult));
     const auto& firstCached =
         std::get<std::optional<javelin::jmap::domain::Email>>(firstCachedResult);
     REQUIRE(firstCached.has_value());

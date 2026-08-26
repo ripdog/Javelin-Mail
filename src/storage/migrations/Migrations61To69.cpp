@@ -205,6 +205,21 @@ namespace javelin::jmap::cache::migrations
                             "mail_notification_event_outbox(account_id,mailbox_id,created_at)"),
                     },
             },
+            MigrationStep{
+                .version = 66,
+                .name = QStringLiteral("mail_notification_horizons"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "CREATE TABLE mail_notification_horizons (account_id TEXT NOT NULL "
+                            "REFERENCES accounts(account_id) ON DELETE CASCADE,mailbox_id TEXT NOT "
+                            "NULL,email_state TEXT NOT NULL,enabled_at TEXT NOT NULL DEFAULT "
+                            "CURRENT_TIMESTAMP,PRIMARY KEY(account_id,mailbox_id)) STRICT"),
+                        QStringLiteral(
+                            "CREATE INDEX idx_mail_notification_horizons_state ON "
+                            "mail_notification_horizons(account_id,email_state,mailbox_id)"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

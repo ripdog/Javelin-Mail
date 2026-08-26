@@ -5,6 +5,7 @@
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
+#include "jmap/cache/NotificationRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
@@ -726,6 +727,13 @@ namespace javelin::jmap::sync
                 superseded.superseded = true;
                 co_return superseded;
             }
+            if (expectedState.has_value())
+            {
+                javelin::jmap::cache::NotificationRepository notifications{databaseConnection};
+                if (const auto error = notifications.advanceMailboxHorizons(
+                        transaction.cacheTransaction(), accountId, *expectedState, snapshot.state))
+                    co_return operationError(*error);
+            }
 
             for (const auto& mailboxId : summary.queryAffectedMailboxIds)
             {
@@ -1164,6 +1172,11 @@ namespace javelin::jmap::sync
                 summary.superseded = true;
                 co_return summary;
             }
+            javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
+            if (const auto error = notifications.advanceMailboxHorizons(
+                    transaction.cacheTransaction(), accountId, parsed.emailChanges->oldState,
+                    parsed.emailChanges->newState))
+                co_return operationError(*error);
         }
 
         javelin::jmap::cache::MailboxRepository mailboxes{m_databaseConnection};
