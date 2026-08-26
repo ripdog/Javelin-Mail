@@ -10,6 +10,32 @@ existing ordering guarantees over new general-purpose synchronization machinery.
 
 All checklist items are initially incomplete. Update this document as phases land.
 
+### Branch handoff checkpoint — 2026-08-27
+
+Current branch: `core-mail-architecture-cleanup`.
+
+Implemented and committed through the notification architecture cutover: account Email-state
+ownership/rebaseline, per-Email notification consumption, state-token notification horizons,
+transactional event creation, import/optimistic-move suppression, local-only desktop outbox delivery,
+legacy notification-state retirement, and removal of notification-only mailboxes from configured
+presentation query interests.
+
+Latest validation before this checkpoint:
+
+- `javelin_jmap_sync_tests`: all 88 test cases passed (1413 assertions) after scanner removal.
+- Notification-focused sync tests cover per-Email dedup/re-entry, eligibility, transactional rollback,
+  horizon semantics, and local delivery revalidation.
+- Legacy notification migration regression passed and preserves cached Email data.
+- Focused daemon integration test `notification-only mailboxes are not presentation sync interests`
+  passes after the Phase 4 configuration change.
+- `scripts/check-debug.sh --full` has **not** yet been run on the branch; checklist items requiring it
+  remain intentionally unchecked.
+
+Next work should continue Phase 4 rather than reopening the retired notification scanner: verify
+open/retained/offline mailbox interests remain intact, add request-count/fake-transport proof that a
+notification-only mailbox causes no presentation `Email/query`, then continue into Phase 5 IPC cache
+invalidation cleanup.
+
 ## Guiding rules
 
 The entire implementation is constrained by these rules:
@@ -324,14 +350,14 @@ The primary invariant is:
 > membership determines whether an as-yet-unnotified Email is eligible; mailbox identity does not
 > create a new notification lifetime.
 
-- [ ] Treat notification identity as per-Email, not per-mailbox.
-- [ ] Ensure an Email simultaneously present in several notification-enabled mailboxes creates one
+- [x] Treat notification identity as per-Email, not per-mailbox.
+- [x] Ensure an Email simultaneously present in several notification-enabled mailboxes creates one
       event total.
-- [ ] Ensure moving a previously notified unread Email between any notification-enabled mailboxes
+- [x] Ensure moving a previously notified unread Email between any notification-enabled mailboxes
       creates zero additional events.
-- [ ] Ensure leaving all notification-enabled mailboxes and later re-entering does not reset the
+- [x] Ensure leaving all notification-enabled mailboxes and later re-entering does not reset the
       Email's notification history.
-- [ ] Ensure successful desktop delivery does not reset the Email's notification history.
+- [x] Ensure successful desktop delivery does not reset the Email's notification history.
 
 ## 2.2 Define what constitutes a legitimate first notification transition
 
@@ -348,11 +374,11 @@ A notification may be created only when all of these are true:
 - the Email is unread after reconciliation;
 - the Email belongs to at least one notification-enabled mailbox after reconciliation.
 
-- [ ] Model this decision explicitly in the daemon synchronization/application layer.
-- [ ] Do not derive it from query-window insertion/removal.
-- [ ] Do not derive it merely from `unread && inNotifiableMailbox` on current cache state.
-- [ ] Do not treat arbitrary `$seen` changes as arrival.
-- [ ] Do not treat a user's own mailbox move as arrival when the server confirms it.
+- [x] Model this decision explicitly in the daemon synchronization/application layer.
+- [x] Do not derive it from query-window insertion/removal.
+- [x] Do not derive it merely from `unread && inNotifiableMailbox` on current cache state.
+- [x] Do not treat arbitrary `$seen` changes as arrival.
+- [x] Do not treat a user's own mailbox move as arrival when the server confirms it.
 
 Conceptually:
 
@@ -383,7 +409,7 @@ mail_notification_state (
 
 The exact schema may vary, but the semantics may not.
 
-- [ ] Create the state only when Javelin creates a legitimate new-mail notification event.
+- [x] Create the state only when Javelin creates a legitimate new-mail notification event.
 - [x] Never populate it merely because an Email is downloaded, cached, indexed, opened, searched,
       offline-synchronized, or exposed by a query window.
 - [x] Keep server-derived Email state separate from Javelin-local notification bookkeeping.
@@ -456,11 +482,11 @@ advance global Email state
 COMMIT
 ```
 
-- [ ] Insert the per-Email consumption row and durable outbox event in the same transaction.
-- [ ] Keep them in the same logical transition as the Email state and global Email-token advancement
+- [x] Insert the per-Email consumption row and durable outbox event in the same transaction.
+- [x] Keep them in the same logical transition as the Email state and global Email-token advancement
       that proves eligibility.
-- [ ] Prevent a crash state where the consumption marker exists but no delivery event was queued.
-- [ ] Prevent a crash state where an event is queued without the consumption marker and can be queued
+- [x] Prevent a crash state where the consumption marker exists but no delivery event was queued.
+- [x] Prevent a crash state where an event is queued without the consumption marker and can be queued
       again.
 - [ ] Replaying the same server delta after a crash must be idempotent.
 
@@ -468,36 +494,36 @@ COMMIT
 
 Existing mail at account setup is baseline state, not newly arrived mail.
 
-- [ ] Define a persisted or state-token-based notification horizon established during account mail
+- [x] Define a persisted or state-token-based notification horizon established during account mail
       bootstrap.
 - [ ] Ensure existing unread mail discovered during initial bootstrap creates zero notification
       events.
-- [ ] Ensure the baseline does not depend on scanning query windows into an observation ledger.
-- [ ] Ensure subsequent genuine post-baseline Email transitions can notify normally.
+- [x] Ensure the baseline does not depend on scanning query windows into an observation ledger.
+- [x] Ensure subsequent genuine post-baseline Email transitions can notify normally.
 - [ ] Cover accounts with complete-offline mailboxes during initial synchronization.
 
 ## 2.8 Establish a notification horizon when notifications are enabled
 
 Enabling notifications for a populated mailbox must not notify existing mail.
 
-- [ ] Establish notification enablement relative to a known committed account Email state/horizon.
-- [ ] Treat mail already present before that horizon as historical for notification purposes.
-- [ ] Do not require inserting per-Email consumption markers for every historical Email merely to
+- [x] Establish notification enablement relative to a known committed account Email state/horizon.
+- [x] Treat mail already present before that horizon as historical for notification purposes.
+- [x] Do not require inserting per-Email consumption markers for every historical Email merely to
       establish the baseline if a state-token/horizon can prove this more cheaply.
-- [ ] Ensure the first genuine post-enable incoming transition notifies normally.
+- [x] Ensure the first genuine post-enable incoming transition notifies normally.
 - [ ] Cover notification settings changes while synchronization is in flight.
 
 ## 2.9 Preserve local-operation provenance
 
 Javelin-originated state changes must not come back from the server and masquerade as incoming mail.
 
-- [ ] Preserve enough operation/mutation provenance to suppress notification creation for the user's
+- [x] Preserve enough operation/mutation provenance to suppress notification creation for the user's
       own mailbox moves when server confirmation arrives.
 - [ ] Cover Move, Archive, Restore, Junk, Not Junk, and mailbox add/remove mutations.
-- [ ] Ensure optimistic projection does not delete or reset existing per-Email notification state.
-- [ ] Ensure server reconciliation of an optimistic move preserves existing per-Email notification
+- [x] Ensure optimistic projection does not delete or reset existing per-Email notification state.
+- [x] Ensure server reconciliation of an optimistic move preserves existing per-Email notification
       state.
-- [ ] Prefer existing optimistic journal/application-command provenance over a new generic origin
+- [x] Prefer existing optimistic journal/application-command provenance over a new generic origin
       tracking framework.
 
 ## 2.10 Suppress local imports explicitly
@@ -505,11 +531,11 @@ Javelin-originated state changes must not come back from the server and masquera
 User-imported mail is not incoming new mail even if the server reports newly created JMAP Email
 objects.
 
-- [ ] Carry import provenance through the existing import/application-operation machinery far enough
+- [x] Carry import provenance through the existing import/application-operation machinery far enough
       for account Email reconciliation to suppress new-mail event creation for Javelin-originated
       imports.
-- [ ] Do not solve this by relying on query-window history.
-- [ ] Do not generate one notification per imported unread message.
+- [x] Do not solve this by relying on query-window history.
+- [x] Do not generate one notification per imported unread message.
 - [ ] Add a regression test importing a large unread batch into a notification-enabled mailbox and
       assert zero notification events.
 
@@ -517,39 +543,39 @@ objects.
 
 A single Email may belong to several notification-enabled mailboxes. It still creates one event.
 
-- [ ] Attribute the event to one mailbox deterministically for wording/navigation/batching.
-- [ ] Prefer the mailbox whose legitimate incoming membership transition made the Email eligible when
+- [x] Attribute the event to one mailbox deterministically for wording/navigation/batching.
+- [x] Prefer the mailbox whose legitimate incoming membership transition made the Email eligible when
       unambiguous.
-- [ ] Otherwise prefer a primary Inbox-role mailbox when present.
-- [ ] Otherwise choose a deterministic notification-enabled mailbox.
-- [ ] Ensure attribution never changes event uniqueness.
-- [ ] Ensure batching does not duplicate one Email because it has multiple qualifying memberships.
+- [x] Otherwise prefer a primary Inbox-role mailbox when present.
+- [x] Otherwise choose a deterministic notification-enabled mailbox.
+- [x] Ensure attribution never changes event uniqueness.
+- [x] Ensure batching does not duplicate one Email because it has multiple qualifying memberships.
 
 ## 2.12 Remove query-window-based notification discovery
 
 Once the new path is production-tested:
 
-- [ ] Remove `NotificationRepository::enqueueUnreadMailboxEmails()` or reduce it so it no longer
+- [x] Remove `NotificationRepository::enqueueUnreadMailboxEmails()` or reduce it so it no longer
       discovers notification events by scanning cache/query state.
-- [ ] Remove the `mailboxRefreshed -> scan cached windows -> infer new mail` architecture.
-- [ ] Remove `observed_notification_emails` from active notification logic.
-- [ ] Audit `RefreshNotificationPlanner` and `notificationCandidates`; delete notification planning
+- [x] Remove the `mailboxRefreshed -> scan cached windows -> infer new mail` architecture.
+- [x] Remove `observed_notification_emails` from active notification logic.
+- [x] Audit `RefreshNotificationPlanner` and `notificationCandidates`; delete notification planning
       that duplicates the authoritative committed-Email transition path.
-- [ ] Ensure a full/continued/query rebuild cannot create notification events.
-- [ ] Ensure complete-offline synchronization cannot create historical notification events.
+- [x] Ensure a full/continued/query rebuild cannot create notification events.
+- [x] Ensure complete-offline synchronization cannot create historical notification events.
 
 ## 2.13 Migrate legacy notification state safely
 
 The existing observation/outbox history contains historical false positives and should not become
 new architectural truth.
 
-- [ ] Add a database migration for the new notification-consumption state/outbox schema as required.
-- [ ] Do not mechanically translate `observed_notification_emails` rows into the new semantic marker.
-- [ ] Remove or retire the legacy observation table once no production code depends on it.
-- [ ] Discard old delivered outbox history rather than preserving historical false positives forever.
-- [ ] For legacy pending rows, either validate them against current Email state and retain only
+- [x] Add a database migration for the new notification-consumption state/outbox schema as required.
+- [x] Do not mechanically translate `observed_notification_emails` rows into the new semantic marker.
+- [x] Remove or retire the legacy observation table once no production code depends on it.
+- [x] Discard old delivered outbox history rather than preserving historical false positives forever.
+- [x] For legacy pending rows, either validate them against current Email state and retain only
       provably eligible events, or discard them if their provenance is ambiguous.
-- [ ] Do not destroy Email/mailbox data as part of this migration.
+- [x] Do not destroy Email/mailbox data as part of this migration.
 
 ## 2.14 Validate Phase 2
 
@@ -571,33 +597,33 @@ It must never request network synchronization merely to retry a popup.
 
 ## 3.1 Separate event creation from delivery
 
-- [ ] Keep mail synchronization responsible for creating durable notification events.
-- [ ] Keep the desktop notification controller responsible only for claiming/delivering pending
+- [x] Keep mail synchronization responsible for creating durable notification events.
+- [x] Keep the desktop notification controller responsible only for claiming/delivering pending
       outbox events.
-- [ ] Remove any delivery-path assumption that another mailbox refresh is needed to discover pending
+- [x] Remove any delivery-path assumption that another mailbox refresh is needed to discover pending
       work.
 
 ## 3.2 Retry directly from SQLite
 
 On desktop delivery failure:
 
-- [ ] Release or expire the dispatch claim locally.
-- [ ] Schedule a local retry timer.
-- [ ] Re-read pending outbox events from SQLite at retry time.
-- [ ] Do not call `requestAccountSynchronization()`.
-- [ ] Do not call mailbox synchronization merely to retry delivery.
+- [x] Release or expire the dispatch claim locally.
+- [x] Schedule a local retry timer.
+- [x] Re-read pending outbox events from SQLite at retry time.
+- [x] Do not call `requestAccountSynchronization()`.
+- [x] Do not call mailbox synchronization merely to retry delivery.
 - [ ] Assert through tests that delivery retry causes zero JMAP requests.
 
 ## 3.3 Revalidate current eligibility before every dispatch
 
 Immediately before showing a pending notification:
 
-- [ ] Verify the Email still exists.
-- [ ] Verify it still belongs to the event's currently relevant notification context, or determine a
+- [x] Verify the Email still exists.
+- [x] Verify it still belongs to the event's currently relevant notification context, or determine a
       valid current navigation context if attribution is allowed to move.
-- [ ] Verify it is still unread.
-- [ ] If it is known no longer eligible, cancel/remove the pending delivery event.
-- [ ] If local state cannot be read because of a transient SQLite/local failure, keep the event
+- [x] Verify it is still unread.
+- [x] If it is known no longer eligible, cancel/remove the pending delivery event.
+- [x] If local state cannot be read because of a transient SQLite/local failure, keep the event
       pending for retry instead of treating uncertainty as ineligibility.
 
 Per-Email consumption state remains consumed even if the pending popup is cancelled because the Email
@@ -606,28 +632,28 @@ was read/moved before delivery. Reading the mail elsewhere must not make it elig
 
 ## 3.4 Preserve existing batching intentionally
 
-- [ ] Batch pending outbox events using the existing user-facing notification style where practical.
-- [ ] Ensure each Email contributes at most once to a batch.
-- [ ] Keep a representative actionable target where the platform supports notification actions.
-- [ ] Continue routing Archive/Mark Read/Reply actions through the normal daemon application command
+- [x] Batch pending outbox events using the existing user-facing notification style where practical.
+- [x] Ensure each Email contributes at most once to a batch.
+- [x] Keep a representative actionable target where the platform supports notification actions.
+- [x] Continue routing Archive/Mark Read/Reply actions through the normal daemon application command
       and optimistic-consistency paths.
-- [ ] Do not let batching become a second event-discovery mechanism.
+- [x] Do not let batching become a second event-discovery mechanism.
 
 ## 3.5 Bound delivery history
 
-- [ ] Prefer deleting successfully delivered outbox rows after durable success acknowledgement.
-- [ ] If a diagnostic delivered history is retained, bound it by time/count and purge it through local
+- [x] Prefer deleting successfully delivered outbox rows after durable success acknowledgement.
+- [x] If a diagnostic delivered history is retained, bound it by time/count and purge it through local
       maintenance.
-- [ ] Ensure correctness does not depend on retaining delivered outbox rows forever.
-- [ ] Ensure the per-Email notification-consumption state, not delivered outbox history, enforces
+- [x] Ensure correctness does not depend on retaining delivered outbox rows forever.
+- [x] Ensure the per-Email notification-consumption state, not delivered outbox history, enforces
       duplicate prevention.
 
 ## 3.6 Recover pending delivery after daemon restart
 
-- [ ] Recover or expire stale dispatch claims at daemon startup.
-- [ ] Re-read pending outbox events locally.
-- [ ] Revalidate eligibility.
-- [ ] Retry delivery without requesting account synchronization solely for notification recovery.
+- [x] Recover or expire stale dispatch claims at daemon startup.
+- [x] Re-read pending outbox events locally.
+- [x] Revalidate eligibility.
+- [x] Retry delivery without requesting account synchronization solely for notification recovery.
 - [ ] Prove crash-after-commit-before-popup results in exactly one eventual popup, not zero or two.
 
 ## 3.7 Validate Phase 3
@@ -648,13 +674,13 @@ coupling is unnecessary.
 
 ## 4.1 Separate notification configuration from presentation interests
 
-- [ ] Stop unioning notification-only mailbox selections into watched mailbox/query-window interests
+- [x] Stop unioning notification-only mailbox selections into watched mailbox/query-window interests
       solely for notification discovery.
 - [ ] Keep open/retained mailbox tabs and explicit offline synchronization as legitimate presentation
       or storage interests.
-- [ ] Keep notification mailbox configuration available to Email transition eligibility logic without
+- [x] Keep notification mailbox configuration available to Email transition eligibility logic without
       forcing an `Email/query` window.
-- [ ] Preserve existing behavior for a mailbox that is both notification-enabled and legitimately
+- [x] Preserve existing behavior for a mailbox that is both notification-enabled and legitimately
       watched for presentation/offline reasons.
 
 ## 4.2 Verify least-request behavior
