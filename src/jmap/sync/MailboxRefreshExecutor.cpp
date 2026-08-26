@@ -1060,16 +1060,8 @@ namespace javelin::jmap::sync
                 co_return javelin::jmap::operationError(*error);
             const auto& expectedQueryRecord =
                 std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(expectedQueryResult);
-            const auto expectedEmailResult = syncStateRepository.find(emailKey);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::cache::DatabaseError>(&expectedEmailResult))
-                co_return javelin::jmap::operationError(*error);
-            const auto& expectedEmailRecord =
-                std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(expectedEmailResult);
             const auto expectedQueryState =
                 expectedQueryRecord.transform([](const auto& record) { return record.stateToken; });
-            const auto expectedEmailState =
-                expectedEmailRecord.transform([](const auto& record) { return record.stateToken; });
 
             emitProgress(QStringLiteral("Refreshing mailbox window from the server..."));
             const auto fetchResult = co_await fetchCollapsedMailboxThreads(
@@ -1136,21 +1128,6 @@ namespace javelin::jmap::sync
                 co_return javelin::jmap::operationError(*error);
             if (!std::get<bool>(queryAdvanced))
                 co_return supersededMailboxRefresh();
-            if (!fetch.emailState.empty())
-            {
-                const auto expectedEmail =
-                    expectedEmailState.has_value()
-                        ? std::optional<std::string_view>{*expectedEmailState}
-                        : std::nullopt;
-                const auto emailAdvanced = syncStateRepository.replaceIfCurrent(
-                    cacheTransaction, emailKey, expectedEmail, fetch.emailState);
-                if (const auto* error =
-                        std::get_if<javelin::jmap::cache::DatabaseError>(&emailAdvanced))
-                    co_return javelin::jmap::operationError(*error);
-                if (!std::get<bool>(emailAdvanced))
-                    co_return supersededMailboxRefresh();
-            }
-
             if (const auto error =
                     emailRepository.upsertMany(cacheTransaction, accountId, fetch.emails))
                 co_return javelin::jmap::operationError(*error);
