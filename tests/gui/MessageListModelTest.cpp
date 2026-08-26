@@ -425,21 +425,24 @@ TEST_CASE("message list drag payload preserves collapsed Thread intent and sourc
         QUrl::fromLocalFile(QStringLiteral("/tmp/message-1.eml")),
         QUrl::fromLocalFile(QStringLiteral("/tmp/message-2.eml")),
     };
+    int externalProviderCalls = 0;
     std::unique_ptr<QMimeData> externalMime{javelin::gui::messages::buildMessageDragMimeData(
         mime->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)),
-        externalUrls)};
+        [&externalProviderCalls, externalUrls]
+        {
+            ++externalProviderCalls;
+            return externalUrls;
+        })};
     REQUIRE(externalMime != nullptr);
-    CHECK(externalMime->urls() == externalUrls);
+    CHECK(externalMime->hasFormat(QStringLiteral("text/uri-list")));
+    CHECK(externalProviderCalls == 0);
     CHECK(externalMime->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)) ==
           mime->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)));
-
-    std::unique_ptr<QMimeData> advertisedMime{javelin::gui::messages::buildMessageDragMimeData(
-        mime->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)), {}, true)};
-    REQUIRE(advertisedMime != nullptr);
-    CHECK(advertisedMime->hasFormat(QStringLiteral("text/uri-list")));
-    CHECK(advertisedMime->urls().isEmpty());
-    CHECK(advertisedMime->hasFormat(
-        QString::fromLatin1(javelin::gui::messages::messageDragMimeType)));
+    CHECK(externalProviderCalls == 0);
+    CHECK(externalMime->urls() == externalUrls);
+    CHECK(externalProviderCalls == 1);
+    CHECK(externalMime->data(QStringLiteral("text/uri-list")).contains("message-1.eml"));
+    CHECK(externalProviderCalls == 1);
 }
 
 TEST_CASE("message list drag payload records search selection without a source mailbox",

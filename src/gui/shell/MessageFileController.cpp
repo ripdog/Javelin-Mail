@@ -20,6 +20,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QDrag>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -380,55 +381,62 @@ namespace javelin::gui::shell
             });
     }
 
-    void
-    MessageFileController::prepareMessageDrag(const quint64 requestId,
-                                              javelin::gui::messages::MessageDragPayload payload)
+    QList<QUrl> MessageFileController::materializeMessageDragFiles(
+        const javelin::gui::messages::MessageDragPayload& payload)
     {
         const auto directory = createExternalDragDirectory(m_externalDragRootPath);
         if (!directory.errorMessage.isEmpty())
         {
             Q_EMIT userInterventionRequired(
                 i18n("Failed to prepare message drag: %1", directory.errorMessage));
-            Q_EMIT messageDragFailed(requestId);
-            return;
+            return {};
         }
 
         Q_EMIT statusMessage(i18n("Preparing messages for drag…"), 0);
         auto task = m_contentPort.saveMessages({
             .accountId = payload.sourceAccountId,
             .sourceMailboxId = payload.sourceMailboxId,
-            .selection = std::move(payload.selection),
+            .selection = payload.selection,
             .targetKind = javelin::app::MessageSaveTargetKind::Directory,
             .destinationPath = directory.path,
         });
-        QCoro::connect(
-            std::move(task), this,
-            [this, requestId,
-             directoryPath = directory.path](javelin::app::SaveMessagesResult result)
-            {
-                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                {
-                    QDir{directoryPath}.removeRecursively();
-                    Q_EMIT operationFailed(*error);
-                    Q_EMIT messageDragFailed(requestId);
-                    return;
-                }
 
-                const auto& saved = std::get<javelin::app::SaveMessagesSummary>(result);
-                auto urls = externalDragFileUrls(directoryPath);
-                if (urls.size() != static_cast<qsizetype>(saved.savedMessageCount) ||
-                    urls.isEmpty())
-                {
-                    QDir{directoryPath}.removeRecursively();
-                    Q_EMIT userInterventionRequired(
-                        i18n("Failed to prepare the complete message selection for dragging."));
-                    Q_EMIT messageDragFailed(requestId);
-                    return;
-                }
+        std::optional<javelin::app::SaveMessagesResult> completedResult;
+        QEventLoop completionLoop;
+        QCoro::connect(std::move(task), &completionLoop,
+                       [&completedResult, &completionLoop](javelin::app::SaveMessagesResult result)
+                       {
+                           completedResult = std::move(result);
+                           completionLoop.quit();
+                       });
+        if (!completedResult.has_value())
+            completionLoop.exec(QEventLoop::ExcludeUserInputEvents);
 
-                Q_EMIT statusMessage(i18n("Messages ready to drag."), 2000);
-                Q_EMIT messageDragReady(requestId, std::move(urls));
-            });
+        if (!completedResult.has_value())
+        {
+            QDir{directory.path}.removeRecursively();
+            Q_EMIT userInterventionRequired(i18n("Message drag preparation did not complete."));
+            return {};
+        }
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&*completedResult))
+        {
+            QDir{directory.path}.removeRecursively();
+            Q_EMIT operationFailed(*error);
+            return {};
+        }
+
+        const auto& saved = std::get<javelin::app::SaveMessagesSummary>(*completedResult);
+        auto urls = externalDragFileUrls(directory.path);
+        if (urls.size() != static_cast<qsizetype>(saved.savedMessageCount) || urls.isEmpty())
+        {
+            QDir{directory.path}.removeRecursively();
+            Q_EMIT userInterventionRequired(
+                i18n("Failed to prepare the complete message selection for dragging."));
+            return {};
+        }
+
+        Q_EMIT statusMessage(i18n("Messages ready to drag."), 2000);
+        return urls;
     }
 
     void MessageFileController::saveMessages(std::string accountId,

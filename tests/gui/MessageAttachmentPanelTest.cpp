@@ -34,6 +34,40 @@ TEST_CASE("attachment panel hides non-downloadable attachment parts", "[gui][mes
     CHECK(panel.findChild<QWidget*>(QStringLiteral("attachmentTile")) == nullptr);
 }
 
+TEST_CASE("attachment panel elides long filenames inside the open button", "[gui][messageview]")
+{
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    const std::optional<std::string> accountId{"account-a"};
+    const std::optional<std::string> emailId{"email-a"};
+    const QString longFileName = QStringLiteral("Estimate_2455_for_FERGUSON_M_with_a_deliberately_"
+                                                "long_descriptive_suffix_and_revision.PDF");
+
+    javelin::jmap::cache::MessageViewSnapshot message;
+    javelin::jmap::cache::MessageAttachment attachment;
+    attachment.partId = "attachment-a";
+    attachment.blobId = "blob-a";
+    attachment.mediaType = "application/pdf";
+    attachment.name = longFileName.toStdString();
+    attachment.disposition = "attachment";
+    attachment.size = 32;
+    message.attachments.push_back(std::move(attachment));
+    const std::optional<javelin::jmap::cache::MessageViewSnapshot> snapshot{std::move(message)};
+
+    javelin::gui::messageview::MessageAttachmentPanel panel{
+        settings, std::cref(accountId), std::cref(emailId), std::cref(snapshot)};
+    panel.resize(420, 80);
+    panel.show();
+    QApplication::processEvents();
+
+    auto* const openButton = panel.findChild<QToolButton*>(QStringLiteral("attachmentOpenButton"));
+    REQUIRE(openButton != nullptr);
+    CHECK(openButton->accessibleName() == longFileName);
+    CHECK(openButton->toolTip().contains(longFileName));
+    CHECK(openButton->text() != longFileName);
+    CHECK(openButton->text().contains(QChar{0x2026}));
+    CHECK(openButton->fontMetrics().horizontalAdvance(openButton->text()) < openButton->width());
+}
+
 TEST_CASE("attachment panel resizes without replacing interactive tiles", "[gui][messageview]")
 {
     javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};

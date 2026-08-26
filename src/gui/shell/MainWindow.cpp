@@ -1653,14 +1653,9 @@ namespace javelin::gui::shell
         m_messageView->setDefaultDropAction(Qt::MoveAction);
         auto* messageDragView =
             static_cast<javelin::gui::messages::MessageDragListView*>(m_messageView);
-        messageDragView->setExternalFileDragEnabled(true);
-        connect(messageDragView,
-                &javelin::gui::messages::MessageDragListView::externalDragPreparationRequested,
-                m_messageFileController, &MessageFileController::prepareMessageDrag);
-        connect(m_messageFileController, &MessageFileController::messageDragReady, messageDragView,
-                &javelin::gui::messages::MessageDragListView::externalDragPreparationReady);
-        connect(m_messageFileController, &MessageFileController::messageDragFailed, messageDragView,
-                &javelin::gui::messages::MessageDragListView::externalDragPreparationFailed);
+        messageDragView->setExternalFileProvider(
+            [this](const javelin::gui::messages::MessageDragPayload& payload)
+            { return m_messageFileController->materializeMessageDragFiles(payload); });
         m_messageView->setStyleSheet(QStringLiteral("QListView { border: none; padding: 3px; }"));
         m_messageView->setMouseTracking(true);
         m_messageView->viewport()->setMouseTracking(true);

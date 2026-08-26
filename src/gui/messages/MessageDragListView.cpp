@@ -4,35 +4,100 @@
 
 #include <KLocalizedString>
 
-#include <QApplication>
-#include <QCursor>
 #include <QDrag>
-#include <QFileInfo>
 #include <QFocusEvent>
 #include <QItemSelectionModel>
 #include <QMimeData>
 #include <QPainter>
+#include <QVariant>
 
 #include <algorithm>
 #include <memory>
-#include <ranges>
+#include <optional>
 #include <utility>
 
 namespace javelin::gui::messages
 {
+    namespace
+    {
+        const QString externalFileMimeType = QStringLiteral("text/uri-list");
+
+        class MessageDragMimeData final : public QMimeData
+        {
+          public:
+            MessageDragMimeData(QByteArray internalPayload,
+                                ExternalDragUrlProvider externalUrlProvider)
+                : m_externalUrlProvider(std::move(externalUrlProvider))
+            {
+                setData(QString::fromLatin1(messageDragMimeType), std::move(internalPayload));
+            }
+
+            [[nodiscard]] bool hasFormat(const QString& mimeType) const override
+            {
+                if (mimeType == externalFileMimeType && externalFilesAvailable())
+                    return true;
+                return QMimeData::hasFormat(mimeType);
+            }
+
+            [[nodiscard]] QStringList formats() const override
+            {
+                auto result = QMimeData::formats();
+                if (externalFilesAvailable() && !result.contains(externalFileMimeType))
+                    result.push_back(externalFileMimeType);
+                return result;
+            }
+
+          protected:
+            [[nodiscard]] QVariant retrieveData(const QString& mimeType,
+                                                const QMetaType preferredType) const override
+            {
+                if (mimeType != externalFileMimeType || !externalFilesAvailable())
+                    return QMimeData::retrieveData(mimeType, preferredType);
+
+                if (!m_externalUrls.has_value())
+                {
+                    m_externalUrls = m_externalUrlProvider();
+                    m_externalUrlProvider = {};
+                }
+
+                QVariantList variantUrls;
+                variantUrls.reserve(m_externalUrls->size());
+                for (const auto& url : *m_externalUrls)
+                    variantUrls.push_back(url);
+                if (preferredType.id() == QMetaType::QVariantList)
+                    return variantUrls;
+
+                if (preferredType.id() == QMetaType::QByteArray)
+                {
+                    QByteArray encoded;
+                    for (const auto& url : *m_externalUrls)
+                    {
+                        encoded += url.toEncoded();
+                        encoded += "\r\n";
+                    }
+                    return encoded;
+                }
+
+                return variantUrls;
+            }
+
+          private:
+            [[nodiscard]] bool externalFilesAvailable() const
+            {
+                return static_cast<bool>(m_externalUrlProvider) || m_externalUrls.has_value();
+            }
+
+            mutable ExternalDragUrlProvider m_externalUrlProvider;
+            mutable std::optional<QList<QUrl>> m_externalUrls;
+        };
+    } // namespace
+
     QMimeData* buildMessageDragMimeData(const QByteArray& internalPayload,
-                                        const QList<QUrl>& externalUrls,
-                                        const bool advertiseExternalFiles)
+                                        ExternalDragUrlProvider externalUrlProvider)
     {
         if (internalPayload.isEmpty())
             return nullptr;
-        auto* mimeData = new QMimeData;
-        mimeData->setData(QString::fromLatin1(messageDragMimeType), internalPayload);
-        if (!externalUrls.isEmpty())
-            mimeData->setUrls(externalUrls);
-        else if (advertiseExternalFiles)
-            mimeData->setData(QStringLiteral("text/uri-list"), {});
-        return mimeData;
+        return new MessageDragMimeData(internalPayload, std::move(externalUrlProvider));
     }
 
     qsizetype representedMessageCountForDrag(const QModelIndexList& indexes)
@@ -68,17 +133,9 @@ namespace javelin::gui::messages
                           QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     }
 
-    void MessageDragListView::setExternalFileDragEnabled(const bool enabled)
+    void MessageDragListView::setExternalFileProvider(MessageExternalFileProvider provider)
     {
-        m_externalFileDragEnabled = enabled;
-        if (!enabled)
-        {
-            m_activeRequestId.reset();
-            m_activeDragMimeData.clear();
-            m_requestedPayloads.clear();
-            m_cachedPayload.clear();
-            m_cachedUrls.clear();
-        }
+        m_externalFileProvider = std::move(provider);
     }
 
     void MessageDragListView::startDrag(const Qt::DropActions supportedActions)
@@ -95,42 +152,20 @@ namespace javelin::gui::messages
         if (internalPayload.isEmpty() || !decoded.has_value())
             return;
 
-        QList<QUrl> externalUrls;
-        const bool cachedFilesAvailable =
-            m_externalFileDragEnabled && m_cachedPayload == internalPayload &&
-            !m_cachedUrls.isEmpty() &&
-            std::ranges::all_of(
-                m_cachedUrls, [](const QUrl& url)
-                { return url.isLocalFile() && QFileInfo::exists(url.toLocalFile()); });
-        if (cachedFilesAvailable)
+        ExternalDragUrlProvider externalUrlProvider;
+        if (m_externalFileProvider)
         {
-            externalUrls = std::exchange(m_cachedUrls, {});
-            m_cachedPayload.clear();
+            externalUrlProvider = [provider = m_externalFileProvider, payload = *decoded]
+            { return provider(payload); };
         }
 
-        // Keep the internal mailbox-transfer payload immediately usable. External file targets
-        // need text/uri-list to be offered from drag start, but the raw EML files may require
-        // asynchronous daemon materialization. Populate that already-advertised format once the
-        // cursor actually leaves this application; if the drag ends first, the completed files are
-        // cached for the next identical drag rather than blocking the GUI with a nested event loop.
-        auto* dragMimeData = buildMessageDragMimeData(
-            internalPayload, externalUrls, m_externalFileDragEnabled && externalUrls.isEmpty());
+        // External file data is promised from drag start but materialized only if the target asks
+        // for text/uri-list. Internal mailbox targets consume only Javelin's private transfer MIME,
+        // so ordinary Move/Copy drags never trigger RFC 5322 export work.
+        auto* dragMimeData =
+            buildMessageDragMimeData(internalPayload, std::move(externalUrlProvider));
         if (dragMimeData == nullptr)
             return;
-
-        const auto requestId = m_nextRequestId++;
-        bool preparationRequested = false;
-        const auto requestPreparation = [this, requestId, internalPayload, payload = *decoded,
-                                         dragMimeData, &preparationRequested]
-        {
-            if (preparationRequested || QApplication::widgetAt(QCursor::pos()) != nullptr)
-                return;
-            preparationRequested = true;
-            m_activeRequestId = requestId;
-            m_activeDragMimeData = dragMimeData;
-            m_requestedPayloads.insert(requestId, internalPayload);
-            Q_EMIT externalDragPreparationRequested(requestId, payload);
-        };
 
         const QString label =
             i18np("%1 message", "%1 messages", representedMessageCountForDrag(indexes));
@@ -165,55 +200,7 @@ namespace javelin::gui::messages
         drag.setMimeData(dragMimeData);
         drag.setPixmap(badge);
         drag.setHotSpot(QPoint{-10, -10});
-        if (m_externalFileDragEnabled && externalUrls.isEmpty())
-        {
-            connect(&drag, &QDrag::targetChanged, this,
-                    [requestPreparation](QObject* target)
-                    {
-                        if (target == nullptr)
-                            requestPreparation();
-                    });
-            connect(&drag, &QDrag::actionChanged, this,
-                    [requestPreparation](Qt::DropAction) { requestPreparation(); });
-        }
         static_cast<void>(drag.exec(supportedActions, defaultDropAction()));
-        if (m_activeRequestId == std::optional<quint64>{requestId})
-        {
-            m_activeRequestId.reset();
-            m_activeDragMimeData.clear();
-        }
-    }
-
-    void MessageDragListView::externalDragPreparationReady(const quint64 requestId,
-                                                           QList<QUrl> urls)
-    {
-        const auto found = m_requestedPayloads.find(requestId);
-        if (found == m_requestedPayloads.end())
-            return;
-        const auto payload = found.value();
-        m_requestedPayloads.erase(found);
-
-        if (m_activeRequestId == std::optional<quint64>{requestId} &&
-            m_activeDragMimeData != nullptr)
-        {
-            m_activeDragMimeData->setUrls(urls);
-            m_activeRequestId.reset();
-            m_activeDragMimeData.clear();
-            return;
-        }
-
-        m_cachedPayload = payload;
-        m_cachedUrls = std::move(urls);
-    }
-
-    void MessageDragListView::externalDragPreparationFailed(const quint64 requestId)
-    {
-        m_requestedPayloads.remove(requestId);
-        if (m_activeRequestId == std::optional<quint64>{requestId})
-        {
-            m_activeRequestId.reset();
-            m_activeDragMimeData.clear();
-        }
     }
 
 } // namespace javelin::gui::messages

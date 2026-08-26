@@ -47,8 +47,8 @@ namespace javelin::gui::shell
         void openAttachment(std::string accountId, std::string emailId, std::string partId);
         void openAttachmentWith(std::string accountId, std::string emailId, std::string partId);
         void dragAttachment(QString accountId, QString emailId, QString partId, QWidget* source);
-        void prepareMessageDrag(quint64 requestId,
-                                javelin::gui::messages::MessageDragPayload payload);
+        [[nodiscard]] QList<QUrl>
+        materializeMessageDragFiles(const javelin::gui::messages::MessageDragPayload& payload);
         void saveMessages(std::string accountId, std::optional<std::string> sourceMailboxId,
                           javelin::app::MessageSelection selection);
         void viewMessageSource(std::string accountId, std::string emailId);
@@ -57,8 +57,6 @@ namespace javelin::gui::shell
         void statusMessage(QString message, int durationMilliseconds);
         void operationFailed(javelin::jmap::OperationError error);
         void userInterventionRequired(QString message);
-        void messageDragReady(quint64 requestId, QList<QUrl> urls);
-        void messageDragFailed(quint64 requestId);
 
       private:
         void openAttachment(std::string accountId, std::string emailId, std::string partId,

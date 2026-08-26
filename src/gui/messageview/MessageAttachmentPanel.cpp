@@ -7,6 +7,7 @@
 #include <KLocalizedString>
 
 #include <QApplication>
+#include <QEvent>
 #include <QFileIconProvider>
 #include <QFileInfo>
 #include <QFrame>
@@ -20,6 +21,7 @@
 #include <QResizeEvent>
 #include <QSizePolicy>
 #include <QStyle>
+#include <QStyleOptionToolButton>
 #include <QToolButton>
 
 #include <algorithm>
@@ -84,6 +86,13 @@ namespace javelin::gui::messageview
             {
             }
 
+            void setFullText(QString text)
+            {
+                m_fullText = std::move(text);
+                setAccessibleName(m_fullText);
+                QToolButton::setText(m_fullText);
+            }
+
           protected:
             void mousePressEvent(QMouseEvent* event) override
             {
@@ -118,8 +127,42 @@ namespace javelin::gui::messageview
                 QToolButton::mouseReleaseEvent(event);
             }
 
+            void resizeEvent(QResizeEvent* event) override
+            {
+                QToolButton::resizeEvent(event);
+                updateElidedText();
+            }
+
+            void changeEvent(QEvent* event) override
+            {
+                QToolButton::changeEvent(event);
+                if (event->type() == QEvent::FontChange || event->type() == QEvent::StyleChange)
+                    updateElidedText();
+            }
+
           private:
+            void updateElidedText()
+            {
+                if (m_fullText.isEmpty())
+                    return;
+
+                QStyleOptionToolButton option;
+                initStyleOption(&option);
+                const QRect buttonRect = style()->subControlRect(QStyle::CC_ToolButton, &option,
+                                                                 QStyle::SC_ToolButton, this);
+                int textWidth = buttonRect.width() - 16;
+                if (!icon().isNull())
+                {
+                    const int spacing = std::max(
+                        4, style()->pixelMetric(QStyle::PM_LayoutHorizontalSpacing, &option, this));
+                    textWidth -= option.iconSize.width() + spacing;
+                }
+                QToolButton::setText(
+                    fontMetrics().elidedText(m_fullText, Qt::ElideMiddle, std::max(0, textWidth)));
+            }
+
             std::function<void(QWidget*)> m_dragAction;
+            QString m_fullText;
             QPoint m_pressPosition;
             bool m_dragStarted = false;
         };
@@ -165,9 +208,10 @@ namespace javelin::gui::messageview
                 layout->setSpacing(0);
 
                 auto* openButton = new AttachmentDragButton(std::move(dragAction), this);
+                openButton->setObjectName(QStringLiteral("attachmentOpenButton"));
                 openButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
                 openButton->setIcon(attachmentIcon(attachment));
-                openButton->setText(fileName);
+                openButton->setFullText(fileName);
                 openButton->setToolTip(i18n("Open %1 in default application", fileName));
                 openButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
                 connect(openButton, &QToolButton::clicked, this,
