@@ -27,62 +27,6 @@ namespace javelin::jmap::cache
     {
     }
 
-    std::variant<std::int64_t, DatabaseError>
-    NotificationRepository::enqueueEvent(DatabaseTransaction& transaction,
-                                         const std::string_view accountId,
-                                         const MailNotificationEventInput& event)
-    {
-        Q_UNUSED(transaction);
-        QSqlQuery insert{m_connection.database()};
-        insert.prepare(QStringLiteral(
-            "INSERT INTO mail_notification_events "
-            "(account_id,mailbox_id,email_id,thread_id,subject,received_at) VALUES "
-            "(:account_id,:mailbox_id,:email_id,:thread_id,:subject,:received_at)"));
-        insert.bindValue(QStringLiteral(":account_id"),
-                         QString::fromStdString(std::string{accountId}));
-        insert.bindValue(QStringLiteral(":mailbox_id"), QString::fromStdString(event.mailboxId));
-        insert.bindValue(QStringLiteral(":email_id"), QString::fromStdString(event.emailId));
-        insert.bindValue(QStringLiteral(":thread_id"), QString::fromStdString(event.threadId));
-        if (event.subject.has_value())
-            insert.bindValue(QStringLiteral(":subject"), QString::fromStdString(*event.subject));
-        else
-            insert.bindValue(QStringLiteral(":subject"), QVariant{});
-        insert.bindValue(QStringLiteral(":received_at"), QString::fromStdString(event.receivedAt));
-        if (!insert.exec())
-            return queryError(QStringLiteral("Enqueue mail notification event"), insert);
-        return insert.lastInsertId().toLongLong();
-    }
-
-    std::variant<std::vector<MailNotificationEventRecord>, DatabaseError>
-    NotificationRepository::listEvents(const std::string_view accountId) const
-    {
-        QSqlQuery query{m_connection.database()};
-        query.prepare(QStringLiteral(
-            "SELECT event_id,mailbox_id,email_id,thread_id,subject,received_at FROM "
-            "mail_notification_events WHERE account_id=:account_id ORDER BY event_id"));
-        query.bindValue(QStringLiteral(":account_id"),
-                        QString::fromStdString(std::string{accountId}));
-        if (!query.exec())
-            return queryError(QStringLiteral("List mail notification events"), query);
-
-        std::vector<MailNotificationEventRecord> events;
-        while (query.next())
-        {
-            events.push_back(MailNotificationEventRecord{
-                .eventId = query.value(0).toLongLong(),
-                .accountId = std::string{accountId},
-                .mailboxId = query.value(1).toString().toStdString(),
-                .emailId = query.value(2).toString().toStdString(),
-                .threadId = query.value(3).toString().toStdString(),
-                .subject = query.value(4).isNull()
-                               ? std::nullopt
-                               : std::optional{query.value(4).toString().toStdString()},
-                .receivedAt = query.value(5).toString().toStdString(),
-            });
-        }
-        return events;
-    }
-
     std::variant<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>, DatabaseError>
     NotificationRepository::enqueueUnreadMailboxEmails(const std::string_view accountId,
                                                        const std::string_view mailboxId)
