@@ -1392,6 +1392,49 @@ namespace javelin::jmap
         const auto apiRequestContext = buildApiRequestContext(settings, connectionId, session);
         qInfo() << "Account bootstrap mailbox request context ready";
 
+        javelin::jmap::cache::SyncStateRepository syncStateRepository{*m_impl->databaseConnection};
+        const javelin::jmap::cache::SyncStateKey emailStateKey{
+            .accountId = accountId,
+            .objectType = "Email",
+            .queryKey = {},
+        };
+        const auto existingEmailStateResult = syncStateRepository.find(emailStateKey);
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&existingEmailStateResult))
+        {
+            co_return javelin::jmap::operationError(*error);
+        }
+        const auto& existingEmailState =
+            std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(
+                existingEmailStateResult);
+
+        bool localEmailWorkingSetEmpty = true;
+        if (!existingEmailState.has_value())
+        {
+            QSqlQuery cachedEmailProbe{m_impl->databaseConnection->database()};
+            cachedEmailProbe.prepare(QStringLiteral(
+                "SELECT EXISTS(SELECT 1 FROM emails WHERE account_id=:account_id LIMIT 1)"));
+            cachedEmailProbe.bindValue(QStringLiteral(":account_id"),
+                                       QString::fromStdString(accountId));
+            if (!cachedEmailProbe.exec() || !cachedEmailProbe.next())
+            {
+                co_return javelin::jmap::operationError(javelin::jmap::cache::DatabaseError{
+                    .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Inspect initial Email working set: ") +
+                               cachedEmailProbe.lastError().text(),
+                });
+            }
+            localEmailWorkingSetEmpty = !cachedEmailProbe.value(0).toBool();
+        }
+        const bool establishInitialEmailBaseline =
+            !existingEmailState.has_value() && localEmailWorkingSetEmpty;
+        if (!existingEmailState.has_value() && !localEmailWorkingSetEmpty)
+        {
+            qWarning() << "Account bootstrap found cached Email rows without an Email state; "
+                          "leaving the cursor unset for account rebaseline"
+                       << QString::fromStdString(accountId);
+        }
+
         javelin::jmap::api::MethodCaller methodCaller{*m_impl->methodTransport};
         const auto mailboxRequest = javelin::jmap::api::mailboxGet({.accountId = remoteAccountId,
                                                                     .ids = std::nullopt,
@@ -1408,6 +1451,26 @@ namespace javelin::jmap
         javelin::jmap::api::RequestBuilder mailboxRequestBuilder;
         mailboxRequestBuilder.useCore().useMail();
         const auto mailboxHandle = mailboxRequestBuilder.call(*mailboxRequest, "mailboxes");
+
+        std::optional<javelin::jmap::api::CallHandle<javelin::jmap::api::EmailGetResponse>>
+            initialEmailStateHandle;
+        if (establishInitialEmailBaseline)
+        {
+            const auto initialEmailStateRequest = javelin::jmap::api::emailGet({
+                .accountId = remoteAccountId,
+                .ids = std::vector<std::string>{},
+                .idsReference = std::nullopt,
+                .properties = std::vector<std::string>{"id"},
+            });
+            if (!initialEmailStateRequest.has_value())
+            {
+                co_return OperationError{
+                    .message = QStringLiteral("Failed to encode the initial Email state request."),
+                };
+            }
+            initialEmailStateHandle =
+                mailboxRequestBuilder.call(*initialEmailStateRequest, "initial-email-state");
+        }
 
         const auto mailboxEnvelopeResult =
             co_await methodCaller.call(apiRequestContext, mailboxRequestBuilder);
@@ -1440,8 +1503,68 @@ namespace javelin::jmap
         if (const auto accountError = validateResponseAccountId(
                 remoteAccountId, parsedMailboxes.accountId, u"Mailbox/get"))
             co_return *accountError;
+
+        std::optional<std::string> initialEmailState;
+        if (initialEmailStateHandle.has_value())
+        {
+            const auto initialEmailStateResult = mailboxReader.require(*initialEmailStateHandle);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::api::ResponseReaderError>(&initialEmailStateResult))
+            {
+                co_return operationError(*error);
+            }
+            const auto& parsedInitialEmailState =
+                std::get<javelin::jmap::api::EmailGetResponse>(initialEmailStateResult);
+            if (const auto accountError = validateResponseAccountId(
+                    remoteAccountId, parsedInitialEmailState.accountId, u"Email/get"))
+                co_return *accountError;
+            if (parsedInitialEmailState.state.empty())
+            {
+                co_return OperationError{
+                    .message = QStringLiteral("The server returned an empty initial Email state."),
+                };
+            }
+            initialEmailState = parsedInitialEmailState.state;
+        }
+
         reportProgress(QStringLiteral("Fetched %1 mailboxes. Updating cache...")
                            .arg(parsedMailboxes.list.size()));
+
+        if (initialEmailState.has_value())
+        {
+            auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                *m_impl->databaseConnection, QStringLiteral("Establish initial Email baseline"));
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+                co_return javelin::jmap::operationError(*error);
+            auto transaction =
+                std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+
+            QSqlQuery cachedEmailProbe{m_impl->databaseConnection->database()};
+            cachedEmailProbe.prepare(QStringLiteral(
+                "SELECT EXISTS(SELECT 1 FROM emails WHERE account_id=:account_id LIMIT 1)"));
+            cachedEmailProbe.bindValue(QStringLiteral(":account_id"),
+                                       QString::fromStdString(accountId));
+            if (!cachedEmailProbe.exec() || !cachedEmailProbe.next())
+            {
+                co_return javelin::jmap::operationError(javelin::jmap::cache::DatabaseError{
+                    .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Confirm initial Email working set: ") +
+                               cachedEmailProbe.lastError().text(),
+                });
+            }
+
+            if (!cachedEmailProbe.value(0).toBool())
+            {
+                const auto installed = syncStateRepository.replaceIfCurrent(
+                    transaction, emailStateKey, std::nullopt, *initialEmailState);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&installed))
+                    co_return javelin::jmap::operationError(*error);
+            }
+            if (const auto error = transaction.commit())
+                co_return javelin::jmap::operationError(*error);
+        }
 
         javelin::jmap::cache::MailboxRepository mailboxRepository{*m_impl->databaseConnection};
         if (const auto error = mailboxRepository.replaceAll(accountId, parsedMailboxes.list))
@@ -1449,7 +1572,6 @@ namespace javelin::jmap
             co_return javelin::jmap::operationError(*error);
         }
 
-        javelin::jmap::cache::SyncStateRepository syncStateRepository{*m_impl->databaseConnection};
         if (const auto error = syncStateRepository.upsert(
                 {.accountId = accountId, .objectType = "Mailbox", .queryKey = {}},
                 parsedMailboxes.state))
