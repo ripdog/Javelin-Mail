@@ -275,9 +275,9 @@ namespace javelin::app
             m_databaseConnection, *m_messageContentClient, *m_accountRuntimeManager,
             *m_errorCoordinator, *m_workScheduler, *m_mailboxMaintenanceRegistry);
         m_mailNotificationService = std::make_unique<MailNotificationService>(m_databaseConnection);
-        QObject::connect(
-            m_accountRuntimeManager.get(), &AccountRuntimeManager::notificationMailboxRefreshed,
-            m_mailNotificationService.get(), &MailNotificationService::mailboxRefreshed);
+        QObject::connect(m_accountRuntimeManager.get(),
+                         &AccountRuntimeManager::notificationEventsCommitted,
+                         m_mailNotificationService.get(), &MailNotificationService::accountChanged);
         m_contactApplicationService = std::make_unique<ContactApplicationService>(
             *m_contactRepository, *m_contactSyncEngine, *m_accountRuntimeManager,
             *m_errorCoordinator, *m_workScheduler, *m_undoManager);

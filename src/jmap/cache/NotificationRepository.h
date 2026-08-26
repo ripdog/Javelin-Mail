@@ -1,6 +1,5 @@
 #pragma once
 
-#include "jmap/sync/RefreshNotificationTypes.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
 #include <optional>
@@ -53,13 +52,11 @@ namespace javelin::jmap::cache
         advanceMailboxHorizons(DatabaseTransaction& transaction, std::string_view accountId,
                                std::string_view expectedEmailState, std::string_view newEmailState);
 
-        [[nodiscard]] std::variant<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>,
-                                   DatabaseError>
-        enqueueUnreadMailboxEmails(std::string_view accountId, std::string_view mailboxId);
+        [[nodiscard]] std::variant<std::vector<MailNotificationPendingEvent>, DatabaseError>
+        claimPendingEvents(std::string_view accountId);
 
         [[nodiscard]] std::optional<DatabaseError>
-        markDelivered(std::string_view accountId, std::string_view mailboxId,
-                      const std::vector<std::string>& emailIds);
+        markDelivered(std::string_view accountId, const std::vector<std::string>& emailIds);
         [[nodiscard]] std::optional<DatabaseError>
         releaseDispatches(std::string_view accountId, const std::vector<std::string>& emailIds);
         [[nodiscard]] std::optional<DatabaseError> recoverDispatches();

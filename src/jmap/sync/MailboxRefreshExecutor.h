@@ -3,7 +3,6 @@
 #include "jmap/OperationError.h"
 #include "jmap/api/MethodCaller.h"
 #include "jmap/sync/MutationJournal.h"
-#include "jmap/sync/RefreshNotificationTypes.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroTask>
@@ -30,8 +29,6 @@ namespace javelin::jmap::sync
         std::vector<std::string> changedEmailIds;
         std::vector<std::string> insertedEmailIds;
         std::vector<std::string> removedEmailIds;
-        bool requiresNotificationScan = false;
-        std::vector<RefreshNotificationCandidate> notificationCandidates;
     };
 
     using MailboxRefreshResult = std::variant<MailboxRefreshSummary, OperationError>;

@@ -8,7 +8,6 @@
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
-#include "jmap/sync/RefreshNotificationPlanner.h"
 #include "jmap/sync/SyncPlanner.h"
 
 #include <QDebug>
@@ -301,7 +300,6 @@ namespace javelin::jmap::sync
             std::vector<std::string> insertedEmailIds;
             std::vector<javelin::jmap::cache::MailboxWindowAddition> windowAdditions;
             std::vector<std::string> removedEmailIds;
-            bool requiresNotificationScan = false;
         };
 
         [[nodiscard]] QCoro::Task<std::variant<CollapsedMailboxFetch, OperationError>>
@@ -541,7 +539,6 @@ namespace javelin::jmap::sync
                         .insertedEmailIds = {},
                         .windowAdditions = {},
                         .removedEmailIds = {},
-                        .requiresNotificationScan = false,
                     };
                 }
 
@@ -604,7 +601,6 @@ namespace javelin::jmap::sync
                     .insertedEmailIds = std::move(addedQueryIds),
                     .windowAdditions = std::move(windowAdditions),
                     .removedEmailIds = queryChanges.removed,
-                    .requiresNotificationScan = !queryChanges.added.empty(),
                 };
             }
 
@@ -669,7 +665,6 @@ namespace javelin::jmap::sync
                 .insertedEmailIds = std::move(addedQueryIds),
                 .windowAdditions = std::move(windowAdditions),
                 .removedEmailIds = queryChanges.removed,
-                .requiresNotificationScan = !queryChanges.added.empty(),
             };
         }
 
@@ -820,8 +815,6 @@ namespace javelin::jmap::sync
         std::vector<std::string> changedEmailIds;
         std::vector<std::string> insertedEmailIds;
         std::vector<std::string> removedEmailIds;
-        bool requiresNotificationScan = false;
-        std::vector<RefreshNotificationCandidate> notificationCandidates;
 
         if (!requireFullMaterialization &&
             queryPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
@@ -849,7 +842,6 @@ namespace javelin::jmap::sync
             changedEmailIds = incremental.changedEmailIds;
             insertedEmailIds = incremental.insertedEmailIds;
             removedEmailIds = incremental.removedEmailIds;
-            requiresNotificationScan = incremental.requiresNotificationScan;
             const auto affectedMailboxIdsResult =
                 changedMailboxIds(m_databaseConnection, accountId, incremental.updatedEmails);
             if (const auto* error = std::get_if<OperationError>(&affectedMailboxIdsResult))
@@ -967,7 +959,6 @@ namespace javelin::jmap::sync
                                                    insertedEmailIds.begin(),
                                                    insertedEmailIds.end());
                     insertedEmailIds = deduplicatedIds(std::move(insertedRepresentatives));
-                    requiresNotificationScan = true;
                 }
             }
             const auto affectedMailboxIdsResult =
@@ -1041,30 +1032,6 @@ namespace javelin::jmap::sync
                     .arg(representativeCount));
         }
 
-        if (requiresNotificationScan && !insertedEmailIds.empty())
-        {
-            const RefreshNotificationPlanner planner{m_databaseConnection};
-            const auto candidatesResult =
-                planner.plan(accountId, mailboxId,
-                             MailboxRefreshSummary{
-                                 .representativeCount = representativeCount,
-                                 .usedIncrementalRefresh = usedIncrementalRefresh,
-                                 .changedEmailIds = changedEmailIds,
-                                 .insertedEmailIds = insertedEmailIds,
-                                 .removedEmailIds = removedEmailIds,
-                                 .requiresNotificationScan = requiresNotificationScan,
-                                 .notificationCandidates = {},
-                             });
-            if (const auto* error =
-                    std::get_if<javelin::jmap::cache::DatabaseError>(&candidatesResult))
-            {
-                co_return javelin::jmap::operationError(*error);
-            }
-
-            notificationCandidates =
-                std::get<std::vector<RefreshNotificationCandidate>>(candidatesResult);
-        }
-
         co_return MailboxRefreshSummary{
             .representativeCount = representativeCount,
             .usedIncrementalRefresh = usedIncrementalRefresh,
@@ -1072,8 +1039,6 @@ namespace javelin::jmap::sync
             .changedEmailIds = std::move(changedEmailIds),
             .insertedEmailIds = std::move(insertedEmailIds),
             .removedEmailIds = std::move(removedEmailIds),
-            .requiresNotificationScan = requiresNotificationScan,
-            .notificationCandidates = std::move(notificationCandidates),
         };
     }
 

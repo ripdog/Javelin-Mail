@@ -9,7 +9,6 @@
 #include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/sync/EventSourceLongPoll.h"
 #include "jmap/sync/LongPollWorker.h"
-#include "jmap/sync/RefreshNotificationTypes.h"
 #include "jmap/sync/WebSocketPushChannel.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
@@ -84,8 +83,7 @@ namespace javelin::app
                                  const javelin::jmap::sync::AccountTypeStateMap& changedStates);
         void identityStateChanged(const QString& ownerAccountId,
                                   const javelin::jmap::sync::AccountTypeStateMap& changedStates);
-        void notificationMailboxRefreshed(const QString& accountId, const QString& mailboxId,
-                                          const QString& mailboxName);
+        void notificationEventsCommitted(const QString& accountId);
         void operationFailed(const QString& operation, javelin::jmap::OperationError error);
         void operationSucceeded();
         void stateChangeCatchUpRequired();

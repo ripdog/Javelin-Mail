@@ -31,6 +31,7 @@
 #include "jmap/cache/MailboxFilterReader.h"
 #include "jmap/cache/MailboxMessageReader.h"
 #include "jmap/cache/MailboxReadRepository.h"
+#include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxStatisticsReader.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/NotificationRepository.h"
@@ -79,6 +80,7 @@
 #include <algorithm>
 #include <chrono>
 #include <limits>
+#include <map>
 #include <ranges>
 #include <unordered_set>
 #include <utility>
@@ -1421,45 +1423,64 @@ namespace javelin::app
         return coordinator->second->requestMailboxSynchronization(mailboxId);
     }
 
-    void MailNotificationService::mailboxRefreshed(const QString& accountId,
-                                                   const QString& mailboxId,
-                                                   const QString& mailboxName)
+    void MailNotificationService::accountChanged(const QString& accountId)
     {
         javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
-        const auto candidates = notifications.enqueueUnreadMailboxEmails(accountId.toStdString(),
-                                                                         mailboxId.toStdString());
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&candidates))
+        const auto claimed = notifications.claimPendingEvents(accountId.toStdString());
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&claimed))
         {
-            qWarning().noquote() << "Notification observation failed" << error->message;
+            qWarning().noquote() << "Claim mail notification delivery failed" << error->message;
             return;
         }
 
         const auto& pending =
-            std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(candidates);
+            std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(claimed);
         if (pending.empty())
             return;
 
-        const auto& target = pending.front();
-        QString title;
-        if (pending.size() == 1)
-            title = QStringLiteral("New mail in %1").arg(mailboxName);
-        else
-            title = QStringLiteral("%1 new messages in %2").arg(pending.size()).arg(mailboxName);
-        const auto message = subjectForDisplay(target.subject);
+        std::map<std::string,
+                 std::vector<const javelin::jmap::cache::MailNotificationPendingEvent*>>
+            byMailbox;
+        for (const auto& event : pending)
+            byMailbox[event.mailboxId].push_back(&event);
 
-        QStringList deliveredEmailIds;
-        deliveredEmailIds.reserve(static_cast<qsizetype>(pending.size()));
-        for (const auto& candidate : pending)
-            deliveredEmailIds.push_back(QString::fromStdString(candidate.emailId));
+        javelin::jmap::cache::MailboxRepository mailboxes{m_databaseConnection};
+        for (const auto& [mailboxId, events] : byMailbox)
+        {
+            QString mailboxName = QString::fromStdString(mailboxId);
+            const auto mailboxResult = mailboxes.find(accountId.toStdString(), mailboxId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxResult))
+            {
+                qWarning().noquote() << "Read notification mailbox name failed" << error->message;
+            }
+            else if (const auto& mailbox =
+                         std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailboxResult);
+                     mailbox.has_value())
+            {
+                mailboxName = QString::fromStdString(mailbox->name);
+            }
 
-        Q_EMIT notificationRaised(accountId, mailboxId, QString::fromStdString(target.threadId),
-                                  QString::fromStdString(target.emailId), mailboxName, title,
-                                  message, deliveredEmailIds);
+            const auto& target = *events.front();
+            const auto title =
+                events.size() == 1
+                    ? QStringLiteral("New mail in %1").arg(mailboxName)
+                    : QStringLiteral("%1 new messages in %2").arg(events.size()).arg(mailboxName);
+            const auto message = subjectForDisplay(target.subject);
+            QStringList deliveredEmailIds;
+            deliveredEmailIds.reserve(static_cast<qsizetype>(events.size()));
+            for (const auto* event : events)
+                deliveredEmailIds.push_back(QString::fromStdString(event->emailId));
+
+            Q_EMIT notificationRaised(accountId, QString::fromStdString(mailboxId),
+                                      QString::fromStdString(target.threadId),
+                                      QString::fromStdString(target.emailId), mailboxName, title,
+                                      message, deliveredEmailIds);
+        }
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
     MailNotificationService::markDelivered(const std::string_view accountId,
-                                           const std::string_view mailboxId,
                                            const QStringList& emailIds)
     {
         std::vector<std::string> ids;
@@ -1467,7 +1488,7 @@ namespace javelin::app
         for (const auto& emailId : emailIds)
             ids.push_back(emailId.toStdString());
         javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
-        return notifications.markDelivered(accountId, mailboxId, ids);
+        return notifications.markDelivered(accountId, ids);
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
@@ -5311,8 +5332,8 @@ namespace javelin::app
         connect(&coordinator, &AccountSyncCoordinator::calendarStateChanged, this,
                 [this](const QString& ownerAccountId, const auto& changedStates)
                 { Q_EMIT calendarStateChanged(ownerAccountId, changedStates); });
-        connect(&coordinator, &AccountSyncCoordinator::notificationMailboxRefreshed, this,
-                &AccountRuntimeManager::notificationMailboxRefreshed);
+        connect(&coordinator, &AccountSyncCoordinator::notificationEventsCommitted, this,
+                &AccountRuntimeManager::notificationEventsCommitted);
         connect(
             &coordinator, &AccountSyncCoordinator::operationFailed, this,
             [this, accountId](const QString& operation, const javelin::jmap::OperationError& error)

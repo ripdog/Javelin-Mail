@@ -393,8 +393,6 @@ TEST_CASE("mailbox refresh executor bootstraps a collapsed mailbox into the cach
     CHECK(summary.changedEmailIds.empty());
     CHECK(summary.insertedEmailIds.empty());
     CHECK(summary.removedEmailIds.empty());
-    CHECK_FALSE(summary.requiresNotificationScan);
-    CHECK(summary.notificationCandidates.empty());
     REQUIRE(transport.requests.size() == 1);
 
     javelin::jmap::cache::MailboxMessageReadRepository mailboxMessages{databaseContext.connection};
@@ -1031,8 +1029,6 @@ TEST_CASE("mailbox query refresh does not own account Email deltas",
     CHECK(summary.changedEmailIds.empty());
     CHECK(summary.insertedEmailIds.empty());
     CHECK(summary.removedEmailIds.empty());
-    CHECK_FALSE(summary.requiresNotificationScan);
-    CHECK(summary.notificationCandidates.empty());
     REQUIRE(transport.requests.size() == 1);
     CHECK(transport.requests.front().body.contains("\"calculateTotal\":true"));
     CHECK(transport.requests.front().body.contains("\"Email/queryChanges\""));
@@ -1369,8 +1365,6 @@ TEST_CASE("mailbox refresh executor preserves change hints when delta falls back
     CHECK(summary.changedEmailIds.empty());
     CHECK(summary.insertedEmailIds == std::vector<std::string>{"eml-new"});
     CHECK(summary.removedEmailIds == std::vector<std::string>{"eml-removed"});
-    CHECK(summary.requiresNotificationScan);
-    CHECK(summary.notificationCandidates.empty());
     REQUIRE(transport.requests.size() == 3);
     const auto removedResult = emailRepository.find("account-1", "eml-removed");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(removedResult));
@@ -1507,10 +1501,6 @@ TEST_CASE("mailbox refresh executor derives inserted email ids from full fetch f
     CHECK_FALSE(summary.usedIncrementalRefresh);
     CHECK(summary.insertedEmailIds == std::vector<std::string>{"eml-2"});
     CHECK(summary.removedEmailIds.empty());
-    CHECK(summary.requiresNotificationScan);
-    REQUIRE(summary.notificationCandidates.size() == 1);
-    CHECK(summary.notificationCandidates.front().emailId == "eml-2");
-    CHECK(summary.notificationCandidates.front().threadId == "thr-123");
 }
 
 TEST_CASE("mailbox refresh executor full fallback preserves unrelated account cache rows",
@@ -1665,7 +1655,6 @@ TEST_CASE("mailbox refresh executor full fallback preserves unrelated account ca
     CHECK_FALSE(summary.usedIncrementalRefresh);
     CHECK(summary.insertedEmailIds == std::vector<std::string>{"eml-2"});
     CHECK(summary.removedEmailIds.empty());
-    CHECK(summary.requiresNotificationScan);
 
     const auto archiveWindowResult = windows.find("account-1", archiveQueryKey, 0, 100);
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(

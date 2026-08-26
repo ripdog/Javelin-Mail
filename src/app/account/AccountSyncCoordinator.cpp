@@ -532,6 +532,9 @@ namespace javelin::app
             emailCacheChanged = delta.emailChanged;
             refreshEveryMailbox = delta.emailNeedsFullRefresh;
             queryAffectedMailboxIds = delta.queryAffectedMailboxIds;
+            if (delta.notificationEventsCreated)
+                Q_EMIT notificationEventsCommitted(
+                    QString::fromStdString(runContext->configuration.accountId));
             hasNewMail = !delta.insertedEmailIds.empty();
             for (const auto& mailboxId : delta.changedMailboxIds)
                 refreshedMailboxIds.push_back(QString::fromStdString(mailboxId));
@@ -643,12 +646,6 @@ namespace javelin::app
                     });
                 }
                 hasNewMail = hasNewMail || !summary->insertedEmailIds.empty();
-                if (runContext->configuration.notificationMailboxIds.contains(mailboxId))
-                {
-                    Q_EMIT notificationMailboxRefreshed(
-                        QString::fromStdString(runContext->configuration.accountId),
-                        QString::fromStdString(mailboxId), QString::fromStdString(mailboxName));
-                }
             }
             else if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
             {
