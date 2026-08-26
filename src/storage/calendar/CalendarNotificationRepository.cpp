@@ -145,7 +145,8 @@ namespace javelin::jmap::cache
                         alert.acknowledged = overridden->second.acknowledged;
                     defaultAlerts.emplace(alertId, std::move(alert));
                 }
-                effectiveAlerts = std::move(defaultAlerts);
+                if (!defaultAlerts.empty())
+                    effectiveAlerts = std::move(defaultAlerts);
             }
             for (const auto& [alertId, alert] : effectiveAlerts)
             {
