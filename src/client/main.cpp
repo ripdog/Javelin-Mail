@@ -741,6 +741,13 @@ int main(int argc, char* argv[])
                     if (mainWindow != nullptr)
                         mainWindow->composeNewMessage();
                 }
+                else if constexpr (std::is_same_v<Route, javelin::protocol::ReplyMessageRoute>)
+                {
+                    restoreMainWindow(activationRoute.activationToken);
+                    if (mainWindow != nullptr)
+                        mainWindow->composeReplyTo(activationRoute.accountId,
+                                                   activationRoute.emailId);
+                }
                 else if constexpr (std::is_same_v<Route, javelin::protocol::OpenTaskCenterRoute>)
                 {
                     restoreMainWindow(activationRoute.activationToken);

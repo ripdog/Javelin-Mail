@@ -149,7 +149,7 @@ Check off completed items as you commit.
 - Open the message in a read-only viewer; do not silently import it into an account.
 - This should provide a natural round trip for Javelin's existing mail export feature.
 
-### [ ] Add actionable new-mail notifications
+### [x] Add actionable new-mail notifications
 
 - Add daemon-owned actions such as Archive, Mark Read, and Reply where the notification protocol allows
   them.

@@ -10,13 +10,19 @@
 #include "app/FullMailSyncService.h"
 #include "app/LocalMaintenanceService.h"
 #include "app/MailApplicationEventsPorts.h"
+#include "app/MailApplicationPorts.h"
 #include "app/MailIndexService.h"
 #include "app/MailMutationApplicationService.h"
 #include "app/MailNotificationService.h"
 #include "app/MailQueryApplicationService.h"
+#include "app/MailboxSelectionMutation.h"
+#include "app/MessageSelection.h"
 #include "daemon/DaemonServices.h"
 #include "desktop/notifications/DesktopNotificationController.h"
 #include "desktop/tray/DaemonTrayController.h"
+
+#include <KLocalizedString>
+#include <QCoroTask>
 
 #include <QDateTime>
 #include <QDebug>
@@ -54,6 +60,79 @@ namespace javelin::app
                         .activationToken = activationToken,
                     });
                 });
+        connect(m_notifications.get(), &DesktopNotificationController::mailArchiveRequested, this,
+                [this](const QString& accountId, const QString& mailboxId, const QString& emailId)
+                {
+                    if (accountId.isEmpty() || mailboxId.isEmpty() || emailId.isEmpty())
+                        return;
+                    MessageSelection selection;
+                    selection.emplace_back(SelectedEmail{.emailId = emailId.toStdString()});
+                    auto task = m_services.mailCommandPort().queueMailboxSelectionMutation({
+                        .accountId = accountId.toStdString(),
+                        .selection = std::move(selection),
+                        .operation = MailboxSelectionOperation::Archive,
+                        .sourceMailboxId = mailboxId.toStdString(),
+                        .destinationMailboxId = std::nullopt,
+                    });
+                    QCoro::connect(
+                        std::move(task), this,
+                        [this, accountId = accountId.toStdString()](
+                            QueuedMailboxSelectionMutationResult result)
+                        {
+                            if (const auto* error =
+                                    std::get_if<javelin::jmap::OperationError>(&result))
+                            {
+                                m_notifications->notifyError({}, i18n("Unable to archive message"),
+                                                             error->message, false, false);
+                                return;
+                            }
+                            const auto& queued = std::get<QueuedMailboxSelectionMutation>(result);
+                            if (queued.queuedEmailCount == 0 || queued.queuedMutations.empty())
+                                return;
+                            submitNotificationMutations(
+                                accountId, queued.queuedMutations.front().patch.operationGroupId,
+                                i18n("Unable to archive message"));
+                        });
+                });
+        connect(
+            m_notifications.get(), &DesktopNotificationController::mailMarkReadRequested, this,
+            [this](const QString& accountId, const QString& emailId)
+            {
+                if (accountId.isEmpty() || emailId.isEmpty())
+                    return;
+                auto task = m_services.mailCommandPort().queueMarkEmailRead(accountId.toStdString(),
+                                                                            emailId.toStdString());
+                QCoro::connect(
+                    std::move(task), this,
+                    [this, accountId =
+                               accountId.toStdString()](QueuedMessageSelectionMutationResult result)
+                    {
+                        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                        {
+                            m_notifications->notifyError({}, i18n("Unable to mark message read"),
+                                                         error->message, false, false);
+                            return;
+                        }
+                        const auto& queued = std::get<QueuedMessageSelectionMutation>(result);
+                        if (queued.queuedEmailCount == 0 || queued.queuedMutations.empty())
+                            return;
+                        submitNotificationMutations(
+                            accountId, queued.queuedMutations.front().patch.operationGroupId,
+                            i18n("Unable to mark message read"));
+                    });
+            });
+        connect(
+            m_notifications.get(), &DesktopNotificationController::mailReplyRequested, this,
+            [this](const QString& accountId, const QString& emailId, const QString& activationToken)
+            {
+                if (accountId.isEmpty() || emailId.isEmpty())
+                    return;
+                Q_EMIT activationRequested(protocol::ReplyMessageRoute{
+                    .accountId = accountId,
+                    .emailId = emailId,
+                    .activationToken = activationToken,
+                });
+            });
         connect(m_notifications.get(), &DesktopNotificationController::errorNotificationActivated,
                 this,
                 [this](const QString& connectionId, const QString& activationToken)
@@ -380,6 +459,39 @@ namespace javelin::app
         }
         m_tray->setInboxUnreadCount(unreadCount);
         m_tray->setAttentionRequired(attentionRequired);
+    }
+
+    void DaemonBackgroundController::submitNotificationMutations(
+        std::string accountId, std::optional<std::string> operationGroupId, QString failureTitle)
+    {
+        auto task = m_services.mailCommandPort().submitPendingEmailMutations(
+            std::move(accountId), std::move(operationGroupId));
+        QCoro::connect(
+            std::move(task), this,
+            [this, failureTitle =
+                       std::move(failureTitle)](javelin::jmap::SubmittedEmailMutationsResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    m_notifications->notifyError({}, failureTitle, error->message, false, false);
+                    return;
+                }
+
+                const auto& submitted = std::get<javelin::jmap::SubmittedEmailMutations>(result);
+                if (submitted.failedEmailCount == 0)
+                    return;
+
+                QString detail = i18n("The server rejected the requested message change.");
+                for (const auto& item : submitted.items)
+                {
+                    if (item.error.has_value() && !item.error->empty())
+                    {
+                        detail = QString::fromStdString(*item.error);
+                        break;
+                    }
+                }
+                m_notifications->notifyError({}, failureTitle, detail, false, false);
+            });
     }
 
     void DaemonBackgroundController::queueNotificationRetry(const QString& accountId)

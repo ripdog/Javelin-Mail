@@ -1221,6 +1221,7 @@ TEST_CASE("activation route wire discriminators remain stable", "[protocol][sock
         {OpenMailtoRoute{}, 7},          {ShowUndoSendDialogRoute{}, 8},
         {CloseUndoSendDialogRoute{}, 9}, {OpenCalendarEventRoute{}, 10},
         {OpenWorkspaceRoute{}, 11},      {NewMessageRoute{}, 12},
+        {ReplyMessageRoute{}, 13},
     };
 
     for (const auto& [route, expectedKind] : routes)
@@ -1233,7 +1234,7 @@ TEST_CASE("activation route wire discriminators remain stable", "[protocol][sock
     }
 }
 
-TEST_CASE("workspace and new-message activation routes round trip", "[protocol][socket]")
+TEST_CASE("workspace and compose activation routes round trip", "[protocol][socket]")
 {
     const ActivationRoute workspace = OpenWorkspaceRoute{
         .section = WorkspaceSection::Contacts,
@@ -1259,6 +1260,22 @@ TEST_CASE("workspace and new-message activation routes round trip", "[protocol][
         std::get_if<NewMessageRoute>(&std::get<ActivationRoute>(decodedNewMessage));
     REQUIRE(receivedNewMessage != nullptr);
     CHECK(receivedNewMessage->activationToken == QStringLiteral("compose-token"));
+
+    const ActivationRoute reply = ReplyMessageRoute{
+        .accountId = QStringLiteral("account-7"),
+        .emailId = QStringLiteral("email-9"),
+        .activationToken = QStringLiteral("reply-token"),
+    };
+    const auto encodedReply = encodeActivationRoute(reply);
+    REQUIRE(std::holds_alternative<QByteArray>(encodedReply));
+    const auto decodedReply = decodeActivationRoute(std::get<QByteArray>(encodedReply));
+    REQUIRE(std::holds_alternative<ActivationRoute>(decodedReply));
+    const auto* receivedReply =
+        std::get_if<ReplyMessageRoute>(&std::get<ActivationRoute>(decodedReply));
+    REQUIRE(receivedReply != nullptr);
+    CHECK(receivedReply->accountId == QStringLiteral("account-7"));
+    CHECK(receivedReply->emailId == QStringLiteral("email-9"));
+    CHECK(receivedReply->activationToken == QStringLiteral("reply-token"));
 }
 
 TEST_CASE("activation socket carries typed routes to the daemon", "[protocol][socket]")

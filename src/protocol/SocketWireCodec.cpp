@@ -1379,6 +1379,8 @@ namespace javelin::protocol
                         return 11;
                     else if constexpr (std::is_same_v<Route, NewMessageRoute>)
                         return 12;
+                    else if constexpr (std::is_same_v<Route, ReplyMessageRoute>)
+                        return 13;
                     else
                         static_assert(sizeof(Route) == 0, "Unhandled activation route");
                 },
@@ -1439,6 +1441,9 @@ namespace javelin::protocol
                     }
                     else if constexpr (std::is_same_v<Route, NewMessageRoute>)
                         return writer.string(value.activationToken);
+                    else if constexpr (std::is_same_v<Route, ReplyMessageRoute>)
+                        return writer.string(value.accountId) && writer.string(value.emailId) &&
+                               writer.string(value.activationToken);
                     else
                         return false;
                 },
@@ -1574,6 +1579,15 @@ namespace javelin::protocol
             {
                 NewMessageRoute value;
                 if (!reader.string(value.activationToken))
+                    return false;
+                route = std::move(value);
+                return true;
+            }
+            if (kind == 13)
+            {
+                ReplyMessageRoute value;
+                if (!reader.string(value.accountId) || !reader.string(value.emailId) ||
+                    !reader.string(value.activationToken))
                     return false;
                 route = std::move(value);
                 return true;

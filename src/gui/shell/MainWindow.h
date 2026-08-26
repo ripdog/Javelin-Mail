@@ -197,6 +197,7 @@ namespace javelin::gui::shell
         void openContacts();
         void openCalendar();
         void composeNewMessage();
+        void composeReplyTo(const QString& accountId, const QString& emailId);
         void restoreDraft(const QString& accountId, const QString& draftEmailId,
                           const QString& composeSessionId);
         void openCalendarEvent(const QString& calendarAccountId, const QString& eventId,

@@ -74,6 +74,11 @@ namespace javelin::app
         void notificationActivated(const QString& accountId, const QString& mailboxId,
                                    const QString& mailboxName, const QString& threadId,
                                    const QString& emailId, const QString& activationToken);
+        void mailArchiveRequested(const QString& accountId, const QString& mailboxId,
+                                  const QString& emailId);
+        void mailMarkReadRequested(const QString& accountId, const QString& emailId);
+        void mailReplyRequested(const QString& accountId, const QString& emailId,
+                                const QString& activationToken);
         void errorNotificationActivated(const QString& connectionId,
                                         const QString& activationToken);
         void calendarNotificationAction(const QString& key, bool snooze);

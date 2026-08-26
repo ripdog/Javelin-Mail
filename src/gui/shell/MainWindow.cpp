@@ -2372,6 +2372,20 @@ namespace javelin::gui::shell
         });
     }
 
+    void MainWindow::composeReplyTo(const QString& accountId, const QString& emailId)
+    {
+        if (accountId.isEmpty() || emailId.isEmpty())
+            return;
+
+        openComposeForRequest({
+            .accountId = accountId.toStdString(),
+            .mode = javelin::jmap::submission::ComposeMode::Reply,
+            .referenceEmailId = emailId.toStdString(),
+            .draftEmailId = std::nullopt,
+            .initialTo = {},
+        });
+    }
+
     void MainWindow::composeReply()
     {
         const auto accountId = activeAccountId();

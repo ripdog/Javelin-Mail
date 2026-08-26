@@ -296,7 +296,12 @@ WebSocket push or EventSource state change
 ```
 
 Notification arrival does not change GUI selection. Activating a notification is a separate explicit
-navigation request containing stable account, mailbox, thread, and Email identities.
+navigation request containing stable account, mailbox, thread, and Email identities. When the
+desktop notification service advertises action support, new-mail Archive and Mark Read actions are
+daemon-owned application commands: they enter through `MailCommandPort`, create the same optimistic
+Email mutations as GUI actions, and submit only their operation group. Reply remains a presentation
+activation: the daemon carries the exact account and Email identity to a reply-compose route and can
+launch the GUI when it is not already running.
 
 ## Presentation and application coordination
 
