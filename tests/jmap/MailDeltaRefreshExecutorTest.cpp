@@ -7,6 +7,7 @@
 #include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
+#include "jmap/cache/NotificationRepository.h"
 #include "jmap/cache/QueryWindowReadRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
@@ -704,6 +705,247 @@ TEST_CASE("account Email rebaseline retries a bounded pass when Email state adva
         std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult).has_value());
     CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult)->stateToken ==
           "email-state-3");
+}
+
+TEST_CASE("account Email delta creates a notification event for new eligible mail",
+          "[jmap][sync][mail-delta][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(
+        emailDeltaResponse(R"("email-1")", {}, {}, emailJson("archive", false)));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(
+        executor.refresh("account-1", {.email = true}, {}, {"archive"}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
+    CHECK(summary.notificationEventMailboxIds == std::vector<std::string>{"archive"});
+
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    const auto listed = notifications.listEvents("account-1");
+    REQUIRE(std::holds_alternative<
+            std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed));
+    const auto& events =
+        std::get<std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed);
+    REQUIRE(events.size() == 1);
+    CHECK(events.front().mailboxId == "archive");
+    CHECK(events.front().emailId == "email-1");
+    CHECK(events.front().threadId == "thread-1");
+}
+
+TEST_CASE("notification event insertion failure rolls back the Email state transition",
+          "[jmap][sync][mail-delta][notification][atomicity]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+
+    QSqlQuery failureTrigger{database.connection.database()};
+    REQUIRE(failureTrigger.exec(QStringLiteral(
+        "CREATE TRIGGER fail_mail_notification_event BEFORE INSERT ON mail_notification_events "
+        "BEGIN SELECT RAISE(ABORT,'injected notification failure'); END")));
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(
+        emailDeltaResponse(R"("email-1")", {}, {}, emailJson("archive", false)));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(
+        executor.refresh("account-1", {.email = true}, {}, {"archive"}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+
+    javelin::jmap::cache::SyncStateRepository states{database.connection};
+    const auto stateResult =
+        states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult));
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult)->stateToken ==
+          "email-state-1");
+
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    const auto cached = emails.find("account-1", "email-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cached));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(cached).has_value());
+
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    const auto listed = notifications.listEvents("account-1");
+    REQUIRE(std::holds_alternative<
+            std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed));
+    CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed).empty());
+}
+
+TEST_CASE("account Email delta does not notify new mail that is already seen",
+          "[jmap][sync][mail-delta][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(
+        emailDeltaResponse(R"("email-1")", {}, {}, emailJson("archive", true)));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(
+        executor.refresh("account-1", {.email = true}, {}, {"archive"}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    CHECK(std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result)
+              .notificationEventMailboxIds.empty());
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    const auto listed = notifications.listEvents("account-1");
+    REQUIRE(std::holds_alternative<
+            std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed));
+    CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed).empty());
+}
+
+TEST_CASE("account Email delta notifies an existing unread Email entering an enabled mailbox",
+          "[jmap][sync][mail-delta][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedMail(database.connection);
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(emailDeltaResponse({}, R"("email-1")", {}));
+    transport.queuedResults.push_back(updatedEmailResponse("inbox", false));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(
+        executor.refresh("account-1", {.email = true}, {}, {"inbox"}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    CHECK(std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result)
+              .notificationEventMailboxIds == std::vector<std::string>{"inbox"});
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    const auto listed = notifications.listEvents("account-1");
+    REQUIRE(std::holds_alternative<
+            std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed));
+    const auto& events =
+        std::get<std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed);
+    REQUIRE(events.size() == 1);
+    CHECK(events.front().mailboxId == "inbox");
+}
+
+TEST_CASE("account Email delta does not guess notification eligibility for uncached updated mail",
+          "[jmap][sync][mail-delta][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(emailDeltaResponse({}, R"("email-1")", {}));
+    transport.queuedResults.push_back(updatedEmailResponse("inbox", false));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(
+        executor.refresh("account-1", {.email = true}, {}, {"inbox"}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    CHECK(std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result)
+              .notificationEventMailboxIds.empty());
+    REQUIRE(transport.requests.size() == 2);
+
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    const auto cached = emails.find("account-1", "email-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cached));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(cached).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(cached)->mailboxIds ==
+          std::vector<std::string>{"inbox"});
+
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    const auto listed = notifications.listEvents("account-1");
+    REQUIRE(std::holds_alternative<
+            std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed));
+    CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed).empty());
+}
+
+TEST_CASE("account Email delta can notify a seen to unread transition without query refresh",
+          "[jmap][sync][mail-delta][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedMail(database.connection);
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {email({"archive"}, {"$seen"})}).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(emailDeltaResponse({}, R"("email-1")", {}));
+    transport.queuedResults.push_back(updatedEmailResponse("archive", false));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(
+        executor.refresh("account-1", {.email = true}, {}, {"archive"}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
+    CHECK(summary.notificationEventMailboxIds == std::vector<std::string>{"archive"});
+    CHECK(summary.queryAffectedMailboxIds.empty());
+
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    const auto listed = notifications.listEvents("account-1");
+    REQUIRE(std::holds_alternative<
+            std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed));
+    CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed).size() ==
+          1);
+}
+
+TEST_CASE("account Email rebaseline never turns historical unread mail into notification events",
+          "[jmap][sync][mail-delta][notification][rebaseline]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {email({"inbox"}, {})}).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(recoverableEmailDeltaResponse("cannotCalculateChanges"));
+    transport.queuedResults.push_back(
+        rebaselineEmailResponse("email-state-2", emailJson("inbox", false)));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(
+        executor.refresh("account-1", {.email = true}, {}, {"inbox"}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    CHECK(std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result)
+              .notificationEventMailboxIds.empty());
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    const auto listed = notifications.listEvents("account-1");
+    REQUIRE(std::holds_alternative<
+            std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed));
+    CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(listed).empty());
 }
 
 TEST_CASE("account mail delta applies an external seen change without invalidating mailbox queries",

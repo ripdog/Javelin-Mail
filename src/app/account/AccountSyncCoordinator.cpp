@@ -503,10 +503,14 @@ namespace javelin::app
         {
             javelin::jmap::sync::MailDeltaRefreshExecutor deltaExecutor{
                 m_databaseConnection, methodCaller, apiRequestContext};
+            const auto notificationMailboxIds = std::vector<std::string>{
+                runContext->configuration.notificationMailboxIds.begin(),
+                runContext->configuration.notificationMailboxIds.end(),
+            };
             const auto deltaResult = co_await deltaExecutor.refresh(
                 runContext->configuration.accountId,
                 {.mailbox = demand.mailboxState, .email = demand.emailState},
-                runContext->configuration.remoteAccountId);
+                runContext->configuration.remoteAccountId, notificationMailboxIds);
             if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
                 runContext->cancellation.isCancelled())
             {
