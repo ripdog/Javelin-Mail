@@ -534,6 +534,18 @@ namespace javelin::gui::messages
         setItems(std::nullopt, std::nullopt, {});
     }
 
+    bool MessageListModel::isBoundTo(const std::string_view accountId,
+                                     const std::optional<std::string_view> mailboxId) const
+    {
+        if (!m_accountId.has_value() || *m_accountId != accountId ||
+            m_mailboxId.has_value() != mailboxId.has_value())
+        {
+            return false;
+        }
+
+        return !mailboxId.has_value() || *m_mailboxId == *mailboxId;
+    }
+
     bool MessageListModel::setThreadExpanded(const std::string_view threadId, const bool expanded)
     {
         const auto threadIndex = findThreadIndex(threadId);

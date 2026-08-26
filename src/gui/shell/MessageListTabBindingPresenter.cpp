@@ -79,7 +79,9 @@ namespace javelin::gui::shell
         {
             const auto& state = mailbox->session->state();
             if (m_appliedSession == mailbox->session &&
-                m_appliedItemsRevision == state.itemsRevision)
+                m_appliedItemsRevision == state.itemsRevision &&
+                m_messageModel.isBoundTo(mailbox->session->accountId(),
+                                         mailbox->session->mailboxId()))
             {
                 return;
             }
@@ -95,7 +97,8 @@ namespace javelin::gui::shell
         {
             const auto& state = search->session->state();
             if (m_appliedSession == search->session &&
-                m_appliedItemsRevision == state.itemsRevision)
+                m_appliedItemsRevision == state.itemsRevision &&
+                m_messageModel.isBoundTo(search->session->accountId(), std::nullopt))
             {
                 return;
             }

@@ -600,6 +600,23 @@ TEST_CASE("message list model marks one cached row read without resetting its li
     CHECK_FALSE(model.setEmailRead("email-1"));
 }
 
+TEST_CASE("message list model clear invalidates its binding identity", "[gui][messages][model]")
+{
+    javelin::gui::messages::MessageListModel model{QString{}};
+
+    model.setItems(std::optional<std::string>{"account-1"}, std::optional<std::string>{"mailbox-1"},
+                   {item("email-1", "thread-1")});
+
+    CHECK(model.isBoundTo("account-1", std::optional<std::string_view>{"mailbox-1"}));
+    CHECK_FALSE(model.isBoundTo("account-1", std::nullopt));
+
+    model.clear();
+    CHECK_FALSE(model.isBoundTo("account-1", std::optional<std::string_view>{"mailbox-1"}));
+
+    model.setItems(std::optional<std::string>{"account-1"}, std::nullopt, {});
+    CHECK(model.isBoundTo("account-1", std::nullopt));
+}
+
 TEST_CASE("message list model appends an infinite-scroll tail without resetting existing rows",
           "[gui][messages][model][infinite-scroll]")
 {

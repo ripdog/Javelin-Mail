@@ -2884,7 +2884,7 @@ namespace javelin::gui::shell
         {
             const auto plan = planTabActivation({});
             m_mailWorkspaceController->setActiveIndex(std::nullopt);
-            m_messageModel->clear();
+            m_messageListTabBindingPresenter->applyItems(nullptr);
             setMessageViewSelection(std::nullopt, std::nullopt, std::nullopt);
             if (m_contentStack != nullptr)
                 m_contentStack->setCurrentIndex(0);
@@ -3068,7 +3068,7 @@ namespace javelin::gui::shell
             });
             if (plan.clearMessagePresentation)
             {
-                m_messageModel->clear();
+                m_messageListTabBindingPresenter->applyItems(nullptr);
                 setMessageViewSelection(std::nullopt, std::nullopt, std::nullopt);
             }
             m_mailActionController->update();
