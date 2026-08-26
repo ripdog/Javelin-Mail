@@ -5,7 +5,6 @@
 
 #include <cstdint>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -48,14 +47,6 @@ namespace javelin::jmap::cache
                      const MailNotificationEventInput& event);
         [[nodiscard]] std::variant<std::vector<MailNotificationEventRecord>, DatabaseError>
         listEvents(std::string_view accountId) const;
-        [[nodiscard]] std::variant<std::vector<MailNotificationEventRecord>, DatabaseError>
-        claimEligibleEvents(std::string_view accountId,
-                            std::span<const std::string> mailboxIds = {});
-        [[nodiscard]] std::optional<DatabaseError>
-        completeEvents(std::string_view accountId, std::span<const std::int64_t> eventIds);
-        [[nodiscard]] std::optional<DatabaseError>
-        releaseEventDispatches(std::string_view accountId,
-                               std::span<const std::int64_t> eventIds);
 
         [[nodiscard]] std::optional<DatabaseError>
         markDelivered(std::string_view accountId, std::string_view mailboxId,

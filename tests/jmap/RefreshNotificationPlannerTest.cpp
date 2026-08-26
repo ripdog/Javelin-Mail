@@ -218,66 +218,6 @@ TEST_CASE("notification event outbox gives repeated Email arrivals distinct iden
     CHECK(events[0].eventId != events[1].eventId);
 }
 
-TEST_CASE("notification event retry revalidates current Email eligibility",
-          "[jmap][cache][notification][event-outbox][retry]")
-{
-    ApplicationGuard application;
-    Q_UNUSED(application);
-
-    auto databaseContext = makeDatabaseContext();
-    seedAccount(databaseContext.connection);
-
-    auto unread = loadEmailFixture();
-    unread.id = "eml-unread";
-    unread.threadId = "thr-unread";
-    unread.mailboxIds = {"mbx-inbox"};
-    unread.keywords = {};
-    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
-    REQUIRE_FALSE(emails.replaceAll("account-1", {unread}).has_value());
-
-    javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
-    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
-        databaseContext.connection, QStringLiteral("Queue retry notification event"));
-    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
-    auto transaction =
-        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
-    const auto enqueued = notifications.enqueueEvent(
-        transaction, "account-1",
-        {
-            .mailboxId = "mbx-inbox",
-            .emailId = unread.id,
-            .threadId = unread.threadId,
-            .subject = unread.subject,
-            .receivedAt = unread.receivedAt,
-        });
-    REQUIRE(std::holds_alternative<std::int64_t>(enqueued));
-    const auto eventId = std::get<std::int64_t>(enqueued);
-    REQUIRE_FALSE(transaction.commit().has_value());
-
-    const std::vector<std::string> inbox{"mbx-inbox"};
-    const auto firstClaim = notifications.claimEligibleEvents("account-1", inbox);
-    REQUIRE(std::holds_alternative<
-            std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(firstClaim));
-    REQUIRE(std::get<std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(firstClaim)
-                .size() == 1);
-    const std::vector<std::int64_t> eventIds{eventId};
-    REQUIRE_FALSE(notifications.releaseEventDispatches("account-1", eventIds).has_value());
-
-    unread.keywords = {"$seen"};
-    REQUIRE_FALSE(emails.upsertMany("account-1", {unread}).has_value());
-    const auto retryClaim = notifications.claimEligibleEvents("account-1", inbox);
-    REQUIRE(std::holds_alternative<
-            std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(retryClaim));
-    CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(retryClaim)
-              .empty());
-
-    const auto remaining = notifications.listEvents("account-1");
-    REQUIRE(std::holds_alternative<
-            std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(remaining));
-    CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationEventRecord>>(remaining)
-              .empty());
-}
-
 TEST_CASE("notification outbox persists pending mail until delivery", "[jmap][cache][notification]")
 {
     ApplicationGuard application;
