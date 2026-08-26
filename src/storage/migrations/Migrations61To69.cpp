@@ -189,7 +189,8 @@ namespace javelin::jmap::cache::migrations
                 .statements =
                     {
                         QStringLiteral(
-                            "CREATE TABLE mail_notification_state (account_id TEXT NOT NULL,email_id "
+                            "CREATE TABLE mail_notification_state (account_id TEXT NOT "
+                            "NULL,email_id "
                             "TEXT NOT NULL,notified_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
                             "PRIMARY KEY(account_id,email_id),FOREIGN KEY(account_id,email_id) "
                             "REFERENCES emails(account_id,email_id) ON DELETE CASCADE) STRICT"),
@@ -197,7 +198,8 @@ namespace javelin::jmap::cache::migrations
                             "CREATE TABLE mail_notification_event_outbox (account_id TEXT NOT NULL,"
                             "email_id TEXT NOT NULL,mailbox_id TEXT NOT NULL,thread_id TEXT NOT "
                             "NULL,subject TEXT,received_at TEXT NOT NULL,created_at TEXT NOT NULL "
-                            "DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(account_id,email_id),FOREIGN KEY("
+                            "DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(account_id,email_id),FOREIGN "
+                            "KEY("
                             "account_id,email_id) REFERENCES mail_notification_state(account_id,"
                             "email_id) ON DELETE CASCADE) STRICT"),
                         QStringLiteral(
@@ -218,6 +220,17 @@ namespace javelin::jmap::cache::migrations
                         QStringLiteral(
                             "CREATE INDEX idx_mail_notification_horizons_state ON "
                             "mail_notification_horizons(account_id,email_state,mailbox_id)"),
+                    },
+            },
+            MigrationStep{
+                .version = 67,
+                .name = QStringLiteral("retire_legacy_mail_notifications"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "DELETE FROM notification_dispatch_claims WHERE kind='mail'"),
+                        QStringLiteral("DROP TABLE mail_notification_outbox"),
+                        QStringLiteral("DROP TABLE observed_notification_emails"),
                     },
             },
         };
