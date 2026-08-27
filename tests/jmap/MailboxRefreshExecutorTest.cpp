@@ -1433,6 +1433,114 @@ TEST_CASE("mailbox refresh executor reuses an account Email state refreshed by a
     CHECK(window->emailIds == std::vector<std::string>{"eml-1"});
 }
 
+TEST_CASE("sequential watched mailbox refreshes never advance account Email state",
+          "[jmap][sync][refresh][state-ownership]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    const auto parsedShared = javelin::jmap::domain::parseEmail(sharedMailboxEmailFixture());
+    REQUIRE(parsedShared.ok());
+    REQUIRE(parsedShared.value.has_value());
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(emails.replaceAll("account-1", {*parsedShared.value}).has_value());
+
+    const auto archiveQueryKey = javelin::jmap::sync::mailboxQueryKey({
+        .mailboxId = "mbx-archive",
+        .sortProperty = "receivedAt",
+        .isAscending = false,
+        .collapseThreads = true,
+    });
+    javelin::jmap::cache::SyncStateRepository states{databaseContext.connection};
+    REQUIRE_FALSE(states
+                      .upsert({.accountId = "account-1",
+                               .objectType = "EmailQuery",
+                               .queryKey = mailboxQueryKey()},
+                              "inbox-query-1")
+                      .has_value());
+    REQUIRE_FALSE(states
+                      .upsert({.accountId = "account-1",
+                               .objectType = "EmailQuery",
+                               .queryKey = archiveQueryKey},
+                              "archive-query-1")
+                      .has_value());
+    REQUIRE_FALSE(states
+                      .upsert({.accountId = "account-1", .objectType = "Email", .queryKey = {}},
+                              "email-state-2")
+                      .has_value());
+
+    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
+    REQUIRE_FALSE(windows
+                      .replace({.accountId = "account-1",
+                                .mailboxId = "mbx-inbox",
+                                .queryKey = mailboxQueryKey(),
+                                .requestedOffset = 0,
+                                .requestedLimit = 100,
+                                .position = 0,
+                                .returnedLimit = 1,
+                                .total = 1,
+                                .queryState = "inbox-query-1",
+                                .emailIds = {"eml-1"}})
+                      .has_value());
+    REQUIRE_FALSE(windows
+                      .replace({.accountId = "account-1",
+                                .mailboxId = "mbx-archive",
+                                .queryKey = archiveQueryKey,
+                                .requestedOffset = 0,
+                                .requestedLimit = 100,
+                                .position = 0,
+                                .returnedLimit = 1,
+                                .total = 1,
+                                .queryState = "archive-query-1",
+                                .emailIds = {"eml-1"}})
+                      .has_value());
+
+    FakeTransport transport;
+    for (const auto& [oldState, newState] :
+         {std::pair{std::string{"inbox-query-1"}, std::string{"inbox-query-2"}},
+          std::pair{std::string{"archive-query-1"}, std::string{"archive-query-2"}}})
+    {
+        transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body = QByteArray::fromStdString(serializeResponseEnvelope({
+                .methodResponses =
+                    {{.name = "Email/queryChanges",
+                      .arguments = std::string{R"({"accountId":"account-1","oldQueryState":")"} +
+                                   oldState + R"(","newQueryState":")" + newState +
+                                   R"(","added":[],"removed":[],"hasMoreChanges":false,"total":1})",
+                      .callId = "mailbox-query-changes"}},
+                .createdIds = std::nullopt,
+                .sessionState = "session-state-2",
+            }))});
+    }
+
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailboxRefreshExecutor executor{databaseContext.connection, caller,
+                                                         makeRequestContext()};
+    for (const auto& mailboxId : {std::string{"mbx-inbox"}, std::string{"mbx-archive"}})
+    {
+        const auto result = QCoro::waitFor(executor.refreshCollapsedMailbox(
+            "account-1", mailboxId, {}, false));
+        REQUIRE(std::holds_alternative<javelin::jmap::sync::MailboxRefreshSummary>(result));
+        CHECK(std::get<javelin::jmap::sync::MailboxRefreshSummary>(result).usedIncrementalRefresh);
+        const auto emailState =
+            states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+        REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(
+            emailState));
+        REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState)
+                    .has_value());
+        CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState)->stateToken ==
+              "email-state-2");
+    }
+
+    REQUIRE(transport.requests.size() == 2);
+    CHECK_FALSE(transport.requests[0].body.contains("\"Email/changes\""));
+    CHECK_FALSE(transport.requests[1].body.contains("\"Email/changes\""));
+}
+
 TEST_CASE("mailbox refresh executor preserves change hints when delta falls back to full fetch",
           "[jmap][sync][refresh]")
 {
