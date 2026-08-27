@@ -480,6 +480,37 @@ namespace
         REQUIRE(item.exec());
     }
 
+    void seedImportProvenanceBatch(javelin::jmap::cache::DatabaseConnection& connection,
+                                   const std::vector<std::string>& emailIds)
+    {
+        QSqlQuery operation{connection.database()};
+        REQUIRE(operation.exec(QStringLiteral(
+            "INSERT INTO mail_import_operations(operation_id,account_id,mailbox_id,"
+            "source_paths_json,recreate_hierarchy,status,scan_sealed,title,created_at) VALUES "
+            "('import-batch','account-1','inbox','[]',0,'complete',1,'Batch Import',"
+            "'2026-08-27T00:00:00Z')")));
+
+        QSqlQuery item{connection.database()};
+        item.prepare(QStringLiteral(
+            "INSERT INTO mail_import_items(item_id,operation_id,ordinal,source_path,source_kind,"
+            "decoded_size,source_canonical_path,source_size,source_mtime_ms,phase,created_email_id) "
+            "VALUES(:item_id,'import-batch',:ordinal,:source_path,'eml',1,:canonical_path,1,1,"
+            "'created',:email_id)"));
+        for (std::size_t index = 0; index < emailIds.size(); ++index)
+        {
+            const auto ordinal = static_cast<qulonglong>(index);
+            const auto itemId = QStringLiteral("import-batch-item-%1").arg(ordinal);
+            const auto sourcePath = QStringLiteral("message-%1.eml").arg(ordinal);
+            item.bindValue(QStringLiteral(":item_id"), itemId);
+            item.bindValue(QStringLiteral(":ordinal"), ordinal);
+            item.bindValue(QStringLiteral(":source_path"), sourcePath);
+            item.bindValue(QStringLiteral(":canonical_path"),
+                           QStringLiteral("/tmp/%1").arg(sourcePath));
+            item.bindValue(QStringLiteral(":email_id"), QString::fromStdString(emailIds[index]));
+            REQUIRE(item.exec());
+        }
+    }
+
     void seedMail(javelin::jmap::cache::DatabaseConnection& connection)
     {
         javelin::jmap::cache::MailboxRepository mailboxes{connection};
@@ -1181,6 +1212,63 @@ TEST_CASE("account Email delta suppresses Javelin-imported created mail",
         pendingResult));
     CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pendingResult)
               .empty());
+}
+
+TEST_CASE("account Email delta suppresses a batch of Javelin-imported unread mail",
+          "[jmap][sync][mail-delta][notification][import][batch]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
+    REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 64, "inbox")}).has_value());
+    seedNotificationHorizons(database.connection, {"inbox"});
+
+    constexpr std::size_t importedCount = 64;
+    std::vector<std::string> importedIds;
+    importedIds.reserve(importedCount);
+    std::string createdIds;
+    std::string createdObjects;
+    for (std::size_t index = 0; index < importedCount; ++index)
+    {
+        const auto id = "imported-" + std::to_string(index);
+        importedIds.push_back(id);
+        if (index != 0)
+        {
+            createdIds += ',';
+            createdObjects += ',';
+        }
+        createdIds += '"' + id + '"';
+        createdObjects += emailJsonWithIdentity(id, "thread-" + id, "inbox", false);
+    }
+    seedImportProvenanceBatch(database.connection, importedIds);
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(emailDeltaResponse(createdIds, {}, {}, createdObjects));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    CHECK_FALSE(
+        std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result).notificationEventsCreated);
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    const auto pendingResult = notifications.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        pendingResult));
+    CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pendingResult)
+              .empty());
+
+    QSqlQuery counts{database.connection.database()};
+    REQUIRE(counts.exec(QStringLiteral(
+        "SELECT (SELECT COUNT(*) FROM emails WHERE account_id='account-1'),"
+        "(SELECT COUNT(*) FROM mail_notification_state WHERE account_id='account-1')")));
+    REQUIRE(counts.next());
+    CHECK(counts.value(0).toULongLong() == importedCount);
+    CHECK(counts.value(1).toULongLong() == 0);
 }
 
 TEST_CASE("notification event failure rolls back Email state and consumption",
