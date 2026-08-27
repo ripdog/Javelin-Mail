@@ -163,7 +163,7 @@ namespace javelin::app
     {
         const QString summary = mailboxName.isEmpty() ? title : QStringLiteral("%1").arg(title);
         QStringList actions;
-        if (m_actionInvokedConnected && m_transport->supportsActions())
+        if (m_actionInvokedConnected && transportSupportsActions())
         {
             actions = {
                 QString::fromLatin1(defaultActionKey),
@@ -317,7 +317,7 @@ namespace javelin::app
     {
         closeUndoableSendNotification(sendId);
         if (!m_actionInvokedConnected || !m_notificationClosedConnected ||
-            !m_transport->supportsActions())
+            !transportSupportsActions())
         {
             return false;
         }
@@ -496,9 +496,17 @@ namespace javelin::app
             untrackNotification(notificationId);
         m_sendNotificationIds.clear();
         m_invitationNotificationIds.clear();
+        m_transportSupportsActions.reset();
         for (const auto& sendId : sendIds)
             Q_EMIT undoableSendWindowEnded(sendId,
                                            DesktopNotificationCloseReason::NotificationServiceLost);
+    }
+
+    bool DesktopNotificationController::transportSupportsActions()
+    {
+        if (!m_transportSupportsActions.has_value())
+            m_transportSupportsActions = m_transport->supportsActions();
+        return *m_transportSupportsActions;
     }
 
     bool DesktopNotificationController::connectSignal(const char* signalName, const char* slotName)

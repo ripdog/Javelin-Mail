@@ -99,6 +99,7 @@ namespace
 
         [[nodiscard]] bool supportsActions() const override
         {
+            ++supportQueryCount;
             return actionsSupported;
         }
 
@@ -113,6 +114,7 @@ namespace
         uint nextNotificationId = 73;
         uint notificationId = 73;
         std::size_t sendCount = 0;
+        mutable std::size_t supportQueryCount = 0;
         bool actionsSupported = true;
         std::optional<QString> sendError;
         std::optional<NotificationRequest> request;
@@ -267,6 +269,38 @@ TEST_CASE("new mail omits actions when the notification service cannot invoke th
                                      QStringLiteral("thread"), QStringLiteral("email"),
                                      QStringLiteral("Inbox"), QStringLiteral("New mail"),
                                      QStringLiteral("Subject")));
+    REQUIRE(observer->request.has_value());
+    CHECK(observer->request->actions.isEmpty());
+}
+
+TEST_CASE("notification action capability is cached until the service restarts",
+          "[app][daemon][notification][actions]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+
+    REQUIRE(controller.notifyNewMail(QStringLiteral("account"), QStringLiteral("inbox"),
+                                     QStringLiteral("thread-1"), QStringLiteral("email-1"),
+                                     QStringLiteral("Inbox"), QStringLiteral("New mail"),
+                                     QStringLiteral("First")));
+    REQUIRE(controller.notifyNewMail(QStringLiteral("account"), QStringLiteral("inbox"),
+                                     QStringLiteral("thread-2"), QStringLiteral("email-2"),
+                                     QStringLiteral("Inbox"), QStringLiteral("New mail"),
+                                     QStringLiteral("Second")));
+    CHECK(observer->supportQueryCount == 1);
+
+    REQUIRE(QMetaObject::invokeMethod(
+        &controller, "onNotificationServiceUnregistered", Qt::DirectConnection,
+        Q_ARG(QString, QStringLiteral("org.freedesktop.Notifications"))));
+    observer->actionsSupported = false;
+    REQUIRE(controller.notifyNewMail(QStringLiteral("account"), QStringLiteral("inbox"),
+                                     QStringLiteral("thread-3"), QStringLiteral("email-3"),
+                                     QStringLiteral("Inbox"), QStringLiteral("New mail"),
+                                     QStringLiteral("Third")));
+    CHECK(observer->supportQueryCount == 2);
     REQUIRE(observer->request.has_value());
     CHECK(observer->request->actions.isEmpty());
 }
