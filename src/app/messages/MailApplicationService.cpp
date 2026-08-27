@@ -3079,11 +3079,6 @@ namespace javelin::app
     MailMutationApplicationService::queueExactEmailMutations(
         std::string accountId, std::vector<javelin::jmap::EmailMailboxMutation> mutations)
     {
-        auto result = m_emailMutationEngine.queueBatch(accountId, std::move(mutations));
-        const auto* queued = std::get_if<std::vector<javelin::jmap::QueuedEmailMutation>>(&result);
-        if (queued == nullptr)
-            return result;
-
         QStringList affectedMailboxIds;
         const auto appendMailboxIds = [&affectedMailboxIds](const auto& mailboxIds)
         {
@@ -3094,6 +3089,23 @@ namespace javelin::app
                     affectedMailboxIds.push_back(value);
             }
         };
+
+        javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
+        for (const auto& mutation : mutations)
+        {
+            const auto found = emails.find(accountId, mutation.emailId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&found))
+                return javelin::jmap::operationError(*error);
+            const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(found);
+            if (email.has_value())
+                appendMailboxIds(email->mailboxIds);
+        }
+
+        auto result = m_emailMutationEngine.queueBatch(accountId, std::move(mutations));
+        const auto* queued = std::get_if<std::vector<javelin::jmap::QueuedEmailMutation>>(&result);
+        if (queued == nullptr)
+            return result;
+
         for (const auto& mutation : *queued)
         {
             appendMailboxIds(mutation.patch.addMailboxIds);

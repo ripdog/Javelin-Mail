@@ -237,8 +237,76 @@ TEST_CASE("optimistic archive reaches mailbox sessions through daemon cache inva
     REQUIRE((*archivePage)->items.size() == 1);
     CHECK((*archivePage)->items.front().emailId == "email-1");
 
+    const auto markedRead =
+        services.mailMutationApplicationService().queueMarkEmailRead("account-1", "email-1");
+    REQUIRE(std::holds_alternative<javelin::app::QueuedMessageSelectionMutation>(markedRead));
+    CHECK(std::get<javelin::app::QueuedMessageSelectionMutation>(markedRead).queuedEmailCount == 1);
+    INFO("waiting for Mark Read projection");
+    waitFor([&]
+            {
+                return archiveSession.state().items.size() == 1 &&
+                       !archiveSession.state().items.front().isUnread;
+            });
+
+    const auto markedUnread = QCoro::waitFor(
+        services.mailMutationApplicationService().queueMarkMessagesUnread(
+            "account-1", std::optional<std::string>{"archive"},
+            {javelin::app::SelectedEmail{.emailId = "email-1"}}));
+    REQUIRE(std::holds_alternative<javelin::app::QueuedMessageSelectionMutation>(markedUnread));
+    CHECK(std::get<javelin::app::QueuedMessageSelectionMutation>(markedUnread).queuedEmailCount == 1);
+    INFO("waiting for Mark Unread projection");
+    waitFor([&]
+            {
+                return archiveSession.state().items.size() == 1 &&
+                       archiveSession.state().items.front().isUnread;
+            });
+
+    // Queue opposite metadata projections back-to-back without waiting for the first session reload.
+    // The session must converge on the final committed SQLite projection rather than controller-side
+    // command completion ordering.
+    const auto flagged = QCoro::waitFor(
+        services.mailMutationApplicationService().queueSetMessagesFlagged(
+            "account-1", std::optional<std::string>{"archive"},
+            {javelin::app::SelectedEmail{.emailId = "email-1"}}, true));
+    REQUIRE(std::holds_alternative<javelin::app::QueuedMessageSelectionMutation>(flagged));
+    const auto unflagged = QCoro::waitFor(
+        services.mailMutationApplicationService().queueSetMessagesFlagged(
+            "account-1", std::optional<std::string>{"archive"},
+            {javelin::app::SelectedEmail{.emailId = "email-1"}}, false));
+    REQUIRE(std::holds_alternative<javelin::app::QueuedMessageSelectionMutation>(unflagged));
+    INFO("waiting for rapid flag/unflag projection");
+    waitFor([&]
+            {
+                return archiveSession.state().items.size() == 1 &&
+                       !archiveSession.state().items.front().isFlagged;
+            });
+
+    const auto tagged = QCoro::waitFor(services.mailMutationApplicationService().queueSetMessagesTag(
+        "account-1", std::optional<std::string>{"archive"},
+        {javelin::app::SelectedEmail{.emailId = "email-1"}}, "project-test", true));
+    REQUIRE(std::holds_alternative<javelin::app::QueuedMessageSelectionMutation>(tagged));
+    const auto untagged = QCoro::waitFor(
+        services.mailMutationApplicationService().queueSetMessagesTag(
+            "account-1", std::optional<std::string>{"archive"},
+            {javelin::app::SelectedEmail{.emailId = "email-1"}}, "project-test", false));
+    REQUIRE(std::holds_alternative<javelin::app::QueuedMessageSelectionMutation>(untagged));
+    INFO("waiting for rapid tag/untag projection");
+    waitFor([&]
+            {
+                const auto current = emails.find("account-1", "email-1");
+                const auto* value =
+                    std::get_if<std::optional<javelin::jmap::domain::Email>>(&current);
+                return value != nullptr && value->has_value() &&
+                       !std::ranges::contains((*value)->keywords, std::string{"project-test"});
+            });
+
+    const auto optimisticInvalidationCount =
+        std::ranges::count_if(invalidations, [](const auto& invalidation)
+                              { return invalidation.change.optimisticProjection; });
+    CHECK(optimisticInvalidationCount >= 7);
+
     QSqlQuery mutationCount{databaseConnection.database()};
     REQUIRE(mutationCount.exec(QStringLiteral("SELECT COUNT(*) FROM mutation_journal")));
     REQUIRE(mutationCount.next());
-    CHECK(mutationCount.value(0).toInt() == 1);
+    CHECK(mutationCount.value(0).toInt() == 7);
 }
