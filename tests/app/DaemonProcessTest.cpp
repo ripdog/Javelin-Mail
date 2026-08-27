@@ -27,7 +27,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
-#include <QEventLoop>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QSettings>
 #include <QSqlQuery>
@@ -267,14 +267,26 @@ TEST_CASE("notification horizon persistence retries after transient database fai
     CHECK(horizon.value(0).toInt() == 0);
     REQUIRE(seed.exec(QStringLiteral("DROP TRIGGER fail_notification_horizon_insert")));
 
-    QEventLoop retryLoop;
-    QTimer::singleShot(std::chrono::milliseconds{1500}, &retryLoop, &QEventLoop::quit);
-    retryLoop.exec();
+    constexpr auto retryTimeout = std::chrono::milliseconds{1500};
+    constexpr auto retryPollInterval = std::chrono::milliseconds{10};
+    QElapsedTimer retryTimer;
+    retryTimer.start();
+    bool horizonReady = false;
+    while (retryTimer.elapsed() < retryTimeout.count())
+    {
+        QCoreApplication::processEvents();
+        REQUIRE(horizon.exec(QStringLiteral(
+            "SELECT email_state FROM mail_notification_horizons WHERE account_id='account-1' AND "
+            "mailbox_id='inbox'")));
+        if (horizon.next())
+        {
+            horizonReady = true;
+            break;
+        }
+        QThread::msleep(static_cast<unsigned long>(retryPollInterval.count()));
+    }
 
-    REQUIRE(horizon.exec(QStringLiteral(
-        "SELECT email_state FROM mail_notification_horizons WHERE account_id='account-1' AND "
-        "mailbox_id='inbox'")));
-    REQUIRE(horizon.next());
+    REQUIRE(horizonReady);
     CHECK(horizon.value(0).toString() == QStringLiteral("email-state-1"));
 }
 
