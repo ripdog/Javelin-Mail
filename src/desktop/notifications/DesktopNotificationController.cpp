@@ -316,11 +316,14 @@ namespace javelin::app
                                                            const int timeoutMs)
     {
         closeUndoableSendNotification(sendId);
-        if (!m_actionInvokedConnected || !m_notificationClosedConnected ||
-            !transportSupportsActions())
-        {
+        if (!m_actionInvokedConnected || !m_notificationClosedConnected)
             return false;
-        }
+
+        // Undo Send is only safe while the notification service currently supports actions.
+        // Refresh this infrequent capability check instead of relying on the new-mail burst cache.
+        m_transportSupportsActions = m_transport->supportsActions();
+        if (!*m_transportSupportsActions)
+            return false;
 
         const QStringList actions = {undoActionKey(sendId),
                                      i18nc("@action:button desktop notification", "Undo Send")};
