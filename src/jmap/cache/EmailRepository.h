@@ -50,6 +50,9 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::optional<DatabaseError>
         markSearchIndexedMany(std::string_view accountId,
                               std::span<const SearchIndexUpdate> updates);
+        [[nodiscard]] std::variant<bool, DatabaseError> hasAny(std::string_view accountId) const;
+        [[nodiscard]] std::variant<bool, DatabaseError> hasAny(DatabaseTransaction& transaction,
+                                                               std::string_view accountId) const;
         [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
         existingIds(std::string_view accountId, std::span<const std::string> emailIds) const;
         [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>

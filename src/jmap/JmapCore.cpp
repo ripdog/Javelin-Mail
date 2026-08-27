@@ -45,7 +45,6 @@
 #include <QLoggingCategory>
 #include <QScopeGuard>
 #include <QSqlError>
-#include <QSqlQuery>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QUuid>
@@ -1393,6 +1392,7 @@ namespace javelin::jmap
         qInfo() << "Account bootstrap mailbox request context ready";
 
         javelin::jmap::cache::SyncStateRepository syncStateRepository{*m_impl->databaseConnection};
+        javelin::jmap::cache::EmailRepository emailRepository{*m_impl->databaseConnection};
         const javelin::jmap::cache::SyncStateKey emailStateKey{
             .accountId = accountId,
             .objectType = "Email",
@@ -1411,20 +1411,11 @@ namespace javelin::jmap
         bool localEmailWorkingSetEmpty = true;
         if (!existingEmailState.has_value())
         {
-            QSqlQuery cachedEmailProbe{m_impl->databaseConnection->database()};
-            cachedEmailProbe.prepare(QStringLiteral(
-                "SELECT EXISTS(SELECT 1 FROM emails WHERE account_id=:account_id LIMIT 1)"));
-            cachedEmailProbe.bindValue(QStringLiteral(":account_id"),
-                                       QString::fromStdString(accountId));
-            if (!cachedEmailProbe.exec() || !cachedEmailProbe.next())
-            {
-                co_return javelin::jmap::operationError(javelin::jmap::cache::DatabaseError{
-                    .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
-                    .message = QStringLiteral("Inspect initial Email working set: ") +
-                               cachedEmailProbe.lastError().text(),
-                });
-            }
-            localEmailWorkingSetEmpty = !cachedEmailProbe.value(0).toBool();
+            const auto hasCachedEmails = emailRepository.hasAny(accountId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&hasCachedEmails))
+                co_return javelin::jmap::operationError(*error);
+            localEmailWorkingSetEmpty = !std::get<bool>(hasCachedEmails);
         }
         const bool establishInitialEmailBaseline =
             !existingEmailState.has_value() && localEmailWorkingSetEmpty;
@@ -1540,21 +1531,12 @@ namespace javelin::jmap
             auto transaction =
                 std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
 
-            QSqlQuery cachedEmailProbe{m_impl->databaseConnection->database()};
-            cachedEmailProbe.prepare(QStringLiteral(
-                "SELECT EXISTS(SELECT 1 FROM emails WHERE account_id=:account_id LIMIT 1)"));
-            cachedEmailProbe.bindValue(QStringLiteral(":account_id"),
-                                       QString::fromStdString(accountId));
-            if (!cachedEmailProbe.exec() || !cachedEmailProbe.next())
-            {
-                co_return javelin::jmap::operationError(javelin::jmap::cache::DatabaseError{
-                    .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
-                    .message = QStringLiteral("Confirm initial Email working set: ") +
-                               cachedEmailProbe.lastError().text(),
-                });
-            }
+            const auto hasCachedEmails = emailRepository.hasAny(transaction, accountId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&hasCachedEmails))
+                co_return javelin::jmap::operationError(*error);
 
-            if (!cachedEmailProbe.value(0).toBool())
+            if (!std::get<bool>(hasCachedEmails))
             {
                 const auto installed = syncStateRepository.replaceIfCurrent(
                     transaction, emailStateKey, std::nullopt, *initialEmailState);
