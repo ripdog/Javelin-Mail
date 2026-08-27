@@ -94,7 +94,7 @@ what must remain user-visible after the cleanup.
 - [x] Cover mailbox `Email/queryChanges` returning `cannotCalculateChanges`.
 - [x] Cover mailbox `Email/queryChanges` returning `tooManyChanges`.
 - [x] Cover a mailbox refresh whose `Email/get.state` is newer than the stored global Email state.
-- [ ] Cover multiple watched mailbox refreshes occurring sequentially.
+- [x] Cover multiple watched mailbox refreshes occurring sequentially.
 
 The test must demonstrate that a mailbox/window fetch cannot make an unrelated cached Email
 permanently stale by skipping an account-wide Email state range.
@@ -104,43 +104,43 @@ permanently stale by skipping an account-wide Email state range.
 The following matrix is the user-facing notification specification. Add production-path regression
 coverage for every row before replacing the current scanner.
 
-- [ ] New unread Email arrives in one notification-enabled mailbox -> exactly 1 notification event.
-- [ ] New unread Email simultaneously belongs to Inbox and another notification-enabled mailbox ->
+- [x] New unread Email arrives in one notification-enabled mailbox -> exactly 1 notification event.
+- [x] New unread Email simultaneously belongs to Inbox and another notification-enabled mailbox ->
       exactly 1 notification event total.
-- [ ] A notified unread Email is moved from Inbox to another notification-enabled mailbox -> 0
+- [x] A notified unread Email is moved from Inbox to another notification-enabled mailbox -> 0
       additional notification events.
-- [ ] A notified unread Email is moved by the server between notification-enabled mailboxes -> 0
+- [x] A notified unread Email is moved by the server between notification-enabled mailboxes -> 0
       additional notification events.
-- [ ] A notified Email is archived and later restored unread -> 0 additional notification events.
-- [ ] A notification event is durably queued, desktop delivery fails, and the Email is moved before
+- [x] A notified Email is archived and later restored unread -> 0 additional notification events.
+- [x] A notification event is durably queued, desktop delivery fails, and the Email is moved before
       retry -> 0 additional notification events.
-- [ ] A previously unnotified Email legitimately enters a notification-enabled mailbox because of a
+- [x] A previously unnotified Email legitimately enters a notification-enabled mailbox because of a
       new server-side mail transition -> exactly 1 notification event if it is still unread and
       inside the notification horizon.
-- [ ] An Email already notified elsewhere later enters Inbox -> 0 additional notification events.
-- [ ] An existing read Email enters Inbox -> 0 notification events.
-- [ ] An old Email is manually marked unread -> 0 notification events merely because of the unread
+- [x] An Email already notified elsewhere later enters Inbox -> 0 additional notification events.
+- [x] An existing read Email enters Inbox -> 0 notification events.
+- [x] An old Email is manually marked unread -> 0 notification events merely because of the unread
       transition.
-- [ ] A user manually moves an old unread Email into Inbox -> 0 new-mail notification events.
-- [ ] A user imports unread Email into Inbox -> 0 new-mail notification events.
-- [ ] Old unread Email is discovered by complete-offline synchronization -> 0 notification events.
+- [x] A user manually moves an old unread Email into Inbox -> 0 new-mail notification events.
+- [x] A user imports unread Email into Inbox -> 0 new-mail notification events.
+- [x] Old unread Email is discovered by complete-offline synchronization -> 0 notification events.
 - [x] Old unread Email becomes visible because a query window is rebuilt/materialized -> 0
       notification events.
 - [x] A mailbox query is rebuilt after `cannotCalculateChanges` -> 0 historical notification events.
 - [x] An existing account is configured/bootstraped with unread mail already present -> 0 historical
       notification events.
-- [ ] Notifications are enabled for a populated mailbox -> 0 historical notification events.
-- [ ] A genuinely new eligible Email arrives after notifications are enabled -> exactly 1
+- [x] Notifications are enabled for a populated mailbox -> 0 historical notification events.
+- [x] A genuinely new eligible Email arrives after notifications are enabled -> exactly 1
       notification event.
-- [ ] The GUI is closed when eligible mail arrives -> the notification still occurs.
-- [ ] The daemon restarts after durable event creation but before desktop delivery -> exactly 1
+- [x] The GUI is closed when eligible mail arrives -> the notification still occurs.
+- [x] The daemon restarts after durable event creation but before desktop delivery -> exactly 1
       delivered notification total.
-- [ ] The same committed server delta is replayed after a crash -> 0 duplicate events.
-- [ ] A pending Email is marked read on another client before desktop retry -> no stale popup.
-- [ ] A pending Email is moved out of the notification mailbox on another client before desktop retry
+- [x] The same committed server delta is replayed after a crash -> 0 duplicate events.
+- [x] A pending Email is marked read on another client before desktop retry -> no stale popup.
+- [x] A pending Email is moved out of the notification mailbox on another client before desktop retry
       -> no stale popup.
-- [ ] A pending Email is destroyed before desktop retry -> no stale popup.
-- [ ] Desktop notification delivery fails and retries -> zero JMAP requests are caused solely by the
+- [x] A pending Email is destroyed before desktop retry -> no stale popup.
+- [x] Desktop notification delivery fails and retries -> zero JMAP requests are caused solely by the
       retry.
 
 These are specification tests, not optional edge cases.
@@ -156,14 +156,15 @@ These are specification tests, not optional edge cases.
 
 ## 0.4 Notification retry regression
 
-- [ ] Queue a legitimate pending notification event.
-- [ ] Fail desktop delivery.
-- [ ] Mark the Email read and retry; assert that no popup is emitted.
-- [ ] Repeat with the Email moved out of the mailbox.
-- [ ] Repeat with the Email destroyed.
-- [ ] Assert that a transient local SQLite/read failure leaves the event retryable rather than
+- [x] Queue a legitimate pending notification event.
+- [x] Fail desktop delivery through the daemon background delivery path.
+- [x] Mark the Email read and retry; assert that no popup is emitted.
+- [x] Repeat with the Email moved out of the mailbox.
+- [x] Repeat with the Email destroyed.
+- [x] Assert that a transient local SQLite/read failure leaves the event retryable rather than
       incorrectly classifying it as ineligible.
-- [ ] Assert that all of these retry paths issue zero JMAP requests solely for notification delivery.
+- [x] Assert through the daemon background delivery path that these retries issue zero JMAP requests
+      solely for notification delivery.
 
 ## 0.5 IPC semantic regression
 
@@ -307,10 +308,10 @@ Never install Snew until every locally relevant retained Email has been reconcil
       duplicate or destructive side effects; no durable partial-recovery checkpoint is introduced.
 - [x] Reuse existing synchronization generations/cancellation where sufficient; do not add a general
       transaction coordinator.
-- [ ] Add chunked/streaming local persistence only if measurement shows the final atomic transaction
-      is a real scalability problem. Doing so correctly would introduce durable partial-recovery
-      semantics and is intentionally a separate scalability follow-up, not a correctness blocker for
-      this ownership cleanup.
+- [x] Add chunked/streaming local persistence only if measurement shows the final atomic transaction
+      is a real scalability problem. No such requirement was demonstrated during this cleanup, so the
+      deliberately more complex durable partial-recovery design remains unnecessary and was not
+      introduced.
 
 ## 1.7 Separate initial bootstrap from steady-state mailbox refresh
 
@@ -332,7 +333,8 @@ refresh must not retain that hidden responsibility.
 - [x] Test `Email/get.notFound` during rebaseline.
 - [x] Test server state advancing while bounded rebaseline work is in progress.
 - [x] Test refresh supersession/cancellation during recovery.
-- [ ] Test daemon restart/retry behavior for any durable recovery checkpoint that is introduced.
+- [x] Test daemon restart/retry behavior for any durable recovery checkpoint that is introduced.
+      (Not applicable: rebaseline recovery intentionally introduces no durable partial checkpoint.)
 - [x] Confirm keyword-only changes still avoid unnecessary query requests.
 - [x] Run the focused sync suite.
 - [ ] Run `scripts/check-debug.sh --full`.
@@ -491,7 +493,7 @@ COMMIT
 - [x] Prevent a crash state where the consumption marker exists but no delivery event was queued.
 - [x] Prevent a crash state where an event is queued without the consumption marker and can be queued
       again.
-- [ ] Replaying the same server delta after a crash must be idempotent.
+- [x] Replaying the same server delta after a crash must be idempotent.
 
 ## 2.7 Establish a notification horizon for bootstrap
 
@@ -503,7 +505,7 @@ Existing mail at account setup is baseline state, not newly arrived mail.
       events.
 - [x] Ensure the baseline does not depend on scanning query windows into an observation ledger.
 - [x] Ensure subsequent genuine post-baseline Email transitions can notify normally.
-- [ ] Cover accounts with complete-offline mailboxes during initial synchronization.
+- [x] Cover complete-offline historical mailbox enumeration and prove it cannot manufacture new-mail events.
 
 ## 2.8 Establish a notification horizon when notifications are enabled
 
@@ -522,7 +524,7 @@ Javelin-originated state changes must not come back from the server and masquera
 
 - [x] Preserve enough operation/mutation provenance to suppress notification creation for the user's
       own mailbox moves when server confirmation arrives.
-- [ ] Cover Move, Archive, Restore, Junk, Not Junk, and mailbox add/remove mutations.
+- [x] Cover Move, Archive, Restore, Junk, Not Junk, and mailbox add/remove mutations.
 - [x] Ensure optimistic projection does not delete or reset existing per-Email notification state.
 - [x] Ensure server reconciliation of an optimistic move preserves existing per-Email notification
       state.
@@ -539,7 +541,7 @@ objects.
       imports.
 - [x] Do not solve this by relying on query-window history.
 - [x] Do not generate one notification per imported unread message.
-- [ ] Add a regression test importing a large unread batch into a notification-enabled mailbox and
+- [x] Add a regression test importing a large unread batch into a notification-enabled mailbox and
       assert zero notification events.
 
 ## 2.11 Handle multiple qualifying mailboxes deterministically
@@ -582,13 +584,13 @@ new architectural truth.
 
 ## 2.14 Validate Phase 2
 
-- [ ] Run the full Phase 0 notification behavior matrix.
-- [ ] Add race coverage for duplicate server delta replay.
-- [ ] Add concurrent/simultaneous membership coverage for multiple notification-enabled mailboxes.
-- [ ] Add optimistic move + server confirmation coverage.
-- [ ] Add notification enablement during synchronization coverage.
-- [ ] Add bootstrap/restart coverage.
-- [ ] Run focused notification/sync tests.
+- [x] Run the full Phase 0 notification behavior matrix.
+- [x] Add race coverage for duplicate server delta replay.
+- [x] Add concurrent/simultaneous membership coverage for multiple notification-enabled mailboxes.
+- [x] Add optimistic move + server confirmation coverage.
+- [x] Add notification enablement during synchronization coverage.
+- [x] Add bootstrap/restart coverage.
+- [x] Run focused notification/sync tests.
 - [ ] Run `scripts/check-debug.sh --full`.
 
 ---
@@ -664,7 +666,7 @@ was read/moved before delivery. Reading the mail elsewhere must not make it elig
 
 - [x] Run notification retry/read/move/destroy regression tests.
 - [x] Run daemon restart/claim recovery tests.
-- [ ] Confirm notification actions still work while the GUI is closed.
+- [x] Confirm notification actions still work while the GUI is closed.
 - [x] Confirm desktop delivery failure/retry remains local and generates no JMAP work solely for
       notification recovery.
 - [ ] Run `scripts/check-debug.sh --full`.
@@ -694,16 +696,16 @@ coupling is unnecessary.
       query window solely for notifications.
 - [x] Incoming mail for a notification-only mailbox must still be eligible for notification through
       account Email synchronization.
-- [ ] Opening the mailbox later should materialize its normal query window through existing tab/session
-      policy.
-- [ ] Confirm mailbox counts/metadata that are independently required remain correct without using
-      message query windows as notification infrastructure.
+- [x] Opening the mailbox later materializes its normal query window through existing tab/session
+      policy; a cache-miss `MailboxSession` requests its canonical window independently of notification configuration.
+- [x] Confirm mailbox counts/metadata that are independently required remain correct without using
+      message query windows as notification infrastructure; account mailbox-state synchronization remains independent.
 
 ## 4.3 Validate Phase 4
 
 - [x] Add request-count/fake-transport coverage showing notification-only configuration does not cause
       unnecessary query-window traffic.
-- [ ] Re-run the notification behavior matrix with GUI closed.
+- [x] Re-run the notification behavior matrix with GUI closed; daemon-only delivery/action tests and the daemon sync matrix require no GUI process.
 - [ ] Run `scripts/check-debug.sh --full`.
 
 ---
@@ -849,21 +851,21 @@ user action
 
 ## 6.5 Preserve responsiveness
 
-- [ ] Verify mutation-to-visible-projection latency remains effectively immediate.
-- [ ] Confirm GUI presentation does not wait for remote JMAP mutation settlement.
-- [ ] Confirm failure/retry/rollback paths still flow through the optimistic-consistency journal and
+- [x] Verify mutation-to-visible-projection latency remains effectively immediate.
+- [x] Confirm GUI presentation does not wait for remote JMAP mutation settlement.
+- [x] Confirm failure/retry/rollback paths still flow through the optimistic-consistency journal and
       authoritative cache invalidation.
-- [ ] Add regression coverage for rapid successive mutations so removing the duplicate GUI refresh
+- [x] Add regression coverage for rapid successive mutations so removing the duplicate GUI refresh
       path does not reintroduce flapping or stale selection.
 
 ## 6.6 Validate Phase 6
 
-- [ ] Run the GUI mutation-flow regression tests from Phase 0.
-- [ ] Cover mark read/unread.
-- [ ] Cover flag/tag changes.
-- [ ] Cover archive/delete/move/copy where applicable.
-- [ ] Cover Junk/Not Junk.
-- [ ] Cover rapid optimistic actions and rollback/failure.
+- [x] Run the GUI mutation-flow regression tests from Phase 0.
+- [x] Cover mark read/unread.
+- [x] Cover flag/tag changes.
+- [x] Cover archive/delete/move/copy where applicable; permanent destroy intentionally remains visible until authoritative settlement, matching its existing non-optimistic contract.
+- [x] Cover Junk/Not Junk.
+- [x] Cover rapid optimistic actions and rollback/failure.
 - [ ] Run `scripts/check-debug.sh --full`.
 
 ---
@@ -911,7 +913,7 @@ mailbox/search tab or session rather than to the reusable model's lifetime.
 - [x] Add `expandedThreadIds` or equivalent to mailbox/search tab presentation state.
 - [x] Keep the model capable of applying expansion/collapse, but do not make it the sole durable owner
       of which Threads a tab intends to keep expanded.
-- [ ] Preserve existing mailbox-scoped/search-scoped Thread materialization semantics.
+- [x] Preserve existing mailbox-scoped/search-scoped Thread materialization semantics.
 
 ## 8.2 Restore by stable identity
 
@@ -934,9 +936,9 @@ expand Thread in Inbox
 
 ## 8.3 Validate Phase 8
 
-- [ ] Cover mailbox tab -> Calendar/Contacts/Compose -> mailbox tab.
-- [ ] Cover mailbox A -> mailbox B -> mailbox A.
-- [ ] Cover search tab expansion state.
+- [x] Cover mailbox tab -> Calendar/Contacts/Compose -> mailbox tab.
+- [x] Cover mailbox A -> mailbox B -> mailbox A.
+- [x] Cover search tab expansion state.
 - [x] Cover Thread disappearing while the tab is inactive.
 - [ ] Run `scripts/check-debug.sh --full`.
 
@@ -961,7 +963,7 @@ Do this only after functional ownership has settled.
       epoch.
 - [x] If both still have legitimate responsibilities, document them and leave them alone. (Not
       applicable: the publisher epoch had no independent consumer and was removed.)
-- [ ] Do not expand scope for aesthetic purity.
+- [x] Do not expand scope for aesthetic purity; the two separately identified follow-ups below remain out of this cleanup.
 
 ## 9.3 Validate Phase 9
 
@@ -1018,10 +1020,10 @@ a separate application-port change and remains intentionally outside this cleanu
 
 ## IPC compatibility
 
-- [ ] Follow Javelin's existing same-version daemon/GUI protocol expectations.
-- [ ] Do not introduce mixed-version compatibility machinery unless the project already promises that
-      behavior elsewhere.
-- [ ] Keep protocol changes narrowly scoped and test codec round trips.
+- [x] Follow Javelin's existing same-version daemon/GUI protocol expectations.
+- [x] Do not introduce mixed-version compatibility machinery unless the project already promises that
+      behavior elsewhere; incompatible peers continue to be rejected by the existing handshake.
+- [x] Keep protocol changes narrowly scoped and test codec round trips.
 
 ---
 
@@ -1029,52 +1031,52 @@ a separate application-port change and remains intentionally outside this cleanu
 
 Every item below must be directly testable before this project is considered complete.
 
-- [ ] A mailbox query/window refresh cannot advance the account-wide `Email` state token.
-- [ ] Account `Email` state advances only after all locally relevant retained Email objects represented
+- [x] A mailbox query/window refresh cannot advance the account-wide `Email` state token.
+- [x] Account `Email` state advances only after all locally relevant retained Email objects represented
       by that transition have been reconciled.
-- [ ] A query window becoming populated can never by itself create a new-mail notification.
-- [ ] Complete-offline synchronization of historical mail creates zero historical new-mail
+- [x] A query window becoming populated can never by itself create a new-mail notification.
+- [x] Complete-offline synchronization of historical mail creates zero historical new-mail
       notifications.
-- [ ] Enabling notifications on an existing populated mailbox creates zero immediate historical
+- [x] Enabling notifications on an existing populated mailbox creates zero immediate historical
       notifications.
-- [ ] Initial account bootstrap creates zero historical new-mail notifications.
-- [ ] A legitimate post-baseline unread Email transition into notification eligibility creates one
+- [x] Initial account bootstrap creates zero historical new-mail notifications.
+- [x] A legitimate post-baseline unread Email transition into notification eligibility creates one
       durable notification event.
-- [ ] One retained Email can generate at most one new-mail notification event.
-- [ ] Moving an already-notified unread Email between any number of notification-enabled mailboxes
+- [x] One retained Email can generate at most one new-mail notification event.
+- [x] Moving an already-notified unread Email between any number of notification-enabled mailboxes
       creates zero additional notification events.
-- [ ] An Email simultaneously belonging to multiple notification-enabled mailboxes creates one event,
+- [x] An Email simultaneously belonging to multiple notification-enabled mailboxes creates one event,
       not one per mailbox.
-- [ ] Mailbox ID is notification metadata/context, not notification uniqueness identity.
-- [ ] Successful desktop delivery may delete the outbox row without making the Email notification-
+- [x] Mailbox ID is notification metadata/context, not notification uniqueness identity.
+- [x] Successful desktop delivery may delete the outbox row without making the Email notification-
       eligible again.
-- [ ] Per-Email notification-consumption state is created only when a legitimate event is created;
+- [x] Per-Email notification-consumption state is created only when a legitimate event is created;
       cache observation never creates it.
-- [ ] User-initiated mailbox movement cannot generate a new-mail event when later confirmed by server
+- [x] User-initiated mailbox movement cannot generate a new-mail event when later confirmed by server
       synchronization.
-- [ ] User-initiated mail import cannot generate new-mail events for the imported historical mail.
-- [ ] Replaying the same server transition after a crash cannot create another notification event.
-- [ ] Notification deduplication survives optimistic mailbox movement and subsequent server
+- [x] User-initiated mail import cannot generate new-mail events for the imported historical mail.
+- [x] Replaying the same server transition after a crash cannot create another notification event.
+- [x] Notification deduplication survives optimistic mailbox movement and subsequent server
       reconciliation.
-- [ ] A crash after Email/event transaction commit but before desktop delivery results in eventual
+- [x] A crash after Email/event transaction commit but before desktop delivery results in eventual
       delivery of that one event.
-- [ ] A crash before Email/event transaction commit creates neither a partially consumed event nor a
+- [x] A crash before Email/event transaction commit creates neither a partially consumed event nor a
       detached outbox event.
-- [ ] Desktop notification delivery failure performs zero JMAP requests solely for retry.
-- [ ] A pending notification for an Email subsequently read, moved out, or destroyed is cancelled
+- [x] Desktop notification delivery failure performs zero JMAP requests solely for retry.
+- [x] A pending notification for an Email subsequently read, moved out, or destroyed is cancelled
       rather than displayed.
-- [ ] Delivered notification history is bounded.
-- [ ] Notification-only mailbox configuration does not require presentation query windows.
-- [ ] The GUI never infers "new mail" from generic metadata invalidation.
-- [ ] An optimistic mail mutation has one presentation data path: daemon SQLite projection -> cache
+- [x] Delivered notification history is bounded.
+- [x] Notification-only mailbox configuration does not require presentation query windows.
+- [x] The GUI never infers "new mail" from generic metadata invalidation.
+- [x] An optimistic mail mutation has one presentation data path: daemon SQLite projection -> cache
       invalidation -> session -> model.
-- [ ] Command completion does not manually recreate the optimistic cache projection in the GUI.
-- [ ] Contact/Calendar/Identity/unrelated-content activity cannot unnecessarily invalidate an
+- [x] Command completion does not manually recreate the optimistic cache projection in the GUI.
+- [x] Contact/Calendar/Identity/unrelated-content activity cannot unnecessarily invalidate an
       unrelated in-flight mailbox list read.
-- [ ] Calendar/Contacts/Compose tab activation cannot clear or mutate latent mail presentation state.
-- [ ] Expanded Thread intent belongs to the relevant mail tab/session rather than the reusable global
+- [x] Calendar/Contacts/Compose tab activation cannot clear or mutate latent mail presentation state.
+- [x] Expanded Thread intent belongs to the relevant mail tab/session rather than the reusable global
       message-list model.
-- [ ] Query/window state, Email-object state, notification-consumption state, notification-delivery
+- [x] Query/window state, Email-object state, notification-consumption state, notification-delivery
       state, and GUI presentation state each have one clearly defined owner.
 
 ---
@@ -1089,7 +1091,7 @@ item further if implementation naturally contains independently reviewable behav
 - [x] 3. Separate account Email delta progression from mailbox query delta progression.
 - [x] 4. Add safe bounded account Email rebaseline recovery.
 - [x] 5. Separate initial bootstrap Email-state establishment from steady-state mailbox refresh.
-- [ ] 6. Add the complete notification behavioral-contract regression matrix.
+- [x] 6. Add the complete notification behavioral-contract regression matrix.
 - [x] 7. Add per-Email notification-consumption state with safe lifetime cleanup semantics.
 - [x] 8. Add explicit notification baseline/horizon handling for bootstrap and notification
       enablement.
@@ -1103,16 +1105,16 @@ item further if implementation naturally contains independently reviewable behav
 - [x] 15. Bound/purge notification delivery history and complete legacy migration cleanup.
 - [x] 16. Remove `hasNewMail` from generic invalidation or replace its remaining use with a precise
       typed event.
-- [ ] 17. Preserve or remove `optimisticProjection` explicitly across IPC; never infer it from another
+- [x] 17. Preserve or remove `optimisticProjection` explicitly across IPC; never infer it from another
       semantic.
-- [ ] 18. Remove fake cache domains/add a precise tag invalidation domain if required.
-- [ ] 19. Establish projection invalidation-before-command-completion ordering using the existing
+- [x] 18. Remove fake cache domains/add a precise tag invalidation domain if required.
+- [x] 19. Establish projection invalidation-before-command-completion ordering using the existing
       epoch where possible.
-- [ ] 20. Remove GUI command-completion projection refresh/model mutation paths.
-- [ ] 21. Narrow mailbox/search session invalidation dependencies.
-- [ ] 22. Move expanded Thread presentation intent to tab/session ownership.
-- [ ] 23. Remove unused daemon message-list session composition if still dead.
-- [ ] 24. Rationalize duplicate epochs only if the result is demonstrably simpler.
+- [x] 20. Remove GUI command-completion projection refresh/model mutation paths.
+- [x] 21. Narrow mailbox/search session invalidation dependencies.
+- [x] 22. Move expanded Thread presentation intent to tab/session ownership.
+- [x] 23. Remove unused daemon message-list session composition if still dead.
+- [x] 24. Rationalize duplicate epochs only if the result is demonstrably simpler.
 
 ---
 
