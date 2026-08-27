@@ -337,7 +337,7 @@ refresh must not retain that hidden responsibility.
       (Not applicable: rebaseline recovery intentionally introduces no durable partial checkpoint.)
 - [x] Confirm keyword-only changes still avoid unnecessary query requests.
 - [x] Run the focused sync suite.
-- [ ] Run `scripts/check-debug.sh --full`.
+- [x] Run `scripts/check-debug.sh --full`.
 
 ---
 
@@ -591,7 +591,7 @@ new architectural truth.
 - [x] Add notification enablement during synchronization coverage.
 - [x] Add bootstrap/restart coverage.
 - [x] Run focused notification/sync tests.
-- [ ] Run `scripts/check-debug.sh --full`.
+- [x] Run `scripts/check-debug.sh --full`.
 
 ---
 
@@ -669,7 +669,7 @@ was read/moved before delivery. Reading the mail elsewhere must not make it elig
 - [x] Confirm notification actions still work while the GUI is closed.
 - [x] Confirm desktop delivery failure/retry remains local and generates no JMAP work solely for
       notification recovery.
-- [ ] Run `scripts/check-debug.sh --full`.
+- [x] Run `scripts/check-debug.sh --full`.
 
 ---
 
@@ -706,7 +706,7 @@ coupling is unnecessary.
 - [x] Add request-count/fake-transport coverage showing notification-only configuration does not cause
       unnecessary query-window traffic.
 - [x] Re-run the notification behavior matrix with GUI closed; daemon-only delivery/action tests and the daemon sync matrix require no GUI process.
-- [ ] Run `scripts/check-debug.sh --full`.
+- [x] Run `scripts/check-debug.sh --full`.
 
 ---
 
@@ -756,7 +756,7 @@ Keep the protocol change narrow.
 - [x] Run GUI invalidation/session tests.
 - [x] Confirm notification behavior is unchanged because it no longer depends on generic cache
       invalidation.
-- [ ] Run `scripts/check-debug.sh --full`.
+- [x] Run `scripts/check-debug.sh --full`.
 
 ---
 
@@ -866,7 +866,7 @@ user action
 - [x] Cover archive/delete/move/copy where applicable; permanent destroy intentionally remains visible until authoritative settlement, matching its existing non-optimistic contract.
 - [x] Cover Junk/Not Junk.
 - [x] Cover rapid optimistic actions and rollback/failure.
-- [ ] Run `scripts/check-debug.sh --full`.
+- [x] Run `scripts/check-debug.sh --full`.
 
 ---
 
@@ -899,7 +899,7 @@ This is a safe performance/stability cleanup after the larger ownership changes.
 - [x] Relevant mailbox query-window replacement does restart/reload as required.
 - [x] Relevant Thread completion does refresh represented expansion state.
 - [x] Relevant optimistic metadata update does refresh the row.
-- [ ] Run `scripts/check-debug.sh --full`.
+- [x] Run `scripts/check-debug.sh --full`.
 
 ---
 
@@ -940,7 +940,7 @@ expand Thread in Inbox
 - [x] Cover mailbox A -> mailbox B -> mailbox A.
 - [x] Cover search tab expansion state.
 - [x] Cover Thread disappearing while the tab is inactive.
-- [ ] Run `scripts/check-debug.sh --full`.
+- [x] Run `scripts/check-debug.sh --full`.
 
 ---
 
@@ -969,7 +969,7 @@ Do this only after functional ownership has settled.
 
 - [x] Build all daemon and GUI targets.
 - [x] Run architecture/unit tests affected by service construction.
-- [ ] Run `scripts/check-debug.sh --full`.
+- [x] Run `scripts/check-debug.sh --full`.
 
 ---
 
