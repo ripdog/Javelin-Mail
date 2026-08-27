@@ -27,11 +27,13 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QSettings>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QTimer>
 #include <QUuid>
 
 #include <memory>
@@ -216,6 +218,64 @@ TEST_CASE("notification-only mailboxes are not presentation sync interests",
     CHECK(configurations.front().mailboxIds == std::vector<std::string>{"opened"});
     CHECK(configurations.front().fullSyncMailboxIds == std::vector<std::string>{"opened"});
     CHECK(configurations.front().notificationMailboxIds == std::vector<std::string>{"notify-only"});
+}
+
+TEST_CASE("notification horizon persistence retries after transient database failure",
+          "[app][daemon][settings][notification][retry]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto locationResult =
+        javelin::app::CacheLocationProvider{temporaryDirectory.path()}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(locationResult));
+    javelin::app::DaemonServices services{std::get<javelin::app::CacheLocation>(locationResult)};
+    auto& connection = services.databaseConnection();
+
+    QSqlQuery seed{connection.database()};
+    REQUIRE(seed.exec(QStringLiteral(
+        "INSERT INTO accounts(account_id,email_address,session_url,is_primary,cap_mail) "
+        "VALUES('account-1','user@example.test','http://127.0.0.1:9/jmap',1,1)")));
+    REQUIRE(seed.exec(
+        QStringLiteral("INSERT INTO sync_state(account_id,object_type,query_key,state_token) "
+                       "VALUES('account-1','Email','','email-state-1')")));
+    REQUIRE(seed.exec(QStringLiteral(
+        "CREATE TRIGGER fail_notification_horizon_insert BEFORE INSERT ON "
+        "mail_notification_horizons BEGIN SELECT RAISE(FAIL,'forced transient failure'); END")));
+
+    services.accountRuntimeManager().applySettings({javelin::app::AccountSyncConfiguration{
+        .settings = {.connectionId = "connection-1",
+                     .revision = 0,
+                     .sessionUrl = "http://127.0.0.1:9/jmap",
+                     .loginEmail = "user@example.test",
+                     .apiKey = "secret",
+                     .refreshToken = {},
+                     .tokenEndpoint = {},
+                     .oauthClientId = {}},
+        .accountId = "account-1",
+        .mailboxIds = {},
+        .fullSyncMailboxIds = {},
+        .notificationMailboxIds = {"inbox"},
+    }});
+
+    QSqlQuery horizon{connection.database()};
+    REQUIRE(horizon.exec(QStringLiteral(
+        "SELECT COUNT(*) FROM mail_notification_horizons WHERE account_id='account-1'")));
+    REQUIRE(horizon.next());
+    CHECK(horizon.value(0).toInt() == 0);
+    REQUIRE(seed.exec(QStringLiteral("DROP TRIGGER fail_notification_horizon_insert")));
+
+    QEventLoop retryLoop;
+    QTimer::singleShot(std::chrono::milliseconds{1500}, &retryLoop, &QEventLoop::quit);
+    retryLoop.exec();
+
+    REQUIRE(horizon.exec(QStringLiteral(
+        "SELECT email_state FROM mail_notification_horizons WHERE account_id='account-1' AND "
+        "mailbox_id='inbox'")));
+    REQUIRE(horizon.next());
+    CHECK(horizon.value(0).toString() == QStringLiteral("email-state-1"));
 }
 
 TEST_CASE("daemon log store enforces a bounded history", "[app][daemon][logging]")

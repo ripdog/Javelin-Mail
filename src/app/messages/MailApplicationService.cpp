@@ -280,6 +280,7 @@ namespace javelin::app
         }
 
         constexpr auto contactRefreshRetryDelay = std::chrono::seconds{30};
+        constexpr unsigned int notificationHorizonRetryMaximumExponent = 5;
 
         [[nodiscard]] javelin::app::undo::ExactMailPatch
         historyPatch(const javelin::jmap::EmailMailboxMutation& mutation)
@@ -919,6 +920,8 @@ namespace javelin::app
             disconnect(coordinatorIt->second.get(), nullptr, this, nullptr);
             coordinatorIt = m_coordinators.erase(coordinatorIt);
             m_observedMailboxIds.erase(removedAccountId);
+            m_notificationHorizonRetryAttempts.erase(removedAccountId);
+            m_notificationHorizonRetriesPending.erase(removedAccountId);
             Q_EMIT accountRemoved(QString::fromStdString(removedAccountId));
         }
         std::erase_if(m_configurations, [&configuredAccountIds](const auto& entry)
@@ -1290,6 +1293,7 @@ namespace javelin::app
                                        configuration.mailboxIds.end());
 
         std::optional<std::string> currentEmailState;
+        bool notificationHorizonSyncFailed = false;
         javelin::jmap::cache::SyncStateRepository syncStates{m_databaseConnection};
         const auto emailState =
             syncStates.find({.accountId = accountId, .objectType = "Email", .queryKey = {}});
@@ -1297,22 +1301,31 @@ namespace javelin::app
         {
             qWarning().noquote() << "Could not read Email state for notification horizon"
                                  << QString::fromStdString(accountId) << error->message;
+            notificationHorizonSyncFailed = true;
         }
-        else if (const auto& state =
-                     std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState);
-                 state.has_value())
+        else
         {
-            currentEmailState = state->stateToken;
+            if (const auto& state =
+                    std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState);
+                state.has_value())
+                currentEmailState = state->stateToken;
+
+            javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
+            if (const auto horizonError = notifications.synchronizeMailboxHorizons(
+                    accountId, configuration.notificationMailboxIds,
+                    currentEmailState.has_value()
+                        ? std::optional<std::string_view>{*currentEmailState}
+                        : std::nullopt))
+            {
+                qWarning().noquote() << "Could not synchronize notification horizons"
+                                     << QString::fromStdString(accountId) << horizonError->message;
+                notificationHorizonSyncFailed = true;
+            }
         }
-        javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
-        if (const auto error = notifications.synchronizeMailboxHorizons(
-                accountId, configuration.notificationMailboxIds,
-                currentEmailState.has_value() ? std::optional<std::string_view>{*currentEmailState}
-                                              : std::nullopt))
-        {
-            qWarning().noquote() << "Could not synchronize notification horizons"
-                                 << QString::fromStdString(accountId) << error->message;
-        }
+        if (notificationHorizonSyncFailed)
+            scheduleNotificationHorizonRetry(accountId);
+        else
+            m_notificationHorizonRetryAttempts.erase(accountId);
 
         auto [coordinatorIt, inserted] = m_coordinators.try_emplace(accountId);
         if (inserted)
@@ -1332,6 +1345,27 @@ namespace javelin::app
         coordinatorIt->second->applySettings(std::move(configuration.settings), accountId,
                                              std::move(configuration.mailboxIds),
                                              std::move(configuration.notificationMailboxIds));
+    }
+
+    void AccountRuntimeManager::scheduleNotificationHorizonRetry(const std::string& accountId)
+    {
+        if (!m_configurations.contains(accountId) ||
+            !m_notificationHorizonRetriesPending.insert(accountId).second)
+            return;
+
+        auto& attempts = m_notificationHorizonRetryAttempts[accountId];
+        const auto exponent = std::min(attempts, notificationHorizonRetryMaximumExponent);
+        ++attempts;
+        const auto delay = std::chrono::seconds{1U << exponent};
+        QTimer::singleShot(delay, this,
+                           [this, accountId]
+                           {
+                               m_notificationHorizonRetriesPending.erase(accountId);
+                               if (!m_configurations.contains(accountId) ||
+                                   !m_notificationHorizonRetryAttempts.contains(accountId))
+                                   return;
+                               applyAccountConfiguration(accountId);
+                           });
     }
 
     MailboxObservation MailQueryApplicationService::observeMailbox(std::string accountId,
