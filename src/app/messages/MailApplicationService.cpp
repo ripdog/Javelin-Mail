@@ -4807,7 +4807,12 @@ namespace javelin::app
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
             std::move(accountId), std::move(calendarId), std::move(withTime),
             std::move(withoutTime));
-        if (std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result))
+        if (const auto* mutationError = std::get_if<javelin::jmap::OperationError>(&result);
+            mutationError != nullptr && mutationError->outcomeUnknown)
+        {
+            requireCatchUp(ownerAccountId);
+        }
+        else if (std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result))
         {
             const auto range = m_visibleCalendarRanges.find(ownerAccountId);
             if (range != m_visibleCalendarRanges.end())

@@ -58,6 +58,7 @@ namespace javelin::jmap
         std::optional<int> httpStatus = std::nullopt;
         std::optional<std::chrono::seconds> retryAfter = std::nullopt;
         std::optional<std::string> protocolType = std::nullopt;
+        bool outcomeUnknown = false;
     };
 
     [[nodiscard]] bool isCancellation(const OperationError& error);

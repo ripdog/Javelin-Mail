@@ -10,6 +10,7 @@
 #include "jmap/calendar/CalendarReader.h"
 
 #include <KDatePicker>
+#include <KMessageWidget>
 
 #include <QAction>
 #include <QApplication>
@@ -130,6 +131,7 @@ namespace
         bool lastSubscribed = false;
         std::vector<javelin::app::CalendarColorChange> lastColorBatch;
         std::vector<javelin::app::CalendarDefaultAlertsChange> lastDefaultAlertsBatch;
+        std::optional<javelin::app::CalendarDefaultAlertsBatchResult> defaultAlertsBatchResult;
         std::vector<std::string> managerBatchOrder;
 
         QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
@@ -223,6 +225,8 @@ namespace
             ++defaultAlertsBatchRequestCount;
             managerBatchOrder.push_back("alerts");
             lastDefaultAlertsBatch = std::move(changes);
+            if (defaultAlertsBatchResult.has_value())
+                co_return *defaultAlertsBatchResult;
             co_return javelin::app::CalendarDefaultAlertsBatchResult{
                 .requestedCount = lastDefaultAlertsBatch.size(),
                 .appliedCount = lastDefaultAlertsBatch.size(),
@@ -364,6 +368,88 @@ TEST_CASE("event default notification configuration uses the calendar command pa
     CHECK(change.accountId == "calendar-1");
     CHECK(change.calendarId == "cal-1");
     CHECK(change.withTime.size() == 1);
+}
+
+TEST_CASE("ambiguous default notification outcome preserves the dialog projection",
+          "[gui][calendar][notifications][actions][uncertain]")
+{
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    Reader reader;
+    CommandPort commands;
+    commands.defaultAlertsBatchResult = javelin::app::CalendarDefaultAlertsBatchResult{
+        .requestedCount = 1,
+        .appliedCount = 0,
+        .failures = {},
+        .error =
+            javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::Timeout,
+                .message = QStringLiteral("Calendar update outcome is unknown."),
+                .outcomeUnknown = true,
+            },
+    };
+    QStackedWidget contentStack;
+    std::vector<javelin::gui::shell::TabState> tabs;
+    javelin::gui::shell::CalendarTabController controller{settings, reader, commands, contentStack,
+                                                          tabs};
+
+    bool projectedDefaultsRetained = false;
+    bool configureReenabled = false;
+    bool uncertaintyReported = false;
+    QObject::connect(&controller, &javelin::gui::shell::CalendarTabController::operationFailed,
+                     &contentStack,
+                     [&uncertaintyReported](const javelin::jmap::OperationError& error)
+                     { uncertaintyReported = error.outcomeUnknown; });
+
+    QTimer::singleShot(
+        0, &contentStack,
+        [&projectedDefaultsRetained, &configureReenabled]
+        {
+            auto* eventDialog = qobject_cast<javelin::gui::calendar::EventDialog*>(
+                QApplication::activeModalWidget());
+            REQUIRE(eventDialog != nullptr);
+            auto* notifications =
+                eventDialog->findChild<javelin::gui::calendar::CalendarNotificationEditor*>();
+            auto* warning = eventDialog->findChild<KMessageWidget*>(
+                QStringLiteral("defaultNotificationsWarning"));
+            auto* configure =
+                eventDialog->findChild<QAction*>(QStringLiteral("configureDefaultNotifications"));
+            REQUIRE(notifications != nullptr);
+            REQUIRE(warning != nullptr);
+            REQUIRE(configure != nullptr);
+            notifications->setUseCalendarDefaults(true);
+            REQUIRE_FALSE(warning->isHidden());
+
+            QTimer::singleShot(
+                0, eventDialog,
+                []
+                {
+                    auto* defaultsDialog =
+                        qobject_cast<javelin::gui::calendar::CalendarDefaultNotificationsDialog*>(
+                            QApplication::activeModalWidget());
+                    REQUIRE(defaultsDialog != nullptr);
+                    auto* notificationTabs = defaultsDialog->findChild<QTabWidget*>();
+                    REQUIRE(notificationTabs != nullptr);
+                    auto* timed = qobject_cast<javelin::gui::calendar::CalendarNotificationEditor*>(
+                        notificationTabs->currentWidget());
+                    REQUIRE(timed != nullptr);
+                    auto* add = timed->findChild<QPushButton*>(QStringLiteral("addNotification"));
+                    REQUIRE(add != nullptr);
+                    add->click();
+                    defaultsDialog->accept();
+                });
+            configure->trigger();
+            QCoreApplication::processEvents();
+            projectedDefaultsRetained = warning->isHidden();
+            configureReenabled = configure->isEnabled();
+            eventDialog->reject();
+        });
+
+    controller.invokeWorkspace(javelin::gui::shell::CalendarTabCommand::CreateEvent);
+    QCoreApplication::processEvents();
+
+    CHECK(projectedDefaultsRetained);
+    CHECK(configureReenabled);
+    CHECK(uncertaintyReported);
 }
 
 TEST_CASE("opening Calendar observes the cached range without forcing a refresh",

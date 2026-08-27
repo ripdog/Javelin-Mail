@@ -405,6 +405,7 @@ TEST_CASE("calendar metadata mutations project and reconcile server outcomes",
             mutation.setCalendarDefaultAlerts(settings, "a1", "a1", "work", timed, {}));
 
         REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK_FALSE(std::get<javelin::jmap::OperationError>(result).outcomeUnknown);
         const auto [withTime, withoutTime] = calendarAlerts();
         CHECK(withTime.empty());
         CHECK(withoutTime.empty());
@@ -431,6 +432,7 @@ TEST_CASE("calendar metadata mutations project and reconcile server outcomes",
             mutation.setCalendarDefaultAlerts(settings, "a1", "a1", "work", timed, {}));
 
         REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK(std::get<javelin::jmap::OperationError>(result).outcomeUnknown);
         CHECK(calendarAlerts().first.contains("reminder"));
         javelin::jmap::sync::MutationJournalRepository journal{connection};
         const auto active = journal.listActive({.accountId = "a1", .dataType = "Calendar"});
