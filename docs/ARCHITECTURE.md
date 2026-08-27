@@ -409,18 +409,31 @@ The route completes after the target has been selected/rendered, or is cancelled
 user navigation. Contact and calendar routes may use the same lifecycle with their own typed route
 values; they do not acquire Email pagination semantics.
 
-Mail notification discovery writes a persistent pending outbox before publication. Entries become
-delivered only after the desktop-notification signal is emitted, making a process failure in that
-gap retryable instead of silently losing the notification. Discovery is limited to threads present
-in an authoritative mailbox query window; raw Email mailbox membership alone cannot produce a
-notification for a message the mailbox view cannot render. Notification routing to a concrete Email
-requires only that target and its contextual query coverage; it does not synchronously hydrate all
-other members of the conversation. Automatic thread materialization follows as ordinary background
-work. Child Email commits may affect other cached mailbox views according to normal Email delta and
-query-window invalidation rules, but the initial representative-window commit must not manufacture
-cross-mailbox invalidations merely because related children have not yet been fetched.
-Calendar reminder acknowledgement and snooze state remains in its separate calendar notification
-repository.
+New-mail notification discovery is owned by account-wide Email reconciliation, never by mailbox
+query/window observation. When a committed server Email transition proves that a previously
+unconsumed Email legitimately crossed an enabled mailbox's notification horizon while unread, the
+Email synchronizer creates the per-Email consumption marker and durable notification outbox entry in
+the same SQLite transaction as the Email-object and global Email-state transition. Mailbox identity
+is retained as deterministic routing/context metadata; `(account_id, email_id)` is the notification
+identity, so later unread movement between enabled mailboxes cannot create another event.
+
+Notification horizons are Email-state-token boundaries. Enabling a mailbox is serialized against
+in-flight Email work with the existing Email consistency generation, then the new horizon is
+installed atomically with a fresh Email reconciliation state so historical cached mail cannot become
+new mail merely because notification settings changed. The delivery service claims pending outbox
+rows and revalidates unread state, current mailbox eligibility, and object existence entirely from
+SQLite before showing a popup. Successful delivery removes the outbox row while preserving the
+per-Email consumption marker; claim, acknowledgement, release, and desktop-presentation failures are
+retried locally and do not request JMAP synchronization solely to recover notification delivery.
+
+Mailbox query windows remain presentation coverage only. Notification routing to a concrete Email
+may use its mailbox context to open/materialize the relevant view, but query-window population,
+rebuild, pagination, or thread materialization cannot itself create a notification event. Automatic
+thread materialization follows as ordinary background work. Child Email commits may affect other
+cached mailbox views according to normal Email delta and query-window invalidation rules, but the
+initial representative-window commit must not manufacture cross-mailbox invalidations merely because
+related children have not yet been fetched. Calendar reminder acknowledgement and snooze state
+remains in its separate calendar notification repository.
 
 `JmapMethodTransport` is the request/response boundary for typed JMAP envelopes.
 `PreferredJmapMethodTransport` uses the RFC 8887 capability advertised by the cached Session to
