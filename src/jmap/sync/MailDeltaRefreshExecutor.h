@@ -6,6 +6,7 @@
 
 #include <QCoroTask>
 
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -26,6 +27,7 @@ namespace javelin::jmap::sync
         bool mailboxNeedsFullRefresh = false;
         bool emailNeedsFullRefresh = false;
         bool notificationEventsCreated = false;
+        bool notificationHorizonEstablished = false;
         bool superseded = false;
         std::vector<std::string> changedMailboxIds;
         std::vector<std::string> queryAffectedMailboxIds;
@@ -46,7 +48,9 @@ namespace javelin::jmap::sync
 
         [[nodiscard]] QCoro::Task<MailDeltaRefreshResult>
         refresh(std::string accountId, MailDeltaRefreshRequest request,
-                std::string remoteAccountId = {}) const;
+                std::string remoteAccountId = {},
+                std::optional<std::vector<std::string>> notificationHorizonMailboxIds =
+                    std::nullopt) const;
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;

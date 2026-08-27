@@ -7,6 +7,7 @@
 #include "jmap/api/Session.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/MailDeltaRefreshExecutor.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 #include "jmap/sync/MailboxStateRefreshExecutor.h"
@@ -28,6 +29,7 @@ namespace javelin::app
     namespace
     {
         constexpr auto refreshDebounceInterval = std::chrono::milliseconds{750};
+        constexpr unsigned int notificationHorizonRetryMaximumExponent = 5;
         constexpr auto resumeWatchdogInterval = std::chrono::seconds{30};
         constexpr auto resumeWatchdogStallThreshold = std::chrono::seconds{90};
 
@@ -86,6 +88,9 @@ namespace javelin::app
         m_refreshDebounceTimer.setInterval(refreshDebounceInterval);
         QObject::connect(&m_refreshDebounceTimer, &QTimer::timeout, this,
                          &AccountSyncCoordinator::scheduleCatchUpRefresh);
+        m_notificationHorizonRetryTimer.setSingleShot(true);
+        QObject::connect(&m_notificationHorizonRetryTimer, &QTimer::timeout, this,
+                         &AccountSyncCoordinator::scheduleNotificationHorizonRefresh);
         m_lastResumeWatchdogTickMs = QDateTime::currentMSecsSinceEpoch();
         m_resumeWatchdogTimer.setInterval(resumeWatchdogInterval);
         QObject::connect(&m_resumeWatchdogTimer, &QTimer::timeout, this,
@@ -170,6 +175,45 @@ namespace javelin::app
             m_shouldCatchUpRefreshOnReconnect = true;
     }
 
+    std::optional<javelin::jmap::cache::DatabaseError>
+    AccountSyncCoordinator::requestNotificationHorizonBaseline(std::vector<std::string> mailboxIds)
+    {
+        std::ranges::sort(mailboxIds);
+        mailboxIds.erase(std::ranges::unique(mailboxIds).begin(), mailboxIds.end());
+        if (m_pendingNotificationHorizonMailboxIds == mailboxIds)
+            return std::nullopt;
+
+        javelin::jmap::sync::ConsistencyDomainRepository consistency{m_databaseConnection};
+        const auto generation =
+            consistency.advanceMutation({.accountId = m_accountId, .dataType = "Email"});
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&generation))
+            return *error;
+
+        m_pendingNotificationHorizonMailboxIds = std::move(mailboxIds);
+        m_notificationHorizonRetryAttempts = 0;
+        m_notificationHorizonRetryTimer.stop();
+        scheduleNotificationHorizonRefresh();
+        return std::nullopt;
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    AccountSyncCoordinator::cancelNotificationHorizonBaseline()
+    {
+        if (!m_pendingNotificationHorizonMailboxIds.has_value())
+            return std::nullopt;
+
+        javelin::jmap::sync::ConsistencyDomainRepository consistency{m_databaseConnection};
+        const auto generation =
+            consistency.advanceMutation({.accountId = m_accountId, .dataType = "Email"});
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&generation))
+            return *error;
+
+        m_pendingNotificationHorizonMailboxIds.reset();
+        m_notificationHorizonRetryAttempts = 0;
+        m_notificationHorizonRetryTimer.stop();
+        return std::nullopt;
+    }
+
     void AccountSyncCoordinator::stop()
     {
         if (m_runContext != nullptr)
@@ -188,6 +232,7 @@ namespace javelin::app
         m_pendingIdentityStateChanges.clear();
         m_authenticationRecoveryInFlight = false;
         m_refreshDebounceTimer.stop();
+        m_notificationHorizonRetryTimer.stop();
         m_queuedRefreshDemand = {};
         m_debouncedRefreshDemand = {};
         setStatus(Status::Disconnected);
@@ -420,6 +465,15 @@ namespace javelin::app
         do
         {
             co_await refreshWatchedMailboxOnce(runContext, demand, retryLease);
+            if (demand.allMailboxes && m_pendingNotificationHorizonMailboxIds.has_value())
+            {
+                m_queuedRefreshDemand.merge(MailRefreshDemand{
+                    .mailboxState = false,
+                    .emailState = true,
+                    .allMailboxes = false,
+                    .mailboxIds = {},
+                });
+            }
             runContext = m_runContext;
             if (runContext == nullptr || runContext->generation != generation ||
                 runContext->cancellation.isCancelled())
@@ -503,10 +557,12 @@ namespace javelin::app
         {
             javelin::jmap::sync::MailDeltaRefreshExecutor deltaExecutor{
                 m_databaseConnection, methodCaller, apiRequestContext};
+            const auto notificationHorizonMailboxIds =
+                demand.emailState ? m_pendingNotificationHorizonMailboxIds : std::nullopt;
             const auto deltaResult = co_await deltaExecutor.refresh(
                 runContext->configuration.accountId,
                 {.mailbox = demand.mailboxState, .email = demand.emailState},
-                runContext->configuration.remoteAccountId);
+                runContext->configuration.remoteAccountId, notificationHorizonMailboxIds);
             if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
                 runContext->cancellation.isCancelled())
             {
@@ -517,7 +573,11 @@ namespace javelin::app
                 qWarning().noquote() << "Account mail delta refresh failed" << error->message;
                 recordRefreshFailure(retryLease, *error);
                 publishOperationError(QStringLiteral("Synchronize mail changes"), *error);
-                if (javelin::jmap::isTransientError(*error))
+                if (notificationHorizonMailboxIds.has_value() &&
+                    (error->code == javelin::jmap::OperationErrorCode::LocalStorageBusy ||
+                     error->code == javelin::jmap::OperationErrorCode::LocalStorageFailure))
+                    scheduleNotificationHorizonRetry();
+                else if (javelin::jmap::isTransientError(*error))
                     scheduleDebouncedRefresh(true);
                 co_return;
             }
@@ -527,6 +587,13 @@ namespace javelin::app
             {
                 m_queuedRefreshDemand.merge(demand);
                 co_return;
+            }
+            if (delta.notificationHorizonEstablished && notificationHorizonMailboxIds.has_value() &&
+                m_pendingNotificationHorizonMailboxIds == notificationHorizonMailboxIds)
+            {
+                m_pendingNotificationHorizonMailboxIds.reset();
+                m_notificationHorizonRetryAttempts = 0;
+                m_notificationHorizonRetryTimer.stop();
             }
             mailboxStateChanged = delta.mailboxChanged;
             emailCacheChanged = delta.emailChanged;
@@ -778,6 +845,36 @@ namespace javelin::app
                                                              .allMailboxes = false,
                                                              .mailboxIds = std::move(mailboxIds)});
         m_refreshDebounceTimer.start(static_cast<int>(refreshDebounceInterval.count()));
+    }
+
+    void AccountSyncCoordinator::scheduleNotificationHorizonRetry()
+    {
+        if (!m_pendingNotificationHorizonMailboxIds.has_value())
+            return;
+        const auto exponent =
+            std::min(m_notificationHorizonRetryAttempts, notificationHorizonRetryMaximumExponent);
+        ++m_notificationHorizonRetryAttempts;
+        m_notificationHorizonRetryTimer.start(
+            static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::seconds{1U << exponent})
+                                 .count()));
+    }
+
+    void AccountSyncCoordinator::scheduleNotificationHorizonRefresh()
+    {
+        if (!m_pendingNotificationHorizonMailboxIds.has_value() || !hasValidSettings() ||
+            m_runContext == nullptr)
+            return;
+
+        const MailRefreshDemand demand{
+            .mailboxState = false, .emailState = true, .allMailboxes = false, .mailboxIds = {}};
+        if (m_refreshInFlight)
+        {
+            m_queuedRefreshDemand.merge(demand);
+            return;
+        }
+        m_debouncedRefreshDemand.merge(demand);
+        m_refreshDebounceTimer.start(0);
     }
 
     void AccountSyncCoordinator::scheduleCatchUpRefresh()

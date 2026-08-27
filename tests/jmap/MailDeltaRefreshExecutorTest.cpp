@@ -813,6 +813,142 @@ TEST_CASE("account Email rebaseline retries a bounded pass when Email state adva
           "email-state-3");
 }
 
+TEST_CASE("notification enablement supersedes an in-flight Email delta and baselines atomically",
+          "[jmap][sync][mail-delta][notification][horizon][race]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
+    REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox")}).has_value());
+
+    FakeTransport transport;
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+
+    transport.queuedResults.push_back(
+        emailDeltaResponseAtStates("email-state-1", "email-state-2", R"("email-1")", {}, {},
+                                   emailJsonWithIdentity("email-1", "thread-1", "inbox", false)));
+    transport.onSend = [&database](const std::size_t requestNumber)
+    {
+        if (requestNumber != 1)
+            return;
+        javelin::jmap::sync::ConsistencyDomainRepository consistency{database.connection};
+        const auto advanced =
+            consistency.advanceMutation({.accountId = "account-1", .dataType = "Email"});
+        REQUIRE(std::holds_alternative<std::uint64_t>(advanced));
+    };
+    const auto stale = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(stale));
+    CHECK(std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(stale).superseded);
+
+    javelin::jmap::cache::SyncStateRepository states{database.connection};
+    const auto staleState =
+        states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(staleState));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(staleState).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(staleState)->stateToken ==
+          "email-state-1");
+
+    transport.onSend = {};
+    transport.queuedResults.push_back(
+        emailDeltaResponseAtStates("email-state-1", "email-state-2", R"("email-1")", {}, {},
+                                   emailJsonWithIdentity("email-1", "thread-1", "inbox", false)));
+    const auto baseline = QCoro::waitFor(
+        executor.refresh("account-1", {.email = true}, {}, std::vector<std::string>{"inbox"}));
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(baseline));
+    const auto& baselineSummary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(baseline);
+    CHECK(baselineSummary.notificationHorizonEstablished);
+    CHECK_FALSE(baselineSummary.notificationEventsCreated);
+
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    const auto horizons = notifications.mailboxHorizonsAtState("account-1", "email-state-2");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(horizons));
+    CHECK(std::get<std::vector<std::string>>(horizons) == std::vector<std::string>{"inbox"});
+    const auto historicalPending = notifications.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        historicalPending));
+    CHECK(
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(historicalPending)
+            .empty());
+
+    transport.queuedResults.push_back(
+        emailDeltaResponseAtStates("email-state-2", "email-state-3", R"("email-2")", {}, {},
+                                   emailJsonWithIdentity("email-2", "thread-2", "inbox", false)));
+    const auto subsequent = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(subsequent));
+    CHECK(std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(subsequent)
+              .notificationEventsCreated);
+    const auto pending = notifications.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        pending));
+    const auto& events =
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pending);
+    REQUIRE(events.size() == 1);
+    CHECK(events.front().emailId == "email-2");
+}
+
+TEST_CASE("notification horizon persistence failure rolls back the Email baseline",
+          "[jmap][sync][mail-delta][notification][horizon][atomicity]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
+    REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox")}).has_value());
+
+    QSqlQuery failHorizon{database.connection.database()};
+    REQUIRE(failHorizon.exec(QStringLiteral(
+        "CREATE TRIGGER fail_notification_horizon_insert BEFORE INSERT ON "
+        "mail_notification_horizons BEGIN SELECT RAISE(FAIL,'forced horizon failure'); END")));
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(
+        emailDeltaResponseAtStates("email-state-1", "email-state-2", R"("email-1")", {}, {},
+                                   emailJsonWithIdentity("email-1", "thread-1", "inbox", false)));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto failed = QCoro::waitFor(
+        executor.refresh("account-1", {.email = true}, {}, std::vector<std::string>{"inbox"}));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(failed));
+
+    javelin::jmap::cache::SyncStateRepository states{database.connection};
+    const auto stateResult =
+        states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult));
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult)->stateToken ==
+          "email-state-1");
+
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    const auto cached = emails.find("account-1", "email-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cached));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(cached).has_value());
+
+    REQUIRE(failHorizon.exec(QStringLiteral("DROP TRIGGER fail_notification_horizon_insert")));
+    transport.queuedResults.push_back(
+        emailDeltaResponseAtStates("email-state-1", "email-state-2", R"("email-1")", {}, {},
+                                   emailJsonWithIdentity("email-1", "thread-1", "inbox", false)));
+    const auto retried = QCoro::waitFor(
+        executor.refresh("account-1", {.email = true}, {}, std::vector<std::string>{"inbox"}));
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(retried));
+    CHECK(std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(retried)
+              .notificationHorizonEstablished);
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    const auto horizons = notifications.mailboxHorizonsAtState("account-1", "email-state-2");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(horizons));
+    CHECK(std::get<std::vector<std::string>>(horizons) == std::vector<std::string>{"inbox"});
+}
+
 TEST_CASE("account Email delta creates one event for a multi-mailbox unread arrival",
           "[jmap][sync][mail-delta][notification]")
 {

@@ -220,8 +220,8 @@ TEST_CASE("notification-only mailboxes are not presentation sync interests",
     CHECK(configurations.front().notificationMailboxIds == std::vector<std::string>{"notify-only"});
 }
 
-TEST_CASE("notification horizon persistence retries after transient database failure",
-          "[app][daemon][settings][notification][retry]")
+TEST_CASE("notification settings fence Email sync before activating a new horizon",
+          "[app][daemon][settings][notification][horizon][race]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -241,59 +241,58 @@ TEST_CASE("notification horizon persistence retries after transient database fai
     REQUIRE(seed.exec(
         QStringLiteral("INSERT INTO sync_state(account_id,object_type,query_key,state_token) "
                        "VALUES('account-1','Email','','email-state-1')")));
-    QSqlQuery emailState{connection.database()};
-    REQUIRE(emailState.exec(QStringLiteral(
-        "SELECT state_token FROM sync_state WHERE account_id='account-1' AND object_type='Email' "
-        "AND query_key=''")));
-    REQUIRE(emailState.next());
-    const auto expectedEmailState = emailState.value(0).toString();
-    REQUIRE(seed.exec(QStringLiteral(
-        "CREATE TRIGGER fail_notification_horizon_insert BEFORE INSERT ON "
-        "mail_notification_horizons BEGIN SELECT RAISE(FAIL,'forced transient failure'); END")));
 
-    services.accountRuntimeManager().applySettings({javelin::app::AccountSyncConfiguration{
-        .settings = {.connectionId = "connection-1",
-                     .revision = 0,
-                     .sessionUrl = "http://127.0.0.1:9/jmap",
-                     .loginEmail = "user@example.test",
-                     .apiKey = "secret",
-                     .refreshToken = {},
-                     .tokenEndpoint = {},
-                     .oauthClientId = {}},
-        .accountId = "account-1",
-        .mailboxIds = {},
-        .fullSyncMailboxIds = {},
-        .notificationMailboxIds = {"inbox"},
-    }});
+    const auto configuration = [](std::vector<std::string> notificationMailboxIds)
+    {
+        return javelin::app::AccountSyncConfiguration{
+            .settings = {.connectionId = "connection-1",
+                         .revision = 0,
+                         .sessionUrl = "http://127.0.0.1:9/jmap",
+                         .loginEmail = "user@example.test",
+                         .apiKey = "secret",
+                         .refreshToken = {},
+                         .tokenEndpoint = {},
+                         .oauthClientId = {}},
+            .accountId = "account-1",
+            .mailboxIds = {},
+            .fullSyncMailboxIds = {},
+            .notificationMailboxIds = std::move(notificationMailboxIds),
+        };
+    };
+
+    services.accountRuntimeManager().applySettings({configuration({"inbox"})});
 
     QSqlQuery horizon{connection.database()};
     REQUIRE(horizon.exec(QStringLiteral(
         "SELECT COUNT(*) FROM mail_notification_horizons WHERE account_id='account-1'")));
     REQUIRE(horizon.next());
     CHECK(horizon.value(0).toInt() == 0);
-    REQUIRE(seed.exec(QStringLiteral("DROP TRIGGER fail_notification_horizon_insert")));
 
-    constexpr auto retryTimeout = std::chrono::milliseconds{1500};
-    constexpr auto retryPollInterval = std::chrono::milliseconds{10};
-    QElapsedTimer retryTimer;
-    retryTimer.start();
-    bool horizonReady = false;
-    while (retryTimer.elapsed() < retryTimeout.count())
-    {
-        QCoreApplication::processEvents();
-        REQUIRE(horizon.exec(QStringLiteral(
-            "SELECT email_state FROM mail_notification_horizons WHERE account_id='account-1' AND "
-            "mailbox_id='inbox'")));
-        if (horizon.next() && horizon.value(0).toString() == expectedEmailState)
-        {
-            horizonReady = true;
-            break;
-        }
-        QThread::msleep(static_cast<unsigned long>(retryPollInterval.count()));
-    }
+    QSqlQuery generation{connection.database()};
+    REQUIRE(generation.exec(QStringLiteral(
+        "SELECT mutation_generation FROM consistency_domains WHERE account_id='account-1' AND "
+        "data_type='Email'")));
+    REQUIRE(generation.next());
+    CHECK(generation.value(0).toULongLong() == 1);
 
-    REQUIRE(horizonReady);
-    CHECK(horizon.value(0).toString() == expectedEmailState);
+    services.accountRuntimeManager().applySettings({configuration({"inbox"})});
+    REQUIRE(generation.exec(QStringLiteral(
+        "SELECT mutation_generation FROM consistency_domains WHERE account_id='account-1' AND "
+        "data_type='Email'")));
+    REQUIRE(generation.next());
+    CHECK(generation.value(0).toULongLong() == 1);
+
+    services.accountRuntimeManager().applySettings({configuration({"archive"})});
+    REQUIRE(generation.exec(QStringLiteral(
+        "SELECT mutation_generation FROM consistency_domains WHERE account_id='account-1' AND "
+        "data_type='Email'")));
+    REQUIRE(generation.next());
+    CHECK(generation.value(0).toULongLong() == 2);
+
+    REQUIRE(horizon.exec(QStringLiteral(
+        "SELECT COUNT(*) FROM mail_notification_horizons WHERE account_id='account-1'")));
+    REQUIRE(horizon.next());
+    CHECK(horizon.value(0).toInt() == 0);
 }
 
 TEST_CASE("daemon log store enforces a bounded history", "[app][daemon][logging]")

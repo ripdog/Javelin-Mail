@@ -1292,37 +1292,59 @@ namespace javelin::app
         configuration.mailboxIds.erase(std::ranges::unique(configuration.mailboxIds).begin(),
                                        configuration.mailboxIds.end());
 
-        std::optional<std::string> currentEmailState;
-        bool notificationHorizonSyncFailed = false;
-        javelin::jmap::cache::SyncStateRepository syncStates{m_databaseConnection};
-        const auto emailState =
-            syncStates.find({.accountId = accountId, .objectType = "Email", .queryKey = {}});
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailState))
+        bool notificationHorizonCheckFailed = false;
+        bool notificationHorizonBaselineRequired = false;
+        javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
+        if (const auto horizonError = notifications.synchronizeMailboxHorizons(
+                accountId, configuration.notificationMailboxIds, std::nullopt))
         {
-            qWarning().noquote() << "Could not read Email state for notification horizon"
-                                 << QString::fromStdString(accountId) << error->message;
-            notificationHorizonSyncFailed = true;
+            qWarning().noquote() << "Could not prune disabled notification horizons"
+                                 << QString::fromStdString(accountId) << horizonError->message;
+            notificationHorizonCheckFailed = true;
+            notificationHorizonBaselineRequired = true;
         }
         else
         {
-            if (const auto& state =
-                    std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState);
-                state.has_value())
-                currentEmailState = state->stateToken;
-
-            javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
-            if (const auto horizonError = notifications.synchronizeMailboxHorizons(
-                    accountId, configuration.notificationMailboxIds,
-                    currentEmailState.has_value()
-                        ? std::optional<std::string_view>{*currentEmailState}
-                        : std::nullopt))
+            javelin::jmap::cache::SyncStateRepository syncStates{m_databaseConnection};
+            const auto emailState =
+                syncStates.find({.accountId = accountId, .objectType = "Email", .queryKey = {}});
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailState))
             {
-                qWarning().noquote() << "Could not synchronize notification horizons"
-                                     << QString::fromStdString(accountId) << horizonError->message;
-                notificationHorizonSyncFailed = true;
+                qWarning().noquote() << "Could not read Email state for notification horizon"
+                                     << QString::fromStdString(accountId) << error->message;
+                notificationHorizonCheckFailed = true;
+                notificationHorizonBaselineRequired = true;
+            }
+            else if (const auto& state =
+                         std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState);
+                     !state.has_value())
+            {
+                notificationHorizonBaselineRequired = !configuration.notificationMailboxIds.empty();
+            }
+            else
+            {
+                const auto horizonResult =
+                    notifications.mailboxHorizonsAtState(accountId, state->stateToken);
+                if (const auto* horizonReadError =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&horizonResult))
+                {
+                    qWarning().noquote()
+                        << "Could not read notification horizons"
+                        << QString::fromStdString(accountId) << horizonReadError->message;
+                    notificationHorizonCheckFailed = true;
+                    notificationHorizonBaselineRequired = true;
+                }
+                else
+                {
+                    auto activeMailboxIds = std::get<std::vector<std::string>>(horizonResult);
+                    auto desiredMailboxIds = configuration.notificationMailboxIds;
+                    std::ranges::sort(activeMailboxIds);
+                    std::ranges::sort(desiredMailboxIds);
+                    notificationHorizonBaselineRequired = activeMailboxIds != desiredMailboxIds;
+                }
             }
         }
-        if (notificationHorizonSyncFailed)
+        if (notificationHorizonCheckFailed)
             scheduleNotificationHorizonRetry(accountId);
         else
             m_notificationHorizonRetryAttempts.erase(accountId);
@@ -1342,9 +1364,22 @@ namespace javelin::app
             coordinatorIt->second->pauseForAuthentication();
             return;
         }
+        const auto desiredNotificationMailboxIds = configuration.notificationMailboxIds;
         coordinatorIt->second->applySettings(std::move(configuration.settings), accountId,
                                              std::move(configuration.mailboxIds),
                                              std::move(configuration.notificationMailboxIds));
+        const auto horizonConfigurationError =
+            notificationHorizonBaselineRequired
+                ? coordinatorIt->second->requestNotificationHorizonBaseline(
+                      desiredNotificationMailboxIds)
+                : coordinatorIt->second->cancelNotificationHorizonBaseline();
+        if (horizonConfigurationError.has_value())
+        {
+            qWarning().noquote() << "Could not serialize notification horizon configuration"
+                                 << QString::fromStdString(accountId)
+                                 << horizonConfigurationError->message;
+            scheduleNotificationHorizonRetry(accountId);
+        }
     }
 
     void AccountRuntimeManager::scheduleNotificationHorizonRetry(const std::string& accountId)

@@ -114,6 +114,25 @@ namespace javelin::jmap::cache
         if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
             return *error;
         auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = synchronizeMailboxHorizons(transaction, accountId, enabledMailboxIds,
+                                                          currentEmailState))
+            return error;
+        return transaction.commit();
+    }
+
+    std::optional<DatabaseError> NotificationRepository::synchronizeMailboxHorizons(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::vector<std::string>& enabledMailboxIds,
+        const std::optional<std::string_view> currentEmailState)
+    {
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Notification horizon synchronization requires an active "
+                                          "matching transaction."),
+            };
+        }
 
         const std::unordered_set<std::string> enabled{enabledMailboxIds.begin(),
                                                       enabledMailboxIds.end()};
@@ -167,7 +186,7 @@ namespace javelin::jmap::cache
                 insert.finish();
             }
         }
-        return transaction.commit();
+        return std::nullopt;
     }
 
     std::variant<std::vector<std::string>, DatabaseError>

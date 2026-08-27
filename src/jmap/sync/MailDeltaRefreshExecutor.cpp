@@ -572,12 +572,13 @@ namespace javelin::jmap::sync
             std::ranges::sort(destination.queryAffectedMailboxIds);
         }
 
-        [[nodiscard]] QCoro::Task<MailDeltaRefreshResult>
-        rebaselineAccountEmails(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                                javelin::jmap::api::MethodCaller& methodCaller,
-                                const javelin::jmap::api::ApiRequestContext& apiRequestContext,
-                                const std::string& accountId, const std::string& remoteAccountId,
-                                const std::optional<std::string>& expectedState)
+        [[nodiscard]] QCoro::Task<MailDeltaRefreshResult> rebaselineAccountEmails(
+            javelin::jmap::cache::DatabaseConnection& databaseConnection,
+            javelin::jmap::api::MethodCaller& methodCaller,
+            const javelin::jmap::api::ApiRequestContext& apiRequestContext,
+            const std::string& accountId, const std::string& remoteAccountId,
+            const std::optional<std::string>& expectedState,
+            const std::optional<std::vector<std::string>>& notificationHorizonMailboxIds)
         {
             const auto workingSetResult = localEmailWorkingSet(databaseConnection, accountId);
             if (const auto* error =
@@ -753,12 +754,20 @@ namespace javelin::jmap::sync
                 superseded.superseded = true;
                 co_return superseded;
             }
+            javelin::jmap::cache::NotificationRepository notifications{databaseConnection};
             if (expectedState.has_value())
             {
-                javelin::jmap::cache::NotificationRepository notifications{databaseConnection};
                 if (const auto error = notifications.advanceMailboxHorizons(
                         transaction.cacheTransaction(), accountId, *expectedState, snapshot.state))
                     co_return operationError(*error);
+            }
+            if (notificationHorizonMailboxIds.has_value())
+            {
+                if (const auto error = notifications.synchronizeMailboxHorizons(
+                        transaction.cacheTransaction(), accountId, *notificationHorizonMailboxIds,
+                        snapshot.state))
+                    co_return operationError(*error);
+                summary.notificationHorizonEstablished = true;
             }
 
             for (const auto& mailboxId : summary.queryAffectedMailboxIds)
@@ -804,9 +813,9 @@ namespace javelin::jmap::sync
     {
     }
 
-    QCoro::Task<MailDeltaRefreshResult>
-    MailDeltaRefreshExecutor::refresh(std::string accountId, const MailDeltaRefreshRequest request,
-                                      std::string remoteAccountId) const
+    QCoro::Task<MailDeltaRefreshResult> MailDeltaRefreshExecutor::refresh(
+        std::string accountId, const MailDeltaRefreshRequest request, std::string remoteAccountId,
+        std::optional<std::vector<std::string>> notificationHorizonMailboxIds) const
     {
         if (remoteAccountId.empty())
             remoteAccountId = accountId;
@@ -842,7 +851,7 @@ namespace javelin::jmap::sync
             {
                 const auto rebaseline = co_await rebaselineAccountEmails(
                     m_databaseConnection, m_methodCaller, m_apiRequestContext, accountId,
-                    remoteAccountId, std::nullopt);
+                    remoteAccountId, std::nullopt, notificationHorizonMailboxIds);
                 if (const auto* error = std::get_if<OperationError>(&rebaseline))
                     co_return *error;
                 mergeSummary(summary, std::get<MailDeltaRefreshSummary>(rebaseline));
@@ -916,7 +925,7 @@ namespace javelin::jmap::sync
             {
                 const auto rebaseline = co_await rebaselineAccountEmails(
                     m_databaseConnection, m_methodCaller, m_apiRequestContext, accountId,
-                    remoteAccountId, emailState);
+                    remoteAccountId, emailState, notificationHorizonMailboxIds);
                 if (const auto* error = std::get_if<OperationError>(&rebaseline))
                     co_return *error;
                 const auto& rebaselineSummary = std::get<MailDeltaRefreshSummary>(rebaseline);
@@ -1071,6 +1080,13 @@ namespace javelin::jmap::sync
                     std::get_if<javelin::jmap::cache::DatabaseError>(&horizonResult))
                 co_return operationError(*error);
             notificationMailboxIds = std::get<std::vector<std::string>>(horizonResult);
+            if (notificationHorizonMailboxIds.has_value())
+            {
+                const std::unordered_set<std::string> desired{
+                    notificationHorizonMailboxIds->begin(), notificationHorizonMailboxIds->end()};
+                std::erase_if(notificationMailboxIds, [&desired](const auto& mailboxId)
+                              { return !desired.contains(mailboxId); });
+            }
         }
 
         std::unordered_set<std::string> createdIds;
@@ -1260,6 +1276,16 @@ namespace javelin::jmap::sync
                     transaction.cacheTransaction(), accountId, parsed.emailChanges->oldState,
                     parsed.emailChanges->newState))
                 co_return operationError(*error);
+            const bool finalEmailTransition =
+                !parsed.emailChanges->hasMoreChanges && !parsed.emailNeedsContinuation;
+            if (finalEmailTransition && notificationHorizonMailboxIds.has_value())
+            {
+                if (const auto error = notifications.synchronizeMailboxHorizons(
+                        transaction.cacheTransaction(), accountId, *notificationHorizonMailboxIds,
+                        parsed.emailChanges->newState))
+                    co_return operationError(*error);
+                summary.notificationHorizonEstablished = true;
+            }
         }
 
         if (parsed.mailboxChanges.has_value())
@@ -1338,15 +1364,19 @@ namespace javelin::jmap::sync
 
         std::ranges::sort(summary.changedMailboxIds);
         std::ranges::sort(summary.queryAffectedMailboxIds);
+        const bool continueEmail =
+            parsed.emailChanges.has_value() &&
+            (parsed.emailChanges->hasMoreChanges || parsed.emailNeedsContinuation);
         const MailDeltaRefreshRequest continuation{
             .mailbox = parsed.mailboxChanges.has_value() &&
                        (parsed.mailboxChanges->hasMoreChanges || parsed.mailboxNeedsContinuation),
-            .email = parsed.emailChanges.has_value() &&
-                     (parsed.emailChanges->hasMoreChanges || parsed.emailNeedsContinuation),
+            .email = continueEmail,
         };
         if (continuation.mailbox || continuation.email)
         {
-            const auto continued = co_await refresh(accountId, continuation, remoteAccountId);
+            const auto continued =
+                co_await refresh(accountId, continuation, remoteAccountId,
+                                 continueEmail ? notificationHorizonMailboxIds : std::nullopt);
             if (const auto* error = std::get_if<OperationError>(&continued))
                 co_return *error;
             const auto& next = std::get<MailDeltaRefreshSummary>(continued);
@@ -1358,6 +1388,8 @@ namespace javelin::jmap::sync
                 summary.emailNeedsFullRefresh || next.emailNeedsFullRefresh;
             summary.notificationEventsCreated =
                 summary.notificationEventsCreated || next.notificationEventsCreated;
+            summary.notificationHorizonEstablished =
+                summary.notificationHorizonEstablished || next.notificationHorizonEstablished;
             summary.superseded = summary.superseded || next.superseded;
             appendUnique(summary.changedMailboxIds, next.changedMailboxIds);
             appendUnique(summary.queryAffectedMailboxIds, next.queryAffectedMailboxIds);

@@ -44,6 +44,10 @@ namespace javelin::jmap::cache
         synchronizeMailboxHorizons(std::string_view accountId,
                                    const std::vector<std::string>& enabledMailboxIds,
                                    std::optional<std::string_view> currentEmailState);
+        [[nodiscard]] std::optional<DatabaseError>
+        synchronizeMailboxHorizons(DatabaseTransaction& transaction, std::string_view accountId,
+                                   const std::vector<std::string>& enabledMailboxIds,
+                                   std::optional<std::string_view> currentEmailState);
         [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
         mailboxHorizonsAtState(std::string_view accountId, std::string_view emailState) const;
         [[nodiscard]] std::variant<bool, DatabaseError>
