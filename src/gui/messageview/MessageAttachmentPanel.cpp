@@ -109,6 +109,7 @@ namespace javelin::gui::messageview
                         QApplication::startDragDistance())
                 {
                     m_dragStarted = true;
+                    setDown(false);
                     if (m_dragAction)
                         m_dragAction(this);
                     return;

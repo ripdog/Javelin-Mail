@@ -163,6 +163,7 @@ TEST_CASE("attachment panel resizes without replacing interactive tiles", "[gui]
         QEvent::MouseMove, QPointF{dragPoint}, QPointF{originalOpenButton->mapToGlobal(dragPoint)},
         Qt::NoButton,      Qt::LeftButton,     Qt::NoModifier};
     QApplication::sendEvent(originalOpenButton, &moveEvent);
+    CHECK_FALSE(originalOpenButton->isDown());
     QMouseEvent releaseEvent{QEvent::MouseButtonRelease,
                              QPointF{dragPoint},
                              QPointF{originalOpenButton->mapToGlobal(dragPoint)},
