@@ -241,6 +241,12 @@ TEST_CASE("notification horizon persistence retries after transient database fai
     REQUIRE(seed.exec(
         QStringLiteral("INSERT INTO sync_state(account_id,object_type,query_key,state_token) "
                        "VALUES('account-1','Email','','email-state-1')")));
+    QSqlQuery emailState{connection.database()};
+    REQUIRE(emailState.exec(QStringLiteral(
+        "SELECT state_token FROM sync_state WHERE account_id='account-1' AND object_type='Email' "
+        "AND query_key=''")));
+    REQUIRE(emailState.next());
+    const auto expectedEmailState = emailState.value(0).toString();
     REQUIRE(seed.exec(QStringLiteral(
         "CREATE TRIGGER fail_notification_horizon_insert BEFORE INSERT ON "
         "mail_notification_horizons BEGIN SELECT RAISE(FAIL,'forced transient failure'); END")));
@@ -278,7 +284,7 @@ TEST_CASE("notification horizon persistence retries after transient database fai
         REQUIRE(horizon.exec(QStringLiteral(
             "SELECT email_state FROM mail_notification_horizons WHERE account_id='account-1' AND "
             "mailbox_id='inbox'")));
-        if (horizon.next())
+        if (horizon.next() && horizon.value(0).toString() == expectedEmailState)
         {
             horizonReady = true;
             break;
@@ -287,7 +293,7 @@ TEST_CASE("notification horizon persistence retries after transient database fai
     }
 
     REQUIRE(horizonReady);
-    CHECK(horizon.value(0).toString() == QStringLiteral("email-state-1"));
+    CHECK(horizon.value(0).toString() == expectedEmailState);
 }
 
 TEST_CASE("daemon log store enforces a bounded history", "[app][daemon][logging]")
