@@ -125,15 +125,21 @@ namespace javelin::jmap::cache
         if (!existing.exec())
             return queryError(QStringLiteral("Read notification horizons"), existing);
 
+        std::vector<std::string> disabledMailboxIds;
+        while (existing.next())
+        {
+            const auto mailboxId = existing.value(0).toString().toStdString();
+            if (!enabled.contains(mailboxId))
+                disabledMailboxIds.push_back(mailboxId);
+        }
+        existing.finish();
+
         QSqlQuery remove{m_connection.database()};
         remove.prepare(QStringLiteral(
             "DELETE FROM mail_notification_horizons WHERE account_id=:account_id AND "
             "mailbox_id=:mailbox_id"));
-        while (existing.next())
+        for (const auto& mailboxId : disabledMailboxIds)
         {
-            const auto mailboxId = existing.value(0).toString().toStdString();
-            if (enabled.contains(mailboxId))
-                continue;
             remove.bindValue(QStringLiteral(":account_id"),
                              QString::fromStdString(std::string{accountId}));
             remove.bindValue(QStringLiteral(":mailbox_id"), QString::fromStdString(mailboxId));
@@ -255,22 +261,46 @@ namespace javelin::jmap::cache
         if (!pending.exec())
             return queryError(QStringLiteral("Read pending mail notification events"), pending);
 
+        struct PendingCandidate
+        {
+            MailNotificationPendingEvent event;
+            bool eligible = false;
+        };
+        std::vector<PendingCandidate> candidates;
+        while (pending.next())
+        {
+            candidates.push_back(PendingCandidate{
+                .event =
+                    {
+                        .accountId = std::string{accountId},
+                        .mailboxId = pending.value(0).toString().toStdString(),
+                        .emailId = pending.value(1).toString().toStdString(),
+                        .threadId = pending.value(2).toString().toStdString(),
+                        .subject = pending.value(3).isNull()
+                                       ? std::nullopt
+                                       : std::optional{pending.value(3).toString().toStdString()},
+                        .receivedAt = pending.value(4).toString().toStdString(),
+                    },
+                .eligible = pending.value(5).toBool() && !pending.value(6).toBool() &&
+                            pending.value(7).toBool(),
+            });
+        }
+        pending.finish();
+
         QSqlQuery cancel{m_connection.database()};
         cancel.prepare(QStringLiteral(
             "DELETE FROM mail_notification_event_outbox WHERE account_id=:account_id AND "
             "email_id=:email_id"));
         NotificationDispatchRepository dispatches{m_connection};
         std::vector<MailNotificationPendingEvent> events;
-        while (pending.next())
+        for (auto& candidate : candidates)
         {
-            const auto emailId = pending.value(1).toString().toStdString();
-            const bool eligible = pending.value(5).toBool() && !pending.value(6).toBool() &&
-                                  pending.value(7).toBool();
-            if (!eligible)
+            if (!candidate.eligible)
             {
                 cancel.bindValue(QStringLiteral(":account_id"),
                                  QString::fromStdString(std::string{accountId}));
-                cancel.bindValue(QStringLiteral(":email_id"), QString::fromStdString(emailId));
+                cancel.bindValue(QStringLiteral(":email_id"),
+                                 QString::fromStdString(candidate.event.emailId));
                 if (!cancel.exec())
                     return queryError(QStringLiteral("Cancel stale mail notification event"),
                                       cancel);
@@ -279,21 +309,12 @@ namespace javelin::jmap::cache
             }
 
             const auto claimed = dispatches.claim(transaction, NotificationDispatchKind::Mail,
-                                                  mailClaimKey(accountId, emailId));
+                                                  mailClaimKey(accountId, candidate.event.emailId));
             if (const auto* error = std::get_if<DatabaseError>(&claimed))
                 return *error;
             if (!std::get<bool>(claimed))
                 continue;
-            events.push_back(MailNotificationPendingEvent{
-                .accountId = std::string{accountId},
-                .mailboxId = pending.value(0).toString().toStdString(),
-                .emailId = emailId,
-                .threadId = pending.value(2).toString().toStdString(),
-                .subject = pending.value(3).isNull()
-                               ? std::nullopt
-                               : std::optional{pending.value(3).toString().toStdString()},
-                .receivedAt = pending.value(4).toString().toStdString(),
-            });
+            events.push_back(std::move(candidate.event));
         }
         if (const auto error = transaction.commit())
             return *error;

@@ -333,6 +333,71 @@ TEST_CASE("notification delivery revalidates pending events locally",
     }
 }
 
+TEST_CASE("notification delivery cancels every stale event in one pass",
+          "[jmap][cache][notification][delivery]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    auto first = loadEmailFixture();
+    first.id = "stale-1";
+    first.threadId = "stale-thread-1";
+    first.mailboxIds = {"mbx-inbox"};
+    first.keywords = {};
+    auto second = first;
+    second.id = "stale-2";
+    second.threadId = "stale-thread-2";
+    auto third = first;
+    third.id = "stale-3";
+    third.threadId = "stale-thread-3";
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(emails.replaceAll("account-1", {first, second, third}).has_value());
+    javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
+    REQUIRE_FALSE(notifications
+                      .synchronizeMailboxHorizons("account-1", {"mbx-inbox"},
+                                                  std::string_view{"email-state-1"})
+                      .has_value());
+
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Create stale notifications"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    for (const auto* email : {&first, &second, &third})
+    {
+        const auto created =
+            notifications.createEventIfUnconsumed(transaction, "account-1",
+                                                  {.mailboxId = "mbx-inbox",
+                                                   .emailId = email->id,
+                                                   .threadId = email->threadId,
+                                                   .subject = email->subject,
+                                                   .receivedAt = email->receivedAt});
+        REQUIRE(std::holds_alternative<bool>(created));
+        REQUIRE(std::get<bool>(created));
+    }
+    REQUIRE_FALSE(transaction.commit().has_value());
+
+    first.keywords = {"$seen"};
+    second.keywords = {"$seen"};
+    third.keywords = {"$seen"};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {first, second, third}).has_value());
+
+    const auto claimed = notifications.claimPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        claimed));
+    CHECK(
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(claimed).empty());
+    const auto pending = notifications.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        pending));
+    CHECK(
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pending).empty());
+}
+
 TEST_CASE("per-Email notification consumption survives delivery and mailbox movement",
           "[jmap][cache][notification][consumption]")
 {
@@ -438,13 +503,14 @@ TEST_CASE("notification mailbox horizons linearize enablement against Email stat
     javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
 
     REQUIRE_FALSE(notifications
-                      .synchronizeMailboxHorizons("account-1", {"mbx-inbox", "mbx-archive"},
-                                                  std::string_view{"email-state-1"})
+                      .synchronizeMailboxHorizons(
+                          "account-1", {"mbx-inbox", "mbx-archive", "mbx-projects", "mbx-junk"},
+                          std::string_view{"email-state-1"})
                       .has_value());
     const auto initial = notifications.mailboxHorizonsAtState("account-1", "email-state-1");
     REQUIRE(std::holds_alternative<std::vector<std::string>>(initial));
     CHECK(std::get<std::vector<std::string>>(initial) ==
-          std::vector<std::string>{"mbx-archive", "mbx-inbox"});
+          std::vector<std::string>{"mbx-archive", "mbx-inbox", "mbx-junk", "mbx-projects"});
 
     REQUIRE_FALSE(notifications
                       .synchronizeMailboxHorizons("account-1", {"mbx-archive"},
