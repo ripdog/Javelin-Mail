@@ -8,6 +8,7 @@
 #include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
+#include "jmap/cache/NotificationRepository.h"
 #include "jmap/cache/QueryWindowReadRepository.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
@@ -2187,6 +2188,9 @@ TEST_CASE("EmailMutationEngine submits queued read keyword mutations through Ema
         syncStates
             .upsert({.accountId = "u1", .objectType = "Email", .queryKey = {}}, "email-state-1")
             .has_value());
+    javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
+    REQUIRE_FALSE(
+        notifications.synchronizeMailboxHorizons("u1", {"mbx-inbox"}, "email-state-1").has_value());
 
     FakeTransport transport;
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
@@ -2243,6 +2247,14 @@ TEST_CASE("EmailMutationEngine submits queued read keyword mutations through Ema
     CHECK(
         std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(acceptedState)->stateToken ==
         "email-state-2");
+
+    const auto advancedHorizons = notifications.mailboxHorizonsAtState("u1", "email-state-2");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(advancedHorizons));
+    CHECK(std::get<std::vector<std::string>>(advancedHorizons) ==
+          std::vector<std::string>{"mbx-inbox"});
+    const auto staleHorizons = notifications.mailboxHorizonsAtState("u1", "email-state-1");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(staleHorizons));
+    CHECK(std::get<std::vector<std::string>>(staleHorizons).empty());
 }
 
 TEST_CASE("MailboxMutationEngine hides a mailbox with optimistic set semantics",
