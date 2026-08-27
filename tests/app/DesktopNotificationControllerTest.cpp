@@ -187,13 +187,13 @@ namespace
             std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
         auto transaction =
             std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
-        const auto created = notifications.createEventIfUnconsumed(
-            transaction, "account-1",
-            {.mailboxId = "inbox",
-             .emailId = email.id,
-             .threadId = email.threadId,
-             .subject = email.subject,
-             .receivedAt = email.receivedAt});
+        const auto created =
+            notifications.createEventIfUnconsumed(transaction, "account-1",
+                                                  {.mailboxId = "inbox",
+                                                   .emailId = email.id,
+                                                   .threadId = email.threadId,
+                                                   .subject = email.subject,
+                                                   .receivedAt = email.receivedAt});
         REQUIRE(std::holds_alternative<bool>(created));
         REQUIRE(std::get<bool>(created));
         REQUIRE_FALSE(transaction.commit().has_value());
@@ -346,7 +346,8 @@ TEST_CASE("failed daemon desktop delivery retries from local notification state 
     CHECK(rowCount(services, QStringLiteral("notification_dispatch_claims")) == 0);
 
     // This is the same local retry body invoked by the background retry timer. No account runtime
-    // exists in this process, so successful retryability cannot be supplied by JMAP synchronization.
+    // exists in this process, so successful retryability cannot be supplied by JMAP
+    // synchronization.
     services.mailNotificationService().accountChanged(QStringLiteral("account-1"));
     CHECK(observer->sendCount == 2);
     CHECK(rowCount(services, QStringLiteral("mail_notification_event_outbox")) == 1);
@@ -402,8 +403,7 @@ TEST_CASE("new mail actions mutate through the daemon while no GUI is running",
     javelin::jmap::cache::EmailRepository emails{services.databaseConnection()};
     const auto archivedResult = emails.find("account-1", "email-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(archivedResult));
-    const auto& archived =
-        std::get<std::optional<javelin::jmap::domain::Email>>(archivedResult);
+    const auto& archived = std::get<std::optional<javelin::jmap::domain::Email>>(archivedResult);
     REQUIRE(archived.has_value());
     CHECK(std::ranges::contains(archived->mailboxIds, std::string{"archive"}));
     CHECK_FALSE(std::ranges::contains(archived->mailboxIds, std::string{"inbox"}));

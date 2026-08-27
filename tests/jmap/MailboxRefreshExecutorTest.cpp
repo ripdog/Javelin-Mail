@@ -454,8 +454,8 @@ TEST_CASE("full mailbox materialization cannot advance account Email state",
     REQUIRE(parsedDestroyed.ok());
     REQUIRE(parsedDestroyed.value.has_value());
     javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
-    REQUIRE_FALSE(
-        emails.replaceAll("account-1", {*parsedArchived.value, *parsedDestroyed.value}).has_value());
+    REQUIRE_FALSE(emails.replaceAll("account-1", {*parsedArchived.value, *parsedDestroyed.value})
+                      .has_value());
 
     javelin::jmap::cache::SyncStateRepository states{databaseContext.connection};
     REQUIRE_FALSE(states
@@ -598,7 +598,8 @@ TEST_CASE("full mailbox materialization cannot advance account Email state",
     const auto destroyedAfterDelta = emails.find("account-1", "eml-destroyed");
     REQUIRE(
         std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(destroyedAfterDelta));
-    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(destroyedAfterDelta).has_value());
+    CHECK_FALSE(
+        std::get<std::optional<javelin::jmap::domain::Email>>(destroyedAfterDelta).has_value());
 }
 
 TEST_CASE("mailbox refresh materializes representatives within get limits",
@@ -1255,7 +1256,8 @@ TEST_CASE("mailbox query rebuild cannot manufacture notifications from historica
     const auto pending = notifications.listPendingEvents("account-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
         pending));
-    CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pending).empty());
+    CHECK(
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pending).empty());
 
     QSqlQuery consumed{databaseContext.connection.database()};
     REQUIRE(consumed.exec(QStringLiteral(
@@ -1461,12 +1463,12 @@ TEST_CASE("sequential watched mailbox refreshes never advance account Email stat
                                .queryKey = mailboxQueryKey()},
                               "inbox-query-1")
                       .has_value());
-    REQUIRE_FALSE(states
-                      .upsert({.accountId = "account-1",
-                               .objectType = "EmailQuery",
-                               .queryKey = archiveQueryKey},
-                              "archive-query-1")
-                      .has_value());
+    REQUIRE_FALSE(
+        states
+            .upsert(
+                {.accountId = "account-1", .objectType = "EmailQuery", .queryKey = archiveQueryKey},
+                "archive-query-1")
+            .has_value());
     REQUIRE_FALSE(states
                       .upsert({.accountId = "account-1", .objectType = "Email", .queryKey = {}},
                               "email-state-2")
@@ -1522,18 +1524,18 @@ TEST_CASE("sequential watched mailbox refreshes never advance account Email stat
                                                          makeRequestContext()};
     for (const auto& mailboxId : {std::string{"mbx-inbox"}, std::string{"mbx-archive"}})
     {
-        const auto result = QCoro::waitFor(executor.refreshCollapsedMailbox(
-            "account-1", mailboxId, {}, false));
+        const auto result =
+            QCoro::waitFor(executor.refreshCollapsedMailbox("account-1", mailboxId, {}, false));
         REQUIRE(std::holds_alternative<javelin::jmap::sync::MailboxRefreshSummary>(result));
         CHECK(std::get<javelin::jmap::sync::MailboxRefreshSummary>(result).usedIncrementalRefresh);
         const auto emailState =
             states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
         REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(
             emailState));
-        REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState)
-                    .has_value());
-        CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState)->stateToken ==
-              "email-state-2");
+        REQUIRE(
+            std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState).has_value());
+        CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState)
+                  ->stateToken == "email-state-2");
     }
 
     REQUIRE(transport.requests.size() == 2);

@@ -76,9 +76,9 @@ namespace
     [[nodiscard]] std::string emailGetArguments(std::string_view accountId, std::string_view state,
                                                 std::string_view emailJson)
     {
-        return std::string{R"({"accountId":")"} + std::string{accountId} +
-               R"(","state":")" + std::string{state} + R"(","list":[)" +
-               std::string{emailJson} + R"(],"notFound":[]})";
+        return std::string{R"({"accountId":")"} + std::string{accountId} + R"(","state":")" +
+               std::string{state} + R"(","list":[)" + std::string{emailJson} +
+               R"(],"notFound":[]})";
     }
 
     [[nodiscard]] std::string emailFixtureWithIdentity(std::string_view emailId,
@@ -277,7 +277,8 @@ TEST_CASE("AccountBootstrapClient does not invent an initial mailbox when none i
               ->stateToken == "email-state-1");
 }
 
-TEST_CASE("AccountBootstrapClient baselines historical unread mail before configured window materialization",
+TEST_CASE("AccountBootstrapClient baselines historical unread mail before configured window "
+          "materialization",
           "[jmap][core][bootstrap][notification]")
 {
     ensureApplication();
@@ -320,38 +321,46 @@ TEST_CASE("AccountBootstrapClient baselines historical unread mail before config
             .sessionState = "session-state-2",
         })),
     });
-    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
-        .statusCode = 200,
-        .body = QByteArray::fromStdString(serializeResponseEnvelope({
-            .methodResponses =
-                {
-                    {
-                        .name = "Email/query",
-                        .arguments =
-                            R"({"accountId":"u1","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["eml-1"],"total":1})",
-                        .callId = "mailbox-query",
-                    },
-                    {
-                        .name = "Email/get",
-                        .arguments = emailGetArguments("u1", "email-state-1", unreadEmail),
-                        .callId = "thread-ids-get",
-                    },
-                    {
-                        .name = "Thread/get",
-                        .arguments =
-                            R"({"accountId":"u1","state":"thread-state-1","list":[{"id":"thr-123","emailIds":["eml-1"]}],"notFound":[]})",
-                        .callId = "threads-get",
-                    },
-                    {
-                        .name = "Email/get",
-                        .arguments = emailGetArguments("u1", "email-state-1", unreadEmail),
-                        .callId = "mailbox-emails-get",
-                    },
-                },
-            .createdIds = std::nullopt,
-            .sessionState = "session-state-3",
-        })),
-    });
+    transport.queuedResults
+        .push_back(
+            javelin::jmap::api::HttpResponse{
+                .statusCode = 200,
+                .body =
+                    QByteArray::fromStdString(
+                        serializeResponseEnvelope(
+                            {
+                                .methodResponses =
+                                    {
+                                        {
+                                            .name = "Email/query",
+                                            .arguments =
+                                                R"({"accountId":"u1","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["eml-1"],"total":1})",
+                                            .callId = "mailbox-query",
+                                        },
+                                        {
+                                            .name = "Email/get",
+                                            .arguments = emailGetArguments("u1", "email-state-1",
+                                                                           unreadEmail),
+                                            .callId = "thread-ids-get",
+                                        },
+                                        {
+                                            .name = "Thread/get",
+                                            .arguments =
+                                                R"({"accountId":"u1","state":"thread-state-1","list":[{"id":"thr-123","emailIds":["eml-1"]}],"notFound":[]})",
+                                            .callId = "threads-get",
+                                        },
+                                        {
+                                            .name = "Email/get",
+                                            .arguments =
+                                                emailGetArguments("u1",
+                                                                  "email-state-1", unreadEmail),
+                                            .callId = "mailbox-emails-get",
+                                        },
+                                    },
+                                .createdIds = std::nullopt,
+                                .sessionState = "session-state-3",
+                            })),
+            });
 
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
     javelin::jmap::AccountBootstrapClient bootstrap{database, transport, methodTransport};

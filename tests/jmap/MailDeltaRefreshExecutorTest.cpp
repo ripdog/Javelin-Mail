@@ -493,7 +493,8 @@ namespace
         QSqlQuery item{connection.database()};
         item.prepare(QStringLiteral(
             "INSERT INTO mail_import_items(item_id,operation_id,ordinal,source_path,source_kind,"
-            "decoded_size,source_canonical_path,source_size,source_mtime_ms,phase,created_email_id) "
+            "decoded_size,source_canonical_path,source_size,source_mtime_ms,phase,created_email_id)"
+            " "
             "VALUES(:item_id,'import-batch',:ordinal,:source_path,'eml',1,:canonical_path,1,1,"
             "'created',:email_id)"));
         for (std::size_t index = 0; index < emailIds.size(); ++index)
@@ -1207,18 +1208,16 @@ TEST_CASE("account Email delta suppresses server confirmation of local mailbox o
         seedEmailState(database.connection);
         javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
         REQUIRE_FALSE(mailboxes
-                          .upsertMany("account-1",
-                                      {mailbox("inbox", 1, "inbox"),
-                                       mailbox("archive", 1, "archive"),
-                                       mailbox("junk", 1, "junk")})
+                          .upsertMany("account-1", {mailbox("inbox", 1, "inbox"),
+                                                    mailbox("archive", 1, "archive"),
+                                                    mailbox("junk", 1, "junk")})
                           .has_value());
         seedNotificationHorizons(database.connection, operation.notificationMailboxIds);
         javelin::jmap::cache::EmailRepository emails{database.connection};
-        REQUIRE_FALSE(
-            emails
-                .upsertMany("account-1",
-                            {email(operation.currentMailboxIds, operation.currentKeywords)})
-                .has_value());
+        REQUIRE_FALSE(emails
+                          .upsertMany("account-1", {email(operation.currentMailboxIds,
+                                                          operation.currentKeywords)})
+                          .has_value());
         javelin::jmap::sync::EmailMutationJournal journal{database.connection};
         REQUIRE_FALSE(journal
                           .put({
@@ -1245,23 +1244,24 @@ TEST_CASE("account Email delta suppresses server confirmation of local mailbox o
 
         FakeTransport transport;
         transport.queuedResults.push_back(emailDeltaResponse({}, R"("email-1")", {}));
-        transport.queuedResults.push_back(updatedEmailResponseAtState(
-            "email-state-2", operation.currentMailboxIds, false));
+        transport.queuedResults.push_back(
+            updatedEmailResponseAtState("email-state-2", operation.currentMailboxIds, false));
         javelin::jmap::api::MethodCaller caller{transport};
         javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
                                                                requestContext()};
         const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
 
         REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
-        CHECK_FALSE(
-            std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result).notificationEventsCreated);
+        CHECK_FALSE(std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result)
+                        .notificationEventsCreated);
         javelin::jmap::cache::NotificationRepository notifications{database.connection};
         const auto pendingResult = notifications.listPendingEvents("account-1");
         REQUIRE(
             std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
                 pendingResult));
-        CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pendingResult)
-                  .empty());
+        CHECK(
+            std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pendingResult)
+                .empty());
     }
 }
 

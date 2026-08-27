@@ -448,10 +448,10 @@ TEST_CASE("complete offline enumeration cannot turn historical unread mail into 
     seedAccount(database.connection);
 
     javelin::jmap::cache::NotificationRepository notifications{database.connection};
-    REQUIRE_FALSE(notifications
-                      .synchronizeMailboxHorizons("account-1", {"archive"},
-                                                  std::string_view{"email-state-1"})
-                      .has_value());
+    REQUIRE_FALSE(
+        notifications
+            .synchronizeMailboxHorizons("account-1", {"archive"}, std::string_view{"email-state-1"})
+            .has_value());
 
     RecordingResourceTransport resources;
     HistoricalUnreadMethodTransport methods;
