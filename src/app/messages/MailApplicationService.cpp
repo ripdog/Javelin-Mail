@@ -281,6 +281,7 @@ namespace javelin::app
 
         constexpr auto contactRefreshRetryDelay = std::chrono::seconds{30};
         constexpr unsigned int notificationHorizonRetryMaximumExponent = 5;
+        constexpr unsigned int mailNotificationLocalRetryMaximumExponent = 5;
 
         [[nodiscard]] javelin::app::undo::ExactMailPatch
         historyPatch(const javelin::jmap::EmailMailboxMutation& mutation)
@@ -720,6 +721,9 @@ namespace javelin::app
         javelin::jmap::cache::DatabaseConnection& databaseConnection, QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection)
     {
+        m_localRetryTimer.setSingleShot(true);
+        connect(&m_localRetryTimer, &QTimer::timeout, this,
+                &MailNotificationService::retryLocalFailures);
     }
 
     ContactApplicationService::ContactApplicationService(
@@ -1499,6 +1503,7 @@ namespace javelin::app
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&claimed))
         {
             qWarning().noquote() << "Claim mail notification delivery failed" << error->message;
+            Q_EMIT deliveryRetryRequired(accountId);
             return;
         }
 
@@ -1557,7 +1562,10 @@ namespace javelin::app
         for (const auto& emailId : emailIds)
             ids.push_back(emailId.toStdString());
         javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
-        return notifications.markDelivered(accountId, ids);
+        const auto error = notifications.markDelivered(accountId, ids);
+        if (error.has_value())
+            rememberLocalRetry(m_markDeliveredRetries, QString::fromUtf8(accountId), emailIds);
+        return error;
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
@@ -1569,7 +1577,80 @@ namespace javelin::app
         for (const auto& emailId : emailIds)
             ids.push_back(emailId.toStdString());
         javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
-        return notifications.releaseDispatches(accountId, ids);
+        const auto error = notifications.releaseDispatches(accountId, ids);
+        if (error.has_value())
+            rememberLocalRetry(m_releaseDispatchRetries, QString::fromUtf8(accountId), emailIds);
+        return error;
+    }
+
+    void MailNotificationService::rememberLocalRetry(RetryMap& retries, QString accountId,
+                                                     const QStringList& emailIds)
+    {
+        if (emailIds.isEmpty())
+            return;
+        auto& pending = retries[std::move(accountId)];
+        for (const auto& emailId : emailIds)
+            pending.insert(emailId);
+        scheduleLocalRetry();
+    }
+
+    void MailNotificationService::scheduleLocalRetry()
+    {
+        if (m_localRetryTimer.isActive() ||
+            (m_markDeliveredRetries.isEmpty() && m_releaseDispatchRetries.isEmpty()))
+            return;
+
+        if (m_localRetryAttempts == 0)
+        {
+            ++m_localRetryAttempts;
+            m_localRetryTimer.start(0);
+            return;
+        }
+
+        const auto exponent =
+            std::min(m_localRetryAttempts - 1, mailNotificationLocalRetryMaximumExponent);
+        ++m_localRetryAttempts;
+        m_localRetryTimer.start(
+            static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::seconds{1U << exponent})
+                                 .count()));
+    }
+
+    void MailNotificationService::retryLocalFailures()
+    {
+        auto deliveredRetries = std::exchange(m_markDeliveredRetries, {});
+        auto releaseRetries = std::exchange(m_releaseDispatchRetries, {});
+
+        for (auto it = deliveredRetries.cbegin(); it != deliveredRetries.cend(); ++it)
+        {
+            QStringList emailIds;
+            emailIds.reserve(it.value().size());
+            for (const auto& emailId : it.value())
+                emailIds.push_back(emailId);
+            if (const auto error = markDelivered(it.key().toStdString(), emailIds))
+                qWarning().noquote()
+                    << "Retry mail notification delivery acknowledgement failed" << error->message;
+        }
+
+        for (auto it = releaseRetries.cbegin(); it != releaseRetries.cend(); ++it)
+        {
+            QStringList emailIds;
+            emailIds.reserve(it.value().size());
+            for (const auto& emailId : it.value())
+                emailIds.push_back(emailId);
+            if (const auto error = releaseDispatches(it.key().toStdString(), emailIds))
+            {
+                qWarning().noquote()
+                    << "Retry mail notification dispatch release failed" << error->message;
+                continue;
+            }
+            Q_EMIT deliveryRetryRequired(it.key());
+        }
+
+        if (m_markDeliveredRetries.isEmpty() && m_releaseDispatchRetries.isEmpty())
+            m_localRetryAttempts = 0;
+        else
+            scheduleLocalRetry();
     }
 
     std::optional<javelin::jmap::cache::DatabaseError> MailNotificationService::recoverDispatches()

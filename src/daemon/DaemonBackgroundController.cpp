@@ -161,6 +161,8 @@ namespace javelin::app
 
         auto& accountRuntime = m_services.accountRuntimeManager();
         auto& notificationService = m_services.mailNotificationService();
+        connect(&notificationService, &MailNotificationService::deliveryRetryRequired, this,
+                &DaemonBackgroundController::queueNotificationRetry);
         connect(&notificationService, &MailNotificationService::notificationRaised, this,
                 [this](const QString& accountId, const QString& mailboxId, const QString& threadId,
                        const QString& emailId, const QString& mailboxName, const QString& title,

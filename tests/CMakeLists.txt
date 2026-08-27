@@ -273,6 +273,7 @@ add_executable(javelin_daemon_app_tests
     app/MailImportRepositoryTest.cpp
     app/MailImportServiceTest.cpp
     app/MailImportSourceTest.cpp
+    app/MailNotificationServiceTest.cpp
     app/MailTransferRepositoryTest.cpp
     app/MailTransferPlanningTest.cpp
     app/MailTransferApplicationServiceTest.cpp
