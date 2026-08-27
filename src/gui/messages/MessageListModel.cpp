@@ -534,6 +534,18 @@ namespace javelin::gui::messages
         setItems(std::nullopt, std::nullopt, {});
     }
 
+    bool MessageListModel::isBoundTo(const std::string_view accountId,
+                                     const std::optional<std::string_view> mailboxId) const
+    {
+        if (!m_accountId.has_value() || *m_accountId != accountId ||
+            m_mailboxId.has_value() != mailboxId.has_value())
+        {
+            return false;
+        }
+
+        return !mailboxId.has_value() || *m_mailboxId == *mailboxId;
+    }
+
     bool MessageListModel::setThreadExpanded(const std::string_view threadId, const bool expanded)
     {
         const auto threadIndex = findThreadIndex(threadId);
@@ -660,40 +672,6 @@ namespace javelin::gui::messages
         }
 
         return m_threads[*threadIndex].summary.emailId;
-    }
-
-    bool MessageListModel::setEmailRead(const std::string_view emailId)
-    {
-        bool changed = false;
-        for (auto& thread : m_threads)
-        {
-            if (thread.summary.emailId == emailId && thread.summary.isUnread)
-            {
-                thread.summary.isUnread = false;
-                changed = true;
-            }
-            for (auto& member : thread.members)
-            {
-                if (member.emailId == emailId && member.isUnread)
-                {
-                    member.isUnread = false;
-                    changed = true;
-                }
-            }
-        }
-        if (!changed)
-            return false;
-
-        for (std::size_t row = 0; row < m_rows.size(); ++row)
-        {
-            if (itemForRow(m_rows[row]).emailId == emailId)
-            {
-                const auto changedIndex = index(static_cast<int>(row), 0);
-                Q_EMIT dataChanged(changedIndex, changedIndex,
-                                   {IsUnreadRole, Qt::AccessibleTextRole});
-            }
-        }
-        return true;
     }
 
     const javelin::jmap::cache::MessageListItem&

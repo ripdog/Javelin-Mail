@@ -8,7 +8,6 @@ namespace javelin::gui::shell
         {
             return {
                 .showMailboxPane = true,
-                .clearMessagePresentation = true,
                 .refreshRemote = false,
             };
         }
@@ -16,28 +15,20 @@ namespace javelin::gui::shell
         switch (*context.kind)
         {
         case TabKind::Mailbox:
-            return {
-                .showMailboxPane = context.homeTab,
-                .clearMessagePresentation = false,
-                .refreshRemote = context.remoteRefreshRequested || context.messageListStale,
-            };
         case TabKind::Search:
             return {
                 .showMailboxPane = context.homeTab,
-                .clearMessagePresentation = false,
                 .refreshRemote = context.remoteRefreshRequested || context.messageListStale,
             };
         case TabKind::Compose:
             return {
                 .showMailboxPane = false,
-                .clearMessagePresentation = false,
                 .refreshRemote = false,
             };
         case TabKind::Contacts:
         case TabKind::Calendar:
             return {
                 .showMailboxPane = false,
-                .clearMessagePresentation = true,
                 .refreshRemote = context.remoteRefreshRequested,
             };
         }

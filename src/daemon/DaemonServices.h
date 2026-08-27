@@ -62,7 +62,6 @@ namespace javelin::app
     class MessageContentPort;
     class MessageContentCommandService;
     class MessageListSessionFactoryPort;
-    class MessageListSessionFactoryService;
     class MailApplicationEventsPort;
     class MailApplicationEventsService;
     class UndoCommandPort;
@@ -196,7 +195,6 @@ namespace javelin::app
         [[nodiscard]] IdentityCommandPort& identityCommandPort();
         [[nodiscard]] AccountRefreshPort& accountRefreshPort();
         [[nodiscard]] MessageContentPort& messageContentPort();
-        [[nodiscard]] MessageListSessionFactoryPort& messageListSessionFactory();
         [[nodiscard]] MailApplicationEventsPort& mailApplicationEvents();
         [[nodiscard]] CommandDispatcher& commandDispatcher();
         [[nodiscard]] UndoCommandPort& undoCommandPort();
@@ -303,7 +301,6 @@ namespace javelin::app
         std::unique_ptr<AccountRefreshCommandService> m_accountRefreshCommandService;
         std::unique_ptr<MessageContentCommandService> m_messageContentCommandService;
         std::unique_ptr<MailApplicationEventsService> m_mailApplicationEventsService;
-        std::unique_ptr<MessageListSessionFactoryService> m_messageListSessionFactoryService;
         std::unique_ptr<CommandDispatcher> m_commandDispatcher;
         std::unique_ptr<UndoCommandService> m_undoCommandService;
         std::unique_ptr<javelin::app::undo::MailHistoryExecutor> m_mailHistoryExecutor;

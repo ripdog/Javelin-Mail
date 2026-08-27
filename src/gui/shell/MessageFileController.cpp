@@ -16,10 +16,16 @@
 #include <KJob>
 #include <KUiServerV2JobTracker>
 
+#include <QApplication>
+#include <QDateTime>
 #include <QDir>
+#include <QDrag>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFutureWatcher>
+#include <QMimeData>
 #include <QTimer>
 #include <QUrl>
 #include <QtConcurrentRun>
@@ -120,9 +126,12 @@ namespace javelin::gui::shell
         javelin::jmap::cache::MessageViewReader& messageViewReader, QWidget* dialogParent,
         QObject* parent)
         : QObject(parent), m_settings(settings), m_contentPort(contentPort),
-          m_messageViewReader(messageViewReader), m_dialogParent(dialogParent)
+          m_messageViewReader(messageViewReader), m_dialogParent(dialogParent),
+          m_externalDragRootPath(defaultExternalDragRootPath())
     {
         m_fileJobTracker = new KUiServerV2JobTracker(this);
+        cleanupExpiredExternalDragDirectories(m_externalDragRootPath,
+                                              QDateTime::currentMSecsSinceEpoch());
     }
 
     void MessageFileController::saveAttachment(std::string accountId, std::string emailId,
@@ -300,6 +309,136 @@ namespace javelin::gui::shell
                        });
     }
 
+    void MessageFileController::dragAttachment(QString accountId, QString emailId, QString partId,
+                                               QWidget* source)
+    {
+        if (source == nullptr || accountId.isEmpty() || emailId.isEmpty() || partId.isEmpty())
+            return;
+
+        const auto key = attachmentDragKey(accountId, emailId, partId);
+        const auto cached = m_preparedAttachmentDragFiles.constFind(key);
+        if (cached != m_preparedAttachmentDragFiles.cend() && cached->isLocalFile() &&
+            QFileInfo::exists(cached->toLocalFile()))
+        {
+            startExternalFileDrag(source, {*cached});
+            return;
+        }
+
+        const auto directory = createExternalDragDirectory(m_externalDragRootPath);
+        if (!directory.errorMessage.isEmpty())
+        {
+            Q_EMIT userInterventionRequired(
+                i18n("Failed to prepare attachment drag: %1", directory.errorMessage));
+            return;
+        }
+
+        QPointer<QWidget> sourceGuard{source};
+        Q_EMIT statusMessage(i18n("Preparing attachment for drag…"), 0);
+        auto task = m_contentPort.requestAttachment(accountId.toStdString(), emailId.toStdString(),
+                                                    partId.toStdString());
+        QCoro::connect(
+            std::move(task), this,
+            [this, sourceGuard, key,
+             directoryPath = directory.path](javelin::jmap::AttachmentDownloadResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    QDir{directoryPath}.removeRecursively();
+                    Q_EMIT operationFailed(*error);
+                    return;
+                }
+
+                const auto& download = std::get<javelin::jmap::AttachmentDownload>(result);
+                const auto targetPath = QDir{directoryPath}.filePath(suggestedFileName(download));
+                auto* watcher = new QFutureWatcher<FileWriteResult>(this);
+                connect(watcher, &QFutureWatcher<FileWriteResult>::finished, this,
+                        [this, watcher, sourceGuard, key, directoryPath]
+                        {
+                            const auto writeResult = watcher->result();
+                            watcher->deleteLater();
+                            if (!writeResult.errorMessage.isEmpty())
+                            {
+                                QDir{directoryPath}.removeRecursively();
+                                Q_EMIT userInterventionRequired(
+                                    i18n("Failed to prepare attachment drag: %1",
+                                         writeResult.errorMessage));
+                                return;
+                            }
+
+                            const QUrl url = QUrl::fromLocalFile(writeResult.path);
+                            m_preparedAttachmentDragFiles.insert(key, url);
+                            if (sourceGuard != nullptr &&
+                                QApplication::mouseButtons().testFlag(Qt::LeftButton))
+                            {
+                                startExternalFileDrag(sourceGuard, {url});
+                                return;
+                            }
+                            Q_EMIT statusMessage(i18n("Attachment is ready; drag it again."), 5000);
+                        });
+                watcher->setFuture(
+                    QtConcurrent::run([targetPath, payload = download.payload]
+                                      { return writePayloadToPath(targetPath, payload); }));
+            });
+    }
+
+    QList<QUrl> MessageFileController::materializeMessageDragFiles(
+        const javelin::gui::messages::MessageDragPayload& payload)
+    {
+        const auto directory = createExternalDragDirectory(m_externalDragRootPath);
+        if (!directory.errorMessage.isEmpty())
+        {
+            Q_EMIT userInterventionRequired(
+                i18n("Failed to prepare message drag: %1", directory.errorMessage));
+            return {};
+        }
+
+        Q_EMIT statusMessage(i18n("Preparing messages for drag…"), 0);
+        auto task = m_contentPort.saveMessages({
+            .accountId = payload.sourceAccountId,
+            .sourceMailboxId = payload.sourceMailboxId,
+            .selection = payload.selection,
+            .targetKind = javelin::app::MessageSaveTargetKind::Directory,
+            .destinationPath = directory.path,
+        });
+
+        std::optional<javelin::app::SaveMessagesResult> completedResult;
+        QEventLoop completionLoop;
+        QCoro::connect(std::move(task), &completionLoop,
+                       [&completedResult, &completionLoop](javelin::app::SaveMessagesResult result)
+                       {
+                           completedResult = std::move(result);
+                           completionLoop.quit();
+                       });
+        if (!completedResult.has_value())
+            completionLoop.exec(QEventLoop::ExcludeUserInputEvents);
+
+        if (!completedResult.has_value())
+        {
+            QDir{directory.path}.removeRecursively();
+            Q_EMIT userInterventionRequired(i18n("Message drag preparation did not complete."));
+            return {};
+        }
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&*completedResult))
+        {
+            QDir{directory.path}.removeRecursively();
+            Q_EMIT operationFailed(*error);
+            return {};
+        }
+
+        const auto& saved = std::get<javelin::app::SaveMessagesSummary>(*completedResult);
+        auto urls = externalDragFileUrls(directory.path);
+        if (urls.size() != static_cast<qsizetype>(saved.savedMessageCount) || urls.isEmpty())
+        {
+            QDir{directory.path}.removeRecursively();
+            Q_EMIT userInterventionRequired(
+                i18n("Failed to prepare the complete message selection for dragging."));
+            return {};
+        }
+
+        Q_EMIT statusMessage(i18n("Messages ready to drag."), 2000);
+        return urls;
+    }
+
     void MessageFileController::saveMessages(std::string accountId,
                                              std::optional<std::string> sourceMailboxId,
                                              javelin::app::MessageSelection selection)
@@ -426,6 +565,24 @@ namespace javelin::gui::shell
                     QtConcurrent::run([fileName, payload = download.payload]
                                       { return writePayloadToTemporaryFile(fileName, payload); }));
             });
+    }
+
+    void MessageFileController::startExternalFileDrag(QWidget* source, const QList<QUrl>& urls)
+    {
+        if (source == nullptr || urls.isEmpty())
+            return;
+        auto* mimeData = new QMimeData;
+        mimeData->setUrls(urls);
+        QDrag drag{source};
+        drag.setMimeData(mimeData);
+        static_cast<void>(drag.exec(Qt::CopyAction, Qt::CopyAction));
+    }
+
+    QString MessageFileController::attachmentDragKey(const QString& accountId,
+                                                     const QString& emailId,
+                                                     const QString& partId) const
+    {
+        return accountId + QChar{0x1f} + emailId + QChar{0x1f} + partId;
     }
 
     void MessageFileController::launchTemporaryFile(QString path, const bool chooseApplication,

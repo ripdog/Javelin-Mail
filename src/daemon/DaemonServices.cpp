@@ -35,7 +35,6 @@
 #include "app/MailboxMaintenanceRegistry.h"
 #include "app/MessageContentApplicationService.h"
 #include "app/MessageContentCommandService.h"
-#include "app/MessageListSessionFactoryService.h"
 #include "app/MessageNavigationCoordinator.h"
 #include "app/SieveApplicationService.h"
 #include "app/SieveCommandService.h"
@@ -275,9 +274,9 @@ namespace javelin::app
             m_databaseConnection, *m_messageContentClient, *m_accountRuntimeManager,
             *m_errorCoordinator, *m_workScheduler, *m_mailboxMaintenanceRegistry);
         m_mailNotificationService = std::make_unique<MailNotificationService>(m_databaseConnection);
-        QObject::connect(
-            m_accountRuntimeManager.get(), &AccountRuntimeManager::notificationMailboxRefreshed,
-            m_mailNotificationService.get(), &MailNotificationService::mailboxRefreshed);
+        QObject::connect(m_accountRuntimeManager.get(),
+                         &AccountRuntimeManager::notificationEventsCommitted,
+                         m_mailNotificationService.get(), &MailNotificationService::accountChanged);
         m_contactApplicationService = std::make_unique<ContactApplicationService>(
             *m_contactRepository, *m_contactSyncEngine, *m_accountRuntimeManager,
             *m_errorCoordinator, *m_workScheduler, *m_undoManager);
@@ -341,7 +340,7 @@ namespace javelin::app
                     .searchWindows = {},
                     .messageContentEmailIds = {},
                     .mailboxTreeChanged = false,
-                    .hasNewMail = false,
+                    .emailObjectsChanged = false,
                     .optimisticProjection = false,
                     .contactsChanged = false,
                     .identitiesChanged = false,
@@ -358,7 +357,7 @@ namespace javelin::app
                     .searchWindows = {},
                     .messageContentEmailIds = {},
                     .mailboxTreeChanged = false,
-                    .hasNewMail = false,
+                    .emailObjectsChanged = false,
                     .optimisticProjection = false,
                     .contactsChanged = false,
                     .identitiesChanged = false,
@@ -476,8 +475,6 @@ namespace javelin::app
             *m_accountRuntimeManager, *m_mailQueryApplicationService,
             *m_mailMutationApplicationService, *m_messageContentApplicationService,
             *m_contactApplicationService);
-        m_messageListSessionFactoryService = std::make_unique<MessageListSessionFactoryService>(
-            *m_mailQueryApplicationService, *m_mailApplicationEventsService, m_databasePath);
         m_commandDispatcher = std::make_unique<CommandDispatcher>(*m_accountRefreshCommandService);
         m_calendarCommandService =
             std::make_unique<CalendarCommandService>(*m_calendarApplicationService);
@@ -704,11 +701,6 @@ namespace javelin::app
     MessageContentPort& DaemonServices::messageContentPort()
     {
         return *m_messageContentCommandService;
-    }
-
-    MessageListSessionFactoryPort& DaemonServices::messageListSessionFactory()
-    {
-        return *m_messageListSessionFactoryService;
     }
 
     MailApplicationEventsPort& DaemonServices::mailApplicationEvents()

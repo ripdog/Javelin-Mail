@@ -6,7 +6,9 @@
 #include <QCoroTask>
 
 #include <QByteArray>
+#include <QList>
 #include <QString>
+#include <QUrl>
 
 #include <string>
 #include <vector>
@@ -39,6 +41,14 @@ namespace javelin::gui::shell
         QString failedPath;
     };
 
+    struct ExternalDragDirectoryResult
+    {
+        QString path;
+        QString errorMessage;
+    };
+
+    inline constexpr qint64 externalDragRetentionMilliseconds = 24LL * 60LL * 60LL * 1000LL;
+
     [[nodiscard]] bool
     isDownloadableAttachment(const javelin::jmap::cache::MessageAttachment& attachment);
     [[nodiscard]] QString suggestedFileName(const javelin::jmap::AttachmentDownload& download);
@@ -49,6 +59,13 @@ namespace javelin::gui::shell
                                                      const QByteArray& payload);
     [[nodiscard]] FileWriteResult writePayloadToTemporaryFile(const QString& suggestedFileName,
                                                               const QByteArray& payload);
+    [[nodiscard]] QString defaultExternalDragRootPath();
+    void cleanupExpiredExternalDragDirectories(
+        const QString& rootPath, qint64 nowMilliseconds,
+        qint64 retentionMilliseconds = externalDragRetentionMilliseconds);
+    [[nodiscard]] ExternalDragDirectoryResult
+    createExternalDragDirectory(const QString& rootPath, qint64 nowMilliseconds = -1);
+    [[nodiscard]] QList<QUrl> externalDragFileUrls(const QString& directoryPath);
     [[nodiscard]] BatchWriteResult
     writePayloadBatchToDirectory(const QString& directoryPath,
                                  const std::vector<DownloadedAttachmentFile>& files);

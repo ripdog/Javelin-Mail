@@ -26,7 +26,7 @@ TEST_CASE("cache invalidation publisher coalesces one account after commit",
         }},
         .searchWindows = {},
         .mailboxTreeChanged = true,
-        .hasNewMail = false,
+        .emailObjectsChanged = false,
         .optimisticProjection = false,
         .contactsChanged = true,
     });
@@ -36,7 +36,7 @@ TEST_CASE("cache invalidation publisher coalesces one account after commit",
         .queryWindows = {},
         .searchWindows = {},
         .mailboxTreeChanged = false,
-        .hasNewMail = true,
+        .emailObjectsChanged = true,
         .optimisticProjection = true,
     });
 
@@ -44,10 +44,9 @@ TEST_CASE("cache invalidation publisher coalesces one account after commit",
 
     REQUIRE(invalidations.size() == 1);
     const auto& invalidation = invalidations.front();
-    CHECK(invalidation.epoch == 1);
-    CHECK(publisher.currentEpoch() == 1);
+    CHECK(invalidation.epoch == 0);
     CHECK(invalidation.change.mailboxTreeChanged);
-    CHECK(invalidation.change.hasNewMail);
+    CHECK(invalidation.change.emailObjectsChanged);
     CHECK(invalidation.change.optimisticProjection);
     CHECK(invalidation.change.contactsChanged);
     CHECK(invalidation.change.mailboxIds ==
@@ -85,7 +84,7 @@ TEST_CASE("cache invalidation publisher preserves account queue order and bounds
         .queryWindows = {},
         .searchWindows = {},
         .mailboxTreeChanged = false,
-        .hasNewMail = false,
+        .emailObjectsChanged = false,
         .optimisticProjection = false,
     };
     for (int index = 0; index < 80; ++index)
@@ -97,15 +96,15 @@ TEST_CASE("cache invalidation publisher preserves account queue order and bounds
         .queryWindows = {},
         .searchWindows = {},
         .mailboxTreeChanged = false,
-        .hasNewMail = false,
+        .emailObjectsChanged = false,
         .optimisticProjection = false,
     });
 
     publisher.flush();
 
     REQUIRE(invalidations.size() == 2);
-    CHECK(invalidations[0].epoch == 1);
-    CHECK(invalidations[1].epoch == 2);
+    CHECK(invalidations[0].epoch == 0);
+    CHECK(invalidations[1].epoch == 0);
     CHECK(invalidations[0].change.accountId == QStringLiteral("account-a"));
     CHECK(invalidations[1].change.accountId == QStringLiteral("account-b"));
     CHECK(invalidations[0].change.mailboxIds.size() == 80);
@@ -127,7 +126,7 @@ TEST_CASE("cache invalidation publisher emits contacts for contact-only changes"
         .queryWindows = {},
         .searchWindows = {},
         .mailboxTreeChanged = false,
-        .hasNewMail = false,
+        .emailObjectsChanged = false,
         .optimisticProjection = false,
         .contactsChanged = true,
     });
@@ -138,6 +137,28 @@ TEST_CASE("cache invalidation publisher emits contacts for contact-only changes"
           std::vector{javelin::protocol::ChangedDomain::Contacts});
     CHECK(invalidations.front().affectedKeys ==
           std::vector<QString>{QStringLiteral("contacts-account")});
+}
+
+TEST_CASE("cache invalidation publisher emits mail tags without a fake query domain",
+          "[app][cache][invalidation][tags]")
+{
+    javelin::app::CacheInvalidationPublisher publisher;
+    std::optional<javelin::app::MailCacheInvalidation> invalidation;
+    QObject::connect(&publisher, &javelin::app::CacheInvalidationPublisher::invalidated,
+                     [&invalidation](javelin::app::MailCacheInvalidation value)
+                     { invalidation = std::move(value); });
+
+    publisher.publish(javelin::app::MailCacheChange{
+        .accountId = QStringLiteral("account-a"),
+        .mailboxIds = {},
+        .queryWindows = {},
+        .searchWindows = {},
+        .mailTagsChanged = true,
+    });
+    publisher.flush();
+
+    REQUIRE(invalidation.has_value());
+    CHECK(invalidation->changedDomains == std::vector{javelin::protocol::ChangedDomain::MailTags});
 }
 
 TEST_CASE("cache invalidation publisher targets hydrated message content",
@@ -164,4 +185,48 @@ TEST_CASE("cache invalidation publisher targets hydrated message content",
     CHECK(invalidation->affectedKeys ==
           std::vector<QString>{QStringLiteral("account-a"), QStringLiteral("email-a")});
     CHECK(invalidation->change.messageContentEmailIds == QStringList{QStringLiteral("email-a")});
+}
+
+TEST_CASE("cache invalidation publisher does not invent a domain for semantic-empty changes",
+          "[app][cache][invalidation]")
+{
+    javelin::app::CacheInvalidationPublisher publisher;
+    std::optional<javelin::app::MailCacheInvalidation> invalidation;
+    QObject::connect(&publisher, &javelin::app::CacheInvalidationPublisher::invalidated,
+                     [&invalidation](javelin::app::MailCacheInvalidation value)
+                     { invalidation = std::move(value); });
+
+    publisher.publish(javelin::app::MailCacheChange{
+        .accountId = QStringLiteral("account-a"),
+        .mailboxIds = {},
+        .queryWindows = {},
+        .searchWindows = {},
+    });
+    publisher.flush();
+
+    REQUIRE(invalidation.has_value());
+    CHECK(invalidation->changedDomains.empty());
+    CHECK(invalidation->affectedKeys == std::vector<QString>{QStringLiteral("account-a")});
+}
+
+TEST_CASE("cache invalidation publisher can publish a committed mutation synchronously",
+          "[app][cache][invalidation][ordering]")
+{
+    javelin::app::CacheInvalidationPublisher publisher;
+    std::optional<javelin::app::MailCacheInvalidation> invalidation;
+    QObject::connect(&publisher, &javelin::app::CacheInvalidationPublisher::invalidated,
+                     [&invalidation](javelin::app::MailCacheInvalidation value)
+                     { invalidation = std::move(value); });
+
+    publisher.publishImmediately(javelin::app::MailCacheChange{
+        .accountId = QStringLiteral("account-a"),
+        .mailboxIds = {QStringLiteral("inbox")},
+        .queryWindows = {},
+        .searchWindows = {},
+        .optimisticProjection = true,
+    });
+
+    REQUIRE(invalidation.has_value());
+    CHECK(invalidation->epoch == 0);
+    CHECK(invalidation->change.optimisticProjection);
 }

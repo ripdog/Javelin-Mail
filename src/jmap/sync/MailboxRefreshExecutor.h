@@ -3,7 +3,6 @@
 #include "jmap/OperationError.h"
 #include "jmap/api/MethodCaller.h"
 #include "jmap/sync/MutationJournal.h"
-#include "jmap/sync/RefreshNotificationTypes.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroTask>
@@ -30,8 +29,6 @@ namespace javelin::jmap::sync
         std::vector<std::string> changedEmailIds;
         std::vector<std::string> insertedEmailIds;
         std::vector<std::string> removedEmailIds;
-        bool requiresNotificationScan = false;
-        std::vector<RefreshNotificationCandidate> notificationCandidates;
     };
 
     using MailboxRefreshResult = std::variant<MailboxRefreshSummary, OperationError>;
@@ -46,6 +43,9 @@ namespace javelin::jmap::sync
                                  std::string_view accountId, std::vector<std::string> emailIds,
                                  std::string_view serverState);
 
+    // Owns mailbox query/window state only: Email/queryChanges, ordered membership and bounded
+    // materialization. Email/get state observed while filling a window is not authority for the
+    // account-wide Email sync token and must never advance that cursor.
     class MailboxRefreshExecutor
     {
       public:
@@ -56,7 +56,7 @@ namespace javelin::jmap::sync
         [[nodiscard]] QCoro::Task<MailboxRefreshResult>
         refreshCollapsedMailbox(std::string accountId, std::string mailboxId,
                                 std::function<void(const QString&)> reportProgress,
-                                bool forceFullRefresh = false, bool refreshAccountEmailState = true,
+                                bool forceFullRefresh = false,
                                 std::string remoteAccountId = {}) const;
 
       private:

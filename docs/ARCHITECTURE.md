@@ -76,7 +76,9 @@ Javelin is a split-process desktop application:
 
 The server is the recoverable source of truth. SQLite is the local data plane and the immediate
 source rendered by the GUI. IPC is the command and coordination plane. A cache commit always occurs
-before the daemon publishes its invalidation.
+before the daemon publishes its invalidation. The daemon process owns the single authoritative
+invalidation epoch; the internal cache-change publisher batches semantic changes but does not
+allocate a second pre-boundary epoch.
 
 The end-to-end command path is deliberately one-way:
 
@@ -207,6 +209,10 @@ The principal runtime objects are:
 | `DesktopNotificationController` | daemon | Publishes desktop notifications and stable GUI activation routes |
 | cache repositories | both, split by API | Daemon repositories write; GUI repositories use read-only/query-only connections |
 
+`MessageListSessionFactoryService` is composed only by `GuiServices`: mailbox and search sessions
+are GUI-process read models backed by read-only SQLite access and daemon materialization ports. The
+daemon does not construct dormant list sessions of its own.
+
 `DaemonServices` is the operational composition root. It is the only place where writable cache
 repositories, JMAP transports, synchronization services, history executors, settings, and background
 controllers are assembled together. Mail protocol work is intentionally injected as narrow
@@ -296,7 +302,12 @@ WebSocket push or EventSource state change
 ```
 
 Notification arrival does not change GUI selection. Activating a notification is a separate explicit
-navigation request containing stable account, mailbox, thread, and Email identities.
+navigation request containing stable account, mailbox, thread, and Email identities. When the
+desktop notification service advertises action support, new-mail Archive and Mark Read actions are
+daemon-owned application commands: they enter through `MailCommandPort`, create the same optimistic
+Email mutations as GUI actions, and submit only their operation group. Reply remains a presentation
+activation: the daemon carries the exact account and Email identity to a reply-compose route and can
+launch the GUI when it is not already running.
 
 ## Presentation and application coordination
 
@@ -310,6 +321,17 @@ confirmation and destination UI, and submits commands through `MailCommandPort`.
 calendar, account refresh, message navigation, content loading, message-list sessions, and Undo/Redo
 follow the same pattern: GUI controllers own interaction and presentation lifetime, while daemon
 services own application policy and operational execution.
+
+External file drag-out follows the same boundary. Attachment drags request the exact attachment
+through `MessageContentPort`, which materializes the raw message source when necessary before
+extracting the part. Message drags retain Javelin's private mail-transfer MIME unchanged and lazily
+promise a separate `text/uri-list`: only an external target requesting that format materializes the
+`.eml` files through the existing selected-message Save and `RawMailMaterializer` path. Drag files
+live in a GUI-owned cache staging area rather than `QTemporaryFile` scope: each staging directory is
+private to the user, remains available for 24 hours so asynchronous drop consumers do not race source
+cleanup, and is pruned by later drag preparation.
+The staging files are never treated as user-owned exports or as the source of an internal mailbox
+move/copy operation.
 
 The mailbox associated with a list tab is selection context, not proof that every visible Email is
 resident in that mailbox: an expanded conversation can expose members from other mailboxes. Move,

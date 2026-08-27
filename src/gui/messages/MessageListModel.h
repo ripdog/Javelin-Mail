@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace javelin::gui::messages
@@ -63,12 +64,13 @@ namespace javelin::gui::messages
         void setItems(std::optional<std::string> accountId, std::optional<std::string> mailboxId,
                       const std::vector<javelin::jmap::cache::MessageListItem>& items);
         void clear();
+        [[nodiscard]] bool isBoundTo(std::string_view accountId,
+                                     std::optional<std::string_view> mailboxId) const;
         [[nodiscard]] bool setThreadExpanded(std::string_view threadId, bool expanded);
         [[nodiscard]] bool isThreadExpanded(std::string_view threadId) const;
         void refreshExpandedThreadMembers();
         [[nodiscard]] std::optional<std::string>
         summaryEmailIdForThread(std::string_view threadId) const;
-        [[nodiscard]] bool setEmailRead(std::string_view emailId);
 
       Q_SIGNALS:
         void threadMaterializationRequired(QString threadId);

@@ -136,12 +136,6 @@ Check off completed items as you commit.
   the server hierarchy.
 - Keep this as local presentation preference, not a new mailbox/sync concept.
 
-### [ ] Fill common mail-navigation/action gaps
-
-- Add Mark All Read and make next/previous unread navigation first-class configurable actions.
-- Evaluate Snooze and Mute Conversation separately as product features rather than folding them into
-  basic keyboard/navigation work.
-
 ### [ ] Open `.eml` files in Javelin
 
 - Advertise `message/rfc822` in the desktop file association and accept `.eml` through the existing
@@ -149,7 +143,7 @@ Check off completed items as you commit.
 - Open the message in a read-only viewer; do not silently import it into an account.
 - This should provide a natural round trip for Javelin's existing mail export feature.
 
-### [ ] Add actionable new-mail notifications
+### [x] Add actionable new-mail notifications
 
 - Add daemon-owned actions such as Archive, Mark Read, and Reply where the notification protocol allows
   them.
@@ -172,14 +166,14 @@ Check off completed items as you commit.
 - Preserve sender/subject legibility and accessibility rather than making every delegate metric freely
   configurable.
 
-### [ ] Add external drag-out for attachments
+### [x] Add external drag-out for attachments
 
 - Allow attachments to be dragged from Javelin to Dolphin/other applications, materializing or
   downloading the file as required.
 - Define temporary-file lifetime carefully so the drag target does not receive a path that disappears
   too early.
 
-### [ ] Add external drag-out for messages
+### [x] Add external drag-out for messages
 
 - Extend drag-out to messages by materializing RFC 5322 `.eml` using the existing export/raw-message
   infrastructure.

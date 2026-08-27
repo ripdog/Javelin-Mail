@@ -7,6 +7,7 @@
 #include <KLocalizedString>
 
 #include <QApplication>
+#include <QEvent>
 #include <QFileIconProvider>
 #include <QFileInfo>
 #include <QFrame>
@@ -16,9 +17,11 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMimeDatabase>
+#include <QMouseEvent>
 #include <QResizeEvent>
 #include <QSizePolicy>
 #include <QStyle>
+#include <QStyleOptionToolButton>
 #include <QToolButton>
 
 #include <algorithm>
@@ -74,12 +77,104 @@ namespace javelin::gui::messageview
             return attachments;
         }
 
+        class AttachmentDragButton final : public QToolButton
+        {
+          public:
+            explicit AttachmentDragButton(std::function<void(QWidget*)> dragAction,
+                                          QWidget* parent = nullptr)
+                : QToolButton(parent), m_dragAction(std::move(dragAction))
+            {
+            }
+
+            void setFullText(QString text)
+            {
+                m_fullText = std::move(text);
+                setAccessibleName(m_fullText);
+                QToolButton::setText(m_fullText);
+            }
+
+          protected:
+            void mousePressEvent(QMouseEvent* event) override
+            {
+                m_dragStarted = false;
+                if (event->button() == Qt::LeftButton)
+                    m_pressPosition = event->position().toPoint();
+                QToolButton::mousePressEvent(event);
+            }
+
+            void mouseMoveEvent(QMouseEvent* event) override
+            {
+                if (!m_dragStarted && event->buttons().testFlag(Qt::LeftButton) &&
+                    (event->position().toPoint() - m_pressPosition).manhattanLength() >=
+                        QApplication::startDragDistance())
+                {
+                    m_dragStarted = true;
+                    if (m_dragAction)
+                        m_dragAction(this);
+                    return;
+                }
+                QToolButton::mouseMoveEvent(event);
+            }
+
+            void mouseReleaseEvent(QMouseEvent* event) override
+            {
+                if (m_dragStarted)
+                {
+                    setDown(false);
+                    event->accept();
+                    return;
+                }
+                QToolButton::mouseReleaseEvent(event);
+            }
+
+            void resizeEvent(QResizeEvent* event) override
+            {
+                QToolButton::resizeEvent(event);
+                updateElidedText();
+            }
+
+            void changeEvent(QEvent* event) override
+            {
+                QToolButton::changeEvent(event);
+                if (event->type() == QEvent::FontChange || event->type() == QEvent::StyleChange)
+                    updateElidedText();
+            }
+
+          private:
+            void updateElidedText()
+            {
+                if (m_fullText.isEmpty())
+                    return;
+
+                QStyleOptionToolButton option;
+                initStyleOption(&option);
+                const QRect buttonRect = style()->subControlRect(QStyle::CC_ToolButton, &option,
+                                                                 QStyle::SC_ToolButton, this);
+                int textWidth = buttonRect.width() - 16;
+                if (!icon().isNull())
+                {
+                    const int spacing = std::max(
+                        4, style()->pixelMetric(QStyle::PM_LayoutHorizontalSpacing, &option, this));
+                    textWidth -= option.iconSize.width() + spacing;
+                }
+                QToolButton::setText(
+                    fontMetrics().elidedText(m_fullText, Qt::ElideMiddle, std::max(0, textWidth)));
+            }
+
+            std::function<void(QWidget*)> m_dragAction;
+            QString m_fullText;
+            QPoint m_pressPosition;
+            bool m_dragStarted = false;
+        };
+
         class AttachmentTile final : public QFrame
         {
           public:
             AttachmentTile(const javelin::jmap::cache::MessageAttachment& attachment,
                            std::function<void()> openAction, std::function<void()> openWithAction,
-                           std::function<void()> saveAction, QString saveToolTip, QWidget* parent)
+                           std::function<void()> saveAction,
+                           std::function<void(QWidget*)> dragAction, QString saveToolTip,
+                           QWidget* parent)
                 : QFrame(parent)
             {
                 const auto fileName = attachmentName(attachment);
@@ -112,10 +207,11 @@ namespace javelin::gui::messageview
                 layout->setContentsMargins(0, 0, 0, 0);
                 layout->setSpacing(0);
 
-                auto* openButton = new QToolButton(this);
+                auto* openButton = new AttachmentDragButton(std::move(dragAction), this);
+                openButton->setObjectName(QStringLiteral("attachmentOpenButton"));
                 openButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
                 openButton->setIcon(attachmentIcon(attachment));
-                openButton->setText(fileName);
+                openButton->setFullText(fileName);
                 openButton->setToolTip(i18n("Open %1 in default application", fileName));
                 openButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
                 connect(openButton, &QToolButton::clicked, this,
@@ -294,6 +390,12 @@ namespace javelin::gui::messageview
                     Q_EMIT saveAttachmentRequested(QString::fromStdString(*m_accountId.get()),
                                                    QString::fromStdString(*m_emailId.get()),
                                                    partId);
+                },
+                [this, partId](QWidget* source)
+                {
+                    Q_EMIT dragAttachmentRequested(QString::fromStdString(*m_accountId.get()),
+                                                   QString::fromStdString(*m_emailId.get()), partId,
+                                                   source);
                 },
                 saveToolTip, m_listWidget));
         }

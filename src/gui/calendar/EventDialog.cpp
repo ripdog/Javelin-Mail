@@ -1,4 +1,5 @@
 #include "gui/calendar/EventDialog.h"
+#include "gui/calendar/CalendarDefaultNotificationsDialog.h"
 #include "gui/calendar/CalendarNotificationEditor.h"
 #include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/RecurrenceDialog.h"
@@ -7,7 +8,9 @@
 #include "jmap/calendar/CalendarEventEditing.h"
 
 #include <KLocalizedString>
+#include <KMessageWidget>
 
+#include <QAction>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateEdit>
@@ -224,7 +227,12 @@ namespace javelin::gui::calendar
         connect(m_endTime->lineEdit(), &QLineEdit::editingFinished, this,
                 &EventDialog::markEndEdited);
         connect(m_endTime, &QComboBox::activated, this, &EventDialog::markEndEdited);
-        connect(m_calendar, &QComboBox::activated, this, [this]() { m_calendarEdited = true; });
+        connect(m_calendar, &QComboBox::activated, this,
+                [this]()
+                {
+                    m_calendarEdited = true;
+                    updateDefaultNotificationsWarning();
+                });
         connect(m_timeZone, &QComboBox::activated, this, [this]() { m_timeZoneEdited = true; });
         connect(m_recurrence, &QComboBox::activated, this,
                 [this]()
@@ -241,6 +249,21 @@ namespace javelin::gui::calendar
 
         m_notifications = new CalendarNotificationEditor(true, this);
         layout->insertRow(layout->rowCount() - 2, i18n("Notifications"), m_notifications);
+        m_defaultNotificationsWarning = new KMessageWidget(this);
+        m_defaultNotificationsWarning->setObjectName(QStringLiteral("defaultNotificationsWarning"));
+        m_defaultNotificationsWarning->setMessageType(KMessageWidget::Warning);
+        m_defaultNotificationsWarning->setWordWrap(true);
+        m_defaultNotificationsWarning->setCloseButtonVisible(false);
+        m_defaultNotificationsWarning->setVisible(false);
+        m_configureDefaultNotifications = new QAction(i18n("Configure defaults…"), this);
+        m_configureDefaultNotifications->setObjectName(
+            QStringLiteral("configureDefaultNotifications"));
+        m_defaultNotificationsWarning->addAction(m_configureDefaultNotifications);
+        layout->insertRow(layout->rowCount() - 2, m_defaultNotificationsWarning);
+        connect(m_configureDefaultNotifications, &QAction::triggered, this,
+                &EventDialog::editCurrentCalendarDefaultNotifications);
+        connect(m_notifications, &CalendarNotificationEditor::useCalendarDefaultsChanged, this,
+                [this](bool) { updateDefaultNotificationsWarning(); });
         updateRecurrenceControls();
     }
 
@@ -328,6 +351,7 @@ namespace javelin::gui::calendar
         m_notifications->setAlerts(event.alerts);
         m_notifications->setUseCalendarDefaults(event.useDefaultAlerts);
         m_notifications->resetEdited();
+        updateDefaultNotificationsWarning();
 
         m_calendarEdited = false;
         m_timeZoneEdited = false;
@@ -349,6 +373,7 @@ namespace javelin::gui::calendar
             !occurrenceMode && m_recurrence->currentData().toString() != QStringLiteral("none"));
         m_attendees->setEnabled(!occurrenceMode);
         m_notifications->setEnabled(!occurrenceMode);
+        updateDefaultNotificationsWarning();
     }
 
     javelin::jmap::calendar::CalendarEvent EventDialog::eventDocument() const
@@ -516,6 +541,130 @@ namespace javelin::gui::calendar
         updateRecurrenceControls();
     }
 
+    javelin::jmap::calendar::Calendar* EventDialog::currentCalendar()
+    {
+        const auto key = m_calendar->currentData().toString();
+        const auto found =
+            std::ranges::find_if(m_calendars, [&key](const auto& calendar)
+                                 { return calendarKey(calendar.accountId, calendar.id) == key; });
+        return found == m_calendars.end() ? nullptr : &*found;
+    }
+
+    const javelin::jmap::calendar::Calendar* EventDialog::currentCalendar() const
+    {
+        const auto key = m_calendar->currentData().toString();
+        const auto found =
+            std::ranges::find_if(m_calendars, [&key](const auto& calendar)
+                                 { return calendarKey(calendar.accountId, calendar.id) == key; });
+        return found == m_calendars.end() ? nullptr : &*found;
+    }
+
+    void EventDialog::updateDefaultNotificationsWarning()
+    {
+        if (m_defaultNotificationsWarning == nullptr || m_notifications == nullptr)
+            return;
+        const auto* calendar = currentCalendar();
+        const auto* defaults = calendar == nullptr
+                                   ? nullptr
+                                   : (m_allDay->isChecked() ? &calendar->defaultAlertsWithoutTime
+                                                            : &calendar->defaultAlertsWithTime);
+        const bool hasDisplayDefault =
+            defaults != nullptr &&
+            std::ranges::any_of(*defaults,
+                                [](const auto& entry)
+                                {
+                                    return entry.second.action == "display" &&
+                                           entry.second.triggerKind ==
+                                               javelin::jmap::calendar::AlertTriggerKind::Offset;
+                                });
+        const bool showWarning = !m_occurrenceMode && calendar != nullptr &&
+                                 m_notifications->useCalendarDefaults() && !hasDisplayDefault;
+        if (showWarning)
+        {
+            m_defaultNotificationsWarning->setText(
+                m_allDay->isChecked()
+                    ? i18n("This calendar has no default notifications configured for all-day "
+                           "events. Javelin will use this event’s own notifications instead; if "
+                           "there are none, no notification will be shown.")
+                    : i18n("This calendar has no default notifications configured for timed "
+                           "events. Javelin will use this event’s own notifications instead; if "
+                           "there are none, no notification will be shown."));
+        }
+        m_configureDefaultNotifications->setEnabled(
+            !m_pendingDefaultNotificationsChange.has_value());
+        m_defaultNotificationsWarning->setVisible(showWarning);
+    }
+
+    void EventDialog::editCurrentCalendarDefaultNotifications()
+    {
+        if (m_pendingDefaultNotificationsChange.has_value())
+            return;
+        auto* calendar = currentCalendar();
+        if (calendar == nullptr || !calendar->isSubscribed)
+            return;
+        CalendarDefaultNotificationsDialog dialog{
+            QString::fromStdString(calendar->name), calendar->defaultAlertsWithTime,
+            calendar->defaultAlertsWithoutTime, m_allDay->isChecked(), this};
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+
+        auto withTime = dialog.alertsWithTime();
+        auto withoutTime = dialog.alertsWithoutTime();
+        if (withTime == calendar->defaultAlertsWithTime &&
+            withoutTime == calendar->defaultAlertsWithoutTime)
+        {
+            updateDefaultNotificationsWarning();
+            return;
+        }
+
+        const auto accountId = QString::fromStdString(calendar->accountId);
+        const auto calendarId = QString::fromStdString(calendar->id);
+        m_pendingDefaultNotificationsChange = PendingDefaultNotificationsChange{
+            .accountId = accountId,
+            .calendarId = calendarId,
+            .originalWithTime = calendar->defaultAlertsWithTime,
+            .originalWithoutTime = calendar->defaultAlertsWithoutTime,
+        };
+        calendar->defaultAlertsWithTime = withTime;
+        calendar->defaultAlertsWithoutTime = withoutTime;
+        updateDefaultNotificationsWarning();
+        Q_EMIT defaultNotificationsChangeRequested(accountId, calendarId, std::move(withTime),
+                                                   std::move(withoutTime));
+    }
+
+    void EventDialog::completeDefaultNotificationsChange(const QString& accountId,
+                                                         const QString& calendarId,
+                                                         const bool success,
+                                                         const QString& errorMessage)
+    {
+        if (!m_pendingDefaultNotificationsChange.has_value() ||
+            m_pendingDefaultNotificationsChange->accountId != accountId ||
+            m_pendingDefaultNotificationsChange->calendarId != calendarId)
+            return;
+
+        if (!success)
+        {
+            const auto found =
+                std::ranges::find_if(m_calendars,
+                                     [&accountId, &calendarId](const auto& calendar)
+                                     {
+                                         return calendar.accountId == accountId.toStdString() &&
+                                                calendar.id == calendarId.toStdString();
+                                     });
+            if (found != m_calendars.end())
+            {
+                found->defaultAlertsWithTime =
+                    std::move(m_pendingDefaultNotificationsChange->originalWithTime);
+                found->defaultAlertsWithoutTime =
+                    std::move(m_pendingDefaultNotificationsChange->originalWithoutTime);
+            }
+            if (!errorMessage.isEmpty())
+                showMutationError(errorMessage);
+        }
+        m_pendingDefaultNotificationsChange.reset();
+        updateDefaultNotificationsWarning();
+    }
+
     void EventDialog::showMutationError(const QString& message)
     {
         m_error->setText(message);
@@ -568,6 +717,7 @@ namespace javelin::gui::calendar
             if (m_endDate->date() <= m_startDate->date())
                 m_endDate->setDate(m_startDate->date().addDays(1));
         }
+        updateDefaultNotificationsWarning();
     }
 
     void EventDialog::updateAutomaticEnd()

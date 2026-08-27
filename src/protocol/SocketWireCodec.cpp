@@ -749,6 +749,7 @@ namespace javelin::protocol
                    writeChangedDomains(writer, invalidation.changedDomains, limits) &&
                    writeAffectedKeys(writer, invalidation.affectedKeys, limits) &&
                    writer.string(invalidation.accountId) &&
+                   writer.boolean(invalidation.optimisticProjection) &&
                    writeStringVector(writer, invalidation.mailboxIds, limits.maximumAffectedKeys,
                                      QStringLiteral("mailboxIds")) &&
                    writeStringVector(writer, invalidation.messageContentEmailIds,
@@ -771,6 +772,7 @@ namespace javelin::protocol
                    readChangedDomains(reader, invalidation.changedDomains, limits) &&
                    readAffectedKeys(reader, invalidation.affectedKeys, limits) &&
                    reader.string(invalidation.accountId) &&
+                   reader.boolean(invalidation.optimisticProjection) &&
                    readStringVector(reader, invalidation.mailboxIds, limits.maximumAffectedKeys,
                                     QStringLiteral("mailboxIds")) &&
                    readStringVector(reader, invalidation.messageContentEmailIds,
@@ -1379,6 +1381,8 @@ namespace javelin::protocol
                         return 11;
                     else if constexpr (std::is_same_v<Route, NewMessageRoute>)
                         return 12;
+                    else if constexpr (std::is_same_v<Route, ReplyMessageRoute>)
+                        return 13;
                     else
                         static_assert(sizeof(Route) == 0, "Unhandled activation route");
                 },
@@ -1439,6 +1443,9 @@ namespace javelin::protocol
                     }
                     else if constexpr (std::is_same_v<Route, NewMessageRoute>)
                         return writer.string(value.activationToken);
+                    else if constexpr (std::is_same_v<Route, ReplyMessageRoute>)
+                        return writer.string(value.accountId) && writer.string(value.emailId) &&
+                               writer.string(value.activationToken);
                     else
                         return false;
                 },
@@ -1574,6 +1581,15 @@ namespace javelin::protocol
             {
                 NewMessageRoute value;
                 if (!reader.string(value.activationToken))
+                    return false;
+                route = std::move(value);
+                return true;
+            }
+            if (kind == 13)
+            {
+                ReplyMessageRoute value;
+                if (!reader.string(value.accountId) || !reader.string(value.emailId) ||
+                    !reader.string(value.activationToken))
                     return false;
                 route = std::move(value);
                 return true;
@@ -1875,6 +1891,8 @@ namespace javelin::protocol
                     values.push_back(value);
             };
             target.epoch = source.epoch;
+            target.optimisticProjection =
+                target.optimisticProjection || source.optimisticProjection;
             if (target.accountId.isEmpty())
                 target.accountId = source.accountId;
             for (const auto domain : source.changedDomains)

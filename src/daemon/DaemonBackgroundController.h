@@ -7,6 +7,8 @@
 #include <QTimer>
 
 #include <memory>
+#include <optional>
+#include <string>
 
 class QNetworkInformation;
 
@@ -44,6 +46,9 @@ namespace javelin::app
         void retryMailNotifications();
         void refreshTrayUnreadCount();
         void queueNotificationRetry(const QString& accountId);
+        void submitNotificationMutations(std::string accountId,
+                                         std::optional<std::string> operationGroupId,
+                                         QString failureTitle);
 
         DaemonServices& m_services;
         std::unique_ptr<DesktopNotificationController> m_notifications;

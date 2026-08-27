@@ -114,9 +114,9 @@ namespace javelin::app
         }
         change.mailboxTreeChanged =
             hasDomain(invalidation.changedDomains, javelin::protocol::ChangedDomain::MailboxTree);
-        change.hasNewMail = hasDomain(invalidation.changedDomains,
-                                      javelin::protocol::ChangedDomain::MessageMetadata);
-        change.optimisticProjection = change.hasNewMail;
+        change.optimisticProjection = invalidation.optimisticProjection;
+        change.mailTagsChanged =
+            hasDomain(invalidation.changedDomains, javelin::protocol::ChangedDomain::MailTags);
         change.contactsChanged =
             hasDomain(invalidation.changedDomains, javelin::protocol::ChangedDomain::Contacts);
         change.identitiesChanged = hasDomain(invalidation.changedDomains,

@@ -104,8 +104,7 @@ namespace javelin::app
         void contactStateChanged(const QString& ownerAccountId);
         void calendarStateChanged(const QString& ownerAccountId,
                                   const javelin::jmap::sync::AccountTypeStateMap& changedStates);
-        void notificationMailboxRefreshed(const QString& accountId, const QString& mailboxId,
-                                          const QString& mailboxName);
+        void notificationEventsCommitted(const QString& accountId);
         void accountConfigured(const QString& accountId);
         void accountRemoved(const QString& accountId);
         void networkReachable();

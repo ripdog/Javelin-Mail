@@ -19,11 +19,9 @@ namespace javelin::app
             javelin::jmap::cache::DatabaseConnection& databaseConnection,
             QObject* parent = nullptr);
 
-        void mailboxRefreshed(const QString& accountId, const QString& mailboxId,
-                              const QString& mailboxName);
+        void accountChanged(const QString& accountId);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        markDelivered(std::string_view accountId, std::string_view mailboxId,
-                      const QStringList& emailIds);
+        markDelivered(std::string_view accountId, const QStringList& emailIds);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         releaseDispatches(std::string_view accountId, const QStringList& emailIds);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError> recoverDispatches();

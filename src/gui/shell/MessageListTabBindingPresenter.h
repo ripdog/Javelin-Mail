@@ -3,6 +3,8 @@
 #include "gui/shell/TabWorkspace.h"
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace javelin::app
 {
@@ -25,6 +27,9 @@ class QWidget;
 
 namespace javelin::gui::shell
 {
+    void restoreRepresentedThreadExpansions(javelin::gui::messages::MessageListModel& messageModel,
+                                            std::vector<std::string>& expandedThreadIds);
+
     class MessageListTabBindingPresenter
     {
       public:
@@ -34,7 +39,7 @@ namespace javelin::gui::shell
                                        QWidget& mailboxPane);
 
         void syncNavigation(const TabState* tab, bool showMailboxPane) const;
-        void applyItems(const TabState* tab) const;
+        void applyItems(TabState* tab) const;
 
       private:
         javelin::gui::mailboxes::MailboxTreeModel& m_mailboxModel;

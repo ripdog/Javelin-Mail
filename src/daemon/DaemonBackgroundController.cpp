@@ -10,13 +10,19 @@
 #include "app/FullMailSyncService.h"
 #include "app/LocalMaintenanceService.h"
 #include "app/MailApplicationEventsPorts.h"
+#include "app/MailApplicationPorts.h"
 #include "app/MailIndexService.h"
 #include "app/MailMutationApplicationService.h"
 #include "app/MailNotificationService.h"
 #include "app/MailQueryApplicationService.h"
+#include "app/MailboxSelectionMutation.h"
+#include "app/MessageSelection.h"
 #include "daemon/DaemonServices.h"
 #include "desktop/notifications/DesktopNotificationController.h"
 #include "desktop/tray/DaemonTrayController.h"
+
+#include <KLocalizedString>
+#include <QCoroTask>
 
 #include <QDateTime>
 #include <QDebug>
@@ -54,6 +60,79 @@ namespace javelin::app
                         .activationToken = activationToken,
                     });
                 });
+        connect(m_notifications.get(), &DesktopNotificationController::mailArchiveRequested, this,
+                [this](const QString& accountId, const QString& mailboxId, const QString& emailId)
+                {
+                    if (accountId.isEmpty() || mailboxId.isEmpty() || emailId.isEmpty())
+                        return;
+                    MessageSelection selection;
+                    selection.emplace_back(SelectedEmail{.emailId = emailId.toStdString()});
+                    auto task = m_services.mailCommandPort().queueMailboxSelectionMutation({
+                        .accountId = accountId.toStdString(),
+                        .selection = std::move(selection),
+                        .operation = MailboxSelectionOperation::Archive,
+                        .sourceMailboxId = mailboxId.toStdString(),
+                        .destinationMailboxId = std::nullopt,
+                    });
+                    QCoro::connect(
+                        std::move(task), this,
+                        [this, accountId = accountId.toStdString()](
+                            QueuedMailboxSelectionMutationResult result)
+                        {
+                            if (const auto* error =
+                                    std::get_if<javelin::jmap::OperationError>(&result))
+                            {
+                                m_notifications->notifyError({}, i18n("Unable to archive message"),
+                                                             error->message, false, false);
+                                return;
+                            }
+                            const auto& queued = std::get<QueuedMailboxSelectionMutation>(result);
+                            if (queued.queuedEmailCount == 0 || queued.queuedMutations.empty())
+                                return;
+                            submitNotificationMutations(
+                                accountId, queued.queuedMutations.front().patch.operationGroupId,
+                                i18n("Unable to archive message"));
+                        });
+                });
+        connect(
+            m_notifications.get(), &DesktopNotificationController::mailMarkReadRequested, this,
+            [this](const QString& accountId, const QString& emailId)
+            {
+                if (accountId.isEmpty() || emailId.isEmpty())
+                    return;
+                auto task = m_services.mailCommandPort().queueMarkEmailRead(accountId.toStdString(),
+                                                                            emailId.toStdString());
+                QCoro::connect(
+                    std::move(task), this,
+                    [this, accountId =
+                               accountId.toStdString()](QueuedMessageSelectionMutationResult result)
+                    {
+                        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                        {
+                            m_notifications->notifyError({}, i18n("Unable to mark message read"),
+                                                         error->message, false, false);
+                            return;
+                        }
+                        const auto& queued = std::get<QueuedMessageSelectionMutation>(result);
+                        if (queued.queuedEmailCount == 0 || queued.queuedMutations.empty())
+                            return;
+                        submitNotificationMutations(
+                            accountId, queued.queuedMutations.front().patch.operationGroupId,
+                            i18n("Unable to mark message read"));
+                    });
+            });
+        connect(
+            m_notifications.get(), &DesktopNotificationController::mailReplyRequested, this,
+            [this](const QString& accountId, const QString& emailId, const QString& activationToken)
+            {
+                if (accountId.isEmpty() || emailId.isEmpty())
+                    return;
+                Q_EMIT activationRequested(protocol::ReplyMessageRoute{
+                    .accountId = accountId,
+                    .emailId = emailId,
+                    .activationToken = activationToken,
+                });
+            });
         connect(m_notifications.get(), &DesktopNotificationController::errorNotificationActivated,
                 this,
                 [this](const QString& connectionId, const QString& activationToken)
@@ -82,37 +161,39 @@ namespace javelin::app
 
         auto& accountRuntime = m_services.accountRuntimeManager();
         auto& notificationService = m_services.mailNotificationService();
-        connect(
-            &notificationService, &MailNotificationService::notificationRaised, this,
-            [this](const QString& accountId, const QString& mailboxId, const QString& threadId,
-                   const QString& emailId, const QString& mailboxName, const QString& title,
-                   const QString& message, const QStringList& deliveredEmailIds)
-            {
-                if (m_notifications->notifyNewMail(accountId, mailboxId, threadId, emailId,
-                                                   mailboxName, title, message))
+        connect(&notificationService, &MailNotificationService::notificationRaised, this,
+                [this](const QString& accountId, const QString& mailboxId, const QString& threadId,
+                       const QString& emailId, const QString& mailboxName, const QString& title,
+                       const QString& message, const QStringList& deliveredEmailIds)
                 {
-                    if (const auto error = m_services.mailNotificationService().markDelivered(
-                            accountId.toStdString(), mailboxId.toStdString(), deliveredEmailIds))
-                        qWarning().noquote() << QStringLiteral("Record mail notification delivery:")
-                                             << error->message;
-                    return;
-                }
+                    if (m_notifications->notifyNewMail(accountId, mailboxId, threadId, emailId,
+                                                       mailboxName, title, message))
+                    {
+                        if (const auto error = m_services.mailNotificationService().markDelivered(
+                                accountId.toStdString(), deliveredEmailIds))
+                            qWarning().noquote()
+                                << QStringLiteral("Record mail notification delivery:")
+                                << error->message;
+                        return;
+                    }
 
-                if (const auto error = m_services.mailNotificationService().releaseDispatches(
-                        accountId.toStdString(), deliveredEmailIds))
-                    qWarning().noquote()
-                        << QStringLiteral("Release mail notification delivery:") << error->message;
-                queueNotificationRetry(accountId);
-            });
+                    if (const auto error = m_services.mailNotificationService().releaseDispatches(
+                            accountId.toStdString(), deliveredEmailIds))
+                        qWarning().noquote()
+                            << QStringLiteral("Release mail notification delivery:")
+                            << error->message;
+                    queueNotificationRetry(accountId);
+                });
         const auto cacheCommitted = [this](MailCacheChange change)
         {
             m_services.localMaintenanceService().requestReplay();
-            const bool mailCacheChanged =
-                !change.mailboxIds.isEmpty() || !change.queryWindows.empty() ||
-                !change.searchWindows.empty() || change.mailboxTreeChanged || change.hasNewMail;
+            const bool mailCacheChanged = !change.mailboxIds.isEmpty() ||
+                                          !change.queryWindows.empty() ||
+                                          !change.searchWindows.empty() ||
+                                          change.mailboxTreeChanged || change.emailObjectsChanged;
             if (!change.optimisticProjection && mailCacheChanged)
                 m_services.fullMailSyncService().requestCatchUp(change.accountId.toStdString());
-            if (change.hasNewMail)
+            if (change.emailObjectsChanged)
                 m_services.mailIndexService().requestIndex(change.accountId.toStdString());
             if (mailCacheChanged)
                 refreshTrayUnreadCount();
@@ -294,6 +375,9 @@ namespace javelin::app
         if (const auto error = notificationService.recoverDispatches())
             qWarning().noquote() << QStringLiteral("Recover mail notification delivery:")
                                  << error->message;
+        else
+            for (const auto& accountId : accountRuntime.configuredAccountIds())
+                notificationService.accountChanged(QString::fromStdString(accountId));
         m_services.deferredSendService().start();
         m_services.calendarNotificationService().start();
         m_services.calendarInvitationService().start();
@@ -349,13 +433,7 @@ namespace javelin::app
     {
         const auto accounts = std::exchange(m_notificationRetryAccounts, {});
         for (const auto& accountId : accounts)
-        {
-            if (!m_services.accountRuntimeManager().requestAccountSynchronization(
-                    accountId.toStdString()))
-                qWarning().noquote()
-                    << QStringLiteral("Retry mail notification synchronization failed for")
-                    << accountId;
-        }
+            m_services.mailNotificationService().accountChanged(accountId);
     }
 
     void DaemonBackgroundController::refreshTrayUnreadCount()
@@ -380,6 +458,39 @@ namespace javelin::app
         }
         m_tray->setInboxUnreadCount(unreadCount);
         m_tray->setAttentionRequired(attentionRequired);
+    }
+
+    void DaemonBackgroundController::submitNotificationMutations(
+        std::string accountId, std::optional<std::string> operationGroupId, QString failureTitle)
+    {
+        auto task = m_services.mailCommandPort().submitPendingEmailMutations(
+            std::move(accountId), std::move(operationGroupId));
+        QCoro::connect(
+            std::move(task), this,
+            [this, failureTitle =
+                       std::move(failureTitle)](javelin::jmap::SubmittedEmailMutationsResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    m_notifications->notifyError({}, failureTitle, error->message, false, false);
+                    return;
+                }
+
+                const auto& submitted = std::get<javelin::jmap::SubmittedEmailMutations>(result);
+                if (submitted.failedEmailCount == 0)
+                    return;
+
+                QString detail = i18n("The server rejected the requested message change.");
+                for (const auto& item : submitted.items)
+                {
+                    if (item.error.has_value() && !item.error->empty())
+                    {
+                        detail = QString::fromStdString(*item.error);
+                        break;
+                    }
+                }
+                m_notifications->notifyError({}, failureTitle, detail, false, false);
+            });
     }
 
     void DaemonBackgroundController::queueNotificationRetry(const QString& accountId)

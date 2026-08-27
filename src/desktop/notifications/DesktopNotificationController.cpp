@@ -23,6 +23,9 @@ namespace javelin::app
         constexpr auto notificationsPath = "/org/freedesktop/Notifications";
         constexpr auto notificationsInterface = "org.freedesktop.Notifications";
         constexpr auto defaultActionKey = "default";
+        constexpr auto archiveActionKey = "archive";
+        constexpr auto markReadActionKey = "mark-read";
+        constexpr auto replyActionKey = "reply";
         constexpr auto notificationIconName = "mail-unread";
         constexpr auto desktopEntryName = "javelinmail";
         constexpr auto defaultTimeoutMs = -1;
@@ -159,10 +162,20 @@ namespace javelin::app
                                                       const QString& title, const QString& message)
     {
         const QString summary = mailboxName.isEmpty() ? title : QStringLiteral("%1").arg(title);
-        const QStringList actions = {
-            QString::fromLatin1(defaultActionKey),
-            i18nc("@action:button desktop notification", "Open"),
-        };
+        QStringList actions;
+        if (m_actionInvokedConnected && m_transport->supportsActions())
+        {
+            actions = {
+                QString::fromLatin1(defaultActionKey),
+                i18nc("@action:button desktop notification", "Open"),
+                QString::fromLatin1(archiveActionKey),
+                i18nc("@action:button desktop notification", "Archive"),
+                QString::fromLatin1(markReadActionKey),
+                i18nc("@action:button desktop notification", "Mark Read"),
+                QString::fromLatin1(replyActionKey),
+                i18nc("@action:button desktop notification", "Reply"),
+            };
+        }
         const auto sent =
             m_transport->send(QString::fromLatin1(notificationIconName), summary, message, actions,
                               notificationHints(urgencyNormal), defaultTimeoutMs);
@@ -402,18 +415,39 @@ namespace javelin::app
             Q_EMIT undoSendRequested(tracked.sendId);
             return;
         }
-        if (actionKey != QString::fromLatin1(defaultActionKey))
-            return;
-
-        if (it->second.opensSettings)
+        if (tracked.opensSettings)
         {
-            Q_EMIT errorNotificationActivated(it->second.connectionId, it->second.activationToken);
+            if (actionKey == QString::fromLatin1(defaultActionKey))
+                Q_EMIT errorNotificationActivated(tracked.connectionId, tracked.activationToken);
             return;
         }
 
-        Q_EMIT notificationActivated(it->second.accountId, it->second.mailboxId,
-                                     it->second.mailboxName, it->second.threadId,
-                                     it->second.emailId, it->second.activationToken);
+        if (actionKey == QString::fromLatin1(archiveActionKey))
+        {
+            untrackNotification(notificationId);
+            m_transport->close(notificationId);
+            Q_EMIT mailArchiveRequested(tracked.accountId, tracked.mailboxId, tracked.emailId);
+            return;
+        }
+        if (actionKey == QString::fromLatin1(markReadActionKey))
+        {
+            untrackNotification(notificationId);
+            m_transport->close(notificationId);
+            Q_EMIT mailMarkReadRequested(tracked.accountId, tracked.emailId);
+            return;
+        }
+        if (actionKey == QString::fromLatin1(replyActionKey))
+        {
+            untrackNotification(notificationId);
+            m_transport->close(notificationId);
+            Q_EMIT mailReplyRequested(tracked.accountId, tracked.emailId, tracked.activationToken);
+            return;
+        }
+        if (actionKey != QString::fromLatin1(defaultActionKey))
+            return;
+
+        Q_EMIT notificationActivated(tracked.accountId, tracked.mailboxId, tracked.mailboxName,
+                                     tracked.threadId, tracked.emailId, tracked.activationToken);
     }
 
     void DesktopNotificationController::onActivationToken(const uint notificationId,

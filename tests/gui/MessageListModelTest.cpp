@@ -1,6 +1,8 @@
 #include "gui/messages/MessageListModel.h"
+#include "gui/messages/MessageDragListView.h"
 #include "gui/messages/MessageDragPayload.h"
 #include "gui/messages/MessageSelectionRestoration.h"
+#include "gui/shell/MessageListTabBindingPresenter.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
@@ -416,8 +418,32 @@ TEST_CASE("message list drag payload preserves collapsed Thread intent and sourc
         std::holds_alternative<javelin::app::SelectedCollapsedThread>(decoded->selection.at(1)));
     CHECK(std::get<javelin::app::SelectedCollapsedThread>(decoded->selection.at(1)).threadId ==
           "thread-2");
+    CHECK_FALSE(mime->hasUrls());
     CHECK(model.supportedDragActions().testFlag(Qt::MoveAction));
     CHECK(model.supportedDragActions().testFlag(Qt::CopyAction));
+
+    const QList<QUrl> externalUrls{
+        QUrl::fromLocalFile(QStringLiteral("/tmp/message-1.eml")),
+        QUrl::fromLocalFile(QStringLiteral("/tmp/message-2.eml")),
+    };
+    int externalProviderCalls = 0;
+    std::unique_ptr<QMimeData> externalMime{javelin::gui::messages::buildMessageDragMimeData(
+        mime->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)),
+        [&externalProviderCalls, externalUrls]
+        {
+            ++externalProviderCalls;
+            return externalUrls;
+        })};
+    REQUIRE(externalMime != nullptr);
+    CHECK(externalMime->hasFormat(QStringLiteral("text/uri-list")));
+    CHECK(externalProviderCalls == 0);
+    CHECK(externalMime->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)) ==
+          mime->data(QString::fromLatin1(javelin::gui::messages::messageDragMimeType)));
+    CHECK(externalProviderCalls == 0);
+    CHECK(externalMime->urls() == externalUrls);
+    CHECK(externalProviderCalls == 1);
+    CHECK(externalMime->data(QStringLiteral("text/uri-list")).contains("message-1.eml"));
+    CHECK(externalProviderCalls == 1);
 }
 
 TEST_CASE("message list drag payload records search selection without a source mailbox",
@@ -558,21 +584,40 @@ TEST_CASE("message list model expands a known conversation without an exact mail
     CHECK_FALSE(accessibleText.contains(QStringLiteral("3 messages")));
 }
 
-TEST_CASE("message list model marks one cached row read without resetting its list",
-          "[gui][messages][model]")
+TEST_CASE("message list model clear invalidates its binding identity", "[gui][messages][model]")
 {
     javelin::gui::messages::MessageListModel model{QString{}};
 
     model.setItems(std::optional<std::string>{"account-1"}, std::optional<std::string>{"mailbox-1"},
-                   {item("email-1", "thread-1", true), item("email-2", "thread-2", true)});
+                   {item("email-1", "thread-1")});
 
-    REQUIRE(model.rowCount() == 2);
-    CHECK(model.setEmailRead("email-1"));
-    CHECK_FALSE(model.data(model.index(0), javelin::gui::messages::MessageListModel::IsUnreadRole)
-                    .toBool());
-    CHECK(model.data(model.index(1), javelin::gui::messages::MessageListModel::IsUnreadRole)
-              .toBool());
-    CHECK_FALSE(model.setEmailRead("email-1"));
+    CHECK(model.isBoundTo("account-1", std::optional<std::string_view>{"mailbox-1"}));
+    CHECK_FALSE(model.isBoundTo("account-1", std::nullopt));
+
+    model.clear();
+    CHECK_FALSE(model.isBoundTo("account-1", std::optional<std::string_view>{"mailbox-1"}));
+
+    model.setItems(std::optional<std::string>{"account-1"}, std::nullopt, {});
+    CHECK(model.isBoundTo("account-1", std::nullopt));
+}
+
+TEST_CASE("tab expansion restoration retains only represented Thread identities",
+          "[gui][messages][model][tabs]")
+{
+    javelin::gui::messages::MessageListModel model{QString{}};
+    model.setItems(std::optional<std::string>{"account-1"}, std::optional<std::string>{"mailbox-1"},
+                   {item("email-1", "thread-1"), item("email-2", "thread-1")});
+    std::vector<std::string> expanded{"thread-1", "missing-thread"};
+
+    javelin::gui::shell::restoreRepresentedThreadExpansions(model, expanded);
+    CHECK(expanded == std::vector<std::string>{"thread-1"});
+    CHECK(model.isThreadExpanded("thread-1"));
+
+    model.setItems(std::optional<std::string>{"account-1"}, std::optional<std::string>{"mailbox-2"},
+                   {item("email-3", "thread-2"), item("email-4", "thread-2")});
+    javelin::gui::shell::restoreRepresentedThreadExpansions(model, expanded);
+    CHECK(expanded.empty());
+    CHECK_FALSE(model.isThreadExpanded("thread-1"));
 }
 
 TEST_CASE("message list model appends an infinite-scroll tail without resetting existing rows",

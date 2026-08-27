@@ -139,8 +139,8 @@ TEST_CASE("mail notification activation preserves the message route and mailbox 
 
     auto transport = std::make_unique<FakeNotificationTransport>();
     auto* transportObserver = transport.get();
-    auto notifications =
-        std::make_unique<javelin::app::DesktopNotificationController>(std::move(transport), false);
+    auto notifications = std::make_unique<javelin::app::DesktopNotificationController>(
+        std::move(transport), false, true);
     auto* notificationController = notifications.get();
     javelin::app::DaemonBackgroundController background{services, std::move(notifications)};
 
@@ -158,7 +158,10 @@ TEST_CASE("mail notification activation preserves the message route and mailbox 
     CHECK(transportObserver->request->summary == QStringLiteral("New mail in Projects"));
     CHECK(transportObserver->request->message == QStringLiteral("Test subject"));
     CHECK(transportObserver->request->actions ==
-          QStringList{QStringLiteral("default"), QStringLiteral("Open")});
+          QStringList{QStringLiteral("default"), QStringLiteral("Open"), QStringLiteral("archive"),
+                      QStringLiteral("Archive"), QStringLiteral("mark-read"),
+                      QStringLiteral("Mark Read"), QStringLiteral("reply"),
+                      QStringLiteral("Reply")});
     CHECK(transportObserver->request->hints.value(QStringLiteral("desktop-entry")).toString() ==
           QStringLiteral("javelinmail"));
 
@@ -179,6 +182,93 @@ TEST_CASE("mail notification activation preserves the message route and mailbox 
     CHECK(messageRoute->threadId == QStringLiteral("thread-8"));
     CHECK(messageRoute->emailId == QStringLiteral("email-13"));
     CHECK(messageRoute->activationToken == QStringLiteral("token-21"));
+
+    REQUIRE(QMetaObject::invokeMethod(
+        notificationController, "onActionInvoked", Qt::DirectConnection,
+        Q_ARG(uint, transportObserver->notificationId), Q_ARG(QString, QStringLiteral("reply"))));
+    REQUIRE(activatedRoute.has_value());
+    const auto* replyRoute = std::get_if<javelin::protocol::ReplyMessageRoute>(&*activatedRoute);
+    REQUIRE(replyRoute != nullptr);
+    CHECK(replyRoute->accountId == QStringLiteral("account-1"));
+    CHECK(replyRoute->emailId == QStringLiteral("email-13"));
+    CHECK(replyRoute->activationToken == QStringLiteral("token-21"));
+    CHECK(transportObserver->closedId == transportObserver->notificationId);
+}
+
+TEST_CASE("new mail notification actions emit stable mail intents",
+          "[app][daemon][notification][actions]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+
+    QString archiveAccount;
+    QString archiveMailbox;
+    QString archiveEmail;
+    QString readAccount;
+    QString readEmail;
+    QObject::connect(&controller,
+                     &javelin::app::DesktopNotificationController::mailArchiveRequested,
+                     &controller,
+                     [&](const QString& accountId, const QString& mailboxId, const QString& emailId)
+                     {
+                         archiveAccount = accountId;
+                         archiveMailbox = mailboxId;
+                         archiveEmail = emailId;
+                     });
+    QObject::connect(&controller,
+                     &javelin::app::DesktopNotificationController::mailMarkReadRequested,
+                     &controller,
+                     [&](const QString& accountId, const QString& emailId)
+                     {
+                         readAccount = accountId;
+                         readEmail = emailId;
+                     });
+
+    REQUIRE(controller.notifyNewMail(QStringLiteral("account-a"), QStringLiteral("inbox-a"),
+                                     QStringLiteral("thread-a"), QStringLiteral("email-a"),
+                                     QStringLiteral("Inbox"), QStringLiteral("New mail"),
+                                     QStringLiteral("First")));
+    const auto archiveNotificationId = observer->notificationId;
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onActionInvoked", Qt::DirectConnection,
+                                      Q_ARG(uint, archiveNotificationId),
+                                      Q_ARG(QString, QStringLiteral("archive"))));
+    CHECK(archiveAccount == QStringLiteral("account-a"));
+    CHECK(archiveMailbox == QStringLiteral("inbox-a"));
+    CHECK(archiveEmail == QStringLiteral("email-a"));
+    CHECK(observer->closedId == archiveNotificationId);
+
+    REQUIRE(controller.notifyNewMail(QStringLiteral("account-b"), QStringLiteral("inbox-b"),
+                                     QStringLiteral("thread-b"), QStringLiteral("email-b"),
+                                     QStringLiteral("Inbox"), QStringLiteral("New mail"),
+                                     QStringLiteral("Second")));
+    const auto readNotificationId = observer->notificationId;
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onActionInvoked", Qt::DirectConnection,
+                                      Q_ARG(uint, readNotificationId),
+                                      Q_ARG(QString, QStringLiteral("mark-read"))));
+    CHECK(readAccount == QStringLiteral("account-b"));
+    CHECK(readEmail == QStringLiteral("email-b"));
+    CHECK(observer->closedId == readNotificationId);
+}
+
+TEST_CASE("new mail omits actions when the notification service cannot invoke them",
+          "[app][daemon][notification][actions]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    observer->actionsSupported = false;
+    javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+
+    REQUIRE(controller.notifyNewMail(QStringLiteral("account"), QStringLiteral("inbox"),
+                                     QStringLiteral("thread"), QStringLiteral("email"),
+                                     QStringLiteral("Inbox"), QStringLiteral("New mail"),
+                                     QStringLiteral("Subject")));
+    REQUIRE(observer->request.has_value());
+    CHECK(observer->request->actions.isEmpty());
 }
 
 TEST_CASE("calendar invitation notification is persistent open-only and activates its event",

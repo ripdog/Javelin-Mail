@@ -43,12 +43,14 @@ namespace javelin::gui::shell
     {
         javelin::app::MailboxSession* session = nullptr;
         TabSelectionState selection;
+        std::vector<std::string> expandedThreadIds;
     };
 
     struct SearchTabState
     {
         javelin::app::SearchSession* session = nullptr;
         TabSelectionState selection;
+        std::vector<std::string> expandedThreadIds;
     };
 
     struct ComposeTabState

@@ -111,6 +111,78 @@ TEST_CASE("GUI mail events preserve equal account and mailbox identifiers", "[ap
     CHECK(received->change.queryWindows.front().total == std::optional<std::size_t>{113});
 }
 
+TEST_CASE("GUI mail events preserve optimistic projection independently of metadata",
+          "[app][gui][cache]")
+{
+    javelin::app::GuiDaemonSession session{
+        {.runtimeDirectory = QStringLiteral("/tmp"),
+         .socketPath = QStringLiteral("/tmp/unused-javelin-test.sock"),
+         .daemonExecutable = {},
+         .protocol = {.major = 3, .minor = 0},
+         .build = {.application = QStringLiteral("Javelin-Mail"),
+                   .revision = QStringLiteral("test")},
+         .startTimeoutMilliseconds = 10,
+         .startDaemonIfMissing = false}};
+
+    javelin::app::GuiMailApplicationEvents events{session};
+    std::optional<javelin::app::MailCacheInvalidation> received;
+    QObject::connect(&events, &javelin::app::MailApplicationEventsPort::cacheInvalidated,
+                     [&received](javelin::app::MailCacheInvalidation invalidation)
+                     { received = std::move(invalidation); });
+
+    session.onBoundaryEvent(javelin::protocol::CacheInvalidation{
+        .epoch = {.value = 9},
+        .changedDomains = {javelin::protocol::ChangedDomain::MessageMetadata},
+        .affectedKeys = {},
+        .accountId = QStringLiteral("account-1"),
+        .optimisticProjection = false,
+    });
+    REQUIRE(received.has_value());
+    CHECK_FALSE(received->change.emailObjectsChanged);
+    CHECK_FALSE(received->change.optimisticProjection);
+
+    session.onBoundaryEvent(javelin::protocol::CacheInvalidation{
+        .epoch = {.value = 10},
+        .changedDomains = {},
+        .affectedKeys = {},
+        .accountId = QStringLiteral("account-1"),
+        .optimisticProjection = true,
+    });
+    REQUIRE(received.has_value());
+    CHECK_FALSE(received->change.emailObjectsChanged);
+    CHECK(received->change.optimisticProjection);
+}
+
+TEST_CASE("GUI mail events publish the dedicated mail-tag cache domain", "[app][gui][cache]")
+{
+    javelin::app::GuiDaemonSession session{
+        {.runtimeDirectory = QStringLiteral("/tmp"),
+         .socketPath = QStringLiteral("/tmp/unused-javelin-test.sock"),
+         .daemonExecutable = {},
+         .protocol = {.major = 3, .minor = 0},
+         .build = {.application = QStringLiteral("Javelin-Mail"),
+                   .revision = QStringLiteral("test")},
+         .startTimeoutMilliseconds = 10,
+         .startDaemonIfMissing = false}};
+    javelin::app::GuiMailApplicationEvents events{session};
+    std::optional<javelin::app::MailCacheInvalidation> received;
+    QObject::connect(&events, &javelin::app::MailApplicationEventsPort::cacheInvalidated,
+                     [&received](javelin::app::MailCacheInvalidation invalidation)
+                     { received = std::move(invalidation); });
+
+    session.onBoundaryEvent(javelin::protocol::CacheInvalidation{
+        .epoch = {.value = 13},
+        .changedDomains = {javelin::protocol::ChangedDomain::MailTags},
+        .affectedKeys = {QStringLiteral("account-1")},
+        .accountId = QStringLiteral("account-1"),
+    });
+
+    REQUIRE(received.has_value());
+    CHECK(received->change.mailTagsChanged);
+    CHECK_FALSE(received->changedDomains.empty());
+    CHECK(received->changedDomains.front() == javelin::protocol::ChangedDomain::MailTags);
+}
+
 TEST_CASE("GUI mail events preserve hydrated message content identifiers", "[app][gui][cache]")
 {
     javelin::app::GuiDaemonSession session{

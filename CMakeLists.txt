@@ -618,6 +618,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/widgets/EmailAddressLineEdit.h
     src/gui/calendar/MonthCalendarWidget.cpp
     src/gui/calendar/MonthCalendarWidget.h
+    src/gui/calendar/CalendarDefaultNotificationsDialog.cpp
+    src/gui/calendar/CalendarDefaultNotificationsDialog.h
     src/gui/calendar/CalendarNotificationEditor.cpp
     src/gui/calendar/CalendarNotificationEditor.h
     src/gui/calendar/MonthCalendarLayout.cpp
@@ -944,8 +946,6 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/calendar/CalendarMutationJournal.h
     src/jmap/contacts/AddressBookMutationJournal.cpp
     src/jmap/contacts/AddressBookMutationJournal.h
-    src/jmap/sync/RefreshNotificationPlanner.cpp
-    src/jmap/sync/RefreshNotificationPlanner.h
     src/jmap/sync/SyncPlanner.cpp
     src/jmap/sync/SyncPlanner.h
     src/jmap/sync/SyncReconciler.cpp
@@ -1240,8 +1240,6 @@ add_library(javelin_jmap STATIC
     src/jmap/identity/IdentityService.h
     src/jmap/contacts/AddressBookMutationJournal.cpp
     src/jmap/contacts/AddressBookMutationJournal.h
-    src/jmap/sync/RefreshNotificationPlanner.cpp
-    src/jmap/sync/RefreshNotificationPlanner.h
     src/jmap/sync/SyncPlanner.cpp
     src/jmap/sync/SyncPlanner.h
     src/jmap/sync/SyncReconciler.cpp
@@ -1463,6 +1461,8 @@ add_library(javelin_gui STATIC
     src/gui/widgets/EmailAddressLineEdit.h
     src/gui/calendar/MonthCalendarWidget.cpp
     src/gui/calendar/MonthCalendarWidget.h
+    src/gui/calendar/CalendarDefaultNotificationsDialog.cpp
+    src/gui/calendar/CalendarDefaultNotificationsDialog.h
     src/gui/calendar/CalendarNotificationEditor.cpp
     src/gui/calendar/CalendarNotificationEditor.h
     src/gui/calendar/MonthCalendarLayout.cpp

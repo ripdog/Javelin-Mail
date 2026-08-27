@@ -33,6 +33,13 @@ namespace javelin::protocol
         QString activationToken;
     };
 
+    struct ReplyMessageRoute
+    {
+        QString accountId;
+        QString emailId;
+        QString activationToken;
+    };
+
     struct OpenSettingsRoute
     {
         QString connectionId;
@@ -103,11 +110,11 @@ namespace javelin::protocol
         QString sendId;
     };
 
-    using ActivationRoute =
-        std::variant<OpenMailboxRoute, OpenMessageRoute, OpenComposeRoute, RaiseGuiRoute,
-                     OpenSettingsRoute, OpenCalendarEventRoute, RestoreDraftRoute,
-                     OpenTaskCenterRoute, OpenMailtoRoute, ShowUndoSendDialogRoute,
-                     CloseUndoSendDialogRoute, OpenWorkspaceRoute, NewMessageRoute>;
+    using ActivationRoute = std::variant<OpenMailboxRoute, OpenMessageRoute, OpenComposeRoute,
+                                         RaiseGuiRoute, OpenSettingsRoute, OpenCalendarEventRoute,
+                                         RestoreDraftRoute, OpenTaskCenterRoute, OpenMailtoRoute,
+                                         ShowUndoSendDialogRoute, CloseUndoSendDialogRoute,
+                                         OpenWorkspaceRoute, NewMessageRoute, ReplyMessageRoute>;
 
     struct ActivationRequested
     {

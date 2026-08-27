@@ -284,7 +284,7 @@ namespace
                                        .limit = limit,
                                        .total = 4}},
                     .mailboxTreeChanged = false,
-                    .hasNewMail = false,
+                    .emailObjectsChanged = false,
                     .optimisticProjection = false,
                     .contactsChanged = false,
                 },
@@ -345,7 +345,7 @@ TEST_CASE("search cache commit terminates its visible refresh", "[app][search-se
                                    .limit = 100,
                                    .total = 0}},
                 .mailboxTreeChanged = false,
-                .hasNewMail = false,
+                .emailObjectsChanged = false,
                 .optimisticProjection = false,
                 .contactsChanged = false,
             },
@@ -388,6 +388,79 @@ TEST_CASE("missing initial online-search cache materializes itself after the cac
         .message = QStringLiteral("Expected search cache-miss test completion."),
     });
     QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+}
+
+TEST_CASE("unrelated same-account invalidation does not supersede online search refresh",
+          "[app][search-session][cache-race]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("search-session-unrelated-test"));
+    PendingSearchMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::SearchSession session{
+        "account-1", {.from = "sender@example.test"}, {}, context.queries, materialization, events,
+        100,
+    };
+    std::size_t failureCount = 0;
+    QObject::connect(&session, &javelin::app::MessageListSession::refreshFailed, &session,
+                     [&failureCount](const javelin::jmap::OperationError&) { ++failureCount; });
+
+    session.refresh();
+    REQUIRE(session.state().refreshInFlight);
+    events.publish({
+        .epoch = 7,
+        .changedDomains = {javelin::protocol::ChangedDomain::Calendars},
+        .affectedKeys = {QStringLiteral("account-1")},
+        .change = {.accountId = QStringLiteral("account-1"),
+                   .mailboxIds = {},
+                   .queryWindows = {},
+                   .searchWindows = {}},
+    });
+    CHECK(session.state().refreshInFlight);
+
+    materialization.complete(javelin::jmap::OperationError{
+        .message = QStringLiteral("Expected search refresh failure."),
+    });
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    CHECK_FALSE(session.state().refreshInFlight);
+    CHECK(failureCount == 1);
+}
+
+TEST_CASE("optimistic metadata invalidation marks an active online search stale",
+          "[app][search-session][cache-race][optimistic]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("search-session-optimistic-test"));
+    PendingSearchMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::SearchSession session{
+        "account-1", {.from = "sender@example.test"}, {}, context.queries, materialization, events,
+        100,
+    };
+    std::size_t failureCount = 0;
+    QObject::connect(&session, &javelin::app::MessageListSession::refreshFailed, &session,
+                     [&failureCount](const javelin::jmap::OperationError&) { ++failureCount; });
+
+    session.refresh();
+    REQUIRE(session.state().refreshInFlight);
+    events.publish({
+        .epoch = 9,
+        .changedDomains = {javelin::protocol::ChangedDomain::MessageMetadata},
+        .affectedKeys = {QStringLiteral("account-1")},
+        .change = {.accountId = QStringLiteral("account-1"),
+                   .mailboxIds = {},
+                   .queryWindows = {},
+                   .searchWindows = {},
+                   .emailObjectsChanged = false,
+                   .optimisticProjection = true},
+    });
+    CHECK(session.state().stale);
+
+    materialization.complete(javelin::jmap::OperationError{
+        .message = QStringLiteral("Active refresh failure remains observable."),
+    });
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    CHECK(failureCount == 1);
 }
 
 TEST_CASE("cached online-search load retries after a superseding same-account invalidation",

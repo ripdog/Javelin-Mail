@@ -17,7 +17,6 @@ namespace javelin::gui::shell
     struct TabActivationPlan
     {
         bool showMailboxPane = true;
-        bool clearMessagePresentation = false;
         bool refreshRemote = false;
     };
 

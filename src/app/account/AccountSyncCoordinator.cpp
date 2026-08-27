@@ -487,8 +487,7 @@ namespace javelin::app
         bool emailCacheChanged = false;
         bool endpointRequestSucceeded = false;
         bool refreshEveryMailbox = demand.allMailboxes;
-        bool accountEmailStateRefreshed = false;
-        bool hasNewMail = false;
+        bool emailObjectsChanged = false;
         std::vector<std::string> queryAffectedMailboxIds;
         QStringList refreshedMailboxIds;
 
@@ -531,10 +530,12 @@ namespace javelin::app
             }
             mailboxStateChanged = delta.mailboxChanged;
             emailCacheChanged = delta.emailChanged;
-            accountEmailStateRefreshed = demand.emailState && !delta.emailNeedsFullRefresh;
             refreshEveryMailbox = delta.emailNeedsFullRefresh;
             queryAffectedMailboxIds = delta.queryAffectedMailboxIds;
-            hasNewMail = !delta.insertedEmailIds.empty();
+            if (delta.notificationEventsCreated)
+                Q_EMIT notificationEventsCommitted(
+                    QString::fromStdString(runContext->configuration.accountId));
+            emailObjectsChanged = delta.emailChanged;
             for (const auto& mailboxId : delta.changedMailboxIds)
                 refreshedMailboxIds.push_back(QString::fromStdString(mailboxId));
             if (delta.mailboxNeedsFullRefresh)
@@ -575,7 +576,7 @@ namespace javelin::app
                     .queryWindows = {},
                     .searchWindows = {},
                     .mailboxTreeChanged = true,
-                    .hasNewMail = false,
+                    .emailObjectsChanged = false,
                 });
             }
             if (endpointRequestSucceeded)
@@ -615,7 +616,7 @@ namespace javelin::app
                 continue;
             const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
                 runContext->configuration.accountId, mailboxId, {}, false,
-                !accountEmailStateRefreshed, runContext->configuration.remoteAccountId);
+                runContext->configuration.remoteAccountId);
             if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
                 runContext->cancellation.isCancelled())
             {
@@ -631,8 +632,6 @@ namespace javelin::app
                     continue;
                 }
                 m_shouldCatchUpRefreshOnReconnect = false;
-                accountEmailStateRefreshed =
-                    accountEmailStateRefreshed || summary->usedIncrementalRefresh;
                 watchedMailboxRefreshed = true;
                 const auto qMailboxId = QString::fromStdString(mailboxId);
                 if (!refreshedMailboxIds.contains(qMailboxId))
@@ -646,13 +645,7 @@ namespace javelin::app
                         .total = std::nullopt,
                     });
                 }
-                hasNewMail = hasNewMail || !summary->insertedEmailIds.empty();
-                if (runContext->configuration.notificationMailboxIds.contains(mailboxId))
-                {
-                    Q_EMIT notificationMailboxRefreshed(
-                        QString::fromStdString(runContext->configuration.accountId),
-                        QString::fromStdString(mailboxId), QString::fromStdString(mailboxName));
-                }
+                emailObjectsChanged = emailObjectsChanged || !summary->changedEmailIds.empty();
             }
             else if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
             {
@@ -682,7 +675,7 @@ namespace javelin::app
                 .queryWindows = std::move(materializedWindows),
                 .searchWindows = {},
                 .mailboxTreeChanged = mailboxStateChanged,
-                .hasNewMail = hasNewMail,
+                .emailObjectsChanged = emailObjectsChanged,
             });
         }
         if (endpointRequestSucceeded)

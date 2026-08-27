@@ -1,10 +1,14 @@
 #include "gui/shell/MessageFileUtils.h"
 
+#include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QMimeDatabase>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTemporaryFile>
 
 #include <algorithm>
@@ -148,6 +152,82 @@ namespace javelin::gui::shell
         const auto path = file.fileName();
         file.close();
         return FileWriteResult{.path = path, .errorMessage = {}};
+    }
+
+    QString defaultExternalDragRootPath()
+    {
+        return QDir{QStandardPaths::writableLocation(QStandardPaths::CacheLocation)}.filePath(
+            QStringLiteral("drag-out"));
+    }
+
+    void cleanupExpiredExternalDragDirectories(const QString& rootPath,
+                                               const qint64 nowMilliseconds,
+                                               const qint64 retentionMilliseconds)
+    {
+        if (retentionMilliseconds < 0)
+            return;
+
+        QDir root{rootPath};
+        if (!root.exists())
+            return;
+
+        const auto directories = root.entryInfoList({QStringLiteral("drag-*")},
+                                                    QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+        for (const auto& directory : directories)
+        {
+            const auto name = directory.fileName();
+            const auto separator = name.indexOf(QLatin1Char('-'), 5);
+            if (separator <= 5)
+                continue;
+            bool ok = false;
+            const auto createdMilliseconds = name.mid(5, separator - 5).toLongLong(&ok);
+            if (!ok || createdMilliseconds > nowMilliseconds ||
+                nowMilliseconds - createdMilliseconds < retentionMilliseconds)
+                continue;
+            QDir{directory.absoluteFilePath()}.removeRecursively();
+        }
+    }
+
+    ExternalDragDirectoryResult createExternalDragDirectory(const QString& rootPath,
+                                                            qint64 nowMilliseconds)
+    {
+        if (nowMilliseconds < 0)
+            nowMilliseconds = QDateTime::currentMSecsSinceEpoch();
+
+        if (!QDir{}.mkpath(rootPath))
+        {
+            return ExternalDragDirectoryResult{
+                .path = {},
+                .errorMessage = QStringLiteral("Could not create the drag-out cache directory."),
+            };
+        }
+        cleanupExpiredExternalDragDirectories(rootPath, nowMilliseconds);
+
+        QTemporaryDir directory{
+            QDir{rootPath}.filePath(QStringLiteral("drag-%1-XXXXXX").arg(nowMilliseconds))};
+        if (!directory.isValid())
+        {
+            return ExternalDragDirectoryResult{
+                .path = {},
+                .errorMessage = directory.errorString(),
+            };
+        }
+        directory.setAutoRemove(false);
+        const auto path = directory.path();
+        static_cast<void>(QFile::setPermissions(
+            path, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        return ExternalDragDirectoryResult{.path = path, .errorMessage = {}};
+    }
+
+    QList<QUrl> externalDragFileUrls(const QString& directoryPath)
+    {
+        const auto files = QDir{directoryPath}.entryInfoList(QDir::Files | QDir::NoDotAndDotDot,
+                                                             QDir::Name | QDir::IgnoreCase);
+        QList<QUrl> urls;
+        urls.reserve(files.size());
+        for (const auto& file : files)
+            urls.push_back(QUrl::fromLocalFile(file.absoluteFilePath()));
+        return urls;
     }
 
     BatchWriteResult

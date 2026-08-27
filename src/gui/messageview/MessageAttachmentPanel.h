@@ -42,6 +42,8 @@ namespace javelin::gui::messageview
         void saveAttachmentRequested(QString accountId, QString emailId, QString partId);
         void openAttachmentRequested(QString accountId, QString emailId, QString partId);
         void openAttachmentWithRequested(QString accountId, QString emailId, QString partId);
+        void dragAttachmentRequested(QString accountId, QString emailId, QString partId,
+                                     QWidget* source);
         void saveAllAttachmentsRequested(QString accountId, QString emailId);
 
       protected:

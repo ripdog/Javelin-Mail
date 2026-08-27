@@ -197,6 +197,7 @@ namespace javelin::gui::shell
         void openContacts();
         void openCalendar();
         void composeNewMessage();
+        void composeReplyTo(const QString& accountId, const QString& emailId);
         void restoreDraft(const QString& accountId, const QString& draftEmailId,
                           const QString& composeSessionId);
         void openCalendarEvent(const QString& calendarAccountId, const QString& eventId,
@@ -248,7 +249,6 @@ namespace javelin::gui::shell
         void
         markTabsStaleForAccount(std::string_view accountId,
                                 std::optional<std::string_view> refreshedMailboxId = std::nullopt);
-        void markSearchTabsStaleForAccount(std::string_view accountId);
         void executeSearch(const QString& text);
         void showAdvancedSearch();
         void clearSearch();
@@ -280,6 +280,7 @@ namespace javelin::gui::shell
         [[nodiscard]] std::optional<std::string> activeMailboxId() const;
         [[nodiscard]] const TabState* activeTab() const;
         [[nodiscard]] TabState* activeTab();
+        [[nodiscard]] bool setActiveThreadExpanded(std::string_view threadId, bool expanded);
         void applyActiveTabItemsPreservingSelection(std::optional<int> previousMessageRow);
         void maybeLoadMoreMessages();
         void loadMoreMessages();

@@ -1,10 +1,8 @@
-#include "jmap/sync/RefreshNotificationPlanner.h"
 #include "FixtureReader.h"
 #include "jmap/cache/EmailRepository.h"
-#include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/NotificationRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
-#include "jmap/sync/MailboxRefreshExecutor.h"
+#include "jmap/sync/MailNotificationEligibility.h"
 
 #include <QCoreApplication>
 #include <QSqlQuery>
@@ -95,64 +93,96 @@ namespace
 
 } // namespace
 
-TEST_CASE("refresh notification planner returns inserted unread mailbox emails",
-          "[jmap][sync][notification]")
+TEST_CASE("mail notification eligibility requires a legitimate incoming transition",
+          "[jmap][sync][notification][eligibility]")
 {
-    ApplicationGuard application;
-    Q_UNUSED(application);
+    auto previous = loadEmailFixture();
+    previous.id = "eml-transition";
+    previous.threadId = "thr-transition";
+    previous.mailboxIds = {"mbx-archive"};
+    previous.keywords = {};
 
-    auto databaseContext = makeDatabaseContext();
-    seedAccount(databaseContext.connection);
+    auto current = previous;
+    const std::vector<std::string> enabled{"mbx-inbox", "mbx-projects"};
+    const auto evaluate = [&](const javelin::jmap::domain::Email* before, const bool serverCreated,
+                              const bool withinHorizon, const bool suppressed)
+    {
+        return javelin::jmap::sync::evaluateMailNotificationTransition({
+            .previous = before,
+            .current = &current,
+            .notificationMailboxIds = enabled,
+            .serverCreated = serverCreated,
+            .withinNotificationHorizon = withinHorizon,
+            .suppressedByLocalOperation = suppressed,
+        });
+    };
 
-    auto unreadInserted = loadEmailFixture();
-    unreadInserted.id = "eml-new";
-    unreadInserted.threadId = "thr-new";
-    unreadInserted.mailboxIds = {"mbx-inbox"};
-    unreadInserted.keywords = {};
-    unreadInserted.subject = "Unread new message";
+    SECTION("new unread mail in one enabled mailbox")
+    {
+        current.mailboxIds = {"mbx-inbox"};
+        const auto decision = evaluate(nullptr, true, true, false);
+        CHECK(decision.qualifyingMailboxIds == std::vector<std::string>{"mbx-inbox"});
+    }
 
-    auto seenInserted = unreadInserted;
-    seenInserted.id = "eml-seen";
-    seenInserted.threadId = "thr-seen";
-    seenInserted.keywords = {"$seen"};
-    seenInserted.subject = "Seen message";
+    SECTION("new unread mail in several enabled mailboxes is still one Email event")
+    {
+        current.mailboxIds = {"mbx-projects", "mbx-inbox"};
+        const auto decision = evaluate(nullptr, true, true, false);
+        CHECK(decision.qualifyingMailboxIds ==
+              std::vector<std::string>{"mbx-inbox", "mbx-projects"});
+    }
 
-    auto otherMailbox = unreadInserted;
-    otherMailbox.id = "eml-other";
-    otherMailbox.threadId = "thr-other";
-    otherMailbox.mailboxIds = {"mbx-archive"};
-    otherMailbox.subject = "Wrong mailbox";
+    SECTION("new mail already read is not eligible")
+    {
+        current.mailboxIds = {"mbx-inbox"};
+        current.keywords = {"$seen"};
+        CHECK_FALSE(evaluate(nullptr, true, true, false).eligible());
+    }
 
-    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
-    REQUIRE_FALSE(
-        emailRepository.replaceAll("account-1", {unreadInserted, seenInserted, otherMailbox})
-            .has_value());
+    SECTION("server-side unread move into an enabled mailbox is eligible")
+    {
+        current.mailboxIds = {"mbx-inbox"};
+        const auto decision = evaluate(&previous, false, true, false);
+        CHECK(decision.qualifyingMailboxIds == std::vector<std::string>{"mbx-inbox"});
+    }
 
-    const javelin::jmap::sync::RefreshNotificationPlanner planner{databaseContext.connection};
-    const auto result =
-        planner.plan("account-1", "mbx-inbox",
-                     javelin::jmap::sync::MailboxRefreshSummary{
-                         .representativeCount = 3,
-                         .usedIncrementalRefresh = false,
-                         .changedEmailIds = {},
-                         .insertedEmailIds = {"eml-new", "eml-seen", "eml-other", "eml-missing"},
-                         .removedEmailIds = {},
-                         .requiresNotificationScan = true,
-                         .notificationCandidates = {},
-                     });
+    SECTION("move between enabled mailboxes is not another incoming transition")
+    {
+        previous.mailboxIds = {"mbx-inbox"};
+        current.mailboxIds = {"mbx-projects"};
+        CHECK_FALSE(evaluate(&previous, false, true, false).eligible());
+    }
 
-    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
-        result));
-    const auto& candidates =
-        std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(result);
-    REQUIRE(candidates.size() == 1);
-    CHECK(candidates.front().emailId == "eml-new");
-    CHECK(candidates.front().threadId == "thr-new");
-    CHECK(candidates.front().subject == std::optional<std::string>{"Unread new message"});
+    SECTION("seen to unread in an already enabled mailbox is not arrival")
+    {
+        previous.mailboxIds = {"mbx-inbox"};
+        previous.keywords = {"$seen"};
+        current.mailboxIds = {"mbx-inbox"};
+        current.keywords = {};
+        CHECK_FALSE(evaluate(&previous, false, true, false).eligible());
+    }
+
+    SECTION("uncached updated mail is not guessed to be newly eligible")
+    {
+        current.mailboxIds = {"mbx-inbox"};
+        CHECK_FALSE(evaluate(nullptr, false, true, false).eligible());
+    }
+
+    SECTION("pre-horizon transition is historical")
+    {
+        current.mailboxIds = {"mbx-inbox"};
+        CHECK_FALSE(evaluate(nullptr, true, false, false).eligible());
+    }
+
+    SECTION("local import provenance suppresses a server-created Email")
+    {
+        current.mailboxIds = {"mbx-inbox"};
+        CHECK_FALSE(evaluate(nullptr, true, true, true).eligible());
+    }
 }
 
-TEST_CASE("refresh notification planner returns empty candidates when nothing was inserted",
-          "[jmap][sync][notification]")
+TEST_CASE("notification delivery revalidates pending events locally",
+          "[jmap][cache][notification][delivery]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -160,95 +190,292 @@ TEST_CASE("refresh notification planner returns empty candidates when nothing wa
     auto databaseContext = makeDatabaseContext();
     seedAccount(databaseContext.connection);
 
-    const javelin::jmap::sync::RefreshNotificationPlanner planner{databaseContext.connection};
-    const auto result = planner.plan("account-1", "mbx-inbox",
-                                     javelin::jmap::sync::MailboxRefreshSummary{
-                                         .representativeCount = 0,
-                                         .usedIncrementalRefresh = true,
-                                         .changedEmailIds = {"eml-1"},
-                                         .insertedEmailIds = {},
-                                         .removedEmailIds = {},
-                                         .requiresNotificationScan = false,
-                                         .notificationCandidates = {},
-                                     });
-
-    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
-        result));
-    CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(result).empty());
-}
-
-TEST_CASE("notification outbox persists pending mail until delivery", "[jmap][cache][notification]")
-{
-    ApplicationGuard application;
-    Q_UNUSED(application);
-
-    auto databaseContext = makeDatabaseContext();
-    seedAccount(databaseContext.connection);
-
-    auto unread = loadEmailFixture();
-    unread.id = "eml-unread";
-    unread.threadId = "thr-unread";
-    unread.mailboxIds = {"mbx-inbox"};
-    unread.keywords = {};
-
-    auto seen = unread;
-    seen.id = "eml-seen";
-    seen.threadId = "thr-seen";
-    seen.keywords = {"$seen"};
+    auto email = loadEmailFixture();
+    email.id = "eml-pending";
+    email.threadId = "thr-pending";
+    email.mailboxIds = {"mbx-inbox"};
+    email.keywords = {};
+    email.subject = "Pending message";
 
     javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
-    REQUIRE_FALSE(emails.replaceAll("account-1", {unread, seen}).has_value());
-
+    REQUIRE_FALSE(emails.replaceAll("account-1", {email}).has_value());
     javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
-    const auto hidden = notifications.enqueueUnreadMailboxEmails("account-1", "mbx-inbox");
-    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
-        hidden));
-    CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(hidden).empty());
-
-    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
-    REQUIRE_FALSE(windows
-                      .replace({
-                          .accountId = "account-1",
-                          .mailboxId = "mbx-inbox",
-                          .queryKey = "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true",
-                          .requestedOffset = 0,
-                          .requestedLimit = 100,
-                          .position = 0,
-                          .returnedLimit = 2,
-                          .total = 2,
-                          .queryState = "query-state-1",
-                          .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
-                          .emailIds = {"eml-unread", "eml-seen"},
-                      })
+    REQUIRE_FALSE(notifications
+                      .synchronizeMailboxHorizons("account-1", {"mbx-inbox"},
+                                                  std::string_view{"email-state-1"})
                       .has_value());
 
-    const auto first = notifications.enqueueUnreadMailboxEmails("account-1", "mbx-inbox");
-    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
-        first));
-    const auto& candidates =
-        std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(first);
-    REQUIRE(candidates.size() == 1);
-    CHECK(candidates.front().emailId == "eml-unread");
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Create pending notification"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    const auto created = notifications.createEventIfUnconsumed(transaction, "account-1",
+                                                               {.mailboxId = "mbx-inbox",
+                                                                .emailId = email.id,
+                                                                .threadId = email.threadId,
+                                                                .subject = email.subject,
+                                                                .receivedAt = email.receivedAt});
+    REQUIRE(std::holds_alternative<bool>(created));
+    REQUIRE(std::get<bool>(created));
+    REQUIRE_FALSE(transaction.commit().has_value());
 
-    const auto pendingAgain = notifications.enqueueUnreadMailboxEmails("account-1", "mbx-inbox");
-    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
-        pendingAgain));
-    CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(pendingAgain)
+    const auto consumptionCount = [&]()
+    {
+        QSqlQuery query{databaseContext.connection.database()};
+        REQUIRE(query.exec(QStringLiteral(
+            "SELECT COUNT(*) FROM mail_notification_state WHERE account_id='account-1' AND "
+            "email_id='eml-pending'")));
+        REQUIRE(query.next());
+        return query.value(0).toInt();
+    };
+
+    SECTION("successful delivery deletes only the outbox row")
+    {
+        const auto claimed = notifications.claimPendingEvents("account-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+                claimed));
+        REQUIRE(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(claimed)
+                    .size() == 1);
+        REQUIRE_FALSE(notifications.markDelivered("account-1", {email.id}).has_value());
+        const auto pending = notifications.listPendingEvents("account-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+                pending));
+        CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pending)
+                  .empty());
+        CHECK(consumptionCount() == 1);
+    }
+
+    SECTION("read before retry cancels the stale popup")
+    {
+        const auto claimed = notifications.claimPendingEvents("account-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+                claimed));
+        REQUIRE_FALSE(notifications.releaseDispatches("account-1", {email.id}).has_value());
+        email.keywords = {"$seen"};
+        REQUIRE_FALSE(emails.upsertMany("account-1", {email}).has_value());
+        const auto retried = notifications.claimPendingEvents("account-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+                retried));
+        CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(retried)
+                  .empty());
+        CHECK(consumptionCount() == 1);
+    }
+
+    SECTION("move out before retry cancels the stale popup")
+    {
+        const auto claimed = notifications.claimPendingEvents("account-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+                claimed));
+        REQUIRE_FALSE(notifications.releaseDispatches("account-1", {email.id}).has_value());
+        const std::vector<std::string> ids{email.id};
+        REQUIRE_FALSE(emails.removeFromMailbox("account-1", "mbx-inbox", ids).has_value());
+        const auto retried = notifications.claimPendingEvents("account-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+                retried));
+        CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(retried)
+                  .empty());
+        CHECK(consumptionCount() == 1);
+    }
+
+    SECTION("disabled notification context cancels the stale popup")
+    {
+        REQUIRE_FALSE(
+            notifications
+                .synchronizeMailboxHorizons("account-1", {}, std::string_view{"email-state-1"})
+                .has_value());
+        const auto claimed = notifications.claimPendingEvents("account-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+                claimed));
+        CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(claimed)
+                  .empty());
+        CHECK(consumptionCount() == 1);
+    }
+
+    SECTION("destroyed Email has no pending popup")
+    {
+        const std::vector<std::string> ids{email.id};
+        REQUIRE_FALSE(emails.removeMany("account-1", ids).has_value());
+        const auto claimed = notifications.claimPendingEvents("account-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+                claimed));
+        CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(claimed)
+                  .empty());
+        CHECK(consumptionCount() == 0);
+    }
+
+    SECTION("local cancellation failure leaves the event retryable")
+    {
+        email.keywords = {"$seen"};
+        REQUIRE_FALSE(emails.upsertMany("account-1", {email}).has_value());
+        QSqlQuery failDelete{databaseContext.connection.database()};
+        REQUIRE(failDelete.exec(
+            QStringLiteral("CREATE TRIGGER fail_pending_notification_delete BEFORE DELETE ON "
+                           "mail_notification_event_outbox BEGIN SELECT RAISE(FAIL,'forced local "
+                           "failure'); END")));
+        const auto failed = notifications.claimPendingEvents("account-1");
+        REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseError>(failed));
+        const auto pending = notifications.listPendingEvents("account-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+                pending));
+        CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pending)
+                  .size() == 1);
+        CHECK(consumptionCount() == 1);
+    }
+}
+
+TEST_CASE("per-Email notification consumption survives delivery and mailbox movement",
+          "[jmap][cache][notification][consumption]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    auto email = loadEmailFixture();
+    email.id = "eml-one-shot";
+    email.threadId = "thr-one-shot";
+    email.mailboxIds = {"mbx-inbox", "mbx-archive"};
+    email.keywords = {};
+    email.subject = "One shot";
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(emails.replaceAll("account-1", {email}).has_value());
+    javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
+
+    auto firstTransactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Create first notification event"));
+    REQUIRE(
+        std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(firstTransactionResult));
+    auto firstTransaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(firstTransactionResult));
+    const auto first = notifications.createEventIfUnconsumed(firstTransaction, "account-1",
+                                                             {
+                                                                 .mailboxId = "mbx-inbox",
+                                                                 .emailId = email.id,
+                                                                 .threadId = email.threadId,
+                                                                 .subject = email.subject,
+                                                                 .receivedAt = email.receivedAt,
+                                                             });
+    REQUIRE(std::holds_alternative<bool>(first));
+    CHECK(std::get<bool>(first));
+    REQUIRE_FALSE(firstTransaction.commit().has_value());
+
+    const auto firstPending = notifications.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        firstPending));
+    const auto& pendingEvents =
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(firstPending);
+    REQUIRE(pendingEvents.size() == 1);
+    CHECK(pendingEvents.front().emailId == email.id);
+    CHECK(pendingEvents.front().mailboxId == "mbx-inbox");
+
+    QSqlQuery delivered{databaseContext.connection.database()};
+    REQUIRE(delivered.exec(QStringLiteral(
+        "DELETE FROM mail_notification_event_outbox WHERE account_id='account-1' AND "
+        "email_id='eml-one-shot'")));
+
+    auto secondTransactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Reject duplicate notification event"));
+    REQUIRE(
+        std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(secondTransactionResult));
+    auto secondTransaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(secondTransactionResult));
+    const auto second = notifications.createEventIfUnconsumed(secondTransaction, "account-1",
+                                                              {
+                                                                  .mailboxId = "mbx-archive",
+                                                                  .emailId = email.id,
+                                                                  .threadId = email.threadId,
+                                                                  .subject = email.subject,
+                                                                  .receivedAt = email.receivedAt,
+                                                              });
+    REQUIRE(std::holds_alternative<bool>(second));
+    CHECK_FALSE(std::get<bool>(second));
+    REQUIRE_FALSE(secondTransaction.commit().has_value());
+
+    const auto afterDelivery = notifications.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        afterDelivery));
+    CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(afterDelivery)
               .empty());
-    REQUIRE_FALSE(notifications.releaseDispatches("account-1", {"eml-unread"}).has_value());
-    const auto retried = notifications.enqueueUnreadMailboxEmails("account-1", "mbx-inbox");
-    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
-        retried));
-    CHECK(
-        std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(retried).size() ==
-        1);
-    REQUIRE_FALSE(
-        notifications.markDelivered("account-1", "mbx-inbox", {"eml-unread"}).has_value());
 
-    seen.keywords = {};
-    REQUIRE_FALSE(emails.upsertMany("account-1", {seen}).has_value());
-    const auto second = notifications.enqueueUnreadMailboxEmails("account-1", "mbx-inbox");
-    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
-        second));
-    CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(second).empty());
+    const std::vector<std::string> ids{email.id};
+    REQUIRE_FALSE(emails.removeFromMailbox("account-1", "mbx-inbox", ids).has_value());
+    QSqlQuery retainedState{databaseContext.connection.database()};
+    REQUIRE(retainedState.exec(QStringLiteral(
+        "SELECT COUNT(*) FROM mail_notification_state WHERE account_id='account-1' AND "
+        "email_id='eml-one-shot'")));
+    REQUIRE(retainedState.next());
+    CHECK(retainedState.value(0).toInt() == 1);
+
+    REQUIRE_FALSE(emails.removeMany("account-1", ids).has_value());
+    QSqlQuery removedState{databaseContext.connection.database()};
+    REQUIRE(removedState.exec(QStringLiteral(
+        "SELECT COUNT(*) FROM mail_notification_state WHERE account_id='account-1' AND "
+        "email_id='eml-one-shot'")));
+    REQUIRE(removedState.next());
+    CHECK(removedState.value(0).toInt() == 0);
+}
+
+TEST_CASE("notification mailbox horizons linearize enablement against Email state",
+          "[jmap][cache][notification][horizon]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
+
+    REQUIRE_FALSE(notifications
+                      .synchronizeMailboxHorizons("account-1", {"mbx-inbox", "mbx-archive"},
+                                                  std::string_view{"email-state-1"})
+                      .has_value());
+    const auto initial = notifications.mailboxHorizonsAtState("account-1", "email-state-1");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(initial));
+    CHECK(std::get<std::vector<std::string>>(initial) ==
+          std::vector<std::string>{"mbx-archive", "mbx-inbox"});
+
+    REQUIRE_FALSE(notifications
+                      .synchronizeMailboxHorizons("account-1", {"mbx-archive"},
+                                                  std::string_view{"email-state-1"})
+                      .has_value());
+    const auto afterDisable = notifications.mailboxHorizonsAtState("account-1", "email-state-1");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(afterDisable));
+    CHECK(std::get<std::vector<std::string>>(afterDisable) ==
+          std::vector<std::string>{"mbx-archive"});
+
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Advance notification horizon"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    REQUIRE_FALSE(
+        notifications
+            .advanceMailboxHorizons(transaction, "account-1", "email-state-1", "email-state-2")
+            .has_value());
+    REQUIRE_FALSE(transaction.commit().has_value());
+
+    const auto advanced = notifications.mailboxHorizonsAtState("account-1", "email-state-2");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(advanced));
+    CHECK(std::get<std::vector<std::string>>(advanced) == std::vector<std::string>{"mbx-archive"});
+
+    REQUIRE_FALSE(notifications
+                      .synchronizeMailboxHorizons("account-1", {"mbx-archive", "mbx-projects"},
+                                                  std::string_view{"email-state-2"})
+                      .has_value());
+    const auto afterEnable = notifications.mailboxHorizonsAtState("account-1", "email-state-2");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(afterEnable));
+    CHECK(std::get<std::vector<std::string>>(afterEnable) ==
+          std::vector<std::string>{"mbx-archive", "mbx-projects"});
 }

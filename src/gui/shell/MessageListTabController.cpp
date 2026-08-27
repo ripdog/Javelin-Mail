@@ -67,7 +67,11 @@ namespace javelin::gui::shell
             std::move(spec.role), spec.sort, m_windowSize, std::move(spec.restored),
             m_sessionParent);
         bind(*session);
-        return {.content = MailboxTabState{.session = session, .selection = {}}};
+        return {.content = MailboxTabState{
+                    .session = session,
+                    .selection = {},
+                    .expandedThreadIds = {},
+                }};
     }
 
     TabState MessageListTabController::createSearchTab(SearchTabSessionSpec spec)
@@ -76,7 +80,11 @@ namespace javelin::gui::shell
             std::move(spec.accountId), std::move(spec.criteria), spec.sort, m_windowSize,
             std::move(spec.restored), m_sessionParent);
         bind(*session);
-        return {.content = SearchTabState{.session = session, .selection = {}}};
+        return {.content = SearchTabState{
+                    .session = session,
+                    .selection = {},
+                    .expandedThreadIds = {},
+                }};
     }
 
     void MessageListTabController::markTabsStaleForAccount(
