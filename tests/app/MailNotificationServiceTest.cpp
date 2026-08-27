@@ -144,6 +144,51 @@ namespace
     }
 } // namespace
 
+TEST_CASE("mail notification startup recovery reclaims a persisted dispatch exactly once",
+          "[app][notification][mail][restart]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabase();
+    seedPendingNotification(database.connection);
+    claimPendingNotification(database.connection);
+    CHECK(rowCount(database.connection, QStringLiteral("notification_dispatch_claims")) == 1);
+
+    javelin::app::MailNotificationService restarted{database.connection};
+    int raisedCount = 0;
+    QStringList deliveredEmailIds;
+    QObject::connect(&restarted, &javelin::app::MailNotificationService::notificationRaised,
+                     [&raisedCount, &deliveredEmailIds](
+                         const QString&, const QString&, const QString&, const QString&,
+                         const QString&, const QString&, const QString&, const QStringList& ids)
+                     {
+                         ++raisedCount;
+                         deliveredEmailIds = ids;
+                     });
+
+    REQUIRE_FALSE(restarted.recoverDispatches().has_value());
+    CHECK(rowCount(database.connection, QStringLiteral("notification_dispatch_claims")) == 0);
+    restarted.accountChanged(QStringLiteral("account-1"));
+    CHECK(raisedCount == 1);
+    CHECK(deliveredEmailIds == QStringList{QStringLiteral("email-1")});
+    CHECK(rowCount(database.connection, QStringLiteral("notification_dispatch_claims")) == 1);
+
+    REQUIRE_FALSE(restarted.markDelivered("account-1", deliveredEmailIds).has_value());
+    CHECK(rowCount(database.connection, QStringLiteral("mail_notification_event_outbox")) == 0);
+    CHECK(rowCount(database.connection, QStringLiteral("notification_dispatch_claims")) == 0);
+
+    javelin::app::MailNotificationService secondRestart{database.connection};
+    int secondRaisedCount = 0;
+    QObject::connect(&secondRestart, &javelin::app::MailNotificationService::notificationRaised,
+                     [&secondRaisedCount](const QString&, const QString&, const QString&,
+                                          const QString&, const QString&, const QString&,
+                                          const QString&, const QStringList&)
+                     { ++secondRaisedCount; });
+    REQUIRE_FALSE(secondRestart.recoverDispatches().has_value());
+    secondRestart.accountChanged(QStringLiteral("account-1"));
+    CHECK(secondRaisedCount == 0);
+}
+
 TEST_CASE("mail notification claim failure requests a later delivery pass",
           "[app][notification][mail][retry]")
 {

@@ -7,10 +7,13 @@
 #include "app/MailboxTreeCacheRead.h"
 #include "app/MessageListMaterializationPort.h"
 #include "app/RemoteCodec.h"
+#include "app/StateChangePolicy.h"
 #include "app/undo/UndoManager.h"
 #include "daemon/DaemonAccountConfiguration.h"
 #include "daemon/DaemonServices.h"
 #include "daemon/actions/DaemonRemoteActionDispatcher.h"
+#include "jmap/api/JmapMethodTransport.h"
+#include "jmap/api/MethodCaller.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
@@ -19,6 +22,7 @@
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
+#include "jmap/sync/MailboxRefreshExecutor.h"
 #include "protocol/actions/ActionCatalog.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
@@ -72,6 +76,22 @@ namespace
         static auto store = std::make_shared<javelin::app::MemoryAccountCredentialStore>();
         return store;
     }
+
+    class RecordingRejectingMethodTransport final : public javelin::jmap::api::JmapMethodTransport
+    {
+      public:
+        std::vector<javelin::jmap::api::JmapMethodRequest> requests;
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
+        call(javelin::jmap::api::JmapMethodRequest request) override
+        {
+            requests.push_back(std::move(request));
+            co_return javelin::jmap::api::TransportError{
+                .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+                .message = "recorded presentation mailbox request",
+            };
+        }
+    };
 
     [[nodiscard]] javelin::app::DaemonProcessOptions optionsFor(const QString& runtimeDirectory,
                                                                 const QString& cacheRoot,
@@ -218,6 +238,64 @@ TEST_CASE("notification-only mailboxes are not presentation sync interests",
     CHECK(configurations.front().mailboxIds == std::vector<std::string>{"opened"});
     CHECK(configurations.front().fullSyncMailboxIds == std::vector<std::string>{"opened"});
     CHECK(configurations.front().notificationMailboxIds == std::vector<std::string>{"notify-only"});
+
+    QSqlQuery seed{connection.database()};
+    REQUIRE(seed.exec(QStringLiteral(
+        "INSERT INTO accounts(account_id,email_address,session_url,is_primary,cap_mail) "
+        "VALUES('connection-1','user@example.test','https://example.test/jmap',1,1)")));
+
+    const auto& configuration = configurations.front();
+    std::vector<std::pair<std::string, std::string>> watchedMailboxes;
+    watchedMailboxes.reserve(configuration.mailboxIds.size());
+    for (const auto& mailboxId : configuration.mailboxIds)
+        watchedMailboxes.emplace_back(mailboxId, mailboxId);
+    const std::vector<std::string> explicitlyRequestedMailboxIds;
+    const auto refreshTargets =
+        javelin::app::mailboxRefreshTargets(watchedMailboxes, explicitlyRequestedMailboxIds);
+    REQUIRE(refreshTargets ==
+            std::vector<std::pair<std::string, std::string>>{{"opened", "opened"}});
+
+    RecordingRejectingMethodTransport transport;
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailboxRefreshExecutor executor{
+        connection,
+        caller,
+        {.credentials =
+             {
+                 .accountId = configuration.accountId,
+                 .emailAddress = configuration.settings.loginEmail,
+                 .sessionUrl = configuration.settings.sessionUrl,
+                 .token =
+                     {
+                         .accessToken = configuration.settings.apiKey,
+                         .refreshToken = std::nullopt,
+                         .expiry = std::nullopt,
+                     },
+             },
+         .apiUrl = "https://example.test/jmap",
+         .requestLimits = std::nullopt}};
+    for (const auto& [mailboxId, mailboxName] : refreshTargets)
+    {
+        static_cast<void>(mailboxName);
+        const auto refresh = QCoro::waitFor(
+            executor.refreshCollapsedMailbox(configuration.accountId, mailboxId, {}));
+        CHECK(std::holds_alternative<javelin::jmap::OperationError>(refresh));
+    }
+
+    REQUIRE(transport.requests.size() == 1);
+    const auto& request = transport.requests.front();
+    REQUIRE_FALSE(request.envelope.methodCalls.empty());
+    CHECK(request.envelope.methodCalls.front().name == "Email/query");
+    bool mentionsOpened = false;
+    bool mentionsNotificationOnly = false;
+    for (const auto& call : request.envelope.methodCalls)
+    {
+        mentionsOpened = mentionsOpened || call.arguments.contains("opened");
+        mentionsNotificationOnly =
+            mentionsNotificationOnly || call.arguments.contains("notify-only");
+    }
+    CHECK(mentionsOpened);
+    CHECK_FALSE(mentionsNotificationOnly);
 }
 
 TEST_CASE("notification settings fence Email sync before activating a new horizon",
