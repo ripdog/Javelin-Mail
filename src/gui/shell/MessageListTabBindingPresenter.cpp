@@ -98,7 +98,8 @@ namespace javelin::gui::shell
             }
             m_messageModel.setItems(mailbox->session->accountId(), mailbox->session->mailboxId(),
                                     state.items);
-            restoreRepresentedThreadExpansions(m_messageModel, mailbox->expandedThreadIds);
+            if (auto* expandedThreadIds = tabExpandedThreadIds(*tab))
+                restoreRepresentedThreadExpansions(m_messageModel, *expandedThreadIds);
             m_appliedSession = mailbox->session;
             m_appliedItemsRevision = state.itemsRevision;
             return;
@@ -115,7 +116,8 @@ namespace javelin::gui::shell
                 return;
             }
             m_messageModel.setItems(search->session->accountId(), std::nullopt, state.items);
-            restoreRepresentedThreadExpansions(m_messageModel, search->expandedThreadIds);
+            if (auto* expandedThreadIds = tabExpandedThreadIds(*tab))
+                restoreRepresentedThreadExpansions(m_messageModel, *expandedThreadIds);
             m_appliedSession = search->session;
             m_appliedItemsRevision = state.itemsRevision;
             return;

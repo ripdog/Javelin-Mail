@@ -78,4 +78,36 @@ namespace javelin::gui::shell
             tab.content);
     }
 
+    const std::vector<std::string>* tabExpandedThreadIds(const TabState& tab)
+    {
+        return std::visit(
+            [](const auto& content) -> const std::vector<std::string>*
+            {
+                using Content = std::decay_t<decltype(content)>;
+                if constexpr (std::is_same_v<Content, MailboxTabState> ||
+                              std::is_same_v<Content, SearchTabState>)
+                {
+                    return &content.expandedThreadIds;
+                }
+                return nullptr;
+            },
+            tab.content);
+    }
+
+    std::vector<std::string>* tabExpandedThreadIds(TabState& tab)
+    {
+        return std::visit(
+            [](auto& content) -> std::vector<std::string>*
+            {
+                using Content = std::decay_t<decltype(content)>;
+                if constexpr (std::is_same_v<Content, MailboxTabState> ||
+                              std::is_same_v<Content, SearchTabState>)
+                {
+                    return &content.expandedThreadIds;
+                }
+                return nullptr;
+            },
+            tab.content);
+    }
+
 } // namespace javelin::gui::shell

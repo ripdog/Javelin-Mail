@@ -2446,22 +2446,18 @@ namespace javelin::gui::shell
         if (tab == nullptr || !m_messageModel->setThreadExpanded(threadId, expanded))
             return false;
 
-        auto update = [threadId, expanded](std::vector<std::string>& expandedThreadIds)
+        auto* expandedThreadIds = tabExpandedThreadIds(*tab);
+        if (expandedThreadIds == nullptr)
+            return true;
+        if (expanded)
         {
-            if (expanded)
-            {
-                if (!std::ranges::contains(expandedThreadIds, threadId))
-                    expandedThreadIds.emplace_back(threadId);
-            }
-            else
-            {
-                std::erase(expandedThreadIds, threadId);
-            }
-        };
-        if (auto* mailbox = std::get_if<MailboxTabState>(&tab->content))
-            update(mailbox->expandedThreadIds);
-        else if (auto* search = std::get_if<SearchTabState>(&tab->content))
-            update(search->expandedThreadIds);
+            if (!std::ranges::contains(*expandedThreadIds, threadId))
+                expandedThreadIds->emplace_back(threadId);
+        }
+        else
+        {
+            std::erase(*expandedThreadIds, threadId);
+        }
         return true;
     }
 

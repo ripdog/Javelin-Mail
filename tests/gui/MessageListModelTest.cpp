@@ -620,6 +620,70 @@ TEST_CASE("tab expansion restoration retains only represented Thread identities"
     CHECK_FALSE(model.isThreadExpanded("thread-1"));
 }
 
+TEST_CASE("reusable message model restores expansion intent per mailbox and search tab",
+          "[gui][messages][model][tabs][thread-expansion]")
+{
+    javelin::gui::messages::MessageListModel model{QString{}};
+    auto inboxSummary = item("email-inbox", "thread-inbox");
+    inboxSummary.globalThreadMessageCount = 2;
+    auto archiveSummary = item("email-archive", "thread-archive");
+    archiveSummary.globalThreadMessageCount = 2;
+    auto searchSummary = item("email-search", "thread-search");
+    searchSummary.globalThreadMessageCount = 2;
+
+    std::vector<std::string> inboxExpanded{"thread-inbox"};
+    std::vector<std::string> archiveExpanded{"thread-archive"};
+    std::vector<std::string> searchExpanded{"thread-search"};
+
+    model.setItems("account-1", "inbox", {inboxSummary});
+    javelin::gui::shell::restoreRepresentedThreadExpansions(model, inboxExpanded);
+    CHECK(model.isThreadExpanded("thread-inbox"));
+
+    SECTION("Calendar Contacts and Compose clear presentation without losing Inbox intent")
+    {
+        for (const auto* workspace : {"Calendar", "Contacts", "Compose"})
+        {
+            CAPTURE(workspace);
+            model.clear();
+            CHECK_FALSE(model.isThreadExpanded("thread-inbox"));
+            CHECK(inboxExpanded == std::vector<std::string>{"thread-inbox"});
+
+            model.setItems("account-1", "inbox", {inboxSummary});
+            javelin::gui::shell::restoreRepresentedThreadExpansions(model, inboxExpanded);
+            CHECK(model.isThreadExpanded("thread-inbox"));
+        }
+    }
+
+    SECTION("mailbox A and mailbox B retain independent expansion intent")
+    {
+        model.setItems("account-1", "archive", {archiveSummary});
+        javelin::gui::shell::restoreRepresentedThreadExpansions(model, archiveExpanded);
+        CHECK(model.isThreadExpanded("thread-archive"));
+        CHECK_FALSE(model.isThreadExpanded("thread-inbox"));
+        CHECK(inboxExpanded == std::vector<std::string>{"thread-inbox"});
+
+        model.setItems("account-1", "inbox", {inboxSummary});
+        javelin::gui::shell::restoreRepresentedThreadExpansions(model, inboxExpanded);
+        CHECK(model.isThreadExpanded("thread-inbox"));
+        CHECK_FALSE(model.isThreadExpanded("thread-archive"));
+        CHECK(archiveExpanded == std::vector<std::string>{"thread-archive"});
+    }
+
+    SECTION("search expansion intent does not leak into mailbox presentation")
+    {
+        model.setItems("account-1", std::nullopt, {searchSummary});
+        javelin::gui::shell::restoreRepresentedThreadExpansions(model, searchExpanded);
+        CHECK(model.isThreadExpanded("thread-search"));
+        CHECK_FALSE(model.isThreadExpanded("thread-inbox"));
+
+        model.setItems("account-1", "inbox", {inboxSummary});
+        javelin::gui::shell::restoreRepresentedThreadExpansions(model, inboxExpanded);
+        CHECK(model.isThreadExpanded("thread-inbox"));
+        CHECK_FALSE(model.isThreadExpanded("thread-search"));
+        CHECK(searchExpanded == std::vector<std::string>{"thread-search"});
+    }
+}
+
 TEST_CASE("message list model appends an infinite-scroll tail without resetting existing rows",
           "[gui][messages][model][infinite-scroll]")
 {
