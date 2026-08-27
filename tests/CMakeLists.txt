@@ -287,6 +287,7 @@ add_executable(javelin_daemon_app_tests
     app/MessageNavigationCoordinatorTest.cpp
     app/MessageSubjectTest.cpp
     app/OAuthRefreshSingleFlightTest.cpp
+    app/OptimisticMutationPresentationTest.cpp
     app/PerformanceMetricsTest.cpp
     app/ProcessInstanceLockTest.cpp
     app/RemoteCodecTest.cpp
