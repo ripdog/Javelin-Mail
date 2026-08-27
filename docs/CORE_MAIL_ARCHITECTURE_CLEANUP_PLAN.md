@@ -1002,13 +1002,13 @@ a separate application-port change and remains intentionally outside this cleanu
 ## Notification migration
 
 - [x] Introduce the new notification-consumption representation through a normal schema migration.
-- [ ] Do not reinterpret `observed_notification_emails` as proof that an Email already generated a
+- [x] Do not reinterpret `observed_notification_emails` as proof that an Email already generated a
       legitimate notification event.
-- [ ] Remove/retire the old observation table after the scanner is gone.
-- [ ] Delete historical delivered outbox rows that have no correctness purpose.
-- [ ] Validate or discard ambiguous legacy pending rows rather than surfacing historical false
+- [x] Remove/retire the old observation table after the scanner is gone.
+- [x] Delete historical delivered outbox rows that have no correctness purpose.
+- [x] Validate or discard ambiguous legacy pending rows rather than surfacing historical false
       positives.
-- [ ] Preserve all normal Email/mailbox data.
+- [x] Preserve all normal Email/mailbox data.
 
 ## IPC compatibility
 
@@ -1085,16 +1085,16 @@ item further if implementation naturally contains independently reviewable behav
 - [x] 5. Separate initial bootstrap Email-state establishment from steady-state mailbox refresh.
 - [ ] 6. Add the complete notification behavioral-contract regression matrix.
 - [x] 7. Add per-Email notification-consumption state with safe lifetime cleanup semantics.
-- [ ] 8. Add explicit notification baseline/horizon handling for bootstrap and notification
+- [x] 8. Add explicit notification baseline/horizon handling for bootstrap and notification
       enablement.
-- [ ] 9. Generate one per-Email notification event from proven committed Email transitions,
+- [x] 9. Generate one per-Email notification event from proven committed Email transitions,
       atomically with Email-state commit.
-- [ ] 10. Preserve/suppress notification provenance across local mailbox mutations and imports.
-- [ ] 11. Add deterministic mailbox attribution/batching for single per-Email events.
-- [ ] 12. Remove query-window notification discovery and `observed_notification_emails`.
-- [ ] 13. Make notification delivery retries local and revalidate pending events.
-- [ ] 14. Remove notification-only mailboxes from query-window watch interests.
-- [ ] 15. Bound/purge notification delivery history and complete legacy migration cleanup.
+- [x] 10. Preserve/suppress notification provenance across local mailbox mutations and imports.
+- [x] 11. Add deterministic mailbox attribution/batching for single per-Email events.
+- [x] 12. Remove query-window notification discovery and `observed_notification_emails`.
+- [x] 13. Make notification delivery retries local and revalidate pending events.
+- [x] 14. Remove notification-only mailboxes from query-window watch interests.
+- [x] 15. Bound/purge notification delivery history and complete legacy migration cleanup.
 - [x] 16. Remove `hasNewMail` from generic invalidation or replace its remaining use with a precise
       typed event.
 - [ ] 17. Preserve or remove `optimisticProjection` explicitly across IPC; never infer it from another
