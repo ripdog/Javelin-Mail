@@ -1128,58 +1128,141 @@ TEST_CASE("account Email delta does not turn seen churn into new mail",
               .empty());
 }
 
-TEST_CASE("account Email delta suppresses server confirmation of an optimistic local move",
+TEST_CASE("account Email delta suppresses server confirmation of local mailbox operations",
           "[jmap][sync][mail-delta][notification][mutation]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
-    auto database = makeDatabaseContext();
-    seedAccount(database.connection);
-    seedMail(database.connection);
-    seedNotificationHorizons(database.connection, {"inbox"});
-    javelin::jmap::cache::EmailRepository emails{database.connection};
-    REQUIRE_FALSE(emails.upsertMany("account-1", {email({"inbox"}, {})}).has_value());
-    javelin::jmap::sync::EmailMutationJournal journal{database.connection};
-    REQUIRE_FALSE(journal
-                      .put({
-                          .mutationId = "local-move",
-                          .operationGroupId = std::nullopt,
-                          .accountId = "account-1",
-                          .status = javelin::jmap::sync::MutationStatus::Pending,
-                          .patch =
-                              {
-                                  .emailId = "email-1",
-                                  .addMailboxIds = {"inbox"},
-                                  .removeMailboxIds = {"archive"},
-                                  .addKeywords = {},
-                                  .removeKeywords = {},
-                                  .destroy = false,
-                              },
-                          .baseMailboxIds = std::vector<std::string>{"archive"},
-                          .baseKeywords = std::vector<std::string>{},
-                          .baseState = "email-state-1",
-                          .acceptedState = std::nullopt,
-                          .errorJson = std::nullopt,
-                      })
-                      .has_value());
 
-    FakeTransport transport;
-    transport.queuedResults.push_back(emailDeltaResponse({}, R"("email-1")", {}));
-    transport.queuedResults.push_back(updatedEmailResponse("inbox", false));
-    javelin::jmap::api::MethodCaller caller{transport};
-    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
-                                                           requestContext()};
-    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+    struct OperationCase
+    {
+        std::string name;
+        std::vector<std::string> baseMailboxIds{};
+        std::vector<std::string> currentMailboxIds{};
+        std::vector<std::string> baseKeywords{};
+        std::vector<std::string> currentKeywords{};
+        std::vector<std::string> addMailboxIds{};
+        std::vector<std::string> removeMailboxIds{};
+        std::vector<std::string> addKeywords{};
+        std::vector<std::string> removeKeywords{};
+        std::vector<std::string> notificationMailboxIds{};
+    };
 
-    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
-    CHECK_FALSE(
-        std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result).notificationEventsCreated);
-    javelin::jmap::cache::NotificationRepository notifications{database.connection};
-    const auto pendingResult = notifications.listPendingEvents("account-1");
-    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
-        pendingResult));
-    CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pendingResult)
-              .empty());
+    const std::vector<OperationCase> cases{
+        {.name = "Move",
+         .baseMailboxIds = {"archive"},
+         .currentMailboxIds = {"inbox"},
+         .addMailboxIds = {"inbox"},
+         .removeMailboxIds = {"archive"},
+         .notificationMailboxIds = {"inbox"}},
+        {.name = "Archive",
+         .baseMailboxIds = {"inbox"},
+         .currentMailboxIds = {"archive"},
+         .addMailboxIds = {"archive"},
+         .removeMailboxIds = {"inbox"},
+         .notificationMailboxIds = {"archive"}},
+        {.name = "Restore",
+         .baseMailboxIds = {"archive"},
+         .currentMailboxIds = {"inbox"},
+         .addMailboxIds = {"inbox"},
+         .removeMailboxIds = {"archive"},
+         .notificationMailboxIds = {"inbox"}},
+        {.name = "Junk",
+         .baseMailboxIds = {"inbox"},
+         .currentMailboxIds = {"junk"},
+         .baseKeywords = {"$notjunk"},
+         .currentKeywords = {"$junk"},
+         .addMailboxIds = {"junk"},
+         .removeMailboxIds = {"inbox"},
+         .addKeywords = {"$junk"},
+         .removeKeywords = {"$notjunk"},
+         .notificationMailboxIds = {"junk"}},
+        {.name = "Not Junk",
+         .baseMailboxIds = {"junk"},
+         .currentMailboxIds = {"inbox"},
+         .baseKeywords = {"$junk"},
+         .currentKeywords = {"$notjunk"},
+         .addMailboxIds = {"inbox"},
+         .removeMailboxIds = {"junk"},
+         .addKeywords = {"$notjunk"},
+         .removeKeywords = {"$junk"},
+         .notificationMailboxIds = {"inbox"}},
+        {.name = "Mailbox add",
+         .baseMailboxIds = {"archive"},
+         .currentMailboxIds = {"archive", "inbox"},
+         .addMailboxIds = {"inbox"},
+         .notificationMailboxIds = {"inbox"}},
+        {.name = "Mailbox remove",
+         .baseMailboxIds = {"archive", "inbox"},
+         .currentMailboxIds = {"archive"},
+         .removeMailboxIds = {"inbox"},
+         .notificationMailboxIds = {"archive"}},
+    };
+
+    for (const auto& operation : cases)
+    {
+        CAPTURE(operation.name);
+        auto database = makeDatabaseContext();
+        seedAccount(database.connection);
+        seedEmailState(database.connection);
+        javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
+        REQUIRE_FALSE(mailboxes
+                          .upsertMany("account-1",
+                                      {mailbox("inbox", 1, "inbox"),
+                                       mailbox("archive", 1, "archive"),
+                                       mailbox("junk", 1, "junk")})
+                          .has_value());
+        seedNotificationHorizons(database.connection, operation.notificationMailboxIds);
+        javelin::jmap::cache::EmailRepository emails{database.connection};
+        REQUIRE_FALSE(
+            emails
+                .upsertMany("account-1",
+                            {email(operation.currentMailboxIds, operation.currentKeywords)})
+                .has_value());
+        javelin::jmap::sync::EmailMutationJournal journal{database.connection};
+        REQUIRE_FALSE(journal
+                          .put({
+                              .mutationId = "local-operation",
+                              .operationGroupId = std::nullopt,
+                              .accountId = "account-1",
+                              .status = javelin::jmap::sync::MutationStatus::Pending,
+                              .patch =
+                                  {
+                                      .emailId = "email-1",
+                                      .addMailboxIds = operation.addMailboxIds,
+                                      .removeMailboxIds = operation.removeMailboxIds,
+                                      .addKeywords = operation.addKeywords,
+                                      .removeKeywords = operation.removeKeywords,
+                                      .destroy = false,
+                                  },
+                              .baseMailboxIds = operation.baseMailboxIds,
+                              .baseKeywords = operation.baseKeywords,
+                              .baseState = "email-state-1",
+                              .acceptedState = std::nullopt,
+                              .errorJson = std::nullopt,
+                          })
+                          .has_value());
+
+        FakeTransport transport;
+        transport.queuedResults.push_back(emailDeltaResponse({}, R"("email-1")", {}));
+        transport.queuedResults.push_back(updatedEmailResponseAtState(
+            "email-state-2", operation.currentMailboxIds, false));
+        javelin::jmap::api::MethodCaller caller{transport};
+        javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                               requestContext()};
+        const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+        CHECK_FALSE(
+            std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result).notificationEventsCreated);
+        javelin::jmap::cache::NotificationRepository notifications{database.connection};
+        const auto pendingResult = notifications.listPendingEvents("account-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+                pendingResult));
+        CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pendingResult)
+                  .empty());
+    }
 }
 
 TEST_CASE("account Email delta suppresses Javelin-imported created mail",
