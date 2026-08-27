@@ -986,6 +986,58 @@ TEST_CASE("account Email delta creates one event for a multi-mailbox unread arri
     CHECK(pending.front().mailboxId == "inbox");
 }
 
+TEST_CASE("duplicate state-change catch-up after notification commit does not duplicate the event",
+          "[jmap][sync][mail-delta][notification][replay]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
+    REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox")}).has_value());
+    seedNotificationHorizons(database.connection, {"inbox"});
+
+    FakeTransport firstTransport;
+    firstTransport.queuedResults.push_back(
+        emailDeltaResponseAtStates("email-state-1", "email-state-2", R"("email-1")", {}, {},
+                                   emailJsonWithIdentity("email-1", "thread-1", "inbox", false)));
+    javelin::jmap::api::MethodCaller firstCaller{firstTransport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor firstExecutor{database.connection, firstCaller,
+                                                                requestContext()};
+    const auto first = QCoro::waitFor(firstExecutor.refresh("account-1", {.email = true}));
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(first));
+    CHECK(std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(first).notificationEventsCreated);
+
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    const auto firstPending = notifications.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        firstPending));
+    REQUIRE(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(firstPending)
+                .size() == 1);
+
+    FakeTransport replayTransport;
+    replayTransport.queuedResults.push_back(
+        emailDeltaResponseAtStates("email-state-2", "email-state-2", {}, {}, {}));
+    javelin::jmap::api::MethodCaller replayCaller{replayTransport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor replayExecutor{database.connection, replayCaller,
+                                                                 requestContext()};
+    const auto replay = QCoro::waitFor(replayExecutor.refresh("account-1", {.email = true}));
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(replay));
+    CHECK_FALSE(
+        std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(replay).notificationEventsCreated);
+    REQUIRE(replayTransport.requests.size() == 1);
+    CHECK(replayTransport.requests.front().body.contains("email-state-2"));
+
+    const auto replayPending = notifications.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        replayPending));
+    const auto& pending =
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(replayPending);
+    REQUIRE(pending.size() == 1);
+    CHECK(pending.front().emailId == "email-1");
+}
+
 TEST_CASE("account Email delta creates a first event for genuine server mailbox entry",
           "[jmap][sync][mail-delta][notification]")
 {

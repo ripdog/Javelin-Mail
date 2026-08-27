@@ -153,6 +153,15 @@ TEST_CASE("mail notification eligibility requires a legitimate incoming transiti
         CHECK_FALSE(evaluate(&previous, false, true, false).eligible());
     }
 
+    SECTION("read mail entering an enabled mailbox is not new mail")
+    {
+        previous.mailboxIds = {"mbx-archive"};
+        previous.keywords = {"$seen"};
+        current.mailboxIds = {"mbx-inbox"};
+        current.keywords = {"$seen"};
+        CHECK_FALSE(evaluate(&previous, false, true, false).eligible());
+    }
+
     SECTION("seen to unread in an already enabled mailbox is not arrival")
     {
         previous.mailboxIds = {"mbx-inbox"};
