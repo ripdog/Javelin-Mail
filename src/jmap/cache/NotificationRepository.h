@@ -41,20 +41,18 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::variant<std::vector<MailNotificationPendingEvent>, DatabaseError>
         listPendingEvents(std::string_view accountId) const;
         [[nodiscard]] std::optional<DatabaseError>
-        synchronizeMailboxHorizons(std::string_view accountId,
-                                   const std::vector<std::string>& enabledMailboxIds,
-                                   std::optional<std::string_view> currentEmailState);
+        retainActiveMailboxes(std::string_view accountId,
+                              const std::vector<std::string>& allowedMailboxIds);
         [[nodiscard]] std::optional<DatabaseError>
-        synchronizeMailboxHorizons(DatabaseTransaction& transaction, std::string_view accountId,
-                                   const std::vector<std::string>& enabledMailboxIds,
-                                   std::optional<std::string_view> currentEmailState);
+        replaceActiveMailboxes(std::string_view accountId,
+                               const std::vector<std::string>& activeMailboxIds);
+        [[nodiscard]] std::optional<DatabaseError>
+        replaceActiveMailboxes(DatabaseTransaction& transaction, std::string_view accountId,
+                               const std::vector<std::string>& activeMailboxIds);
         [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
-        mailboxHorizonsAtState(std::string_view accountId, std::string_view emailState) const;
+        activeMailboxIds(std::string_view accountId) const;
         [[nodiscard]] std::variant<bool, DatabaseError>
         wasCreatedByMailImport(std::string_view accountId, std::string_view emailId) const;
-        [[nodiscard]] std::optional<DatabaseError>
-        advanceMailboxHorizons(DatabaseTransaction& transaction, std::string_view accountId,
-                               std::string_view expectedEmailState, std::string_view newEmailState);
 
         [[nodiscard]] std::variant<std::vector<MailNotificationPendingEvent>, DatabaseError>
         claimPendingEvents(std::string_view accountId);

@@ -29,7 +29,7 @@ namespace javelin::app
     namespace
     {
         constexpr auto refreshDebounceInterval = std::chrono::milliseconds{750};
-        constexpr unsigned int notificationHorizonRetryMaximumExponent = 5;
+        constexpr unsigned int notificationBaselineRetryMaximumExponent = 5;
         constexpr auto resumeWatchdogInterval = std::chrono::seconds{30};
         constexpr auto resumeWatchdogStallThreshold = std::chrono::seconds{90};
 
@@ -88,9 +88,9 @@ namespace javelin::app
         m_refreshDebounceTimer.setInterval(refreshDebounceInterval);
         QObject::connect(&m_refreshDebounceTimer, &QTimer::timeout, this,
                          &AccountSyncCoordinator::scheduleCatchUpRefresh);
-        m_notificationHorizonRetryTimer.setSingleShot(true);
-        QObject::connect(&m_notificationHorizonRetryTimer, &QTimer::timeout, this,
-                         &AccountSyncCoordinator::scheduleNotificationHorizonRefresh);
+        m_notificationBaselineRetryTimer.setSingleShot(true);
+        QObject::connect(&m_notificationBaselineRetryTimer, &QTimer::timeout, this,
+                         &AccountSyncCoordinator::scheduleNotificationBaselineRefresh);
         m_lastResumeWatchdogTickMs = QDateTime::currentMSecsSinceEpoch();
         m_resumeWatchdogTimer.setInterval(resumeWatchdogInterval);
         QObject::connect(&m_resumeWatchdogTimer, &QTimer::timeout, this,
@@ -176,11 +176,11 @@ namespace javelin::app
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
-    AccountSyncCoordinator::requestNotificationHorizonBaseline(std::vector<std::string> mailboxIds)
+    AccountSyncCoordinator::requestNotificationBaseline(std::vector<std::string> mailboxIds)
     {
         std::ranges::sort(mailboxIds);
         mailboxIds.erase(std::ranges::unique(mailboxIds).begin(), mailboxIds.end());
-        if (m_pendingNotificationHorizonMailboxIds == mailboxIds)
+        if (m_pendingNotificationBaselineMailboxIds == mailboxIds)
             return std::nullopt;
 
         javelin::jmap::sync::ConsistencyDomainRepository consistency{m_databaseConnection};
@@ -189,17 +189,17 @@ namespace javelin::app
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&generation))
             return *error;
 
-        m_pendingNotificationHorizonMailboxIds = std::move(mailboxIds);
-        m_notificationHorizonRetryAttempts = 0;
-        m_notificationHorizonRetryTimer.stop();
-        scheduleNotificationHorizonRefresh();
+        m_pendingNotificationBaselineMailboxIds = std::move(mailboxIds);
+        m_notificationBaselineRetryAttempts = 0;
+        m_notificationBaselineRetryTimer.stop();
+        scheduleNotificationBaselineRefresh();
         return std::nullopt;
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
-    AccountSyncCoordinator::cancelNotificationHorizonBaseline()
+    AccountSyncCoordinator::cancelNotificationBaseline()
     {
-        if (!m_pendingNotificationHorizonMailboxIds.has_value())
+        if (!m_pendingNotificationBaselineMailboxIds.has_value())
             return std::nullopt;
 
         javelin::jmap::sync::ConsistencyDomainRepository consistency{m_databaseConnection};
@@ -208,9 +208,9 @@ namespace javelin::app
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&generation))
             return *error;
 
-        m_pendingNotificationHorizonMailboxIds.reset();
-        m_notificationHorizonRetryAttempts = 0;
-        m_notificationHorizonRetryTimer.stop();
+        m_pendingNotificationBaselineMailboxIds.reset();
+        m_notificationBaselineRetryAttempts = 0;
+        m_notificationBaselineRetryTimer.stop();
         return std::nullopt;
     }
 
@@ -232,7 +232,7 @@ namespace javelin::app
         m_pendingIdentityStateChanges.clear();
         m_authenticationRecoveryInFlight = false;
         m_refreshDebounceTimer.stop();
-        m_notificationHorizonRetryTimer.stop();
+        m_notificationBaselineRetryTimer.stop();
         m_queuedRefreshDemand = {};
         m_debouncedRefreshDemand = {};
         setStatus(Status::Disconnected);
@@ -465,7 +465,7 @@ namespace javelin::app
         do
         {
             co_await refreshWatchedMailboxOnce(runContext, demand, retryLease);
-            if (demand.allMailboxes && m_pendingNotificationHorizonMailboxIds.has_value())
+            if (demand.allMailboxes && m_pendingNotificationBaselineMailboxIds.has_value())
             {
                 m_queuedRefreshDemand.merge(MailRefreshDemand{
                     .mailboxState = false,
@@ -557,12 +557,12 @@ namespace javelin::app
         {
             javelin::jmap::sync::MailDeltaRefreshExecutor deltaExecutor{
                 m_databaseConnection, methodCaller, apiRequestContext};
-            const auto notificationHorizonMailboxIds =
-                demand.emailState ? m_pendingNotificationHorizonMailboxIds : std::nullopt;
+            const auto notificationBaselineMailboxIds =
+                demand.emailState ? m_pendingNotificationBaselineMailboxIds : std::nullopt;
             const auto deltaResult = co_await deltaExecutor.refresh(
                 runContext->configuration.accountId,
                 {.mailbox = demand.mailboxState, .email = demand.emailState},
-                runContext->configuration.remoteAccountId, notificationHorizonMailboxIds);
+                runContext->configuration.remoteAccountId, notificationBaselineMailboxIds);
             if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
                 runContext->cancellation.isCancelled())
             {
@@ -573,10 +573,10 @@ namespace javelin::app
                 qWarning().noquote() << "Account mail delta refresh failed" << error->message;
                 recordRefreshFailure(retryLease, *error);
                 publishOperationError(QStringLiteral("Synchronize mail changes"), *error);
-                if (notificationHorizonMailboxIds.has_value() &&
+                if (notificationBaselineMailboxIds.has_value() &&
                     (error->code == javelin::jmap::OperationErrorCode::LocalStorageBusy ||
                      error->code == javelin::jmap::OperationErrorCode::LocalStorageFailure))
-                    scheduleNotificationHorizonRetry();
+                    scheduleNotificationBaselineRetry();
                 else if (javelin::jmap::isTransientError(*error))
                     scheduleDebouncedRefresh(true);
                 co_return;
@@ -588,12 +588,13 @@ namespace javelin::app
                 m_queuedRefreshDemand.merge(demand);
                 co_return;
             }
-            if (delta.notificationHorizonEstablished && notificationHorizonMailboxIds.has_value() &&
-                m_pendingNotificationHorizonMailboxIds == notificationHorizonMailboxIds)
+            if (delta.notificationBaselineEstablished &&
+                notificationBaselineMailboxIds.has_value() &&
+                m_pendingNotificationBaselineMailboxIds == notificationBaselineMailboxIds)
             {
-                m_pendingNotificationHorizonMailboxIds.reset();
-                m_notificationHorizonRetryAttempts = 0;
-                m_notificationHorizonRetryTimer.stop();
+                m_pendingNotificationBaselineMailboxIds.reset();
+                m_notificationBaselineRetryAttempts = 0;
+                m_notificationBaselineRetryTimer.stop();
             }
             mailboxStateChanged = delta.mailboxChanged;
             emailCacheChanged = delta.emailChanged;
@@ -847,22 +848,22 @@ namespace javelin::app
         m_refreshDebounceTimer.start(static_cast<int>(refreshDebounceInterval.count()));
     }
 
-    void AccountSyncCoordinator::scheduleNotificationHorizonRetry()
+    void AccountSyncCoordinator::scheduleNotificationBaselineRetry()
     {
-        if (!m_pendingNotificationHorizonMailboxIds.has_value())
+        if (!m_pendingNotificationBaselineMailboxIds.has_value())
             return;
         const auto exponent =
-            std::min(m_notificationHorizonRetryAttempts, notificationHorizonRetryMaximumExponent);
-        ++m_notificationHorizonRetryAttempts;
-        m_notificationHorizonRetryTimer.start(
+            std::min(m_notificationBaselineRetryAttempts, notificationBaselineRetryMaximumExponent);
+        ++m_notificationBaselineRetryAttempts;
+        m_notificationBaselineRetryTimer.start(
             static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
                                  std::chrono::seconds{1U << exponent})
                                  .count()));
     }
 
-    void AccountSyncCoordinator::scheduleNotificationHorizonRefresh()
+    void AccountSyncCoordinator::scheduleNotificationBaselineRefresh()
     {
-        if (!m_pendingNotificationHorizonMailboxIds.has_value() || !hasValidSettings() ||
+        if (!m_pendingNotificationBaselineMailboxIds.has_value() || !hasValidSettings() ||
             m_runContext == nullptr)
             return;
 

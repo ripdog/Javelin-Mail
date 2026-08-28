@@ -451,13 +451,11 @@ namespace
                           .has_value());
     }
 
-    void seedNotificationHorizons(javelin::jmap::cache::DatabaseConnection& connection,
-                                  std::vector<std::string> mailboxIds,
-                                  const std::string_view state = "email-state-1")
+    void seedNotificationMailboxes(javelin::jmap::cache::DatabaseConnection& connection,
+                                   std::vector<std::string> mailboxIds)
     {
         javelin::jmap::cache::NotificationRepository notifications{connection};
-        REQUIRE_FALSE(
-            notifications.synchronizeMailboxHorizons("account-1", mailboxIds, state).has_value());
+        REQUIRE_FALSE(notifications.replaceActiveMailboxes("account-1", mailboxIds).has_value());
     }
 
     void seedImportProvenance(javelin::jmap::cache::DatabaseConnection& connection,
@@ -577,10 +575,7 @@ TEST_CASE("account Email rebaseline reconciles cached mail before advancing stat
         javelin::jmap::cache::EmailRepository emails{database.connection};
         REQUIRE_FALSE(emails.upsertMany("account-1", {email({"archive"}, {})}).has_value());
         javelin::jmap::cache::NotificationRepository notifications{database.connection};
-        REQUIRE_FALSE(notifications
-                          .synchronizeMailboxHorizons("account-1", {"inbox"},
-                                                      std::string_view{"email-state-1"})
-                          .has_value());
+        REQUIRE_FALSE(notifications.replaceActiveMailboxes("account-1", {"inbox"}).has_value());
 
         FakeTransport transport;
         transport.queuedResults.push_back(recoverableEmailDeltaResponse(errorType));
@@ -618,9 +613,10 @@ TEST_CASE("account Email rebaseline reconciles cached mail before advancing stat
                     .has_value());
         CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult)
                   ->stateToken == "email-state-2");
-        const auto horizon = notifications.mailboxHorizonsAtState("account-1", "email-state-2");
-        REQUIRE(std::holds_alternative<std::vector<std::string>>(horizon));
-        CHECK(std::get<std::vector<std::string>>(horizon) == std::vector<std::string>{"inbox"});
+        const auto activeMailboxes = notifications.activeMailboxIds("account-1");
+        REQUIRE(std::holds_alternative<std::vector<std::string>>(activeMailboxes));
+        CHECK(std::get<std::vector<std::string>>(activeMailboxes) ==
+              std::vector<std::string>{"inbox"});
     };
 
     SECTION("cannotCalculateChanges")
@@ -846,7 +842,7 @@ TEST_CASE("account Email rebaseline retries a bounded pass when Email state adva
 }
 
 TEST_CASE("notification enablement supersedes an in-flight Email delta and baselines atomically",
-          "[jmap][sync][mail-delta][notification][horizon][race]")
+          "[jmap][sync][mail-delta][notification][baseline][race]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -894,13 +890,13 @@ TEST_CASE("notification enablement supersedes an in-flight Email delta and basel
         executor.refresh("account-1", {.email = true}, {}, std::vector<std::string>{"inbox"}));
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(baseline));
     const auto& baselineSummary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(baseline);
-    CHECK(baselineSummary.notificationHorizonEstablished);
+    CHECK(baselineSummary.notificationBaselineEstablished);
     CHECK_FALSE(baselineSummary.notificationEventsCreated);
 
     javelin::jmap::cache::NotificationRepository notifications{database.connection};
-    const auto horizons = notifications.mailboxHorizonsAtState("account-1", "email-state-2");
-    REQUIRE(std::holds_alternative<std::vector<std::string>>(horizons));
-    CHECK(std::get<std::vector<std::string>>(horizons) == std::vector<std::string>{"inbox"});
+    const auto activeMailboxes = notifications.activeMailboxIds("account-1");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(activeMailboxes));
+    CHECK(std::get<std::vector<std::string>>(activeMailboxes) == std::vector<std::string>{"inbox"});
     const auto historicalPending = notifications.listPendingEvents("account-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
         historicalPending));
@@ -924,8 +920,8 @@ TEST_CASE("notification enablement supersedes an in-flight Email delta and basel
     CHECK(events.front().emailId == "email-2");
 }
 
-TEST_CASE("notification horizon persistence failure rolls back the Email baseline",
-          "[jmap][sync][mail-delta][notification][horizon][atomicity]")
+TEST_CASE("notification baseline completion survives Email changes fallback",
+          "[jmap][sync][mail-delta][notification][baseline][fallback]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -935,10 +931,46 @@ TEST_CASE("notification horizon persistence failure rolls back the Email baselin
     javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
     REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox")}).has_value());
 
-    QSqlQuery failHorizon{database.connection.database()};
-    REQUIRE(failHorizon.exec(QStringLiteral(
-        "CREATE TRIGGER fail_notification_horizon_insert BEFORE INSERT ON "
-        "mail_notification_horizons BEGIN SELECT RAISE(FAIL,'forced horizon failure'); END")));
+    FakeTransport transport;
+    transport.queuedResults.push_back(recoverableEmailDeltaResponse("cannotCalculateChanges"));
+    transport.queuedResults.push_back(rebaselineEmailResponse("email-state-2", {}));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+
+    const auto result = QCoro::waitFor(
+        executor.refresh("account-1", {.email = true}, {}, std::vector<std::string>{"inbox"}));
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
+    CHECK(summary.notificationBaselineEstablished);
+    CHECK_FALSE(summary.notificationEventsCreated);
+
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    const auto activeMailboxes = notifications.activeMailboxIds("account-1");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(activeMailboxes));
+    CHECK(std::get<std::vector<std::string>>(activeMailboxes) == std::vector<std::string>{"inbox"});
+    const auto pending = notifications.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        pending));
+    CHECK(
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pending).empty());
+}
+
+TEST_CASE("notification mailbox activation failure rolls back the Email baseline",
+          "[jmap][sync][mail-delta][notification][mailboxes][atomicity]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
+    REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox")}).has_value());
+
+    QSqlQuery failActivation{database.connection.database()};
+    REQUIRE(failActivation.exec(QStringLiteral(
+        "CREATE TRIGGER fail_notification_mailbox_insert BEFORE INSERT ON "
+        "mail_notification_mailboxes BEGIN SELECT RAISE(FAIL,'forced activation failure'); END")));
 
     FakeTransport transport;
     transport.queuedResults.push_back(
@@ -966,7 +998,7 @@ TEST_CASE("notification horizon persistence failure rolls back the Email baselin
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cached));
     CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(cached).has_value());
 
-    REQUIRE(failHorizon.exec(QStringLiteral("DROP TRIGGER fail_notification_horizon_insert")));
+    REQUIRE(failActivation.exec(QStringLiteral("DROP TRIGGER fail_notification_mailbox_insert")));
     transport.queuedResults.push_back(
         emailDeltaResponseAtStates("email-state-1", "email-state-2", R"("email-1")", {}, {},
                                    emailJsonWithIdentity("email-1", "thread-1", "inbox", false)));
@@ -974,11 +1006,11 @@ TEST_CASE("notification horizon persistence failure rolls back the Email baselin
         executor.refresh("account-1", {.email = true}, {}, std::vector<std::string>{"inbox"}));
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(retried));
     CHECK(std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(retried)
-              .notificationHorizonEstablished);
+              .notificationBaselineEstablished);
     javelin::jmap::cache::NotificationRepository notifications{database.connection};
-    const auto horizons = notifications.mailboxHorizonsAtState("account-1", "email-state-2");
-    REQUIRE(std::holds_alternative<std::vector<std::string>>(horizons));
-    CHECK(std::get<std::vector<std::string>>(horizons) == std::vector<std::string>{"inbox"});
+    const auto activeMailboxes = notifications.activeMailboxIds("account-1");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(activeMailboxes));
+    CHECK(std::get<std::vector<std::string>>(activeMailboxes) == std::vector<std::string>{"inbox"});
 }
 
 TEST_CASE("account Email delta creates one event for a multi-mailbox unread arrival",
@@ -993,7 +1025,7 @@ TEST_CASE("account Email delta creates one event for a multi-mailbox unread arri
     REQUIRE_FALSE(
         mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox"), mailbox("archive", 1)})
             .has_value());
-    seedNotificationHorizons(database.connection, {"archive", "inbox"});
+    seedNotificationMailboxes(database.connection, {"archive", "inbox"});
 
     FakeTransport transport;
     transport.queuedResults.push_back(emailDeltaResponse(
@@ -1028,7 +1060,7 @@ TEST_CASE("duplicate state-change catch-up after notification commit does not du
     seedEmailState(database.connection);
     javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
     REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox")}).has_value());
-    seedNotificationHorizons(database.connection, {"inbox"});
+    seedNotificationMailboxes(database.connection, {"inbox"});
 
     FakeTransport firstTransport;
     firstTransport.queuedResults.push_back(
@@ -1078,7 +1110,7 @@ TEST_CASE("account Email delta creates a first event for genuine server mailbox 
     auto database = makeDatabaseContext();
     seedAccount(database.connection);
     seedMail(database.connection);
-    seedNotificationHorizons(database.connection, {"inbox"});
+    seedNotificationMailboxes(database.connection, {"inbox"});
 
     FakeTransport transport;
     transport.queuedResults.push_back(emailDeltaResponse({}, R"("email-1")", {}));
@@ -1108,7 +1140,7 @@ TEST_CASE("account Email delta does not turn seen churn into new mail",
     seedMail(database.connection);
     javelin::jmap::cache::EmailRepository emails{database.connection};
     REQUIRE_FALSE(emails.upsertMany("account-1", {email({"inbox"}, {"$seen"})}).has_value());
-    seedNotificationHorizons(database.connection, {"inbox"});
+    seedNotificationMailboxes(database.connection, {"inbox"});
 
     FakeTransport transport;
     transport.queuedResults.push_back(emailDeltaResponse({}, R"("email-1")", {}));
@@ -1212,7 +1244,7 @@ TEST_CASE("account Email delta suppresses server confirmation of local mailbox o
                                                     mailbox("archive", 1, "archive"),
                                                     mailbox("junk", 1, "junk")})
                           .has_value());
-        seedNotificationHorizons(database.connection, operation.notificationMailboxIds);
+        seedNotificationMailboxes(database.connection, operation.notificationMailboxIds);
         javelin::jmap::cache::EmailRepository emails{database.connection};
         REQUIRE_FALSE(emails
                           .upsertMany("account-1", {email(operation.currentMailboxIds,
@@ -1275,7 +1307,7 @@ TEST_CASE("account Email delta suppresses Javelin-imported created mail",
     seedEmailState(database.connection);
     javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
     REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox")}).has_value());
-    seedNotificationHorizons(database.connection, {"inbox"});
+    seedNotificationMailboxes(database.connection, {"inbox"});
     seedImportProvenance(database.connection, "email-1");
 
     FakeTransport transport;
@@ -1307,7 +1339,7 @@ TEST_CASE("account Email delta suppresses a batch of Javelin-imported unread mai
     seedEmailState(database.connection);
     javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
     REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 64, "inbox")}).has_value());
-    seedNotificationHorizons(database.connection, {"inbox"});
+    seedNotificationMailboxes(database.connection, {"inbox"});
 
     constexpr std::size_t importedCount = 64;
     std::vector<std::string> importedIds;
@@ -1364,7 +1396,7 @@ TEST_CASE("notification event failure rolls back Email state and consumption",
     seedEmailState(database.connection);
     javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
     REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox")}).has_value());
-    seedNotificationHorizons(database.connection, {"inbox"});
+    seedNotificationMailboxes(database.connection, {"inbox"});
 
     QSqlQuery failOutbox{database.connection.database()};
     REQUIRE(failOutbox.exec(QStringLiteral(
@@ -1413,7 +1445,7 @@ TEST_CASE("notification consumption prevents a second event after later re-entry
     seedMail(database.connection);
     javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
     REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("other", 1)}).has_value());
-    seedNotificationHorizons(database.connection, {"inbox"});
+    seedNotificationMailboxes(database.connection, {"inbox"});
 
     FakeTransport transport;
     javelin::jmap::api::MethodCaller caller{transport};

@@ -233,6 +233,21 @@ namespace javelin::jmap::cache::migrations
                         QStringLiteral("DROP TABLE observed_notification_emails"),
                     },
             },
+            MigrationStep{
+                .version = 68,
+                .name = QStringLiteral("simplify_mail_notification_mailboxes"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "CREATE TABLE mail_notification_mailboxes (account_id TEXT NOT NULL "
+                            "REFERENCES accounts(account_id) ON DELETE CASCADE,mailbox_id TEXT NOT "
+                            "NULL,PRIMARY KEY(account_id,mailbox_id)) STRICT"),
+                        QStringLiteral(
+                            "INSERT INTO mail_notification_mailboxes(account_id,mailbox_id) SELECT "
+                            "account_id,mailbox_id FROM mail_notification_horizons"),
+                        QStringLiteral("DROP TABLE mail_notification_horizons"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

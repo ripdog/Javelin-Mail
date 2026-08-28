@@ -65,9 +65,9 @@ namespace javelin::app
                            std::vector<std::string> mailboxIds,
                            std::vector<std::string> notificationMailboxIds);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        requestNotificationHorizonBaseline(std::vector<std::string> mailboxIds);
+        requestNotificationBaseline(std::vector<std::string> mailboxIds);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        cancelNotificationHorizonBaseline();
+        cancelNotificationBaseline();
         void stop();
         void pauseForAuthentication();
         void networkBecameReachable();
@@ -167,8 +167,8 @@ namespace javelin::app
         void handleResumeWatchdogTimeout();
         void scheduleDebouncedRefresh(bool forceEmailRefresh = false,
                                       std::vector<std::string> mailboxIds = {});
-        void scheduleNotificationHorizonRetry();
-        void scheduleNotificationHorizonRefresh();
+        void scheduleNotificationBaselineRetry();
+        void scheduleNotificationBaselineRefresh();
         void scheduleCatchUpRefresh();
         void processGroupwareStateChanges();
         [[nodiscard]] bool domainHasActiveMutation(std::string_view accountId,
@@ -224,10 +224,10 @@ namespace javelin::app
         MailRefreshDemand m_queuedRefreshDemand;
         MailRefreshDemand m_debouncedRefreshDemand;
         QTimer m_refreshDebounceTimer;
-        QTimer m_notificationHorizonRetryTimer;
+        QTimer m_notificationBaselineRetryTimer;
         QTimer m_resumeWatchdogTimer;
-        std::optional<std::vector<std::string>> m_pendingNotificationHorizonMailboxIds;
-        unsigned int m_notificationHorizonRetryAttempts = 0;
+        std::optional<std::vector<std::string>> m_pendingNotificationBaselineMailboxIds;
+        unsigned int m_notificationBaselineRetryAttempts = 0;
         qint64 m_lastResumeWatchdogTickMs = 0;
     };
 

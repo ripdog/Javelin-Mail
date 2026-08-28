@@ -1198,10 +1198,7 @@ TEST_CASE("mailbox query rebuild cannot manufacture notifications from historica
                       .has_value());
     seedCanonicalWindow(databaseContext.connection, {});
     javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
-    REQUIRE_FALSE(notifications
-                      .synchronizeMailboxHorizons("account-1", {"mbx-inbox"},
-                                                  std::string_view{"email-state-1"})
-                      .has_value());
+    REQUIRE_FALSE(notifications.replaceActiveMailboxes("account-1", {"mbx-inbox"}).has_value());
 
     FakeTransport transport;
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{

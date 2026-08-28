@@ -114,7 +114,7 @@ namespace javelin::app
 
       private:
         void applyAccountConfiguration(const std::string& accountId);
-        void scheduleNotificationHorizonRetry(const std::string& accountId);
+        void scheduleNotificationBaselineRetry(const std::string& accountId);
         void refreshConfiguredSessions();
         void startSessionRefresh(const std::string& ownerAccountId,
                                  const AccountConnectionSettings& settings);
@@ -135,8 +135,8 @@ namespace javelin::app
         std::unordered_map<std::string, std::unique_ptr<AccountSyncCoordinator>> m_coordinators;
         std::unordered_map<std::string, AccountSyncConfiguration> m_configurations;
         std::unordered_map<std::string, std::vector<std::string>> m_observedMailboxIds;
-        std::unordered_map<std::string, unsigned int> m_notificationHorizonRetryAttempts;
-        std::unordered_set<std::string> m_notificationHorizonRetriesPending;
+        std::unordered_map<std::string, unsigned int> m_notificationBaselineRetryAttempts;
+        std::unordered_set<std::string> m_notificationBaselineRetriesPending;
         std::unordered_set<std::string> m_sessionRefreshesInFlight;
     };
 

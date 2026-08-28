@@ -105,104 +105,123 @@ namespace javelin::jmap::cache
         return events;
     }
 
-    std::optional<DatabaseError> NotificationRepository::synchronizeMailboxHorizons(
-        const std::string_view accountId, const std::vector<std::string>& enabledMailboxIds,
-        const std::optional<std::string_view> currentEmailState)
+    namespace
+    {
+        [[nodiscard]] std::optional<DatabaseError>
+        retainActiveMailboxRows(DatabaseConnection& connection, DatabaseTransaction& transaction,
+                                const std::string_view accountId,
+                                const std::vector<std::string>& allowedMailboxIds)
+        {
+            if (!transaction.isActive() || &transaction.connection() != &connection)
+            {
+                return DatabaseError{
+                    .code = DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Notification mailbox retention requires an active "
+                                              "matching transaction."),
+                };
+            }
+
+            const std::unordered_set<std::string> allowed{allowedMailboxIds.begin(),
+                                                          allowedMailboxIds.end()};
+            QSqlQuery existing{connection.database()};
+            existing.prepare(QStringLiteral(
+                "SELECT mailbox_id FROM mail_notification_mailboxes WHERE account_id=:account_id"));
+            existing.bindValue(QStringLiteral(":account_id"),
+                               QString::fromStdString(std::string{accountId}));
+            if (!existing.exec())
+                return queryError(QStringLiteral("Read active notification mailboxes"), existing);
+
+            std::vector<std::string> removedMailboxIds;
+            while (existing.next())
+            {
+                const auto mailboxId = existing.value(0).toString().toStdString();
+                if (!allowed.contains(mailboxId))
+                    removedMailboxIds.push_back(mailboxId);
+            }
+            existing.finish();
+
+            QSqlQuery remove{connection.database()};
+            remove.prepare(QStringLiteral(
+                "DELETE FROM mail_notification_mailboxes WHERE account_id=:account_id AND "
+                "mailbox_id=:mailbox_id"));
+            for (const auto& mailboxId : removedMailboxIds)
+            {
+                remove.bindValue(QStringLiteral(":account_id"),
+                                 QString::fromStdString(std::string{accountId}));
+                remove.bindValue(QStringLiteral(":mailbox_id"), QString::fromStdString(mailboxId));
+                if (!remove.exec())
+                    return queryError(QStringLiteral("Remove active notification mailbox"), remove);
+                remove.finish();
+            }
+            return std::nullopt;
+        }
+    } // namespace
+
+    std::optional<DatabaseError>
+    NotificationRepository::retainActiveMailboxes(const std::string_view accountId,
+                                                  const std::vector<std::string>& allowedMailboxIds)
     {
         auto transactionResult = DatabaseTransaction::begin(
-            m_connection, QStringLiteral("Synchronize notification horizons"));
+            m_connection, QStringLiteral("Retain active notification mailboxes"));
         if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
             return *error;
         auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
-        if (const auto error = synchronizeMailboxHorizons(transaction, accountId, enabledMailboxIds,
-                                                          currentEmailState))
+        if (const auto error =
+                retainActiveMailboxRows(m_connection, transaction, accountId, allowedMailboxIds))
             return error;
         return transaction.commit();
     }
 
-    std::optional<DatabaseError> NotificationRepository::synchronizeMailboxHorizons(
-        DatabaseTransaction& transaction, const std::string_view accountId,
-        const std::vector<std::string>& enabledMailboxIds,
-        const std::optional<std::string_view> currentEmailState)
+    std::optional<DatabaseError>
+    NotificationRepository::replaceActiveMailboxes(const std::string_view accountId,
+                                                   const std::vector<std::string>& activeMailboxIds)
     {
-        if (!transaction.isActive() || &transaction.connection() != &m_connection)
-        {
-            return DatabaseError{
-                .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Notification horizon synchronization requires an active "
-                                          "matching transaction."),
-            };
-        }
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Replace active notification mailboxes"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = replaceActiveMailboxes(transaction, accountId, activeMailboxIds))
+            return error;
+        return transaction.commit();
+    }
 
-        const std::unordered_set<std::string> enabled{enabledMailboxIds.begin(),
-                                                      enabledMailboxIds.end()};
-        QSqlQuery existing{m_connection.database()};
-        existing.prepare(QStringLiteral(
-            "SELECT mailbox_id FROM mail_notification_horizons WHERE account_id=:account_id"));
-        existing.bindValue(QStringLiteral(":account_id"),
-                           QString::fromStdString(std::string{accountId}));
-        if (!existing.exec())
-            return queryError(QStringLiteral("Read notification horizons"), existing);
+    std::optional<DatabaseError>
+    NotificationRepository::replaceActiveMailboxes(DatabaseTransaction& transaction,
+                                                   const std::string_view accountId,
+                                                   const std::vector<std::string>& activeMailboxIds)
+    {
+        if (const auto error =
+                retainActiveMailboxRows(m_connection, transaction, accountId, activeMailboxIds))
+            return error;
 
-        std::vector<std::string> disabledMailboxIds;
-        while (existing.next())
+        QSqlQuery insert{m_connection.database()};
+        insert.prepare(QStringLiteral(
+            "INSERT OR IGNORE INTO mail_notification_mailboxes(account_id,mailbox_id) "
+            "VALUES(:account_id,:mailbox_id)"));
+        for (const auto& mailboxId : activeMailboxIds)
         {
-            const auto mailboxId = existing.value(0).toString().toStdString();
-            if (!enabled.contains(mailboxId))
-                disabledMailboxIds.push_back(mailboxId);
-        }
-        existing.finish();
-
-        QSqlQuery remove{m_connection.database()};
-        remove.prepare(QStringLiteral(
-            "DELETE FROM mail_notification_horizons WHERE account_id=:account_id AND "
-            "mailbox_id=:mailbox_id"));
-        for (const auto& mailboxId : disabledMailboxIds)
-        {
-            remove.bindValue(QStringLiteral(":account_id"),
+            insert.bindValue(QStringLiteral(":account_id"),
                              QString::fromStdString(std::string{accountId}));
-            remove.bindValue(QStringLiteral(":mailbox_id"), QString::fromStdString(mailboxId));
-            if (!remove.exec())
-                return queryError(QStringLiteral("Remove notification horizon"), remove);
-            remove.finish();
-        }
-
-        if (currentEmailState.has_value())
-        {
-            QSqlQuery insert{m_connection.database()};
-            insert.prepare(
-                QStringLiteral("INSERT OR IGNORE INTO "
-                               "mail_notification_horizons(account_id,mailbox_id,email_state) "
-                               "VALUES(:account_id,:mailbox_id,:email_state)"));
-            for (const auto& mailboxId : enabledMailboxIds)
-            {
-                insert.bindValue(QStringLiteral(":account_id"),
-                                 QString::fromStdString(std::string{accountId}));
-                insert.bindValue(QStringLiteral(":mailbox_id"), QString::fromStdString(mailboxId));
-                insert.bindValue(QStringLiteral(":email_state"),
-                                 QString::fromStdString(std::string{*currentEmailState}));
-                if (!insert.exec())
-                    return queryError(QStringLiteral("Create notification horizon"), insert);
-                insert.finish();
-            }
+            insert.bindValue(QStringLiteral(":mailbox_id"), QString::fromStdString(mailboxId));
+            if (!insert.exec())
+                return queryError(QStringLiteral("Activate notification mailbox"), insert);
+            insert.finish();
         }
         return std::nullopt;
     }
 
     std::variant<std::vector<std::string>, DatabaseError>
-    NotificationRepository::mailboxHorizonsAtState(const std::string_view accountId,
-                                                   const std::string_view emailState) const
+    NotificationRepository::activeMailboxIds(const std::string_view accountId) const
     {
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
-            "SELECT mailbox_id FROM mail_notification_horizons WHERE account_id=:account_id AND "
-            "email_state=:email_state ORDER BY mailbox_id"));
+            "SELECT mailbox_id FROM mail_notification_mailboxes WHERE account_id=:account_id "
+            "ORDER BY mailbox_id"));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
-        query.bindValue(QStringLiteral(":email_state"),
-                        QString::fromStdString(std::string{emailState}));
         if (!query.exec())
-            return queryError(QStringLiteral("Read notification horizons at Email state"), query);
+            return queryError(QStringLiteral("Read active notification mailboxes"), query);
         std::vector<std::string> mailboxIds;
         while (query.next())
             mailboxIds.push_back(query.value(0).toString().toStdString());
@@ -226,33 +245,6 @@ namespace javelin::jmap::cache
         return query.next();
     }
 
-    std::optional<DatabaseError> NotificationRepository::advanceMailboxHorizons(
-        DatabaseTransaction& transaction, const std::string_view accountId,
-        const std::string_view expectedEmailState, const std::string_view newEmailState)
-    {
-        if (!transaction.isActive() || &transaction.connection() != &m_connection)
-        {
-            return DatabaseError{
-                .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral(
-                    "Notification horizon advancement requires an active matching transaction."),
-            };
-        }
-        QSqlQuery update{m_connection.database()};
-        update.prepare(
-            QStringLiteral("UPDATE mail_notification_horizons SET email_state=:new_state WHERE "
-                           "account_id=:account_id AND email_state=:expected_state"));
-        update.bindValue(QStringLiteral(":new_state"),
-                         QString::fromStdString(std::string{newEmailState}));
-        update.bindValue(QStringLiteral(":account_id"),
-                         QString::fromStdString(std::string{accountId}));
-        update.bindValue(QStringLiteral(":expected_state"),
-                         QString::fromStdString(std::string{expectedEmailState}));
-        if (!update.exec())
-            return queryError(QStringLiteral("Advance notification horizons"), update);
-        return std::nullopt;
-    }
-
     std::variant<std::vector<MailNotificationPendingEvent>, DatabaseError>
     NotificationRepository::claimPendingEvents(const std::string_view accountId)
     {
@@ -271,8 +263,8 @@ namespace javelin::jmap::cache
             "membership.mailbox_id=event.mailbox_id),"
             "EXISTS(SELECT 1 FROM email_keywords keyword WHERE keyword.account_id=event.account_id "
             "AND keyword.email_id=event.email_id AND keyword.keyword='$seen'),"
-            "EXISTS(SELECT 1 FROM mail_notification_horizons horizon WHERE "
-            "horizon.account_id=event.account_id AND horizon.mailbox_id=event.mailbox_id) "
+            "EXISTS(SELECT 1 FROM mail_notification_mailboxes configured WHERE "
+            "configured.account_id=event.account_id AND configured.mailbox_id=event.mailbox_id) "
             "FROM mail_notification_event_outbox event WHERE event.account_id=:account_id "
             "ORDER BY event.mailbox_id,event.created_at,event.email_id"));
         pending.bindValue(QStringLiteral(":account_id"),

@@ -26,7 +26,6 @@
 #include "jmap/cache/MessageContentTypes.h"
 #include "jmap/cache/MessageSummaryReadRepository.h"
 #include "jmap/cache/MimeMessageParser.h"
-#include "jmap/cache/NotificationRepository.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
@@ -2594,17 +2593,6 @@ namespace javelin::jmap
                     std::get_if<javelin::jmap::cache::DatabaseError>(&stateAdvanced))
             {
                 co_return javelin::jmap::operationError(*error);
-            }
-            if (std::get<bool>(stateAdvanced))
-            {
-                javelin::jmap::cache::NotificationRepository notifications{
-                    *m_impl->databaseConnection};
-                if (const auto error = notifications.advanceMailboxHorizons(
-                        transaction.cacheTransaction(), accountId, parsed.oldState,
-                        parsed.newState))
-                {
-                    co_return javelin::jmap::operationError(*error);
-                }
             }
         }
 

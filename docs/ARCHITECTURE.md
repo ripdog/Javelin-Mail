@@ -411,20 +411,25 @@ values; they do not acquire Email pagination semantics.
 
 New-mail notification discovery is owned by account-wide Email reconciliation, never by mailbox
 query/window observation. When a committed server Email transition proves that a previously
-unconsumed Email legitimately crossed an enabled mailbox's notification horizon while unread, the
-Email synchronizer creates the per-Email consumption marker and durable notification outbox entry in
-the same SQLite transaction as the Email-object and global Email-state transition. Mailbox identity
-is retained as deterministic routing/context metadata; `(account_id, email_id)` is the notification
+unconsumed Email legitimately entered an active notification mailbox while unread, the Email
+synchronizer creates the per-Email consumption marker and durable notification outbox entry in the
+same SQLite transaction as the Email-object and global Email-state transition. Mailbox identity is
+retained as deterministic routing/context metadata; `(account_id, email_id)` is the notification
 identity, so later unread movement between enabled mailboxes cannot create another event.
 
-Notification horizons are Email-state-token boundaries. Enabling a mailbox is serialized against
-in-flight Email work with the existing Email consistency generation, then the new horizon is
-installed atomically with a fresh Email reconciliation state so historical cached mail cannot become
-new mail merely because notification settings changed. The delivery service claims pending outbox
-rows and revalidates unread state, current mailbox eligibility, and object existence entirely from
-SQLite before showing a popup. Successful delivery removes the outbox row while preserving the
-per-Email consumption marker; claim, acknowledgement, release, and desktop-presentation failures are
-retried locally and do not request JMAP synchronization solely to recover notification delivery.
+The account's global `Email` sync state is the only Email cursor. Notification storage contains only
+the set of mailboxes whose notification baseline has completed; it does not duplicate the Email
+state token. Enabling a new mailbox is serialized against in-flight Email work with the existing
+Email consistency generation. The mailbox is added to the active notification set only in the final
+transaction of a fresh Email reconciliation, so historical cached mail cannot become new mail merely
+because notification settings changed. Disabling a mailbox removes it from the active set
+immediately. Because ordinary Email state advancement does not mutate this set, local `Email/set`
+confirmation and other Email-state writers cannot desynchronize notification eligibility from the
+account cursor. The delivery service claims pending outbox rows and revalidates unread state,
+current mailbox eligibility, and object existence entirely from SQLite before showing a popup.
+Successful delivery removes the outbox row while preserving the per-Email consumption marker; claim,
+acknowledgement, release, and desktop-presentation failures are retried locally and do not request
+JMAP synchronization solely to recover notification delivery.
 
 Mailbox query windows remain presentation coverage only. Notification routing to a concrete Email
 may use its mailbox context to open/materialize the relevant view, but query-window population,

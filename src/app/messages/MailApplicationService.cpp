@@ -280,7 +280,7 @@ namespace javelin::app
         }
 
         constexpr auto contactRefreshRetryDelay = std::chrono::seconds{30};
-        constexpr unsigned int notificationHorizonRetryMaximumExponent = 5;
+        constexpr unsigned int notificationBaselineRetryMaximumExponent = 5;
         constexpr unsigned int mailNotificationLocalRetryMaximumExponent = 5;
 
         [[nodiscard]] javelin::app::undo::ExactMailPatch
@@ -924,8 +924,8 @@ namespace javelin::app
             disconnect(coordinatorIt->second.get(), nullptr, this, nullptr);
             coordinatorIt = m_coordinators.erase(coordinatorIt);
             m_observedMailboxIds.erase(removedAccountId);
-            m_notificationHorizonRetryAttempts.erase(removedAccountId);
-            m_notificationHorizonRetriesPending.erase(removedAccountId);
+            m_notificationBaselineRetryAttempts.erase(removedAccountId);
+            m_notificationBaselineRetriesPending.erase(removedAccountId);
             Q_EMIT accountRemoved(QString::fromStdString(removedAccountId));
         }
         std::erase_if(m_configurations, [&configuredAccountIds](const auto& entry)
@@ -1296,16 +1296,17 @@ namespace javelin::app
         configuration.mailboxIds.erase(std::ranges::unique(configuration.mailboxIds).begin(),
                                        configuration.mailboxIds.end());
 
-        bool notificationHorizonCheckFailed = false;
-        bool notificationHorizonBaselineRequired = false;
+        bool notificationBaselineCheckFailed = false;
+        bool notificationBaselineRequired = false;
         javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
-        if (const auto horizonError = notifications.synchronizeMailboxHorizons(
-                accountId, configuration.notificationMailboxIds, std::nullopt))
+        if (const auto activeMailboxError = notifications.retainActiveMailboxes(
+                accountId, configuration.notificationMailboxIds))
         {
-            qWarning().noquote() << "Could not prune disabled notification horizons"
-                                 << QString::fromStdString(accountId) << horizonError->message;
-            notificationHorizonCheckFailed = true;
-            notificationHorizonBaselineRequired = true;
+            qWarning().noquote() << "Could not prune disabled notification mailboxes"
+                                 << QString::fromStdString(accountId)
+                                 << activeMailboxError->message;
+            notificationBaselineCheckFailed = true;
+            notificationBaselineRequired = true;
         }
         else
         {
@@ -1314,44 +1315,43 @@ namespace javelin::app
                 syncStates.find({.accountId = accountId, .objectType = "Email", .queryKey = {}});
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailState))
             {
-                qWarning().noquote() << "Could not read Email state for notification horizon"
+                qWarning().noquote() << "Could not read Email state for notification baseline"
                                      << QString::fromStdString(accountId) << error->message;
-                notificationHorizonCheckFailed = true;
-                notificationHorizonBaselineRequired = true;
+                notificationBaselineCheckFailed = true;
+                notificationBaselineRequired = true;
             }
             else if (const auto& state =
                          std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState);
                      !state.has_value())
             {
-                notificationHorizonBaselineRequired = !configuration.notificationMailboxIds.empty();
+                notificationBaselineRequired = !configuration.notificationMailboxIds.empty();
             }
             else
             {
-                const auto horizonResult =
-                    notifications.mailboxHorizonsAtState(accountId, state->stateToken);
-                if (const auto* horizonReadError =
-                        std::get_if<javelin::jmap::cache::DatabaseError>(&horizonResult))
+                const auto activeResult = notifications.activeMailboxIds(accountId);
+                if (const auto* activeReadError =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&activeResult))
                 {
                     qWarning().noquote()
-                        << "Could not read notification horizons"
-                        << QString::fromStdString(accountId) << horizonReadError->message;
-                    notificationHorizonCheckFailed = true;
-                    notificationHorizonBaselineRequired = true;
+                        << "Could not read active notification mailboxes"
+                        << QString::fromStdString(accountId) << activeReadError->message;
+                    notificationBaselineCheckFailed = true;
+                    notificationBaselineRequired = true;
                 }
                 else
                 {
-                    auto activeMailboxIds = std::get<std::vector<std::string>>(horizonResult);
+                    auto activeMailboxIds = std::get<std::vector<std::string>>(activeResult);
                     auto desiredMailboxIds = configuration.notificationMailboxIds;
                     std::ranges::sort(activeMailboxIds);
                     std::ranges::sort(desiredMailboxIds);
-                    notificationHorizonBaselineRequired = activeMailboxIds != desiredMailboxIds;
+                    notificationBaselineRequired = activeMailboxIds != desiredMailboxIds;
                 }
             }
         }
-        if (notificationHorizonCheckFailed)
-            scheduleNotificationHorizonRetry(accountId);
+        if (notificationBaselineCheckFailed)
+            scheduleNotificationBaselineRetry(accountId);
         else
-            m_notificationHorizonRetryAttempts.erase(accountId);
+            m_notificationBaselineRetryAttempts.erase(accountId);
 
         auto [coordinatorIt, inserted] = m_coordinators.try_emplace(accountId);
         if (inserted)
@@ -1372,36 +1372,35 @@ namespace javelin::app
         coordinatorIt->second->applySettings(std::move(configuration.settings), accountId,
                                              std::move(configuration.mailboxIds),
                                              std::move(configuration.notificationMailboxIds));
-        const auto horizonConfigurationError =
-            notificationHorizonBaselineRequired
-                ? coordinatorIt->second->requestNotificationHorizonBaseline(
-                      desiredNotificationMailboxIds)
-                : coordinatorIt->second->cancelNotificationHorizonBaseline();
-        if (horizonConfigurationError.has_value())
+        const auto baselineConfigurationError =
+            notificationBaselineRequired
+                ? coordinatorIt->second->requestNotificationBaseline(desiredNotificationMailboxIds)
+                : coordinatorIt->second->cancelNotificationBaseline();
+        if (baselineConfigurationError.has_value())
         {
-            qWarning().noquote() << "Could not serialize notification horizon configuration"
+            qWarning().noquote() << "Could not serialize notification baseline configuration"
                                  << QString::fromStdString(accountId)
-                                 << horizonConfigurationError->message;
-            scheduleNotificationHorizonRetry(accountId);
+                                 << baselineConfigurationError->message;
+            scheduleNotificationBaselineRetry(accountId);
         }
     }
 
-    void AccountRuntimeManager::scheduleNotificationHorizonRetry(const std::string& accountId)
+    void AccountRuntimeManager::scheduleNotificationBaselineRetry(const std::string& accountId)
     {
         if (!m_configurations.contains(accountId) ||
-            !m_notificationHorizonRetriesPending.insert(accountId).second)
+            !m_notificationBaselineRetriesPending.insert(accountId).second)
             return;
 
-        auto& attempts = m_notificationHorizonRetryAttempts[accountId];
-        const auto exponent = std::min(attempts, notificationHorizonRetryMaximumExponent);
+        auto& attempts = m_notificationBaselineRetryAttempts[accountId];
+        const auto exponent = std::min(attempts, notificationBaselineRetryMaximumExponent);
         ++attempts;
         const auto delay = std::chrono::seconds{1U << exponent};
         QTimer::singleShot(delay, this,
                            [this, accountId]
                            {
-                               m_notificationHorizonRetriesPending.erase(accountId);
+                               m_notificationBaselineRetriesPending.erase(accountId);
                                if (!m_configurations.contains(accountId) ||
-                                   !m_notificationHorizonRetryAttempts.contains(accountId))
+                                   !m_notificationBaselineRetryAttempts.contains(accountId))
                                    return;
                                applyAccountConfiguration(accountId);
                            });

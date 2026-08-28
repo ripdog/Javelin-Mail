@@ -177,10 +177,7 @@ namespace
         REQUIRE_FALSE(emails.upsertMany("account-1", {email}).has_value());
 
         javelin::jmap::cache::NotificationRepository notifications{connection};
-        REQUIRE_FALSE(notifications
-                          .synchronizeMailboxHorizons("account-1", {"inbox"},
-                                                      std::string_view{"email-state-1"})
-                          .has_value());
+        REQUIRE_FALSE(notifications.replaceActiveMailboxes("account-1", {"inbox"}).has_value());
         auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
             connection, QStringLiteral("Seed background notification"));
         REQUIRE(

@@ -105,14 +105,13 @@ TEST_CASE("mail notification eligibility requires a legitimate incoming transiti
     auto current = previous;
     const std::vector<std::string> enabled{"mbx-inbox", "mbx-projects"};
     const auto evaluate = [&](const javelin::jmap::domain::Email* before, const bool serverCreated,
-                              const bool withinHorizon, const bool suppressed)
+                              const bool suppressed)
     {
         return javelin::jmap::sync::evaluateMailNotificationTransition({
             .previous = before,
             .current = &current,
             .notificationMailboxIds = enabled,
             .serverCreated = serverCreated,
-            .withinNotificationHorizon = withinHorizon,
             .suppressedByLocalOperation = suppressed,
         });
     };
@@ -120,14 +119,14 @@ TEST_CASE("mail notification eligibility requires a legitimate incoming transiti
     SECTION("new unread mail in one enabled mailbox")
     {
         current.mailboxIds = {"mbx-inbox"};
-        const auto decision = evaluate(nullptr, true, true, false);
+        const auto decision = evaluate(nullptr, true, false);
         CHECK(decision.qualifyingMailboxIds == std::vector<std::string>{"mbx-inbox"});
     }
 
     SECTION("new unread mail in several enabled mailboxes is still one Email event")
     {
         current.mailboxIds = {"mbx-projects", "mbx-inbox"};
-        const auto decision = evaluate(nullptr, true, true, false);
+        const auto decision = evaluate(nullptr, true, false);
         CHECK(decision.qualifyingMailboxIds ==
               std::vector<std::string>{"mbx-inbox", "mbx-projects"});
     }
@@ -136,13 +135,13 @@ TEST_CASE("mail notification eligibility requires a legitimate incoming transiti
     {
         current.mailboxIds = {"mbx-inbox"};
         current.keywords = {"$seen"};
-        CHECK_FALSE(evaluate(nullptr, true, true, false).eligible());
+        CHECK_FALSE(evaluate(nullptr, true, false).eligible());
     }
 
     SECTION("server-side unread move into an enabled mailbox is eligible")
     {
         current.mailboxIds = {"mbx-inbox"};
-        const auto decision = evaluate(&previous, false, true, false);
+        const auto decision = evaluate(&previous, false, false);
         CHECK(decision.qualifyingMailboxIds == std::vector<std::string>{"mbx-inbox"});
     }
 
@@ -150,7 +149,7 @@ TEST_CASE("mail notification eligibility requires a legitimate incoming transiti
     {
         previous.mailboxIds = {"mbx-inbox"};
         current.mailboxIds = {"mbx-projects"};
-        CHECK_FALSE(evaluate(&previous, false, true, false).eligible());
+        CHECK_FALSE(evaluate(&previous, false, false).eligible());
     }
 
     SECTION("read mail entering an enabled mailbox is not new mail")
@@ -159,7 +158,7 @@ TEST_CASE("mail notification eligibility requires a legitimate incoming transiti
         previous.keywords = {"$seen"};
         current.mailboxIds = {"mbx-inbox"};
         current.keywords = {"$seen"};
-        CHECK_FALSE(evaluate(&previous, false, true, false).eligible());
+        CHECK_FALSE(evaluate(&previous, false, false).eligible());
     }
 
     SECTION("seen to unread in an already enabled mailbox is not arrival")
@@ -168,25 +167,19 @@ TEST_CASE("mail notification eligibility requires a legitimate incoming transiti
         previous.keywords = {"$seen"};
         current.mailboxIds = {"mbx-inbox"};
         current.keywords = {};
-        CHECK_FALSE(evaluate(&previous, false, true, false).eligible());
+        CHECK_FALSE(evaluate(&previous, false, false).eligible());
     }
 
     SECTION("uncached updated mail is not guessed to be newly eligible")
     {
         current.mailboxIds = {"mbx-inbox"};
-        CHECK_FALSE(evaluate(nullptr, false, true, false).eligible());
-    }
-
-    SECTION("pre-horizon transition is historical")
-    {
-        current.mailboxIds = {"mbx-inbox"};
-        CHECK_FALSE(evaluate(nullptr, true, false, false).eligible());
+        CHECK_FALSE(evaluate(nullptr, false, false).eligible());
     }
 
     SECTION("local import provenance suppresses a server-created Email")
     {
         current.mailboxIds = {"mbx-inbox"};
-        CHECK_FALSE(evaluate(nullptr, true, true, true).eligible());
+        CHECK_FALSE(evaluate(nullptr, true, true).eligible());
     }
 }
 
@@ -209,10 +202,7 @@ TEST_CASE("notification delivery revalidates pending events locally",
     javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
     REQUIRE_FALSE(emails.replaceAll("account-1", {email}).has_value());
     javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
-    REQUIRE_FALSE(notifications
-                      .synchronizeMailboxHorizons("account-1", {"mbx-inbox"},
-                                                  std::string_view{"email-state-1"})
-                      .has_value());
+    REQUIRE_FALSE(notifications.replaceActiveMailboxes("account-1", {"mbx-inbox"}).has_value());
 
     auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
         databaseContext.connection, QStringLiteral("Create pending notification"));
@@ -295,10 +285,7 @@ TEST_CASE("notification delivery revalidates pending events locally",
 
     SECTION("disabled notification context cancels the stale popup")
     {
-        REQUIRE_FALSE(
-            notifications
-                .synchronizeMailboxHorizons("account-1", {}, std::string_view{"email-state-1"})
-                .has_value());
+        REQUIRE_FALSE(notifications.replaceActiveMailboxes("account-1", {}).has_value());
         const auto claimed = notifications.claimPendingEvents("account-1");
         REQUIRE(
             std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
@@ -366,10 +353,7 @@ TEST_CASE("notification delivery cancels every stale event in one pass",
     javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
     REQUIRE_FALSE(emails.replaceAll("account-1", {first, second, third}).has_value());
     javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
-    REQUIRE_FALSE(notifications
-                      .synchronizeMailboxHorizons("account-1", {"mbx-inbox"},
-                                                  std::string_view{"email-state-1"})
-                      .has_value());
+    REQUIRE_FALSE(notifications.replaceActiveMailboxes("account-1", {"mbx-inbox"}).has_value());
 
     auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
         databaseContext.connection, QStringLiteral("Create stale notifications"));
@@ -501,8 +485,8 @@ TEST_CASE("per-Email notification consumption survives delivery and mailbox move
     CHECK(removedState.value(0).toInt() == 0);
 }
 
-TEST_CASE("notification mailbox horizons linearize enablement against Email state",
-          "[jmap][cache][notification][horizon]")
+TEST_CASE("notification mailbox activation is independent of the Email state token",
+          "[jmap][cache][notification][mailboxes]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -512,44 +496,23 @@ TEST_CASE("notification mailbox horizons linearize enablement against Email stat
     javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
 
     REQUIRE_FALSE(notifications
-                      .synchronizeMailboxHorizons(
-                          "account-1", {"mbx-inbox", "mbx-archive", "mbx-projects", "mbx-junk"},
-                          std::string_view{"email-state-1"})
+                      .replaceActiveMailboxes(
+                          "account-1", {"mbx-inbox", "mbx-archive", "mbx-projects", "mbx-junk"})
                       .has_value());
-    const auto initial = notifications.mailboxHorizonsAtState("account-1", "email-state-1");
+    const auto initial = notifications.activeMailboxIds("account-1");
     REQUIRE(std::holds_alternative<std::vector<std::string>>(initial));
     CHECK(std::get<std::vector<std::string>>(initial) ==
           std::vector<std::string>{"mbx-archive", "mbx-inbox", "mbx-junk", "mbx-projects"});
 
-    REQUIRE_FALSE(notifications
-                      .synchronizeMailboxHorizons("account-1", {"mbx-archive"},
-                                                  std::string_view{"email-state-1"})
-                      .has_value());
-    const auto afterDisable = notifications.mailboxHorizonsAtState("account-1", "email-state-1");
+    REQUIRE_FALSE(notifications.retainActiveMailboxes("account-1", {"mbx-archive"}).has_value());
+    const auto afterDisable = notifications.activeMailboxIds("account-1");
     REQUIRE(std::holds_alternative<std::vector<std::string>>(afterDisable));
     CHECK(std::get<std::vector<std::string>>(afterDisable) ==
           std::vector<std::string>{"mbx-archive"});
 
-    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
-        databaseContext.connection, QStringLiteral("Advance notification horizon"));
-    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
-    auto transaction =
-        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
-    REQUIRE_FALSE(
-        notifications
-            .advanceMailboxHorizons(transaction, "account-1", "email-state-1", "email-state-2")
-            .has_value());
-    REQUIRE_FALSE(transaction.commit().has_value());
-
-    const auto advanced = notifications.mailboxHorizonsAtState("account-1", "email-state-2");
-    REQUIRE(std::holds_alternative<std::vector<std::string>>(advanced));
-    CHECK(std::get<std::vector<std::string>>(advanced) == std::vector<std::string>{"mbx-archive"});
-
-    REQUIRE_FALSE(notifications
-                      .synchronizeMailboxHorizons("account-1", {"mbx-archive", "mbx-projects"},
-                                                  std::string_view{"email-state-2"})
+    REQUIRE_FALSE(notifications.replaceActiveMailboxes("account-1", {"mbx-archive", "mbx-projects"})
                       .has_value());
-    const auto afterEnable = notifications.mailboxHorizonsAtState("account-1", "email-state-2");
+    const auto afterEnable = notifications.activeMailboxIds("account-1");
     REQUIRE(std::holds_alternative<std::vector<std::string>>(afterEnable));
     CHECK(std::get<std::vector<std::string>>(afterEnable) ==
           std::vector<std::string>{"mbx-archive", "mbx-projects"});

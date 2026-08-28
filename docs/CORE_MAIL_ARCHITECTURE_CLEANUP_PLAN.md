@@ -14,17 +14,19 @@ All checklist items are initially incomplete. Update this document as phases lan
 
 Current branch: `core-mail-architecture-cleanup`.
 
-Implemented and committed through the notification architecture cutover: account Email-state
-ownership/rebaseline, per-Email notification consumption, state-token notification horizons,
-transactional event creation, import/optimistic-move suppression, local-only desktop outbox delivery,
-legacy notification-state retirement, and removal of notification-only mailboxes from configured
-presentation query interests.
+Implemented through the notification architecture cutover: account Email-state ownership/rebaseline,
+per-Email notification consumption, baseline-gated active notification mailboxes, transactional event
+creation, import/optimistic-move suppression, local-only desktop outbox delivery, legacy
+notification-state retirement, and removal of notification-only mailboxes from configured
+presentation query interests. The original state-token horizon representation was subsequently
+removed after live testing proved that duplicating the account Email cursor could silently disable
+notifications when the two tokens diverged.
 
 Latest validation before this checkpoint:
 
 - `javelin_jmap_sync_tests`: all 88 test cases passed (1413 assertions) after scanner removal.
 - Notification-focused sync tests cover per-Email dedup/re-entry, eligibility, transactional rollback,
-  horizon semantics, and local delivery revalidation.
+  baseline activation semantics, and local delivery revalidation.
 - Legacy notification migration regression passed and preserves cached Email data.
 - Focused daemon integration test `notification-only mailboxes are not presentation sync interests`
   passes after the Phase 4 configuration change.
@@ -114,9 +116,8 @@ coverage for every row before replacing the current scanner.
 - [x] A notified Email is archived and later restored unread -> 0 additional notification events.
 - [x] A notification event is durably queued, desktop delivery fails, and the Email is moved before
       retry -> 0 additional notification events.
-- [x] A previously unnotified Email legitimately enters a notification-enabled mailbox because of a
-      new server-side mail transition -> exactly 1 notification event if it is still unread and
-      inside the notification horizon.
+- [x] A previously unnotified Email legitimately enters an active notification mailbox because of a
+      new server-side mail transition -> exactly 1 notification event if it is still unread.
 - [x] An Email already notified elsewhere later enters Inbox -> 0 additional notification events.
 - [x] An existing read Email enters Inbox -> 0 notification events.
 - [x] An old Email is manually marked unread -> 0 notification events merely because of the unread
@@ -367,17 +368,16 @@ The primary invariant is:
 ## 2.2 Define what constitutes a legitimate first notification transition
 
 Absence from the per-Email notification marker is necessary but not sufficient. The synchronization
-path must also prove that the Email crossed Javelin's notification horizon as genuinely incoming
-mail.
+path must also prove that the Email is part of a genuinely incoming server transition after the
+relevant notification mailbox has completed its baseline.
 
 A notification may be created only when all of these are true:
 
 - the Email has not already consumed its notification event;
-- the committed server-derived transition is within the notification horizon;
 - the transition is not merely cache/query discovery or bootstrap materialization;
 - the transition is not a Javelin-originated move/import that should be suppressed;
 - the Email is unread after reconciliation;
-- the Email belongs to at least one notification-enabled mailbox after reconciliation.
+- the Email belongs to at least one active notification mailbox after reconciliation.
 
 - [x] Model this decision explicitly in the daemon synchronization/application layer.
 - [x] Do not derive it from query-window insertion/removal.
@@ -435,9 +435,9 @@ server Email look newly arrived.
 - [x] Distinguish server-confirmed destruction from local cache eviction/retention cleanup.
 - [x] Prove that an Email whose notification marker cascades away cannot later be rediscovered as an
       old server Email and generate a false new-mail event.
-- [x] If local Email rows can be evicted while the server object still exists, tie notification
-      deduplication lifetime to the account synchronization/notification horizon rather than naïvely
-      to row residency.
+- [x] If local Email rows can be evicted while the server object still exists, preserve notification
+      deduplication independently of transient presentation/cache residency rather than naïvely tying
+      it to a query window.
 - [x] Add a regression test for any cache-evict-and-rediscover path that exists.
 
 Audit result: normal production code does not evict an `emails` row while retaining the same live
@@ -495,27 +495,31 @@ COMMIT
       again.
 - [x] Replaying the same server delta after a crash must be idempotent.
 
-## 2.7 Establish a notification horizon for bootstrap
+## 2.7 Establish notification activation after bootstrap
 
 Existing mail at account setup is baseline state, not newly arrived mail.
 
-- [x] Define a persisted or state-token-based notification horizon established during account mail
-      bootstrap.
+- [x] Keep notification mailboxes inactive until the account mail baseline is complete.
 - [x] Ensure existing unread mail discovered during initial bootstrap creates zero notification
       events.
 - [x] Ensure the baseline does not depend on scanning query windows into an observation ledger.
+- [x] Activate the configured notification mailbox set atomically with the completed Email baseline.
 - [x] Ensure subsequent genuine post-baseline Email transitions can notify normally.
 - [x] Cover complete-offline historical mailbox enumeration and prove it cannot manufacture new-mail events.
 
-## 2.8 Establish a notification horizon when notifications are enabled
+## 2.8 Activate newly enabled notification mailboxes only after a fresh baseline
 
 Enabling notifications for a populated mailbox must not notify existing mail.
 
-- [x] Establish notification enablement relative to a known committed account Email state/horizon.
-- [x] Treat mail already present before that horizon as historical for notification purposes.
+- [x] Fence in-flight Email reconciliation before baselining a newly enabled notification mailbox.
+- [x] Keep newly enabled mailboxes out of the active notification set while the baseline is running.
+- [x] Atomically replace the active notification mailbox set in the final Email-baseline transaction.
+- [x] Do not duplicate the account Email state token in notification storage; `sync_state.Email` is
+      the sole account Email cursor.
 - [x] Do not require inserting per-Email consumption markers for every historical Email merely to
-      establish the baseline if a state-token/horizon can prove this more cheaply.
-- [x] Ensure the first genuine post-enable incoming transition notifies normally.
+      establish the baseline.
+- [x] Ensure the first genuine post-activation incoming transition notifies normally; activation is
+      the committed completion of the enablement baseline, not the settings-toggle instant.
 - [x] Cover notification settings changes while synchronization is in flight.
 
 ## 2.9 Preserve local-operation provenance
@@ -1093,8 +1097,8 @@ item further if implementation naturally contains independently reviewable behav
 - [x] 5. Separate initial bootstrap Email-state establishment from steady-state mailbox refresh.
 - [x] 6. Add the complete notification behavioral-contract regression matrix.
 - [x] 7. Add per-Email notification-consumption state with safe lifetime cleanup semantics.
-- [x] 8. Add explicit notification baseline/horizon handling for bootstrap and notification
-      enablement.
+- [x] 8. Add explicit notification baseline activation for bootstrap and notification enablement;
+      notification storage must not duplicate the account Email cursor.
 - [x] 9. Generate one per-Email notification event from proven committed Email transitions,
       atomically with Email-state commit.
 - [x] 10. Preserve/suppress notification provenance across local mailbox mutations and imports.

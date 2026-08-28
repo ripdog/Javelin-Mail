@@ -17,7 +17,6 @@ namespace javelin::jmap::sync
         const javelin::jmap::domain::Email* current = nullptr;
         std::span<const std::string> notificationMailboxIds;
         bool serverCreated = false;
-        bool withinNotificationHorizon = false;
         bool suppressedByLocalOperation = false;
     };
 
@@ -55,8 +54,8 @@ namespace javelin::jmap::sync
     [[nodiscard]] inline MailNotificationEligibility
     evaluateMailNotificationTransition(const MailNotificationTransition& transition)
     {
-        if (transition.current == nullptr || !transition.withinNotificationHorizon ||
-            transition.suppressedByLocalOperation || hasKeyword(*transition.current, "$seen"))
+        if (transition.current == nullptr || transition.suppressedByLocalOperation ||
+            hasKeyword(*transition.current, "$seen"))
         {
             return {};
         }

@@ -298,8 +298,8 @@ TEST_CASE("notification-only mailboxes are not presentation sync interests",
     CHECK_FALSE(mentionsNotificationOnly);
 }
 
-TEST_CASE("notification settings fence Email sync before activating a new horizon",
-          "[app][daemon][settings][notification][horizon][race]")
+TEST_CASE("notification settings fence Email sync before activating a new baseline",
+          "[app][daemon][settings][notification][baseline][race]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -340,11 +340,11 @@ TEST_CASE("notification settings fence Email sync before activating a new horizo
 
     services.accountRuntimeManager().applySettings({configuration({"inbox"})});
 
-    QSqlQuery horizon{connection.database()};
-    REQUIRE(horizon.exec(QStringLiteral(
-        "SELECT COUNT(*) FROM mail_notification_horizons WHERE account_id='account-1'")));
-    REQUIRE(horizon.next());
-    CHECK(horizon.value(0).toInt() == 0);
+    QSqlQuery activeMailboxes{connection.database()};
+    REQUIRE(activeMailboxes.exec(QStringLiteral(
+        "SELECT COUNT(*) FROM mail_notification_mailboxes WHERE account_id='account-1'")));
+    REQUIRE(activeMailboxes.next());
+    CHECK(activeMailboxes.value(0).toInt() == 0);
 
     QSqlQuery generation{connection.database()};
     REQUIRE(generation.exec(QStringLiteral(
@@ -367,10 +367,65 @@ TEST_CASE("notification settings fence Email sync before activating a new horizo
     REQUIRE(generation.next());
     CHECK(generation.value(0).toULongLong() == 2);
 
-    REQUIRE(horizon.exec(QStringLiteral(
-        "SELECT COUNT(*) FROM mail_notification_horizons WHERE account_id='account-1'")));
-    REQUIRE(horizon.next());
-    CHECK(horizon.value(0).toInt() == 0);
+    REQUIRE(activeMailboxes.exec(QStringLiteral(
+        "SELECT COUNT(*) FROM mail_notification_mailboxes WHERE account_id='account-1'")));
+    REQUIRE(activeMailboxes.next());
+    CHECK(activeMailboxes.value(0).toInt() == 0);
+}
+
+TEST_CASE("existing active notification mailboxes do not require another baseline",
+          "[app][daemon][settings][notification][baseline][migration]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto locationResult =
+        javelin::app::CacheLocationProvider{temporaryDirectory.path()}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(locationResult));
+    javelin::app::DaemonServices services{std::get<javelin::app::CacheLocation>(locationResult)};
+    auto& connection = services.databaseConnection();
+
+    QSqlQuery seed{connection.database()};
+    REQUIRE(seed.exec(QStringLiteral(
+        "INSERT INTO accounts(account_id,email_address,session_url,is_primary,cap_mail) "
+        "VALUES('account-1','user@example.test','http://127.0.0.1:9/jmap',1,1)")));
+    REQUIRE(seed.exec(
+        QStringLiteral("INSERT INTO sync_state(account_id,object_type,query_key,state_token) "
+                       "VALUES('account-1','Email','','email-state-current')")));
+    REQUIRE(
+        seed.exec(QStringLiteral("INSERT INTO mail_notification_mailboxes(account_id,mailbox_id) "
+                                 "VALUES('account-1','inbox')")));
+
+    services.accountRuntimeManager().applySettings({javelin::app::AccountSyncConfiguration{
+        .settings = {.connectionId = "connection-1",
+                     .revision = 0,
+                     .sessionUrl = "http://127.0.0.1:9/jmap",
+                     .loginEmail = "user@example.test",
+                     .apiKey = "secret",
+                     .refreshToken = {},
+                     .tokenEndpoint = {},
+                     .oauthClientId = {}},
+        .accountId = "account-1",
+        .mailboxIds = {},
+        .fullSyncMailboxIds = {},
+        .notificationMailboxIds = {"inbox"},
+    }});
+
+    QSqlQuery active{connection.database()};
+    REQUIRE(active.exec(QStringLiteral(
+        "SELECT mailbox_id FROM mail_notification_mailboxes WHERE account_id='account-1'")));
+    REQUIRE(active.next());
+    CHECK(active.value(0).toString() == QStringLiteral("inbox"));
+    CHECK_FALSE(active.next());
+
+    QSqlQuery generation{connection.database()};
+    REQUIRE(generation.exec(
+        QStringLiteral("SELECT COUNT(*) FROM consistency_domains WHERE account_id='account-1' AND "
+                       "data_type='Email'")));
+    REQUIRE(generation.next());
+    CHECK(generation.value(0).toInt() == 0);
 }
 
 TEST_CASE("daemon log store enforces a bounded history", "[app][daemon][logging]")
