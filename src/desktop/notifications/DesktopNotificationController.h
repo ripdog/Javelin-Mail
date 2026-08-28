@@ -119,7 +119,8 @@ namespace javelin::app
 
         bool connectSignal(const char* signalName, const char* slotName);
         [[nodiscard]] bool transportSupportsActions();
-        [[nodiscard]] QVariantMap notificationHints(int urgency, bool activatesApplication = true,
+        [[nodiscard]] QVariantMap notificationHints(int urgency,
+                                                    bool associateWithDesktopEntry = true,
                                                     bool transient = false) const;
         void untrackNotification(uint notificationId);
 

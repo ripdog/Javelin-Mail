@@ -176,9 +176,13 @@ namespace javelin::app
                 i18nc("@action:button desktop notification", "Reply"),
             };
         }
-        const auto sent =
-            m_transport->send(QString::fromLatin1(notificationIconName), summary, message, actions,
-                              notificationHints(urgencyNormal), defaultTimeoutMs);
+        // Plasma requests one activation token for every action using the notification-wide
+        // desktop-entry hint. Archive and Mark Read are daemon-only, so associating this mixed
+        // action set with the GUI would leave startup feedback waiting for a window that will
+        // never open. Open and Reply still receive a usable token without an application id.
+        const auto sent = m_transport->send(
+            QString::fromLatin1(notificationIconName), summary, message, actions,
+            notificationHints(urgencyNormal, actions.isEmpty()), defaultTimeoutMs);
         if (const auto* error = std::get_if<QString>(&sent))
         {
             qWarning().noquote() << "Failed to send desktop notification" << *error;
@@ -331,7 +335,7 @@ namespace javelin::app
         // NotificationClosed is not emitted when their display timeout ends.
         const auto sent =
             m_transport->send(QStringLiteral("mail-send"), title, message, actions,
-                              notificationHints(urgencyNormal, true, true), timeoutMs);
+                              notificationHints(urgencyNormal, false, true), timeoutMs);
         if (std::holds_alternative<QString>(sent))
             return false;
         const auto notificationId = std::get<uint>(sent);
@@ -525,12 +529,11 @@ namespace javelin::app
         return connected;
     }
 
-    QVariantMap DesktopNotificationController::notificationHints(const int urgency,
-                                                                 const bool activatesApplication,
-                                                                 const bool transient) const
+    QVariantMap DesktopNotificationController::notificationHints(
+        const int urgency, const bool associateWithDesktopEntry, const bool transient) const
     {
         QVariantMap hints;
-        if (activatesApplication)
+        if (associateWithDesktopEntry)
             hints.insert(QStringLiteral("desktop-entry"), QString::fromLatin1(desktopEntryName));
         hints.insert(QStringLiteral("urgency"), urgency);
         if (transient)

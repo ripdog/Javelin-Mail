@@ -245,8 +245,7 @@ TEST_CASE("mail notification activation preserves the message route and mailbox 
                       QStringLiteral("Archive"), QStringLiteral("mark-read"),
                       QStringLiteral("Mark Read"), QStringLiteral("reply"),
                       QStringLiteral("Reply")});
-    CHECK(transportObserver->request->hints.value(QStringLiteral("desktop-entry")).toString() ==
-          QStringLiteral("javelinmail"));
+    CHECK_FALSE(transportObserver->request->hints.contains(QStringLiteral("desktop-entry")));
 
     REQUIRE(QMetaObject::invokeMethod(notificationController, "onActivationToken",
                                       Qt::DirectConnection,
@@ -500,6 +499,8 @@ TEST_CASE("new mail omits actions when the notification service cannot invoke th
                                      QStringLiteral("Subject")));
     REQUIRE(observer->request.has_value());
     CHECK(observer->request->actions.isEmpty());
+    CHECK(observer->request->hints.value(QStringLiteral("desktop-entry")).toString() ==
+          QStringLiteral("javelinmail"));
 }
 
 TEST_CASE("notification action capability is cached until the service restarts",
@@ -610,6 +611,7 @@ TEST_CASE("undoable send notification reports its actionable lifetime and timeou
     CHECK(observer->request->actions ==
           QStringList{QStringLiteral("undo-send:send-1"), QStringLiteral("Undo Send")});
     CHECK(observer->request->hints.value(QStringLiteral("transient")).toBool());
+    CHECK_FALSE(observer->request->hints.contains(QStringLiteral("desktop-entry")));
 }
 
 TEST_CASE("dialog undo send mode routes a deadline without creating a notification",
