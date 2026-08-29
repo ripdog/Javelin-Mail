@@ -247,6 +247,7 @@ javelin_enable_test_localization(javelin_jmap_domain_tests)
 # files inside a JMAP test executable.
 add_executable(javelin_daemon_app_tests
     app/AccountCredentialStoreTest.cpp
+    app/AccountSyncCoordinatorTest.cpp
     app/ApplicationErrorCoordinatorTest.cpp
     app/CacheAccessBarrierTest.cpp
     app/CacheInvalidationPublisherTest.cpp

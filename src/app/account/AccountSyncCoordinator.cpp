@@ -545,15 +545,7 @@ namespace javelin::app
         std::vector<std::string> queryAffectedMailboxIds;
         QStringList refreshedMailboxIds;
 
-        if (demand.allMailboxes)
-        {
-            const auto mailboxState = co_await refreshMailboxStateOnce(runContext, retryLease);
-            if (!mailboxState.has_value())
-                co_return;
-            mailboxStateChanged = *mailboxState;
-            endpointRequestSucceeded = true;
-        }
-        else if (demand.mailboxState || demand.emailState)
+        if (demand.mailboxState || demand.emailState)
         {
             javelin::jmap::sync::MailDeltaRefreshExecutor deltaExecutor{
                 m_databaseConnection, methodCaller, apiRequestContext};
@@ -598,7 +590,7 @@ namespace javelin::app
             }
             mailboxStateChanged = delta.mailboxChanged;
             emailCacheChanged = delta.emailChanged;
-            refreshEveryMailbox = delta.emailNeedsFullRefresh;
+            refreshEveryMailbox = refreshEveryMailbox || delta.emailNeedsFullRefresh;
             queryAffectedMailboxIds = delta.queryAffectedMailboxIds;
             if (delta.notificationEventsCreated)
                 Q_EMIT notificationEventsCommitted(
