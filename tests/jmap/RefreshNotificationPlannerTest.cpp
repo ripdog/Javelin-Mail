@@ -91,6 +91,15 @@ namespace
         return *parsed.value;
     }
 
+    [[nodiscard]] int rowCount(javelin::jmap::cache::DatabaseConnection& connection,
+                               const QString& table)
+    {
+        QSqlQuery query{connection.database()};
+        REQUIRE(query.exec(QStringLiteral("SELECT COUNT(*) FROM %1").arg(table)));
+        REQUIRE(query.next());
+        return query.value(0).toInt();
+    }
+
 } // namespace
 
 TEST_CASE("mail notification eligibility requires a legitimate incoming transition",
@@ -191,6 +200,13 @@ TEST_CASE("notification delivery revalidates pending events locally",
 
     auto databaseContext = makeDatabaseContext();
     seedAccount(databaseContext.connection);
+    QSqlQuery mailboxes{databaseContext.connection.database()};
+    REQUIRE(mailboxes.exec(
+        QStringLiteral("INSERT INTO mailboxes(account_id,mailbox_id,name,role,is_subscribed) VALUES"
+                       "('account-1','mbx-inbox','Inbox','inbox',1),"
+                       "('account-1','mbx-projects','Projects',NULL,1),"
+                       "('account-1','mbx-receipts','Receipts',NULL,1),"
+                       "('account-1','mbx-archive','Archive','archive',1)")));
 
     auto email = loadEmailFixture();
     email.id = "eml-pending";
@@ -247,6 +263,110 @@ TEST_CASE("notification delivery revalidates pending events locally",
         CHECK(consumptionCount() == 1);
     }
 
+    SECTION("move to another enabled mailbox before first delivery reattributes one event")
+    {
+        REQUIRE_FALSE(
+            notifications.replaceActiveMailboxes("account-1", {"mbx-inbox", "mbx-projects"})
+                .has_value());
+        email.mailboxIds = {"mbx-projects"};
+        REQUIRE_FALSE(emails.upsertMany("account-1", {email}).has_value());
+
+        const auto claimed = notifications.claimPendingEvents("account-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+                claimed));
+        const auto& events =
+            std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(claimed);
+        REQUIRE(events.size() == 1);
+        CHECK(events.front().mailboxId == "mbx-projects");
+        CHECK(consumptionCount() == 1);
+        CHECK(rowCount(databaseContext.connection,
+                       QStringLiteral("mail_notification_event_outbox")) == 1);
+
+        auto duplicateTransactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+            databaseContext.connection, QStringLiteral("Reject duplicate notification"));
+        REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(
+            duplicateTransactionResult));
+        auto duplicateTransaction = std::get<javelin::jmap::cache::DatabaseTransaction>(
+            std::move(duplicateTransactionResult));
+        const auto duplicate =
+            notifications.createEventIfUnconsumed(duplicateTransaction, "account-1",
+                                                  {.mailboxId = "mbx-projects",
+                                                   .emailId = email.id,
+                                                   .threadId = email.threadId,
+                                                   .subject = email.subject,
+                                                   .receivedAt = email.receivedAt});
+        REQUIRE(std::holds_alternative<bool>(duplicate));
+        CHECK_FALSE(std::get<bool>(duplicate));
+        REQUIRE_FALSE(duplicateTransaction.commit().has_value());
+        CHECK(rowCount(databaseContext.connection,
+                       QStringLiteral("mail_notification_event_outbox")) == 1);
+    }
+
+    SECTION("move to another enabled mailbox after delivery failure retries the same event")
+    {
+        REQUIRE_FALSE(
+            notifications.replaceActiveMailboxes("account-1", {"mbx-inbox", "mbx-projects"})
+                .has_value());
+        const auto claimed = notifications.claimPendingEvents("account-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+                claimed));
+        REQUIRE(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(claimed)
+                    .size() == 1);
+        REQUIRE_FALSE(notifications.releaseDispatches("account-1", {email.id}).has_value());
+
+        email.mailboxIds = {"mbx-projects"};
+        REQUIRE_FALSE(emails.upsertMany("account-1", {email}).has_value());
+        const auto retried = notifications.claimPendingEvents("account-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+                retried));
+        const auto& events =
+            std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(retried);
+        REQUIRE(events.size() == 1);
+        CHECK(events.front().mailboxId == "mbx-projects");
+        CHECK(consumptionCount() == 1);
+    }
+
+    SECTION("reattribution prefers Inbox then a stable mailbox identifier")
+    {
+        REQUIRE_FALSE(
+            notifications
+                .replaceActiveMailboxes("account-1", {"mbx-inbox", "mbx-projects", "mbx-receipts"})
+                .has_value());
+        QSqlQuery original{databaseContext.connection.database()};
+        REQUIRE(original.exec(QStringLiteral(
+            "UPDATE mail_notification_event_outbox SET mailbox_id='mbx-archive' WHERE "
+            "account_id='account-1' AND email_id='eml-pending'")));
+
+        email.mailboxIds = {"mbx-projects", "mbx-inbox"};
+        REQUIRE_FALSE(emails.upsertMany("account-1", {email}).has_value());
+        const auto inboxClaim = notifications.claimPendingEvents("account-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+                inboxClaim));
+        const auto& inboxEvents =
+            std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(inboxClaim);
+        REQUIRE(inboxEvents.size() == 1);
+        CHECK(inboxEvents.front().mailboxId == "mbx-inbox");
+        REQUIRE_FALSE(notifications.releaseDispatches("account-1", {email.id}).has_value());
+
+        REQUIRE(original.exec(QStringLiteral(
+            "UPDATE mail_notification_event_outbox SET mailbox_id='mbx-archive' WHERE "
+            "account_id='account-1' AND email_id='eml-pending'")));
+        email.mailboxIds = {"mbx-receipts", "mbx-projects"};
+        REQUIRE_FALSE(emails.upsertMany("account-1", {email}).has_value());
+        const auto lexicalClaim = notifications.claimPendingEvents("account-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+                lexicalClaim));
+        const auto& lexicalEvents =
+            std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(lexicalClaim);
+        REQUIRE(lexicalEvents.size() == 1);
+        CHECK(lexicalEvents.front().mailboxId == "mbx-projects");
+    }
+
     SECTION("read before retry cancels the stale popup")
     {
         const auto claimed = notifications.claimPendingEvents("account-1");
@@ -267,13 +387,16 @@ TEST_CASE("notification delivery revalidates pending events locally",
 
     SECTION("move out before retry cancels the stale popup")
     {
+        REQUIRE_FALSE(
+            notifications.replaceActiveMailboxes("account-1", {"mbx-inbox", "mbx-projects"})
+                .has_value());
         const auto claimed = notifications.claimPendingEvents("account-1");
         REQUIRE(
             std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
                 claimed));
         REQUIRE_FALSE(notifications.releaseDispatches("account-1", {email.id}).has_value());
-        const std::vector<std::string> ids{email.id};
-        REQUIRE_FALSE(emails.removeFromMailbox("account-1", "mbx-inbox", ids).has_value());
+        email.mailboxIds = {"mbx-archive"};
+        REQUIRE_FALSE(emails.upsertMany("account-1", {email}).has_value());
         const auto retried = notifications.claimPendingEvents("account-1");
         REQUIRE(
             std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(

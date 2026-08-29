@@ -258,13 +258,17 @@ namespace javelin::jmap::cache
         pending.prepare(QStringLiteral(
             "SELECT "
             "event.mailbox_id,event.email_id,event.thread_id,event.subject,event.received_at,"
-            "EXISTS(SELECT 1 FROM email_mailboxes membership WHERE "
-            "membership.account_id=event.account_id AND membership.email_id=event.email_id AND "
-            "membership.mailbox_id=event.mailbox_id),"
+            "(SELECT membership.mailbox_id FROM email_mailboxes membership INNER JOIN "
+            "mail_notification_mailboxes configured ON "
+            "configured.account_id=membership.account_id AND "
+            "configured.mailbox_id=membership.mailbox_id LEFT JOIN mailboxes mailbox ON "
+            "mailbox.account_id=membership.account_id AND "
+            "mailbox.mailbox_id=membership.mailbox_id WHERE "
+            "membership.account_id=event.account_id AND membership.email_id=event.email_id "
+            "ORDER BY CASE WHEN membership.mailbox_id=event.mailbox_id THEN 0 WHEN "
+            "mailbox.role='inbox' THEN 1 ELSE 2 END,membership.mailbox_id LIMIT 1),"
             "EXISTS(SELECT 1 FROM email_keywords keyword WHERE keyword.account_id=event.account_id "
-            "AND keyword.email_id=event.email_id AND keyword.keyword='$seen'),"
-            "EXISTS(SELECT 1 FROM mail_notification_mailboxes configured WHERE "
-            "configured.account_id=event.account_id AND configured.mailbox_id=event.mailbox_id) "
+            "AND keyword.email_id=event.email_id AND keyword.keyword='$seen') "
             "FROM mail_notification_event_outbox event WHERE event.account_id=:account_id "
             "ORDER BY event.mailbox_id,event.created_at,event.email_id"));
         pending.bindValue(QStringLiteral(":account_id"),
@@ -275,7 +279,8 @@ namespace javelin::jmap::cache
         struct PendingCandidate
         {
             MailNotificationPendingEvent event;
-            bool eligible = false;
+            std::optional<std::string> eligibleMailboxId;
+            bool seen = false;
         };
         std::vector<PendingCandidate> candidates;
         while (pending.next())
@@ -292,8 +297,10 @@ namespace javelin::jmap::cache
                                        : std::optional{pending.value(3).toString().toStdString()},
                         .receivedAt = pending.value(4).toString().toStdString(),
                     },
-                .eligible = pending.value(5).toBool() && !pending.value(6).toBool() &&
-                            pending.value(7).toBool(),
+                .eligibleMailboxId = pending.value(5).isNull()
+                                         ? std::nullopt
+                                         : std::optional{pending.value(5).toString().toStdString()},
+                .seen = pending.value(6).toBool(),
             });
         }
         pending.finish();
@@ -302,11 +309,15 @@ namespace javelin::jmap::cache
         cancel.prepare(QStringLiteral(
             "DELETE FROM mail_notification_event_outbox WHERE account_id=:account_id AND "
             "email_id=:email_id"));
+        QSqlQuery reattribute{m_connection.database()};
+        reattribute.prepare(
+            QStringLiteral("UPDATE mail_notification_event_outbox SET mailbox_id=:mailbox_id WHERE "
+                           "account_id=:account_id AND email_id=:email_id"));
         NotificationDispatchRepository dispatches{m_connection};
         std::vector<MailNotificationPendingEvent> events;
         for (auto& candidate : candidates)
         {
-            if (!candidate.eligible)
+            if (!candidate.eligibleMailboxId.has_value() || candidate.seen)
             {
                 cancel.bindValue(QStringLiteral(":account_id"),
                                  QString::fromStdString(std::string{accountId}));
@@ -317,6 +328,21 @@ namespace javelin::jmap::cache
                                       cancel);
                 cancel.finish();
                 continue;
+            }
+
+            if (candidate.event.mailboxId != *candidate.eligibleMailboxId)
+            {
+                reattribute.bindValue(QStringLiteral(":mailbox_id"),
+                                      QString::fromStdString(*candidate.eligibleMailboxId));
+                reattribute.bindValue(QStringLiteral(":account_id"),
+                                      QString::fromStdString(std::string{accountId}));
+                reattribute.bindValue(QStringLiteral(":email_id"),
+                                      QString::fromStdString(candidate.event.emailId));
+                if (!reattribute.exec())
+                    return queryError(QStringLiteral("Reattribute mail notification event"),
+                                      reattribute);
+                reattribute.finish();
+                candidate.event.mailboxId = std::move(*candidate.eligibleMailboxId);
             }
 
             const auto claimed = dispatches.claim(transaction, NotificationDispatchKind::Mail,
