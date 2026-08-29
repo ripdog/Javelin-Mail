@@ -465,15 +465,6 @@ namespace javelin::app
         do
         {
             co_await refreshWatchedMailboxOnce(runContext, demand, retryLease);
-            if (demand.allMailboxes && m_pendingNotificationBaselineMailboxIds.has_value())
-            {
-                m_queuedRefreshDemand.merge(MailRefreshDemand{
-                    .mailboxState = false,
-                    .emailState = true,
-                    .allMailboxes = false,
-                    .mailboxIds = {},
-                });
-            }
             runContext = m_runContext;
             if (runContext == nullptr || runContext->generation != generation ||
                 runContext->cancellation.isCancelled())
@@ -842,6 +833,8 @@ namespace javelin::app
 
     void AccountSyncCoordinator::scheduleNotificationBaselineRetry()
     {
+        // The runtime manager owns failures before the baseline is installed here. Once pending,
+        // this coordinator retries only execution through MailDeltaRefreshExecutor.
         if (!m_pendingNotificationBaselineMailboxIds.has_value())
             return;
         const auto exponent =

@@ -429,7 +429,11 @@ transaction of a fresh Email reconciliation, so historical cached mail cannot be
 because notification settings changed. Disabling a mailbox removes it from the active set
 immediately. Because ordinary Email state advancement does not mutate this set, local `Email/set`
 confirmation and other Email-state writers cannot desynchronize notification eligibility from the
-account cursor. The delivery service claims pending outbox rows and revalidates unread state,
+account cursor. `AccountRuntimeManager` retries durable configuration reads and installation of the
+pending baseline fence; once installed, `AccountSyncCoordinator` retries execution of that baseline
+through `MailDeltaRefreshExecutor`. Neither retry owner activates a mailbox independently: only the
+committed Email-baseline transaction replaces the active set. The delivery service claims pending
+outbox rows and revalidates unread state,
 current mailbox eligibility, and object existence entirely from SQLite before showing a popup.
 Successful delivery removes the outbox row while preserving the per-Email consumption marker; claim,
 acknowledgement, release, and desktop-presentation failures are retried locally and do not request

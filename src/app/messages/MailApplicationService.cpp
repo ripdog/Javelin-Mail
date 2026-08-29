@@ -1387,6 +1387,9 @@ namespace javelin::app
 
     void AccountRuntimeManager::scheduleNotificationBaselineRetry(const std::string& accountId)
     {
+        // This retry owns durable configuration and baseline setup only. The coordinator retains
+        // execution failures and retries the synchronized Email transition; active notification
+        // mailboxes are replaced only by that transition's commit.
         if (!m_configurations.contains(accountId) ||
             !m_notificationBaselineRetriesPending.insert(accountId).second)
             return;

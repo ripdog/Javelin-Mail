@@ -401,3 +401,35 @@ TEST_CASE("reconnect and transient retry keep the authoritative Email reconcilia
                    fixture.transport.successfulEmailDeltas > beforeRetry;
         }));
 }
+
+TEST_CASE("notification baseline execution has one coordinator retry path",
+          "[app][account][sync][notification][baseline][retry]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    CoordinatorFixture fixture;
+    REQUIRE(waitUntil(
+        [&fixture]
+        {
+            return fixture.transport.successfulEmailDeltas >= 1 &&
+                   fixture.transport.presentationRequests >= 1;
+        }));
+
+    const auto attemptsBeforeBaseline = fixture.transport.emailDeltaAttempts;
+    const auto successesBeforeBaseline = fixture.transport.successfulEmailDeltas;
+    fixture.transport.transientEmailFailuresRemaining = 1;
+    REQUIRE_FALSE(fixture.coordinator.requestNotificationBaseline({"inbox"}).has_value());
+    REQUIRE(fixture.coordinator.requestSynchronization());
+    REQUIRE(waitUntil([&fixture, attemptsBeforeBaseline]
+                      { return fixture.transport.emailDeltaAttempts > attemptsBeforeBaseline; }));
+
+    QElapsedTimer immediateRetryWindow;
+    immediateRetryWindow.start();
+    while (immediateRetryWindow.elapsed() < 100)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    CHECK(fixture.transport.emailDeltaAttempts == attemptsBeforeBaseline + 1);
+
+    REQUIRE(
+        waitUntil([&fixture, successesBeforeBaseline]
+                  { return fixture.transport.successfulEmailDeltas > successesBeforeBaseline; }));
+}
