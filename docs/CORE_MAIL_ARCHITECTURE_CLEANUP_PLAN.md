@@ -116,8 +116,9 @@ coverage for every row before replacing the current scanner.
 - [x] A notified Email is archived and later restored unread -> 0 additional notification events.
 - [x] A notification event is durably queued, desktop delivery fails, and the Email is moved before
       retry -> 0 additional notification events.
-- [x] A previously unnotified Email legitimately enters an active notification mailbox because of a
-      new server-side mail transition -> exactly 1 notification event if it is still unread.
+- [x] A previously unnotified, retained Email legitimately enters an active notification mailbox
+      because of a new server-side mail transition -> exactly 1 notification event if its retained
+      prior state proves the transition and it is still unread.
 - [x] An Email already notified elsewhere later enters Inbox -> 0 additional notification events.
 - [x] An existing read Email enters Inbox -> 0 notification events.
 - [x] An old Email is manually marked unread -> 0 notification events merely because of the unread
@@ -378,6 +379,15 @@ A notification may be created only when all of these are true:
 - the transition is not a Javelin-originated move/import that should be suppressed;
 - the Email is unread after reconciliation;
 - the Email belongs to at least one active notification mailbox after reconciliation.
+
+The authoritative transition can prove first eligibility for a server-created Email, or for an
+updated Email whose previous object state Javelin retained. `Email/changes.updated` supplies only
+Email ids; a following `Email/get` supplies current state, not the previous object or the properties
+that changed. An updated Email that was previously uncached therefore cannot prove that it entered a
+notification mailbox rather than already being there. Javelin does not fetch such an update solely
+for notification discovery and does not guess if another materialization happens to fetch it. This
+is an intentional conservative product boundary: otherwise-unretained Email history is not added
+merely to infer notifications.
 
 - [x] Model this decision explicitly in the daemon synchronization/application layer.
 - [x] Do not derive it from query-window insertion/removal.
@@ -698,8 +708,8 @@ coupling is unnecessary.
 
 - [x] Enabling notifications for an unopened online mailbox must not warm a canonical presentation
       query window solely for notifications.
-- [x] Incoming mail for a notification-only mailbox must still be eligible for notification through
-      account Email synchronization.
+- [x] Server-created incoming mail for a notification-only mailbox remains eligible through account
+      Email synchronization; updated Email transitions require retained prior object state.
 - [x] Opening the mailbox later materializes its normal query window through existing tab/session
       policy; a cache-miss `MailboxSession` requests its canonical window independently of notification configuration.
 - [x] Confirm mailbox counts/metadata that are independently required remain correct without using
@@ -1044,8 +1054,8 @@ Every item below must be directly testable before this project is considered com
 - [x] Enabling notifications on an existing populated mailbox creates zero immediate historical
       notifications.
 - [x] Initial account bootstrap creates zero historical new-mail notifications.
-- [x] A legitimate post-baseline unread Email transition into notification eligibility creates one
-      durable notification event.
+- [x] A server-created post-baseline unread Email, or an updated retained Email whose prior state
+      proves entry into notification eligibility, creates one durable notification event.
 - [x] One retained Email can generate at most one new-mail notification event.
 - [x] Moving an already-notified unread Email between any number of notification-enabled mailboxes
       creates zero additional notification events.

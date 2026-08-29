@@ -1725,6 +1725,55 @@ TEST_CASE("account mail delta skips an updated unmaterialized Thread child",
     CHECK(state->stateToken == "email-state-2");
 }
 
+TEST_CASE("uncached updated Email does not guess a notification-only mailbox transition",
+          "[jmap][sync][mail-delta][notification][conservative]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
+    REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("projects", 1)}).has_value());
+    seedNotificationMailboxes(database.connection, {"projects"});
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(emailDeltaResponse({}, R"("email-1")", {}));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
+    CHECK(summary.emailChanged);
+    CHECK_FALSE(summary.notificationEventsCreated);
+    REQUIRE(transport.requests.size() == 1);
+    CHECK_FALSE(transport.requests.front().body.contains("relevant-updated-emails"));
+
+    javelin::jmap::cache::SyncStateRepository states{database.connection};
+    const auto stateResult =
+        states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult));
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult)->stateToken ==
+          "email-state-2");
+
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    const auto pending = notifications.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        pending));
+    CHECK(
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pending).empty());
+    QSqlQuery consumed{database.connection.database()};
+    REQUIRE(consumed.exec(QStringLiteral(
+        "SELECT COUNT(*) FROM mail_notification_state WHERE account_id='account-1'")));
+    REQUIRE(consumed.next());
+    CHECK(consumed.value(0).toInt() == 0);
+}
+
 TEST_CASE("account mail delta fetches an uncached updated Email tracked by a mailbox window",
           "[jmap][sync][mail-delta][query-window]")
 {

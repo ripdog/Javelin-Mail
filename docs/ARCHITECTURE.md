@@ -413,9 +413,13 @@ New-mail notification discovery is owned by account-wide Email reconciliation, n
 query/window observation. When a committed server Email transition proves that a previously
 unconsumed Email legitimately entered an active notification mailbox while unread, the Email
 synchronizer creates the per-Email consumption marker and durable notification outbox entry in the
-same SQLite transaction as the Email-object and global Email-state transition. Mailbox identity is
-retained as deterministic routing/context metadata; `(account_id, email_id)` is the notification
-identity, so later unread movement between enabled mailboxes cannot create another event.
+same SQLite transaction as the Email-object and global Email-state transition. Proof is available
+for server-created Emails and for updated Emails whose prior object state Javelin retained. JMAP
+`Email/changes.updated` contains ids rather than prior objects or changed properties, so an updated
+Email that was previously uncached is not fetched solely for notifications and is not guessed to be
+newly eligible. Mailbox identity is retained as deterministic routing/context metadata;
+`(account_id, email_id)` is the notification identity, so later unread movement between enabled
+mailboxes cannot create another event.
 
 The account's global `Email` sync state is the only Email cursor. Notification storage contains only
 the set of mailboxes whose notification baseline has completed; it does not duplicate the Email
