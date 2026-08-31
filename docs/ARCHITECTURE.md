@@ -417,7 +417,13 @@ same SQLite transaction as the Email-object and global Email-state transition. P
 for server-created Emails and for updated Emails whose prior object state Javelin retained. JMAP
 `Email/changes.updated` contains ids rather than prior objects or changed properties, so an updated
 Email that was previously uncached is not fetched solely for notifications and is not guessed to be
-newly eligible. Mailbox identity is retained as deterministic routing/context metadata;
+newly eligible. If `Email/changes` history is unavailable, a bounded account rebaseline applies the
+same previous-to-current notification rule to retained Emails. An entirely unknown Email cannot be
+classified safely as created during the lost history range, so notification is conservatively
+omitted for that Email. The successful rebaseline nevertheless requires every tracked mailbox query
+to reconcile its membership, recovering presentation and offline completeness without giving query
+refresh ownership of the account Email cursor. Mailbox identity is retained as deterministic
+routing/context metadata;
 `(account_id, email_id)` is the notification identity, so later unread movement between enabled
 mailboxes cannot create another event.
 

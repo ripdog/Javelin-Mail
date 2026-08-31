@@ -581,7 +581,7 @@ namespace javelin::app
             }
             mailboxStateChanged = delta.mailboxChanged;
             emailCacheChanged = delta.emailChanged;
-            refreshEveryMailbox = refreshEveryMailbox || delta.emailNeedsFullRefresh;
+            refreshEveryMailbox = refreshEveryMailbox || delta.mailboxQueriesNeedReconciliation;
             queryAffectedMailboxIds = delta.queryAffectedMailboxIds;
             if (delta.notificationEventsCreated)
                 Q_EMIT notificationEventsCommitted(

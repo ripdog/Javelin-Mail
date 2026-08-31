@@ -589,6 +589,7 @@ TEST_CASE("account Email rebaseline reconciles cached mail before advancing stat
         REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
         const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
         CHECK_FALSE(summary.emailNeedsFullRefresh);
+        CHECK(summary.mailboxQueriesNeedReconciliation);
         CHECK(summary.emailChanged);
         CHECK(summary.queryAffectedMailboxIds == std::vector<std::string>{"archive", "inbox"});
         REQUIRE(transport.requests.size() == 2);
@@ -627,6 +628,98 @@ TEST_CASE("account Email rebaseline reconciles cached mail before advancing stat
     {
         runCase("tooManyChanges");
     }
+}
+
+TEST_CASE("account Email rebaseline notifies a retained Email whose prior state proves entry",
+          "[jmap][sync][mail-delta][rebaseline][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {email({"archive"}, {})}).has_value());
+    javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
+    REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox")}).has_value());
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    REQUIRE_FALSE(notifications.replaceActiveMailboxes("account-1", {"inbox"}).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(recoverableEmailDeltaResponse("cannotCalculateChanges"));
+    transport.queuedResults.push_back(
+        rebaselineEmailResponse("email-state-2", emailJson("inbox", false)));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
+    CHECK(summary.notificationEventsCreated);
+    CHECK(summary.mailboxQueriesNeedReconciliation);
+    const auto pending = notifications.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        pending));
+    const auto& events =
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pending);
+    REQUIRE(events.size() == 1);
+    CHECK(events.front().emailId == "email-1");
+    CHECK(events.front().mailboxId == "inbox");
+}
+
+TEST_CASE("rebaseline notification failure rolls back the recovered Email cursor and object",
+          "[jmap][sync][mail-delta][rebaseline][notification][atomicity]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {email({"archive"}, {})}).has_value());
+    javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
+    REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox")}).has_value());
+    seedNotificationMailboxes(database.connection, {"inbox"});
+
+    QSqlQuery failOutbox{database.connection.database()};
+    REQUIRE(failOutbox.exec(QStringLiteral(
+        "CREATE TRIGGER fail_rebaseline_notification_outbox BEFORE INSERT ON "
+        "mail_notification_event_outbox BEGIN SELECT RAISE(FAIL,'forced rebaseline notification "
+        "failure'); END")));
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(recoverableEmailDeltaResponse("cannotCalculateChanges"));
+    transport.queuedResults.push_back(
+        rebaselineEmailResponse("email-state-2", emailJson("inbox", false)));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+
+    javelin::jmap::cache::SyncStateRepository states{database.connection};
+    const auto stateResult =
+        states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult));
+    const auto& state = std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult);
+    REQUIRE(state.has_value());
+    CHECK(state->stateToken == "email-state-1");
+
+    const auto cached = emails.find("account-1", "email-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cached));
+    const auto& retained = std::get<std::optional<javelin::jmap::domain::Email>>(cached);
+    REQUIRE(retained.has_value());
+    CHECK(retained->mailboxIds == std::vector<std::string>{"archive"});
+
+    QSqlQuery notificationRows{database.connection.database()};
+    REQUIRE(notificationRows.exec(QStringLiteral(
+        "SELECT (SELECT COUNT(*) FROM mail_notification_state WHERE account_id='account-1'),"
+        "(SELECT COUNT(*) FROM mail_notification_event_outbox WHERE account_id='account-1')")));
+    REQUIRE(notificationRows.next());
+    CHECK(notificationRows.value(0).toInt() == 0);
+    CHECK(notificationRows.value(1).toInt() == 0);
 }
 
 TEST_CASE("account Email rebaseline removes locally retained notFound mail before advancing state",
@@ -930,10 +1023,13 @@ TEST_CASE("notification baseline completion survives Email changes fallback",
     seedEmailState(database.connection);
     javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
     REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox")}).has_value());
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {email({"archive"}, {})}).has_value());
 
     FakeTransport transport;
     transport.queuedResults.push_back(recoverableEmailDeltaResponse("cannotCalculateChanges"));
-    transport.queuedResults.push_back(rebaselineEmailResponse("email-state-2", {}));
+    transport.queuedResults.push_back(
+        rebaselineEmailResponse("email-state-2", emailJson("inbox", false)));
     javelin::jmap::api::MethodCaller caller{transport};
     javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
                                                            requestContext()};
@@ -944,6 +1040,7 @@ TEST_CASE("notification baseline completion survives Email changes fallback",
     const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
     CHECK(summary.notificationBaselineEstablished);
     CHECK_FALSE(summary.notificationEventsCreated);
+    CHECK(summary.mailboxQueriesNeedReconciliation);
 
     javelin::jmap::cache::NotificationRepository notifications{database.connection};
     const auto activeMailboxes = notifications.activeMailboxIds("account-1");

@@ -562,6 +562,9 @@ namespace javelin::jmap::sync
                 destination.mailboxNeedsFullRefresh || source.mailboxNeedsFullRefresh;
             destination.emailNeedsFullRefresh =
                 destination.emailNeedsFullRefresh || source.emailNeedsFullRefresh;
+            destination.mailboxQueriesNeedReconciliation =
+                destination.mailboxQueriesNeedReconciliation ||
+                source.mailboxQueriesNeedReconciliation;
             destination.notificationEventsCreated =
                 destination.notificationEventsCreated || source.notificationEventsCreated;
             destination.notificationBaselineEstablished =
@@ -614,12 +617,25 @@ namespace javelin::jmap::sync
 
             MailDeltaRefreshSummary summary;
             javelin::jmap::cache::EmailRepository emails{databaseConnection};
+            javelin::jmap::cache::MailboxRepository mailboxes{databaseConnection};
             javelin::jmap::cache::MailboxWindowRepository mailboxWindows{databaseConnection};
+            javelin::jmap::cache::NotificationRepository notifications{databaseConnection};
             javelin::jmap::cache::SearchWindowRepository searchWindows{databaseConnection};
             javelin::jmap::cache::ThreadRepository threads{databaseConnection};
+            javelin::jmap::sync::EmailMutationJournal emailMutations{databaseConnection};
             bool searchWindowsAffected = false;
             std::vector<std::string> staleThreadIds;
             std::vector<std::string> changedEmailIds;
+            std::vector<javelin::jmap::cache::MailNotificationEventInput> notificationEvents;
+            std::vector<std::string> notificationMailboxIds;
+            if (!notificationBaselineMailboxIds.has_value())
+            {
+                const auto activeMailboxResult = notifications.activeMailboxIds(accountId);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&activeMailboxResult))
+                    co_return operationError(*error);
+                notificationMailboxIds = std::get<std::vector<std::string>>(activeMailboxResult);
+            }
             changedEmailIds.reserve(snapshot.emails.size());
 
             for (const auto& email : snapshot.emails)
@@ -653,6 +669,38 @@ namespace javelin::jmap::sync
                     appendUnique(summary.queryAffectedMailboxIds, trackedMailboxIds);
                     if (previous.has_value())
                         appendUnique(summary.queryAffectedMailboxIds, previous->mailboxIds);
+                }
+
+                if (!notificationMailboxIds.empty())
+                {
+                    const auto mutationResult = emailMutations.listForEmail(accountId, email.id);
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::cache::DatabaseError>(&mutationResult))
+                        co_return operationError(*error);
+                    auto effectiveCurrent = projectEmailMutations(
+                        email, std::get<std::vector<EmailMutationRecord>>(mutationResult));
+                    const auto eligibility = evaluateMailNotificationTransition({
+                        .previous = previous.has_value() ? &*previous : nullptr,
+                        .current = &effectiveCurrent,
+                        .notificationMailboxIds = notificationMailboxIds,
+                        .serverCreated = false,
+                        .suppressedByLocalOperation = false,
+                    });
+                    if (eligibility.eligible())
+                    {
+                        const auto mailboxResult = chooseNotificationMailbox(
+                            mailboxes, accountId, eligibility.qualifyingMailboxIds);
+                        if (const auto* error =
+                                std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxResult))
+                            co_return operationError(*error);
+                        notificationEvents.push_back({
+                            .mailboxId = std::get<std::string>(mailboxResult),
+                            .emailId = effectiveCurrent.id,
+                            .threadId = effectiveCurrent.threadId,
+                            .subject = effectiveCurrent.subject,
+                            .receivedAt = effectiveCurrent.receivedAt,
+                        });
+                    }
                 }
 
                 const auto searchResult = searchWindows.containsEmail(accountId, email.id);
@@ -757,7 +805,6 @@ namespace javelin::jmap::sync
                 superseded.superseded = true;
                 co_return superseded;
             }
-            javelin::jmap::cache::NotificationRepository notifications{databaseConnection};
             if (notificationBaselineMailboxIds.has_value())
             {
                 if (const auto error = notifications.replaceActiveMailboxes(
@@ -779,6 +826,15 @@ namespace javelin::jmap::sync
             if (const auto error =
                     emails.removeMany(transaction.cacheTransaction(), accountId, snapshot.notFound))
                 co_return operationError(*error);
+            for (const auto& event : notificationEvents)
+            {
+                const auto created = notifications.createEventIfUnconsumed(
+                    transaction.cacheTransaction(), accountId, event);
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&created))
+                    co_return operationError(*error);
+                summary.notificationEventsCreated =
+                    summary.notificationEventsCreated || std::get<bool>(created);
+            }
             if (const auto error =
                     threads.markStale(transaction.cacheTransaction(), accountId, staleThreadIds))
                 co_return operationError(*error);
@@ -927,6 +983,8 @@ namespace javelin::jmap::sync
                 const auto& rebaselineSummary = std::get<MailDeltaRefreshSummary>(rebaseline);
                 fallback->emailNeedsFullRefresh = false;
                 mergeSummary(*fallback, rebaselineSummary);
+                if (!rebaselineSummary.superseded)
+                    fallback->mailboxQueriesNeedReconciliation = true;
             }
             co_return *fallback;
         }
@@ -1375,6 +1433,8 @@ namespace javelin::jmap::sync
                 summary.mailboxNeedsFullRefresh || next.mailboxNeedsFullRefresh;
             summary.emailNeedsFullRefresh =
                 summary.emailNeedsFullRefresh || next.emailNeedsFullRefresh;
+            summary.mailboxQueriesNeedReconciliation =
+                summary.mailboxQueriesNeedReconciliation || next.mailboxQueriesNeedReconciliation;
             summary.notificationEventsCreated =
                 summary.notificationEventsCreated || next.notificationEventsCreated;
             summary.notificationBaselineEstablished =

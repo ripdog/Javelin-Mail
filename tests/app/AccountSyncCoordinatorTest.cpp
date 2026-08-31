@@ -3,6 +3,7 @@
 #include "app/account/EndpointRetryGate.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/cache/AccountRepository.h"
+#include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/NotificationRepository.h"
@@ -74,7 +75,9 @@ namespace
         std::size_t successfulEmailDeltas = 0;
         std::size_t emailDeltaAttempts = 0;
         std::size_t presentationRequests = 0;
+        std::size_t emailRebaselineRequests = 0;
         std::size_t transientEmailFailuresRemaining = 0;
+        std::size_t recoverableEmailGapsRemaining = 0;
         bool notificationCommittedBeforePresentation = false;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
@@ -101,6 +104,9 @@ namespace
                     };
                 }
             }
+            const bool recoverableEmailGap = emailDelta && recoverableEmailGapsRemaining > 0;
+            if (recoverableEmailGap)
+                --recoverableEmailGapsRemaining;
             if (presentation)
             {
                 ++presentationRequests;
@@ -117,7 +123,8 @@ namespace
                 }
             }
 
-            const bool createsNotification = emailDelta && successfulEmailDeltas == 1;
+            const bool createsNotification =
+                emailDelta && !recoverableEmailGap && successfulEmailDeltas == 1;
             const std::string emailState = createsNotification ? "email-state-2" : m_emailState;
             javelin::jmap::api::ResponseEnvelope response;
             response.sessionState = "session-state";
@@ -137,36 +144,64 @@ namespace
                 }
                 else if (name == "Email/changes")
                 {
-                    arguments = std::string{R"({"accountId":"account-1","oldState":")"} +
-                                m_emailState + R"(","newState":")" + emailState +
-                                R"(","hasMoreChanges":false,"created":[)" +
-                                (createsNotification ? R"("email-new")" : "") +
-                                R"(],"updated":[],"destroyed":[]})";
+                    if (recoverableEmailGap)
+                    {
+                        name = "error";
+                        arguments = R"({"type":"cannotCalculateChanges"})";
+                    }
+                    else
+                    {
+                        arguments = std::string{R"({"accountId":"account-1","oldState":")"} +
+                                    m_emailState + R"(","newState":")" + emailState +
+                                    R"(","hasMoreChanges":false,"created":[)" +
+                                    (createsNotification ? R"("email-new")" : "") +
+                                    R"(],"updated":[],"destroyed":[]})";
+                    }
                 }
                 else if (name == "Email/get")
                 {
                     const bool createdFetch = invocation.callId == "created-emails";
+                    const bool rebaselineFetch = invocation.callId.starts_with("email-rebaseline-");
+                    if (rebaselineFetch)
+                    {
+                        ++emailRebaselineRequests;
+                        m_emailState = "email-state-gap";
+                        m_unknownEmailPending = true;
+                    }
+                    const bool unknownPresentationFetch =
+                        m_unknownEmailPending && (invocation.callId == "thread-ids-get" ||
+                                                  invocation.callId == "updated-emails-get");
                     const std::string objects =
                         createsNotification && createdFetch
                             ? R"({"id":"email-new","blobId":"blob-new","threadId":"thread-new","mailboxIds":{"inbox":true},"keywords":{},"size":42,"receivedAt":"2026-08-29T00:00:00Z","subject":"New mail","preview":"Preview"})"
+                        : unknownPresentationFetch
+                            ? R"({"id":"email-gap-new","blobId":"blob-gap-new","threadId":"thread-gap-new","mailboxIds":{"inbox":true},"keywords":{},"size":42,"receivedAt":"2026-08-29T00:00:01Z","subject":"Recovered mail","preview":"Preview"})"
                             : "";
-                    arguments = std::string{R"({"accountId":"account-1","state":")"} + emailState +
+                    const auto& getState = rebaselineFetch ? m_emailState : emailState;
+                    arguments = std::string{R"({"accountId":"account-1","state":")"} + getState +
                                 R"(","list":[)" + objects + R"(],"notFound":[]})";
+                    if (unknownPresentationFetch)
+                        m_unknownEmailPending = false;
                 }
                 else if (name == "Email/query")
                 {
                     m_queryState = "query-state-" + std::to_string(++m_queryGeneration);
                     arguments = std::string{R"({"accountId":"account-1","queryState":")"} +
                                 m_queryState +
-                                R"(","canCalculateChanges":true,"position":0,"ids":[],"total":0})";
+                                R"(","canCalculateChanges":true,"position":0,"ids":[)" +
+                                (m_unknownEmailPending ? R"("email-gap-new")" : "") +
+                                R"(],"total":)" + (m_unknownEmailPending ? "1" : "0") + "}";
                 }
                 else if (name == "Email/queryChanges")
                 {
                     const auto oldState = m_queryState;
                     m_queryState = "query-state-" + std::to_string(++m_queryGeneration);
-                    arguments = std::string{R"({"accountId":"account-1","oldQueryState":")"} +
-                                oldState + R"(","newQueryState":")" + m_queryState +
-                                R"(","added":[],"removed":[],"hasMoreChanges":false,"total":0})";
+                    arguments =
+                        std::string{R"({"accountId":"account-1","oldQueryState":")"} + oldState +
+                        R"(","newQueryState":")" + m_queryState + R"(","added":[)" +
+                        (m_unknownEmailPending ? R"({"id":"email-gap-new","index":0})" : "") +
+                        R"(],"removed":[],"hasMoreChanges":false,"total":)" +
+                        (m_unknownEmailPending ? "1" : "0") + "}";
                 }
                 else
                 {
@@ -181,7 +216,7 @@ namespace
                     .callId = invocation.callId,
                 });
             }
-            if (emailDelta)
+            if (emailDelta && !recoverableEmailGap)
             {
                 ++successfulEmailDeltas;
                 m_emailState = emailState;
@@ -193,6 +228,7 @@ namespace
         std::string m_emailState = "email-state-1";
         std::string m_queryState;
         std::size_t m_queryGeneration = 0;
+        bool m_unknownEmailPending = false;
     };
 
     struct CoordinatorFixture
@@ -432,4 +468,38 @@ TEST_CASE("notification baseline execution has one coordinator retry path",
     REQUIRE(
         waitUntil([&fixture, successesBeforeBaseline]
                   { return fixture.transport.successfulEmailDeltas > successesBeforeBaseline; }));
+}
+
+TEST_CASE("lost account Email history reconciles every tracked mailbox query",
+          "[app][account][sync][ownership][rebaseline]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    CoordinatorFixture fixture;
+    REQUIRE(waitUntil(
+        [&fixture]
+        {
+            return fixture.transport.successfulEmailDeltas >= 1 &&
+                   fixture.transport.presentationRequests >= 1;
+        }));
+
+    const auto presentationsBeforeGap = fixture.transport.presentationRequests;
+    fixture.transport.recoverableEmailGapsRemaining = 1;
+    QCoro::waitFor(fixture.coordinator.onStateChange({
+        .newState = "push-state-gap",
+        .changedTypes = {"Email"},
+        .changedStates = {{"account-1", {{"Email", "email-state-gap"}}}},
+    }));
+
+    REQUIRE(waitUntil(
+        [&fixture, presentationsBeforeGap]
+        {
+            return fixture.transport.emailRebaselineRequests == 1 &&
+                   fixture.transport.presentationRequests > presentationsBeforeGap;
+        }));
+    CHECK(fixture.transport.emailDeltaAttempts >= 2);
+    javelin::jmap::cache::EmailRepository emails{fixture.connection};
+    const auto recovered = emails.find("account-1", "email-gap-new");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(recovered));
+    CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(recovered).has_value());
 }

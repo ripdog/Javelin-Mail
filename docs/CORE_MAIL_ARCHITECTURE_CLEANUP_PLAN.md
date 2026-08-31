@@ -289,6 +289,12 @@ account-state substitute.
 - [x] Reconcile confirmed destroyed/`notFound` Emails through normal deletion/membership cleanup.
 - [x] Mark affected query windows stale/reconcilable where object changes invalidate their retained
       representation.
+- [x] After recovering an unrecoverable delta gap, reconcile every configured/tracked mailbox query:
+      the retained working set cannot identify membership changes caused by entirely unknown Emails.
+- [x] During ordinary gap recovery, create notification events for retained Emails whose previous
+      and current objects prove entry into notification eligibility in the same rebaseline
+      transaction. Suppress those events when the rebaseline establishes a newly enabled mailbox's
+      historical notification baseline.
 - [x] Install the new global Email state only after every locally relevant Email has been accounted
       for against that state.
 - [x] Ensure cancellation/supersession cannot install a partially reconciled state token.
@@ -387,7 +393,11 @@ that changed. An updated Email that was previously uncached therefore cannot pro
 notification mailbox rather than already being there. Javelin does not fetch such an update solely
 for notification discovery and does not guess if another materialization happens to fetch it. This
 is an intentional conservative product boundary: otherwise-unretained Email history is not added
-merely to infer notifications.
+merely to infer notifications. The same boundary applies to an entirely unknown Email when an
+unrecoverable `Email/changes` gap has erased evidence of whether it was created after Javelin's old
+cursor: presentation/offline membership is recovered by mandatory tracked-query reconciliation,
+but no notification event is guessed. Retained Emails in that recovery path still use their proven
+previous-to-current transition and may create one event.
 
 - [x] Model this decision explicitly in the daemon synchronization/application layer.
 - [x] Do not derive it from query-window insertion/removal.

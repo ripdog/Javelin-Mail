@@ -26,6 +26,10 @@ namespace javelin::jmap::sync
         bool emailChanged = false;
         bool mailboxNeedsFullRefresh = false;
         bool emailNeedsFullRefresh = false;
+        // A recovered Email state gap cannot prove query membership for Emails outside the local
+        // working set. The coordinator must reconcile its tracked mailbox query windows without
+        // treating those presentation queries as owners of the account Email cursor.
+        bool mailboxQueriesNeedReconciliation = false;
         bool notificationEventsCreated = false;
         bool notificationBaselineEstablished = false;
         bool superseded = false;
