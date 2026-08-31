@@ -427,13 +427,22 @@ routing/context metadata;
 `(account_id, email_id)` is the notification identity, so later unread movement between enabled
 mailboxes cannot create another event.
 
+Combined account Mailbox/Email requests retain independent transition outcomes. A recoverable
+`Mailbox/changes` gap schedules Mailbox recovery without discarding a valid `Email/changes`
+transition from the same response, and an Email gap does not discard a valid Mailbox transition.
+
 The account's global `Email` sync state is the only Email cursor. Notification storage contains only
 the set of mailboxes whose notification baseline has completed; it does not duplicate the Email
 state token. Enabling a new mailbox is serialized against in-flight Email work with the existing
 Email consistency generation. The mailbox is added to the active notification set only in the final
 transaction of a fresh Email reconciliation, so historical cached mail cannot become new mail merely
 because notification settings changed. Disabling a mailbox removes it from the active set
-immediately. Because ordinary Email state advancement does not mutate this set, local `Email/set`
+immediately. During a pending settings baseline, both incremental and rebaseline Email transitions
+may notify
+only through the intersection of the already-active and newly desired mailbox sets. Existing active
+mailboxes therefore keep notifying while newly enabled mailboxes remain fenced until the baseline
+transaction commits. Because ordinary Email state advancement does not mutate this set, local
+`Email/set`
 confirmation and other Email-state writers cannot desynchronize notification eligibility from the
 account cursor. `AccountRuntimeManager` retries durable configuration reads and installation of the
 pending baseline fence; once installed, `AccountSyncCoordinator` retries execution of that baseline

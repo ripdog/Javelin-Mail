@@ -51,10 +51,12 @@ namespace javelin::jmap::sync
             std::vector<javelin::jmap::domain::Mailbox> mailboxes;
             std::vector<std::string> lateDestroyedMailboxes;
             bool mailboxNeedsContinuation = false;
+            bool mailboxNeedsFullRefresh = false;
             std::optional<EmailChangesResponse> emailChanges;
             std::vector<javelin::jmap::domain::Email> emails;
             std::vector<std::string> lateDestroyedEmails;
             bool emailNeedsContinuation = false;
+            bool emailNeedsFullRefresh = false;
         };
 
         struct MaterializationAssessment
@@ -144,6 +146,27 @@ namespace javelin::jmap::sync
 
         using NotificationMailboxSelectionResult =
             std::variant<std::string, javelin::jmap::cache::DatabaseError>;
+        using NotificationMailboxIdsResult =
+            std::variant<std::vector<std::string>, javelin::jmap::cache::DatabaseError>;
+
+        [[nodiscard]] NotificationMailboxIdsResult notificationMailboxIdsForTransition(
+            javelin::jmap::cache::NotificationRepository& notifications,
+            const std::string_view accountId,
+            const std::optional<std::vector<std::string>>& notificationBaselineMailboxIds)
+        {
+            auto activeResult = notifications.activeMailboxIds(accountId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&activeResult))
+                return *error;
+            auto activeMailboxIds = std::get<std::vector<std::string>>(std::move(activeResult));
+            if (!notificationBaselineMailboxIds.has_value())
+                return activeMailboxIds;
+
+            const std::unordered_set<std::string> desired{notificationBaselineMailboxIds->begin(),
+                                                          notificationBaselineMailboxIds->end()};
+            std::erase_if(activeMailboxIds, [&desired](const auto& mailboxId)
+                          { return !desired.contains(mailboxId); });
+            return activeMailboxIds;
+        }
 
         [[nodiscard]] NotificationMailboxSelectionResult
         chooseNotificationMailbox(javelin::jmap::cache::MailboxRepository& mailboxes,
@@ -464,7 +487,7 @@ namespace javelin::jmap::sync
             return std::nullopt;
         }
 
-        [[nodiscard]] std::variant<ParsedDelta, MailDeltaRefreshSummary, OperationError>
+        [[nodiscard]] std::variant<ParsedDelta, OperationError>
         parseDelta(const javelin::jmap::api::ResponseEnvelope& envelope,
                    const DeltaHandles& handles)
         {
@@ -478,43 +501,50 @@ namespace javelin::jmap::sync
                 {
                     if (isRecoverableChangesError(*error))
                     {
-                        MailDeltaRefreshSummary summary;
-                        summary.mailboxNeedsFullRefresh = true;
-                        summary.emailNeedsFullRefresh = handles.emailChanges.has_value();
-                        return summary;
+                        parsed.mailboxNeedsFullRefresh = true;
                     }
-                    return operationError(*error);
+                    else
+                    {
+                        return operationError(*error);
+                    }
                 }
-                parsed.mailboxChanges = std::get<MailboxChangesResponse>(changesResult);
-                MailboxGetResponse created;
-                MailboxGetResponse updated;
-                if (const auto error = readRequired(reader, *handles.createdMailboxes, created))
-                    return *error;
-                if (const auto error = readRequired(reader, *handles.updatedMailboxes, updated))
-                    return *error;
-                const auto createdAssessment = assessMaterialization(
-                    parsed.mailboxChanges->created, created.list, created.notFound,
-                    parsed.mailboxChanges->newState, created.state);
-                const auto updatedAssessment = assessMaterialization(
-                    parsed.mailboxChanges->updated, updated.list, updated.notFound,
-                    parsed.mailboxChanges->newState, updated.state);
-                if (!createdAssessment.complete || !updatedAssessment.complete ||
-                    created.accountId != parsed.mailboxChanges->accountId ||
-                    updated.accountId != parsed.mailboxChanges->accountId)
+                else
                 {
-                    MailDeltaRefreshSummary summary;
-                    summary.mailboxNeedsFullRefresh = true;
-                    summary.emailNeedsFullRefresh = handles.emailChanges.has_value();
-                    return summary;
+                    parsed.mailboxChanges = std::get<MailboxChangesResponse>(changesResult);
+                    MailboxGetResponse created;
+                    MailboxGetResponse updated;
+                    if (const auto readError =
+                            readRequired(reader, *handles.createdMailboxes, created))
+                        return *readError;
+                    if (const auto readError =
+                            readRequired(reader, *handles.updatedMailboxes, updated))
+                        return *readError;
+                    const auto createdAssessment = assessMaterialization(
+                        parsed.mailboxChanges->created, created.list, created.notFound,
+                        parsed.mailboxChanges->newState, created.state);
+                    const auto updatedAssessment = assessMaterialization(
+                        parsed.mailboxChanges->updated, updated.list, updated.notFound,
+                        parsed.mailboxChanges->newState, updated.state);
+                    if (!createdAssessment.complete || !updatedAssessment.complete ||
+                        created.accountId != parsed.mailboxChanges->accountId ||
+                        updated.accountId != parsed.mailboxChanges->accountId)
+                    {
+                        parsed.mailboxChanges.reset();
+                        parsed.mailboxNeedsFullRefresh = true;
+                    }
+                    else
+                    {
+                        parsed.mailboxNeedsContinuation = createdAssessment.needsContinuation ||
+                                                          updatedAssessment.needsContinuation;
+                        parsed.lateDestroyedMailboxes = createdAssessment.lateDestroyed;
+                        appendUnique(parsed.lateDestroyedMailboxes,
+                                     updatedAssessment.lateDestroyed);
+                        parsed.mailboxes = std::move(created.list);
+                        parsed.mailboxes.insert(parsed.mailboxes.end(),
+                                                std::make_move_iterator(updated.list.begin()),
+                                                std::make_move_iterator(updated.list.end()));
+                    }
                 }
-                parsed.mailboxNeedsContinuation =
-                    createdAssessment.needsContinuation || updatedAssessment.needsContinuation;
-                parsed.lateDestroyedMailboxes = createdAssessment.lateDestroyed;
-                appendUnique(parsed.lateDestroyedMailboxes, updatedAssessment.lateDestroyed);
-                parsed.mailboxes = std::move(created.list);
-                parsed.mailboxes.insert(parsed.mailboxes.end(),
-                                        std::make_move_iterator(updated.list.begin()),
-                                        std::make_move_iterator(updated.list.end()));
             }
             if (handles.emailChanges.has_value())
             {
@@ -524,31 +554,36 @@ namespace javelin::jmap::sync
                 {
                     if (isRecoverableChangesError(*error))
                     {
-                        MailDeltaRefreshSummary summary;
-                        summary.mailboxNeedsFullRefresh = handles.mailboxChanges.has_value();
-                        summary.emailNeedsFullRefresh = true;
-                        return summary;
+                        parsed.emailNeedsFullRefresh = true;
                     }
-                    return operationError(*error);
+                    else
+                    {
+                        return operationError(*error);
+                    }
                 }
-                parsed.emailChanges = std::get<EmailChangesResponse>(changesResult);
-                EmailGetResponse created;
-                if (const auto error = readRequired(reader, *handles.createdEmails, created))
-                    return *error;
-                const auto createdAssessment = assessMaterialization(
-                    parsed.emailChanges->created, created.list, created.notFound,
-                    parsed.emailChanges->newState, created.state);
-                if (!createdAssessment.complete ||
-                    created.accountId != parsed.emailChanges->accountId)
+                else
                 {
-                    MailDeltaRefreshSummary summary;
-                    summary.mailboxNeedsFullRefresh = handles.mailboxChanges.has_value();
-                    summary.emailNeedsFullRefresh = true;
-                    return summary;
+                    parsed.emailChanges = std::get<EmailChangesResponse>(changesResult);
+                    EmailGetResponse created;
+                    if (const auto readError =
+                            readRequired(reader, *handles.createdEmails, created))
+                        return *readError;
+                    const auto createdAssessment = assessMaterialization(
+                        parsed.emailChanges->created, created.list, created.notFound,
+                        parsed.emailChanges->newState, created.state);
+                    if (!createdAssessment.complete ||
+                        created.accountId != parsed.emailChanges->accountId)
+                    {
+                        parsed.emailChanges.reset();
+                        parsed.emailNeedsFullRefresh = true;
+                    }
+                    else
+                    {
+                        parsed.emailNeedsContinuation = createdAssessment.needsContinuation;
+                        parsed.lateDestroyedEmails = createdAssessment.lateDestroyed;
+                        parsed.emails = std::move(created.list);
+                    }
                 }
-                parsed.emailNeedsContinuation = createdAssessment.needsContinuation;
-                parsed.lateDestroyedEmails = createdAssessment.lateDestroyed;
-                parsed.emails = std::move(created.list);
             }
             return parsed;
         }
@@ -627,15 +662,13 @@ namespace javelin::jmap::sync
             std::vector<std::string> staleThreadIds;
             std::vector<std::string> changedEmailIds;
             std::vector<javelin::jmap::cache::MailNotificationEventInput> notificationEvents;
-            std::vector<std::string> notificationMailboxIds;
-            if (!notificationBaselineMailboxIds.has_value())
-            {
-                const auto activeMailboxResult = notifications.activeMailboxIds(accountId);
-                if (const auto* error =
-                        std::get_if<javelin::jmap::cache::DatabaseError>(&activeMailboxResult))
-                    co_return operationError(*error);
-                notificationMailboxIds = std::get<std::vector<std::string>>(activeMailboxResult);
-            }
+            const auto notificationMailboxResult = notificationMailboxIdsForTransition(
+                notifications, accountId, notificationBaselineMailboxIds);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&notificationMailboxResult))
+                co_return operationError(*error);
+            const auto& notificationMailboxIds =
+                std::get<std::vector<std::string>>(notificationMailboxResult);
             changedEmailIds.reserve(snapshot.emails.size());
 
             for (const auto& email : snapshot.emails)
@@ -966,29 +999,11 @@ namespace javelin::jmap::sync
             parseDelta(std::get<javelin::jmap::api::ResponseEnvelope>(envelopeResult), handles);
         if (const auto* error = std::get_if<OperationError>(&parsedResult))
             co_return *error;
-        if (auto* fallback = std::get_if<MailDeltaRefreshSummary>(&parsedResult))
-        {
-            fallback->mailboxNeedsFullRefresh =
-                fallback->mailboxNeedsFullRefresh || summary.mailboxNeedsFullRefresh;
-            fallback->emailNeedsFullRefresh =
-                fallback->emailNeedsFullRefresh || summary.emailNeedsFullRefresh;
-            mergeSummary(*fallback, summary);
-            if (fallback->emailNeedsFullRefresh && request.email)
-            {
-                const auto rebaseline = co_await rebaselineAccountEmails(
-                    m_databaseConnection, m_methodCaller, m_apiRequestContext, accountId,
-                    remoteAccountId, emailState, notificationBaselineMailboxIds);
-                if (const auto* error = std::get_if<OperationError>(&rebaseline))
-                    co_return *error;
-                const auto& rebaselineSummary = std::get<MailDeltaRefreshSummary>(rebaseline);
-                fallback->emailNeedsFullRefresh = false;
-                mergeSummary(*fallback, rebaselineSummary);
-                if (!rebaselineSummary.superseded)
-                    fallback->mailboxQueriesNeedReconciliation = true;
-            }
-            co_return *fallback;
-        }
         auto parsed = std::get<ParsedDelta>(std::move(parsedResult));
+        summary.mailboxNeedsFullRefresh =
+            summary.mailboxNeedsFullRefresh || parsed.mailboxNeedsFullRefresh;
+        summary.emailNeedsFullRefresh =
+            summary.emailNeedsFullRefresh || parsed.emailNeedsFullRefresh;
         if ((parsed.mailboxChanges.has_value() &&
              (parsed.mailboxChanges->accountId != remoteAccountId ||
               parsed.mailboxChanges->oldState != *mailboxState)) ||
@@ -1002,7 +1017,7 @@ namespace javelin::jmap::sync
                                           "account and state."),
             };
         }
-        if (mailboxFence.has_value())
+        if (parsed.mailboxChanges.has_value() && mailboxFence.has_value())
         {
             const auto canCommit = consistency.isCurrent(*mailboxFence);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&canCommit))
@@ -1013,7 +1028,7 @@ namespace javelin::jmap::sync
                 co_return summary;
             }
         }
-        if (emailFence.has_value())
+        if (parsed.emailChanges.has_value() && emailFence.has_value())
         {
             const auto canCommit = consistency.isCurrent(*emailFence);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&canCommit))
@@ -1114,32 +1129,34 @@ namespace javelin::jmap::sync
                 if (!assessment.complete || updated.accountId != remoteAccountId)
                 {
                     summary.emailNeedsFullRefresh = true;
-                    co_return summary;
+                    parsed.emailChanges.reset();
+                    parsed.emails.clear();
+                    parsed.lateDestroyedEmails.clear();
+                    parsed.emailNeedsContinuation = false;
+                    trackedMailboxIds.clear();
+                    searchWindowsAffected = false;
                 }
-                parsed.emailNeedsContinuation =
-                    parsed.emailNeedsContinuation || assessment.needsContinuation;
-                appendUnique(parsed.lateDestroyedEmails, assessment.lateDestroyed);
-                parsed.emails.insert(parsed.emails.end(),
-                                     std::make_move_iterator(updated.list.begin()),
-                                     std::make_move_iterator(updated.list.end()));
+                else
+                {
+                    parsed.emailNeedsContinuation =
+                        parsed.emailNeedsContinuation || assessment.needsContinuation;
+                    appendUnique(parsed.lateDestroyedEmails, assessment.lateDestroyed);
+                    parsed.emails.insert(parsed.emails.end(),
+                                         std::make_move_iterator(updated.list.begin()),
+                                         std::make_move_iterator(updated.list.end()));
+                }
             }
         }
 
         std::vector<std::string> notificationMailboxIds;
         if (parsed.emailChanges.has_value())
         {
-            const auto activeMailboxResult = notifications.activeMailboxIds(accountId);
+            const auto activeMailboxResult = notificationMailboxIdsForTransition(
+                notifications, accountId, notificationBaselineMailboxIds);
             if (const auto* error =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&activeMailboxResult))
                 co_return operationError(*error);
             notificationMailboxIds = std::get<std::vector<std::string>>(activeMailboxResult);
-            if (notificationBaselineMailboxIds.has_value())
-            {
-                const std::unordered_set<std::string> desired{
-                    notificationBaselineMailboxIds->begin(), notificationBaselineMailboxIds->end()};
-                std::erase_if(notificationMailboxIds, [&desired](const auto& mailboxId)
-                              { return !desired.contains(mailboxId); });
-            }
         }
 
         std::unordered_set<std::string> createdIds;
@@ -1277,7 +1294,7 @@ namespace javelin::jmap::sync
                 std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
             co_return operationError(*error);
         auto transaction = std::get<MutationProjectionTransaction>(std::move(transactionResult));
-        if (mailboxFence.has_value())
+        if (parsed.mailboxChanges.has_value() && mailboxFence.has_value())
         {
             const auto fenceCurrent = consistency.isCurrent(*mailboxFence);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&fenceCurrent))
@@ -1288,7 +1305,7 @@ namespace javelin::jmap::sync
                 co_return summary;
             }
         }
-        if (emailFence.has_value())
+        if (parsed.emailChanges.has_value() && emailFence.has_value())
         {
             const auto fenceCurrent = consistency.isCurrent(*emailFence);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&fenceCurrent))
@@ -1427,24 +1444,22 @@ namespace javelin::jmap::sync
             if (const auto* error = std::get_if<OperationError>(&continued))
                 co_return *error;
             const auto& next = std::get<MailDeltaRefreshSummary>(continued);
-            summary.mailboxChanged = summary.mailboxChanged || next.mailboxChanged;
-            summary.emailChanged = summary.emailChanged || next.emailChanged;
-            summary.mailboxNeedsFullRefresh =
-                summary.mailboxNeedsFullRefresh || next.mailboxNeedsFullRefresh;
-            summary.emailNeedsFullRefresh =
-                summary.emailNeedsFullRefresh || next.emailNeedsFullRefresh;
-            summary.mailboxQueriesNeedReconciliation =
-                summary.mailboxQueriesNeedReconciliation || next.mailboxQueriesNeedReconciliation;
-            summary.notificationEventsCreated =
-                summary.notificationEventsCreated || next.notificationEventsCreated;
-            summary.notificationBaselineEstablished =
-                summary.notificationBaselineEstablished || next.notificationBaselineEstablished;
-            summary.superseded = summary.superseded || next.superseded;
-            appendUnique(summary.changedMailboxIds, next.changedMailboxIds);
-            appendUnique(summary.queryAffectedMailboxIds, next.queryAffectedMailboxIds);
-            appendUnique(summary.insertedEmailIds, next.insertedEmailIds);
-            std::ranges::sort(summary.changedMailboxIds);
-            std::ranges::sort(summary.queryAffectedMailboxIds);
+            mergeSummary(summary, next);
+        }
+        if (summary.superseded)
+            co_return summary;
+        if (summary.emailNeedsFullRefresh && request.email)
+        {
+            const auto rebaseline = co_await rebaselineAccountEmails(
+                m_databaseConnection, m_methodCaller, m_apiRequestContext, accountId,
+                remoteAccountId, emailState, notificationBaselineMailboxIds);
+            if (const auto* error = std::get_if<OperationError>(&rebaseline))
+                co_return *error;
+            const auto& rebaselineSummary = std::get<MailDeltaRefreshSummary>(rebaseline);
+            summary.emailNeedsFullRefresh = false;
+            mergeSummary(summary, rebaselineSummary);
+            if (!rebaselineSummary.superseded)
+                summary.mailboxQueriesNeedReconciliation = true;
         }
         co_return summary;
     }

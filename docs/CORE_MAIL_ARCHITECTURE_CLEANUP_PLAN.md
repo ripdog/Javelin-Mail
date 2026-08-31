@@ -230,6 +230,9 @@ This should be a narrow correctness change, not a sync rewrite.
       and bounded window materialization.
 - [x] Ensure mailbox-query failure does not discard or roll back an independently valid account Email
       delta merely because both happened to be sent in one JMAP request envelope.
+- [x] Parse combined account `Mailbox/changes` and `Email/changes` outcomes independently: a
+      recoverable gap in one domain must not discard a valid transition already returned for the
+      other domain.
 - [x] Ensure account Email-delta failure does not force mailbox code to invent a new global Email
       baseline from representative data.
 
@@ -293,8 +296,9 @@ account-state substitute.
       the retained working set cannot identify membership changes caused by entirely unknown Emails.
 - [x] During ordinary gap recovery, create notification events for retained Emails whose previous
       and current objects prove entry into notification eligibility in the same rebaseline
-      transaction. Suppress those events when the rebaseline establishes a newly enabled mailbox's
-      historical notification baseline.
+      transaction. While a settings baseline is pending, use the same active-intersect-desired set
+      as incremental reconciliation, so already-active mailboxes remain eligible while newly
+      enabled mailboxes stay fenced.
 - [x] Install the new global Email state only after every locally relevant Email has been accounted
       for against that state.
 - [x] Ensure cancellation/supersession cannot install a partially reconciled state token.
