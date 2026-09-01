@@ -11,6 +11,7 @@
 #include <QCoroTask>
 
 #include <QCoreApplication>
+#include <QDate>
 #include <QEventLoop>
 #include <QSqlQuery>
 #include <QTemporaryDir>
@@ -324,6 +325,9 @@ TEST_CASE("calendar invitation full reconciliation alerts for an unseen created 
         "INSERT INTO calendar_event_notifications(account_id,notification_id,type,is_deleted) "
         "VALUES('calendar-account','notification-old','created',0)")));
 
+    const auto invitationDate = QDate::currentDate().addDays(7).toString(Qt::ISODate);
+    const auto invitationStart = invitationDate + QStringLiteral("T09:00:00");
+
     FakeMethodTransport transport;
     transport.results = {
         response(
@@ -338,11 +342,17 @@ TEST_CASE("calendar invitation full reconciliation alerts for an unseen created 
             "calendar-invitation-query"),
         response(
             "CalendarEventNotification/get",
-            R"({"accountId":"calendar-account","state":"n2","list":[{"id":"notification-new","created":"2026-08-15T03:00:00Z","changedBy":{"name":"Organizer"},"type":"created","calendarEventId":"event-new","isDraft":false,"event":{"@type":"Event","id":"event-new","uid":"event-new-uid","calendarIds":{"work":true},"title":"Recovered invitation","start":"2026-09-01T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","isDraft":false,"isOrigin":false,"participants":{"self":{"@type":"Participant","name":"Alice","calendarAddress":"mailto:alice@example.test","participationStatus":"needs-action","roles":{"attendee":true}}}}}],"notFound":[]})",
+            QStringLiteral(
+                R"({"accountId":"calendar-account","state":"n2","list":[{"id":"notification-new","created":"2026-08-15T03:00:00Z","changedBy":{"name":"Organizer"},"type":"created","calendarEventId":"event-new","isDraft":false,"event":{"@type":"Event","id":"event-new","uid":"event-new-uid","calendarIds":{"work":true},"title":"Recovered invitation","start":"%1","duration":"PT1H","timeZone":"Pacific/Auckland","isDraft":false,"isOrigin":false,"participants":{"self":{"@type":"Participant","name":"Alice","calendarAddress":"mailto:alice@example.test","participationStatus":"needs-action","roles":{"attendee":true}}}}}],"notFound":[]})")
+                .arg(invitationStart)
+                .toStdString(),
             "calendar-invitation-notification-get"),
         response(
             "CalendarEvent/get",
-            R"({"accountId":"calendar-account","state":"e2","list":[{"@type":"Event","id":"event-new","uid":"event-new-uid","calendarIds":{"work":true},"title":"Recovered invitation","start":"2026-09-01T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","isDraft":false,"isOrigin":false,"participants":{"organizer":{"@type":"Participant","name":"Organizer","calendarAddress":"mailto:organizer@example.test","participationStatus":"accepted","roles":{"owner":true,"attendee":true}},"self":{"@type":"Participant","name":"Alice","calendarAddress":"mailto:alice@example.test","participationStatus":"needs-action","roles":{"attendee":true}}}}],"notFound":[]})",
+            QStringLiteral(
+                R"({"accountId":"calendar-account","state":"e2","list":[{"@type":"Event","id":"event-new","uid":"event-new-uid","calendarIds":{"work":true},"title":"Recovered invitation","start":"%1","duration":"PT1H","timeZone":"Pacific/Auckland","isDraft":false,"isOrigin":false,"participants":{"organizer":{"@type":"Participant","name":"Organizer","calendarAddress":"mailto:organizer@example.test","participationStatus":"accepted","roles":{"owner":true,"attendee":true}},"self":{"@type":"Participant","name":"Alice","calendarAddress":"mailto:alice@example.test","participationStatus":"needs-action","roles":{"attendee":true}}}}],"notFound":[]})")
+                .arg(invitationStart)
+                .toStdString(),
             "calendar-invitation-event-get"),
     };
 
@@ -354,6 +364,7 @@ TEST_CASE("calendar invitation full reconciliation alerts for an unseen created 
     const auto signal = runUntilInvitation(service);
     REQUIRE(signal.has_value());
     CHECK(signal->eventId == QStringLiteral("event-new"));
+    CHECK(signal->navigationDate == invitationDate);
     CHECK(signal->title == QStringLiteral("Recovered invitation"));
     CHECK(transport.results.empty());
 }
