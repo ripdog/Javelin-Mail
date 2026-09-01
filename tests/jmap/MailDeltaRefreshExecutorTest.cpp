@@ -515,7 +515,7 @@ namespace
     }
 
     void seedNotificationMailboxes(javelin::jmap::cache::DatabaseConnection& connection,
-                                   std::vector<std::string> mailboxIds)
+                                   const std::vector<std::string>& mailboxIds)
     {
         javelin::jmap::cache::NotificationRepository notifications{connection};
         REQUIRE_FALSE(notifications.replaceActiveMailboxes("account-1", mailboxIds).has_value());

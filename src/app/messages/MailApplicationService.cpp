@@ -1538,10 +1538,10 @@ namespace javelin::app
             }
 
             const auto& target = *events.front();
-            const auto title =
-                events.size() == 1
-                    ? QStringLiteral("New mail in %1").arg(mailboxName)
-                    : QStringLiteral("%1 new messages in %2").arg(events.size()).arg(mailboxName);
+            const auto title = events.size() == 1
+                                   ? i18n("New mail in %1", mailboxName)
+                                   : i18np("%1 new message in %2", "%1 new messages in %2",
+                                           events.size(), mailboxName);
             const auto message = subjectForDisplay(target.subject);
             QStringList deliveredEmailIds;
             deliveredEmailIds.reserve(static_cast<qsizetype>(events.size()));
