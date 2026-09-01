@@ -609,7 +609,12 @@ namespace javelin::jmap::calendar
                     .acceptedState = std::nullopt,
                     .errorJson = std::nullopt,
                 });
-                prepared.projectedOccurrences.push_back(projectedOccurrence(projected));
+                // Expanded occurrence ids are server materialization. Keep the existing range
+                // intact whenever an update crosses or remains inside recurring state.
+                const bool recurrenceNeedsServerMaterialization =
+                    projected.recurrenceRule || (base && base->recurrenceRule);
+                if (!recurrenceNeedsServerMaterialization)
+                    prepared.projectedOccurrences.push_back(projectedOccurrence(projected));
                 prepared.projectedEvents.push_back(std::move(projected));
             }
             for (const auto& eventId : request.destroy)
@@ -947,7 +952,8 @@ namespace javelin::jmap::calendar
                 if (const auto* operationError = std::get_if<OperationError>(&restored))
                     return *operationError;
                 auto event = std::get<CalendarEvent>(std::move(restored));
-                restoredOccurrences.push_back(projectedOccurrence(event));
+                if (!event.recurrenceRule)
+                    restoredOccurrences.push_back(projectedOccurrence(event));
                 restoredEvents.push_back(std::move(event));
             }
             if (const auto cacheError = repository.projectEvents(
