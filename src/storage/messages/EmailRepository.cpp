@@ -539,6 +539,39 @@ namespace javelin::jmap::cache
     {
     }
 
+    std::variant<bool, DatabaseError>
+    EmailRepository::hasAny(const std::string_view accountId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT EXISTS(SELECT 1 FROM emails WHERE account_id=:account_id LIMIT 1)"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        if (!query.exec() || !query.next())
+            return makeQueryError(QStringLiteral("Inspect account Email working set"), query);
+        return query.value(0).toBool();
+    }
+
+    std::variant<bool, DatabaseError>
+    EmailRepository::hasAny(DatabaseTransaction& transaction,
+                            const std::string_view accountId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message =
+                    QStringLiteral("Email existence check requires an active matching transaction"),
+            };
+        }
+        return hasAny(accountId);
+    }
+
     std::optional<DatabaseError>
     EmailRepository::replaceAll(const std::string_view accountId,
                                 const std::vector<javelin::jmap::domain::Email>& emails)

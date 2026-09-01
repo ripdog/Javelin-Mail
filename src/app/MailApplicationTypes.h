@@ -38,8 +38,12 @@ namespace javelin::app
         std::vector<SearchQueryWindowChange> searchWindows;
         QStringList messageContentEmailIds{};
         bool mailboxTreeChanged = false;
-        bool hasNewMail = false;
+        // Signals that committed Email rows changed. This drives metadata invalidation and
+        // indexing; it deliberately says nothing about whether the change represents newly arrived
+        // mail.
+        bool emailObjectsChanged = false;
         bool optimisticProjection = false;
+        bool mailTagsChanged = false;
         bool contactsChanged = false;
         bool identitiesChanged = false;
     };

@@ -71,7 +71,6 @@ namespace javelin::gui::messages
         void refreshExpandedThreadMembers();
         [[nodiscard]] std::optional<std::string>
         summaryEmailIdForThread(std::string_view threadId) const;
-        [[nodiscard]] bool setEmailRead(std::string_view emailId);
 
       Q_SIGNALS:
         void threadMaterializationRequired(QString threadId);

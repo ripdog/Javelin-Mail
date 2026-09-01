@@ -188,7 +188,8 @@ namespace javelin::app
                         return;
 
                     m_cacheEpoch = std::max(m_cacheEpoch, invalidation.epoch);
-                    static_cast<void>(m_refreshGeneration.begin(m_cacheEpoch));
+                    const auto beginRelevantRefresh = [this]
+                    { static_cast<void>(m_refreshGeneration.begin(m_cacheEpoch)); };
 
                     if (quickFilterActive())
                     {
@@ -208,6 +209,7 @@ namespace javelin::app
                             });
                         if (retainedFilteredWindowChanged)
                         {
+                            beginRelevantRefresh();
                             if (m_state.refreshInFlight)
                             {
                                 ++m_refreshRequestId;
@@ -221,10 +223,16 @@ namespace javelin::app
 
                         if (change.mailboxIds.contains(QString::fromStdString(m_mailboxId)))
                         {
+                            beginRelevantRefresh();
                             m_state.stale = true;
                             if (!m_state.refreshInFlight && !m_state.loadMoreInFlight)
                                 requestInitialWindow(MessageListRefreshMode::Materialize,
                                                      std::nullopt, 1);
+                        }
+                        else if (change.mailTagsChanged)
+                        {
+                            beginRelevantRefresh();
+                            reloadProjectedWindows();
                         }
                         return;
                     }
@@ -246,6 +254,7 @@ namespace javelin::app
                     }
                     if (retainedWindowChanged)
                     {
+                        beginRelevantRefresh();
                         if (m_state.refreshInFlight)
                         {
                             ++m_refreshRequestId;
@@ -259,7 +268,13 @@ namespace javelin::app
 
                     if (change.mailboxIds.contains(QString::fromStdString(m_mailboxId)))
                     {
+                        beginRelevantRefresh();
                         m_state.stale = true;
+                        reloadProjectedWindows();
+                    }
+                    else if (change.mailTagsChanged)
+                    {
+                        beginRelevantRefresh();
                         reloadProjectedWindows();
                     }
                 });

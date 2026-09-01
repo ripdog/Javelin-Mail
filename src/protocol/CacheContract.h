@@ -120,6 +120,7 @@ namespace javelin::protocol
         std::vector<ChangedDomain> changedDomains;
         std::vector<QString> affectedKeys;
         QString accountId{};
+        bool optimisticProjection = false;
         std::vector<QString> mailboxIds{};
         std::vector<QString> messageContentEmailIds{};
         std::vector<MailboxWindowInvalidation> mailboxWindows{};

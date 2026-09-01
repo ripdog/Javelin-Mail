@@ -7,10 +7,13 @@
 #include "app/MailboxTreeCacheRead.h"
 #include "app/MessageListMaterializationPort.h"
 #include "app/RemoteCodec.h"
+#include "app/StateChangePolicy.h"
 #include "app/undo/UndoManager.h"
 #include "daemon/DaemonAccountConfiguration.h"
 #include "daemon/DaemonServices.h"
 #include "daemon/actions/DaemonRemoteActionDispatcher.h"
+#include "jmap/api/JmapMethodTransport.h"
+#include "jmap/api/MethodCaller.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
@@ -19,6 +22,7 @@
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
+#include "jmap/sync/MailboxRefreshExecutor.h"
 #include "protocol/actions/ActionCatalog.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
@@ -27,11 +31,13 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QSettings>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QTimer>
 #include <QUuid>
 
 #include <memory>
@@ -70,6 +76,22 @@ namespace
         static auto store = std::make_shared<javelin::app::MemoryAccountCredentialStore>();
         return store;
     }
+
+    class RecordingRejectingMethodTransport final : public javelin::jmap::api::JmapMethodTransport
+    {
+      public:
+        std::vector<javelin::jmap::api::JmapMethodRequest> requests;
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
+        call(javelin::jmap::api::JmapMethodRequest request) override
+        {
+            requests.push_back(std::move(request));
+            co_return javelin::jmap::api::TransportError{
+                .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+                .message = "recorded presentation mailbox request",
+            };
+        }
+    };
 
     [[nodiscard]] javelin::app::DaemonProcessOptions optionsFor(const QString& runtimeDirectory,
                                                                 const QString& cacheRoot,
@@ -158,6 +180,252 @@ TEST_CASE("daemon account configuration build fails atomically when legacy claim
         javelin::app::buildAccountSyncConfigurations(snapshot, credentials, accounts);
 
     REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseError>(result));
+}
+
+TEST_CASE("notification-only mailboxes are not presentation sync interests",
+          "[app][daemon][settings][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("notification-interest-test"),
+        .databasePath = temporaryDirectory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::AccountRepository accounts{connection};
+
+    javelin::protocol::SettingsSnapshot snapshot;
+    snapshot.accounts = {{.id = QStringLiteral("connection-1"),
+                          .revision = 0,
+                          .displayName = QStringLiteral("Example"),
+                          .sessionUrl = QStringLiteral("https://example.test/jmap"),
+                          .loginEmail = QStringLiteral("user@example.test"),
+                          .tokenEndpoint = {},
+                          .oauthClientId = {},
+                          .oauthIssuer = {},
+                          .oauthResource = {},
+                          .oauthScope = {},
+                          .revocationEndpoint = {},
+                          .registrationClientUri = {},
+                          .hasCredentials = true,
+                          .credentialHandle = {},
+                          .tokenExpiresAtEpochSeconds = 0,
+                          .reauthenticationRequired = false,
+                          .cachedAccountIds = {}}};
+    snapshot.syncedMailboxSelections = {
+        {.accountId = QStringLiteral("connection-1"), .mailboxIds = {QStringLiteral("opened")}}};
+    snapshot.notificationMailboxSelections = {{.accountId = QStringLiteral("connection-1"),
+                                               .mailboxIds = {QStringLiteral("notify-only")}}};
+
+    javelin::app::MemoryAccountCredentialStore credentials;
+    REQUIRE_FALSE(
+        credentials
+            .store(QStringLiteral("connection-1"), {.accessToken = QStringLiteral("secret"),
+                                                    .refreshToken = {},
+                                                    .registrationAccessToken = {}})
+            .has_value());
+
+    const auto result =
+        javelin::app::buildAccountSyncConfigurations(snapshot, credentials, accounts);
+    REQUIRE(std::holds_alternative<std::vector<javelin::app::AccountSyncConfiguration>>(result));
+    const auto& configurations =
+        std::get<std::vector<javelin::app::AccountSyncConfiguration>>(result);
+    REQUIRE(configurations.size() == 1);
+    CHECK(configurations.front().mailboxIds == std::vector<std::string>{"opened"});
+    CHECK(configurations.front().fullSyncMailboxIds == std::vector<std::string>{"opened"});
+    CHECK(configurations.front().notificationMailboxIds == std::vector<std::string>{"notify-only"});
+
+    QSqlQuery seed{connection.database()};
+    REQUIRE(seed.exec(QStringLiteral(
+        "INSERT INTO accounts(account_id,email_address,session_url,is_primary,cap_mail) "
+        "VALUES('connection-1','user@example.test','https://example.test/jmap',1,1)")));
+
+    const auto& configuration = configurations.front();
+    std::vector<std::pair<std::string, std::string>> watchedMailboxes;
+    watchedMailboxes.reserve(configuration.mailboxIds.size());
+    for (const auto& mailboxId : configuration.mailboxIds)
+        watchedMailboxes.emplace_back(mailboxId, mailboxId);
+    const std::vector<std::string> explicitlyRequestedMailboxIds;
+    const auto refreshTargets =
+        javelin::app::mailboxRefreshTargets(watchedMailboxes, explicitlyRequestedMailboxIds);
+    REQUIRE(refreshTargets ==
+            std::vector<std::pair<std::string, std::string>>{{"opened", "opened"}});
+
+    RecordingRejectingMethodTransport transport;
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailboxRefreshExecutor executor{
+        connection,
+        caller,
+        {.credentials =
+             {
+                 .accountId = configuration.accountId,
+                 .emailAddress = configuration.settings.loginEmail,
+                 .sessionUrl = configuration.settings.sessionUrl,
+                 .token =
+                     {
+                         .accessToken = configuration.settings.apiKey,
+                         .refreshToken = std::nullopt,
+                         .expiry = std::nullopt,
+                     },
+             },
+         .apiUrl = "https://example.test/jmap",
+         .requestLimits = std::nullopt}};
+    for (const auto& [mailboxId, mailboxName] : refreshTargets)
+    {
+        static_cast<void>(mailboxName);
+        const auto refresh = QCoro::waitFor(
+            executor.refreshCollapsedMailbox(configuration.accountId, mailboxId, {}));
+        CHECK(std::holds_alternative<javelin::jmap::OperationError>(refresh));
+    }
+
+    REQUIRE(transport.requests.size() == 1);
+    const auto& request = transport.requests.front();
+    REQUIRE_FALSE(request.envelope.methodCalls.empty());
+    CHECK(request.envelope.methodCalls.front().name == "Email/query");
+    bool mentionsOpened = false;
+    bool mentionsNotificationOnly = false;
+    for (const auto& call : request.envelope.methodCalls)
+    {
+        mentionsOpened = mentionsOpened || call.arguments.contains("opened");
+        mentionsNotificationOnly =
+            mentionsNotificationOnly || call.arguments.contains("notify-only");
+    }
+    CHECK(mentionsOpened);
+    CHECK_FALSE(mentionsNotificationOnly);
+}
+
+TEST_CASE("notification settings fence Email sync before activating a new baseline",
+          "[app][daemon][settings][notification][baseline][race]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto locationResult =
+        javelin::app::CacheLocationProvider{temporaryDirectory.path()}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(locationResult));
+    javelin::app::DaemonServices services{std::get<javelin::app::CacheLocation>(locationResult)};
+    auto& connection = services.databaseConnection();
+
+    QSqlQuery seed{connection.database()};
+    REQUIRE(seed.exec(QStringLiteral(
+        "INSERT INTO accounts(account_id,email_address,session_url,is_primary,cap_mail) "
+        "VALUES('account-1','user@example.test','http://127.0.0.1:9/jmap',1,1)")));
+    REQUIRE(seed.exec(
+        QStringLiteral("INSERT INTO sync_state(account_id,object_type,query_key,state_token) "
+                       "VALUES('account-1','Email','','email-state-1')")));
+
+    const auto configuration = [](std::vector<std::string> notificationMailboxIds)
+    {
+        return javelin::app::AccountSyncConfiguration{
+            .settings = {.connectionId = "connection-1",
+                         .revision = 0,
+                         .sessionUrl = "http://127.0.0.1:9/jmap",
+                         .loginEmail = "user@example.test",
+                         .apiKey = "secret",
+                         .refreshToken = {},
+                         .tokenEndpoint = {},
+                         .oauthClientId = {}},
+            .accountId = "account-1",
+            .mailboxIds = {},
+            .fullSyncMailboxIds = {},
+            .notificationMailboxIds = std::move(notificationMailboxIds),
+        };
+    };
+
+    services.accountRuntimeManager().applySettings({configuration({"inbox"})});
+
+    QSqlQuery activeMailboxes{connection.database()};
+    REQUIRE(activeMailboxes.exec(QStringLiteral(
+        "SELECT COUNT(*) FROM mail_notification_mailboxes WHERE account_id='account-1'")));
+    REQUIRE(activeMailboxes.next());
+    CHECK(activeMailboxes.value(0).toInt() == 0);
+
+    QSqlQuery generation{connection.database()};
+    REQUIRE(generation.exec(QStringLiteral(
+        "SELECT mutation_generation FROM consistency_domains WHERE account_id='account-1' AND "
+        "data_type='Email'")));
+    REQUIRE(generation.next());
+    CHECK(generation.value(0).toULongLong() == 1);
+
+    services.accountRuntimeManager().applySettings({configuration({"inbox"})});
+    REQUIRE(generation.exec(QStringLiteral(
+        "SELECT mutation_generation FROM consistency_domains WHERE account_id='account-1' AND "
+        "data_type='Email'")));
+    REQUIRE(generation.next());
+    CHECK(generation.value(0).toULongLong() == 1);
+
+    services.accountRuntimeManager().applySettings({configuration({"archive"})});
+    REQUIRE(generation.exec(QStringLiteral(
+        "SELECT mutation_generation FROM consistency_domains WHERE account_id='account-1' AND "
+        "data_type='Email'")));
+    REQUIRE(generation.next());
+    CHECK(generation.value(0).toULongLong() == 2);
+
+    REQUIRE(activeMailboxes.exec(QStringLiteral(
+        "SELECT COUNT(*) FROM mail_notification_mailboxes WHERE account_id='account-1'")));
+    REQUIRE(activeMailboxes.next());
+    CHECK(activeMailboxes.value(0).toInt() == 0);
+}
+
+TEST_CASE("existing active notification mailboxes do not require another baseline",
+          "[app][daemon][settings][notification][baseline][migration]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto locationResult =
+        javelin::app::CacheLocationProvider{temporaryDirectory.path()}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(locationResult));
+    javelin::app::DaemonServices services{std::get<javelin::app::CacheLocation>(locationResult)};
+    auto& connection = services.databaseConnection();
+
+    QSqlQuery seed{connection.database()};
+    REQUIRE(seed.exec(QStringLiteral(
+        "INSERT INTO accounts(account_id,email_address,session_url,is_primary,cap_mail) "
+        "VALUES('account-1','user@example.test','http://127.0.0.1:9/jmap',1,1)")));
+    REQUIRE(seed.exec(
+        QStringLiteral("INSERT INTO sync_state(account_id,object_type,query_key,state_token) "
+                       "VALUES('account-1','Email','','email-state-current')")));
+    REQUIRE(
+        seed.exec(QStringLiteral("INSERT INTO mail_notification_mailboxes(account_id,mailbox_id) "
+                                 "VALUES('account-1','inbox')")));
+
+    services.accountRuntimeManager().applySettings({javelin::app::AccountSyncConfiguration{
+        .settings = {.connectionId = "connection-1",
+                     .revision = 0,
+                     .sessionUrl = "http://127.0.0.1:9/jmap",
+                     .loginEmail = "user@example.test",
+                     .apiKey = "secret",
+                     .refreshToken = {},
+                     .tokenEndpoint = {},
+                     .oauthClientId = {}},
+        .accountId = "account-1",
+        .mailboxIds = {},
+        .fullSyncMailboxIds = {},
+        .notificationMailboxIds = {"inbox"},
+    }});
+
+    QSqlQuery active{connection.database()};
+    REQUIRE(active.exec(QStringLiteral(
+        "SELECT mailbox_id FROM mail_notification_mailboxes WHERE account_id='account-1'")));
+    REQUIRE(active.next());
+    CHECK(active.value(0).toString() == QStringLiteral("inbox"));
+    CHECK_FALSE(active.next());
+
+    QSqlQuery generation{connection.database()};
+    REQUIRE(generation.exec(
+        QStringLiteral("SELECT COUNT(*) FROM consistency_domains WHERE account_id='account-1' AND "
+                       "data_type='Email'")));
+    REQUIRE(generation.next());
+    CHECK(generation.value(0).toInt() == 0);
 }
 
 TEST_CASE("daemon log store enforces a bounded history", "[app][daemon][logging]")

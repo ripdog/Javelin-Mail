@@ -1,5 +1,7 @@
 #include "gui/shell/MessageFileUtils.h"
 
+#include <KLocalizedString>
+
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -198,7 +200,7 @@ namespace javelin::gui::shell
         {
             return ExternalDragDirectoryResult{
                 .path = {},
-                .errorMessage = QStringLiteral("Could not create the drag-out cache directory."),
+                .errorMessage = i18n("Could not create the drag-out cache directory."),
             };
         }
         cleanupExpiredExternalDragDirectories(rootPath, nowMilliseconds);

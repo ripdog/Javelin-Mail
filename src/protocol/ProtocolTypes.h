@@ -97,6 +97,7 @@ namespace javelin::protocol
         MailboxTree,
         MailQueryWindows,
         MessageMetadata,
+        MailTags,
         MessageContent,
         Contacts,
         Calendars,

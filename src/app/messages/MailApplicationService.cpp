@@ -31,6 +31,7 @@
 #include "jmap/cache/MailboxFilterReader.h"
 #include "jmap/cache/MailboxMessageReader.h"
 #include "jmap/cache/MailboxReadRepository.h"
+#include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxStatisticsReader.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/NotificationRepository.h"
@@ -79,6 +80,7 @@
 #include <algorithm>
 #include <chrono>
 #include <limits>
+#include <map>
 #include <ranges>
 #include <unordered_set>
 #include <utility>
@@ -278,6 +280,8 @@ namespace javelin::app
         }
 
         constexpr auto contactRefreshRetryDelay = std::chrono::seconds{30};
+        constexpr unsigned int notificationBaselineRetryMaximumExponent = 5;
+        constexpr unsigned int mailNotificationLocalRetryMaximumExponent = 5;
 
         [[nodiscard]] javelin::app::undo::ExactMailPatch
         historyPatch(const javelin::jmap::EmailMailboxMutation& mutation)
@@ -717,6 +721,9 @@ namespace javelin::app
         javelin::jmap::cache::DatabaseConnection& databaseConnection, QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection)
     {
+        m_localRetryTimer.setSingleShot(true);
+        connect(&m_localRetryTimer, &QTimer::timeout, this,
+                &MailNotificationService::retryLocalFailures);
     }
 
     ContactApplicationService::ContactApplicationService(
@@ -737,7 +744,7 @@ namespace javelin::app
                         .queryWindows = {},
                         .searchWindows = {},
                         .mailboxTreeChanged = false,
-                        .hasNewMail = false,
+                        .emailObjectsChanged = false,
                         .optimisticProjection = false,
                         .contactsChanged = true,
                     });
@@ -917,6 +924,8 @@ namespace javelin::app
             disconnect(coordinatorIt->second.get(), nullptr, this, nullptr);
             coordinatorIt = m_coordinators.erase(coordinatorIt);
             m_observedMailboxIds.erase(removedAccountId);
+            m_notificationBaselineRetryAttempts.erase(removedAccountId);
+            m_notificationBaselineRetriesPending.erase(removedAccountId);
             Q_EMIT accountRemoved(QString::fromStdString(removedAccountId));
         }
         std::erase_if(m_configurations, [&configuredAccountIds](const auto& entry)
@@ -1228,7 +1237,7 @@ namespace javelin::app
             .queryWindows = {},
             .searchWindows = {},
             .mailboxTreeChanged = true,
-            .hasNewMail = false,
+            .emailObjectsChanged = false,
             .optimisticProjection = unresolved,
         });
         m_accountRuntime.refreshAccountConfiguration(accountId);
@@ -1287,6 +1296,63 @@ namespace javelin::app
         configuration.mailboxIds.erase(std::ranges::unique(configuration.mailboxIds).begin(),
                                        configuration.mailboxIds.end());
 
+        bool notificationBaselineCheckFailed = false;
+        bool notificationBaselineRequired = false;
+        javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
+        if (const auto activeMailboxError = notifications.retainActiveMailboxes(
+                accountId, configuration.notificationMailboxIds))
+        {
+            qWarning().noquote() << "Could not prune disabled notification mailboxes"
+                                 << QString::fromStdString(accountId)
+                                 << activeMailboxError->message;
+            notificationBaselineCheckFailed = true;
+            notificationBaselineRequired = true;
+        }
+        else
+        {
+            javelin::jmap::cache::SyncStateRepository syncStates{m_databaseConnection};
+            const auto emailState =
+                syncStates.find({.accountId = accountId, .objectType = "Email", .queryKey = {}});
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailState))
+            {
+                qWarning().noquote() << "Could not read Email state for notification baseline"
+                                     << QString::fromStdString(accountId) << error->message;
+                notificationBaselineCheckFailed = true;
+                notificationBaselineRequired = true;
+            }
+            else if (const auto& state =
+                         std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState);
+                     !state.has_value())
+            {
+                notificationBaselineRequired = !configuration.notificationMailboxIds.empty();
+            }
+            else
+            {
+                const auto activeResult = notifications.activeMailboxIds(accountId);
+                if (const auto* activeReadError =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&activeResult))
+                {
+                    qWarning().noquote()
+                        << "Could not read active notification mailboxes"
+                        << QString::fromStdString(accountId) << activeReadError->message;
+                    notificationBaselineCheckFailed = true;
+                    notificationBaselineRequired = true;
+                }
+                else
+                {
+                    auto activeMailboxIds = std::get<std::vector<std::string>>(activeResult);
+                    auto desiredMailboxIds = configuration.notificationMailboxIds;
+                    std::ranges::sort(activeMailboxIds);
+                    std::ranges::sort(desiredMailboxIds);
+                    notificationBaselineRequired = activeMailboxIds != desiredMailboxIds;
+                }
+            }
+        }
+        if (notificationBaselineCheckFailed)
+            scheduleNotificationBaselineRetry(accountId);
+        else
+            m_notificationBaselineRetryAttempts.erase(accountId);
+
         auto [coordinatorIt, inserted] = m_coordinators.try_emplace(accountId);
         if (inserted)
         {
@@ -1302,9 +1368,45 @@ namespace javelin::app
             coordinatorIt->second->pauseForAuthentication();
             return;
         }
+        const auto desiredNotificationMailboxIds = configuration.notificationMailboxIds;
         coordinatorIt->second->applySettings(std::move(configuration.settings), accountId,
                                              std::move(configuration.mailboxIds),
                                              std::move(configuration.notificationMailboxIds));
+        const auto baselineConfigurationError =
+            notificationBaselineRequired
+                ? coordinatorIt->second->requestNotificationBaseline(desiredNotificationMailboxIds)
+                : coordinatorIt->second->cancelNotificationBaseline();
+        if (baselineConfigurationError.has_value())
+        {
+            qWarning().noquote() << "Could not serialize notification baseline configuration"
+                                 << QString::fromStdString(accountId)
+                                 << baselineConfigurationError->message;
+            scheduleNotificationBaselineRetry(accountId);
+        }
+    }
+
+    void AccountRuntimeManager::scheduleNotificationBaselineRetry(const std::string& accountId)
+    {
+        // This retry owns durable configuration and baseline setup only. The coordinator retains
+        // execution failures and retries the synchronized Email transition; active notification
+        // mailboxes are replaced only by that transition's commit.
+        if (!m_configurations.contains(accountId) ||
+            !m_notificationBaselineRetriesPending.insert(accountId).second)
+            return;
+
+        auto& attempts = m_notificationBaselineRetryAttempts[accountId];
+        const auto exponent = std::min(attempts, notificationBaselineRetryMaximumExponent);
+        ++attempts;
+        const auto delay = std::chrono::seconds{1U << exponent};
+        QTimer::singleShot(delay, this,
+                           [this, accountId]
+                           {
+                               m_notificationBaselineRetriesPending.erase(accountId);
+                               if (!m_configurations.contains(accountId) ||
+                                   !m_notificationBaselineRetryAttempts.contains(accountId))
+                                   return;
+                               applyAccountConfiguration(accountId);
+                           });
     }
 
     MailboxObservation MailQueryApplicationService::observeMailbox(std::string accountId,
@@ -1396,45 +1498,65 @@ namespace javelin::app
         return coordinator->second->requestMailboxSynchronization(mailboxId);
     }
 
-    void MailNotificationService::mailboxRefreshed(const QString& accountId,
-                                                   const QString& mailboxId,
-                                                   const QString& mailboxName)
+    void MailNotificationService::accountChanged(const QString& accountId)
     {
         javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
-        const auto candidates = notifications.enqueueUnreadMailboxEmails(accountId.toStdString(),
-                                                                         mailboxId.toStdString());
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&candidates))
+        const auto claimed = notifications.claimPendingEvents(accountId.toStdString());
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&claimed))
         {
-            qWarning().noquote() << "Notification observation failed" << error->message;
+            qWarning().noquote() << "Claim mail notification delivery failed" << error->message;
+            Q_EMIT deliveryRetryRequired(accountId);
             return;
         }
 
         const auto& pending =
-            std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(candidates);
+            std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(claimed);
         if (pending.empty())
             return;
 
-        const auto& target = pending.front();
-        QString title;
-        if (pending.size() == 1)
-            title = QStringLiteral("New mail in %1").arg(mailboxName);
-        else
-            title = QStringLiteral("%1 new messages in %2").arg(pending.size()).arg(mailboxName);
-        const auto message = subjectForDisplay(target.subject);
+        std::map<std::string,
+                 std::vector<const javelin::jmap::cache::MailNotificationPendingEvent*>>
+            byMailbox;
+        for (const auto& event : pending)
+            byMailbox[event.mailboxId].push_back(&event);
 
-        QStringList deliveredEmailIds;
-        deliveredEmailIds.reserve(static_cast<qsizetype>(pending.size()));
-        for (const auto& candidate : pending)
-            deliveredEmailIds.push_back(QString::fromStdString(candidate.emailId));
+        javelin::jmap::cache::MailboxRepository mailboxes{m_databaseConnection};
+        for (const auto& [mailboxId, events] : byMailbox)
+        {
+            QString mailboxName = QString::fromStdString(mailboxId);
+            const auto mailboxResult = mailboxes.find(accountId.toStdString(), mailboxId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxResult))
+            {
+                qWarning().noquote() << "Read notification mailbox name failed" << error->message;
+            }
+            else if (const auto& mailbox =
+                         std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailboxResult);
+                     mailbox.has_value())
+            {
+                mailboxName = QString::fromStdString(mailbox->name);
+            }
 
-        Q_EMIT notificationRaised(accountId, mailboxId, QString::fromStdString(target.threadId),
-                                  QString::fromStdString(target.emailId), mailboxName, title,
-                                  message, deliveredEmailIds);
+            const auto& target = *events.front();
+            const auto title = events.size() == 1
+                                   ? i18n("New mail in %1", mailboxName)
+                                   : i18np("%1 new message in %2", "%1 new messages in %2",
+                                           events.size(), mailboxName);
+            const auto message = subjectForDisplay(target.subject);
+            QStringList deliveredEmailIds;
+            deliveredEmailIds.reserve(static_cast<qsizetype>(events.size()));
+            for (const auto* event : events)
+                deliveredEmailIds.push_back(QString::fromStdString(event->emailId));
+
+            Q_EMIT notificationRaised(accountId, QString::fromStdString(mailboxId),
+                                      QString::fromStdString(target.threadId),
+                                      QString::fromStdString(target.emailId), mailboxName, title,
+                                      message, deliveredEmailIds);
+        }
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
     MailNotificationService::markDelivered(const std::string_view accountId,
-                                           const std::string_view mailboxId,
                                            const QStringList& emailIds)
     {
         std::vector<std::string> ids;
@@ -1442,7 +1564,10 @@ namespace javelin::app
         for (const auto& emailId : emailIds)
             ids.push_back(emailId.toStdString());
         javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
-        return notifications.markDelivered(accountId, mailboxId, ids);
+        const auto error = notifications.markDelivered(accountId, ids);
+        if (error.has_value())
+            rememberLocalRetry(m_markDeliveredRetries, QString::fromUtf8(accountId), emailIds);
+        return error;
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
@@ -1454,7 +1579,80 @@ namespace javelin::app
         for (const auto& emailId : emailIds)
             ids.push_back(emailId.toStdString());
         javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
-        return notifications.releaseDispatches(accountId, ids);
+        const auto error = notifications.releaseDispatches(accountId, ids);
+        if (error.has_value())
+            rememberLocalRetry(m_releaseDispatchRetries, QString::fromUtf8(accountId), emailIds);
+        return error;
+    }
+
+    void MailNotificationService::rememberLocalRetry(RetryMap& retries, QString accountId,
+                                                     const QStringList& emailIds)
+    {
+        if (emailIds.isEmpty())
+            return;
+        auto& pending = retries[std::move(accountId)];
+        for (const auto& emailId : emailIds)
+            pending.insert(emailId);
+        scheduleLocalRetry();
+    }
+
+    void MailNotificationService::scheduleLocalRetry()
+    {
+        if (m_localRetryTimer.isActive() ||
+            (m_markDeliveredRetries.isEmpty() && m_releaseDispatchRetries.isEmpty()))
+            return;
+
+        if (m_localRetryAttempts == 0)
+        {
+            ++m_localRetryAttempts;
+            m_localRetryTimer.start(0);
+            return;
+        }
+
+        const auto exponent =
+            std::min(m_localRetryAttempts - 1, mailNotificationLocalRetryMaximumExponent);
+        ++m_localRetryAttempts;
+        m_localRetryTimer.start(
+            static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::seconds{1U << exponent})
+                                 .count()));
+    }
+
+    void MailNotificationService::retryLocalFailures()
+    {
+        auto deliveredRetries = std::exchange(m_markDeliveredRetries, {});
+        auto releaseRetries = std::exchange(m_releaseDispatchRetries, {});
+
+        for (auto it = deliveredRetries.cbegin(); it != deliveredRetries.cend(); ++it)
+        {
+            QStringList emailIds;
+            emailIds.reserve(it.value().size());
+            for (const auto& emailId : it.value())
+                emailIds.push_back(emailId);
+            if (const auto error = markDelivered(it.key().toStdString(), emailIds))
+                qWarning().noquote()
+                    << "Retry mail notification delivery acknowledgement failed" << error->message;
+        }
+
+        for (auto it = releaseRetries.cbegin(); it != releaseRetries.cend(); ++it)
+        {
+            QStringList emailIds;
+            emailIds.reserve(it.value().size());
+            for (const auto& emailId : it.value())
+                emailIds.push_back(emailId);
+            if (const auto error = releaseDispatches(it.key().toStdString(), emailIds))
+            {
+                qWarning().noquote()
+                    << "Retry mail notification dispatch release failed" << error->message;
+                continue;
+            }
+            Q_EMIT deliveryRetryRequired(it.key());
+        }
+
+        if (m_markDeliveredRetries.isEmpty() && m_releaseDispatchRetries.isEmpty())
+            m_localRetryAttempts = 0;
+        else
+            scheduleLocalRetry();
     }
 
     std::optional<javelin::jmap::cache::DatabaseError> MailNotificationService::recoverDispatches()
@@ -1484,7 +1682,7 @@ namespace javelin::app
             }},
             .searchWindows = {},
             .mailboxTreeChanged = false,
-            .hasNewMail = false,
+            .emailObjectsChanged = false,
         });
     }
 
@@ -1789,7 +1987,7 @@ namespace javelin::app
                 .total = page.total,
             }},
             .searchWindows = {},
-            .hasNewMail = false,
+            .emailObjectsChanged = false,
         });
         co_return summary;
     }
@@ -1896,7 +2094,7 @@ namespace javelin::app
                         .limit = intent.limit,
                         .total = *total,
                     }},
-                    .hasNewMail = false,
+                    .emailObjectsChanged = false,
                 });
                 co_return SearchWindowSummary{
                     .accountId = std::move(intent.accountId),
@@ -1981,7 +2179,7 @@ namespace javelin::app
                 .limit = page.limit,
                 .total = page.total,
             }},
-            .hasNewMail = false,
+            .emailObjectsChanged = false,
         });
         co_return summary;
     }
@@ -2688,6 +2886,14 @@ namespace javelin::app
             };
         }
 
+        Q_EMIT cacheCommitted(MailCacheChange{
+            .accountId = QString::fromStdString(definition.accountId),
+            .mailboxIds = {},
+            .queryWindows = {},
+            .searchWindows = {},
+            .mailTagsChanged = true,
+        });
+
         return MailTagDefinition{
             .accountId = std::move(definition.accountId),
             .keyword = std::move(keyword),
@@ -2763,7 +2969,7 @@ namespace javelin::app
                 .queryWindows = {},
                 .searchWindows = {},
                 .mailboxTreeChanged = true,
-                .hasNewMail = false,
+                .emailObjectsChanged = false,
                 .optimisticProjection = optimisticProjection,
             });
         };
@@ -2802,7 +3008,7 @@ namespace javelin::app
                 .queryWindows = {},
                 .searchWindows = {},
                 .mailboxTreeChanged = true,
-                .hasNewMail = false,
+                .emailObjectsChanged = false,
                 .optimisticProjection = optimisticProjection,
             });
         };
@@ -2841,7 +3047,7 @@ namespace javelin::app
                 .queryWindows = {},
                 .searchWindows = {},
                 .mailboxTreeChanged = true,
-                .hasNewMail = false,
+                .emailObjectsChanged = false,
                 .optimisticProjection = optimisticProjection,
             });
         };
@@ -2875,11 +3081,6 @@ namespace javelin::app
     MailMutationApplicationService::queueExactEmailMutations(
         std::string accountId, std::vector<javelin::jmap::EmailMailboxMutation> mutations)
     {
-        auto result = m_emailMutationEngine.queueBatch(accountId, std::move(mutations));
-        const auto* queued = std::get_if<std::vector<javelin::jmap::QueuedEmailMutation>>(&result);
-        if (queued == nullptr)
-            return result;
-
         QStringList affectedMailboxIds;
         const auto appendMailboxIds = [&affectedMailboxIds](const auto& mailboxIds)
         {
@@ -2890,6 +3091,23 @@ namespace javelin::app
                     affectedMailboxIds.push_back(value);
             }
         };
+
+        javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
+        for (const auto& mutation : mutations)
+        {
+            const auto found = emails.find(accountId, mutation.emailId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&found))
+                return javelin::jmap::operationError(*error);
+            const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(found);
+            if (email.has_value())
+                appendMailboxIds(email->mailboxIds);
+        }
+
+        auto result = m_emailMutationEngine.queueBatch(accountId, std::move(mutations));
+        const auto* queued = std::get_if<std::vector<javelin::jmap::QueuedEmailMutation>>(&result);
+        if (queued == nullptr)
+            return result;
+
         for (const auto& mutation : *queued)
         {
             appendMailboxIds(mutation.patch.addMailboxIds);
@@ -2904,7 +3122,7 @@ namespace javelin::app
             .queryWindows = {},
             .searchWindows = {},
             .mailboxTreeChanged = false,
-            .hasNewMail = false,
+            .emailObjectsChanged = false,
             .optimisticProjection = true,
         });
         return result;
@@ -3041,7 +3259,7 @@ namespace javelin::app
                 .queryWindows = {},
                 .searchWindows = {},
                 .mailboxTreeChanged = false,
-                .hasNewMail = false,
+                .emailObjectsChanged = false,
                 .optimisticProjection = true,
             });
         }
@@ -3761,8 +3979,9 @@ namespace javelin::app
                     .queryWindows = {},
                     .searchWindows = {},
                     .mailboxTreeChanged = false,
-                    .hasNewMail = false,
+                    .emailObjectsChanged = false,
                     .optimisticProjection = false,
+                    .mailTagsChanged = true,
                 });
                 co_return;
             }
@@ -4718,7 +4937,12 @@ namespace javelin::app
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
             std::move(accountId), std::move(calendarId), std::move(withTime),
             std::move(withoutTime));
-        if (std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result))
+        if (const auto* mutationError = std::get_if<javelin::jmap::OperationError>(&result);
+            mutationError != nullptr && mutationError->outcomeUnknown)
+        {
+            requireCatchUp(ownerAccountId);
+        }
+        else if (std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result))
         {
             const auto range = m_visibleCalendarRanges.find(ownerAccountId);
             if (range != m_visibleCalendarRanges.end())
@@ -5286,8 +5510,8 @@ namespace javelin::app
         connect(&coordinator, &AccountSyncCoordinator::calendarStateChanged, this,
                 [this](const QString& ownerAccountId, const auto& changedStates)
                 { Q_EMIT calendarStateChanged(ownerAccountId, changedStates); });
-        connect(&coordinator, &AccountSyncCoordinator::notificationMailboxRefreshed, this,
-                &AccountRuntimeManager::notificationMailboxRefreshed);
+        connect(&coordinator, &AccountSyncCoordinator::notificationEventsCommitted, this,
+                &AccountRuntimeManager::notificationEventsCommitted);
         connect(
             &coordinator, &AccountSyncCoordinator::operationFailed, this,
             [this, accountId](const QString& operation, const javelin::jmap::OperationError& error)

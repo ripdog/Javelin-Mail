@@ -7,6 +7,7 @@
 #include "jmap/api/Transport.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailSearchIndex.h"
+#include "jmap/cache/NotificationRepository.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/domain/MailEntities.h"
@@ -85,6 +86,43 @@ namespace
             co_return javelin::jmap::api::TransportError{
                 .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
                 .message = "Unexpected JMAP method request during body hydration",
+            };
+        }
+    };
+
+    class HistoricalUnreadMethodTransport final : public javelin::jmap::api::JmapMethodTransport
+    {
+      public:
+        std::size_t calls = 0;
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
+        call(javelin::jmap::api::JmapMethodRequest request) override
+        {
+            if (request.dispatched)
+                request.dispatched();
+            ++calls;
+            REQUIRE(request.envelope.methodCalls.size() == 2);
+            REQUIRE(request.envelope.methodCalls[0].name == "Email/query");
+            REQUIRE(request.envelope.methodCalls[1].name == "Email/get");
+
+            co_return javelin::jmap::api::ResponseEnvelope{
+                .methodResponses =
+                    {
+                        {
+                            .name = "Email/query",
+                            .arguments =
+                                R"({"accountId":"account-1","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["historical-unread"],"total":1})",
+                            .callId = request.envelope.methodCalls[0].callId,
+                        },
+                        {
+                            .name = "Email/get",
+                            .arguments =
+                                R"({"accountId":"account-1","state":"email-state-1","list":[{"id":"historical-unread","blobId":"historical-blob","threadId":"historical-thread","mailboxIds":{"archive":true},"keywords":{},"size":128,"receivedAt":"2026-07-01T01:00:00Z","hasAttachment":false,"subject":"Historical unread","from":[{"email":"sender@example.test"}],"to":[{"email":"user@example.test"}],"cc":[],"bcc":[],"replyTo":[]}],"notFound":[]})",
+                            .callId = request.envelope.methodCalls[1].callId,
+                        },
+                    },
+                .createdIds = std::nullopt,
+                .sessionState = "session-state-1",
             };
         }
     };
@@ -399,6 +437,51 @@ TEST_CASE("offline sync does not run for a deleted mailbox", "[app][offline][del
     CHECK_FALSE(record->has_value());
     CHECK(methods.calls == 0);
     CHECK(resources.requests.empty());
+}
+
+TEST_CASE("complete offline enumeration cannot turn historical unread mail into new mail",
+          "[app][offline][notification][historical]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabase();
+    seedAccount(database.connection);
+
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    REQUIRE_FALSE(notifications.replaceActiveMailboxes("account-1", {"archive"}).has_value());
+
+    RecordingResourceTransport resources;
+    HistoricalUnreadMethodTransport methods;
+    javelin::jmap::MailQueryClient queryClient{database.connection, methods};
+    javelin::jmap::MessageContentClient contentClient{database.connection, resources};
+    javelin::app::WorkScheduler scheduler{database.connection, nullptr,
+                                          std::chrono::milliseconds{0}};
+    javelin::app::MailIndexService indexer{database.connection, scheduler};
+    javelin::app::FullMailSyncService service{database.connection, queryClient, contentClient,
+                                              scheduler, indexer};
+    service.applySettings({configuration()});
+
+    REQUIRE(waitUntil(
+        [&]()
+        {
+            const auto job = scheduler.find(fullSyncJobId());
+            const auto* record = std::get_if<std::optional<javelin::app::WorkRecord>>(&job);
+            return record != nullptr && record->has_value() &&
+                   (*record)->status == javelin::app::WorkStatus::Complete;
+        }));
+
+    CHECK(methods.calls == 1);
+    CHECK(resources.requests.size() == 1);
+    CHECK(scopeStatus(database.connection) == QStringLiteral("complete"));
+    CHECK(scalar(database.connection,
+                 QStringLiteral("SELECT COUNT(*) FROM emails WHERE account_id='account-1' AND "
+                                "email_id='historical-unread'")) == 1);
+    CHECK(scalar(database.connection,
+                 QStringLiteral("SELECT COUNT(*) FROM mail_notification_state WHERE "
+                                "account_id='account-1'")) == 0);
+    CHECK(scalar(database.connection,
+                 QStringLiteral("SELECT COUNT(*) FROM mail_notification_event_outbox WHERE "
+                                "account_id='account-1'")) == 0);
 }
 
 TEST_CASE("offline body hydration resumes after restart without re-enumerating mailbox",

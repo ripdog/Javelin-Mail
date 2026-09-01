@@ -189,7 +189,7 @@ namespace javelin::app
                 .queryWindows = {},
                 .searchWindows = {},
                 .mailboxTreeChanged = false,
-                .hasNewMail = false,
+                .emailObjectsChanged = false,
                 .optimisticProjection = true,
             });
             m_lastSavedSnapshots.insert_or_assign(savedSnapshot.composeSessionId, savedSnapshot);

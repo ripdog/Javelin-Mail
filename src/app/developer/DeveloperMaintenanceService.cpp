@@ -955,7 +955,7 @@ namespace javelin::app
             .queryWindows = {},
             .searchWindows = {},
             .mailboxTreeChanged = false,
-            .hasNewMail = false,
+            .emailObjectsChanged = false,
             .optimisticProjection = false,
             .contactsChanged = false,
         });

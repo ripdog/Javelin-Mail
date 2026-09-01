@@ -674,40 +674,6 @@ namespace javelin::gui::messages
         return m_threads[*threadIndex].summary.emailId;
     }
 
-    bool MessageListModel::setEmailRead(const std::string_view emailId)
-    {
-        bool changed = false;
-        for (auto& thread : m_threads)
-        {
-            if (thread.summary.emailId == emailId && thread.summary.isUnread)
-            {
-                thread.summary.isUnread = false;
-                changed = true;
-            }
-            for (auto& member : thread.members)
-            {
-                if (member.emailId == emailId && member.isUnread)
-                {
-                    member.isUnread = false;
-                    changed = true;
-                }
-            }
-        }
-        if (!changed)
-            return false;
-
-        for (std::size_t row = 0; row < m_rows.size(); ++row)
-        {
-            if (itemForRow(m_rows[row]).emailId == emailId)
-            {
-                const auto changedIndex = index(static_cast<int>(row), 0);
-                Q_EMIT dataChanged(changedIndex, changedIndex,
-                                   {IsUnreadRole, Qt::AccessibleTextRole});
-            }
-        }
-        return true;
-    }
-
     const javelin::jmap::cache::MessageListItem&
     MessageListModel::itemForRow(const VisibleRow& row) const
     {

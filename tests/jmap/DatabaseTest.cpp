@@ -198,7 +198,7 @@ TEST_CASE("participant identity state migration preserves calendar tokens and wi
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 64);
+    CHECK(migrated.schemaVersion() == 68);
 
     QSqlQuery preserved{migrated.database()};
     REQUIRE(preserved.exec(QStringLiteral(
@@ -216,6 +216,159 @@ TEST_CASE("participant identity state migration preserves calendar tokens and wi
     REQUIRE(widened.exec(
         QStringLiteral("INSERT INTO calendar_state_tokens(account_id,data_type,state) VALUES "
                        "('account-1','ParticipantIdentity','participant-state-1')")));
+}
+
+TEST_CASE("legacy mail notification state is discarded without touching cached mail",
+          "[jmap][cache][database][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+    const QString databasePath =
+        temporaryDir.filePath(QStringLiteral("legacy-mail-notification-cache.sqlite3"));
+    const QString fixtureConnectionName = makeConnectionName();
+    {
+        QSqlDatabase fixture =
+            QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), fixtureConnectionName);
+        fixture.setDatabaseName(databasePath);
+        REQUIRE(fixture.open());
+
+        const auto currentRunner = javelin::jmap::cache::createDefaultMigrationRunner();
+        const auto notificationState = std::ranges::find_if(
+            currentRunner.steps(), [](const auto& step) { return step.version == 65; });
+        REQUIRE(notificationState != currentRunner.steps().end());
+        std::vector<javelin::jmap::cache::MigrationStep> legacySteps{currentRunner.steps().begin(),
+                                                                     notificationState};
+        const javelin::jmap::cache::MigrationRunner legacyRunner{std::move(legacySteps)};
+        REQUIRE_FALSE(legacyRunner.migrate(fixture).has_value());
+
+        QSqlQuery seed{fixture};
+        REQUIRE(seed.exec(QStringLiteral(
+            "INSERT INTO accounts(account_id,email_address,session_url,is_primary) "
+            "VALUES('account-1','alice@example.test','https://example.test/jmap',1)")));
+        REQUIRE(seed.exec(
+            QStringLiteral("INSERT INTO emails(account_id,email_id,thread_id,subject,preview) "
+                           "VALUES('account-1','email-1','thread-1','Subject','Preview')")));
+        REQUIRE(seed.exec(
+            QStringLiteral("INSERT INTO observed_notification_emails(account_id,email_id) "
+                           "VALUES('account-1','email-1')")));
+        REQUIRE(seed.exec(QStringLiteral(
+            "INSERT INTO mail_notification_outbox(account_id,mailbox_id,email_id,thread_id,subject,"
+            "received_at,status) VALUES('account-1','inbox','email-1','thread-1','Subject',"
+            "'2026-08-27T00:00:00Z','pending')")));
+        REQUIRE(seed.exec(QStringLiteral("INSERT INTO notification_dispatch_claims(kind,claim_key) "
+                                         "VALUES('mail','legacy-claim')")));
+        seed.finish();
+        fixture.close();
+    }
+    QSqlDatabase::removeDatabase(fixtureConnectionName);
+
+    auto migratedResult = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = databasePath,
+    });
+    if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
+        FAIL(error->message.toStdString());
+    auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
+    CHECK(migrated.schemaVersion() == 68);
+
+    QSqlQuery email{migrated.database()};
+    REQUIRE(email.exec(QStringLiteral(
+        "SELECT subject FROM emails WHERE account_id='account-1' AND email_id='email-1'")));
+    REQUIRE(email.next());
+    CHECK(email.value(0).toString() == QStringLiteral("Subject"));
+
+    QSqlQuery legacyTables{migrated.database()};
+    REQUIRE(legacyTables.exec(
+        QStringLiteral("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN "
+                       "('observed_notification_emails','mail_notification_outbox')")));
+    REQUIRE(legacyTables.next());
+    CHECK(legacyTables.value(0).toInt() == 0);
+
+    QSqlQuery newState{migrated.database()};
+    REQUIRE(newState.exec(
+        QStringLiteral("SELECT (SELECT COUNT(*) FROM mail_notification_state),"
+                       "(SELECT COUNT(*) FROM mail_notification_event_outbox),"
+                       "(SELECT COUNT(*) FROM notification_dispatch_claims WHERE kind='mail')")));
+    REQUIRE(newState.next());
+    CHECK(newState.value(0).toInt() == 0);
+    CHECK(newState.value(1).toInt() == 0);
+    CHECK(newState.value(2).toInt() == 0);
+}
+
+TEST_CASE(
+    "stale notification horizon migration preserves the armed mailbox without its Email token",
+    "[jmap][cache][database][notification][migration]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+    const QString databasePath =
+        temporaryDir.filePath(QStringLiteral("stale-notification-horizon-cache.sqlite3"));
+    const QString fixtureConnectionName = makeConnectionName();
+    {
+        QSqlDatabase fixture =
+            QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), fixtureConnectionName);
+        fixture.setDatabaseName(databasePath);
+        REQUIRE(fixture.open());
+
+        const auto currentRunner = javelin::jmap::cache::createDefaultMigrationRunner();
+        const auto simplifiedMailboxes = std::ranges::find_if(
+            currentRunner.steps(), [](const auto& step) { return step.version == 68; });
+        REQUIRE(simplifiedMailboxes != currentRunner.steps().end());
+        std::vector<javelin::jmap::cache::MigrationStep> legacySteps{currentRunner.steps().begin(),
+                                                                     simplifiedMailboxes};
+        const javelin::jmap::cache::MigrationRunner legacyRunner{std::move(legacySteps)};
+        REQUIRE_FALSE(legacyRunner.migrate(fixture).has_value());
+
+        QSqlQuery seed{fixture};
+        REQUIRE(seed.exec(QStringLiteral(
+            "INSERT INTO accounts(account_id,email_address,session_url,is_primary) "
+            "VALUES('account-1','alice@example.test','https://example.test/jmap',1)")));
+        REQUIRE(seed.exec(
+            QStringLiteral("INSERT INTO sync_state(account_id,object_type,query_key,state_token) "
+                           "VALUES('account-1','Email','','email-state-current')")));
+        REQUIRE(seed.exec(QStringLiteral(
+            "INSERT INTO mail_notification_horizons(account_id,mailbox_id,email_state,enabled_at) "
+            "VALUES('account-1','inbox','email-state-stale','2026-08-27 18:51:14')")));
+        seed.finish();
+        fixture.close();
+    }
+    QSqlDatabase::removeDatabase(fixtureConnectionName);
+
+    auto migratedResult = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = databasePath,
+    });
+    if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
+        FAIL(error->message.toStdString());
+    auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
+    CHECK(migrated.schemaVersion() == 68);
+
+    QSqlQuery active{migrated.database()};
+    REQUIRE(active.exec(QStringLiteral(
+        "SELECT mailbox_id FROM mail_notification_mailboxes WHERE account_id='account-1'")));
+    REQUIRE(active.next());
+    CHECK(active.value(0).toString() == QStringLiteral("inbox"));
+    CHECK_FALSE(active.next());
+
+    QSqlQuery retired{migrated.database()};
+    REQUIRE(retired.exec(QStringLiteral("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND "
+                                        "name='mail_notification_horizons'")));
+    REQUIRE(retired.next());
+    CHECK(retired.value(0).toInt() == 0);
+
+    QSqlQuery columns{migrated.database()};
+    REQUIRE(columns.exec(QStringLiteral("PRAGMA table_info(mail_notification_mailboxes)")));
+    std::vector<QString> columnNames;
+    while (columns.next())
+        columnNames.push_back(columns.value(1).toString());
+    CHECK(columnNames ==
+          std::vector<QString>{QStringLiteral("account_id"), QStringLiteral("mailbox_id")});
 }
 
 TEST_CASE("mutation journal retention migrates and follows durable owners",
@@ -288,7 +441,7 @@ TEST_CASE("mutation journal retention migrates and follows durable owners",
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 64);
+    CHECK(migrated.schemaVersion() == 68);
 
     QSqlQuery retained{migrated.database()};
     REQUIRE(retained.exec(

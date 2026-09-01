@@ -105,14 +105,12 @@ namespace javelin::gui::shell
         MessageCommandController& commandController, QuickFilterController& quickFilterController,
         QListView& messageView, QMenu& tagsMenu, QWidget& parentWidget, MailActions actions,
         std::function<void(QString, int)> showStatus,
-        std::function<void(const javelin::jmap::OperationError&)> showError,
-        std::function<void()> refreshMessageList, QObject* parent)
+        std::function<void(const javelin::jmap::OperationError&)> showError, QObject* parent)
         : QObject(parent), m_mailboxReader(mailboxReader), m_mailTagReader(mailTagReader),
           m_mailCommandPort(mailCommandPort), m_selectionController(selectionController),
           m_commandController(commandController), m_quickFilterController(quickFilterController),
           m_messageView(messageView), m_tagsMenu(tagsMenu), m_parentWidget(parentWidget),
-          m_actions(actions), m_showStatus(std::move(showStatus)),
-          m_showError(std::move(showError)), m_refreshMessageList(std::move(refreshMessageList))
+          m_actions(actions), m_showStatus(std::move(showStatus)), m_showError(std::move(showError))
     {
         connect(&m_actions.archive, &QAction::triggered, this,
                 [this]
@@ -555,7 +553,6 @@ namespace javelin::gui::shell
                 const auto& tag = std::get<javelin::app::MailTagDefinition>(result);
                 m_showStatus(i18n("Created tag %1", QString::fromStdString(tag.displayName)), 5000);
                 m_quickFilterController.rebuildTagsMenu();
-                m_refreshMessageList();
                 if (applyToSelection && activeAccountId() == std::optional<std::string>{accountId})
                 {
                     m_commandController.setSelectionTag(accountId, activeMailboxId(), tag.keyword,
@@ -647,7 +644,6 @@ namespace javelin::gui::shell
                     if (guardedList != nullptr)
                         reload();
                     m_quickFilterController.rebuildTagsMenu();
-                    m_refreshMessageList();
                 });
         };
 
@@ -775,7 +771,6 @@ namespace javelin::gui::shell
                                            return;
                                        }
                                        m_quickFilterController.removeTag(keyword);
-                                       m_refreshMessageList();
                                        m_showStatus(
                                            i18n("Tag deletion queued in Background Tasks."), 5000);
                                    });

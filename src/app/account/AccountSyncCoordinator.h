@@ -9,7 +9,6 @@
 #include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/sync/EventSourceLongPoll.h"
 #include "jmap/sync/LongPollWorker.h"
-#include "jmap/sync/RefreshNotificationTypes.h"
 #include "jmap/sync/WebSocketPushChannel.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
@@ -65,6 +64,10 @@ namespace javelin::app
         void applySettings(AccountConnectionSettings settings, std::string accountId,
                            std::vector<std::string> mailboxIds,
                            std::vector<std::string> notificationMailboxIds);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        requestNotificationBaseline(std::vector<std::string> mailboxIds);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        cancelNotificationBaseline();
         void stop();
         void pauseForAuthentication();
         void networkBecameReachable();
@@ -84,8 +87,7 @@ namespace javelin::app
                                  const javelin::jmap::sync::AccountTypeStateMap& changedStates);
         void identityStateChanged(const QString& ownerAccountId,
                                   const javelin::jmap::sync::AccountTypeStateMap& changedStates);
-        void notificationMailboxRefreshed(const QString& accountId, const QString& mailboxId,
-                                          const QString& mailboxName);
+        void notificationEventsCommitted(const QString& accountId);
         void operationFailed(const QString& operation, javelin::jmap::OperationError error);
         void operationSucceeded();
         void stateChangeCatchUpRequired();
@@ -165,6 +167,8 @@ namespace javelin::app
         void handleResumeWatchdogTimeout();
         void scheduleDebouncedRefresh(bool forceEmailRefresh = false,
                                       std::vector<std::string> mailboxIds = {});
+        void scheduleNotificationBaselineRetry();
+        void scheduleNotificationBaselineRefresh();
         void scheduleCatchUpRefresh();
         void processGroupwareStateChanges();
         [[nodiscard]] bool domainHasActiveMutation(std::string_view accountId,
@@ -220,7 +224,10 @@ namespace javelin::app
         MailRefreshDemand m_queuedRefreshDemand;
         MailRefreshDemand m_debouncedRefreshDemand;
         QTimer m_refreshDebounceTimer;
+        QTimer m_notificationBaselineRetryTimer;
         QTimer m_resumeWatchdogTimer;
+        std::optional<std::vector<std::string>> m_pendingNotificationBaselineMailboxIds;
+        unsigned int m_notificationBaselineRetryAttempts = 0;
         qint64 m_lastResumeWatchdogTickMs = 0;
     };
 

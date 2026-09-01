@@ -2,12 +2,15 @@
 #include "jmap/api/SessionRefreshClient.h"
 #include "jmap/query/MailQueryClient.h"
 #include "jmap/query/MailQueryMaterializer.h"
+#include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include "FixtureReader.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/Transport.h"
+#include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
+#include "jmap/cache/SyncStateRepository.h"
 
 #include <QCoroTask>
 
@@ -70,6 +73,14 @@ namespace
         return *serialized;
     }
 
+    [[nodiscard]] std::string emailGetArguments(std::string_view accountId, std::string_view state,
+                                                std::string_view emailJson)
+    {
+        return std::string{R"({"accountId":")"} + std::string{accountId} + R"(","state":")" +
+               std::string{state} + R"(","list":[)" + std::string{emailJson} +
+               R"(],"notFound":[]})";
+    }
+
     [[nodiscard]] std::string emailFixtureWithIdentity(std::string_view emailId,
                                                        std::string_view threadId)
     {
@@ -83,6 +94,15 @@ namespace
         REQUIRE(threadPosition != std::string::npos);
         email.replace(threadPosition, std::string{R"("threadId": "thr-123")"}.size(),
                       R"("threadId": ")" + std::string{threadId} + '"');
+        return email;
+    }
+
+    [[nodiscard]] std::string unreadEmailFixture()
+    {
+        auto email = emailFixtureWithIdentity("eml-1", "thr-123");
+        const auto seenPosition = email.find(R"("$seen": true)");
+        REQUIRE(seenPosition != std::string::npos);
+        email.replace(seenPosition, std::string{R"("$seen": true)"}.size(), R"("$seen": false)");
         return email;
     }
 } // namespace
@@ -172,6 +192,12 @@ TEST_CASE("AccountBootstrapClient does not invent an initial mailbox when none i
                             javelin::tests::loadFixture("jmap/method/mailbox_get_arguments.json"),
                         .callId = "mailboxes",
                     },
+                    {
+                        .name = "Email/get",
+                        .arguments =
+                            R"({"accountId":"u1","state":"email-state-1","list":[],"notFound":[]})",
+                        .callId = "initial-email-state",
+                    },
                 },
             .createdIds = std::nullopt,
             .sessionState = "session-state-2",
@@ -194,7 +220,202 @@ TEST_CASE("AccountBootstrapClient does not invent an initial mailbox when none i
     CHECK(summary.emailCount == 0);
     REQUIRE(transport.requests.size() == 2);
     CHECK(transport.requests.back().body.contains("\"Mailbox/get\""));
+    CHECK(transport.requests.back().body.contains("\"Email/get\""));
+    CHECK(transport.requests.back().body.contains("\"ids\":[]"));
     CHECK_FALSE(transport.requests.back().body.contains("\"Email/query\""));
+
+    javelin::jmap::cache::SyncStateRepository syncStates{database};
+    const auto emailState =
+        syncStates.find({.accountId = summary.accountId, .objectType = "Email", .queryKey = {}});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState)->stateToken ==
+          "email-state-1");
+
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(
+            javelin::tests::loadFixture("jmap/session/websocket_session.json")),
+    });
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(serializeResponseEnvelope({
+            .methodResponses =
+                {
+                    {
+                        .name = "Mailbox/get",
+                        .arguments =
+                            javelin::tests::loadFixture("jmap/method/mailbox_get_arguments.json"),
+                        .callId = "mailboxes",
+                    },
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "session-state-3",
+        })),
+    });
+
+    const auto repeatedResult = QCoro::waitFor(bootstrap.bootstrap(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "connection-1"));
+    REQUIRE(std::holds_alternative<javelin::jmap::LiveRefreshSummary>(repeatedResult));
+    REQUIRE(transport.requests.size() == 4);
+    CHECK(transport.requests.back().body.contains("\"Mailbox/get\""));
+    CHECK_FALSE(transport.requests.back().body.contains("\"Email/get\""));
+
+    const auto repeatedEmailState =
+        syncStates.find({.accountId = summary.accountId, .objectType = "Email", .queryKey = {}});
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(
+        repeatedEmailState));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(repeatedEmailState)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(repeatedEmailState)
+              ->stateToken == "email-state-1");
+}
+
+TEST_CASE("AccountBootstrapClient baselines historical unread mail before configured window "
+          "materialization",
+          "[jmap][core][bootstrap][notification]")
+{
+    ensureApplication();
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto database = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+
+    const auto unreadEmail = unreadEmailFixture();
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(
+            javelin::tests::loadFixture("jmap/session/websocket_session.json")),
+    });
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(serializeResponseEnvelope({
+            .methodResponses =
+                {
+                    {
+                        .name = "Mailbox/get",
+                        .arguments =
+                            javelin::tests::loadFixture("jmap/method/mailbox_get_arguments.json"),
+                        .callId = "mailboxes",
+                    },
+                    {
+                        .name = "Email/get",
+                        .arguments =
+                            R"({"accountId":"u1","state":"email-state-1","list":[],"notFound":[]})",
+                        .callId = "initial-email-state",
+                    },
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "session-state-2",
+        })),
+    });
+    transport.queuedResults
+        .push_back(
+            javelin::jmap::api::HttpResponse{
+                .statusCode = 200,
+                .body =
+                    QByteArray::fromStdString(
+                        serializeResponseEnvelope(
+                            {
+                                .methodResponses =
+                                    {
+                                        {
+                                            .name = "Email/query",
+                                            .arguments =
+                                                R"({"accountId":"u1","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["eml-1"],"total":1})",
+                                            .callId = "mailbox-query",
+                                        },
+                                        {
+                                            .name = "Email/get",
+                                            .arguments = emailGetArguments("u1", "email-state-1",
+                                                                           unreadEmail),
+                                            .callId = "thread-ids-get",
+                                        },
+                                        {
+                                            .name = "Thread/get",
+                                            .arguments =
+                                                R"({"accountId":"u1","state":"thread-state-1","list":[{"id":"thr-123","emailIds":["eml-1"]}],"notFound":[]})",
+                                            .callId = "threads-get",
+                                        },
+                                        {
+                                            .name = "Email/get",
+                                            .arguments =
+                                                emailGetArguments("u1",
+                                                                  "email-state-1", unreadEmail),
+                                            .callId = "mailbox-emails-get",
+                                        },
+                                    },
+                                .createdIds = std::nullopt,
+                                .sessionState = "session-state-3",
+                            })),
+            });
+
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::AccountBootstrapClient bootstrap{database, transport, methodTransport};
+    const auto result = QCoro::waitFor(bootstrap.bootstrap(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "connection-1", {}, {"mbx-inbox"}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::LiveRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::LiveRefreshSummary>(result);
+    CHECK(summary.accountId == "u1");
+    CHECK(summary.selectedMailboxId == std::optional<std::string>{"mbx-inbox"});
+    CHECK(summary.emailCount == 1);
+    REQUIRE(transport.requests.size() == 3);
+    CHECK(transport.requests[1].body.contains("\"initial-email-state\""));
+    CHECK(transport.requests[1].body.contains("\"ids\":[]"));
+    CHECK_FALSE(transport.requests[1].body.contains("\"Email/query\""));
+    CHECK(transport.requests[2].body.contains("\"Email/query\""));
+    CHECK(transport.requests[2].body.contains("mbx-inbox"));
+
+    javelin::jmap::cache::SyncStateRepository syncStates{database};
+    const auto emailState =
+        syncStates.find({.accountId = "u1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState)->stateToken ==
+          "email-state-1");
+
+    const auto inboxQueryKey = javelin::jmap::sync::mailboxQueryKey({
+        .mailboxId = "mbx-inbox",
+        .sortProperty = "receivedAt",
+        .isAscending = false,
+        .collapseThreads = true,
+    });
+    javelin::jmap::cache::MailboxWindowRepository windows{database};
+    const auto windowResult = windows.find("u1", inboxQueryKey, 0, 100);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(
+        windowResult));
+    const auto& window =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(windowResult);
+    REQUIRE(window.has_value());
+    CHECK(window->queryState == "query-state-1");
+    CHECK(window->emailIds == std::vector<std::string>{"eml-1"});
+
+    QSqlQuery notifications{database.database()};
+    REQUIRE(notifications.exec(QStringLiteral(
+        "SELECT (SELECT COUNT(*) FROM mail_notification_state WHERE account_id='u1'),"
+        "(SELECT COUNT(*) FROM mail_notification_event_outbox WHERE account_id='u1')")));
+    REQUIRE(notifications.next());
+    CHECK(notifications.value(0).toInt() == 0);
+    CHECK(notifications.value(1).toInt() == 0);
 }
 
 TEST_CASE("AccountBootstrapClient isolates identical remote account ids across connections",
@@ -218,22 +439,33 @@ TEST_CASE("AccountBootstrapClient isolates identical remote account ids across c
             .body = QByteArray::fromStdString(
                 javelin::tests::loadFixture("jmap/session/websocket_session.json")),
         });
-        transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
-            .statusCode = 200,
-            .body = QByteArray::fromStdString(serializeResponseEnvelope({
-                .methodResponses =
-                    {
-                        {
-                            .name = "Mailbox/get",
-                            .arguments = javelin::tests::loadFixture(
-                                "jmap/method/mailbox_get_arguments.json"),
-                            .callId = "mailboxes",
-                        },
-                    },
-                .createdIds = std::nullopt,
-                .sessionState = "session-state-2",
-            })),
-        });
+        transport.queuedResults
+            .push_back(
+                javelin::jmap::api::HttpResponse{
+                    .statusCode = 200,
+                    .body =
+                        QByteArray::fromStdString(
+                            serializeResponseEnvelope(
+                                {
+                                    .methodResponses =
+                                        {
+                                            {
+                                                .name = "Mailbox/get",
+                                                .arguments = javelin::tests::loadFixture(
+                                                    "jmap/method/mailbox_get_arguments.json"),
+                                                .callId = "mailboxes",
+                                            },
+                                            {
+                                                .name = "Email/get",
+                                                .arguments =
+                                                    R"({"accountId":"u1","state":"email-state-1","list":[],"notFound":[]})",
+                                                .callId = "initial-email-state",
+                                            },
+                                        },
+                                    .createdIds = std::nullopt,
+                                    .sessionState = "session-state-2",
+                                })),
+                });
     };
 
     const javelin::jmap::LiveConnectionSettings settings{

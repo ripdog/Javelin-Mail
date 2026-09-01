@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <variant>
 
@@ -117,7 +118,9 @@ namespace javelin::app
         };
 
         bool connectSignal(const char* signalName, const char* slotName);
-        [[nodiscard]] QVariantMap notificationHints(int urgency, bool activatesApplication = true,
+        [[nodiscard]] bool transportSupportsActions();
+        [[nodiscard]] QVariantMap notificationHints(int urgency,
+                                                    bool associateWithDesktopEntry = true,
                                                     bool transient = false) const;
         void untrackNotification(uint notificationId);
 
@@ -128,6 +131,7 @@ namespace javelin::app
         QHash<QString, uint> m_invitationNotificationIds;
         bool m_actionInvokedConnected = false;
         bool m_notificationClosedConnected = false;
+        std::optional<bool> m_transportSupportsActions;
     };
 
 } // namespace javelin::app

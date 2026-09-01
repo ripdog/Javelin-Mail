@@ -43,12 +43,14 @@ namespace javelin::gui::shell
     {
         javelin::app::MailboxSession* session = nullptr;
         TabSelectionState selection;
+        std::vector<std::string> expandedThreadIds;
     };
 
     struct SearchTabState
     {
         javelin::app::SearchSession* session = nullptr;
         TabSelectionState selection;
+        std::vector<std::string> expandedThreadIds;
     };
 
     struct ComposeTabState
@@ -103,6 +105,8 @@ namespace javelin::gui::shell
     [[nodiscard]] javelin::app::MessageListSession* messageListSession(TabState& tab);
     [[nodiscard]] const TabSelectionState& tabSelection(const TabState& tab);
     [[nodiscard]] TabSelectionState& tabSelection(TabState& tab);
+    [[nodiscard]] const std::vector<std::string>* tabExpandedThreadIds(const TabState& tab);
+    [[nodiscard]] std::vector<std::string>* tabExpandedThreadIds(TabState& tab);
     [[nodiscard]] std::optional<int> activeTabIndexAfterClose(std::size_t tabCountBeforeClose,
                                                               std::optional<int> activeIndex,
                                                               int closedIndex);

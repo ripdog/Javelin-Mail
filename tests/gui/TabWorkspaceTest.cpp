@@ -14,6 +14,11 @@ namespace
         return {.content = javelin::gui::shell::MailboxTabState{}};
     }
 
+    [[nodiscard]] javelin::gui::shell::TabState searchTab()
+    {
+        return {.content = javelin::gui::shell::SearchTabState{}};
+    }
+
     [[nodiscard]] javelin::gui::shell::TabState composeTab(std::string accountId = "account-a")
     {
         return {.content = javelin::gui::shell::ComposeTabState{
@@ -28,6 +33,14 @@ namespace
     {
         return {.content = javelin::gui::shell::ContactsTabState{
                     .title = QStringLiteral("Contacts"),
+                    .selection = {},
+                }};
+    }
+
+    [[nodiscard]] javelin::gui::shell::TabState calendarTab()
+    {
+        return {.content = javelin::gui::shell::CalendarTabState{
+                    .title = QStringLiteral("Calendar"),
                     .selection = {},
                 }};
     }
@@ -85,6 +98,37 @@ TEST_CASE("tab workspace tracks the active tab across tab moves", "[gui][tabs]")
     CHECK(activeTabIndexAfterMove(std::nullopt, 2, 4) == std::nullopt);
     CHECK(activeTabIndexAfterMove(2, -1, 4) == std::optional<int>{2});
     CHECK(activeTabIndexAfterMove(2, 2, 2) == std::optional<int>{2});
+}
+
+TEST_CASE("mail and search tabs own expansion intent independently of reusable presentation",
+          "[gui][tabs][thread-expansion]")
+{
+    auto mailboxA = mailboxTab();
+    auto mailboxB = mailboxTab();
+    auto search = searchTab();
+    auto compose = composeTab();
+    auto contacts = contactsTab();
+    auto calendar = calendarTab();
+
+    auto* mailboxAExpanded = javelin::gui::shell::tabExpandedThreadIds(mailboxA);
+    auto* mailboxBExpanded = javelin::gui::shell::tabExpandedThreadIds(mailboxB);
+    auto* searchExpanded = javelin::gui::shell::tabExpandedThreadIds(search);
+    REQUIRE(mailboxAExpanded != nullptr);
+    REQUIRE(mailboxBExpanded != nullptr);
+    REQUIRE(searchExpanded != nullptr);
+    *mailboxAExpanded = {"thread-a"};
+    *mailboxBExpanded = {"thread-b"};
+    *searchExpanded = {"thread-search"};
+
+    CHECK(*javelin::gui::shell::tabExpandedThreadIds(std::as_const(mailboxA)) ==
+          std::vector<std::string>{"thread-a"});
+    CHECK(*javelin::gui::shell::tabExpandedThreadIds(std::as_const(mailboxB)) ==
+          std::vector<std::string>{"thread-b"});
+    CHECK(*javelin::gui::shell::tabExpandedThreadIds(std::as_const(search)) ==
+          std::vector<std::string>{"thread-search"});
+    CHECK(javelin::gui::shell::tabExpandedThreadIds(compose) == nullptr);
+    CHECK(javelin::gui::shell::tabExpandedThreadIds(contacts) == nullptr);
+    CHECK(javelin::gui::shell::tabExpandedThreadIds(calendar) == nullptr);
 }
 
 TEST_CASE("tab workspace exposes one selection state for every tab kind", "[gui][tabs]")

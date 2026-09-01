@@ -682,20 +682,12 @@ namespace javelin::gui::shell
                     if (m_mailboxModel->refreshAccount(change.accountId))
                         m_mailboxView->expandAll();
                 }
-
-                for (const auto& mailboxId : change.mailboxIds)
+                if (change.mailTagsChanged)
                 {
-                    const auto mailbox = mailboxId.toStdString();
-                    if (change.hasNewMail && activeTabIsMailbox() &&
-                        activeAccountId() ==
-                            std::optional<std::string>{change.accountId.toStdString()} &&
-                        activeMailboxId() == std::optional<std::string>{mailbox} &&
-                        m_messageModel->rowCount() > 0 &&
-                        m_messageView->verticalScrollBar()->value() == 0)
-                    {
-                        m_messageView->scrollTo(m_messageModel->index(0, 0));
-                    }
+                    m_quickFilterController->rebuildTagsMenu();
+                    m_mailActionController->rebuildTagsMenu();
                 }
+
                 resolveOpenEmailRoute();
             });
         restorePersistentState();
@@ -1426,8 +1418,7 @@ namespace javelin::gui::shell
              .findSender = *m_findSenderContextAction},
             [this](QString message, const int durationMilliseconds)
             { m_statusBar->showMessage(message, durationMilliseconds); },
-            [this](const javelin::jmap::OperationError& error) { presentError(error); },
-            [this] { refreshMessageListPreservingSelection(); }, this);
+            [this](const javelin::jmap::OperationError& error) { presentError(error); }, this);
         m_mailActionController->activate(activeTab());
 
         m_themeController->setThemedActions({
@@ -1671,43 +1662,6 @@ namespace javelin::gui::shell
                 { m_statusBar->showMessage(message, durationMilliseconds); });
         connect(m_messageCommandController, &MessageCommandController::operationFailed, this,
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
-        connect(m_messageCommandController, &MessageCommandController::mailboxMembershipChanged,
-                this,
-                [this](const QString&)
-                {
-                    refreshMessageListPreservingSelection();
-                    m_messageModel->refreshExpandedThreadMembers();
-                    refreshSelectionFromModels();
-                    updateEmptyStates();
-                    updateMessageListHeader();
-                });
-        connect(m_messageCommandController, &MessageCommandController::messageMetadataChanged, this,
-                [this](const QString& accountId)
-                {
-                    markSearchTabsStaleForAccount(accountId.toStdString());
-                    refreshMessageListPreservingSelection();
-                    m_messageModel->refreshExpandedThreadMembers();
-                    refreshSelectionFromModels();
-                });
-        connect(m_messageCommandController, &MessageCommandController::junkStateChanged, this,
-                [this](const QString& accountId)
-                {
-                    markSearchTabsStaleForAccount(accountId.toStdString());
-                    refreshMessageListPreservingSelection();
-                    m_messageModel->refreshExpandedThreadMembers();
-                    refreshSelectionFromModels();
-                    m_messageViewContainer->refresh(m_messageViewReader);
-                    updateEmptyStates();
-                    updateMessageListHeader();
-                    m_mailActionController->update();
-                });
-        connect(m_messageCommandController, &MessageCommandController::emailMarkedRead, this,
-                [this](const QString& accountId, const QString& emailId)
-                {
-                    markSearchTabsStaleForAccount(accountId.toStdString());
-                    static_cast<void>(m_messageModel->setEmailRead(emailId.toStdString()));
-                    m_mailActionController->update();
-                });
         connect(
             m_messageCommandController, &MessageCommandController::emailMutationsSubmitted, this,
             [this](const EmailMutationSubmissionSummary& summary)
@@ -2029,8 +1983,7 @@ namespace javelin::gui::shell
                     m_messageView->setCurrentIndex(index);
                 }
 
-                static_cast<void>(
-                    m_messageModel->setThreadExpanded(threadId.toStdString(), !isExpanded));
+                static_cast<void>(setActiveThreadExpanded(threadId.toStdString(), !isExpanded));
             });
         connect(messageListDelegate,
                 &javelin::gui::messages::MessageListDelegate::attachmentButtonClicked, this,
@@ -2217,8 +2170,7 @@ namespace javelin::gui::shell
                                    if (m_messageSelectionController->currentThreadId() ==
                                        std::optional<std::string>{threadId})
                                    {
-                                       static_cast<void>(
-                                           m_messageModel->setThreadExpanded(threadId, true));
+                                       static_cast<void>(setActiveThreadExpanded(threadId, true));
                                    }
                                });
         }
@@ -2486,6 +2438,27 @@ namespace javelin::gui::shell
     TabState* MainWindow::activeTab()
     {
         return m_mailWorkspaceController->activeTab();
+    }
+
+    bool MainWindow::setActiveThreadExpanded(const std::string_view threadId, const bool expanded)
+    {
+        auto* tab = activeTab();
+        if (tab == nullptr || !m_messageModel->setThreadExpanded(threadId, expanded))
+            return false;
+
+        auto* expandedThreadIds = tabExpandedThreadIds(*tab);
+        if (expandedThreadIds == nullptr)
+            return true;
+        if (expanded)
+        {
+            if (!std::ranges::contains(*expandedThreadIds, threadId))
+                expandedThreadIds->emplace_back(threadId);
+        }
+        else
+        {
+            std::erase(*expandedThreadIds, threadId);
+        }
+        return true;
     }
 
     bool MainWindow::activeTabIsMailbox() const
@@ -3154,11 +3127,6 @@ namespace javelin::gui::shell
         m_mailWorkspaceController->markTabsStaleForAccount(accountId, refreshedMailboxId);
     }
 
-    void MainWindow::markSearchTabsStaleForAccount(const std::string_view accountId)
-    {
-        m_mailWorkspaceController->markSearchTabsStaleForAccount(accountId);
-    }
-
     void MainWindow::openMailboxSelectionInTab(const bool refreshRemote)
     {
         const auto accountId = currentAccountId(*m_mailboxView);
@@ -3738,7 +3706,7 @@ namespace javelin::gui::shell
 
             if (keyEvent->key() == Qt::Key_Right)
             {
-                if (m_messageModel->setThreadExpanded(threadId.toStdString(), true))
+                if (setActiveThreadExpanded(threadId.toStdString(), true))
                 {
                     return true;
                 }
@@ -3746,7 +3714,7 @@ namespace javelin::gui::shell
 
             if (keyEvent->key() == Qt::Key_Left)
             {
-                if (m_messageModel->setThreadExpanded(threadId.toStdString(), false))
+                if (setActiveThreadExpanded(threadId.toStdString(), false))
                 {
                     const auto summaryEmailId =
                         m_messageModel->summaryEmailIdForThread(threadId.toStdString());

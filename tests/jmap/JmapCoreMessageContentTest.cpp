@@ -1,6 +1,7 @@
 #include "FixtureReader.h"
 #include "jmap/MessageContentClient.h"
 #include "jmap/api/JmapMethodTransport.h"
+#include "jmap/api/MethodCaller.h"
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/SessionParser.h"
 #include "jmap/api/Transport.h"
@@ -8,6 +9,7 @@
 #include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
+#include "jmap/cache/NotificationRepository.h"
 #include "jmap/cache/QueryWindowReadRepository.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
@@ -21,6 +23,7 @@
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/EmailMutationEngine.h"
 #include "jmap/sync/EmailMutationJournal.h"
+#include "jmap/sync/MailDeltaRefreshExecutor.h"
 #include "jmap/sync/MailboxMutationEngine.h"
 #include "jmap/sync/MailboxMutationJournal.h"
 
@@ -2187,6 +2190,8 @@ TEST_CASE("EmailMutationEngine submits queued read keyword mutations through Ema
         syncStates
             .upsert({.accountId = "u1", .objectType = "Email", .queryKey = {}}, "email-state-1")
             .has_value());
+    javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
+    REQUIRE_FALSE(notifications.replaceActiveMailboxes("u1", {"mbx-inbox"}).has_value());
 
     FakeTransport transport;
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
@@ -2243,6 +2248,90 @@ TEST_CASE("EmailMutationEngine submits queued read keyword mutations through Ema
     CHECK(
         std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(acceptedState)->stateToken ==
         "email-state-2");
+
+    const auto activeNotificationMailboxes = notifications.activeMailboxIds("u1");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(activeNotificationMailboxes));
+    CHECK(std::get<std::vector<std::string>>(activeNotificationMailboxes) ==
+          std::vector<std::string>{"mbx-inbox"});
+}
+
+TEST_CASE("accepted Email mutation keeps later new-mail notification discovery armed",
+          "[jmap][core][mutation-journal][notification][regression]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    REQUIRE_FALSE(sessionRepository.replace("u1", loadSessionFixture()).has_value());
+
+    auto existingEmail = loadEmailFixture();
+    existingEmail.id = "eml-existing";
+    existingEmail.threadId = "thr-existing";
+    existingEmail.mailboxIds = {"mbx-inbox"};
+    existingEmail.keywords = {};
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(emails.replaceAll("u1", {existingEmail}).has_value());
+
+    javelin::jmap::cache::SyncStateRepository states{databaseContext.connection};
+    REQUIRE_FALSE(
+        states.upsert({.accountId = "u1", .objectType = "Email", .queryKey = {}}, "email-state-1")
+            .has_value());
+    javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
+    REQUIRE_FALSE(notifications.replaceActiveMailboxes("u1", {"mbx-inbox"}).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"eml-existing":null},"notUpdated":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
+    });
+
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto queued = capabilities.emailMutations.queue(
+        "u1",
+        javelin::jmap::EmailMailboxMutation{.emailId = "eml-existing", .addKeywords = {"$seen"}});
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queued));
+    const auto submitted = QCoro::waitFor(capabilities.emailMutations.submitPending(
+        {.sessionUrl = "https://mail.example.com/.well-known/jmap",
+         .loginEmail = "alice@example.com",
+         .apiKey = "access-token"},
+        "u1"));
+    REQUIRE(std::holds_alternative<javelin::jmap::SubmittedEmailMutations>(submitted));
+    CHECK(std::get<javelin::jmap::SubmittedEmailMutations>(submitted).updatedEmailCount == 1);
+
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            R"({"methodResponses":[["Email/changes",{"accountId":"u1","oldState":"email-state-2","newState":"email-state-3","hasMoreChanges":false,"created":["eml-new"],"updated":[],"destroyed":[]},"email-changes"],["Email/get",{"accountId":"u1","state":"email-state-3","list":[{"id":"eml-new","blobId":"blob-new","threadId":"thr-new","mailboxIds":{"mbx-inbox":true},"keywords":{},"size":42,"receivedAt":"2026-08-29T00:00:00Z","subject":"New mail","preview":"Preview"}],"notFound":[]},"created-emails"]],"createdIds":{},"sessionState":"session-state-3"})",
+    });
+    javelin::jmap::api::MethodCaller caller{transport.methodTransport};
+    const javelin::jmap::api::ApiRequestContext requestContext{
+        .credentials =
+            {
+                .accountId = "u1",
+                .emailAddress = "alice@example.com",
+                .sessionUrl = "https://mail.example.com/.well-known/jmap",
+                .token = {.accessToken = "access-token",
+                          .refreshToken = std::nullopt,
+                          .expiry = std::nullopt},
+            },
+        .apiUrl = "https://mail.example.com/jmap/api",
+        .requestLimits = std::nullopt,
+    };
+    javelin::jmap::sync::MailDeltaRefreshExecutor deltaExecutor{databaseContext.connection, caller,
+                                                                requestContext};
+    const auto delta = QCoro::waitFor(deltaExecutor.refresh("u1", {.email = true}, "u1"));
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(delta));
+    CHECK(std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(delta).notificationEventsCreated);
+
+    const auto pending = notifications.listPendingEvents("u1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        pending));
+    const auto& events =
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pending);
+    REQUIRE(events.size() == 1);
+    CHECK(events.front().emailId == "eml-new");
 }
 
 TEST_CASE("MailboxMutationEngine hides a mailbox with optimistic set semantics",

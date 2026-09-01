@@ -157,7 +157,8 @@ namespace javelin::app
                     }
 
                     m_cacheEpoch = std::max(m_cacheEpoch, invalidation.epoch);
-                    static_cast<void>(m_refreshGeneration.begin(m_cacheEpoch));
+                    const auto beginRelevantRefresh = [this]
+                    { static_cast<void>(m_refreshGeneration.begin(m_cacheEpoch)); };
                     const auto key = onlineWindowKey();
                     bool retainedWindowChanged = false;
                     for (const auto& changed : change.searchWindows)
@@ -176,6 +177,7 @@ namespace javelin::app
                     }
                     if (retainedWindowChanged)
                     {
+                        beginRelevantRefresh();
                         if (m_state.refreshInFlight)
                         {
                             ++m_refreshRequestId;
@@ -187,9 +189,10 @@ namespace javelin::app
                         return;
                     }
 
-                    if (change.hasNewMail || change.optimisticProjection ||
-                        !change.mailboxIds.isEmpty())
+                    if (change.optimisticProjection || !change.mailboxIds.isEmpty() ||
+                        change.mailTagsChanged)
                     {
+                        beginRelevantRefresh();
                         m_state.stale = true;
                         reloadProjectedWindows();
                     }

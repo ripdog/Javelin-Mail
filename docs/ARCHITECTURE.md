@@ -76,7 +76,9 @@ Javelin is a split-process desktop application:
 
 The server is the recoverable source of truth. SQLite is the local data plane and the immediate
 source rendered by the GUI. IPC is the command and coordination plane. A cache commit always occurs
-before the daemon publishes its invalidation.
+before the daemon publishes its invalidation. The daemon process owns the single authoritative
+invalidation epoch; the internal cache-change publisher batches semantic changes but does not
+allocate a second pre-boundary epoch.
 
 The end-to-end command path is deliberately one-way:
 
@@ -206,6 +208,10 @@ The principal runtime objects are:
 | `DaemonTrayController` | daemon | Publishes the KDE StatusNotifierItem and D-Bus menu without a Widgets dependency |
 | `DesktopNotificationController` | daemon | Publishes desktop notifications and stable GUI activation routes |
 | cache repositories | both, split by API | Daemon repositories write; GUI repositories use read-only/query-only connections |
+
+`MessageListSessionFactoryService` is composed only by `GuiServices`: mailbox and search sessions
+are GUI-process read models backed by read-only SQLite access and daemon materialization ports. The
+daemon does not construct dormant list sessions of its own.
 
 `DaemonServices` is the operational composition root. It is the only place where writable cache
 repositories, JMAP transports, synchronization services, history executors, settings, and background
@@ -403,18 +409,59 @@ The route completes after the target has been selected/rendered, or is cancelled
 user navigation. Contact and calendar routes may use the same lifecycle with their own typed route
 values; they do not acquire Email pagination semantics.
 
-Mail notification discovery writes a persistent pending outbox before publication. Entries become
-delivered only after the desktop-notification signal is emitted, making a process failure in that
-gap retryable instead of silently losing the notification. Discovery is limited to threads present
-in an authoritative mailbox query window; raw Email mailbox membership alone cannot produce a
-notification for a message the mailbox view cannot render. Notification routing to a concrete Email
-requires only that target and its contextual query coverage; it does not synchronously hydrate all
-other members of the conversation. Automatic thread materialization follows as ordinary background
-work. Child Email commits may affect other cached mailbox views according to normal Email delta and
-query-window invalidation rules, but the initial representative-window commit must not manufacture
-cross-mailbox invalidations merely because related children have not yet been fetched.
-Calendar reminder acknowledgement and snooze state remains in its separate calendar notification
-repository.
+New-mail notification discovery is owned by account-wide Email reconciliation, never by mailbox
+query/window observation. When a committed server Email transition proves that a previously
+unconsumed Email legitimately entered an active notification mailbox while unread, the Email
+synchronizer creates the per-Email consumption marker and durable notification outbox entry in the
+same SQLite transaction as the Email-object and global Email-state transition. Proof is available
+for server-created Emails and for updated Emails whose prior object state Javelin retained. JMAP
+`Email/changes.updated` contains ids rather than prior objects or changed properties, so an updated
+Email that was previously uncached is not fetched solely for notifications and is not guessed to be
+newly eligible. If `Email/changes` history is unavailable, a bounded account rebaseline applies the
+same previous-to-current notification rule to retained Emails. An entirely unknown Email cannot be
+classified safely as created during the lost history range, so notification is conservatively
+omitted for that Email. The successful rebaseline nevertheless requires every tracked mailbox query
+to reconcile its membership, recovering presentation and offline completeness without giving query
+refresh ownership of the account Email cursor. Mailbox identity is retained as deterministic
+routing/context metadata;
+`(account_id, email_id)` is the notification identity, so later unread movement between enabled
+mailboxes cannot create another event.
+
+Combined account Mailbox/Email requests retain independent transition outcomes. A recoverable
+`Mailbox/changes` gap schedules Mailbox recovery without discarding a valid `Email/changes`
+transition from the same response, and an Email gap does not discard a valid Mailbox transition.
+
+The account's global `Email` sync state is the only Email cursor. Notification storage contains only
+the set of mailboxes whose notification baseline has completed; it does not duplicate the Email
+state token. Enabling a new mailbox is serialized against in-flight Email work with the existing
+Email consistency generation. The mailbox is added to the active notification set only in the final
+transaction of a fresh Email reconciliation, so historical cached mail cannot become new mail merely
+because notification settings changed. Disabling a mailbox removes it from the active set
+immediately. During a pending settings baseline, both incremental and rebaseline Email transitions
+may notify
+only through the intersection of the already-active and newly desired mailbox sets. Existing active
+mailboxes therefore keep notifying while newly enabled mailboxes remain fenced until the baseline
+transaction commits. Because ordinary Email state advancement does not mutate this set, local
+`Email/set`
+confirmation and other Email-state writers cannot desynchronize notification eligibility from the
+account cursor. `AccountRuntimeManager` retries durable configuration reads and installation of the
+pending baseline fence; once installed, `AccountSyncCoordinator` retries execution of that baseline
+through `MailDeltaRefreshExecutor`. Neither retry owner activates a mailbox independently: only the
+committed Email-baseline transaction replaces the active set. The delivery service claims pending
+outbox rows and revalidates unread state,
+current mailbox eligibility, and object existence entirely from SQLite before showing a popup.
+Successful delivery removes the outbox row while preserving the per-Email consumption marker; claim,
+acknowledgement, release, and desktop-presentation failures are retried locally and do not request
+JMAP synchronization solely to recover notification delivery.
+
+Mailbox query windows remain presentation coverage only. Notification routing to a concrete Email
+may use its mailbox context to open/materialize the relevant view, but query-window population,
+rebuild, pagination, or thread materialization cannot itself create a notification event. Automatic
+thread materialization follows as ordinary background work. Child Email commits may affect other
+cached mailbox views according to normal Email delta and query-window invalidation rules, but the
+initial representative-window commit must not manufacture cross-mailbox invalidations merely because
+related children have not yet been fetched. Calendar reminder acknowledgement and snooze state
+remains in its separate calendar notification repository.
 
 `JmapMethodTransport` is the request/response boundary for typed JMAP envelopes.
 `PreferredJmapMethodTransport` uses the RFC 8887 capability advertised by the cached Session to

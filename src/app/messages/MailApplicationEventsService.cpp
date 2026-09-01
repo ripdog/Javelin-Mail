@@ -49,7 +49,8 @@ namespace javelin::app
         connect(&queries, &MailQueryApplicationService::cacheCommitted, &m_invalidationPublisher,
                 publish);
         connect(&mutations, &MailMutationApplicationService::cacheCommitted,
-                &m_invalidationPublisher, publish);
+                &m_invalidationPublisher, [this](MailCacheChange change)
+                { m_invalidationPublisher.publishImmediately(std::move(change)); });
         connect(&content, &MessageContentApplicationService::cacheCommitted,
                 &m_invalidationPublisher, publish);
         connect(&contacts, &ContactApplicationService::cacheCommitted, &m_invalidationPublisher,

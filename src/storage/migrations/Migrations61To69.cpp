@@ -183,6 +183,71 @@ namespace javelin::jmap::cache::migrations
                                        "mail_import_items(operation_id,phase,ordinal)"),
                     },
             },
+            MigrationStep{
+                .version = 65,
+                .name = QStringLiteral("mail_notification_consumption_state"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "CREATE TABLE mail_notification_state (account_id TEXT NOT "
+                            "NULL,email_id "
+                            "TEXT NOT NULL,notified_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                            "PRIMARY KEY(account_id,email_id),FOREIGN KEY(account_id,email_id) "
+                            "REFERENCES emails(account_id,email_id) ON DELETE CASCADE) STRICT"),
+                        QStringLiteral(
+                            "CREATE TABLE mail_notification_event_outbox (account_id TEXT NOT NULL,"
+                            "email_id TEXT NOT NULL,mailbox_id TEXT NOT NULL,thread_id TEXT NOT "
+                            "NULL,subject TEXT,received_at TEXT NOT NULL,created_at TEXT NOT NULL "
+                            "DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(account_id,email_id),FOREIGN "
+                            "KEY("
+                            "account_id,email_id) REFERENCES mail_notification_state(account_id,"
+                            "email_id) ON DELETE CASCADE) STRICT"),
+                        QStringLiteral(
+                            "CREATE INDEX idx_mail_notification_event_outbox_pending ON "
+                            "mail_notification_event_outbox(account_id,mailbox_id,created_at)"),
+                    },
+            },
+            MigrationStep{
+                .version = 66,
+                .name = QStringLiteral("mail_notification_horizons"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "CREATE TABLE mail_notification_horizons (account_id TEXT NOT NULL "
+                            "REFERENCES accounts(account_id) ON DELETE CASCADE,mailbox_id TEXT NOT "
+                            "NULL,email_state TEXT NOT NULL,enabled_at TEXT NOT NULL DEFAULT "
+                            "CURRENT_TIMESTAMP,PRIMARY KEY(account_id,mailbox_id)) STRICT"),
+                        QStringLiteral(
+                            "CREATE INDEX idx_mail_notification_horizons_state ON "
+                            "mail_notification_horizons(account_id,email_state,mailbox_id)"),
+                    },
+            },
+            MigrationStep{
+                .version = 67,
+                .name = QStringLiteral("retire_legacy_mail_notifications"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "DELETE FROM notification_dispatch_claims WHERE kind='mail'"),
+                        QStringLiteral("DROP TABLE mail_notification_outbox"),
+                        QStringLiteral("DROP TABLE observed_notification_emails"),
+                    },
+            },
+            MigrationStep{
+                .version = 68,
+                .name = QStringLiteral("simplify_mail_notification_mailboxes"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "CREATE TABLE mail_notification_mailboxes (account_id TEXT NOT NULL "
+                            "REFERENCES accounts(account_id) ON DELETE CASCADE,mailbox_id TEXT NOT "
+                            "NULL,PRIMARY KEY(account_id,mailbox_id)) STRICT"),
+                        QStringLiteral(
+                            "INSERT INTO mail_notification_mailboxes(account_id,mailbox_id) SELECT "
+                            "account_id,mailbox_id FROM mail_notification_horizons"),
+                        QStringLiteral("DROP TABLE mail_notification_horizons"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

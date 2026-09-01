@@ -449,6 +449,14 @@ namespace javelin::gui::shell
                         {
                             if (result.error.has_value())
                             {
+                                if (result.error->outcomeUnknown)
+                                {
+                                    if (dialogGuard != nullptr)
+                                        dialogGuard->completeDefaultNotificationsChange(
+                                            accountId, calendarId, true);
+                                    Q_EMIT operationFailed(*result.error);
+                                    return;
+                                }
                                 if (dialogGuard != nullptr)
                                     dialogGuard->completeDefaultNotificationsChange(
                                         accountId, calendarId, false, result.error->message);

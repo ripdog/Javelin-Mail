@@ -749,6 +749,7 @@ namespace javelin::protocol
                    writeChangedDomains(writer, invalidation.changedDomains, limits) &&
                    writeAffectedKeys(writer, invalidation.affectedKeys, limits) &&
                    writer.string(invalidation.accountId) &&
+                   writer.boolean(invalidation.optimisticProjection) &&
                    writeStringVector(writer, invalidation.mailboxIds, limits.maximumAffectedKeys,
                                      QStringLiteral("mailboxIds")) &&
                    writeStringVector(writer, invalidation.messageContentEmailIds,
@@ -771,6 +772,7 @@ namespace javelin::protocol
                    readChangedDomains(reader, invalidation.changedDomains, limits) &&
                    readAffectedKeys(reader, invalidation.affectedKeys, limits) &&
                    reader.string(invalidation.accountId) &&
+                   reader.boolean(invalidation.optimisticProjection) &&
                    readStringVector(reader, invalidation.mailboxIds, limits.maximumAffectedKeys,
                                     QStringLiteral("mailboxIds")) &&
                    readStringVector(reader, invalidation.messageContentEmailIds,
@@ -1889,6 +1891,8 @@ namespace javelin::protocol
                     values.push_back(value);
             };
             target.epoch = source.epoch;
+            target.optimisticProjection =
+                target.optimisticProjection || source.optimisticProjection;
             if (target.accountId.isEmpty())
                 target.accountId = source.accountId;
             for (const auto domain : source.changedDomains)

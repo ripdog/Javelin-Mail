@@ -151,6 +151,36 @@ TEST_CASE("email repository round-trips cached email summaries", "[jmap][cache][
     CHECK(loaded.replyTo.front().email == "support@example.com");
 }
 
+TEST_CASE("email repository reports whether an account has cached Email rows",
+          "[jmap][cache][repository]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::cache::EmailRepository repository{databaseContext.connection};
+
+    const auto empty = repository.hasAny("account-1");
+    REQUIRE(std::holds_alternative<bool>(empty));
+    CHECK_FALSE(std::get<bool>(empty));
+
+    REQUIRE_FALSE(repository.replaceAll("account-1", {loadEmailFixture()}).has_value());
+    const auto populated = repository.hasAny("account-1");
+    REQUIRE(std::holds_alternative<bool>(populated));
+    CHECK(std::get<bool>(populated));
+
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Check Email existence"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    const auto inTransaction = repository.hasAny(transaction, "account-1");
+    REQUIRE(std::holds_alternative<bool>(inTransaction));
+    CHECK(std::get<bool>(inTransaction));
+    REQUIRE_FALSE(transaction.commit().has_value());
+}
+
 TEST_CASE("email repository normalizes missing subject and preview for cache writes",
           "[jmap][cache][repository]")
 {

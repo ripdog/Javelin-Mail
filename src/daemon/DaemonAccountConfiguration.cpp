@@ -100,16 +100,8 @@ namespace javelin::app
                 const auto* synced = findSelection(snapshot.syncedMailboxSelections, accountId);
                 const auto* notifications =
                     findSelection(snapshot.notificationMailboxSelections, accountId);
-                std::vector<QString> mailboxIds;
-                if (synced != nullptr)
-                    mailboxIds = synced->mailboxIds;
-                if (notifications != nullptr)
-                {
-                    mailboxIds.insert(mailboxIds.end(), notifications->mailboxIds.begin(),
-                                      notifications->mailboxIds.end());
-                }
-                std::ranges::sort(mailboxIds);
-                mailboxIds.erase(std::ranges::unique(mailboxIds).begin(), mailboxIds.end());
+                const std::vector<QString> mailboxIds =
+                    synced == nullptr ? std::vector<QString>{} : synced->mailboxIds;
 
                 result.push_back({
                     .settings = connectionSettings(account, credentials),

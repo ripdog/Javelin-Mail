@@ -609,7 +609,12 @@ namespace javelin::jmap::calendar
                     .acceptedState = std::nullopt,
                     .errorJson = std::nullopt,
                 });
-                prepared.projectedOccurrences.push_back(projectedOccurrence(projected));
+                // Expanded occurrence ids are server materialization. Keep the existing range
+                // intact whenever an update crosses or remains inside recurring state.
+                const bool recurrenceNeedsServerMaterialization =
+                    projected.recurrenceRule || (base && base->recurrenceRule);
+                if (!recurrenceNeedsServerMaterialization)
+                    prepared.projectedOccurrences.push_back(projectedOccurrence(projected));
                 prepared.projectedEvents.push_back(std::move(projected));
             }
             for (const auto& eventId : request.destroy)
@@ -947,7 +952,8 @@ namespace javelin::jmap::calendar
                 if (const auto* operationError = std::get_if<OperationError>(&restored))
                     return *operationError;
                 auto event = std::get<CalendarEvent>(std::move(restored));
-                restoredOccurrences.push_back(projectedOccurrence(event));
+                if (!event.recurrenceRule)
+                    restoredOccurrences.push_back(projectedOccurrence(event));
                 restoredEvents.push_back(std::move(event));
             }
             if (const auto cacheError = repository.projectEvents(
@@ -2256,6 +2262,11 @@ namespace javelin::jmap::calendar
         if (const auto cacheError = queue.commit())
             co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
 
+        const auto markOutcomeUnknown = [](OperationError value)
+        {
+            value.outcomeUnknown = true;
+            return value;
+        };
         const auto transition = [&](const sync::MutationStatus status,
                                     const std::optional<std::string_view> acceptedState =
                                         std::nullopt) -> std::optional<OperationError>
@@ -2291,8 +2302,8 @@ namespace javelin::jmap::calendar
         if (!envelope)
         {
             if (const auto transitionError = transition(sync::MutationStatus::Unknown))
-                co_return *transitionError;
-            co_return callError(result);
+                co_return markOutcomeUnknown(*transitionError);
+            co_return markOutcomeUnknown(callError(result));
         }
         const auto read = api::ResponseReader{*envelope}.require(handle);
         if (const auto* readError = std::get_if<api::ResponseReaderError>(&read))
@@ -2300,8 +2311,13 @@ namespace javelin::jmap::calendar
             const auto status = readError->methodError.has_value() ? sync::MutationStatus::Rejected
                                                                    : sync::MutationStatus::Unknown;
             if (const auto transitionError = transition(status))
-                co_return *transitionError;
-            co_return responseError(*readError);
+                co_return status == sync::MutationStatus::Unknown
+                    ? markOutcomeUnknown(*transitionError)
+                    : *transitionError;
+            auto failure = responseError(*readError);
+            if (status == sync::MutationStatus::Unknown)
+                failure = markOutcomeUnknown(std::move(failure));
+            co_return failure;
         }
         const auto& response = std::get<api::CalendarSetResponse>(read);
         if (const auto failed = response.notUpdated.find(calendarId);
@@ -2324,9 +2340,10 @@ namespace javelin::jmap::calendar
         if (!response.updated.contains(calendarId))
         {
             if (const auto transitionError = transition(sync::MutationStatus::Unknown))
-                co_return *transitionError;
-            co_return error(OperationErrorCode::ProtocolViolation,
-                            QStringLiteral("Calendar/set omitted the updated calendar."));
+                co_return markOutcomeUnknown(*transitionError);
+            co_return markOutcomeUnknown(
+                error(OperationErrorCode::ProtocolViolation,
+                      QStringLiteral("Calendar/set omitted the updated calendar.")));
         }
 
         auto acceptResult = sync::MutationProjectionTransaction::begin(

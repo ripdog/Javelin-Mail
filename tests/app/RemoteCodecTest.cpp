@@ -586,11 +586,16 @@ TEST_CASE("remote codec preserves calendar default notification batches",
     CHECK(decodedChanges.front().withTime.at("reminder").offset->value == "-PT15M");
     CHECK(decodedChanges.front().withoutTime.empty());
 
+    const javelin::jmap::OperationError unknownOutcome{
+        .code = javelin::jmap::OperationErrorCode::Timeout,
+        .message = QStringLiteral("Calendar update outcome is unknown."),
+        .outcomeUnknown = true,
+    };
     const javelin::app::CalendarDefaultAlertsBatchResult result{
         .requestedCount = 1,
-        .appliedCount = 1,
-        .failures = {},
-        .error = std::nullopt,
+        .appliedCount = 0,
+        .failures = {{.change = changes.front(), .error = unknownOutcome}},
+        .error = unknownOutcome,
     };
     const auto encodedResult =
         javelin::app::remote::encodeVersioned<Action::resultSchemaVersion>(result);
@@ -602,9 +607,12 @@ TEST_CASE("remote codec preserves calendar default notification batches",
     const auto* resultValue = std::get_if<Action::Result>(&decodedResult);
     REQUIRE(resultValue != nullptr);
     CHECK(resultValue->requestedCount == 1);
-    CHECK(resultValue->appliedCount == 1);
-    CHECK(resultValue->failures.empty());
-    CHECK_FALSE(resultValue->error.has_value());
+    CHECK(resultValue->appliedCount == 0);
+    REQUIRE(resultValue->failures.size() == 1);
+    CHECK(resultValue->failures.front().error.outcomeUnknown);
+    REQUIRE(resultValue->error.has_value());
+    CHECK(resultValue->error->code == javelin::jmap::OperationErrorCode::Timeout);
+    CHECK(resultValue->error->outcomeUnknown);
 
     const auto metadata = javelin::protocol::actions::findActionMetadata(Action::id);
     REQUIRE(metadata.has_value());

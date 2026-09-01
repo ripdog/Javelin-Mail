@@ -311,7 +311,7 @@ namespace
                                       .total = 4}},
                     .searchWindows = {},
                     .mailboxTreeChanged = false,
-                    .hasNewMail = false,
+                    .emailObjectsChanged = false,
                     .optimisticProjection = false,
                     .contactsChanged = false,
                 },
@@ -336,7 +336,7 @@ namespace
                                        .limit = limit,
                                        .total = total}},
                     .mailboxTreeChanged = false,
-                    .hasNewMail = false,
+                    .emailObjectsChanged = false,
                     .optimisticProjection = false,
                     .contactsChanged = false,
                 },
@@ -428,6 +428,91 @@ TEST_CASE("cached mailbox load retries after a superseding same-account invalida
     CHECK(session.state().items[0].emailId == "email-1");
     CHECK(session.state().items[1].emailId == "email-2");
     CHECK_FALSE(materialization.lastMailboxIntent.has_value());
+}
+
+TEST_CASE("unrelated contact and content invalidations do not supersede mailbox refresh",
+          "[app][mailbox-session][cache-race]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("mailbox-session-unrelated-test"));
+    PendingMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::MailboxSession session{
+        "account-1", "mailbox-1",     QStringLiteral("Inbox"), std::optional<std::string>{"inbox"},
+        {},          context.queries, materialization,         100,
+        events};
+    std::size_t failureCount = 0;
+    QObject::connect(&session, &javelin::app::MessageListSession::refreshFailed, &session,
+                     [&failureCount](const javelin::jmap::OperationError&) { ++failureCount; });
+
+    session.refresh();
+    REQUIRE(session.state().refreshInFlight);
+    events.publish({
+        .epoch = 7,
+        .changedDomains = {javelin::protocol::ChangedDomain::Contacts},
+        .affectedKeys = {QStringLiteral("account-1")},
+        .change = {.accountId = QStringLiteral("account-1"),
+                   .mailboxIds = {},
+                   .queryWindows = {},
+                   .searchWindows = {},
+                   .contactsChanged = true},
+    });
+    CHECK(session.state().refreshInFlight);
+    events.publish({
+        .epoch = 8,
+        .changedDomains = {javelin::protocol::ChangedDomain::MessageContent},
+        .affectedKeys = {QStringLiteral("account-1"), QStringLiteral("other-email")},
+        .change = {.accountId = QStringLiteral("account-1"),
+                   .mailboxIds = {},
+                   .queryWindows = {},
+                   .searchWindows = {},
+                   .messageContentEmailIds = {QStringLiteral("other-email")}},
+    });
+    CHECK(session.state().refreshInFlight);
+
+    materialization.complete(javelin::jmap::OperationError{
+        .message = QStringLiteral("Expected refresh failure."),
+    });
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    CHECK_FALSE(session.state().refreshInFlight);
+    CHECK(failureCount == 1);
+}
+
+TEST_CASE("optimistic mailbox metadata invalidation marks an active mailbox session stale",
+          "[app][mailbox-session][cache-race][optimistic]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("mailbox-session-optimistic-test"));
+    PendingMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::MailboxSession session{
+        "account-1", "mailbox-1",     QStringLiteral("Inbox"), std::optional<std::string>{"inbox"},
+        {},          context.queries, materialization,         100,
+        events};
+    std::size_t failureCount = 0;
+    QObject::connect(&session, &javelin::app::MessageListSession::refreshFailed, &session,
+                     [&failureCount](const javelin::jmap::OperationError&) { ++failureCount; });
+
+    session.refresh();
+    REQUIRE(session.state().refreshInFlight);
+    events.publish({
+        .epoch = 9,
+        .changedDomains = {javelin::protocol::ChangedDomain::MessageMetadata},
+        .affectedKeys = {QStringLiteral("account-1"), QStringLiteral("mailbox-1")},
+        .change = {.accountId = QStringLiteral("account-1"),
+                   .mailboxIds = {QStringLiteral("mailbox-1")},
+                   .queryWindows = {},
+                   .searchWindows = {},
+                   .emailObjectsChanged = false,
+                   .optimisticProjection = true},
+    });
+    CHECK(session.state().stale);
+
+    materialization.complete(javelin::jmap::OperationError{
+        .message = QStringLiteral("Active refresh failure remains observable."),
+    });
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    CHECK(failureCount == 1);
 }
 
 TEST_CASE("missing initial mailbox cache materializes itself after the cache read",

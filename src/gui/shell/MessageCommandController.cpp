@@ -276,11 +276,6 @@ namespace javelin::gui::shell
                         std::get<javelin::app::MailTransferExecutionSummary>(result);
                     if (summary.status == javelin::app::MailTransferStatus::Complete)
                     {
-                        Q_EMIT mailboxMembershipChanged(
-                            QString::fromStdString(destinationAccountId));
-                        if (move)
-                            Q_EMIT mailboxMembershipChanged(
-                                QString::fromStdString(sourceAccountId));
                         Q_EMIT statusMessage(
                             move ? i18np("Moved one message.", "Moved %1 messages.",
                                          summary.completeItemCount)
@@ -392,7 +387,6 @@ namespace javelin::gui::shell
                     return;
                 }
 
-                Q_EMIT mailboxMembershipChanged(QString::fromStdString(accountId));
                 if (summary.skippedEmailCount > 0)
                 {
                     Q_EMIT statusMessage(
@@ -425,7 +419,7 @@ namespace javelin::gui::shell
         auto task = m_mailCommandPort.queueMarkEmailRead(accountId, emailId);
         QCoro::connect(
             std::move(task), this,
-            [this, accountId = std::move(accountId), emailId = std::move(emailId)](
+            [this, accountId = std::move(accountId)](
                 javelin::app::QueuedMessageSelectionMutationResult result)
             {
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
@@ -438,8 +432,6 @@ namespace javelin::gui::shell
                     std::get<javelin::app::QueuedMessageSelectionMutation>(result);
                 if (summary.queuedEmailCount == 0)
                     return;
-                Q_EMIT emailMarkedRead(QString::fromStdString(accountId),
-                                       QString::fromStdString(emailId));
                 submitQueuedMutations(accountId,
                                       summary.queuedMutations.front().patch.operationGroupId);
             });
@@ -484,7 +476,6 @@ namespace javelin::gui::shell
                     return;
                 if (index.isValid())
                     m_messageView.setCurrentIndex(index);
-                Q_EMIT messageMetadataChanged(QString::fromStdString(accountId));
                 Q_EMIT statusMessage(flagged ? i18n("Removed star.") : i18n("Added star."), 5000);
                 submitQueuedMutations(accountId,
                                       summary.queuedMutations.front().patch.operationGroupId);
@@ -523,7 +514,6 @@ namespace javelin::gui::shell
                     std::get<javelin::app::QueuedMessageSelectionMutation>(result);
                 if (summary.queuedEmailCount == 0 || summary.queuedMutations.empty())
                     return;
-                Q_EMIT messageMetadataChanged(QString::fromStdString(accountId));
                 Q_EMIT statusMessage(
                     flagged ? i18np("Added a star to %1 message.", "Added a star to %1 messages.",
                                     summary.queuedEmailCount)
@@ -570,7 +560,6 @@ namespace javelin::gui::shell
                 const auto markedCount = summary.queuedEmailCount;
                 if (markedCount == 0)
                     return;
-                Q_EMIT messageMetadataChanged(QString::fromStdString(accountId));
                 Q_EMIT statusMessage(markedCount == 1
                                          ? i18n("Marked unread.")
                                          : i18np("Marked %1 message unread.",
@@ -643,7 +632,6 @@ namespace javelin::gui::shell
                     std::get<javelin::app::QueuedMessageSelectionMutation>(result);
                 if (summary.queuedEmailCount == 0 || summary.queuedMutations.empty())
                     return;
-                Q_EMIT messageMetadataChanged(QString::fromStdString(accountId));
                 Q_EMIT statusMessage(
                     enabled ? i18np("Added tag to %1 message.", "Added tag to %1 messages.",
                                     summary.queuedEmailCount)
@@ -692,7 +680,6 @@ namespace javelin::gui::shell
                     return;
                 }
 
-                Q_EMIT junkStateChanged(QString::fromStdString(accountId));
                 Q_EMIT statusMessage(
                     summary.queuedEmailCount == 1
                         ? (junk ? i18n("Marked as junk.") : i18n("Marked as not junk."))
@@ -742,7 +729,6 @@ namespace javelin::gui::shell
                     return;
                 }
 
-                Q_EMIT mailboxMembershipChanged(QString::fromStdString(accountId));
                 if (summary.skippedEmailCount > 0)
                 {
                     Q_EMIT statusMessage(
@@ -804,7 +790,6 @@ namespace javelin::gui::shell
                 const auto selectedCount = summary.queuedEmailCount;
                 if (selectedCount == 0 || summary.queuedMutations.empty())
                     return;
-                Q_EMIT mailboxMembershipChanged(QString::fromStdString(accountId));
                 Q_EMIT statusMessage(selectedCount == 1
                                          ? i18n("Queued permanent deletion.")
                                          : i18np("Queued permanent deletion for %1 message.",

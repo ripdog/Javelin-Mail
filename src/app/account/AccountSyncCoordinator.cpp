@@ -7,6 +7,7 @@
 #include "jmap/api/Session.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/MailDeltaRefreshExecutor.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 #include "jmap/sync/MailboxStateRefreshExecutor.h"
@@ -28,6 +29,7 @@ namespace javelin::app
     namespace
     {
         constexpr auto refreshDebounceInterval = std::chrono::milliseconds{750};
+        constexpr unsigned int notificationBaselineRetryMaximumExponent = 5;
         constexpr auto resumeWatchdogInterval = std::chrono::seconds{30};
         constexpr auto resumeWatchdogStallThreshold = std::chrono::seconds{90};
 
@@ -86,6 +88,9 @@ namespace javelin::app
         m_refreshDebounceTimer.setInterval(refreshDebounceInterval);
         QObject::connect(&m_refreshDebounceTimer, &QTimer::timeout, this,
                          &AccountSyncCoordinator::scheduleCatchUpRefresh);
+        m_notificationBaselineRetryTimer.setSingleShot(true);
+        QObject::connect(&m_notificationBaselineRetryTimer, &QTimer::timeout, this,
+                         &AccountSyncCoordinator::scheduleNotificationBaselineRefresh);
         m_lastResumeWatchdogTickMs = QDateTime::currentMSecsSinceEpoch();
         m_resumeWatchdogTimer.setInterval(resumeWatchdogInterval);
         QObject::connect(&m_resumeWatchdogTimer, &QTimer::timeout, this,
@@ -170,6 +175,45 @@ namespace javelin::app
             m_shouldCatchUpRefreshOnReconnect = true;
     }
 
+    std::optional<javelin::jmap::cache::DatabaseError>
+    AccountSyncCoordinator::requestNotificationBaseline(std::vector<std::string> mailboxIds)
+    {
+        std::ranges::sort(mailboxIds);
+        mailboxIds.erase(std::ranges::unique(mailboxIds).begin(), mailboxIds.end());
+        if (m_pendingNotificationBaselineMailboxIds == mailboxIds)
+            return std::nullopt;
+
+        javelin::jmap::sync::ConsistencyDomainRepository consistency{m_databaseConnection};
+        const auto generation =
+            consistency.advanceMutation({.accountId = m_accountId, .dataType = "Email"});
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&generation))
+            return *error;
+
+        m_pendingNotificationBaselineMailboxIds = std::move(mailboxIds);
+        m_notificationBaselineRetryAttempts = 0;
+        m_notificationBaselineRetryTimer.stop();
+        scheduleNotificationBaselineRefresh();
+        return std::nullopt;
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    AccountSyncCoordinator::cancelNotificationBaseline()
+    {
+        if (!m_pendingNotificationBaselineMailboxIds.has_value())
+            return std::nullopt;
+
+        javelin::jmap::sync::ConsistencyDomainRepository consistency{m_databaseConnection};
+        const auto generation =
+            consistency.advanceMutation({.accountId = m_accountId, .dataType = "Email"});
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&generation))
+            return *error;
+
+        m_pendingNotificationBaselineMailboxIds.reset();
+        m_notificationBaselineRetryAttempts = 0;
+        m_notificationBaselineRetryTimer.stop();
+        return std::nullopt;
+    }
+
     void AccountSyncCoordinator::stop()
     {
         if (m_runContext != nullptr)
@@ -188,6 +232,7 @@ namespace javelin::app
         m_pendingIdentityStateChanges.clear();
         m_authenticationRecoveryInFlight = false;
         m_refreshDebounceTimer.stop();
+        m_notificationBaselineRetryTimer.stop();
         m_queuedRefreshDemand = {};
         m_debouncedRefreshDemand = {};
         setStatus(Status::Disconnected);
@@ -487,27 +532,20 @@ namespace javelin::app
         bool emailCacheChanged = false;
         bool endpointRequestSucceeded = false;
         bool refreshEveryMailbox = demand.allMailboxes;
-        bool accountEmailStateRefreshed = false;
-        bool hasNewMail = false;
+        bool emailObjectsChanged = false;
         std::vector<std::string> queryAffectedMailboxIds;
         QStringList refreshedMailboxIds;
 
-        if (demand.allMailboxes)
-        {
-            const auto mailboxState = co_await refreshMailboxStateOnce(runContext, retryLease);
-            if (!mailboxState.has_value())
-                co_return;
-            mailboxStateChanged = *mailboxState;
-            endpointRequestSucceeded = true;
-        }
-        else if (demand.mailboxState || demand.emailState)
+        if (demand.mailboxState || demand.emailState)
         {
             javelin::jmap::sync::MailDeltaRefreshExecutor deltaExecutor{
                 m_databaseConnection, methodCaller, apiRequestContext};
+            const auto notificationBaselineMailboxIds =
+                demand.emailState ? m_pendingNotificationBaselineMailboxIds : std::nullopt;
             const auto deltaResult = co_await deltaExecutor.refresh(
                 runContext->configuration.accountId,
                 {.mailbox = demand.mailboxState, .email = demand.emailState},
-                runContext->configuration.remoteAccountId);
+                runContext->configuration.remoteAccountId, notificationBaselineMailboxIds);
             if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
                 runContext->cancellation.isCancelled())
             {
@@ -518,7 +556,11 @@ namespace javelin::app
                 qWarning().noquote() << "Account mail delta refresh failed" << error->message;
                 recordRefreshFailure(retryLease, *error);
                 publishOperationError(QStringLiteral("Synchronize mail changes"), *error);
-                if (javelin::jmap::isTransientError(*error))
+                if (notificationBaselineMailboxIds.has_value() &&
+                    (error->code == javelin::jmap::OperationErrorCode::LocalStorageBusy ||
+                     error->code == javelin::jmap::OperationErrorCode::LocalStorageFailure))
+                    scheduleNotificationBaselineRetry();
+                else if (javelin::jmap::isTransientError(*error))
                     scheduleDebouncedRefresh(true);
                 co_return;
             }
@@ -529,12 +571,22 @@ namespace javelin::app
                 m_queuedRefreshDemand.merge(demand);
                 co_return;
             }
+            if (delta.notificationBaselineEstablished &&
+                notificationBaselineMailboxIds.has_value() &&
+                m_pendingNotificationBaselineMailboxIds == notificationBaselineMailboxIds)
+            {
+                m_pendingNotificationBaselineMailboxIds.reset();
+                m_notificationBaselineRetryAttempts = 0;
+                m_notificationBaselineRetryTimer.stop();
+            }
             mailboxStateChanged = delta.mailboxChanged;
             emailCacheChanged = delta.emailChanged;
-            accountEmailStateRefreshed = demand.emailState && !delta.emailNeedsFullRefresh;
-            refreshEveryMailbox = delta.emailNeedsFullRefresh;
+            refreshEveryMailbox = refreshEveryMailbox || delta.mailboxQueriesNeedReconciliation;
             queryAffectedMailboxIds = delta.queryAffectedMailboxIds;
-            hasNewMail = !delta.insertedEmailIds.empty();
+            if (delta.notificationEventsCreated)
+                Q_EMIT notificationEventsCommitted(
+                    QString::fromStdString(runContext->configuration.accountId));
+            emailObjectsChanged = delta.emailChanged;
             for (const auto& mailboxId : delta.changedMailboxIds)
                 refreshedMailboxIds.push_back(QString::fromStdString(mailboxId));
             if (delta.mailboxNeedsFullRefresh)
@@ -575,7 +627,7 @@ namespace javelin::app
                     .queryWindows = {},
                     .searchWindows = {},
                     .mailboxTreeChanged = true,
-                    .hasNewMail = false,
+                    .emailObjectsChanged = false,
                 });
             }
             if (endpointRequestSucceeded)
@@ -615,7 +667,7 @@ namespace javelin::app
                 continue;
             const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
                 runContext->configuration.accountId, mailboxId, {}, false,
-                !accountEmailStateRefreshed, runContext->configuration.remoteAccountId);
+                runContext->configuration.remoteAccountId);
             if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
                 runContext->cancellation.isCancelled())
             {
@@ -631,8 +683,6 @@ namespace javelin::app
                     continue;
                 }
                 m_shouldCatchUpRefreshOnReconnect = false;
-                accountEmailStateRefreshed =
-                    accountEmailStateRefreshed || summary->usedIncrementalRefresh;
                 watchedMailboxRefreshed = true;
                 const auto qMailboxId = QString::fromStdString(mailboxId);
                 if (!refreshedMailboxIds.contains(qMailboxId))
@@ -646,13 +696,7 @@ namespace javelin::app
                         .total = std::nullopt,
                     });
                 }
-                hasNewMail = hasNewMail || !summary->insertedEmailIds.empty();
-                if (runContext->configuration.notificationMailboxIds.contains(mailboxId))
-                {
-                    Q_EMIT notificationMailboxRefreshed(
-                        QString::fromStdString(runContext->configuration.accountId),
-                        QString::fromStdString(mailboxId), QString::fromStdString(mailboxName));
-                }
+                emailObjectsChanged = emailObjectsChanged || !summary->changedEmailIds.empty();
             }
             else if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
             {
@@ -682,7 +726,7 @@ namespace javelin::app
                 .queryWindows = std::move(materializedWindows),
                 .searchWindows = {},
                 .mailboxTreeChanged = mailboxStateChanged,
-                .hasNewMail = hasNewMail,
+                .emailObjectsChanged = emailObjectsChanged,
             });
         }
         if (endpointRequestSucceeded)
@@ -785,6 +829,38 @@ namespace javelin::app
                                                              .allMailboxes = false,
                                                              .mailboxIds = std::move(mailboxIds)});
         m_refreshDebounceTimer.start(static_cast<int>(refreshDebounceInterval.count()));
+    }
+
+    void AccountSyncCoordinator::scheduleNotificationBaselineRetry()
+    {
+        // The runtime manager owns failures before the baseline is installed here. Once pending,
+        // this coordinator retries only execution through MailDeltaRefreshExecutor.
+        if (!m_pendingNotificationBaselineMailboxIds.has_value())
+            return;
+        const auto exponent =
+            std::min(m_notificationBaselineRetryAttempts, notificationBaselineRetryMaximumExponent);
+        ++m_notificationBaselineRetryAttempts;
+        m_notificationBaselineRetryTimer.start(
+            static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::seconds{1U << exponent})
+                                 .count()));
+    }
+
+    void AccountSyncCoordinator::scheduleNotificationBaselineRefresh()
+    {
+        if (!m_pendingNotificationBaselineMailboxIds.has_value() || !hasValidSettings() ||
+            m_runContext == nullptr)
+            return;
+
+        const MailRefreshDemand demand{
+            .mailboxState = false, .emailState = true, .allMailboxes = false, .mailboxIds = {}};
+        if (m_refreshInFlight)
+        {
+            m_queuedRefreshDemand.merge(demand);
+            return;
+        }
+        m_debouncedRefreshDemand.merge(demand);
+        m_refreshDebounceTimer.start(0);
     }
 
     void AccountSyncCoordinator::scheduleCatchUpRefresh()

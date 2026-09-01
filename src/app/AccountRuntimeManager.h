@@ -104,8 +104,7 @@ namespace javelin::app
         void contactStateChanged(const QString& ownerAccountId);
         void calendarStateChanged(const QString& ownerAccountId,
                                   const javelin::jmap::sync::AccountTypeStateMap& changedStates);
-        void notificationMailboxRefreshed(const QString& accountId, const QString& mailboxId,
-                                          const QString& mailboxName);
+        void notificationEventsCommitted(const QString& accountId);
         void accountConfigured(const QString& accountId);
         void accountRemoved(const QString& accountId);
         void networkReachable();
@@ -115,6 +114,7 @@ namespace javelin::app
 
       private:
         void applyAccountConfiguration(const std::string& accountId);
+        void scheduleNotificationBaselineRetry(const std::string& accountId);
         void refreshConfiguredSessions();
         void startSessionRefresh(const std::string& ownerAccountId,
                                  const AccountConnectionSettings& settings);
@@ -135,6 +135,8 @@ namespace javelin::app
         std::unordered_map<std::string, std::unique_ptr<AccountSyncCoordinator>> m_coordinators;
         std::unordered_map<std::string, AccountSyncConfiguration> m_configurations;
         std::unordered_map<std::string, std::vector<std::string>> m_observedMailboxIds;
+        std::unordered_map<std::string, unsigned int> m_notificationBaselineRetryAttempts;
+        std::unordered_set<std::string> m_notificationBaselineRetriesPending;
         std::unordered_set<std::string> m_sessionRefreshesInFlight;
     };
 

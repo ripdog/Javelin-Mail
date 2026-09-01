@@ -2,6 +2,7 @@
 #include "gui/messages/MessageDragListView.h"
 #include "gui/messages/MessageDragPayload.h"
 #include "gui/messages/MessageSelectionRestoration.h"
+#include "gui/shell/MessageListTabBindingPresenter.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
@@ -583,23 +584,6 @@ TEST_CASE("message list model expands a known conversation without an exact mail
     CHECK_FALSE(accessibleText.contains(QStringLiteral("3 messages")));
 }
 
-TEST_CASE("message list model marks one cached row read without resetting its list",
-          "[gui][messages][model]")
-{
-    javelin::gui::messages::MessageListModel model{QString{}};
-
-    model.setItems(std::optional<std::string>{"account-1"}, std::optional<std::string>{"mailbox-1"},
-                   {item("email-1", "thread-1", true), item("email-2", "thread-2", true)});
-
-    REQUIRE(model.rowCount() == 2);
-    CHECK(model.setEmailRead("email-1"));
-    CHECK_FALSE(model.data(model.index(0), javelin::gui::messages::MessageListModel::IsUnreadRole)
-                    .toBool());
-    CHECK(model.data(model.index(1), javelin::gui::messages::MessageListModel::IsUnreadRole)
-              .toBool());
-    CHECK_FALSE(model.setEmailRead("email-1"));
-}
-
 TEST_CASE("message list model clear invalidates its binding identity", "[gui][messages][model]")
 {
     javelin::gui::messages::MessageListModel model{QString{}};
@@ -615,6 +599,89 @@ TEST_CASE("message list model clear invalidates its binding identity", "[gui][me
 
     model.setItems(std::optional<std::string>{"account-1"}, std::nullopt, {});
     CHECK(model.isBoundTo("account-1", std::nullopt));
+}
+
+TEST_CASE("tab expansion restoration retains only represented Thread identities",
+          "[gui][messages][model][tabs]")
+{
+    javelin::gui::messages::MessageListModel model{QString{}};
+    model.setItems(std::optional<std::string>{"account-1"}, std::optional<std::string>{"mailbox-1"},
+                   {item("email-1", "thread-1"), item("email-2", "thread-1")});
+    std::vector<std::string> expanded{"thread-1", "missing-thread"};
+
+    javelin::gui::shell::restoreRepresentedThreadExpansions(model, expanded);
+    CHECK(expanded == std::vector<std::string>{"thread-1"});
+    CHECK(model.isThreadExpanded("thread-1"));
+
+    model.setItems(std::optional<std::string>{"account-1"}, std::optional<std::string>{"mailbox-2"},
+                   {item("email-3", "thread-2"), item("email-4", "thread-2")});
+    javelin::gui::shell::restoreRepresentedThreadExpansions(model, expanded);
+    CHECK(expanded.empty());
+    CHECK_FALSE(model.isThreadExpanded("thread-1"));
+}
+
+TEST_CASE("reusable message model restores expansion intent per mailbox and search tab",
+          "[gui][messages][model][tabs][thread-expansion]")
+{
+    javelin::gui::messages::MessageListModel model{QString{}};
+    auto inboxSummary = item("email-inbox", "thread-inbox");
+    inboxSummary.globalThreadMessageCount = 2;
+    auto archiveSummary = item("email-archive", "thread-archive");
+    archiveSummary.globalThreadMessageCount = 2;
+    auto searchSummary = item("email-search", "thread-search");
+    searchSummary.globalThreadMessageCount = 2;
+
+    std::vector<std::string> inboxExpanded{"thread-inbox"};
+    std::vector<std::string> archiveExpanded{"thread-archive"};
+    std::vector<std::string> searchExpanded{"thread-search"};
+
+    model.setItems("account-1", "inbox", {inboxSummary});
+    javelin::gui::shell::restoreRepresentedThreadExpansions(model, inboxExpanded);
+    CHECK(model.isThreadExpanded("thread-inbox"));
+
+    SECTION("Calendar Contacts and Compose clear presentation without losing Inbox intent")
+    {
+        for (const auto* workspace : {"Calendar", "Contacts", "Compose"})
+        {
+            CAPTURE(workspace);
+            model.clear();
+            CHECK_FALSE(model.isThreadExpanded("thread-inbox"));
+            CHECK(inboxExpanded == std::vector<std::string>{"thread-inbox"});
+
+            model.setItems("account-1", "inbox", {inboxSummary});
+            javelin::gui::shell::restoreRepresentedThreadExpansions(model, inboxExpanded);
+            CHECK(model.isThreadExpanded("thread-inbox"));
+        }
+    }
+
+    SECTION("mailbox A and mailbox B retain independent expansion intent")
+    {
+        model.setItems("account-1", "archive", {archiveSummary});
+        javelin::gui::shell::restoreRepresentedThreadExpansions(model, archiveExpanded);
+        CHECK(model.isThreadExpanded("thread-archive"));
+        CHECK_FALSE(model.isThreadExpanded("thread-inbox"));
+        CHECK(inboxExpanded == std::vector<std::string>{"thread-inbox"});
+
+        model.setItems("account-1", "inbox", {inboxSummary});
+        javelin::gui::shell::restoreRepresentedThreadExpansions(model, inboxExpanded);
+        CHECK(model.isThreadExpanded("thread-inbox"));
+        CHECK_FALSE(model.isThreadExpanded("thread-archive"));
+        CHECK(archiveExpanded == std::vector<std::string>{"thread-archive"});
+    }
+
+    SECTION("search expansion intent does not leak into mailbox presentation")
+    {
+        model.setItems("account-1", std::nullopt, {searchSummary});
+        javelin::gui::shell::restoreRepresentedThreadExpansions(model, searchExpanded);
+        CHECK(model.isThreadExpanded("thread-search"));
+        CHECK_FALSE(model.isThreadExpanded("thread-inbox"));
+
+        model.setItems("account-1", "inbox", {inboxSummary});
+        javelin::gui::shell::restoreRepresentedThreadExpansions(model, inboxExpanded);
+        CHECK(model.isThreadExpanded("thread-inbox"));
+        CHECK_FALSE(model.isThreadExpanded("thread-search"));
+        CHECK(searchExpanded == std::vector<std::string>{"thread-search"});
+    }
 }
 
 TEST_CASE("message list model appends an infinite-scroll tail without resetting existing rows",

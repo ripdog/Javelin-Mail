@@ -1,22 +1,32 @@
 #include "desktop/notifications/DesktopNotificationController.h"
 
+#include "app/AccountRuntimeManager.h"
 #include "app/CacheLocationProvider.h"
 #include "app/DeferredSendService.h"
+#include "app/MailMutationApplicationService.h"
+#include "app/MailNotificationService.h"
 #include "daemon/DaemonBackgroundController.h"
 #include "daemon/DaemonServices.h"
+#include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxRepository.h"
+#include "jmap/cache/NotificationRepository.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QEventLoop>
 #include <QMetaObject>
 #include <QSettings>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -99,6 +109,7 @@ namespace
 
         [[nodiscard]] bool supportsActions() const override
         {
+            ++supportQueryCount;
             return actionsSupported;
         }
 
@@ -113,6 +124,7 @@ namespace
         uint nextNotificationId = 73;
         uint notificationId = 73;
         std::size_t sendCount = 0;
+        mutable std::size_t supportQueryCount = 0;
         bool actionsSupported = true;
         std::optional<QString> sendError;
         std::optional<NotificationRequest> request;
@@ -120,6 +132,77 @@ namespace
         std::vector<uint> closedIds;
         std::function<void(uint)> closeObserver;
     };
+
+    void seedPendingMailNotification(javelin::app::DaemonServices& services)
+    {
+        auto& connection = services.databaseConnection();
+        QSqlQuery account{connection.database()};
+        REQUIRE(account.exec(QStringLiteral(
+            "INSERT INTO accounts(account_id,email_address,session_url,is_primary,cap_mail) "
+            "VALUES('account-1','user@example.test','https://example.test/jmap',1,1)")));
+
+        const javelin::jmap::domain::MailboxRights rights{
+            .mayReadItems = true,
+            .mayAddItems = true,
+            .mayRemoveItems = true,
+            .maySetSeen = true,
+            .maySetKeywords = true,
+        };
+        javelin::jmap::domain::Mailbox inbox;
+        inbox.id = "inbox";
+        inbox.name = "Inbox";
+        inbox.role = "inbox";
+        inbox.totalEmails = 1;
+        inbox.unreadEmails = 1;
+        inbox.totalThreads = 1;
+        inbox.unreadThreads = 1;
+        inbox.isSubscribed = true;
+        inbox.myRights = rights;
+        javelin::jmap::domain::Mailbox archive;
+        archive.id = "archive";
+        archive.name = "Archive";
+        archive.role = "archive";
+        archive.isSubscribed = true;
+        archive.myRights = rights;
+        javelin::jmap::cache::MailboxRepository mailboxes{connection};
+        REQUIRE_FALSE(mailboxes.replaceAll("account-1", {inbox, archive}).has_value());
+
+        javelin::jmap::domain::Email email;
+        email.id = "email-1";
+        email.threadId = "thread-1";
+        email.mailboxIds = {"inbox"};
+        email.receivedAt = "2026-08-28T00:00:00Z";
+        email.subject = "Background notification";
+        javelin::jmap::cache::EmailRepository emails{connection};
+        REQUIRE_FALSE(emails.upsertMany("account-1", {email}).has_value());
+
+        javelin::jmap::cache::NotificationRepository notifications{connection};
+        REQUIRE_FALSE(notifications.replaceActiveMailboxes("account-1", {"inbox"}).has_value());
+        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+            connection, QStringLiteral("Seed background notification"));
+        REQUIRE(
+            std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+        auto transaction =
+            std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+        const auto created =
+            notifications.createEventIfUnconsumed(transaction, "account-1",
+                                                  {.mailboxId = "inbox",
+                                                   .emailId = email.id,
+                                                   .threadId = email.threadId,
+                                                   .subject = email.subject,
+                                                   .receivedAt = email.receivedAt});
+        REQUIRE(std::holds_alternative<bool>(created));
+        REQUIRE(std::get<bool>(created));
+        REQUIRE_FALSE(transaction.commit().has_value());
+    }
+
+    [[nodiscard]] int rowCount(javelin::app::DaemonServices& services, const QString& table)
+    {
+        QSqlQuery query{services.databaseConnection().database()};
+        REQUIRE(query.exec(QStringLiteral("SELECT COUNT(*) FROM %1").arg(table)));
+        REQUIRE(query.next());
+        return query.value(0).toInt();
+    }
 } // namespace
 
 TEST_CASE("mail notification activation preserves the message route and mailbox name",
@@ -162,8 +245,7 @@ TEST_CASE("mail notification activation preserves the message route and mailbox 
                       QStringLiteral("Archive"), QStringLiteral("mark-read"),
                       QStringLiteral("Mark Read"), QStringLiteral("reply"),
                       QStringLiteral("Reply")});
-    CHECK(transportObserver->request->hints.value(QStringLiteral("desktop-entry")).toString() ==
-          QStringLiteral("javelinmail"));
+    CHECK_FALSE(transportObserver->request->hints.contains(QStringLiteral("desktop-entry")));
 
     REQUIRE(QMetaObject::invokeMethod(notificationController, "onActivationToken",
                                       Qt::DirectConnection,
@@ -193,6 +275,154 @@ TEST_CASE("mail notification activation preserves the message route and mailbox 
     CHECK(replyRoute->emailId == QStringLiteral("email-13"));
     CHECK(replyRoute->activationToken == QStringLiteral("token-21"));
     CHECK(transportObserver->closedId == transportObserver->notificationId);
+}
+
+TEST_CASE("daemon delivers pending new mail while no GUI is running",
+          "[app][daemon][notification][background][gui-closed]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+
+    auto location = javelin::app::CacheLocationProvider{cacheRoot}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(location));
+    javelin::app::DaemonServices services{
+        std::get<javelin::app::CacheLocation>(std::move(location))};
+    seedPendingMailNotification(services);
+    CHECK(services.accountRuntimeManager().configuredAccountIds().empty());
+
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    auto notifications = std::make_unique<javelin::app::DesktopNotificationController>(
+        std::move(transport), false, true);
+    javelin::app::DaemonBackgroundController background{services, std::move(notifications)};
+    background.start(false);
+
+    services.mailNotificationService().accountChanged(QStringLiteral("account-1"));
+
+    REQUIRE(observer->request.has_value());
+    CHECK(observer->sendCount == 1);
+    CHECK(observer->request->summary == QStringLiteral("New mail in Inbox"));
+    CHECK(observer->request->message == QStringLiteral("Background notification"));
+    CHECK(rowCount(services, QStringLiteral("mail_notification_event_outbox")) == 0);
+    CHECK(rowCount(services, QStringLiteral("notification_dispatch_claims")) == 0);
+}
+
+TEST_CASE("failed daemon desktop delivery retries from local notification state without sync",
+          "[app][daemon][notification][background][retry][gui-closed]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+
+    auto location = javelin::app::CacheLocationProvider{cacheRoot}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(location));
+    javelin::app::DaemonServices services{
+        std::get<javelin::app::CacheLocation>(std::move(location))};
+    seedPendingMailNotification(services);
+    REQUIRE(services.accountRuntimeManager().configuredAccountIds().empty());
+
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    observer->sendError = QStringLiteral("desktop notification unavailable");
+    auto notifications = std::make_unique<javelin::app::DesktopNotificationController>(
+        std::move(transport), false, true);
+    javelin::app::DaemonBackgroundController background{services, std::move(notifications)};
+    background.start(false);
+
+    services.mailNotificationService().accountChanged(QStringLiteral("account-1"));
+    CHECK(observer->sendCount == 1);
+    CHECK(rowCount(services, QStringLiteral("mail_notification_event_outbox")) == 1);
+    CHECK(rowCount(services, QStringLiteral("notification_dispatch_claims")) == 0);
+
+    // This is the same local retry body invoked by the background retry timer. No account runtime
+    // exists in this process, so successful retryability cannot be supplied by JMAP
+    // synchronization.
+    services.mailNotificationService().accountChanged(QStringLiteral("account-1"));
+    CHECK(observer->sendCount == 2);
+    CHECK(rowCount(services, QStringLiteral("mail_notification_event_outbox")) == 1);
+    CHECK(rowCount(services, QStringLiteral("notification_dispatch_claims")) == 0);
+    CHECK(services.accountRuntimeManager().configuredAccountIds().empty());
+}
+
+TEST_CASE("new mail actions mutate through the daemon while no GUI is running",
+          "[app][daemon][notification][actions][gui-closed]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+
+    auto location = javelin::app::CacheLocationProvider{cacheRoot}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(location));
+    javelin::app::DaemonServices services{
+        std::get<javelin::app::CacheLocation>(std::move(location))};
+    seedPendingMailNotification(services);
+
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    auto notifications = std::make_unique<javelin::app::DesktopNotificationController>(
+        std::move(transport), false, true);
+    auto* notificationController = notifications.get();
+    javelin::app::DaemonBackgroundController background{services, std::move(notifications)};
+
+    int cacheCommits = 0;
+    QEventLoop cacheLoop;
+    QObject::connect(&services.mailMutationApplicationService(),
+                     &javelin::app::MailMutationApplicationService::cacheCommitted, &cacheLoop,
+                     [&cacheCommits, &cacheLoop](const javelin::app::MailCacheChange&)
+                     {
+                         ++cacheCommits;
+                         cacheLoop.quit();
+                     });
+
+    REQUIRE(notificationController->notifyNewMail(
+        QStringLiteral("account-1"), QStringLiteral("inbox"), QStringLiteral("thread-1"),
+        QStringLiteral("email-1"), QStringLiteral("Inbox"), QStringLiteral("New mail in Inbox"),
+        QStringLiteral("Background notification")));
+    const auto archiveNotificationId = observer->notificationId;
+    REQUIRE(QMetaObject::invokeMethod(notificationController, "onActionInvoked",
+                                      Qt::DirectConnection, Q_ARG(uint, archiveNotificationId),
+                                      Q_ARG(QString, QStringLiteral("archive"))));
+    if (cacheCommits == 0)
+        cacheLoop.exec();
+    REQUIRE(cacheCommits >= 1);
+
+    javelin::jmap::cache::EmailRepository emails{services.databaseConnection()};
+    const auto archivedResult = emails.find("account-1", "email-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(archivedResult));
+    const auto& archived = std::get<std::optional<javelin::jmap::domain::Email>>(archivedResult);
+    REQUIRE(archived.has_value());
+    CHECK(std::ranges::contains(archived->mailboxIds, std::string{"archive"}));
+    CHECK_FALSE(std::ranges::contains(archived->mailboxIds, std::string{"inbox"}));
+
+    REQUIRE(notificationController->notifyNewMail(
+        QStringLiteral("account-1"), QStringLiteral("archive"), QStringLiteral("thread-1"),
+        QStringLiteral("email-1"), QStringLiteral("Archive"), QStringLiteral("New mail in Archive"),
+        QStringLiteral("Background notification")));
+    const auto readNotificationId = observer->notificationId;
+    const auto beforeReadCommit = cacheCommits;
+    REQUIRE(QMetaObject::invokeMethod(notificationController, "onActionInvoked",
+                                      Qt::DirectConnection, Q_ARG(uint, readNotificationId),
+                                      Q_ARG(QString, QStringLiteral("mark-read"))));
+    if (cacheCommits == beforeReadCommit)
+        cacheLoop.exec();
+    REQUIRE(cacheCommits > beforeReadCommit);
+
+    const auto readResult = emails.find("account-1", "email-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(readResult));
+    const auto& read = std::get<std::optional<javelin::jmap::domain::Email>>(readResult);
+    REQUIRE(read.has_value());
+    CHECK(std::ranges::contains(read->keywords, std::string{"$seen"}));
+    CHECK(services.accountRuntimeManager().configuredAccountIds().empty());
 }
 
 TEST_CASE("new mail notification actions emit stable mail intents",
@@ -267,6 +497,40 @@ TEST_CASE("new mail omits actions when the notification service cannot invoke th
                                      QStringLiteral("thread"), QStringLiteral("email"),
                                      QStringLiteral("Inbox"), QStringLiteral("New mail"),
                                      QStringLiteral("Subject")));
+    REQUIRE(observer->request.has_value());
+    CHECK(observer->request->actions.isEmpty());
+    CHECK(observer->request->hints.value(QStringLiteral("desktop-entry")).toString() ==
+          QStringLiteral("javelinmail"));
+}
+
+TEST_CASE("notification action capability is cached until the service restarts",
+          "[app][daemon][notification][actions]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+
+    REQUIRE(controller.notifyNewMail(QStringLiteral("account"), QStringLiteral("inbox"),
+                                     QStringLiteral("thread-1"), QStringLiteral("email-1"),
+                                     QStringLiteral("Inbox"), QStringLiteral("New mail"),
+                                     QStringLiteral("First")));
+    REQUIRE(controller.notifyNewMail(QStringLiteral("account"), QStringLiteral("inbox"),
+                                     QStringLiteral("thread-2"), QStringLiteral("email-2"),
+                                     QStringLiteral("Inbox"), QStringLiteral("New mail"),
+                                     QStringLiteral("Second")));
+    CHECK(observer->supportQueryCount == 1);
+
+    REQUIRE(QMetaObject::invokeMethod(
+        &controller, "onNotificationServiceUnregistered", Qt::DirectConnection,
+        Q_ARG(QString, QStringLiteral("org.freedesktop.Notifications"))));
+    observer->actionsSupported = false;
+    REQUIRE(controller.notifyNewMail(QStringLiteral("account"), QStringLiteral("inbox"),
+                                     QStringLiteral("thread-3"), QStringLiteral("email-3"),
+                                     QStringLiteral("Inbox"), QStringLiteral("New mail"),
+                                     QStringLiteral("Third")));
+    CHECK(observer->supportQueryCount == 2);
     REQUIRE(observer->request.has_value());
     CHECK(observer->request->actions.isEmpty());
 }
@@ -347,6 +611,7 @@ TEST_CASE("undoable send notification reports its actionable lifetime and timeou
     CHECK(observer->request->actions ==
           QStringList{QStringLiteral("undo-send:send-1"), QStringLiteral("Undo Send")});
     CHECK(observer->request->hints.value(QStringLiteral("transient")).toBool());
+    CHECK_FALSE(observer->request->hints.contains(QStringLiteral("desktop-entry")));
 }
 
 TEST_CASE("dialog undo send mode routes a deadline without creating a notification",

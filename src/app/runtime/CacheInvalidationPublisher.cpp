@@ -71,6 +71,12 @@ namespace javelin::app
             m_flushTimer.start(0);
     }
 
+    void CacheInvalidationPublisher::publishImmediately(MailCacheChange change)
+    {
+        publish(std::move(change));
+        flush();
+    }
+
     void CacheInvalidationPublisher::flush()
     {
         m_flushTimer.stop();
@@ -78,19 +84,13 @@ namespace javelin::app
         {
             auto change = std::move(m_pending.front());
             m_pending.pop_front();
-            ++m_epoch;
             Q_EMIT invalidated(MailCacheInvalidation{
-                .epoch = m_epoch,
+                .epoch = 0,
                 .changedDomains = changedDomains(change),
                 .affectedKeys = affectedKeys(change),
                 .change = std::move(change),
             });
         }
-    }
-
-    std::uint64_t CacheInvalidationPublisher::currentEpoch() const
-    {
-        return m_epoch;
     }
 
     void CacheInvalidationPublisher::merge(MailCacheChange& target, MailCacheChange source)
@@ -109,8 +109,9 @@ namespace javelin::app
         for (auto& emailId : source.messageContentEmailIds)
             appendUniqueBounded(target.messageContentEmailIds, std::move(emailId));
         target.mailboxTreeChanged = target.mailboxTreeChanged || source.mailboxTreeChanged;
-        target.hasNewMail = target.hasNewMail || source.hasNewMail;
+        target.emailObjectsChanged = target.emailObjectsChanged || source.emailObjectsChanged;
         target.optimisticProjection = target.optimisticProjection || source.optimisticProjection;
+        target.mailTagsChanged = target.mailTagsChanged || source.mailTagsChanged;
         target.contactsChanged = target.contactsChanged || source.contactsChanged;
         target.identitiesChanged = target.identitiesChanged || source.identitiesChanged;
     }
@@ -124,16 +125,16 @@ namespace javelin::app
         if (!change.mailboxIds.empty() || !change.queryWindows.empty() ||
             !change.searchWindows.empty())
             domains.push_back(javelin::protocol::ChangedDomain::MailQueryWindows);
-        if (change.hasNewMail || change.optimisticProjection)
+        if (change.emailObjectsChanged || change.optimisticProjection)
             domains.push_back(javelin::protocol::ChangedDomain::MessageMetadata);
+        if (change.mailTagsChanged)
+            domains.push_back(javelin::protocol::ChangedDomain::MailTags);
         if (!change.messageContentEmailIds.empty())
             domains.push_back(javelin::protocol::ChangedDomain::MessageContent);
         if (change.contactsChanged)
             domains.push_back(javelin::protocol::ChangedDomain::Contacts);
         if (change.identitiesChanged)
             domains.push_back(javelin::protocol::ChangedDomain::SenderIdentities);
-        if (domains.empty())
-            domains.push_back(javelin::protocol::ChangedDomain::MailQueryWindows);
         return domains;
     }
 

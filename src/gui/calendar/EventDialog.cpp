@@ -584,11 +584,11 @@ namespace javelin::gui::calendar
             m_defaultNotificationsWarning->setText(
                 m_allDay->isChecked()
                     ? i18n("This calendar has no default notifications configured for all-day "
-                           "events. Javelin will use this event’s own notifications instead; if "
-                           "there are none, no notification will be shown.")
+                           "events. No display notification will be shown for this event while "
+                           "calendar defaults are enabled.")
                     : i18n("This calendar has no default notifications configured for timed "
-                           "events. Javelin will use this event’s own notifications instead; if "
-                           "there are none, no notification will be shown."));
+                           "events. No display notification will be shown for this event while "
+                           "calendar defaults are enabled."));
         }
         m_configureDefaultNotifications->setEnabled(
             !m_pendingDefaultNotificationsChange.has_value());

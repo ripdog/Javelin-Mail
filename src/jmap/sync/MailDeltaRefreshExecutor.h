@@ -6,6 +6,7 @@
 
 #include <QCoroTask>
 
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -25,6 +26,12 @@ namespace javelin::jmap::sync
         bool emailChanged = false;
         bool mailboxNeedsFullRefresh = false;
         bool emailNeedsFullRefresh = false;
+        // A recovered Email state gap cannot prove query membership for Emails outside the local
+        // working set. The coordinator must reconcile its tracked mailbox query windows without
+        // treating those presentation queries as owners of the account Email cursor.
+        bool mailboxQueriesNeedReconciliation = false;
+        bool notificationEventsCreated = false;
+        bool notificationBaselineEstablished = false;
         bool superseded = false;
         std::vector<std::string> changedMailboxIds;
         std::vector<std::string> queryAffectedMailboxIds;
@@ -33,6 +40,9 @@ namespace javelin::jmap::sync
 
     using MailDeltaRefreshResult = std::variant<MailDeltaRefreshSummary, OperationError>;
 
+    // Owns account-wide Mailbox/Email object-state progression. In particular, the global Email
+    // sync token may advance here only after every locally relevant Email represented by that
+    // transition has been reconciled (or explicitly accounted for during rebaseline recovery).
     class MailDeltaRefreshExecutor
     {
       public:
@@ -42,7 +52,9 @@ namespace javelin::jmap::sync
 
         [[nodiscard]] QCoro::Task<MailDeltaRefreshResult>
         refresh(std::string accountId, MailDeltaRefreshRequest request,
-                std::string remoteAccountId = {}) const;
+                std::string remoteAccountId = {},
+                std::optional<std::vector<std::string>> notificationBaselineMailboxIds =
+                    std::nullopt) const;
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;

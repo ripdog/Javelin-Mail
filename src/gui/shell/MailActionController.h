@@ -71,7 +71,7 @@ namespace javelin::gui::shell
                              QMenu& tagsMenu, QWidget& parentWidget, MailActions actions,
                              std::function<void(QString, int)> showStatus,
                              std::function<void(const javelin::jmap::OperationError&)> showError,
-                             std::function<void()> refreshMessageList, QObject* parent = nullptr);
+                             QObject* parent = nullptr);
 
         void activate(const TabState* tab);
         void update();
@@ -104,7 +104,6 @@ namespace javelin::gui::shell
         MailActions m_actions;
         std::function<void(QString, int)> m_showStatus;
         std::function<void(const javelin::jmap::OperationError&)> m_showError;
-        std::function<void()> m_refreshMessageList;
         QPointer<QMenu> m_contextMenu;
         std::function<std::vector<QString>()> m_configuredContextMenuLayout;
         std::function<void(const QList<QAction*>&)> m_replaceContextMenuActionList;

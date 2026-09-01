@@ -207,6 +207,8 @@ TEST_CASE("event default notification warning follows the applicable calendar de
 
     CHECK_FALSE(warning->isHidden());
     CHECK(warning->text().contains(QStringLiteral("all-day")));
+    CHECK(warning->text().contains(QStringLiteral("No display notification will be shown")));
+    CHECK_FALSE(warning->text().contains(QStringLiteral("own notifications")));
 }
 
 TEST_CASE("event default notification warning opens direct calendar configuration",

@@ -918,6 +918,7 @@ TEST_CASE("socket endpoint runs the transport-neutral typed surface", "[protocol
         .changedDomains = {ChangedDomain::MessageMetadata},
         .affectedKeys = {QStringLiteral("c")},
         .accountId = QStringLiteral("c"),
+        .optimisticProjection = true,
         .mailboxIds = {QStringLiteral("c")},
         .messageContentEmailIds = {QStringLiteral("email-1")},
         .mailboxWindows =
@@ -933,6 +934,7 @@ TEST_CASE("socket endpoint runs the transport-neutral typed surface", "[protocol
     REQUIRE(invalidation != nullptr);
     CHECK(invalidation->epoch.value == 13);
     CHECK(invalidation->accountId == QStringLiteral("c"));
+    CHECK(invalidation->optimisticProjection);
     CHECK(invalidation->mailboxIds == std::vector{QStringLiteral("c")});
     CHECK(invalidation->messageContentEmailIds == std::vector{QStringLiteral("email-1")});
     REQUIRE(invalidation->mailboxWindows.size() == 1);

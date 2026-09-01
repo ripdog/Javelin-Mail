@@ -20,9 +20,8 @@ namespace javelin::app
         explicit CacheInvalidationPublisher(QObject* parent = nullptr);
 
         void publish(MailCacheChange change);
+        void publishImmediately(MailCacheChange change);
         void flush();
-
-        [[nodiscard]] std::uint64_t currentEpoch() const;
 
       Q_SIGNALS:
         void invalidated(javelin::app::MailCacheInvalidation invalidation);
@@ -35,6 +34,5 @@ namespace javelin::app
 
         QTimer m_flushTimer;
         std::deque<MailCacheChange> m_pending;
-        std::uint64_t m_epoch = 0;
     };
 } // namespace javelin::app
