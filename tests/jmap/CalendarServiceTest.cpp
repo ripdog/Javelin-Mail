@@ -3364,6 +3364,72 @@ TEST_CASE("calendar refresh recovers a recurring base omitted by the bounded bas
     if (const auto error = sessions.replace("a1", session()))
         FAIL(error->message.toStdString());
 
+    const javelin::jmap::calendar::VisibleInterval interval{
+        .start = {.value = "2026-06-29T00:00:00"}, .end = {.value = "2026-08-10T00:00:00"}};
+    const javelin::jmap::calendar::TimeZoneId zone{.value = "Pacific/Auckland"};
+    javelin::jmap::cache::CalendarRepository calendars{connection};
+    const javelin::jmap::calendar::Calendar work{
+        .accountId = "a1",
+        .id = "work",
+        .name = "Work",
+        .description = std::nullopt,
+        .color = std::nullopt,
+        .sortOrder = 0,
+        .isSubscribed = true,
+        .isVisible = true,
+        .isDefault = true,
+        .timeZone = std::nullopt,
+        .defaultAlertsWithTime = {},
+        .defaultAlertsWithoutTime = {},
+        .myRights = {.mayReadFreeBusy = true,
+                     .mayReadItems = true,
+                     .mayWriteAll = true,
+                     .mayWriteOwn = true,
+                     .mayUpdatePrivate = true,
+                     .mayRSVP = true,
+                     .mayShare = false,
+                     .mayDelete = false},
+    };
+    REQUIRE_FALSE(calendars.replaceCalendars("a1", "calendar-water", {work}).has_value());
+    auto corrupted = event();
+    corrupted.id = "base-water";
+    corrupted.uid = "water-series-uid";
+    corrupted.title = "Water Softener Running";
+    corrupted.start = {.value = "2026-01-08T02:20:00"};
+    corrupted.duration = {.value = "PT2H10M"};
+    corrupted.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
+    corrupted.recurrenceRule->frequency = javelin::jmap::calendar::RecurrenceFrequency::Daily;
+    corrupted.recurrenceRule->interval = 3;
+    REQUIRE_FALSE(calendars
+                      .reconcileWindow({
+                          .accountId = "a1",
+                          .start = interval.start,
+                          .end = interval.end,
+                          .displayTimeZone = zone,
+                          .queryState = "corrupt-water-window",
+                          .eventState = "event-water",
+                          .events = {corrupted},
+                          .occurrences = {{.accountId = "a1",
+                                           .id = "base-water",
+                                           .eventId = "base-water",
+                                           .recurrenceId = std::nullopt,
+                                           .localStart = {.value = "2026-07-01T02:20:00"},
+                                           .localEnd = {.value = "2026-07-01T04:30:00"},
+                                           .utcStart = std::nullopt,
+                                           .utcEnd = std::nullopt,
+                                           .allDay = false}},
+                      })
+                      .has_value());
+    const auto beforeRepair = calendars.loadWindow("a1", interval.start, interval.end, zone);
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(beforeRepair));
+    const auto& corruptWindow =
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(beforeRepair);
+    REQUIRE(corruptWindow.has_value());
+    REQUIRE(corruptWindow->occurrences.size() == 1);
+    CHECK_FALSE(corruptWindow->occurrences.front().recurrenceId.has_value());
+    CHECK(corruptWindow->eventState == "event-water");
+
     FakeMethodTransport transport;
     transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
         .methodResponses =
@@ -3417,9 +3483,6 @@ TEST_CASE("calendar refresh recovers a recurring base omitted by the bounded bas
     javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
     javelin::jmap::calendar::CalendarSyncEngine sync{connection, protocol};
     javelin::jmap::calendar::CalendarMutationEngine mutation{connection, protocol, sync, reader};
-    const javelin::jmap::calendar::VisibleInterval interval{
-        .start = {.value = "2026-06-29T00:00:00"}, .end = {.value = "2026-08-10T00:00:00"}};
-    const javelin::jmap::calendar::TimeZoneId zone{.value = "Pacific/Auckland"};
     const auto refreshed =
         QCoro::waitFor(sync.refresh({.sessionUrl = "https://example.test/.well-known/jmap",
                                      .loginEmail = "alice@example.test",
@@ -3427,7 +3490,6 @@ TEST_CASE("calendar refresh recovers a recurring base omitted by the bounded bas
                                     "a1", interval, zone));
 
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(refreshed));
-    javelin::jmap::cache::CalendarRepository calendars{connection};
     const auto loaded = calendars.loadWindow("a1", interval.start, interval.end, zone);
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(loaded));
     const auto& window = std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(loaded);
@@ -3437,7 +3499,10 @@ TEST_CASE("calendar refresh recovers a recurring base omitted by the bounded bas
     CHECK(window->events.front().title == "Water Softener Running");
     REQUIRE(window->occurrences.size() == 1);
     CHECK(window->occurrences.front().eventId == "base-water");
+    REQUIRE(window->occurrences.front().recurrenceId.has_value());
+    CHECK(window->occurrences.front().recurrenceId->value == "2026-07-01T02:20:00");
     CHECK(window->occurrences.front().localStart.value == "2026-07-01T02:20:00");
+    CHECK(window->eventState == "event-water");
     REQUIRE(transport.requests.size() == 5);
     REQUIRE(transport.requests[1].envelope.methodCalls.size() == 1);
     CHECK(transport.requests[1].envelope.methodCalls.front().arguments.find(R"("properties":[)") !=

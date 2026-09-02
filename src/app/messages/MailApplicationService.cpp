@@ -4196,8 +4196,11 @@ namespace javelin::app
         const ForegroundWorkScope foreground{m_workScheduler};
         const bool refreshCalendarMetadata =
             !m_calendarMetadataReadyOwners.contains(ownerAccountId);
-        const bool useIncrementalRefresh =
-            cachedRangeAvailable && (forceRefresh || catchUpRequired);
+        // A user-requested refresh is also the cache-repair path. CalendarEvent/changes can
+        // legitimately report no changes when the collection token is current even if local
+        // occurrence materialization is incomplete, so an explicit refresh must rematerialize
+        // the visible range authoritatively. Push/catch-up work remains incremental.
+        const bool useIncrementalRefresh = cachedRangeAvailable && catchUpRequired && !forceRefresh;
         auto promise = std::make_shared<QPromise<javelin::jmap::calendar::CalendarRefreshResult>>();
         promise->start();
         auto future = promise->future();
