@@ -3046,65 +3046,31 @@ namespace javelin::jmap::calendar
                        !changes.updated.empty() || !changes.destroyed.empty();
             };
             const bool calendarMetadataChanged = hasChanges(calendarChanges);
-            if (eventChanges.hasMoreChanges)
+            // CalendarEvent/query filters are evaluated in the requested display timezone, while
+            // CalendarEvent.start remains in the event's own timezone. A changed event therefore
+            // cannot be placed into cached range windows by comparing local start/end strings.
+            // Rematerialize the visible range from the server for every real event delta; retain
+            // the incremental path only for collection-state advancement and Calendar metadata.
+            if (hasChanges(eventChanges))
             {
                 fullRefreshRequired = true;
                 break;
             }
-            std::vector<std::string> changedIds = eventChanges.created;
-            changedIds.insert(changedIds.end(), eventChanges.updated.begin(),
-                              eventChanges.updated.end());
-            std::ranges::sort(changedIds);
-            const auto [firstDuplicate, end] = std::ranges::unique(changedIds);
-            changedIds.erase(firstDuplicate, end);
-            if (session.capabilities.coreDetails &&
-                session.capabilities.coreDetails->maxObjectsInGet &&
-                changedIds.size() > *session.capabilities.coreDetails->maxObjectsInGet)
-            {
-                fullRefreshRequired = true;
-                break;
-            }
-
             std::optional<api::CalendarGetResponse> changedCalendars;
-            std::vector<CalendarEvent> changedEvents;
-            if (calendarMetadataChanged || !changedIds.empty())
+            if (calendarMetadataChanged)
             {
-                std::optional<api::MethodRequest<api::CalendarGetResponse>> calendarGetRequest;
-                if (calendarMetadataChanged)
-                {
-                    calendarGetRequest = api::calendarGet({.accountId = accountId,
-                                                           .ids = std::nullopt,
-                                                           .idsReference = std::nullopt,
-                                                           .properties = std::nullopt});
-                }
-                std::optional<api::MethodRequest<api::CalendarEventGetResponse>> eventGetRequest;
-                if (!changedIds.empty())
-                {
-                    eventGetRequest =
-                        api::calendarEventGet({.accountId = accountId,
-                                               .ids = changedIds,
-                                               .idsReference = std::nullopt,
-                                               .properties = calendarEventReadProperties(),
-                                               .recurrenceOverridesBefore = std::nullopt,
-                                               .recurrenceOverridesAfter = std::nullopt,
-                                               .reduceParticipants = false,
-                                               .timeZone = displayTimeZone});
-                }
-                if ((calendarMetadataChanged && !calendarGetRequest) ||
-                    (!changedIds.empty() && !eventGetRequest))
-                {
+                const auto calendarGetRequest = api::calendarGet({.accountId = accountId,
+                                                                  .ids = std::nullopt,
+                                                                  .idsReference = std::nullopt,
+                                                                  .properties = std::nullopt});
+                if (!calendarGetRequest)
                     co_return error(OperationErrorCode::InvalidRequest,
                                     QStringLiteral("Unable to serialize changed calendar data."));
-                }
 
                 api::RequestBuilder getBuilder;
                 getBuilder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
-                std::optional<api::CallHandle<api::CalendarGetResponse>> calendarGetHandle;
-                std::optional<api::CallHandle<api::CalendarEventGetResponse>> eventGetHandle;
-                if (calendarGetRequest)
-                    calendarGetHandle = getBuilder.call(*calendarGetRequest, "changed-calendars");
-                if (eventGetRequest)
-                    eventGetHandle = getBuilder.call(*eventGetRequest, "changed-calendar-events");
+                const auto calendarGetHandle =
+                    getBuilder.call(*calendarGetRequest, "changed-calendars");
                 const auto getResult = co_await m_protocolClient.call(
                     context(settings, session, accountId), std::move(getBuilder));
                 if (!isCurrentRefresh(ownerAccountId, generation))
@@ -3112,68 +3078,16 @@ namespace javelin::jmap::calendar
                 const auto* getEnvelope = std::get_if<api::ResponseEnvelope>(&getResult);
                 if (!getEnvelope)
                     co_return callError(getResult);
-                const api::ResponseReader getReader{*getEnvelope};
-                if (calendarGetHandle)
-                {
-                    const auto getRead = getReader.require(*calendarGetHandle);
-                    if (const auto* readError = std::get_if<api::ResponseReaderError>(&getRead))
-                        co_return responseError(*readError);
-                    auto getResponse = std::get<api::CalendarGetResponse>(getRead);
-                    if (getResponse.accountId != accountId || !getResponse.notFound.empty())
-                        co_return error(OperationErrorCode::ProtocolViolation,
-                                        QStringLiteral("Invalid changed Calendar/get response."));
-                    changedCalendars = std::move(getResponse);
-                }
-                if (eventGetHandle)
-                {
-                    const auto getRead = getReader.require(*eventGetHandle);
-                    if (const auto* readError = std::get_if<api::ResponseReaderError>(&getRead))
-                        co_return responseError(*readError);
-                    auto getResponse = std::get<api::CalendarEventGetResponse>(getRead);
-                    std::unordered_set<std::string> expectedIds(changedIds.begin(),
-                                                                changedIds.end());
-                    std::unordered_set<std::string> materializedIds;
-                    const bool invalidMaterialization =
-                        getResponse.accountId != accountId ||
-                        getResponse.state != eventChanges.newState ||
-                        std::ranges::any_of(
-                            getResponse.list,
-                            [&expectedIds, &materializedIds](const CalendarEvent& event)
-                            {
-                                return !expectedIds.contains(event.id) ||
-                                       !materializedIds.insert(event.id).second;
-                            }) ||
-                        materializedIds.size() + getResponse.notFound.size() !=
-                            expectedIds.size() ||
-                        std::ranges::any_of(getResponse.notFound,
-                                            [&expectedIds, &materializedIds](const std::string& id)
-                                            {
-                                                return !expectedIds.contains(id) ||
-                                                       !materializedIds.insert(id).second;
-                                            });
-                    if (invalidMaterialization || !getResponse.notFound.empty() ||
-                        std::ranges::any_of(getResponse.list, [](const auto& event)
-                                            { return event.recurrenceRule.has_value(); }))
-                    {
-                        fullRefreshRequired = true;
-                        break;
-                    }
-                    changedEvents = std::move(getResponse.list);
-                }
+                const auto getRead = api::ResponseReader{*getEnvelope}.require(calendarGetHandle);
+                if (const auto* readError = std::get_if<api::ResponseReaderError>(&getRead))
+                    co_return responseError(*readError);
+                auto getResponse = std::get<api::CalendarGetResponse>(getRead);
+                if (getResponse.accountId != accountId || !getResponse.notFound.empty())
+                    co_return error(OperationErrorCode::ProtocolViolation,
+                                    QStringLiteral("Invalid changed Calendar/get response."));
+                changedCalendars = std::move(getResponse);
             }
 
-            std::vector<Occurrence> changedOccurrences;
-            changedOccurrences.reserve(changedEvents.size());
-            for (const auto& event : changedEvents)
-                changedOccurrences.push_back({.accountId = accountId,
-                                              .id = event.id,
-                                              .eventId = event.id,
-                                              .recurrenceId = std::nullopt,
-                                              .localStart = event.start,
-                                              .localEnd = localEnd(event),
-                                              .utcStart = event.utcStart,
-                                              .utcEnd = event.utcEnd,
-                                              .allDay = event.showWithoutTime});
             const auto calendarCurrent = fenceIsCurrent(m_connection, calendarFence);
             const auto eventCurrent = fenceIsCurrent(m_connection, eventFence);
             if (const auto* serviceError = std::get_if<OperationError>(&calendarCurrent))
@@ -3190,16 +3104,12 @@ namespace javelin::jmap::calendar
                         accountId, acceptedCalendarState, changedCalendars->list))
                     co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             }
-            if (const auto cacheError = repository.applyEventDelta(
-                    accountId, acceptedCalendarState, eventChanges.newState, displayTimeZone,
-                    changedEvents, changedOccurrences, eventChanges.destroyed))
+            if (const auto cacheError =
+                    repository.applyEventDelta(accountId, acceptedCalendarState,
+                                               eventChanges.newState, displayTimeZone, {}, {}, {}))
                 co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
-            if (calendarMetadataChanged || !changedEvents.empty() ||
-                !eventChanges.destroyed.empty())
-            {
+            if (calendarMetadataChanged)
                 ++summary.accountCount;
-                summary.eventCount += changedOccurrences.size();
-            }
         }
         if (fullRefreshRequired)
             co_return co_await refresh(std::move(settings), std::move(ownerAccountId),
