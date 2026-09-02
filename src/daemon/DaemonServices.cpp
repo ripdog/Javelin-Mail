@@ -548,7 +548,7 @@ namespace javelin::app
                          m_fullMailSyncService.get(), refreshMailboxVisibility);
         m_messageNavigationCoordinator = std::make_unique<MessageNavigationCoordinator>();
         m_calendarNotificationService = std::make_unique<CalendarNotificationService>(
-            m_databaseConnection, *m_calendarApplicationService);
+            m_databaseConnection, *m_calendarApplicationService, *m_calendarApplicationService);
         m_calendarInvitationService = std::make_unique<CalendarInvitationService>(
             m_databaseConnection, *m_calendarProtocolClient, *m_calendarReader,
             *m_accountRuntimeManager);
@@ -571,16 +571,29 @@ namespace javelin::app
             m_accountRuntimeManager.get(), &AccountRuntimeManager::calendarStateChanged,
             m_calendarInvitationService.get(), &CalendarInvitationService::calendarStateChanged);
         QObject::connect(
+            m_accountRuntimeManager.get(), &AccountRuntimeManager::calendarStateChanged,
+            m_calendarNotificationService.get(),
+            [this](const QString& ownerAccountId,
+                   const javelin::jmap::sync::AccountTypeStateMap& changedStates)
+            {
+                if (std::ranges::any_of(changedStates, [](const auto& account)
+                                        { return account.second.contains("CalendarEvent"); }))
+                    m_calendarNotificationService->calendarStateChanged(ownerAccountId);
+            });
+        QObject::connect(
             m_accountRuntimeManager.get(), &AccountRuntimeManager::stateChangeCatchUpRequired,
             m_calendarInvitationService.get(), &CalendarInvitationService::accountChanged);
         QObject::connect(m_accountRuntimeManager.get(),
                          &AccountRuntimeManager::calendarAlertReceived,
                          m_calendarNotificationService.get(),
                          &CalendarNotificationService::calendarAlertReceived);
-        QObject::connect(m_calendarApplicationService.get(),
-                         &CalendarApplicationService::calendarCacheCommitted,
-                         m_calendarNotificationService.get(), [this](const CalendarCacheChange&)
-                         { m_calendarNotificationService->requestScan(); });
+        QObject::connect(
+            m_calendarApplicationService.get(), &CalendarApplicationService::calendarCacheCommitted,
+            m_calendarNotificationService.get(), [this](const CalendarCacheChange& change)
+            { m_calendarNotificationService->calendarCacheCommitted(change.ownerAccountId); });
+        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::accountRemoved,
+                         m_calendarNotificationService.get(),
+                         &CalendarNotificationService::calendarAccountRemoved);
         QObject::connect(m_calendarApplicationService.get(),
                          &CalendarApplicationService::calendarCacheCommitted,
                          m_calendarInvitationService.get(), [this](const CalendarCacheChange&)

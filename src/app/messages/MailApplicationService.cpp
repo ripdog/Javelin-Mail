@@ -850,6 +850,59 @@ namespace javelin::app
         return {m_calendarMetadataUsableOwners.begin(), m_calendarMetadataUsableOwners.end()};
     }
 
+    QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
+    CalendarApplicationService::materializeCalendarReminderHorizon(
+        std::string ownerAccountId, javelin::jmap::calendar::VisibleInterval interval,
+        javelin::jmap::calendar::TimeZoneId displayTimeZone)
+    {
+        if (const auto metadata = m_calendarMetadataRefreshesInFlight.find(ownerAccountId);
+            metadata != m_calendarMetadataRefreshesInFlight.end())
+        {
+            auto future = metadata->second;
+            static_cast<void>(co_await qCoro(future).result());
+            co_return co_await materializeCalendarReminderHorizon(
+                std::move(ownerAccountId), std::move(interval), std::move(displayTimeZone));
+        }
+        if (const auto state = m_calendarStateRefreshesInFlight.find(ownerAccountId);
+            state != m_calendarStateRefreshesInFlight.end())
+        {
+            auto future = state->second;
+            static_cast<void>(co_await qCoro(future).result());
+            co_return co_await materializeCalendarReminderHorizon(
+                std::move(ownerAccountId), std::move(interval), std::move(displayTimeZone));
+        }
+        if (const auto range = m_calendarRangeRefreshesInFlight.find(ownerAccountId);
+            range != m_calendarRangeRefreshesInFlight.end())
+        {
+            auto future = range->second.future;
+            static_cast<void>(co_await qCoro(future).result());
+            co_return co_await materializeCalendarReminderHorizon(
+                std::move(ownerAccountId), std::move(interval), std::move(displayTimeZone));
+        }
+
+        const auto configuration = m_accountRuntime.configurationFor(ownerAccountId);
+        if (!configuration.has_value())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
+                .message = accountSynchronizationNotConfigured(),
+            };
+
+        auto result = co_await m_calendarSyncEngine.refreshReminderHorizon(
+            toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
+            std::move(interval), std::move(displayTimeZone));
+        if (const auto* summary = std::get_if<javelin::jmap::calendar::RefreshedRange>(&result))
+        {
+            if (const auto historyError =
+                    settleReconciledHistory(m_undoManager, summary->reconciledMutations))
+                co_return observeResult(
+                    m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                    i18n("Synchronize calendar reminders"),
+                    javelin::jmap::calendar::CalendarRefreshResult{*historyError});
+        }
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                i18n("Synchronize calendar reminders"), std::move(result));
+    }
+
     void CalendarApplicationService::requireCatchUp(std::string ownerAccountId)
     {
         if (ownerAccountId.empty())

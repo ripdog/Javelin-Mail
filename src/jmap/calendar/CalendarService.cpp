@@ -43,6 +43,68 @@ namespace javelin::jmap::calendar
     {
         [[nodiscard]] OperationError error(OperationErrorCode code, QString message);
 
+        [[nodiscard]] std::variant<VisibleInterval, OperationError>
+        boundExpandedInterval(const VisibleInterval& requested, const std::string_view maximum)
+        {
+            static const QRegularExpression durationExpression{
+                QStringLiteral("^P(?:(\\d+)Y)?(?:(\\d+)M)?(?:(\\d+)W)?(?:(\\d+)D)?"
+                               "(?:T(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+(?:\\.\\d+)?)S)?)?$")};
+            const auto match =
+                durationExpression.match(QString::fromStdString(std::string{maximum}));
+            if (!match.hasMatch())
+                return error(OperationErrorCode::ProtocolViolation,
+                             QStringLiteral("The server advertised an invalid maximum recurrence "
+                                            "expansion duration."));
+
+            auto start =
+                QDateTime::fromString(QString::fromStdString(requested.start.value), Qt::ISODate);
+            auto requestedEnd =
+                QDateTime::fromString(QString::fromStdString(requested.end.value), Qt::ISODate);
+            if (!start.isValid() || !requestedEnd.isValid())
+                return error(
+                    OperationErrorCode::InvalidRequest,
+                    QStringLiteral("The reminder horizon has an invalid date-time range."));
+            start = QDateTime{start.date(), start.time(), QTimeZone::UTC};
+            requestedEnd = QDateTime{requestedEnd.date(), requestedEnd.time(), QTimeZone::UTC};
+            if (!start.isValid() || !requestedEnd.isValid())
+                return error(
+                    OperationErrorCode::InvalidRequest,
+                    QStringLiteral("The reminder horizon has an invalid date-time range."));
+
+            bool yearsValid = true;
+            bool monthsValid = true;
+            const int years =
+                match.captured(1).isEmpty() ? 0 : match.captured(1).toInt(&yearsValid);
+            const int months =
+                match.captured(2).isEmpty() ? 0 : match.captured(2).toInt(&monthsValid);
+            if (!yearsValid || !monthsValid)
+                return error(OperationErrorCode::ProtocolViolation,
+                             QStringLiteral("The server advertised an oversized maximum recurrence "
+                                            "expansion duration."));
+            const auto component = [&match](const int index) -> qint64
+            { return match.captured(index).isEmpty() ? 0 : match.captured(index).toLongLong(); };
+            start = start.addYears(years);
+            start = start.addMonths(months);
+            start = start.addDays(component(3) * 7 + component(4));
+            start = start.addSecs(component(5) * 3600 + component(6) * 60);
+            if (!match.captured(7).isEmpty())
+                start = start.addMSecs(qRound64(match.captured(7).toDouble() * 1000.0));
+            if (!start.isValid() ||
+                start <= QDateTime::fromString(QString::fromStdString(requested.start.value),
+                                               Qt::ISODate))
+                return error(OperationErrorCode::ProtocolViolation,
+                             QStringLiteral("The server advertised an unusable maximum recurrence "
+                                            "expansion duration."));
+            if (requestedEnd <= start)
+                return requested;
+
+            return VisibleInterval{
+                .start = requested.start,
+                .end = {.value =
+                            start.toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss")).toStdString()},
+            };
+        }
+
         [[nodiscard]] std::optional<std::optional<std::string>>
         calendarColorMutationPayload(const std::string_view payload)
         {
@@ -3186,6 +3248,27 @@ namespace javelin::jmap::calendar
                                 VisibleInterval interval, TimeZoneId displayTimeZone,
                                 const bool refreshCalendarMetadata)
     {
+        co_return co_await refreshMaterialization(std::move(settings), std::move(ownerAccountId),
+                                                  std::move(interval), std::move(displayTimeZone),
+                                                  refreshCalendarMetadata,
+                                                  MaterializationTarget::PresentationWindow);
+    }
+
+    QCoro::Task<CalendarRefreshResult>
+    CalendarSyncEngine::refreshReminderHorizon(LiveConnectionSettings settings,
+                                               std::string ownerAccountId, VisibleInterval interval,
+                                               TimeZoneId displayTimeZone)
+    {
+        co_return co_await refreshMaterialization(std::move(settings), std::move(ownerAccountId),
+                                                  std::move(interval), std::move(displayTimeZone),
+                                                  false, MaterializationTarget::ReminderHorizon);
+    }
+
+    QCoro::Task<CalendarRefreshResult> CalendarSyncEngine::refreshMaterialization(
+        LiveConnectionSettings settings, std::string ownerAccountId, VisibleInterval interval,
+        TimeZoneId displayTimeZone, const bool refreshCalendarMetadata,
+        const MaterializationTarget target)
+    {
         const auto generation = beginRefresh(ownerAccountId);
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
         if (const auto* serviceError = std::get_if<OperationError>(&sessionResult))
@@ -3201,6 +3284,15 @@ namespace javelin::jmap::calendar
         {
             if (!account.accountCapabilities.calendars)
                 continue;
+            auto accountInterval = interval;
+            if (target == MaterializationTarget::ReminderHorizon)
+            {
+                const auto bounded = boundExpandedInterval(
+                    interval, account.accountCapabilities.calendars->maxExpandedQueryDuration);
+                if (const auto* serviceError = std::get_if<OperationError>(&bounded))
+                    co_return *serviceError;
+                accountInterval = std::get<VisibleInterval>(bounded);
+            }
             const auto calendarFenceResult = captureFence(m_connection, accountId, "Calendar");
             const auto eventFenceResult = captureFence(m_connection, accountId, "CalendarEvent");
             if (const auto* serviceError = std::get_if<OperationError>(&calendarFenceResult))
@@ -3221,8 +3313,8 @@ namespace javelin::jmap::calendar
             const auto queryRequest =
                 api::calendarEventQuery({.accountId = accountId,
                                          .filter = {.inCalendar = std::nullopt,
-                                                    .after = interval.start,
-                                                    .before = interval.end,
+                                                    .after = accountInterval.start,
+                                                    .before = accountInterval.end,
                                                     .text = std::nullopt},
                                          .expandRecurrences = true,
                                          .timeZone = displayTimeZone,
@@ -3234,8 +3326,8 @@ namespace javelin::jmap::calendar
             const auto baseQueryRequest =
                 api::calendarEventQuery({.accountId = accountId,
                                          .filter = {.inCalendar = std::nullopt,
-                                                    .after = interval.start,
-                                                    .before = interval.end,
+                                                    .after = accountInterval.start,
+                                                    .before = accountInterval.end,
                                                     .text = std::nullopt},
                                          .expandRecurrences = false,
                                          .timeZone = displayTimeZone,
@@ -3277,11 +3369,16 @@ namespace javelin::jmap::calendar
                 co_return responseError(*readError);
             const auto& query = std::get<api::CalendarEventQueryResponse>(queryRead);
             const auto& baseQuery = std::get<api::CalendarEventQueryResponse>(baseQueryRead);
+            const auto materializationReason = target == MaterializationTarget::ReminderHorizon
+                                                   ? QStringLiteral("reminder-horizon")
+                                                   : QStringLiteral("visible-range");
             qCDebug(logCalendarService).noquote()
-                << "calendar range query reason visible-range" << QString::fromStdString(accountId)
-                << QString::fromStdString(interval.start.value)
-                << QString::fromStdString(interval.end.value) << "expanded" << query.ids.size()
-                << "base" << baseQuery.ids.size() << "metadata" << refreshCalendarMetadata;
+                << "calendar range query reason" << materializationReason
+                << QString::fromStdString(accountId)
+                << QString::fromStdString(accountInterval.start.value)
+                << QString::fromStdString(accountInterval.end.value) << "expanded"
+                << query.ids.size() << "base" << baseQuery.ids.size() << "metadata"
+                << refreshCalendarMetadata;
             if (calendarResponse)
             {
                 const auto& calendars = *calendarResponse;
@@ -3544,8 +3641,8 @@ namespace javelin::jmap::calendar
                 const auto nextRequest =
                     api::calendarEventQuery({.accountId = accountId,
                                              .filter = {.inCalendar = std::nullopt,
-                                                        .after = interval.start,
-                                                        .before = interval.end,
+                                                        .after = accountInterval.start,
+                                                        .before = accountInterval.end,
                                                         .text = std::nullopt},
                                              .expandRecurrences = true,
                                              .timeZone = displayTimeZone,
@@ -3583,8 +3680,8 @@ namespace javelin::jmap::calendar
                 const auto nextRequest =
                     api::calendarEventQuery({.accountId = accountId,
                                              .filter = {.inCalendar = std::nullopt,
-                                                        .after = interval.start,
-                                                        .before = interval.end,
+                                                        .after = accountInterval.start,
+                                                        .before = accountInterval.end,
                                                         .text = std::nullopt},
                                              .expandRecurrences = false,
                                              .timeZone = displayTimeZone,
@@ -3841,17 +3938,40 @@ namespace javelin::jmap::calendar
                     co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
                 summary.calendarMetadataAuthoritative = true;
             }
-            cache::CalendarWindow window{.accountId = accountId,
-                                         .start = interval.start,
-                                         .end = interval.end,
-                                         .displayTimeZone = displayTimeZone,
-                                         .queryState = query.queryState,
-                                         .eventState = baseResponse.state,
-                                         .events = std::move(baseResponse.list),
-                                         .occurrences = std::move(occurrences)};
+            const auto materializedEventCount = occurrences.size();
+            std::optional<cache::CalendarWindow> window;
+            std::optional<cache::CalendarReminderHorizon> reminderHorizon;
+            if (target == MaterializationTarget::ReminderHorizon)
+            {
+                reminderHorizon.emplace(cache::CalendarReminderHorizon{
+                    .accountId = accountId,
+                    .start = accountInterval.start,
+                    .end = accountInterval.end,
+                    .displayTimeZone = displayTimeZone,
+                    .eventState = baseResponse.state,
+                    .events = std::move(baseResponse.list),
+                    .occurrences = std::move(occurrences),
+                });
+            }
+            else
+            {
+                window.emplace(cache::CalendarWindow{
+                    .accountId = accountId,
+                    .start = accountInterval.start,
+                    .end = accountInterval.end,
+                    .displayTimeZone = displayTimeZone,
+                    .queryState = query.queryState,
+                    .eventState = baseResponse.state,
+                    .events = std::move(baseResponse.list),
+                    .occurrences = std::move(occurrences),
+                });
+            }
             if (reconciliation.resolved.empty())
             {
-                if (const auto cacheError = repository.reconcileWindow(window))
+                const auto cacheError = reminderHorizon
+                                            ? repository.reconcileReminderHorizon(*reminderHorizon)
+                                            : repository.reconcileWindow(*window);
+                if (cacheError)
                     co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             }
             else
@@ -3862,9 +3982,14 @@ namespace javelin::jmap::calendar
                     co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
                 auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
                     std::move(transactionResult));
-                if (const auto cacheError =
-                        repository.reconcileWindow(transaction.cacheTransaction(), window))
-                    co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+                const auto materializationError =
+                    reminderHorizon
+                        ? repository.reconcileReminderHorizon(transaction.cacheTransaction(),
+                                                              *reminderHorizon)
+                        : repository.reconcileWindow(transaction.cacheTransaction(), *window);
+                if (materializationError)
+                    co_return error(OperationErrorCode::LocalStorageFailure,
+                                    materializationError->message);
                 std::vector<CalendarEvent> authoritativeEvents;
                 std::vector<std::string> removedEventIds;
                 for (const auto& resolved : reconciliation.resolved)
@@ -3876,7 +4001,9 @@ namespace javelin::jmap::calendar
                 }
                 if (const auto cacheError = repository.projectEvents(
                         transaction.cacheTransaction(), accountId, baseResponse.state,
-                        authoritativeEvents, {}, removedEventIds))
+                        authoritativeEvents, {}, removedEventIds,
+                        reminderHorizon ? cache::CalendarEventStatePersistence::PreserveCursor
+                                        : cache::CalendarEventStatePersistence::AdvanceCursor))
                     co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
                 const std::array domains{javelin::jmap::sync::ConsistencyDomain{
                     .accountId = accountId,
@@ -3929,7 +4056,7 @@ namespace javelin::jmap::calendar
                 }
             }
             ++summary.accountCount;
-            summary.eventCount += window.occurrences.size();
+            summary.eventCount += materializedEventCount;
         }
         co_return summary;
     }

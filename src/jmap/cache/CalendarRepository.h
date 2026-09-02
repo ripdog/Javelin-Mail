@@ -25,6 +25,23 @@ namespace javelin::jmap::cache
         std::vector<calendar::Occurrence> occurrences;
     };
 
+    struct CalendarReminderHorizon
+    {
+        std::string accountId;
+        calendar::LocalDateTime start;
+        calendar::LocalDateTime end;
+        calendar::TimeZoneId displayTimeZone;
+        std::string eventState;
+        std::vector<calendar::CalendarEvent> events;
+        std::vector<calendar::Occurrence> occurrences;
+    };
+
+    enum class CalendarEventStatePersistence
+    {
+        AdvanceCursor,
+        PreserveCursor,
+    };
+
     struct CalendarAccount
     {
         std::string ownerAccountId;
@@ -99,6 +116,11 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::optional<DatabaseError> reconcileWindow(DatabaseTransaction& transaction,
                                                                    const CalendarWindow& window);
         [[nodiscard]] std::optional<DatabaseError>
+        reconcileReminderHorizon(const CalendarReminderHorizon& horizon);
+        [[nodiscard]] std::optional<DatabaseError>
+        reconcileReminderHorizon(DatabaseTransaction& transaction,
+                                 const CalendarReminderHorizon& horizon);
+        [[nodiscard]] std::optional<DatabaseError>
         applyEventDelta(std::string_view accountId, std::string_view calendarState,
                         std::string_view eventState, const calendar::TimeZoneId& displayTimeZone,
                         const std::vector<calendar::CalendarEvent>& events,
@@ -109,7 +131,9 @@ namespace javelin::jmap::cache
                       std::string_view eventState,
                       const std::vector<calendar::CalendarEvent>& events,
                       const std::vector<calendar::Occurrence>& replacementOccurrences,
-                      std::span<const std::string> destroyedEventIds);
+                      std::span<const std::string> destroyedEventIds,
+                      CalendarEventStatePersistence statePersistence =
+                          CalendarEventStatePersistence::AdvanceCursor);
 
         [[nodiscard]] std::variant<std::optional<CalendarWindow>, DatabaseError>
         loadWindow(std::string_view accountId, const calendar::LocalDateTime& start,

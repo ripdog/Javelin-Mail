@@ -13,6 +13,7 @@
 #include <QCoroTask>
 
 #include <QCoreApplication>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
@@ -627,6 +628,76 @@ TEST_CASE("calendar metadata refresh is independent from visible range materiali
     REQUIRE(transport.requests.at(1).envelope.methodCalls.size() == 2);
     CHECK(std::ranges::none_of(transport.requests.at(1).envelope.methodCalls,
                                [](const auto& call) { return call.name == "Calendar/get"; }));
+}
+
+TEST_CASE("calendar reminder horizon respects the server expansion duration limit",
+          "[jmap][calendar][service][notification]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-reminder-expansion-limit"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    auto limitedSession = session();
+    limitedSession.accounts.at("a1").accountCapabilities.calendars->maxExpandedQueryDuration =
+        "P1D";
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", limitedSession).has_value());
+
+    FakeMethodTransport transport;
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"q1","canCalculateChanges":false,"position":0,"ids":[],"total":0,"limit":100})",
+              .callId = "calendar-event-query"},
+             {.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"qb1","canCalculateChanges":false,"position":0,"ids":[],"total":0,"limit":100})",
+              .callId = "calendar-base-event-query"}},
+        .createdIds = std::nullopt,
+        .sessionState = "s2"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses = {{.name = "CalendarEvent/get",
+                             .arguments =
+                                 R"({"accountId":"a1","state":"e1","list":[],"notFound":[]})",
+                             .callId = "calendar-event-get"}},
+        .createdIds = std::nullopt,
+        .sessionState = "s2"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses = {{.name = "CalendarEvent/get",
+                             .arguments =
+                                 R"({"accountId":"a1","state":"e1","list":[],"notFound":[]})",
+                             .callId = "calendar-base-event-get"}},
+        .createdIds = std::nullopt,
+        .sessionState = "s2"});
+
+    javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
+    javelin::jmap::calendar::CalendarSyncEngine sync{connection, protocol};
+    const auto result = QCoro::waitFor(sync.refreshReminderHorizon(
+        {.sessionUrl = "https://example.test/.well-known/jmap",
+         .loginEmail = "alice@example.test",
+         .apiKey = "secret"},
+        "a1", {.start = {.value = "2026-09-01T00:00:00"}, .end = {.value = "2026-12-01T00:00:00"}},
+        {.value = "Pacific/Auckland"}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(result));
+    REQUIRE(transport.requests.size() == 3);
+    REQUIRE(transport.requests.front().envelope.methodCalls.size() == 2);
+    for (const auto& call : transport.requests.front().envelope.methodCalls)
+    {
+        CHECK(call.arguments.find(R"("after":"2026-09-01T00:00:00")") != std::string::npos);
+        CHECK(call.arguments.find(R"("before":"2026-09-02T00:00:00")") != std::string::npos);
+    }
+    QSqlQuery horizon{connection.database()};
+    REQUIRE(horizon.exec(QStringLiteral(
+        "SELECT range_start,range_end FROM calendar_reminder_horizons WHERE account_id='a1'")));
+    REQUIRE(horizon.next());
+    CHECK(horizon.value(0).toString() == QStringLiteral("2026-09-01T00:00:00"));
+    CHECK(horizon.value(1).toString() == QStringLiteral("2026-09-02T00:00:00"));
 }
 
 TEST_CASE("calendar manager mutations project, reconcile, and preserve uncertainty",

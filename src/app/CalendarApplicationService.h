@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/MailApplicationTypes.h"
+#include "app/calendar/CalendarReminderMaterializationPort.h"
 #include "app/undo/CalendarHistoryPort.h"
 #include "app/undo/CalendarPreferencePort.h"
 #include "jmap/calendar/CalendarReader.h"
@@ -39,7 +40,8 @@ namespace javelin::app
 
     class CalendarApplicationService final : public QObject,
                                              public javelin::app::undo::CalendarHistoryPort,
-                                             public javelin::app::undo::CalendarPreferencePort
+                                             public javelin::app::undo::CalendarPreferencePort,
+                                             public CalendarReminderMaterializationPort
     {
         Q_OBJECT
 
@@ -61,6 +63,10 @@ namespace javelin::app
                              javelin::jmap::calendar::TimeZoneId displayTimeZone,
                              bool forceRefresh = false);
         [[nodiscard]] std::vector<std::string> calendarMetadataReadyOwners() const;
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
+        materializeCalendarReminderHorizon(
+            std::string ownerAccountId, javelin::jmap::calendar::VisibleInterval interval,
+            javelin::jmap::calendar::TimeZoneId displayTimeZone) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         createCalendarEvent(std::string ownerAccountId,
                             javelin::jmap::calendar::CreateEventCommand command,

@@ -33,7 +33,8 @@ namespace
         Q_UNUSED(application);
     }
 
-    class FakeCalendarEvents final : public javelin::app::undo::CalendarHistoryPort
+    class FakeCalendarEvents final : public javelin::app::undo::CalendarHistoryPort,
+                                     public javelin::app::CalendarReminderMaterializationPort
     {
       public:
         javelin::jmap::calendar::CalendarEvent event;
@@ -46,6 +47,10 @@ namespace
         int updates = 0;
         std::string updatedOwnerAccountId;
         std::optional<javelin::jmap::calendar::UpdateEventCommand> updatedCommand;
+        int reminderHorizonMaterializations = 0;
+        std::string reminderHorizonOwnerAccountId;
+        std::optional<javelin::jmap::calendar::VisibleInterval> reminderHorizonInterval;
+        std::optional<javelin::jmap::calendar::TimeZoneId> reminderHorizonTimeZone;
 
         [[nodiscard]] javelin::jmap::calendar::AuthoritativeCalendarEventResult
         getEffectiveCalendarEvent(std::string_view, const std::optional<std::string>&) override
@@ -74,6 +79,25 @@ namespace
             co_return javelin::jmap::calendar::AuthoritativeCalendarEvent{
                 .state = "event-state",
                 .event = event,
+            };
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
+        materializeCalendarReminderHorizon(
+            std::string ownerAccountId, javelin::jmap::calendar::VisibleInterval interval,
+            javelin::jmap::calendar::TimeZoneId displayTimeZone) override
+        {
+            ++reminderHorizonMaterializations;
+            reminderHorizonOwnerAccountId = std::move(ownerAccountId);
+            reminderHorizonInterval = interval;
+            reminderHorizonTimeZone = displayTimeZone;
+            co_return javelin::jmap::calendar::RefreshedRange{
+                .interval = std::move(interval),
+                .displayTimeZone = std::move(displayTimeZone),
+                .accountCount = 1,
+                .eventCount = 0,
+                .calendarMetadataAuthoritative = true,
+                .reconciledMutations = {},
             };
         }
 
@@ -205,6 +229,42 @@ namespace
     }
 } // namespace
 
+TEST_CASE("calendar notification service materializes a daemon reminder horizon",
+          "[app][calendar][notification][horizon]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-notification-horizon"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    seedCalendarMetadata(connection);
+
+    FakeCalendarEvents calendarEvents;
+    javelin::app::CalendarNotificationService service{connection, calendarEvents, calendarEvents};
+    service.calendarMetadataReady(QStringLiteral("owner"));
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+    REQUIRE(calendarEvents.reminderHorizonMaterializations == 1);
+    CHECK(calendarEvents.reminderHorizonOwnerAccountId == "owner");
+    REQUIRE(calendarEvents.reminderHorizonInterval.has_value());
+    REQUIRE(calendarEvents.reminderHorizonTimeZone.has_value());
+    CHECK_FALSE(calendarEvents.reminderHorizonTimeZone->value.empty());
+    const auto start = QDateTime::fromString(
+        QString::fromStdString(calendarEvents.reminderHorizonInterval->start.value), Qt::ISODate);
+    const auto end = QDateTime::fromString(
+        QString::fromStdString(calendarEvents.reminderHorizonInterval->end.value), Qt::ISODate);
+    REQUIRE(start.isValid());
+    REQUIRE(end.isValid());
+    CHECK(start.daysTo(end) >= 91);
+
+    service.calendarStateChanged(QStringLiteral("owner"));
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    CHECK(calendarEvents.reminderHorizonMaterializations == 2);
+}
+
 TEST_CASE("calendar alert push fetches an uncached event and delivers it once",
           "[app][calendar][notification][push]")
 {
@@ -220,7 +280,7 @@ TEST_CASE("calendar alert push fetches an uncached event and delivers it once",
 
     FakeCalendarEvents calendarEvents;
     calendarEvents.event = uncachedEvent();
-    javelin::app::CalendarNotificationService service{connection, calendarEvents};
+    javelin::app::CalendarNotificationService service{connection, calendarEvents, calendarEvents};
 
     int deliveries = 0;
     QString deliveredKey;
@@ -291,7 +351,7 @@ TEST_CASE("dismissing an uncached pushed calendar alert acknowledges the authori
 
     FakeCalendarEvents calendarEvents;
     calendarEvents.event = uncachedEvent();
-    javelin::app::CalendarNotificationService service{connection, calendarEvents};
+    javelin::app::CalendarNotificationService service{connection, calendarEvents, calendarEvents};
     QEventLoop loop;
     QString deliveredKey;
     QObject::connect(&service, &javelin::app::CalendarNotificationService::reminderDue, &loop,
@@ -352,7 +412,7 @@ TEST_CASE("calendar alert push survives a daemon restart during transient fetch 
             .code = javelin::jmap::OperationErrorCode::NetworkUnavailable,
             .message = QStringLiteral("offline"),
         };
-        javelin::app::CalendarNotificationService service{connection, failingEvents};
+        javelin::app::CalendarNotificationService service{connection, failingEvents, failingEvents};
         service.calendarAlertReceived(QStringLiteral("owner"), QStringLiteral("calendar-account"),
                                       QStringLiteral("event-1"), QStringLiteral("uid-1"), QString{},
                                       QStringLiteral("alert-1"));
@@ -367,7 +427,8 @@ TEST_CASE("calendar alert push survives a daemon restart during transient fetch 
 
     FakeCalendarEvents recoveredEvents;
     recoveredEvents.event = uncachedEvent();
-    javelin::app::CalendarNotificationService restarted{connection, recoveredEvents};
+    javelin::app::CalendarNotificationService restarted{connection, recoveredEvents,
+                                                        recoveredEvents};
     QEventLoop loop;
     QString deliveredKey;
     QObject::connect(&restarted, &javelin::app::CalendarNotificationService::reminderDue, &loop,
@@ -408,7 +469,7 @@ TEST_CASE("snoozed pushed calendar alerts remain durable until their retry deadl
 
     FakeCalendarEvents calendarEvents;
     calendarEvents.event = uncachedEvent();
-    javelin::app::CalendarNotificationService service{connection, calendarEvents};
+    javelin::app::CalendarNotificationService service{connection, calendarEvents, calendarEvents};
     QEventLoop loop;
     QString deliveredKey;
     QObject::connect(&service, &javelin::app::CalendarNotificationService::reminderDue, &loop,
@@ -460,7 +521,7 @@ TEST_CASE("calendar alert push waits for calendar metadata before resolving defa
     calendarEvents.event = uncachedEvent();
     calendarEvents.event.useDefaultAlerts = true;
     calendarEvents.event.alerts.clear();
-    javelin::app::CalendarNotificationService service{connection, calendarEvents};
+    javelin::app::CalendarNotificationService service{connection, calendarEvents, calendarEvents};
 
     int metadataRequests = 0;
     int deliveries = 0;
@@ -528,7 +589,7 @@ TEST_CASE("calendar alert push retries a transient authoritative fetch",
         .code = javelin::jmap::OperationErrorCode::NetworkUnavailable,
         .message = QStringLiteral("Temporary network failure"),
     };
-    javelin::app::CalendarNotificationService service{connection, calendarEvents};
+    javelin::app::CalendarNotificationService service{connection, calendarEvents, calendarEvents};
 
     int deliveries = 0;
     QObject::connect(&service, &javelin::app::CalendarNotificationService::reminderDue,
@@ -562,7 +623,7 @@ TEST_CASE("calendar alert push retries desktop publication without occurrence ma
 
     FakeCalendarEvents calendarEvents;
     calendarEvents.event = uncachedEvent();
-    javelin::app::CalendarNotificationService service{connection, calendarEvents};
+    javelin::app::CalendarNotificationService service{connection, calendarEvents, calendarEvents};
 
     int deliveries = 0;
     QString deliveredKey;

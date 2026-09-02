@@ -30,6 +30,26 @@ namespace javelin::jmap::cache::migrations
                                        "calendar_pushed_alerts(owner_account_id)"),
                     },
             },
+            MigrationStep{
+                .version = 72,
+                .name = QStringLiteral("calendar_reminder_horizon"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "CREATE TABLE calendar_reminder_horizons (account_id TEXT PRIMARY KEY "
+                            "REFERENCES accounts(account_id) ON DELETE CASCADE, range_start TEXT "
+                            "NOT NULL, range_end TEXT NOT NULL, display_time_zone TEXT NOT NULL, "
+                            "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP) STRICT"),
+                        QStringLiteral(
+                            "CREATE TABLE calendar_reminder_occurrences (account_id TEXT NOT NULL, "
+                            "occurrence_id TEXT NOT NULL, PRIMARY KEY(account_id,occurrence_id), "
+                            "FOREIGN KEY(account_id) REFERENCES "
+                            "calendar_reminder_horizons(account_id) "
+                            "ON DELETE CASCADE, FOREIGN KEY(account_id,occurrence_id) REFERENCES "
+                            "calendar_occurrences(account_id,occurrence_id) ON DELETE CASCADE) "
+                            "STRICT"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

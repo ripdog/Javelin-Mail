@@ -27,6 +27,35 @@ namespace javelin::app
         constexpr auto pushedAlertRetryDelay = std::chrono::seconds{30};
         constexpr auto pushedDeliveryRetryDelay = std::chrono::seconds{60};
         constexpr auto maximumPushedAlertRetryDelay = std::chrono::minutes{5};
+        constexpr auto reminderHorizonRefreshInterval = std::chrono::hours{6};
+        constexpr auto reminderHorizonRetryDelay = std::chrono::minutes{1};
+        constexpr int reminderHorizonPastDays = 1;
+        constexpr int reminderHorizonFutureDays = 90;
+
+        struct ReminderHorizonRequest
+        {
+            javelin::jmap::calendar::VisibleInterval interval;
+            javelin::jmap::calendar::TimeZoneId displayTimeZone;
+        };
+
+        ReminderHorizonRequest reminderHorizonRequest(const QDateTime& now)
+        {
+            auto zone = QTimeZone::systemTimeZone();
+            if (!zone.isValid())
+                zone = QTimeZone::UTC;
+            const auto localDate = now.toTimeZone(zone).date();
+            const auto start =
+                QDateTime{localDate.addDays(-reminderHorizonPastDays), QTime{0, 0}, zone};
+            const auto end =
+                QDateTime{localDate.addDays(reminderHorizonFutureDays + 1), QTime{0, 0}, zone};
+            const auto localValue = [](const QDateTime& value)
+            { return value.toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss")).toStdString(); };
+            return {
+                .interval = {.start = {.value = localValue(start)},
+                             .end = {.value = localValue(end)}},
+                .displayTimeZone = {.value = zone.id().toStdString()},
+            };
+        }
 
         int pushedAlertRetryDelayMs(const javelin::jmap::OperationError& error)
         {
@@ -102,10 +131,12 @@ namespace javelin::app
 
     CalendarNotificationService::CalendarNotificationService(
         javelin::jmap::cache::DatabaseConnection& connection,
-        javelin::app::undo::CalendarHistoryPort& calendarEvents, QObject* parent)
+        javelin::app::undo::CalendarHistoryPort& calendarEvents,
+        CalendarReminderMaterializationPort& reminderMaterializer, QObject* parent)
         : QObject(parent), m_connection(connection), m_repository(connection),
-          m_calendarEvents(calendarEvents), m_timer(new QTimer(this)),
-          m_pushRetryTimer(new QTimer(this)), m_pushDeliveryRetryTimer(new QTimer(this))
+          m_calendarEvents(calendarEvents), m_reminderMaterializer(reminderMaterializer),
+          m_timer(new QTimer(this)), m_pushRetryTimer(new QTimer(this)),
+          m_pushDeliveryRetryTimer(new QTimer(this)), m_horizonRefreshTimer(new QTimer(this))
     {
         m_timer->setSingleShot(true);
         connect(m_timer, &QTimer::timeout, this, &CalendarNotificationService::scan);
@@ -115,13 +146,28 @@ namespace javelin::app
         m_pushDeliveryRetryTimer->setSingleShot(true);
         connect(m_pushDeliveryRetryTimer, &QTimer::timeout, this,
                 &CalendarNotificationService::retryPushedDeliveries);
+        m_horizonRefreshTimer->setInterval(static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(reminderHorizonRefreshInterval)
+                .count()));
+        connect(m_horizonRefreshTimer, &QTimer::timeout, this,
+                &CalendarNotificationService::refreshReminderHorizons);
     }
 
     void CalendarNotificationService::start()
     {
         if (const auto error = m_repository.recoverDispatches())
             qWarning().noquote() << "Recover calendar notification delivery:" << error->message;
+        javelin::jmap::cache::CalendarRepository calendars{m_connection};
+        const auto accounts = calendars.listAccounts();
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&accounts))
+            qWarning().noquote() << "Discover calendar reminder owners:" << error->message;
+        else
+            for (const auto& account :
+                 std::get<std::vector<javelin::jmap::cache::CalendarAccount>>(accounts))
+                m_horizonOwners.insert(account.ownerAccountId);
         retryPushedAlerts();
+        refreshReminderHorizons();
+        m_horizonRefreshTimer->start();
         scan();
     }
 
@@ -160,7 +206,79 @@ namespace javelin::app
 
     void CalendarNotificationService::calendarMetadataReady(const QString& ownerAccountId)
     {
-        processQueuedPushedAlerts(ownerAccountId.toStdString());
+        const auto owner = ownerAccountId.toStdString();
+        processQueuedPushedAlerts(owner);
+        requestReminderHorizon(owner);
+    }
+
+    void CalendarNotificationService::calendarStateChanged(const QString& ownerAccountId)
+    {
+        requestReminderHorizon(ownerAccountId.toStdString());
+    }
+
+    void CalendarNotificationService::calendarCacheCommitted(const QString& ownerAccountId)
+    {
+        requestScan();
+        requestReminderHorizon(ownerAccountId.toStdString());
+    }
+
+    void CalendarNotificationService::calendarAccountRemoved(const QString& ownerAccountId)
+    {
+        const auto owner = ownerAccountId.toStdString();
+        m_horizonOwners.erase(owner);
+        m_horizonRefreshPending.erase(owner);
+    }
+
+    void CalendarNotificationService::refreshReminderHorizons()
+    {
+        const std::vector<std::string> owners{m_horizonOwners.begin(), m_horizonOwners.end()};
+        for (const auto& owner : owners)
+            requestReminderHorizon(owner);
+    }
+
+    void CalendarNotificationService::requestReminderHorizon(std::string ownerAccountId)
+    {
+        if (ownerAccountId.empty())
+            return;
+        m_horizonOwners.insert(ownerAccountId);
+        if (!m_horizonRefreshesInFlight.insert(ownerAccountId).second)
+        {
+            m_horizonRefreshPending.insert(std::move(ownerAccountId));
+            return;
+        }
+
+        const auto owner = ownerAccountId;
+        auto request = reminderHorizonRequest(QDateTime::currentDateTimeUtc());
+        auto task = m_reminderMaterializer.materializeCalendarReminderHorizon(
+            ownerAccountId, std::move(request.interval), std::move(request.displayTimeZone));
+        QCoro::connect(
+            std::move(task), this,
+            [this, owner](const javelin::jmap::calendar::CalendarRefreshResult& result)
+            {
+                m_horizonRefreshesInFlight.erase(owner);
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    qWarning().noquote() << "Calendar reminder horizon refresh failed"
+                                         << QString::fromStdString(owner) << error->message;
+                    const auto delay =
+                        static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                             reminderHorizonRetryDelay)
+                                             .count());
+                    QTimer::singleShot(delay, this,
+                                       [this, owner]
+                                       {
+                                           if (m_horizonOwners.contains(owner))
+                                               requestReminderHorizon(owner);
+                                       });
+                }
+                else
+                {
+                    requestScan();
+                }
+
+                if (m_horizonRefreshPending.erase(owner) > 0 && m_horizonOwners.contains(owner))
+                    requestReminderHorizon(owner);
+            });
     }
 
     void CalendarNotificationService::retryPushedAlerts()
