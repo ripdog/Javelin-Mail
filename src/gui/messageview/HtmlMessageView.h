@@ -52,6 +52,7 @@ namespace javelin::gui::messageview
         void printRequested();
         void documentLoaded(QString documentId);
         void hoveredLinkChanged(QString url);
+        void linkActivated(QUrl url);
 
       private:
         void applyRemoteContentPolicy(std::function<void()> callback = {});

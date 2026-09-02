@@ -31,14 +31,21 @@ TEST_CASE("short numbers in plain text are not treated as phone numbers", "[gui]
     CHECK_FALSE(html.contains(QStringLiteral("tel:")));
 }
 
-TEST_CASE("message external links only allow supported safe schemes", "[gui][message-view]")
+TEST_CASE("message links distinguish browser, compose, and rejected schemes", "[gui][message-view]")
 {
-    using javelin::gui::messageview::isSafeExternalMessageUrl;
+    using javelin::gui::messageview::MessageLinkAction;
+    using javelin::gui::messageview::messageLinkAction;
 
-    CHECK(isSafeExternalMessageUrl(QUrl{QStringLiteral("https://example.test/unsubscribe")}));
-    CHECK(isSafeExternalMessageUrl(QUrl{QStringLiteral("HTTP://example.test/")}));
-    CHECK(isSafeExternalMessageUrl(QUrl{QStringLiteral("mailto:list@example.test")}));
-    CHECK_FALSE(isSafeExternalMessageUrl(QUrl{QStringLiteral("javascript:alert(1)")}));
-    CHECK_FALSE(isSafeExternalMessageUrl(QUrl{QStringLiteral("data:text/plain,hello")}));
-    CHECK_FALSE(isSafeExternalMessageUrl(QUrl{QStringLiteral("file:///tmp/message")}));
+    CHECK(messageLinkAction(QUrl{QStringLiteral("https://example.test/unsubscribe")}) ==
+          MessageLinkAction::OpenExternal);
+    CHECK(messageLinkAction(QUrl{QStringLiteral("HTTP://example.test/")}) ==
+          MessageLinkAction::OpenExternal);
+    CHECK(messageLinkAction(QUrl{QStringLiteral("mailto:list@example.test")}) ==
+          MessageLinkAction::ComposeMail);
+    CHECK(messageLinkAction(QUrl{QStringLiteral("javascript:alert(1)")}) ==
+          MessageLinkAction::Reject);
+    CHECK(messageLinkAction(QUrl{QStringLiteral("data:text/plain,hello")}) ==
+          MessageLinkAction::Reject);
+    CHECK(messageLinkAction(QUrl{QStringLiteral("file:///tmp/message")}) ==
+          MessageLinkAction::Reject);
 }

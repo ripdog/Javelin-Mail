@@ -1945,6 +1945,9 @@ namespace javelin::gui::shell
                 &javelin::gui::messageview::MessageViewContainer::hoveredLinkChanged, this,
                 [this](const QString& url) { m_statusBar->setOverlayMessage(url); });
         connect(m_messageViewContainer,
+                &javelin::gui::messageview::MessageViewContainer::mailtoActivated, this,
+                &MainWindow::openMailtoUri);
+        connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::readerActionsAvailabilityChanged,
                 this, [this] { updateActiveContextUi(); });
 

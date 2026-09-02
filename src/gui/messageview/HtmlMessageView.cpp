@@ -9,7 +9,6 @@
 #include <QChildEvent>
 #include <QColor>
 #include <QContextMenuEvent>
-#include <QDesktopServices>
 #include <QFile>
 #include <QGuiApplication>
 #include <QJsonArray>
@@ -36,6 +35,7 @@
 
 #include <array>
 #include <memory>
+#include <utility>
 
 static void initializeDarkReaderResource()
 {
@@ -129,29 +129,38 @@ namespace javelin::gui::messageview
         class ExternalNavigationPage final : public QWebEnginePage
         {
           public:
-            using QWebEnginePage::QWebEnginePage;
+            explicit ExternalNavigationPage(std::function<void(const QUrl&)> activateLink,
+                                            QObject* parent)
+                : QWebEnginePage(parent), m_activateLink(std::move(activateLink))
+            {
+            }
 
           protected:
             bool acceptNavigationRequest(const QUrl& url, NavigationType, bool) override
             {
-                if (isSafeExternalMessageUrl(url))
-                {
-                    QDesktopServices::openUrl(url);
-                }
+                if (messageLinkAction(url) != MessageLinkAction::Reject)
+                    m_activateLink(url);
                 deleteLater();
                 return false;
             }
+
+          private:
+            std::function<void(const QUrl&)> m_activateLink;
         };
 
         class MessageWebEnginePage final : public QWebEnginePage
         {
           public:
-            using QWebEnginePage::QWebEnginePage;
+            explicit MessageWebEnginePage(std::function<void(const QUrl&)> activateLink,
+                                          QObject* parent)
+                : QWebEnginePage(parent), m_activateLink(std::move(activateLink))
+            {
+            }
 
           protected:
             QWebEnginePage* createWindow(WebWindowType) override
             {
-                return new ExternalNavigationPage(this);
+                return new ExternalNavigationPage(m_activateLink, this);
             }
 
             bool acceptNavigationRequest(const QUrl& url, NavigationType type,
@@ -159,14 +168,15 @@ namespace javelin::gui::messageview
             {
                 if (type == QWebEnginePage::NavigationTypeLinkClicked && isMainFrame)
                 {
-                    if (isSafeExternalMessageUrl(url))
-                    {
-                        QDesktopServices::openUrl(url);
-                    }
+                    if (messageLinkAction(url) != MessageLinkAction::Reject)
+                        m_activateLink(url);
                     return false;
                 }
                 return QWebEnginePage::acceptNavigationRequest(url, type, isMainFrame);
             }
+
+          private:
+            std::function<void(const QUrl&)> m_activateLink;
         };
 
         class FilteredWebEngineView final : public QWebEngineView
@@ -322,7 +332,8 @@ namespace javelin::gui::messageview
             [this] { Q_EMIT findRequested(); }, [this] { Q_EMIT zoomInRequested(); },
             [this] { Q_EMIT zoomOutRequested(); }, [this] { Q_EMIT resetZoomRequested(); },
             [this] { Q_EMIT printRequested(); }, renderSurface);
-        m_view->setPage(new MessageWebEnginePage(m_view));
+        m_view->setPage(new MessageWebEnginePage([this](const QUrl& url)
+                                                 { Q_EMIT linkActivated(url); }, m_view));
         renderLayout->addWidget(m_view);
         m_loadingCover = new QWidget(renderSurface);
         m_loadingCover->setAttribute(Qt::WA_TransparentForMouseEvents);

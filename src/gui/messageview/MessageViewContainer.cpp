@@ -524,12 +524,8 @@ namespace javelin::gui::messageview
                                          QIcon::fromTheme(QStringLiteral("news-unsubscribe")));
         m_unsubscribeBanner->setTextFormat(Qt::RichText);
         connect(m_unsubscribeBanner, &KMessageWidget::linkActivated, this,
-                [](const QString& value)
-                {
-                    const auto url = QUrl::fromEncoded(value.toUtf8());
-                    if (isSafeExternalMessageUrl(url))
-                        QDesktopServices::openUrl(url);
-                });
+                [this](const QString& value)
+                { activateMessageLink(QUrl::fromEncoded(value.toUtf8())); });
         connect(m_unsubscribeBanner, &KMessageWidget::linkHovered, this,
                 [this](const QString& url) { Q_EMIT hoveredLinkChanged(url); });
         connect(m_unsubscribeBanner, &KMessageWidget::hideAnimationFinished, this,
@@ -648,7 +644,7 @@ namespace javelin::gui::messageview
         m_plainTextView->setOpenExternalLinks(false);
         m_plainTextView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         connect(m_plainTextView, &QTextBrowser::anchorClicked, this,
-                [](const QUrl& url) { QDesktopServices::openUrl(url); });
+                [this](const QUrl& url) { activateMessageLink(url); });
         connect(m_plainTextView, &QTextBrowser::highlighted, this,
                 [this](const QUrl& url) { Q_EMIT hoveredLinkChanged(url.toString()); });
 
@@ -691,6 +687,8 @@ namespace javelin::gui::messageview
                 &MessageViewContainer::printMessage);
         connect(m_htmlView, &HtmlMessageView::hoveredLinkChanged, this,
                 &MessageViewContainer::hoveredLinkChanged);
+        connect(m_htmlView, &HtmlMessageView::linkActivated, this,
+                &MessageViewContainer::activateMessageLink);
         connect(
             m_htmlView, &HtmlMessageView::documentLoaded, this,
             [this](const QString& documentId)
@@ -1206,7 +1204,8 @@ namespace javelin::gui::messageview
             m_snapshot.has_value() && m_snapshot->unsubscribeUrl.has_value()
                 ? QUrl::fromEncoded(QByteArray::fromStdString(*m_snapshot->unsubscribeUrl))
                 : QUrl{};
-        const bool hasUnsubscribeUrl = isSafeExternalMessageUrl(unsubscribeUrl);
+        const bool hasUnsubscribeUrl =
+            messageLinkAction(unsubscribeUrl) != MessageLinkAction::Reject;
         const bool shouldShow = hasUnsubscribeUrl && !messageBannerDismissed(UnsubscribeBannerId);
         m_unsubscribeBanner->setVisible(shouldShow);
         if (!shouldShow)
@@ -1222,6 +1221,29 @@ namespace javelin::gui::messageview
                            "</tr></table>")
                 .arg(i18n("This message is from a mailing list.").toHtmlEscaped(), url,
                      i18nc("@action:link", "Unsubscribe").toHtmlEscaped()));
+    }
+
+    void MessageViewContainer::activateMessageLink(const QUrl& url)
+    {
+        // Plain-text linkification also creates telephone links. Keep their existing desktop
+        // dispatch while mailto links stay inside Javelin.
+        if (url.scheme().compare(QStringLiteral("tel"), Qt::CaseInsensitive) == 0)
+        {
+            QDesktopServices::openUrl(url);
+            return;
+        }
+
+        switch (messageLinkAction(url))
+        {
+        case MessageLinkAction::Reject:
+            return;
+        case MessageLinkAction::OpenExternal:
+            QDesktopServices::openUrl(url);
+            return;
+        case MessageLinkAction::ComposeMail:
+            Q_EMIT mailtoActivated(QString::fromUtf8(url.toEncoded()));
+            return;
+        }
     }
 
     void MessageViewContainer::updateLanguageBanner()

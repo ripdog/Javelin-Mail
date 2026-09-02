@@ -7,6 +7,7 @@
 #include "jmap/cache/MessageViewReader.h"
 
 #include <QString>
+#include <QUrl>
 #include <QWidget>
 
 #include <cstddef>
@@ -95,6 +96,7 @@ namespace javelin::gui::messageview
         void viewSourceRequested();
         void messageActivated(QString emailId);
         void hoveredLinkChanged(QString url);
+        void mailtoActivated(QString uri);
         void contentRequired(QString accountId, QString emailId);
         void notJunkRequested(QString accountId, QString mailboxId, QString emailId);
         void readerActionsAvailabilityChanged(bool available);
@@ -112,6 +114,7 @@ namespace javelin::gui::messageview
         void updateJunkBanner();
         void updateUnsubscribeBanner();
         void updateLanguageBanner();
+        void activateMessageLink(const QUrl& url);
         void startLanguageDetection();
         void translateCurrentMessage();
         void restoreCurrentTranslation();
