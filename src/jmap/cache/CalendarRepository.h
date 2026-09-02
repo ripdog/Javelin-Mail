@@ -83,6 +83,11 @@ namespace javelin::jmap::cache
         stateToken(std::string_view accountId, std::string_view dataType) const;
         [[nodiscard]] std::variant<std::optional<calendar::CalendarEvent>, DatabaseError>
         findEvent(std::string_view accountId, std::string_view eventId) const;
+        [[nodiscard]] std::variant<std::vector<calendar::Occurrence>, DatabaseError>
+        listEventOccurrences(std::string_view accountId, std::string_view eventId) const;
+        [[nodiscard]] std::optional<DatabaseError>
+        invalidateEventWindows(DatabaseTransaction& transaction, std::string_view accountId,
+                               std::span<const std::string> eventIds);
         [[nodiscard]] std::optional<DatabaseError> storeStateTokens(std::string_view accountId,
                                                                     std::string_view calendarState,
                                                                     std::string_view eventState);
@@ -100,7 +105,7 @@ namespace javelin::jmap::cache
         projectEvents(DatabaseTransaction& transaction, std::string_view accountId,
                       std::string_view eventState,
                       const std::vector<calendar::CalendarEvent>& events,
-                      const std::vector<calendar::Occurrence>& nonRecurringOccurrences,
+                      const std::vector<calendar::Occurrence>& replacementOccurrences,
                       std::span<const std::string> destroyedEventIds);
 
         [[nodiscard]] std::variant<std::optional<CalendarWindow>, DatabaseError>

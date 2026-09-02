@@ -2290,6 +2290,195 @@ TEST_CASE("calendar event deletion rematerializes the visible range without drop
     CHECK(window.occurrences.front().eventId == "event-2");
 }
 
+TEST_CASE("rejected recurring calendar deletion restores materialized occurrences",
+          "[jmap][calendar][service][recurrence][mutation]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-delete-recurring-rejection"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", session()).has_value());
+
+    javelin::jmap::cache::CalendarRepository calendars{connection};
+    REQUIRE_FALSE(calendars
+                      .replaceCalendars(
+                          "a1", "calendar-state",
+                          {javelin::jmap::calendar::Calendar{.accountId = "a1",
+                                                             .id = "work",
+                                                             .name = "Work",
+                                                             .description = std::nullopt,
+                                                             .color = std::nullopt,
+                                                             .sortOrder = 0,
+                                                             .isSubscribed = true,
+                                                             .isVisible = true,
+                                                             .isDefault = true,
+                                                             .timeZone = std::nullopt,
+                                                             .defaultAlertsWithTime = {},
+                                                             .defaultAlertsWithoutTime = {},
+                                                             .myRights = {.mayReadFreeBusy = true,
+                                                                          .mayReadItems = true,
+                                                                          .mayWriteAll = true,
+                                                                          .mayWriteOwn = true,
+                                                                          .mayUpdatePrivate = true,
+                                                                          .mayRSVP = true,
+                                                                          .mayShare = false,
+                                                                          .mayDelete = false}}})
+                      .has_value());
+
+    auto recurring = event();
+    recurring.title = "Recurring";
+    recurring.start = {.value = "2026-01-08T02:20:00"};
+    recurring.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
+    recurring.recurrenceRule->frequency = javelin::jmap::calendar::RecurrenceFrequency::Daily;
+    recurring.recurrenceRule->interval = 3;
+    const javelin::jmap::calendar::VisibleInterval interval{
+        .start = {.value = "2026-08-31T00:00:00"},
+        .end = {.value = "2026-09-14T00:00:00"},
+    };
+    const javelin::jmap::calendar::TimeZoneId zone{.value = "Pacific/Auckland"};
+    const std::vector<javelin::jmap::calendar::Occurrence> occurrences{
+        {.accountId = "a1",
+         .id = "occurrence-sep-2",
+         .eventId = recurring.id,
+         .recurrenceId = javelin::jmap::calendar::LocalDateTime{.value = "2026-09-02T02:20:00"},
+         .localStart = {.value = "2026-09-02T02:20:00"},
+         .localEnd = {.value = "2026-09-02T03:20:00"},
+         .utcStart = std::nullopt,
+         .utcEnd = std::nullopt,
+         .allDay = false},
+        {.accountId = "a1",
+         .id = "occurrence-sep-5",
+         .eventId = recurring.id,
+         .recurrenceId = javelin::jmap::calendar::LocalDateTime{.value = "2026-09-05T02:20:00"},
+         .localStart = {.value = "2026-09-05T02:20:00"},
+         .localEnd = {.value = "2026-09-05T03:20:00"},
+         .utcStart = std::nullopt,
+         .utcEnd = std::nullopt,
+         .allDay = false},
+    };
+    REQUIRE_FALSE(calendars
+                      .reconcileWindow({.accountId = "a1",
+                                        .start = interval.start,
+                                        .end = interval.end,
+                                        .displayTimeZone = zone,
+                                        .queryState = "query-state",
+                                        .eventState = "event-state",
+                                        .events = {recurring},
+                                        .occurrences = occurrences})
+                      .has_value());
+
+    FakeMethodTransport transport;
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/set",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"event-state","newState":"event-state","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{"event-1":{"type":"forbidden","description":"read only"}}})",
+              .callId = "calendar-event-set"},
+             {.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"query-state-2","canCalculateChanges":false,"position":0,"ids":["occurrence-sep-2","occurrence-sep-5"],"total":2})",
+              .callId = "calendar-event-materialization-query"},
+             {.name = "CalendarEvent/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"event-state","list":[{"@type":"Event","id":"occurrence-sep-2","baseEventId":"event-1","recurrenceId":"2026-09-02T02:20:00","uid":"uid-1","calendarIds":{"work":true},"title":"Recurring","start":"2026-09-02T02:20:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true},{"@type":"Event","id":"occurrence-sep-5","baseEventId":"event-1","recurrenceId":"2026-09-05T02:20:00","uid":"uid-1","calendarIds":{"work":true},"title":"Recurring","start":"2026-09-05T02:20:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true}],"notFound":[]})",
+              .callId = "calendar-event-materialization-get"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-delete-recurring-rejected",
+    });
+    transport.beforeReturn = [&]
+    {
+        const auto projected =
+            calendars.loadRangeSnapshot("a1", interval.start, interval.end, zone);
+        REQUIRE(std::holds_alternative<javelin::jmap::cache::CalendarWindow>(projected));
+        const auto& window = std::get<javelin::jmap::cache::CalendarWindow>(projected);
+        CHECK(window.events.empty());
+        CHECK(window.occurrences.empty());
+        const auto invalidated = calendars.loadWindow("a1", interval.start, interval.end, zone);
+        REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(
+            invalidated));
+        CHECK_FALSE(
+            std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(invalidated).has_value());
+    };
+
+    javelin::jmap::calendar::CalendarCacheReader reader{connection};
+    javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
+    javelin::jmap::calendar::CalendarSyncEngine sync{connection, protocol};
+    javelin::jmap::calendar::CalendarMutationEngine mutation{connection, protocol, sync, reader};
+    const auto rejected = QCoro::waitFor(
+        mutation.remove({.sessionUrl = "https://example.test/.well-known/jmap",
+                         .loginEmail = "alice@example.test",
+                         .apiKey = "secret"},
+                        "a1",
+                        {.accountId = "a1",
+                         .eventId = recurring.id,
+                         .calendarIds = {"work"},
+                         .operationGroupId = std::nullopt,
+                         .ifInState = std::nullopt,
+                         .materialization = javelin::jmap::calendar::CalendarRangeMaterialization{
+                             .interval = interval, .displayTimeZone = zone}}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(rejected));
+    CHECK(std::get<javelin::jmap::OperationError>(rejected).code ==
+          javelin::jmap::OperationErrorCode::PermissionDenied);
+    const auto restored = calendars.loadRangeSnapshot("a1", interval.start, interval.end, zone);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::CalendarWindow>(restored));
+    const auto& window = std::get<javelin::jmap::cache::CalendarWindow>(restored);
+    REQUIRE(window.events.size() == 1);
+    REQUIRE(window.occurrences.size() == 2);
+    CHECK(window.events.front().id == recurring.id);
+    CHECK(std::ranges::all_of(window.occurrences,
+                              [&](const auto& value) { return value.eventId == recurring.id; }));
+    CHECK(std::ranges::all_of(window.occurrences,
+                              [](const auto& value) { return value.recurrenceId.has_value(); }));
+    const auto restoredWindow = calendars.loadWindow("a1", interval.start, interval.end, zone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(
+        restoredWindow));
+    const auto& cachedRestoredWindow =
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(restoredWindow);
+    REQUIRE(cachedRestoredWindow.has_value());
+    CHECK(cachedRestoredWindow->queryState == "query-state-2");
+    CHECK(cachedRestoredWindow->occurrences.size() == 2);
+
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/set",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"event-state","newState":"event-state","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{"event-1":{"type":"forbidden","description":"still read only"}}})",
+              .callId = "calendar-event-set"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-delete-recurring-rejected-without-range",
+    });
+    const auto rejectedWithoutRange =
+        QCoro::waitFor(mutation.remove({.sessionUrl = "https://example.test/.well-known/jmap",
+                                        .loginEmail = "alice@example.test",
+                                        .apiKey = "secret"},
+                                       "a1",
+                                       {.accountId = "a1",
+                                        .eventId = recurring.id,
+                                        .calendarIds = {"work"},
+                                        .operationGroupId = std::nullopt,
+                                        .ifInState = std::nullopt,
+                                        .materialization = std::nullopt}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(rejectedWithoutRange));
+    const auto restoredWithoutRange =
+        calendars.loadRangeSnapshot("a1", interval.start, interval.end, zone);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::CalendarWindow>(restoredWithoutRange));
+    const auto& rangeAfterSecondRejection =
+        std::get<javelin::jmap::cache::CalendarWindow>(restoredWithoutRange);
+    CHECK(rangeAfterSecondRejection.occurrences.size() == 2);
+    const auto invalidated = calendars.loadWindow("a1", interval.start, interval.end, zone);
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(invalidated));
+    CHECK_FALSE(
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(invalidated).has_value());
+}
+
 TEST_CASE("calendar invitation responses use participant identities and RSVP rights",
           "[jmap][calendar][service][scheduling]")
 {

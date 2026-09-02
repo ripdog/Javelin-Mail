@@ -741,6 +741,91 @@ namespace javelin::jmap::cache
         return std::optional<calendar::CalendarEvent>{std::move(*parsed.value)};
     }
 
+    std::variant<std::vector<calendar::Occurrence>, DatabaseError>
+    CalendarRepository::listEventOccurrences(const std::string_view accountId,
+                                             const std::string_view eventId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT occurrence_id,recurrence_id,start_utc,end_utc,local_start,local_end,is_all_day "
+            "FROM calendar_occurrences WHERE account_id=:account AND event_id=:event ORDER BY "
+            "local_start,local_end,occurrence_id"));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":event"), QString::fromStdString(std::string{eventId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("List calendar event occurrences"), query);
+        std::vector<calendar::Occurrence> result;
+        while (query.next())
+        {
+            result.push_back({
+                .accountId = std::string{accountId},
+                .id = query.value(0).toString().toStdString(),
+                .eventId = std::string{eventId},
+                .recurrenceId =
+                    query.value(1).isNull()
+                        ? std::nullopt
+                        : std::optional<calendar::LocalDateTime>{{.value = query.value(1)
+                                                                               .toString()
+                                                                               .toStdString()}},
+                .localStart = {.value = query.value(4).toString().toStdString()},
+                .localEnd = {.value = query.value(5).toString().toStdString()},
+                .utcStart =
+                    query.value(2).isNull()
+                        ? std::nullopt
+                        : std::optional<calendar::UtcInstant>{{.value = query.value(2)
+                                                                            .toString()
+                                                                            .toStdString()}},
+                .utcEnd = query.value(3).isNull()
+                              ? std::nullopt
+                              : std::optional<calendar::UtcInstant>{{.value = query.value(3)
+                                                                                  .toString()
+                                                                                  .toStdString()}},
+                .allDay = query.value(6).toInt() != 0,
+            });
+        }
+        return result;
+    }
+
+    std::optional<DatabaseError>
+    CalendarRepository::invalidateEventWindows(DatabaseTransaction& transaction,
+                                               const std::string_view accountId,
+                                               const std::span<const std::string> eventIds)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message =
+                    QStringLiteral("Calendar window invalidation requires a matching transaction"),
+            };
+        }
+        if (eventIds.empty())
+            return std::nullopt;
+
+        QSqlQuery remove{m_connection.database()};
+        remove.prepare(QStringLiteral(
+            "DELETE FROM calendar_query_windows WHERE account_id=:account AND EXISTS (SELECT 1 "
+            "FROM calendar_window_occurrences w JOIN calendar_occurrences o ON "
+            "o.account_id=w.account_id AND o.occurrence_id=w.occurrence_id WHERE "
+            "w.account_id=calendar_query_windows.account_id AND "
+            "w.range_start=calendar_query_windows.range_start AND "
+            "w.range_end=calendar_query_windows.range_end AND "
+            "w.display_time_zone=calendar_query_windows.display_time_zone AND o.event_id=:event)"));
+        for (const auto& eventId : eventIds)
+        {
+            remove.bindValue(QStringLiteral(":account"),
+                             QString::fromStdString(std::string{accountId}));
+            remove.bindValue(QStringLiteral(":event"), QString::fromStdString(eventId));
+            if (!remove.exec())
+                return queryError(QStringLiteral("Invalidate calendar event windows"), remove);
+        }
+        return std::nullopt;
+    }
+
     std::optional<DatabaseError>
     CalendarRepository::storeStateTokens(const std::string_view accountId,
                                          const std::string_view calendarState,
@@ -1278,7 +1363,7 @@ namespace javelin::jmap::cache
     std::optional<DatabaseError> CalendarRepository::projectEvents(
         DatabaseTransaction& transaction, const std::string_view accountId,
         const std::string_view eventState, const std::vector<calendar::CalendarEvent>& events,
-        const std::vector<calendar::Occurrence>& nonRecurringOccurrences,
+        const std::vector<calendar::Occurrence>& replacementOccurrences,
         const std::span<const std::string> destroyedEventIds)
     {
         if (const auto error = m_connection.validate())
@@ -1559,28 +1644,38 @@ namespace javelin::jmap::cache
         insertOccurrence.prepare(QStringLiteral(
             "INSERT INTO calendar_occurrences (account_id,occurrence_id,event_id,recurrence_id,"
             "start_utc,end_utc,local_start,local_end,is_all_day) VALUES "
-            "(:account,:id,:event,NULL,:start_utc,:end_utc,:local_start,:local_end,:all_day)"));
+            "(:account,:id,:event,:recurrence,:start_utc,:end_utc,:local_start,:local_end,:all_"
+            "day)"));
         QSqlQuery addToWindows{database};
         addToWindows.prepare(QStringLiteral(
             "INSERT INTO calendar_window_occurrences (account_id,range_start,range_end,"
             "display_time_zone,occurrence_id) SELECT account_id,range_start,range_end,"
             "display_time_zone,:occurrence FROM calendar_query_windows WHERE account_id=:account "
             "AND range_start < :local_end AND range_end > :local_start"));
-        for (const auto& occurrence : nonRecurringOccurrences)
+        std::unordered_set<std::string> replacedOccurrenceEvents;
+        for (const auto& occurrence : replacementOccurrences)
         {
-            removeOccurrences.bindValue(QStringLiteral(":account"),
-                                        QString::fromStdString(std::string{accountId}));
-            removeOccurrences.bindValue(QStringLiteral(":event"),
-                                        QString::fromStdString(occurrence.eventId));
-            if (!exec(removeOccurrences, failure,
-                      QStringLiteral("Replace projected event occurrence")))
-                return failure;
+            if (replacedOccurrenceEvents.insert(occurrence.eventId).second)
+            {
+                removeOccurrences.bindValue(QStringLiteral(":account"),
+                                            QString::fromStdString(std::string{accountId}));
+                removeOccurrences.bindValue(QStringLiteral(":event"),
+                                            QString::fromStdString(occurrence.eventId));
+                if (!exec(removeOccurrences, failure,
+                          QStringLiteral("Replace projected event occurrences")))
+                    return failure;
+            }
             insertOccurrence.bindValue(QStringLiteral(":account"),
                                        QString::fromStdString(std::string{accountId}));
             insertOccurrence.bindValue(QStringLiteral(":id"),
                                        QString::fromStdString(occurrence.id));
             insertOccurrence.bindValue(QStringLiteral(":event"),
                                        QString::fromStdString(occurrence.eventId));
+            insertOccurrence.bindValue(
+                QStringLiteral(":recurrence"),
+                occurrence.recurrenceId
+                    ? QVariant{QString::fromStdString(occurrence.recurrenceId->value)}
+                    : QVariant{});
             insertOccurrence.bindValue(
                 QStringLiteral(":start_utc"),
                 occurrence.utcStart ? QVariant{QString::fromStdString(occurrence.utcStart->value)}
