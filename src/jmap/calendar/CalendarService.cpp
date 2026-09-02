@@ -519,6 +519,14 @@ namespace javelin::jmap::calendar
             return {.value = start.addSecs(seconds).toString(Qt::ISODate).toStdString()};
         }
 
+        [[nodiscard]] bool timingInputsChanged(const CalendarEvent& previous,
+                                               const CalendarEvent& current)
+        {
+            return previous.start != current.start || previous.duration != current.duration ||
+                   previous.timeZone != current.timeZone ||
+                   previous.showWithoutTime != current.showWithoutTime;
+        }
+
         [[nodiscard]] Occurrence projectedOccurrence(const CalendarEvent& event)
         {
             return Occurrence{
@@ -589,6 +597,11 @@ namespace javelin::jmap::calendar
                 if (const auto* cacheError = std::get_if<cache::DatabaseError>(&cached))
                     return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
                 const auto& base = std::get<std::optional<CalendarEvent>>(cached);
+                if (base && timingInputsChanged(*base, projected))
+                {
+                    projected.utcStart.reset();
+                    projected.utcEnd.reset();
+                }
                 const auto requestedDocument = api::serializeCalendarEventDocument(projected);
                 if (!requestedDocument.has_value())
                     return error(OperationErrorCode::InvalidRequest,
@@ -977,7 +990,8 @@ namespace javelin::jmap::calendar
         acceptCalendarMutations(cache::DatabaseConnection& connection,
                                 cache::CalendarRepository& repository,
                                 const std::vector<CalendarMutationRecord>& records,
-                                const api::CalendarEventSetResponse& response)
+                                const api::CalendarEventSetResponse& response,
+                                const std::span<const CalendarEvent> authoritativeUpdates)
         {
             std::vector<CalendarEvent> acceptedEvents;
             std::vector<Occurrence> acceptedOccurrences;
@@ -991,6 +1005,22 @@ namespace javelin::jmap::calendar
                             OperationErrorCode::ProtocolViolation,
                             QStringLiteral(
                                 "The CalendarEvent/set response omitted an updated event."));
+                    const auto authoritative = std::ranges::find(
+                        authoritativeUpdates, record.objectId, &CalendarEvent::id);
+                    if (authoritative == authoritativeUpdates.end())
+                        continue;
+                    const auto current = repository.findEvent(response.accountId, record.objectId);
+                    if (const auto* cacheError = std::get_if<cache::DatabaseError>(&current))
+                        return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+                    const auto& currentEvent = std::get<std::optional<CalendarEvent>>(current);
+                    if (!currentEvent || timingInputsChanged(*currentEvent, *authoritative))
+                        continue;
+                    auto merged = *currentEvent;
+                    merged.utcStart = authoritative->utcStart;
+                    merged.utcEnd = authoritative->utcEnd;
+                    if (!merged.recurrenceRule)
+                        acceptedOccurrences.push_back(projectedOccurrence(merged));
+                    acceptedEvents.push_back(std::move(merged));
                     continue;
                 }
                 if (record.kind == CalendarMutationKind::Destroy)
@@ -4257,9 +4287,48 @@ namespace javelin::jmap::calendar
                 projectionCommitted();
             co_return retried;
         };
+        std::vector<std::string> timingUpdateIds;
+        bool timingUpdateTouchesRecurringMaterialization = false;
+        for (const auto& [eventId, update] : request.update)
+        {
+            if (!timingInputsChanged(update.previous, update.event))
+                continue;
+            timingUpdateIds.push_back(eventId);
+            timingUpdateTouchesRecurringMaterialization =
+                timingUpdateTouchesRecurringMaterialization || update.previous.recurrenceRule ||
+                update.event.recurrenceRule || !update.previous.recurrenceOverrides.empty() ||
+                !update.event.recurrenceOverrides.empty();
+        }
+
+        auto timingReadTimeZone =
+            materialization
+                ? materialization->displayTimeZone
+                : TimeZoneId{.value =
+                                 QString::fromUtf8(QTimeZone::systemTimeZoneId()).toStdString()};
+        if (timingReadTimeZone.value.empty())
+            timingReadTimeZone.value = "UTC";
+
         api::RequestBuilder builder;
         builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
         const auto handle = builder.call(*method, "calendar-event-set");
+        std::optional<api::CallHandle<api::CalendarEventGetResponse>> timingGetHandle;
+        if (!timingUpdateIds.empty())
+        {
+            const auto get = api::calendarEventGet({
+                .accountId = request.accountId,
+                .ids = timingUpdateIds,
+                .idsReference = std::nullopt,
+                .properties = calendarEventReadProperties(),
+                .recurrenceOverridesBefore = std::nullopt,
+                .recurrenceOverridesAfter = std::nullopt,
+                .reduceParticipants = false,
+                .timeZone = timingReadTimeZone,
+            });
+            if (!get)
+                co_return error(OperationErrorCode::InvalidRequest,
+                                QStringLiteral("Unable to serialize updated event retrieval."));
+            timingGetHandle = builder.call(*get, "calendar-event-derived-timing-get");
+        }
         std::optional<api::CallHandle<api::CalendarEventQueryResponse>> queryHandle;
         std::optional<api::CallHandle<api::CalendarEventGetResponse>> getHandle;
         if (materialization.has_value())
@@ -4321,6 +4390,33 @@ namespace javelin::jmap::calendar
             co_return failure;
         }
         const auto& response = std::get<api::CalendarEventSetResponse>(read);
+        std::vector<CalendarEvent> authoritativeTimingUpdates;
+        bool timingReadComplete = timingUpdateIds.empty();
+        if (timingGetHandle.has_value())
+        {
+            const auto timingRead = api::ResponseReader{*envelope}.require(*timingGetHandle);
+            if (const auto* timingResponse =
+                    std::get_if<api::CalendarEventGetResponse>(&timingRead);
+                timingResponse != nullptr && timingResponse->accountId == request.accountId &&
+                timingResponse->state == response.newState && timingResponse->notFound.empty() &&
+                timingResponse->list.size() == timingUpdateIds.size() &&
+                std::ranges::all_of(
+                    timingUpdateIds,
+                    [&](const std::string& eventId)
+                    {
+                        const auto event =
+                            std::ranges::find(timingResponse->list, eventId, &CalendarEvent::id);
+                        const auto requested = request.update.find(eventId);
+                        return event != timingResponse->list.end() &&
+                               requested != request.update.end() &&
+                               !timingInputsChanged(requested->second.event, *event) &&
+                               event->utcStart.has_value() && event->utcEnd.has_value();
+                    }))
+            {
+                authoritativeTimingUpdates = timingResponse->list;
+                timingReadComplete = true;
+            }
+        }
         std::optional<api::CalendarEventQueryResponse> materializedQuery;
         std::optional<api::CalendarEventGetResponse> materializedEvents;
         if (queryHandle.has_value() && getHandle.has_value())
@@ -4370,8 +4466,8 @@ namespace javelin::jmap::calendar
                             QString::fromStdString(setError->description.value_or(
                                 "The server rejected the calendar change.")));
         }
-        auto accepted =
-            acceptCalendarMutations(m_connection, repository, prepared.records, response);
+        auto accepted = acceptCalendarMutations(m_connection, repository, prepared.records,
+                                                response, authoritativeTimingUpdates);
         if (const auto* operationError = std::get_if<OperationError>(&accepted))
         {
             static_cast<void>(
@@ -4442,8 +4538,12 @@ namespace javelin::jmap::calendar
                     materializationComplete = true;
             }
         }
+        const bool recurringTimingMaterializationComplete =
+            !timingUpdateTouchesRecurringMaterialization ||
+            (materialization.has_value() && materializationComplete);
         std::get<CommittedMutation>(accepted).receipt.incompleteMaterialization =
-            !materializationComplete;
+            !materializationComplete || !timingReadComplete ||
+            !recurringTimingMaterializationComplete;
         if (projectionCommitted)
             projectionCommitted();
         m_syncEngine.invalidateRefresh(ownerAccountId);
