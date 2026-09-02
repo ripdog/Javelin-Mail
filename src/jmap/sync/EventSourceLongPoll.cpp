@@ -142,17 +142,64 @@ namespace javelin::jmap::sync
 namespace javelin::jmap::sync
 {
 
+    QtStateChangeSleeper::QtStateChangeSleeper()
+    {
+        m_timer.setSingleShot(true);
+        QObject::connect(&m_timer, &QTimer::timeout, &m_timer, [this]() { resumeWaiter(); });
+    }
+
+    QtStateChangeSleeper::~QtStateChangeSleeper()
+    {
+        cancel();
+    }
+
+    QtStateChangeSleeper::WaitAwaiter::WaitAwaiter(QtStateChangeSleeper& sleeper,
+                                                   const std::chrono::milliseconds delay)
+        : m_sleeper(sleeper), m_delay(delay)
+    {
+    }
+
+    bool QtStateChangeSleeper::WaitAwaiter::await_ready() const noexcept
+    {
+        return m_delay.count() <= 0;
+    }
+
+    void QtStateChangeSleeper::WaitAwaiter::await_suspend(const std::coroutine_handle<> handle)
+    {
+        m_sleeper.beginWait(handle, m_delay);
+    }
+
+    void QtStateChangeSleeper::WaitAwaiter::await_resume() const noexcept
+    {
+    }
+
+    void QtStateChangeSleeper::beginWait(const std::coroutine_handle<> handle,
+                                         const std::chrono::milliseconds delay)
+    {
+        Q_ASSERT(!m_waiter);
+        m_waiter = handle;
+        m_timer.start(delay);
+    }
+
+    void QtStateChangeSleeper::resumeWaiter()
+    {
+        if (!m_waiter)
+            return;
+        auto waiter = std::exchange(m_waiter, {});
+        waiter.resume();
+    }
+
     QCoro::Task<void> QtStateChangeSleeper::sleepFor(const std::chrono::milliseconds delay)
     {
-        if (delay.count() <= 0)
-        {
-            co_return;
-        }
+        co_await WaitAwaiter{*this, delay};
+    }
 
-        QTimer timer;
-        timer.setSingleShot(true);
-        timer.start(delay);
-        co_await qCoro(timer).waitForTimeout();
+    void QtStateChangeSleeper::cancel()
+    {
+        if (!m_waiter)
+            return;
+        m_timer.stop();
+        resumeWaiter();
     }
 
     EventSourceStateChangeSource::EventSourceStateChangeSource(

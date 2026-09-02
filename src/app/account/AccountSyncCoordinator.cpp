@@ -223,6 +223,7 @@ namespace javelin::app
             {
                 m_runContext->source->cancel();
             }
+            m_runContext->sleeper.cancel();
             m_runContext.reset();
         }
 
