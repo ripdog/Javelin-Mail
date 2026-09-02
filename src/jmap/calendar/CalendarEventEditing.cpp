@@ -1,9 +1,11 @@
 #include "jmap/calendar/CalendarEventEditing.h"
 
+#include <QRegularExpression>
 #include <QUrl>
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
@@ -317,6 +319,35 @@ namespace javelin::jmap::calendar
         auto result = baseEvent;
         result.recurrenceOverrides[recurrenceId.value].excluded = true;
         return result;
+    }
+
+    std::optional<qint64> durationSeconds(const Duration& duration)
+    {
+        static const QRegularExpression expression{
+            QStringLiteral("^([+-])?P(?:(\\d+)W)?(?:(\\d+)D)?(?:T(?:(\\d+)H)?(?:(\\d+)M)?"
+                           "(?:(\\d+(?:\\.\\d+)?)S)?)?$")};
+        const auto match = expression.match(QString::fromStdString(duration.value));
+        if (!match.hasMatch())
+            return std::nullopt;
+        const qint64 seconds =
+            match.captured(2).toLongLong() * 7 * 86400 + match.captured(3).toLongLong() * 86400 +
+            match.captured(4).toLongLong() * 3600 + match.captured(5).toLongLong() * 60 +
+            static_cast<qint64>(std::round(match.captured(6).toDouble()));
+        return match.captured(1) == QStringLiteral("-") ? -seconds : seconds;
+    }
+
+    QDateTime alertTrigger(const Alert& alert, const QDateTime& startsAt, const QDateTime& endsAt)
+    {
+        if (alert.triggerKind == AlertTriggerKind::Absolute && alert.when)
+            return QDateTime::fromString(QString::fromStdString(alert.when->value),
+                                         Qt::ISODateWithMs)
+                .toUTC();
+        if (!alert.offset)
+            return {};
+        const auto offset = durationSeconds(*alert.offset);
+        if (!offset)
+            return {};
+        return (alert.relativeTo == "end" ? endsAt : startsAt).addSecs(*offset);
     }
 
     CalendarEvent acknowledgeAlert(CalendarEvent event, Alert alert,

@@ -104,6 +104,27 @@ TEST_CASE("state-change routing includes groupware changes from secondary accoun
               {"contacts-account", {{"ContactCard", "contacts-2"}}}});
 }
 
+TEST_CASE("WebSocket push messages parse calendar alerts without advancing push state",
+          "[jmap][push][websocket][calendar]")
+{
+    const javelin::jmap::sync::StateChangeSubscription subscription{
+        .accountId = "mail-account",
+        .lastState = "push-state-1",
+        .types = {"CalendarAlert"},
+        .groupwareAccountIds = {"calendar-account"},
+    };
+    const auto parsed = javelin::jmap::sync::parseWebSocketPushMessage(
+        subscription, subscription.lastState,
+        R"({"@type":"CalendarAlert","accountId":"calendar-account","calendarEventId":"event-1","uid":"uid-1","recurrenceId":null,"alertId":"alert-1"})");
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::CalendarAlertEvent>(parsed));
+    const auto& alert = std::get<javelin::jmap::sync::CalendarAlertEvent>(parsed);
+    CHECK(alert.accountId == "calendar-account");
+    CHECK(alert.calendarEventId == "event-1");
+    CHECK_FALSE(alert.recurrenceId.has_value());
+    CHECK(alert.alertId == "alert-1");
+}
+
 TEST_CASE("WebSocket push messages use the shared protocol parser", "[jmap][push][websocket]")
 {
     const javelin::jmap::sync::StateChangeSubscription subscription{

@@ -2,6 +2,8 @@
 
 #include "jmap/calendar/CalendarTypes.h"
 
+#include <QDateTime>
+
 #include <cstddef>
 #include <optional>
 #include <span>
@@ -40,6 +42,9 @@ namespace javelin::jmap::calendar
                                                                  std::string participationStatus);
     [[nodiscard]] CalendarEvent excludeOccurrence(const CalendarEvent& baseEvent,
                                                   const LocalDateTime& recurrenceId);
+    [[nodiscard]] std::optional<qint64> durationSeconds(const Duration& duration);
+    [[nodiscard]] QDateTime alertTrigger(const Alert& alert, const QDateTime& startsAt,
+                                         const QDateTime& endsAt);
     [[nodiscard]] CalendarEvent acknowledgeAlert(CalendarEvent event, Alert alert,
                                                  UtcInstant acknowledgedAt);
 } // namespace javelin::jmap::calendar

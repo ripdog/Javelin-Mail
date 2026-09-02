@@ -114,6 +114,7 @@ namespace javelin::app
         [[nodiscard]] std::variant<std::optional<std::string>, javelin::jmap::OperationError>
         currentCalendarPreference(
             const javelin::app::undo::CalendarPreferenceHistory& history) const override;
+        void ensureCalendarMetadata(std::string ownerAccountId);
         [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::OperationError>>
         applyCalendarPreference(javelin::app::undo::CalendarPreferenceHistory history,
                                 std::optional<std::string> value,

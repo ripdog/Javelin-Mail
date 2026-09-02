@@ -703,10 +703,20 @@ TEST_CASE("calendar reminders are claimed once and can be snoozed or dismissed",
         std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(first);
     REQUIRE(candidates.size() == 1);
     CHECK(candidates.front().title == "Event event-1");
+    const auto originalTrigger =
+        QDateTime::fromString(QStringLiteral("2026-07-18T09:50:00Z"), Qt::ISODate);
+    CHECK(candidates.front().key ==
+          "a1:event-1:alert-1:" + std::to_string(originalTrigger.toMSecsSinceEpoch()));
+    CHECK(candidates.front().identityKey != candidates.front().key);
     CHECK(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
               notifications.claimDue(now))
               .empty());
-    REQUIRE_FALSE(notifications.markDelivered(candidates.front().key, now).has_value());
+    const auto duplicatePush = notifications.claimPushed(candidates.front().identityKey, now);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::CalendarPushedAlertClaim>(duplicatePush));
+    CHECK_FALSE(std::get<javelin::jmap::cache::CalendarPushedAlertClaim>(duplicatePush).claimed);
+    REQUIRE_FALSE(
+        notifications.markDelivered(candidates.front().key, candidates.front().identityKey, now)
+            .has_value());
 
     REQUIRE_FALSE(notifications.snooze(candidates.front().key, now.addSecs(300)).has_value());
     CHECK(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
@@ -716,7 +726,9 @@ TEST_CASE("calendar reminders are claimed once and can be snoozed or dismissed",
     REQUIRE(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(snoozed)
                 .size() == 1);
     REQUIRE_FALSE(
-        notifications.markDelivered(candidates.front().key, now.addSecs(300)).has_value());
+        notifications
+            .markDelivered(candidates.front().key, candidates.front().identityKey, now.addSecs(300))
+            .has_value());
     REQUIRE_FALSE(notifications.dismiss(candidates.front().key).has_value());
     CHECK(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
               notifications.claimDue(now.addSecs(600)))
@@ -757,6 +769,49 @@ TEST_CASE("calendar reminders are claimed once and can be snoozed or dismissed",
         std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(defaultReminder)
             .front()
             .alertId == "default-alert");
+
+    auto pushedEvent = event("event-2", "2026-07-18T10:00:00");
+    pushedEvent.timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Etc/UTC"};
+    pushedEvent.utcStart = javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T10:00:00Z"};
+    pushedEvent.utcEnd = javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T11:00:00Z"};
+    pushedEvent.alerts.emplace("push-alert",
+                               javelin::jmap::calendar::Alert{
+                                   .id = "push-alert",
+                                   .action = "display",
+                                   .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+                                   .relativeTo = "start",
+                                   .offset = javelin::jmap::calendar::Duration{.value = "-PT10M"},
+                                   .when = std::nullopt,
+                                   .acknowledged = std::nullopt});
+    const auto pushedIdentity = javelin::jmap::cache::calendarNotificationIdentityKey(
+        "a1", "event-2", std::nullopt, "push-alert", originalTrigger);
+    const auto pushedClaim = notifications.claimPushed(pushedIdentity, now);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::CalendarPushedAlertClaim>(pushedClaim));
+    REQUIRE(std::get<javelin::jmap::cache::CalendarPushedAlertClaim>(pushedClaim).claimed);
+    REQUIRE_FALSE(notifications.markDelivered(pushedIdentity, pushedIdentity, now).has_value());
+
+    auto pushedOccurrence = occurrence("event-2", "2026-07-18T10:00:00");
+    pushedOccurrence.localEnd = {.value = "2026-07-18T11:00:00"};
+    pushedOccurrence.utcStart =
+        javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T10:00:00Z"};
+    pushedOccurrence.utcEnd = javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T11:00:00Z"};
+    REQUIRE_FALSE(calendars
+                      .reconcileWindow({.accountId = "a1",
+                                        .start = {.value = "2026-07-01T00:00:00"},
+                                        .end = {.value = "2026-08-01T00:00:00"},
+                                        .displayTimeZone = {.value = "Etc/UTC"},
+                                        .queryState = "q4",
+                                        .eventState = "e4",
+                                        .events = {pushedEvent},
+                                        .occurrences = {pushedOccurrence}})
+                      .has_value());
+    const auto afterPushMaterialization = notifications.claimDue(now.addSecs(600));
+    const auto& afterPushCandidates =
+        std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
+            afterPushMaterialization);
+    CHECK(std::ranges::find(afterPushCandidates, "event-2",
+                            &javelin::jmap::cache::CalendarNotificationCandidate::eventId) ==
+          afterPushCandidates.end());
 }
 
 TEST_CASE("calendar reminders use their actual trigger rather than occurrence start bounds",

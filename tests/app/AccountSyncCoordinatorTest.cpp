@@ -472,6 +472,49 @@ TEST_CASE("notification baseline execution has one coordinator retry path",
                   { return fixture.transport.successfulEmailDeltas > successesBeforeBaseline; }));
 }
 
+TEST_CASE("calendar alert push routes independently of collection state",
+          "[app][account][sync][calendar][alert]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    CoordinatorFixture fixture;
+
+    int deliveries = 0;
+    QString ownerAccountId;
+    QString calendarAccountId;
+    QString eventId;
+    QString recurrenceId;
+    QString alertId;
+    QObject::connect(&fixture.coordinator,
+                     &javelin::app::AccountSyncCoordinator::calendarAlertReceived,
+                     [&deliveries, &ownerAccountId, &calendarAccountId, &eventId, &recurrenceId,
+                      &alertId](const QString& owner, const QString& account, const QString& event,
+                                const QString&, const QString& recurrence, const QString& alert)
+                     {
+                         ++deliveries;
+                         ownerAccountId = owner;
+                         calendarAccountId = account;
+                         eventId = event;
+                         recurrenceId = recurrence;
+                         alertId = alert;
+                     });
+
+    QCoro::waitFor(fixture.coordinator.onCalendarAlert({
+        .accountId = "calendar-account",
+        .calendarEventId = "event-1",
+        .uid = "uid-1",
+        .recurrenceId = std::string{"2026-09-03T09:00:00"},
+        .alertId = "alert-1",
+    }));
+
+    CHECK(deliveries == 1);
+    CHECK(ownerAccountId == QStringLiteral("account-1"));
+    CHECK(calendarAccountId == QStringLiteral("calendar-account"));
+    CHECK(eventId == QStringLiteral("event-1"));
+    CHECK(recurrenceId == QStringLiteral("2026-09-03T09:00:00"));
+    CHECK(alertId == QStringLiteral("alert-1"));
+}
+
 TEST_CASE("lost account Email history reconciles every tracked mailbox query",
           "[app][account][sync][ownership][rebaseline]")
 {

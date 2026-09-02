@@ -40,6 +40,7 @@ namespace javelin::app
             types.emplace_back("CalendarEvent");
             types.emplace_back("CalendarEventNotification");
             types.emplace_back("ParticipantIdentity");
+            types.emplace_back("CalendarAlert");
         }
         if (capabilities.contacts)
         {

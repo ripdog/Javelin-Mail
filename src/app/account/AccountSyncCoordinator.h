@@ -77,12 +77,17 @@ namespace javelin::app
 
         [[nodiscard]] QCoro::Task<void>
         onStateChange(javelin::jmap::sync::StateChangeEvent event) override;
+        [[nodiscard]] QCoro::Task<void>
+        onCalendarAlert(javelin::jmap::sync::CalendarAlertEvent event) override;
 
       Q_SIGNALS:
         void statusChanged(javelin::app::AccountSyncCoordinator::Status status);
         void cacheCommitted(javelin::app::MailCacheChange change);
         void calendarStateChanged(const QString& ownerAccountId,
                                   const javelin::jmap::sync::AccountTypeStateMap& changedStates);
+        void calendarAlertReceived(const QString& ownerAccountId, const QString& accountId,
+                                   const QString& eventId, const QString& uid,
+                                   const QString& recurrenceId, const QString& alertId);
         void contactStateChanged(const QString& ownerAccountId,
                                  const javelin::jmap::sync::AccountTypeStateMap& changedStates);
         void identityStateChanged(const QString& ownerAccountId,

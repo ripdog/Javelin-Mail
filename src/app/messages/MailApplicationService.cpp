@@ -4267,6 +4267,11 @@ namespace javelin::app
         co_return observedResult;
     }
 
+    void CalendarApplicationService::ensureCalendarMetadata(std::string ownerAccountId)
+    {
+        scheduleMetadataRefresh(std::move(ownerAccountId));
+    }
+
     void CalendarApplicationService::scheduleMetadataRefresh(std::string ownerAccountId)
     {
         if (ownerAccountId.empty())
@@ -5513,6 +5518,8 @@ namespace javelin::app
         connect(&coordinator, &AccountSyncCoordinator::calendarStateChanged, this,
                 [this](const QString& ownerAccountId, const auto& changedStates)
                 { Q_EMIT calendarStateChanged(ownerAccountId, changedStates); });
+        connect(&coordinator, &AccountSyncCoordinator::calendarAlertReceived, this,
+                &AccountRuntimeManager::calendarAlertReceived);
         connect(&coordinator, &AccountSyncCoordinator::notificationEventsCommitted, this,
                 &AccountRuntimeManager::notificationEventsCommitted);
         connect(

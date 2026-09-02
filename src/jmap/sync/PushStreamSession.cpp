@@ -34,6 +34,12 @@ namespace javelin::jmap::sync
             co_return PushStreamPing{.interval = ping->interval};
         if (auto* error = std::get_if<PushProtocolError>(&message))
             co_return PushStreamProtocolFailure{.message = std::move(error->message)};
+        if (auto* alert = std::get_if<CalendarAlertEvent>(&message))
+        {
+            ++m_summary.updateCount;
+            co_await m_consumer.onCalendarAlert(std::move(*alert));
+            co_return PushStreamIgnored{};
+        }
 
         auto event = std::get<StateChangeEvent>(std::move(message));
         m_subscription.lastState = event.newState;

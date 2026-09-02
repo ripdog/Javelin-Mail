@@ -529,7 +529,16 @@ and owns only invitation-specific `CalendarEventNotification` reconciliation,
 `ParticipantIdentity` synchronization, and event fetches required to resolve invitations outside the
 visible range. Pending invitations retain their own event snapshot for presentation and dispatch;
 invitation reconciliation never advances the authoritative `CalendarEvent` state token or overwrites
-the shared CalendarEvent cache. `CalendarCacheReader` owns cached reads. The GUI consumes typed
+the shared CalendarEvent cache. `CalendarNotificationService` separately owns reminder delivery.
+For Calendars-capable sessions, push subscriptions include the draft-26 `CalendarAlert` pseudo-type;
+these alerts are event notifications, not collection state, so handling them never advances a JMAP
+state token. The daemon persists each raw pushed alert before any follow-up fetch or desktop delivery,
+then resolves the authoritative event and shares the same durable notification identity used by local
+reminder scans. Fetch, Calendar-metadata, desktop-publication, snooze, and restart recovery therefore
+cannot depend on a GUI-visible occurrence window or on the server repeating a push. Dismissing a
+pushed reminder whose event is not cached fetches the current authoritative event before submitting
+the acknowledgement through the normal calendar mutation path. `CalendarCacheReader` owns cached
+reads. The GUI consumes typed
 calendar values from its read-only cache surface and commands through application ports such as
 `CalendarCommandPort`; it
 never constructs method names or raw JSON. GUI connection-status changes are presentation state and

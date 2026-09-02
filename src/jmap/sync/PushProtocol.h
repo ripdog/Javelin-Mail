@@ -37,8 +37,8 @@ namespace javelin::jmap::sync
         std::string message;
     };
 
-    using PushMessage =
-        std::variant<PushMessageIgnored, PushPing, StateChangeEvent, PushProtocolError>;
+    using PushMessage = std::variant<PushMessageIgnored, PushPing, StateChangeEvent,
+                                     CalendarAlertEvent, PushProtocolError>;
     using PushPingIntervalResult = std::variant<std::optional<std::chrono::seconds>, std::string>;
 
     [[nodiscard]] PushPingIntervalResult parsePushPingInterval(std::string_view eventData);
