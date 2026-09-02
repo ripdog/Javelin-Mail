@@ -2050,6 +2050,12 @@ TEST_CASE("calendar event deletion rematerializes the visible range without drop
     CHECK(transport.requests.front().envelope.methodCalls[0].name == "CalendarEvent/set");
     CHECK(transport.requests.front().envelope.methodCalls[1].name == "CalendarEvent/query");
     CHECK(transport.requests.front().envelope.methodCalls[2].name == "CalendarEvent/get");
+    CHECK(transport.requests.front().envelope.methodCalls[2].arguments.find(R"("properties":[)") !=
+          std::string::npos);
+    CHECK(transport.requests.front().envelope.methodCalls[2].arguments.find(R"("utcStart")") !=
+          std::string::npos);
+    CHECK(transport.requests.front().envelope.methodCalls[2].arguments.find(R"("utcEnd")") !=
+          std::string::npos);
 
     const auto cached = calendars.loadRangeSnapshot("a1", interval.start, interval.end, zone);
     REQUIRE(std::holds_alternative<javelin::jmap::cache::CalendarWindow>(cached));

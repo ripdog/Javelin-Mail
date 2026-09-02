@@ -4288,7 +4288,7 @@ namespace javelin::jmap::calendar
                 .accountId = request.accountId,
                 .ids = std::nullopt,
                 .idsReference = api::resultReference(*queryHandle, "/ids"),
-                .properties = std::nullopt,
+                .properties = calendarEventReadProperties(),
                 .recurrenceOverridesBefore = std::nullopt,
                 .recurrenceOverridesAfter = std::nullopt,
                 .reduceParticipants = false,
