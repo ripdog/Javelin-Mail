@@ -1,4 +1,5 @@
 #include "gui/messageview/MessageViewContainer.h"
+#include "gui/messageview/HtmlMessageView.h"
 #include "gui/settings/GuiSettings.h"
 #include "gui/translation/GoogleTranslationBackend.h"
 #include "gui/translation/TranslationCache.h"
@@ -12,6 +13,8 @@
 #include <QLineEdit>
 #include <QNetworkAccessManager>
 #include <QTemporaryDir>
+#include <QTextBrowser>
+#include <QUrl>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -82,7 +85,8 @@ namespace
     };
 } // namespace
 
-TEST_CASE("message view constructs with the find footer", "[qtwebengine]")
+TEST_CASE("message view find footer and internal mailto routing",
+          "[qtwebengine][gui][message-view]")
 {
     QTemporaryDir temporaryDirectory;
     REQUIRE(temporaryDirectory.isValid());
@@ -119,6 +123,21 @@ TEST_CASE("message view constructs with the find footer", "[qtwebengine]")
     QKeyEvent escapePress{QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier};
     QApplication::sendEvent(findEdit, &escapePress);
     CHECK(findBar->isHidden());
+
+    QString activatedMailto;
+    QObject::connect(&view, &javelin::gui::messageview::MessageViewContainer::mailtoActivated,
+                     [&activatedMailto](const QString& uri) { activatedMailto = uri; });
+
+    auto* plainTextView = view.findChild<QTextBrowser*>();
+    REQUIRE(plainTextView != nullptr);
+    plainTextView->anchorClicked(
+        QUrl{QStringLiteral("mailto:plain@example.test?subject=Plain%20link")});
+    CHECK(activatedMailto == QStringLiteral("mailto:plain@example.test?subject=Plain%20link"));
+
+    auto* htmlView = view.findChild<javelin::gui::messageview::HtmlMessageView*>();
+    REQUIRE(htmlView != nullptr);
+    htmlView->linkActivated(QUrl{QStringLiteral("mailto:html@example.test?subject=HTML%20link")});
+    CHECK(activatedMailto == QStringLiteral("mailto:html@example.test?subject=HTML%20link"));
 
     if (previousConfigHome.isNull())
     {
