@@ -166,6 +166,70 @@ TEST_CASE("calendar create and delete projections render effective state",
           accepted.end());
 }
 
+TEST_CASE("calendar window freshness advances only from a known materialization state",
+          "[jmap][calendar][cache][state]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-window-state"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    QSqlQuery account{connection.database()};
+    REQUIRE(account.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    const javelin::jmap::calendar::TimeZoneId zone{.value = "Pacific/Auckland"};
+    const javelin::jmap::cache::CalendarWindow known{
+        .accountId = "a1",
+        .start = {.value = "2026-09-01T00:00:00"},
+        .end = {.value = "2026-10-01T00:00:00"},
+        .displayTimeZone = zone,
+        .queryState = "query-known",
+        .eventState = "event-state-1",
+        .events = {},
+        .occurrences = {},
+    };
+    REQUIRE_FALSE(repository.reconcileWindow(known).has_value());
+
+    QSqlQuery legacy{connection.database()};
+    REQUIRE(legacy.exec(QStringLiteral(
+        "INSERT INTO calendar_query_windows(account_id,range_start,range_end,display_time_zone,"
+        "query_state,event_state,updated_at) VALUES('a1','2026-10-01T00:00:00',"
+        "'2026-11-01T00:00:00','Pacific/Auckland','query-unknown',NULL,"
+        "'2000-01-01T00:00:00.000Z')")));
+
+    REQUIRE_FALSE(
+        repository.applyEventDelta("a1", "calendar-state-2", "event-state-2", zone, {}, {}, {})
+            .has_value());
+
+    const auto advanced = repository.loadWindow("a1", known.start, known.end, zone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(advanced));
+    const auto& advancedWindow =
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(advanced);
+    REQUIRE(advancedWindow.has_value());
+    CHECK(advancedWindow->eventState == "event-state-2");
+
+    const javelin::jmap::calendar::LocalDateTime unknownStart{.value = "2026-10-01T00:00:00"};
+    const javelin::jmap::calendar::LocalDateTime unknownEnd{.value = "2026-11-01T00:00:00"};
+    const auto unknown = repository.loadWindow("a1", unknownStart, unknownEnd, zone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(unknown));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(unknown).has_value());
+
+    QSqlQuery retainedUnknown{connection.database()};
+    REQUIRE(retainedUnknown.exec(QStringLiteral(
+        "SELECT event_state,updated_at FROM calendar_query_windows WHERE account_id='a1' AND "
+        "range_start='2026-10-01T00:00:00'")));
+    REQUIRE(retainedUnknown.next());
+    CHECK(retainedUnknown.value(0).isNull());
+    CHECK(retainedUnknown.value(1).toString() == QStringLiteral("2000-01-01T00:00:00.000Z"));
+}
+
 TEST_CASE("calendar windows retain occurrences referenced by overlapping windows",
           "[jmap][calendar][cache]")
 {
@@ -258,7 +322,7 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
         .end = {.value = "2026-05-10T00:00:00"},
         .displayTimeZone = zone,
         .queryState = "q2",
-        .eventState = "e2-state",
+        .eventState = "e1-state",
         .events = {event("e2", "2026-04-02T09:00:00")},
         .occurrences = {occurrence("e2", "2026-04-02T09:00:00")}};
     REQUIRE_FALSE(repository.reconcileWindow(second).has_value());
@@ -388,6 +452,20 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
     REQUIRE(count.next());
     CHECK(count.value(0).toInt() == 1);
 
+    REQUIRE_FALSE(repository.applyEventDelta("a1", "c2", "e2-state", zone, {}, {}, {}).has_value());
+    const auto stateAdvancedFirst =
+        repository.loadWindow("a1", first.start, first.end, first.displayTimeZone);
+    const auto stateAdvancedSecond =
+        repository.loadWindow("a1", second.start, second.end, second.displayTimeZone);
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(stateAdvancedFirst)
+                .has_value());
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(stateAdvancedSecond)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(stateAdvancedFirst)
+              ->eventState == "e2-state");
+    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(stateAdvancedSecond)
+              ->eventState == "e2-state");
+
     auto changedEvent = event("e2", "2026-04-02T10:00:00");
     changedEvent.title = "Changed event";
     const auto changedOccurrence = occurrence("e2", "2026-04-02T10:00:00");
@@ -395,31 +473,33 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
         repository
             .applyEventDelta("a1", "c2", "e3-state", zone, {changedEvent}, {changedOccurrence}, {})
             .has_value());
-    const auto updatedFirst =
+    const auto staleFirst =
         repository.loadWindow("a1", first.start, first.end, first.displayTimeZone);
-    const auto updatedSecond =
+    const auto staleSecond =
         repository.loadWindow("a1", second.start, second.end, second.displayTimeZone);
-    REQUIRE(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(updatedFirst)
-                ->events.size() == 1);
-    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(updatedFirst)
-              ->events.front()
-              .title == "Changed event");
-    REQUIRE(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(updatedSecond)
-                ->events.size() == 1);
-    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(updatedSecond)
-              ->events.front()
-              .title == "Changed event");
+    CHECK_FALSE(
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(staleFirst).has_value());
+    CHECK_FALSE(
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(staleSecond).has_value());
+    const auto changedCachedEvent = repository.findEvent("a1", "e2");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(
+        changedCachedEvent));
+    REQUIRE(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(changedCachedEvent)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(changedCachedEvent)
+              ->title == "Changed event");
 
     REQUIRE_FALSE(
         repository.applyEventDelta("a1", "c2", "e4-state", zone, {}, {}, {"e2"}).has_value());
-    const auto destroyedFirst =
-        repository.loadWindow("a1", first.start, first.end, first.displayTimeZone);
-    const auto destroyedSecond =
-        repository.loadWindow("a1", second.start, second.end, second.displayTimeZone);
-    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(destroyedFirst)
-              ->events.empty());
-    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(destroyedSecond)
-              ->events.empty());
+    const auto destroyedCachedEvent = repository.findEvent("a1", "e2");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(
+        destroyedCachedEvent));
+    CHECK_FALSE(
+        std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(destroyedCachedEvent)
+            .has_value());
+
+    refreshedFirst.eventState = "e4-state";
+    REQUIRE_FALSE(repository.reconcileWindow(refreshedFirst).has_value());
 
     REQUIRE(count.exec(
         QStringLiteral("UPDATE calendar_query_windows SET updated_at=CASE range_start WHEN "

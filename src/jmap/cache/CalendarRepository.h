@@ -88,6 +88,9 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::optional<DatabaseError>
         invalidateEventWindows(DatabaseTransaction& transaction, std::string_view accountId,
                                std::span<const std::string> eventIds);
+        [[nodiscard]] std::optional<DatabaseError>
+        advanceEventWindows(DatabaseTransaction& transaction, std::string_view accountId,
+                            std::string_view oldState, std::string_view newState);
         [[nodiscard]] std::optional<DatabaseError> storeStateTokens(std::string_view accountId,
                                                                     std::string_view calendarState,
                                                                     std::string_view eventState);

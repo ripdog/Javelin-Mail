@@ -527,6 +527,41 @@ namespace javelin::jmap::calendar
                    previous.showWithoutTime != current.showWithoutTime;
         }
 
+        [[nodiscard]] bool occurrenceMaterializationInputsChanged(const CalendarEvent& previous,
+                                                                  const CalendarEvent& current)
+        {
+            if (previous.uid != current.uid || timingInputsChanged(previous, current) ||
+                previous.recurrenceRule != current.recurrenceRule)
+                return true;
+
+            const auto changesOccurrence = [](const RecurrenceOverride& override)
+            {
+                return override.excluded || override.start.has_value() ||
+                       override.duration.has_value();
+            };
+            for (const auto& [recurrenceId, previousOverride] : previous.recurrenceOverrides)
+            {
+                const auto currentOverride = current.recurrenceOverrides.find(recurrenceId);
+                if (currentOverride == current.recurrenceOverrides.end())
+                {
+                    if (changesOccurrence(previousOverride))
+                        return true;
+                    continue;
+                }
+                if (previousOverride.excluded != currentOverride->second.excluded ||
+                    previousOverride.start != currentOverride->second.start ||
+                    previousOverride.duration != currentOverride->second.duration)
+                    return true;
+            }
+            for (const auto& [recurrenceId, currentOverride] : current.recurrenceOverrides)
+            {
+                if (!previous.recurrenceOverrides.contains(recurrenceId) &&
+                    changesOccurrence(currentOverride))
+                    return true;
+            }
+            return false;
+        }
+
         [[nodiscard]] Occurrence projectedOccurrence(const CalendarEvent& event)
         {
             return Occurrence{
@@ -1150,6 +1185,28 @@ namespace javelin::jmap::calendar
                 }
             }
 
+            bool existingWindowsRemainMaterialized = !records.empty();
+            for (const auto& record : records)
+            {
+                if (record.kind != CalendarMutationKind::Update || !record.baseDocument.has_value())
+                {
+                    existingWindowsRemainMaterialized = false;
+                    continue;
+                }
+                auto previous =
+                    eventFromMutationDocument(record, *record.baseDocument, record.objectId);
+                if (const auto* operationError = std::get_if<OperationError>(&previous))
+                    return *operationError;
+                const auto current = repository.findEvent(response.accountId, record.objectId);
+                if (const auto* cacheError = std::get_if<cache::DatabaseError>(&current))
+                    return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+                const auto& currentEvent = std::get<std::optional<CalendarEvent>>(current);
+                if (!currentEvent.has_value() ||
+                    occurrenceMaterializationInputsChanged(std::get<CalendarEvent>(previous),
+                                                           *currentEvent))
+                    existingWindowsRemainMaterialized = false;
+            }
+
             std::vector<CalendarEvent> acceptedEvents;
             std::vector<Occurrence> acceptedOccurrences;
             std::vector<std::string> removedTemporaryIds;
@@ -1259,6 +1316,13 @@ namespace javelin::jmap::calendar
                     transaction.cacheTransaction(), response.accountId, response.newState,
                     acceptedEvents, acceptedOccurrences, removedTemporaryIds))
                 return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            if (existingWindowsRemainMaterialized)
+            {
+                if (const auto cacheError = repository.advanceEventWindows(
+                        transaction.cacheTransaction(), response.accountId, response.oldState,
+                        response.newState))
+                    return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            }
 
             bool materializationComplete = materialization == nullptr;
             if (materialization != nullptr && materializationSafe && materializedQuery != nullptr &&

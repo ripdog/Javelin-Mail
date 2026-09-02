@@ -198,7 +198,7 @@ TEST_CASE("participant identity state migration preserves calendar tokens and wi
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 69);
+    CHECK(migrated.schemaVersion() == 70);
 
     QSqlQuery preserved{migrated.database()};
     REQUIRE(preserved.exec(QStringLiteral(
@@ -270,7 +270,7 @@ TEST_CASE("pending calendar invitation migration isolates snapshots from event c
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 69);
+    CHECK(migrated.schemaVersion() == 70);
 
     QSqlQuery pending{migrated.database()};
     REQUIRE(pending.exec(
@@ -288,6 +288,77 @@ TEST_CASE("pending calendar invitation migration isolates snapshots from event c
         "event_id='event-1'")));
     REQUIRE(retained.next());
     CHECK(retained.value(0).toInt() == 1);
+}
+
+TEST_CASE("calendar window event state migration leaves legacy materialization unknown",
+          "[jmap][cache][database][calendar][migration]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+    const QString databasePath =
+        temporaryDir.filePath(QStringLiteral("legacy-calendar-window-state-cache.sqlite3"));
+    const QString fixtureConnectionName = makeConnectionName();
+    {
+        QSqlDatabase fixture =
+            QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), fixtureConnectionName);
+        fixture.setDatabaseName(databasePath);
+        REQUIRE(fixture.open());
+
+        const auto currentRunner = javelin::jmap::cache::createDefaultMigrationRunner();
+        const auto windowEventState = std::ranges::find_if(
+            currentRunner.steps(), [](const auto& step) { return step.version == 70; });
+        REQUIRE(windowEventState != currentRunner.steps().end());
+        std::vector<javelin::jmap::cache::MigrationStep> legacySteps{currentRunner.steps().begin(),
+                                                                     windowEventState};
+        const javelin::jmap::cache::MigrationRunner legacyRunner{std::move(legacySteps)};
+        REQUIRE_FALSE(legacyRunner.migrate(fixture).has_value());
+
+        QSqlQuery seed{fixture};
+        REQUIRE(seed.exec(QStringLiteral(
+            "INSERT INTO accounts(account_id,email_address,session_url,is_primary) "
+            "VALUES('account-1','alice@example.test','https://example.test/jmap',1)")));
+        REQUIRE(seed.exec(
+            QStringLiteral("INSERT INTO calendar_state_tokens(account_id,data_type,state) VALUES "
+                           "('account-1','CalendarEvent','event-state-current')")));
+        REQUIRE(seed.exec(QStringLiteral(
+            "INSERT INTO calendar_query_windows(account_id,range_start,range_end,"
+            "display_time_zone,query_state) VALUES('account-1','2026-09-01T00:00:00',"
+            "'2026-10-01T00:00:00','Pacific/Auckland','query-state-old')")));
+        seed.finish();
+        fixture.close();
+    }
+    QSqlDatabase::removeDatabase(fixtureConnectionName);
+
+    auto migratedResult = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = databasePath,
+    });
+    if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
+        FAIL(error->message.toStdString());
+    auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
+    CHECK(migrated.schemaVersion() == 70);
+
+    QSqlQuery columns{migrated.database()};
+    REQUIRE(columns.exec(QStringLiteral("PRAGMA table_info(calendar_query_windows)")));
+    bool foundEventState = false;
+    while (columns.next())
+    {
+        if (columns.value(1).toString() == QStringLiteral("event_state"))
+        {
+            foundEventState = true;
+            CHECK(columns.value(3).toInt() == 0);
+        }
+    }
+    CHECK(foundEventState);
+
+    QSqlQuery window{migrated.database()};
+    REQUIRE(window.exec(QStringLiteral(
+        "SELECT event_state FROM calendar_query_windows WHERE account_id='account-1'")));
+    REQUIRE(window.next());
+    CHECK(window.value(0).isNull());
 }
 
 TEST_CASE("legacy mail notification state is discarded without touching cached mail",
@@ -344,7 +415,7 @@ TEST_CASE("legacy mail notification state is discarded without touching cached m
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 69);
+    CHECK(migrated.schemaVersion() == 70);
 
     QSqlQuery email{migrated.database()};
     REQUIRE(email.exec(QStringLiteral(
@@ -419,7 +490,7 @@ TEST_CASE(
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 69);
+    CHECK(migrated.schemaVersion() == 70);
 
     QSqlQuery active{migrated.database()};
     REQUIRE(active.exec(QStringLiteral(
@@ -513,7 +584,7 @@ TEST_CASE("mutation journal retention migrates and follows durable owners",
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 69);
+    CHECK(migrated.schemaVersion() == 70);
 
     QSqlQuery retained{migrated.database()};
     REQUIRE(retained.exec(

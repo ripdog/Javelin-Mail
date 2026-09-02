@@ -826,6 +826,35 @@ namespace javelin::jmap::cache
         return std::nullopt;
     }
 
+    std::optional<DatabaseError> CalendarRepository::advanceEventWindows(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::string_view oldState, const std::string_view newState)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message =
+                    QStringLiteral("Calendar window advancement requires a matching transaction"),
+            };
+        }
+        QSqlQuery update{m_connection.database()};
+        update.prepare(QStringLiteral(
+            "UPDATE calendar_query_windows SET event_state=:new_state WHERE account_id=:account "
+            "AND event_state=:old_state"));
+        update.bindValue(QStringLiteral(":new_state"),
+                         QString::fromStdString(std::string{newState}));
+        update.bindValue(QStringLiteral(":account"),
+                         QString::fromStdString(std::string{accountId}));
+        update.bindValue(QStringLiteral(":old_state"),
+                         QString::fromStdString(std::string{oldState}));
+        return update.exec() ? std::nullopt
+                             : std::optional{queryError(
+                                   QStringLiteral("Advance calendar event windows"), update)};
+    }
+
     std::optional<DatabaseError>
     CalendarRepository::storeStateTokens(const std::string_view accountId,
                                          const std::string_view calendarState,
@@ -1017,13 +1046,17 @@ namespace javelin::jmap::cache
             QSqlQuery upsertWindow{database};
             upsertWindow.prepare(QStringLiteral(
                 "INSERT INTO calendar_query_windows (account_id,range_start,range_end,"
-                "display_time_zone,query_state,updated_at) VALUES "
-                "(:account,:start,:end,:zone,:state,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON "
+                "display_time_zone,query_state,event_state,updated_at) VALUES "
+                "(:account,:start,:end,:zone,:query_state,:event_state,"
+                "strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON "
                 "CONFLICT(account_id,range_start,range_end,display_time_zone) DO UPDATE SET "
-                "query_state=excluded.query_state,updated_at=excluded.updated_at"));
+                "query_state=excluded.query_state,event_state=excluded.event_state,"
+                "updated_at=excluded.updated_at"));
             bindWindow(upsertWindow);
-            upsertWindow.bindValue(QStringLiteral(":state"),
+            upsertWindow.bindValue(QStringLiteral(":query_state"),
                                    QString::fromStdString(window.queryState));
+            upsertWindow.bindValue(QStringLiteral(":event_state"),
+                                   QString::fromStdString(window.eventState));
             exec(upsertWindow, failure, QStringLiteral("Upsert calendar window"));
         }
         if (!failure)
@@ -1326,6 +1359,19 @@ namespace javelin::jmap::cache
             pruneEvents.bindValue(QStringLiteral(":account"),
                                   QString::fromStdString(std::string{accountId}));
             exec(pruneEvents, failure, QStringLiteral("Prune delta events"));
+        }
+        if (!failure && events.empty() && occurrences.empty() && destroyedEventIds.empty())
+        {
+            QSqlQuery refreshWindows{database};
+            refreshWindows.prepare(QStringLiteral(
+                "UPDATE calendar_query_windows SET event_state=:state WHERE account_id=:account "
+                "AND event_state=(SELECT state FROM calendar_state_tokens WHERE "
+                "account_id=:account AND data_type='CalendarEvent')"));
+            refreshWindows.bindValue(QStringLiteral(":state"),
+                                     QString::fromStdString(std::string{eventState}));
+            refreshWindows.bindValue(QStringLiteral(":account"),
+                                     QString::fromStdString(std::string{accountId}));
+            exec(refreshWindows, failure, QStringLiteral("Advance unchanged calendar windows"));
         }
         if (!failure)
         {
@@ -1726,9 +1772,9 @@ namespace javelin::jmap::cache
             return *error;
         QSqlQuery windowQuery{m_connection.database()};
         windowQuery.prepare(QStringLiteral(
-            "SELECT w.query_state,(SELECT state FROM calendar_state_tokens s WHERE "
-            "s.account_id=w.account_id AND s.data_type='CalendarEvent') FROM "
-            "calendar_query_windows w WHERE w.account_id=:account AND w.range_start=:start AND "
+            "SELECT w.query_state,w.event_state,s.state FROM calendar_query_windows w LEFT JOIN "
+            "calendar_state_tokens s ON s.account_id=w.account_id AND "
+            "s.data_type='CalendarEvent' WHERE w.account_id=:account AND w.range_start=:start AND "
             "w.range_end=:end AND w.display_time_zone=:zone"));
         windowQuery.bindValue(QStringLiteral(":account"),
                               QString::fromStdString(std::string{accountId}));
@@ -1739,6 +1785,9 @@ namespace javelin::jmap::cache
         if (!windowQuery.exec())
             return queryError(QStringLiteral("Load calendar window"), windowQuery);
         if (!windowQuery.next())
+            return std::optional<CalendarWindow>{std::nullopt};
+        if (windowQuery.value(1).isNull() || windowQuery.value(2).isNull() ||
+            windowQuery.value(1).toString() != windowQuery.value(2).toString())
             return std::optional<CalendarWindow>{std::nullopt};
         QSqlQuery touchWindow{m_connection.database()};
         touchWindow.prepare(QStringLiteral(

@@ -3181,18 +3181,35 @@ TEST_CASE("recurring calendar updates preserve materialized occurrences without 
         .sessionState = "session-recurring-update",
     });
 
+    const auto assertOccurrenceRowsPreserved = [&]
+    {
+        const auto loaded = calendars.listEventOccurrences("a1", recurring.id);
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::Occurrence>>(loaded));
+        const auto& cachedOccurrences =
+            std::get<std::vector<javelin::jmap::calendar::Occurrence>>(loaded);
+        REQUIRE(cachedOccurrences.size() == 2);
+        CHECK(cachedOccurrences[0].eventId == recurring.id);
+        CHECK(cachedOccurrences[0].recurrenceId.has_value());
+        CHECK(cachedOccurrences[1].eventId == recurring.id);
+        CHECK(cachedOccurrences[1].recurrenceId.has_value());
+    };
     const auto assertOccurrencesPreserved = [&]
     {
+        assertOccurrenceRowsPreserved();
         const auto loaded = calendars.loadWindow("a1", rangeStart, rangeEnd, zone);
         REQUIRE(
             std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(loaded));
         const auto& window = std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(loaded);
         REQUIRE(window.has_value());
         REQUIRE(window->occurrences.size() == 2);
-        CHECK(window->occurrences[0].eventId == recurring.id);
-        CHECK(window->occurrences[0].recurrenceId.has_value());
-        CHECK(window->occurrences[1].eventId == recurring.id);
-        CHECK(window->occurrences[1].recurrenceId.has_value());
+    };
+    const auto assertWindowStale = [&]
+    {
+        const auto loaded = calendars.loadWindow("a1", rangeStart, rangeEnd, zone);
+        REQUIRE(
+            std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(loaded));
+        CHECK_FALSE(
+            std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(loaded).has_value());
     };
     transport.beforeReturn = assertOccurrencesPreserved;
 
@@ -3317,7 +3334,8 @@ TEST_CASE("recurring calendar updates preserve materialized occurrences without 
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(shifted));
     CHECK(std::get<javelin::jmap::calendar::CommittedMutation>(shifted)
               .receipt.incompleteMaterialization);
-    assertOccurrencesPreserved();
+    assertOccurrenceRowsPreserved();
+    assertWindowStale();
     const auto shiftedBase = calendars.findEvent("a1", recurring.id);
     REQUIRE(
         std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(shiftedBase));
@@ -3338,7 +3356,11 @@ TEST_CASE("recurring calendar updates preserve materialized occurrences without 
         .createdIds = std::nullopt,
         .sessionState = "session-recurrence-removal-accepted",
     });
-    transport.beforeReturn = assertOccurrencesPreserved;
+    transport.beforeReturn = [&]
+    {
+        assertOccurrenceRowsPreserved();
+        assertWindowStale();
+    };
     auto stoppedRecurring = *shiftedBaseEvent;
     stoppedRecurring.recurrenceRule.reset();
     const auto stopped = QCoro::waitFor(mutation.update(settings, "a1",
@@ -3361,13 +3383,7 @@ TEST_CASE("recurring calendar updates preserve materialized occurrences without 
     REQUIRE(stoppedBaseEvent.has_value());
     CHECK_FALSE(stoppedBaseEvent->recurrenceRule.has_value());
 
-    const auto formerRecurringWindow = calendars.loadWindow("a1", rangeStart, rangeEnd, zone);
-    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(
-        formerRecurringWindow));
-    const auto& stoppedWindow =
-        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(formerRecurringWindow);
-    REQUIRE(stoppedWindow.has_value());
-    CHECK(stoppedWindow->occurrences.empty());
+    assertWindowStale();
 
     const auto baseSnapshot = calendars.loadRangeSnapshot("a1", {.value = "2026-01-08T00:00:00"},
                                                           {.value = "2026-01-09T00:00:00"}, zone);
