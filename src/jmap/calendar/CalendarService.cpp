@@ -1005,22 +1005,47 @@ namespace javelin::jmap::calendar
                             OperationErrorCode::ProtocolViolation,
                             QStringLiteral(
                                 "The CalendarEvent/set response omitted an updated event."));
+                    bool recurrenceRemoved = false;
+                    if (record.baseDocument.has_value() && record.projectedDocument.has_value())
+                    {
+                        auto previous = eventFromMutationDocument(record, *record.baseDocument,
+                                                                  record.objectId);
+                        if (const auto* operationError = std::get_if<OperationError>(&previous))
+                            return *operationError;
+                        auto projected = eventFromMutationDocument(
+                            record, *record.projectedDocument, record.objectId);
+                        if (const auto* operationError = std::get_if<OperationError>(&projected))
+                            return *operationError;
+                        recurrenceRemoved =
+                            std::get<CalendarEvent>(previous).recurrenceRule.has_value() &&
+                            !std::get<CalendarEvent>(projected).recurrenceRule.has_value();
+                    }
+
                     const auto authoritative = std::ranges::find(
                         authoritativeUpdates, record.objectId, &CalendarEvent::id);
-                    if (authoritative == authoritativeUpdates.end())
+                    const bool hasAuthoritativeTiming = authoritative != authoritativeUpdates.end();
+                    if (!hasAuthoritativeTiming && !recurrenceRemoved)
                         continue;
                     const auto current = repository.findEvent(response.accountId, record.objectId);
                     if (const auto* cacheError = std::get_if<cache::DatabaseError>(&current))
                         return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
                     const auto& currentEvent = std::get<std::optional<CalendarEvent>>(current);
-                    if (!currentEvent || timingInputsChanged(*currentEvent, *authoritative))
+                    if (!currentEvent)
                         continue;
-                    auto merged = *currentEvent;
-                    merged.utcStart = authoritative->utcStart;
-                    merged.utcEnd = authoritative->utcEnd;
-                    if (!merged.recurrenceRule)
-                        acceptedOccurrences.push_back(projectedOccurrence(merged));
-                    acceptedEvents.push_back(std::move(merged));
+
+                    auto acceptedEvent = *currentEvent;
+                    const bool timingStillMatches =
+                        hasAuthoritativeTiming &&
+                        !timingInputsChanged(*currentEvent, *authoritative);
+                    if (timingStillMatches)
+                    {
+                        acceptedEvent.utcStart = authoritative->utcStart;
+                        acceptedEvent.utcEnd = authoritative->utcEnd;
+                    }
+                    if (!acceptedEvent.recurrenceRule && (timingStillMatches || recurrenceRemoved))
+                        acceptedOccurrences.push_back(projectedOccurrence(acceptedEvent));
+                    if (timingStillMatches)
+                        acceptedEvents.push_back(std::move(acceptedEvent));
                     continue;
                 }
                 if (record.kind == CalendarMutationKind::Destroy)

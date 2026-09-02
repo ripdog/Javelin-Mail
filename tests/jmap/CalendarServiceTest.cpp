@@ -3054,6 +3054,110 @@ TEST_CASE("recurring calendar updates preserve materialized occurrences without 
     REQUIRE(shiftedBaseEvent->utcEnd.has_value());
     CHECK(shiftedBaseEvent->utcStart->value == "2026-01-07T14:20:00Z");
     CHECK(shiftedBaseEvent->utcEnd->value == "2026-01-07T16:30:00Z");
+
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/set",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"event-3-state","newState":"event-4-state","created":{},"updated":{"event-1":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+              .callId = "calendar-event-set"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-recurrence-removal-accepted",
+    });
+    transport.beforeReturn = assertOccurrencesPreserved;
+    auto stoppedRecurring = *shiftedBaseEvent;
+    stoppedRecurring.recurrenceRule.reset();
+    const auto stopped = QCoro::waitFor(mutation.update(settings, "a1",
+                                                        {.accountId = "a1",
+                                                         .event = std::move(stoppedRecurring),
+                                                         .operationGroupId = std::nullopt,
+                                                         .ifInState = std::nullopt,
+                                                         .materialization = std::nullopt}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(stopped));
+    CHECK_FALSE(std::get<javelin::jmap::calendar::CommittedMutation>(stopped)
+                    .receipt.incompleteMaterialization);
+    REQUIRE(transport.requests.back().envelope.methodCalls.size() == 1);
+    CHECK(transport.requests.back().envelope.methodCalls.front().name == "CalendarEvent/set");
+    const auto stoppedBase = calendars.findEvent("a1", recurring.id);
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(stoppedBase));
+    const auto& stoppedBaseEvent =
+        std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(stoppedBase);
+    REQUIRE(stoppedBaseEvent.has_value());
+    CHECK_FALSE(stoppedBaseEvent->recurrenceRule.has_value());
+
+    const auto formerRecurringWindow = calendars.loadWindow("a1", rangeStart, rangeEnd, zone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(
+        formerRecurringWindow));
+    const auto& stoppedWindow =
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(formerRecurringWindow);
+    REQUIRE(stoppedWindow.has_value());
+    CHECK(stoppedWindow->occurrences.empty());
+
+    const auto baseSnapshot = calendars.loadRangeSnapshot("a1", {.value = "2026-01-08T00:00:00"},
+                                                          {.value = "2026-01-09T00:00:00"}, zone);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::CalendarWindow>(baseSnapshot));
+    const auto& stoppedBaseWindow = std::get<javelin::jmap::cache::CalendarWindow>(baseSnapshot);
+    REQUIRE(stoppedBaseWindow.occurrences.size() == 1);
+    CHECK(stoppedBaseWindow.occurrences.front().eventId == recurring.id);
+    CHECK_FALSE(stoppedBaseWindow.occurrences.front().recurrenceId.has_value());
+    CHECK(stoppedBaseWindow.occurrences.front().localStart.value == "2026-01-08T03:20:00");
+
+    REQUIRE_FALSE(calendars
+                      .reconcileWindow({.accountId = "a1",
+                                        .start = rangeStart,
+                                        .end = rangeEnd,
+                                        .displayTimeZone = zone,
+                                        .queryState = "query-2",
+                                        .eventState = "event-5-state",
+                                        .events = {recurring},
+                                        .occurrences = occurrences})
+                      .has_value());
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/set",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"event-5-state","newState":"event-6-state","created":{},"updated":{"event-1":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+              .callId = "calendar-event-set"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-recurrence-removal-superseded",
+    });
+    transport.beforeReturn = [&]
+    {
+        assertOccurrencesPreserved();
+        auto newerRecurring = recurring;
+        newerRecurring.title = "Newer recurring projection";
+        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+            connection, QStringLiteral("Project newer recurring calendar edit"));
+        REQUIRE(
+            std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+        auto transaction =
+            std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+        REQUIRE_FALSE(
+            calendars.projectEvents(transaction, "a1", "event-5-state", {newerRecurring}, {}, {})
+                .has_value());
+        REQUIRE_FALSE(transaction.commit().has_value());
+    };
+    auto supersededRemoval = recurring;
+    supersededRemoval.recurrenceRule.reset();
+    const auto superseded = QCoro::waitFor(mutation.update(settings, "a1",
+                                                           {.accountId = "a1",
+                                                            .event = std::move(supersededRemoval),
+                                                            .operationGroupId = std::nullopt,
+                                                            .ifInState = std::nullopt,
+                                                            .materialization = std::nullopt}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(superseded));
+    assertOccurrencesPreserved();
+    const auto newerBase = calendars.findEvent("a1", recurring.id);
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(newerBase));
+    const auto& newerBaseEvent =
+        std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(newerBase);
+    REQUIRE(newerBaseEvent.has_value());
+    CHECK(newerBaseEvent->title == "Newer recurring projection");
+    REQUIRE(newerBaseEvent->recurrenceRule.has_value());
 }
 
 TEST_CASE("calendar refresh recovers a recurring base omitted by the bounded base query",
