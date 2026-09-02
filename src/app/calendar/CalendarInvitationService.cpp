@@ -488,6 +488,7 @@ namespace javelin::app
             if (!knownFutureFromQuery && !hasCurrentOrFutureOccurrence(effectiveEvent))
                 return std::nullopt;
             return javelin::jmap::cache::CalendarInvitationProjection{
+                .event = baseEvent,
                 .eventId = baseEvent.id,
                 .recurrenceId = recurrenceId,
                 .selfParticipantId = participant->id,
@@ -1048,12 +1049,9 @@ namespace javelin::app
             if (const auto error =
                     m_repository.reconcile({.accountId = accountId,
                                             .notificationState = notificationState,
-                                            .eventState = events.state,
                                             .replaceNotifications = fullNotificationReconciliation,
                                             .notifications = notifications.list,
                                             .deletedNotificationIds = deletedNotificationIds,
-                                            .events = events.list,
-                                            .nonRecurringOccurrences = {},
                                             .destroyedEventIds = destroyedEventIds,
                                             .consideredEventIds = consideredEventIds,
                                             .pendingInvitations = pending}))

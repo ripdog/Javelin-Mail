@@ -1192,7 +1192,7 @@ namespace javelin::jmap::calendar
             return error(OperationErrorCode::LocalStorageFailure, validation->message);
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
-            "SELECT p.account_id,p.event_id,p.self_participant_id,e.document_json,"
+            "SELECT p.account_id,p.event_id,p.self_participant_id,p.event_document_json,"
             "COALESCE(a.owner_account_id,a.account_id),p.recurrence_id,p.display_recurrence_id,"
             "p.display_start,p.display_utc_start,"
             "(SELECT o.local_start FROM calendar_occurrences o WHERE o.account_id=p.account_id "
@@ -1203,8 +1203,7 @@ namespace javelin::jmap::calendar
             "LIMIT 1),"
             "(SELECT o.recurrence_id FROM calendar_occurrences o WHERE o.account_id=p.account_id "
             "AND o.event_id=p.event_id AND substr(o.local_start,1,10)>=:today ORDER BY "
-            "o.local_start LIMIT 1) FROM calendar_pending_invitations p JOIN calendar_events e ON "
-            "e.account_id=p.account_id AND e.event_id=p.event_id JOIN accounts a ON "
+            "o.local_start LIMIT 1) FROM calendar_pending_invitations p JOIN accounts a ON "
             "a.account_id=p.account_id ORDER BY p.discovered_at,p.account_id,p.event_id,"
             "p.recurrence_id"));
         query.bindValue(QStringLiteral(":today"), QDate::currentDate().toString(Qt::ISODate));

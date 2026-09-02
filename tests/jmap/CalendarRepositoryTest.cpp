@@ -906,6 +906,8 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
                                         .occurrences = {futureOccurrence}})
                       .has_value());
 
+    auto invitationSnapshot = invitation;
+    invitationSnapshot.title = "Invitation snapshot";
     const javelin::jmap::calendar::CalendarEventNotification notification{
         .accountId = "a1",
         .id = "notification-1",
@@ -952,15 +954,13 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
     REQUIRE_FALSE(invitations
                       .reconcile({.accountId = "a1",
                                   .notificationState = "n1",
-                                  .eventState = "e1",
                                   .replaceNotifications = true,
                                   .notifications = {notification},
                                   .deletedNotificationIds = {},
-                                  .events = {invitation},
-                                  .nonRecurringOccurrences = {},
                                   .destroyedEventIds = {},
                                   .consideredEventIds = {"invite-1"},
-                                  .pendingInvitations = {{.eventId = "invite-1",
+                                  .pendingInvitations = {{.event = invitationSnapshot,
+                                                          .eventId = "invite-1",
                                                           .selfParticipantId = "self",
                                                           .sourceNotificationId = "notification-1",
                                                           .enqueueDesktopNotification = true}}})
@@ -969,6 +969,16 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
     auto state = calendars.stateToken("a1", "CalendarEventNotification");
     REQUIRE(std::holds_alternative<std::optional<std::string>>(state));
     CHECK(std::get<std::optional<std::string>>(state) == std::optional<std::string>{"n1"});
+    const auto eventState = calendars.stateToken("a1", "CalendarEvent");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(eventState));
+    CHECK(std::get<std::optional<std::string>>(eventState) == std::optional<std::string>{"e0"});
+    const auto authoritativeEvent = calendars.findEvent("a1", "invite-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(
+        authoritativeEvent));
+    REQUIRE(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(authoritativeEvent)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(authoritativeEvent)
+              ->title == invitation.title);
     QSqlQuery projected{connection.database()};
     REQUIRE(projected.exec(QStringLiteral(
         "SELECT p.self_participant_id,o.status FROM calendar_pending_invitations p JOIN "
@@ -985,6 +995,7 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
         std::get<std::vector<javelin::jmap::cache::CalendarInvitationDispatchCandidate>>(
             firstClaim);
     REQUIRE(candidates.size() == 1);
+    CHECK(candidates.front().title == invitationSnapshot.title);
     CHECK(candidates.front().start.value == "2099-08-20T10:00:00");
     CHECK_FALSE(candidates.front().recurrenceId.has_value());
     CHECK(candidates.front().displayRecurrenceId ==
@@ -1050,15 +1061,13 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
     REQUIRE_FALSE(invitations
                       .reconcile({.accountId = "a1",
                                   .notificationState = "n-delivered-requeue",
-                                  .eventState = "e3",
                                   .replaceNotifications = false,
                                   .notifications = {},
                                   .deletedNotificationIds = {},
-                                  .events = {invitation},
-                                  .nonRecurringOccurrences = {},
                                   .destroyedEventIds = {},
                                   .consideredEventIds = {"invite-1"},
-                                  .pendingInvitations = {{.eventId = "invite-1",
+                                  .pendingInvitations = {{.event = invitation,
+                                                          .eventId = "invite-1",
                                                           .selfParticipantId = "self",
                                                           .sourceNotificationId = "notification-2",
                                                           .enqueueDesktopNotification = true}}})
@@ -1082,16 +1091,14 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
             .reconcile(
                 {.accountId = "a1",
                  .notificationState = "n2",
-                 .eventState = "e4",
                  .replaceNotifications = false,
                  .notifications = {},
                  .deletedNotificationIds = {},
-                 .events = {occurrenceInvitations},
-                 .nonRecurringOccurrences = {},
                  .destroyedEventIds = {},
                  .consideredEventIds = {"invite-1"},
                  .pendingInvitations =
-                     {{.eventId = "invite-1",
+                     {{.event = occurrenceInvitations,
+                       .eventId = "invite-1",
                        .recurrenceId =
                            javelin::jmap::calendar::LocalDateTime{.value = "2099-08-20T10:00:00"},
                        .selfParticipantId = "self",
@@ -1100,7 +1107,8 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
                        .displayStart =
                            javelin::jmap::calendar::LocalDateTime{.value = "2099-08-20T10:00:00"},
                        .enqueueDesktopNotification = true},
-                      {.eventId = "invite-1",
+                      {.event = occurrenceInvitations,
+                       .eventId = "invite-1",
                        .recurrenceId =
                            javelin::jmap::calendar::LocalDateTime{.value = "2099-08-27T10:00:00"},
                        .selfParticipantId = "self",
@@ -1142,16 +1150,14 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
             .reconcile(
                 {.accountId = "a1",
                  .notificationState = "n3",
-                 .eventState = "e6",
                  .replaceNotifications = false,
                  .notifications = {},
                  .deletedNotificationIds = {},
-                 .events = {occurrenceInvitations},
-                 .nonRecurringOccurrences = {},
                  .destroyedEventIds = {},
                  .consideredEventIds = {"invite-1"},
                  .pendingInvitations =
-                     {{.eventId = "invite-1",
+                     {{.event = occurrenceInvitations,
+                       .eventId = "invite-1",
                        .recurrenceId =
                            javelin::jmap::calendar::LocalDateTime{.value = "2099-08-20T10:00:00"},
                        .selfParticipantId = "self",
@@ -1160,7 +1166,8 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
                        .displayStart =
                            javelin::jmap::calendar::LocalDateTime{.value = "2099-08-20T10:00:00"},
                        .enqueueDesktopNotification = true},
-                      {.eventId = "invite-1",
+                      {.event = occurrenceInvitations,
+                       .eventId = "invite-1",
                        .recurrenceId =
                            javelin::jmap::calendar::LocalDateTime{.value = "2099-08-27T10:00:00"},
                        .selfParticipantId = "self",

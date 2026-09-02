@@ -527,8 +527,11 @@ is retained and replayed when background invitation delivery starts, so an early
 cannot lose its consumer trigger. `CalendarInvitationService` consumes that cached Calendar metadata
 and owns only invitation-specific `CalendarEventNotification` reconciliation,
 `ParticipantIdentity` synchronization, and event fetches required to resolve invitations outside the
-visible range. `CalendarCacheReader` owns cached reads. The GUI consumes typed calendar values from
-its read-only cache surface and commands through application ports such as `CalendarCommandPort`; it
+visible range. Pending invitations retain their own event snapshot for presentation and dispatch;
+invitation reconciliation never advances the authoritative `CalendarEvent` state token or overwrites
+the shared CalendarEvent cache. `CalendarCacheReader` owns cached reads. The GUI consumes typed
+calendar values from its read-only cache surface and commands through application ports such as
+`CalendarCommandPort`; it
 never constructs method names or raw JSON. GUI connection-status changes are presentation state and
 do not create calendar synchronization demand; opening or navigating a calendar range does.
 

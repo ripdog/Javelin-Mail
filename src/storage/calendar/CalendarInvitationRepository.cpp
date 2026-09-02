@@ -1,7 +1,6 @@
 #include "jmap/cache/CalendarInvitationRepository.h"
 
 #include "jmap/api/CalendarMethods.h"
-#include "jmap/cache/CalendarRepository.h"
 #include "jmap/cache/NotificationDispatchRepository.h"
 
 #include <QCryptographicHash>
@@ -164,14 +163,6 @@ namespace javelin::jmap::cache
         if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
             return *error;
         auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
-
-        CalendarRepository calendars{m_connection};
-        if (const auto error = calendars.projectEvents(
-                transaction, reconciliation.accountId, reconciliation.eventState,
-                reconciliation.events, reconciliation.nonRecurringOccurrences,
-                reconciliation.destroyedEventIds))
-            return error;
-
         auto& database = m_connection.database();
         if (reconciliation.replaceNotifications)
         {
@@ -286,12 +277,13 @@ namespace javelin::jmap::cache
         QSqlQuery upsertPending{database};
         upsertPending.prepare(QStringLiteral(
             "INSERT INTO calendar_pending_invitations(account_id,event_id,recurrence_id,"
-            "self_participant_id,source_notification_id,display_recurrence_id,display_start,"
-            "display_utc_start) VALUES(:account,:event,:recurrence,:participant,:source,"
-            ":display_recurrence,:display_start,:display_utc) ON CONFLICT(account_id,event_id,"
-            "recurrence_id) DO UPDATE SET self_participant_id=excluded.self_participant_id,"
-            "source_notification_id=COALESCE(excluded.source_notification_id,"
-            "calendar_pending_invitations.source_notification_id),display_recurrence_id="
+            "self_participant_id,source_notification_id,event_document_json,"
+            "display_recurrence_id,display_start,display_utc_start) VALUES(:account,:event,"
+            ":recurrence,:participant,:source,:document,:display_recurrence,:display_start,"
+            ":display_utc) ON CONFLICT(account_id,event_id,recurrence_id) DO UPDATE SET "
+            "self_participant_id=excluded.self_participant_id,source_notification_id=COALESCE("
+            "excluded.source_notification_id,calendar_pending_invitations.source_notification_id),"
+            "event_document_json=excluded.event_document_json,display_recurrence_id="
             "excluded.display_recurrence_id,display_start=excluded.display_start,display_utc_start="
             "excluded.display_utc_start,last_seen_at=CURRENT_TIMESTAMP"));
         QSqlQuery ensureOutbox{database};
@@ -313,6 +305,14 @@ namespace javelin::jmap::cache
             "calendar_invitation_outbox.resolved_at END"));
         for (const auto& projection : reconciliation.pendingInvitations)
         {
+            const auto eventDocument = api::serializeCalendarEventDocument(projection.event);
+            if (!eventDocument)
+            {
+                transaction.rollback();
+                return DatabaseError{
+                    .code = DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Serialize pending calendar invitation snapshot")};
+            }
             projectedScopes.insert(scopeKey(projection.eventId, projection.recurrenceId));
             upsertPending.bindValue(QStringLiteral(":account"),
                                     QString::fromStdString(reconciliation.accountId));
@@ -324,6 +324,8 @@ namespace javelin::jmap::cache
                                     QString::fromStdString(projection.selfParticipantId));
             upsertPending.bindValue(QStringLiteral(":source"),
                                     optionalVariant(projection.sourceNotificationId));
+            upsertPending.bindValue(QStringLiteral(":document"),
+                                    QString::fromStdString(*eventDocument));
             upsertPending.bindValue(
                 QStringLiteral(":display_recurrence"),
                 projection.displayRecurrenceId
@@ -515,7 +517,7 @@ namespace javelin::jmap::cache
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "SELECT o.invitation_key,a.owner_account_id,o.account_id,o.event_id,"
-            "o.self_participant_id,o.source_notification_id,e.document_json,p.recurrence_id,"
+            "o.self_participant_id,o.source_notification_id,p.event_document_json,p.recurrence_id,"
             "p.display_recurrence_id,p.display_start,p.display_utc_start,"
             "(SELECT c.local_start FROM calendar_occurrences c WHERE c.account_id=o.account_id "
             "AND c.event_id=o.event_id AND substr(c.local_start,1,10)>=:today ORDER BY "
@@ -527,8 +529,7 @@ namespace javelin::jmap::cache
             "AND c.event_id=o.event_id AND substr(c.local_start,1,10)>=:today ORDER BY "
             "c.local_start LIMIT 1) FROM calendar_invitation_outbox o JOIN "
             "calendar_pending_invitations p ON p.account_id=o.account_id AND "
-            "p.event_id=o.event_id AND p.recurrence_id=o.recurrence_id JOIN calendar_events e ON "
-            "e.account_id=o.account_id AND e.event_id=o.event_id JOIN accounts a ON "
+            "p.event_id=o.event_id AND p.recurrence_id=o.recurrence_id JOIN accounts a ON "
             "a.account_id=o.account_id WHERE o.status='pending' ORDER BY "
             "o.created_at,o.invitation_key LIMIT :limit"));
         query.bindValue(QStringLiteral(":today"), QDate::currentDate().toString(Qt::ISODate));
