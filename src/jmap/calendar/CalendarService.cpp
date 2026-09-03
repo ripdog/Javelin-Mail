@@ -1581,9 +1581,6 @@ namespace javelin::jmap::calendar
             "(SELECT o.local_start FROM calendar_occurrences o WHERE o.account_id=p.account_id "
             "AND o.event_id=p.event_id AND substr(o.local_start,1,10)>=:today ORDER BY "
             "o.local_start LIMIT 1),"
-            "(SELECT o.start_utc FROM calendar_occurrences o WHERE o.account_id=p.account_id AND "
-            "o.event_id=p.event_id AND substr(o.local_start,1,10)>=:today ORDER BY o.local_start "
-            "LIMIT 1),"
             "(SELECT o.recurrence_id FROM calendar_occurrences o WHERE o.account_id=p.account_id "
             "AND o.event_id=p.event_id AND substr(o.local_start,1,10)>=:today ORDER BY "
             "o.local_start LIMIT 1) FROM calendar_pending_invitations p JOIN accounts a ON "
@@ -1680,16 +1677,15 @@ namespace javelin::jmap::calendar
             const auto displayUtc =
                 !query.value(8).isNull()
                     ? std::optional<UtcInstant>{{.value = query.value(8).toString().toStdString()}}
-                : !query.value(10).isNull()
-                    ? std::optional<UtcInstant>{{.value = query.value(10).toString().toStdString()}}
-                    : effectiveEvent->utcStart;
+                : !query.value(9).isNull() ? std::optional<UtcInstant>{}
+                                           : effectiveEvent->utcStart;
             const auto displayRecurrenceId =
                 !query.value(6).isNull()
                     ? std::optional<LocalDateTime>{{.value =
                                                         query.value(6).toString().toStdString()}}
-                : !query.value(11).isNull()
+                : !query.value(10).isNull()
                     ? std::optional<LocalDateTime>{{.value =
-                                                        query.value(11).toString().toStdString()}}
+                                                        query.value(10).toString().toStdString()}}
                     : recurrenceId;
             result.push_back(PendingCalendarInvitation{
                 .ownerAccountId = query.value(4).toString().toStdString(),

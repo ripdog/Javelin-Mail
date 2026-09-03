@@ -1844,6 +1844,15 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
     CHECK(projected.value(0).toString() == QStringLiteral("self"));
     CHECK(projected.value(1).toString() == QStringLiteral("pending"));
 
+    const auto pendingRead = cacheReader.pendingInvitations();
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::PendingCalendarInvitation>>(
+        pendingRead));
+    const auto& pendingInvitations =
+        std::get<std::vector<javelin::jmap::calendar::PendingCalendarInvitation>>(pendingRead);
+    REQUIRE(pendingInvitations.size() == 1);
+    CHECK(pendingInvitations.front().displayTime.value == "2099-08-20T10:00:00");
+    CHECK_FALSE(pendingInvitations.front().displayUtc.has_value());
+
     const auto firstClaim = invitations.claimPendingDispatches();
     REQUIRE(std::holds_alternative<
             std::vector<javelin::jmap::cache::CalendarInvitationDispatchCandidate>>(firstClaim));
@@ -1853,6 +1862,7 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
     REQUIRE(candidates.size() == 1);
     CHECK(candidates.front().title == invitationSnapshot.title);
     CHECK(candidates.front().start.value == "2099-08-20T10:00:00");
+    CHECK_FALSE(candidates.front().utcStart.has_value());
     CHECK_FALSE(candidates.front().recurrenceId.has_value());
     CHECK(candidates.front().displayRecurrenceId ==
           std::optional<javelin::jmap::calendar::LocalDateTime>{{.value = "2099-08-20T10:00:00"}});

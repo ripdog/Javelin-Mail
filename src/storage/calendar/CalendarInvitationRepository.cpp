@@ -522,9 +522,6 @@ namespace javelin::jmap::cache
             "(SELECT c.local_start FROM calendar_occurrences c WHERE c.account_id=o.account_id "
             "AND c.event_id=o.event_id AND substr(c.local_start,1,10)>=:today ORDER BY "
             "c.local_start LIMIT 1),"
-            "(SELECT c.start_utc FROM calendar_occurrences c WHERE c.account_id=o.account_id "
-            "AND c.event_id=o.event_id AND substr(c.local_start,1,10)>=:today ORDER BY "
-            "c.local_start LIMIT 1),"
             "(SELECT c.recurrence_id FROM calendar_occurrences c WHERE c.account_id=o.account_id "
             "AND c.event_id=o.event_id AND substr(c.local_start,1,10)>=:today ORDER BY "
             "c.local_start LIMIT 1) FROM calendar_invitation_outbox o JOIN "
@@ -577,18 +574,15 @@ namespace javelin::jmap::cache
                     ? std::optional<calendar::UtcInstant>{{.value = query.value(10)
                                                                         .toString()
                                                                         .toStdString()}}
-                : !query.value(12).isNull()
-                    ? std::optional<calendar::UtcInstant>{{.value = query.value(12)
-                                                                        .toString()
-                                                                        .toStdString()}}
-                    : event.utcStart;
+                : !query.value(11).isNull() ? std::optional<calendar::UtcInstant>{}
+                                            : event.utcStart;
             const auto displayRecurrenceId =
                 !query.value(8).isNull()
                     ? std::optional<calendar::LocalDateTime>{{.value = query.value(8)
                                                                            .toString()
                                                                            .toStdString()}}
-                : !query.value(13).isNull()
-                    ? std::optional<calendar::LocalDateTime>{{.value = query.value(13)
+                : !query.value(12).isNull()
+                    ? std::optional<calendar::LocalDateTime>{{.value = query.value(12)
                                                                            .toString()
                                                                            .toStdString()}}
                     : recurrenceId;

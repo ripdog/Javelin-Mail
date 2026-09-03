@@ -554,9 +554,12 @@ The row field is not an independent source of synchronization truth.
 `CalendarInvitationService` consumes that cached Calendar metadata and owns only invitation-specific
 `CalendarEventNotification` reconciliation,
 `ParticipantIdentity` synchronization, and event fetches required to resolve invitations outside the
-visible range. Pending invitations retain their own event snapshot for presentation and dispatch;
-invitation reconciliation never advances the authoritative `CalendarEvent` state token or overwrites
-the shared CalendarEvent cache. `CalendarNotificationService` separately owns reminder delivery and a
+visible range. Pending invitations retain their own event snapshot and resolved display UTC for
+presentation and dispatch. A legacy/incomplete snapshot may use cached occurrence local time and
+recurrence identity to choose its visible instance, but it never borrows presentation-derived UTC from
+`calendar_occurrences`; without invitation-owned UTC it degrades to local display time until
+reconciliation repairs the snapshot. Invitation reconciliation never advances the authoritative
+`CalendarEvent` state token or overwrites the shared CalendarEvent cache. `CalendarNotificationService` separately owns reminder delivery and a
 bounded daemon reminder horizon. That horizon reuses `CalendarSyncEngine`'s authoritative server-side
 recurrence expansion and stores both reminder eligibility and the horizon-derived UTC trigger timing in
 `calendar_reminder_occurrences`; it is not a presentation/query window and does not own another
