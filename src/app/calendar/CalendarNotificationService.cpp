@@ -75,6 +75,16 @@ namespace javelin::app
             return parsed.toUTC();
         }
 
+        QTimeZone eventTimeZone(const javelin::jmap::calendar::CalendarEvent& event)
+        {
+            auto zone = event.timeZone
+                            ? QTimeZone{QByteArray::fromStdString(event.timeZone->value)}
+                            : QTimeZone::systemTimeZone();
+            if (!zone.isValid())
+                zone = QTimeZone::UTC;
+            return zone;
+        }
+
         QDateTime startsAtUtc(const javelin::jmap::calendar::CalendarEvent& event)
         {
             if (event.utcStart)
@@ -88,11 +98,7 @@ namespace javelin::app
                 QDateTime::fromString(QString::fromStdString(event.start.value), Qt::ISODate);
             if (!local.isValid())
                 return {};
-            const auto zone = event.timeZone
-                                  ? QTimeZone{QByteArray::fromStdString(event.timeZone->value)}
-                                  : QTimeZone::systemTimeZone();
-            if (!zone.isValid())
-                return {};
+            const auto zone = eventTimeZone(event);
             return QDateTime{local.date(), local.time(), zone}.toUTC();
         }
 
@@ -109,7 +115,8 @@ namespace javelin::app
             return duration ? startsAt.addSecs(*duration) : QDateTime{};
         }
 
-        std::string pushAlertPendingKey(const std::string_view accountId,
+        std::string pushAlertPendingKey(const std::string_view ownerAccountId,
+                                        const std::string_view accountId,
                                         const std::string_view eventId,
                                         const std::optional<std::string>& recurrenceId,
                                         const std::string_view alertId)
@@ -121,6 +128,7 @@ namespace javelin::app
                 key.append(value);
             };
             std::string key{"push:"};
+            append(key, ownerAccountId);
             append(key, accountId);
             append(key, eventId);
             append(key, recurrenceId ? std::string_view{*recurrenceId} : std::string_view{});
@@ -183,8 +191,8 @@ namespace javelin::app
         const auto recurrence = recurrenceId.isEmpty() ? std::optional<std::string>{}
                                                        : std::optional{recurrenceId.toStdString()};
         javelin::jmap::cache::CalendarPushedAlert alert{
-            .key = pushAlertPendingKey(accountId.toStdString(), eventId.toStdString(), recurrence,
-                                       alertId.toStdString()),
+            .key = pushAlertPendingKey(ownerAccountId.toStdString(), accountId.toStdString(),
+                                       eventId.toStdString(), recurrence, alertId.toStdString()),
             .ownerAccountId = ownerAccountId.toStdString(),
             .accountId = accountId.toStdString(),
             .eventId = eventId.toStdString(),
@@ -456,8 +464,8 @@ namespace javelin::app
 
         const auto startsAt = startsAtUtc(effective);
         const auto endsAt = endsAtUtc(effective, startsAt);
-        const auto trigger =
-            javelin::jmap::calendar::alertTrigger(*resolvedAlert, startsAt, endsAt);
+        const auto trigger = javelin::jmap::calendar::alertTrigger(
+            *resolvedAlert, startsAt, endsAt, eventTimeZone(effective));
         if (!startsAt.isValid() || !trigger.isValid() ||
             (resolvedAlert->acknowledged &&
              parseInstant(resolvedAlert->acknowledged->value) >= trigger))
