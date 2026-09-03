@@ -2,6 +2,9 @@
 
 #include <glaze/glaze.hpp>
 
+#include <QDate>
+#include <QRegularExpression>
+
 #include <algorithm>
 #include <charconv>
 #include <unordered_map>
@@ -117,6 +120,22 @@ namespace javelin::jmap::sync
                    subscription.groupwareAccountIds.end();
         }
 
+        [[nodiscard]] bool validLocalDateTime(const std::string_view value)
+        {
+            static const QRegularExpression expression{QStringLiteral(
+                "^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(?:\\.(\\d*[1-9]))?$")};
+            const auto match = expression.match(QString::fromUtf8(value.data(), value.size()));
+            if (!match.hasMatch())
+                return false;
+            const QDate date{match.captured(1).toInt(), match.captured(2).toInt(),
+                             match.captured(3).toInt()};
+            const int hour = match.captured(4).toInt();
+            const int minute = match.captured(5).toInt();
+            const int second = match.captured(6).toInt();
+            return date.isValid() && hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 &&
+                   second >= 0 && second <= 59;
+        }
+
         [[nodiscard]] PushMessage calendarAlertMessage(const StateChangeSubscription& subscription,
                                                        const std::string_view payload)
         {
@@ -126,7 +145,8 @@ namespace javelin::jmap::sync
             const auto& alert = std::get<RawCalendarAlert>(parsed);
             if (alert.type != std::optional<std::string>{"CalendarAlert"} ||
                 alert.accountId.empty() || alert.calendarEventId.empty() || alert.uid.empty() ||
-                alert.alertId.empty())
+                alert.alertId.empty() ||
+                (alert.recurrenceId && !validLocalDateTime(*alert.recurrenceId)))
                 return PushProtocolError{.message = "Invalid JMAP CalendarAlert payload."};
             if (std::ranges::find(subscription.types, "CalendarAlert") ==
                     subscription.types.end() ||
