@@ -540,10 +540,17 @@ coalescing policy is not the only record of an incomplete presentation. The lega
 server state. A `CalendarEvent/changes` page containing any created, updated, or destroyed event never
 mutates cached occurrences incrementally: event-local `start` values cannot safely place an occurrence
 into display-timezone query windows, so the sync engine performs authoritative server-side range
-rematerialization instead. Only a changes page with no event-object delta may advance the collection
-cursor in place; that compare-and-swap updates known-current query windows and cached event-row cursor
-mirrors atomically and rejects a stale expected cursor. There is no generic local CalendarEvent-delta
-materialization path. The row field is not an independent source of synchronization truth.
+rematerialization instead. Optimistic mutation projection follows the same timezone boundary: retained
+occurrence identities keep authoritative membership in display timezones that cannot be recalculated
+locally, while local range comparisons are used only for floating events or windows whose display
+zone exactly matches the event zone. Retained occurrence rows are upserted rather than deleted, so a
+non-timing edit does not accidentally discard daemon reminder-horizon ownership. A projection that
+changes the event or occurrence timing explicitly invalidates that reminder ownership; the daemon
+horizon refresh then re-establishes authoritative trigger UTC before the post-refresh reminder scan.
+Only a changes page with no event-object delta may advance the collection cursor in place; that
+compare-and-swap updates known-current query windows and cached event-row cursor mirrors atomically and
+rejects a stale expected cursor. There is no generic local CalendarEvent-delta materialization path.
+The row field is not an independent source of synchronization truth.
 `CalendarInvitationService` consumes that cached Calendar metadata and owns only invitation-specific
 `CalendarEventNotification` reconciliation,
 `ParticipantIdentity` synchronization, and event fetches required to resolve invitations outside the

@@ -7,6 +7,7 @@
 #include <QSqlQuery>
 
 #include <algorithm>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -1385,6 +1386,19 @@ namespace javelin::jmap::cache
             calendarEventRowState(m_connection, accountId, eventState, statePersistence, failure);
         if (!rowState.has_value())
             return failure;
+        std::unordered_map<std::string, bool> projectedEventTimingUnchanged;
+        for (const auto& event : events)
+        {
+            const auto previousResult = findEvent(accountId, event.id);
+            if (const auto* error = std::get_if<DatabaseError>(&previousResult))
+                return *error;
+            const auto& previous = std::get<std::optional<calendar::CalendarEvent>>(previousResult);
+            projectedEventTimingUnchanged.emplace(
+                event.id, previous.has_value() && previous->start == event.start &&
+                              previous->duration == event.duration &&
+                              previous->timeZone == event.timeZone &&
+                              previous->showWithoutTime == event.showWithoutTime);
+        }
         QSqlQuery removeEvent{database};
         removeEvent.prepare(QStringLiteral(
             "DELETE FROM calendar_events WHERE account_id=:account AND event_id=:event"));
@@ -1643,70 +1657,176 @@ namespace javelin::jmap::cache
             }
         }
 
-        QSqlQuery removeOccurrences{database};
-        removeOccurrences.prepare(QStringLiteral(
-            "DELETE FROM calendar_occurrences WHERE account_id=:account AND event_id=:event"));
-        QSqlQuery insertOccurrence{database};
-        insertOccurrence.prepare(QStringLiteral(
-            "INSERT INTO calendar_occurrences (account_id,occurrence_id,event_id,recurrence_id,"
-            "start_utc,end_utc,local_start,local_end,is_all_day) VALUES "
-            "(:account,:id,:event,:recurrence,:start_utc,:end_utc,:local_start,:local_end,:all_"
-            "day)"));
-        QSqlQuery addToWindows{database};
-        addToWindows.prepare(QStringLiteral(
-            "INSERT INTO calendar_window_occurrences (account_id,range_start,range_end,"
-            "display_time_zone,occurrence_id) SELECT account_id,range_start,range_end,"
-            "display_time_zone,:occurrence FROM calendar_query_windows WHERE account_id=:account "
-            "AND range_start < :local_end AND range_end > :local_start"));
-        std::unordered_set<std::string> replacedOccurrenceEvents;
+        std::unordered_map<std::string, std::unordered_set<std::string>> replacementIdsByEvent;
         for (const auto& occurrence : replacementOccurrences)
+            replacementIdsByEvent[occurrence.eventId].insert(occurrence.id);
+
+        QSqlQuery listExistingOccurrences{database};
+        listExistingOccurrences.prepare(QStringLiteral(
+            "SELECT occurrence_id FROM calendar_occurrences WHERE account_id=:account AND "
+            "event_id=:event"));
+        QSqlQuery removeOccurrence{database};
+        removeOccurrence.prepare(QStringLiteral(
+            "DELETE FROM calendar_occurrences WHERE account_id=:account AND occurrence_id=:id"));
+        for (const auto& [eventId, retainedIds] : replacementIdsByEvent)
         {
-            if (replacedOccurrenceEvents.insert(occurrence.eventId).second)
+            listExistingOccurrences.bindValue(QStringLiteral(":account"),
+                                              QString::fromStdString(std::string{accountId}));
+            listExistingOccurrences.bindValue(QStringLiteral(":event"),
+                                              QString::fromStdString(eventId));
+            if (!exec(listExistingOccurrences, failure,
+                      QStringLiteral("List projected event occurrences")))
+                return failure;
+            std::vector<std::string> staleIds;
+            while (listExistingOccurrences.next())
             {
-                removeOccurrences.bindValue(QStringLiteral(":account"),
-                                            QString::fromStdString(std::string{accountId}));
-                removeOccurrences.bindValue(QStringLiteral(":event"),
-                                            QString::fromStdString(occurrence.eventId));
-                if (!exec(removeOccurrences, failure,
-                          QStringLiteral("Replace projected event occurrences")))
+                const auto occurrenceId = listExistingOccurrences.value(0).toString().toStdString();
+                if (!retainedIds.contains(occurrenceId))
+                    staleIds.push_back(occurrenceId);
+            }
+            for (const auto& occurrenceId : staleIds)
+            {
+                removeOccurrence.bindValue(QStringLiteral(":account"),
+                                           QString::fromStdString(std::string{accountId}));
+                removeOccurrence.bindValue(QStringLiteral(":id"),
+                                           QString::fromStdString(occurrenceId));
+                if (!exec(removeOccurrence, failure,
+                          QStringLiteral("Remove stale projected event occurrence")))
                     return failure;
             }
-            insertOccurrence.bindValue(QStringLiteral(":account"),
+        }
+
+        QSqlQuery readOccurrenceTiming{database};
+        readOccurrenceTiming.prepare(QStringLiteral(
+            "SELECT local_start,local_end,start_utc,end_utc,is_all_day FROM calendar_occurrences "
+            "WHERE account_id=:account AND occurrence_id=:id"));
+        QSqlQuery upsertOccurrence{database};
+        upsertOccurrence.prepare(QStringLiteral(
+            "INSERT INTO calendar_occurrences (account_id,occurrence_id,event_id,recurrence_id,"
+            "start_utc,end_utc,local_start,local_end,is_all_day) VALUES "
+            "(:account,:id,:event,:recurrence,:start_utc,:end_utc,:local_start,:local_end,:all_day)"
+            " "
+            "ON CONFLICT(account_id,occurrence_id) DO UPDATE SET event_id=excluded.event_id,"
+            "recurrence_id=excluded.recurrence_id,start_utc=excluded.start_utc,"
+            "end_utc=excluded.end_utc,local_start=excluded.local_start,local_end=excluded.local_"
+            "end,"
+            "is_all_day=excluded.is_all_day"));
+        QSqlQuery removeReminderMembership{database};
+        removeReminderMembership.prepare(QStringLiteral(
+            "DELETE FROM calendar_reminder_occurrences WHERE account_id=:account AND "
+            "occurrence_id=:occurrence"));
+        QSqlQuery clearComparableWindows{database};
+        clearComparableWindows.prepare(QStringLiteral(
+            "DELETE FROM calendar_window_occurrences WHERE account_id=:account AND "
+            "occurrence_id=:occurrence AND (:floating OR display_time_zone=:event_zone)"));
+        QSqlQuery addToComparableWindows{database};
+        addToComparableWindows.prepare(QStringLiteral(
+            "INSERT OR IGNORE INTO calendar_window_occurrences (account_id,range_start,range_end,"
+            "display_time_zone,occurrence_id) SELECT account_id,range_start,range_end,"
+            "display_time_zone,:occurrence FROM calendar_query_windows WHERE account_id=:account "
+            "AND range_start < :local_end AND range_end > :local_start AND "
+            "(:floating OR display_time_zone=:event_zone)"));
+        const auto storedInstantMatches =
+            [](const QVariant& stored, const std::optional<calendar::UtcInstant>& projected)
+        {
+            if (stored.isNull())
+                return !projected.has_value();
+            return projected.has_value() && stored.toString().toStdString() == projected->value;
+        };
+        for (const auto& occurrence : replacementOccurrences)
+        {
+            readOccurrenceTiming.bindValue(QStringLiteral(":account"),
+                                           QString::fromStdString(std::string{accountId}));
+            readOccurrenceTiming.bindValue(QStringLiteral(":id"),
+                                           QString::fromStdString(occurrence.id));
+            if (!exec(readOccurrenceTiming, failure,
+                      QStringLiteral("Read projected occurrence timing")))
+                return failure;
+            bool occurrenceTimingUnchanged = false;
+            if (readOccurrenceTiming.next())
+            {
+                occurrenceTimingUnchanged =
+                    readOccurrenceTiming.value(0).toString().toStdString() ==
+                        occurrence.localStart.value &&
+                    readOccurrenceTiming.value(1).toString().toStdString() ==
+                        occurrence.localEnd.value &&
+                    storedInstantMatches(readOccurrenceTiming.value(2), occurrence.utcStart) &&
+                    storedInstantMatches(readOccurrenceTiming.value(3), occurrence.utcEnd) &&
+                    (readOccurrenceTiming.value(4).toInt() != 0) == occurrence.allDay;
+            }
+            readOccurrenceTiming.finish();
+            const auto eventTiming = projectedEventTimingUnchanged.find(occurrence.eventId);
+            const bool eventTimingUnchanged =
+                eventTiming != projectedEventTimingUnchanged.end() && eventTiming->second;
+            if (!eventTimingUnchanged || !occurrenceTimingUnchanged)
+            {
+                removeReminderMembership.bindValue(QStringLiteral(":account"),
+                                                   QString::fromStdString(std::string{accountId}));
+                removeReminderMembership.bindValue(QStringLiteral(":occurrence"),
+                                                   QString::fromStdString(occurrence.id));
+                if (!exec(removeReminderMembership, failure,
+                          QStringLiteral("Invalidate projected reminder occurrence")))
+                    return failure;
+            }
+
+            upsertOccurrence.bindValue(QStringLiteral(":account"),
                                        QString::fromStdString(std::string{accountId}));
-            insertOccurrence.bindValue(QStringLiteral(":id"),
+            upsertOccurrence.bindValue(QStringLiteral(":id"),
                                        QString::fromStdString(occurrence.id));
-            insertOccurrence.bindValue(QStringLiteral(":event"),
+            upsertOccurrence.bindValue(QStringLiteral(":event"),
                                        QString::fromStdString(occurrence.eventId));
-            insertOccurrence.bindValue(
+            upsertOccurrence.bindValue(
                 QStringLiteral(":recurrence"),
                 occurrence.recurrenceId
                     ? QVariant{QString::fromStdString(occurrence.recurrenceId->value)}
                     : QVariant{});
-            insertOccurrence.bindValue(
+            upsertOccurrence.bindValue(
                 QStringLiteral(":start_utc"),
                 occurrence.utcStart ? QVariant{QString::fromStdString(occurrence.utcStart->value)}
                                     : QVariant{});
-            insertOccurrence.bindValue(
+            upsertOccurrence.bindValue(
                 QStringLiteral(":end_utc"),
                 occurrence.utcEnd ? QVariant{QString::fromStdString(occurrence.utcEnd->value)}
                                   : QVariant{});
-            insertOccurrence.bindValue(QStringLiteral(":local_start"),
+            upsertOccurrence.bindValue(QStringLiteral(":local_start"),
                                        QString::fromStdString(occurrence.localStart.value));
-            insertOccurrence.bindValue(QStringLiteral(":local_end"),
+            upsertOccurrence.bindValue(QStringLiteral(":local_end"),
                                        QString::fromStdString(occurrence.localEnd.value));
-            insertOccurrence.bindValue(QStringLiteral(":all_day"), occurrence.allDay ? 1 : 0);
-            if (!exec(insertOccurrence, failure,
-                      QStringLiteral("Insert projected event occurrence")))
+            upsertOccurrence.bindValue(QStringLiteral(":all_day"), occurrence.allDay ? 1 : 0);
+            if (!exec(upsertOccurrence, failure,
+                      QStringLiteral("Upsert projected event occurrence")))
                 return failure;
-            addToWindows.bindValue(QStringLiteral(":occurrence"),
-                                   QString::fromStdString(occurrence.id));
-            addToWindows.bindValue(QStringLiteral(":account"),
-                                   QString::fromStdString(std::string{accountId}));
-            addToWindows.bindValue(QStringLiteral(":local_start"),
-                                   QString::fromStdString(occurrence.localStart.value));
-            addToWindows.bindValue(QStringLiteral(":local_end"),
-                                   QString::fromStdString(occurrence.localEnd.value));
-            if (!exec(addToWindows, failure, QStringLiteral("Add projected occurrence to windows")))
+
+            const auto projectedEvent =
+                std::ranges::find(events, occurrence.eventId, &calendar::CalendarEvent::id);
+            const bool hasProjectedEvent = projectedEvent != events.end();
+            if (!hasProjectedEvent)
+                continue;
+            const bool floating = !projectedEvent->timeZone.has_value();
+            const auto eventZone = projectedEvent->timeZone.has_value()
+                                       ? QString::fromStdString(projectedEvent->timeZone->value)
+                                       : QString{};
+            clearComparableWindows.bindValue(QStringLiteral(":account"),
+                                             QString::fromStdString(std::string{accountId}));
+            clearComparableWindows.bindValue(QStringLiteral(":occurrence"),
+                                             QString::fromStdString(occurrence.id));
+            clearComparableWindows.bindValue(QStringLiteral(":floating"), floating ? 1 : 0);
+            clearComparableWindows.bindValue(QStringLiteral(":event_zone"), eventZone);
+            if (!exec(clearComparableWindows, failure,
+                      QStringLiteral("Clear comparable projected occurrence windows")))
+                return failure;
+            addToComparableWindows.bindValue(QStringLiteral(":occurrence"),
+                                             QString::fromStdString(occurrence.id));
+            addToComparableWindows.bindValue(QStringLiteral(":account"),
+                                             QString::fromStdString(std::string{accountId}));
+            addToComparableWindows.bindValue(QStringLiteral(":local_start"),
+                                             QString::fromStdString(occurrence.localStart.value));
+            addToComparableWindows.bindValue(QStringLiteral(":local_end"),
+                                             QString::fromStdString(occurrence.localEnd.value));
+            addToComparableWindows.bindValue(QStringLiteral(":floating"), floating ? 1 : 0);
+            addToComparableWindows.bindValue(QStringLiteral(":event_zone"), eventZone);
+            if (!exec(addToComparableWindows, failure,
+                      QStringLiteral("Add projected occurrence to comparable windows")))
                 return failure;
         }
 
