@@ -336,18 +336,46 @@ namespace javelin::jmap::calendar
         return match.captured(1) == QStringLiteral("-") ? -seconds : seconds;
     }
 
-    QDateTime alertTrigger(const Alert& alert, const QDateTime& startsAt, const QDateTime& endsAt)
+    QDateTime alertTrigger(const Alert& alert, const QDateTime& startsAt, const QDateTime& endsAt,
+                           const QTimeZone& timeZone)
     {
         if (alert.triggerKind == AlertTriggerKind::Absolute && alert.when)
             return QDateTime::fromString(QString::fromStdString(alert.when->value),
                                          Qt::ISODateWithMs)
                 .toUTC();
-        if (!alert.offset)
+        if (!alert.offset || !timeZone.isValid())
             return {};
-        const auto offset = durationSeconds(*alert.offset);
-        if (!offset)
+
+        static const QRegularExpression expression{
+            QStringLiteral("^([+-])?P(?:(\\d+)W)?(?:(\\d+)D)?(?:T(?:(\\d+)H)?(?:(\\d+)M)?"
+                           "(?:(\\d+(?:\\.\\d+)?)S)?)?$")};
+        const auto match = expression.match(QString::fromStdString(alert.offset->value));
+        if (!match.hasMatch())
             return {};
-        return (alert.relativeTo == "end" ? endsAt : startsAt).addSecs(*offset);
+        const qint64 calendarDays = match.captured(2).toLongLong() * 7 +
+                                    match.captured(3).toLongLong();
+        const qint64 elapsedMilliseconds =
+            match.captured(4).toLongLong() * 3600000 +
+            match.captured(5).toLongLong() * 60000 +
+            static_cast<qint64>(std::round(match.captured(6).toDouble() * 1000.0));
+        const bool negative = match.captured(1) == QStringLiteral("-");
+        const auto anchor = alert.relativeTo == "end" ? endsAt : startsAt;
+        if (!anchor.isValid())
+            return {};
+
+        if (!negative)
+        {
+            auto local = anchor.toTimeZone(timeZone).addDays(calendarDays);
+            if (!local.isValid())
+                return {};
+            return local.toUTC().addMSecs(elapsedMilliseconds);
+        }
+
+        auto local = anchor.addMSecs(-elapsedMilliseconds).toTimeZone(timeZone);
+        if (!local.isValid())
+            return {};
+        local = local.addDays(-calendarDays);
+        return local.isValid() ? local.toUTC() : QDateTime{};
     }
 
     CalendarEvent acknowledgeAlert(CalendarEvent event, Alert alert,
