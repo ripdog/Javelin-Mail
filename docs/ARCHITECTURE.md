@@ -533,7 +533,11 @@ flights carry a materialization epoch, so a refresh that began before the accept
 accidentally satisfy the repair even if it was itself an authoritative refresh; later event mutations
 that invalidate an in-flight repair preserve the outstanding repair demand. Durable query-window
 state remains stale across restart until authoritative materialization catches up, so this in-memory
-coalescing policy is not the only record of an incomplete presentation.
+coalescing policy is not the only record of an incomplete presentation. The legacy
+`calendar_events.state` field is maintained only as a mirror of Javelin's owned per-account
+`CalendarEvent` cursor: authoritative cursor advances update both atomically, while reminder-only
+`PreserveCursor` materialization reuses the currently owned cursor rather than recording the fetched
+server state. It is not an independent source of synchronization truth.
 `CalendarInvitationService` consumes that cached Calendar metadata and owns only invitation-specific
 `CalendarEventNotification` reconciliation,
 `ParticipantIdentity` synchronization, and event fetches required to resolve invitations outside the

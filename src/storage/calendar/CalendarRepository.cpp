@@ -55,6 +55,28 @@ namespace javelin::jmap::cache
             return false;
         }
 
+        std::optional<QVariant>
+        calendarEventRowState(DatabaseConnection& connection, const std::string_view accountId,
+                              const std::string_view eventState,
+                              const CalendarEventStatePersistence statePersistence,
+                              std::optional<DatabaseError>& failure)
+        {
+            if (statePersistence == CalendarEventStatePersistence::AdvanceCursor)
+                return QVariant{QString::fromStdString(std::string{eventState})};
+
+            QSqlQuery ownedState{connection.database()};
+            ownedState.prepare(QStringLiteral(
+                "SELECT state FROM calendar_state_tokens WHERE account_id=:account AND "
+                "data_type='CalendarEvent'"));
+            ownedState.bindValue(QStringLiteral(":account"),
+                                 QString::fromStdString(std::string{accountId}));
+            if (!exec(ownedState, failure, QStringLiteral("Read owned CalendarEvent state")))
+                return std::nullopt;
+            if (!ownedState.next())
+                return QVariant{};
+            return ownedState.value(0);
+        }
+
         std::optional<DatabaseError>
         materializeCalendarObjects(DatabaseConnection& connection, const std::string_view accountId,
                                    const std::string_view eventState,
@@ -64,6 +86,10 @@ namespace javelin::jmap::cache
         {
             auto& database = connection.database();
             std::optional<DatabaseError> failure;
+            const auto rowState =
+                calendarEventRowState(connection, accountId, eventState, statePersistence, failure);
+            if (!rowState.has_value())
+                return failure;
             QSqlQuery upsertEvent{database};
             upsertEvent.prepare(QStringLiteral(
                 "INSERT INTO calendar_events (account_id,event_id,uid,title,description,location,"
@@ -94,8 +120,7 @@ namespace javelin::jmap::cache
                 upsertEvent.bindValue(QStringLiteral(":location"), optionalString(item.location));
                 upsertEvent.bindValue(QStringLiteral(":document"),
                                       QString::fromStdString(*document));
-                upsertEvent.bindValue(QStringLiteral(":state"),
-                                      QString::fromStdString(std::string{eventState}));
+                upsertEvent.bindValue(QStringLiteral(":state"), *rowState);
                 if (!exec(upsertEvent, failure, QStringLiteral("Upsert calendar event")))
                     return failure;
                 clearMembership.bindValue(QStringLiteral(":account"),
@@ -1522,6 +1547,10 @@ namespace javelin::jmap::cache
 
         auto& database = m_connection.database();
         std::optional<DatabaseError> failure;
+        const auto rowState =
+            calendarEventRowState(m_connection, accountId, eventState, statePersistence, failure);
+        if (!rowState.has_value())
+            return failure;
         QSqlQuery removeEvent{database};
         removeEvent.prepare(QStringLiteral(
             "DELETE FROM calendar_events WHERE account_id=:account AND event_id=:event"));
@@ -1575,7 +1604,7 @@ namespace javelin::jmap::cache
             "document_json,state) VALUES (:account,:id,:uid,:title,:description,:location,"
             ":document,:state) ON CONFLICT(account_id,event_id) DO UPDATE SET uid=excluded.uid,"
             "title=excluded.title,description=excluded.description,location=excluded.location,"
-            "document_json=excluded.document_json"));
+            "document_json=excluded.document_json,state=excluded.state"));
         QSqlQuery clearMembership{database};
         clearMembership.prepare(QStringLiteral(
             "DELETE FROM calendar_event_calendars WHERE account_id=:account AND event_id=:event"));
@@ -1633,8 +1662,7 @@ namespace javelin::jmap::cache
                                   optionalString(event.description));
             upsertEvent.bindValue(QStringLiteral(":location"), optionalString(event.location));
             upsertEvent.bindValue(QStringLiteral(":document"), QString::fromStdString(*document));
-            upsertEvent.bindValue(QStringLiteral(":state"),
-                                  QString::fromStdString(std::string{eventState}));
+            upsertEvent.bindValue(QStringLiteral(":state"), *rowState);
             if (!exec(upsertEvent, failure, QStringLiteral("Project calendar event")))
                 return failure;
             clearMembership.bindValue(QStringLiteral(":account"),

@@ -252,6 +252,52 @@ TEST_CASE("calendar window freshness advances only from a known materialization 
     CHECK(retainedUnknown.value(1).toString() == QStringLiteral("2000-01-01T00:00:00.000Z"));
 }
 
+TEST_CASE("calendar event row state mirrors the owned collection cursor",
+          "[jmap][calendar][cache][state]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-event-row-state"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    auto projected = event("e1", "2026-09-03T10:00:00");
+    projected.calendarIds.clear();
+    auto firstTransaction = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Project first calendar event state"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(firstTransaction));
+    auto first = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(firstTransaction));
+    REQUIRE_FALSE(
+        repository.projectEvents(first, "a1", "cursor-1", {projected}, {}, {}).has_value());
+    REQUIRE_FALSE(first.commit().has_value());
+
+    projected.title = "Updated event";
+    auto secondTransaction = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Project second calendar event state"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(secondTransaction));
+    auto second = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(secondTransaction));
+    REQUIRE_FALSE(
+        repository.projectEvents(second, "a1", "cursor-2", {projected}, {}, {}).has_value());
+    REQUIRE_FALSE(second.commit().has_value());
+
+    QSqlQuery state{connection.database()};
+    REQUIRE(state.exec(QStringLiteral(
+        "SELECT e.state,s.state FROM calendar_events e JOIN calendar_state_tokens s ON "
+        "s.account_id=e.account_id AND s.data_type='CalendarEvent' WHERE e.account_id='a1' AND "
+        "e.event_id='e1'")));
+    REQUIRE(state.next());
+    CHECK(state.value(0).toString() == QStringLiteral("cursor-2"));
+    CHECK(state.value(1).toString() == QStringLiteral("cursor-2"));
+}
+
 TEST_CASE("calendar reminder horizon survives presentation-window eviction",
           "[jmap][calendar][cache][notification]")
 {
@@ -324,6 +370,11 @@ TEST_CASE("calendar reminder horizon survives presentation-window eviction",
                        "data_type='CalendarEvent'")));
     REQUIRE(retainedCursor.next());
     CHECK(retainedCursor.value(0).toString() == QStringLiteral("cursor-before-horizon"));
+    QSqlQuery retainedEventState{connection.database()};
+    REQUIRE(retainedEventState.exec(QStringLiteral(
+        "SELECT state FROM calendar_events WHERE account_id='a1' AND event_id='reminder'")));
+    REQUIRE(retainedEventState.next());
+    CHECK(retainedEventState.value(0).toString() == QStringLiteral("cursor-before-horizon"));
 
     for (int index = 0; index < 13; ++index)
     {
