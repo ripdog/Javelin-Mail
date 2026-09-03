@@ -1248,8 +1248,23 @@ namespace javelin::jmap::calendar
             }
 
             bool existingWindowsRemainMaterialized = !records.empty();
+            bool authoritativeRangeMaterializationRequired = false;
             for (const auto& record : records)
             {
+                if (record.kind == CalendarMutationKind::Create &&
+                    record.projectedDocument.has_value())
+                {
+                    auto projected = eventFromMutationDocument(record, *record.projectedDocument,
+                                                               record.objectId);
+                    if (const auto* operationError = std::get_if<OperationError>(&projected))
+                        return *operationError;
+                    const auto& projectedEvent = std::get<CalendarEvent>(projected);
+                    authoritativeRangeMaterializationRequired =
+                        authoritativeRangeMaterializationRequired ||
+                        projectedEvent.recurrenceRule.has_value() ||
+                        !projectedEvent.recurrenceOverrides.empty();
+                }
+
                 if (record.kind != CalendarMutationKind::Update || !record.baseDocument.has_value())
                 {
                     existingWindowsRemainMaterialized = false;
@@ -1263,10 +1278,20 @@ namespace javelin::jmap::calendar
                 if (const auto* cacheError = std::get_if<cache::DatabaseError>(&current))
                     return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
                 const auto& currentEvent = std::get<std::optional<CalendarEvent>>(current);
-                if (!currentEvent.has_value() ||
-                    occurrenceMaterializationInputsChanged(std::get<CalendarEvent>(previous),
-                                                           *currentEvent))
+                if (!currentEvent.has_value())
+                {
                     existingWindowsRemainMaterialized = false;
+                    continue;
+                }
+                if (occurrenceMaterializationInputsChanged(std::get<CalendarEvent>(previous),
+                                                           *currentEvent))
+                {
+                    existingWindowsRemainMaterialized = false;
+                    authoritativeRangeMaterializationRequired =
+                        authoritativeRangeMaterializationRequired ||
+                        currentEvent->recurrenceRule.has_value() ||
+                        !currentEvent->recurrenceOverrides.empty();
+                }
             }
 
             std::vector<CalendarEvent> acceptedEvents;
@@ -1386,7 +1411,14 @@ namespace javelin::jmap::calendar
                     return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             }
 
-            bool materializationComplete = materialization == nullptr;
+            // The mutation engine owns the decision about whether recurrence expansion is needed.
+            // Callers may provide a visible range, but a missing range cannot make a recurring
+            // create or recurrence-affecting update complete: only an expanded authoritative query
+            // can establish the resulting occurrence set. Recurrence removal remains locally
+            // complete because the accepted projection collapses the series to its single base
+            // occurrence.
+            bool materializationComplete =
+                materialization == nullptr ? !authoritativeRangeMaterializationRequired : false;
             if (materialization != nullptr && materializationSafe && materializedQuery != nullptr &&
                 materializedEvents != nullptr)
             {

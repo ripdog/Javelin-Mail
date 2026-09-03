@@ -842,6 +842,8 @@ namespace javelin::app
                     m_calendarStateRefreshesInFlight.erase(key);
                     m_calendarStateRefreshPending.erase(key);
                     m_calendarCatchUpRequiredOwners.erase(key);
+                    m_calendarMaterializationEpochs.erase(key);
+                    m_calendarMaterializationRepairRequiredOwners.erase(key);
                 });
     }
 
@@ -4190,9 +4192,16 @@ namespace javelin::app
             active != m_calendarRangeRefreshesInFlight.end())
         {
             const auto activeRange = active->second.range;
+            const bool activeAuthoritative = active->second.authoritative;
+            const auto activeMaterializationEpoch = active->second.materializationEpoch;
             auto future = active->second.future;
             auto activeResult = co_await qCoro(future).result();
-            if (sameRange(activeRange, requestedRange))
+            const auto currentEpoch = m_calendarMaterializationEpochs.find(ownerAccountId);
+            const auto materializationEpoch =
+                currentEpoch == m_calendarMaterializationEpochs.end() ? 0 : currentEpoch->second;
+            if (sameRange(activeRange, requestedRange) &&
+                (!forceRefresh ||
+                 (activeAuthoritative && activeMaterializationEpoch == materializationEpoch)))
                 co_return activeResult;
 
             const auto desired = m_visibleCalendarRanges.find(ownerAccountId);
@@ -4254,12 +4263,18 @@ namespace javelin::app
         // occurrence materialization is incomplete, so an explicit refresh must rematerialize
         // the visible range authoritatively. Push/catch-up work remains incremental.
         const bool useIncrementalRefresh = cachedRangeAvailable && catchUpRequired && !forceRefresh;
+        const auto currentEpoch = m_calendarMaterializationEpochs.find(ownerAccountId);
+        const auto materializationEpoch =
+            currentEpoch == m_calendarMaterializationEpochs.end() ? 0 : currentEpoch->second;
         auto promise = std::make_shared<QPromise<javelin::jmap::calendar::CalendarRefreshResult>>();
         promise->start();
         auto future = promise->future();
         m_calendarRangeRefreshesInFlight.insert_or_assign(
-            ownerAccountId,
-            RangeRefreshFlight{.range = requestedRange, .future = future, .promise = promise});
+            ownerAccountId, RangeRefreshFlight{.range = requestedRange,
+                                               .authoritative = !useIncrementalRefresh,
+                                               .materializationEpoch = materializationEpoch,
+                                               .future = future,
+                                               .promise = promise});
         auto refreshTask =
             useIncrementalRefresh
                 ? m_calendarSyncEngine.refreshChanged(
@@ -4280,6 +4295,11 @@ namespace javelin::app
             summary != nullptr && summary->calendarMetadataAuthoritative;
         if (succeeded)
         {
+            const auto latestEpoch = m_calendarMaterializationEpochs.find(ownerAccountId);
+            const auto currentMaterializationEpoch =
+                latestEpoch == m_calendarMaterializationEpochs.end() ? 0 : latestEpoch->second;
+            if (!useIncrementalRefresh && materializationEpoch == currentMaterializationEpoch)
+                m_calendarMaterializationRepairRequiredOwners.erase(ownerAccountId);
             if (refreshCalendarMetadata || metadataAuthoritative)
             {
                 if (m_calendarMetadataUsableOwners.insert(ownerAccountId).second)
@@ -4503,6 +4523,41 @@ namespace javelin::app
                                 i18n("Synchronize calendar changes"), std::move(result));
     }
 
+    bool CalendarApplicationService::noteCalendarEventMutation(
+        const std::string_view ownerAccountId,
+        const javelin::jmap::calendar::CalendarMutationResult& mutationResult)
+    {
+        const auto* committed =
+            std::get_if<javelin::jmap::calendar::CommittedMutation>(&mutationResult);
+        if (committed == nullptr ||
+            !std::ranges::any_of(committed->receipt.domains, [](const auto& domain)
+                                 { return domain.dataType == "CalendarEvent"; }))
+            return false;
+
+        ++m_calendarMaterializationEpochs[std::string{ownerAccountId}];
+        if (committed->receipt.incompleteMaterialization)
+            m_calendarMaterializationRepairRequiredOwners.insert(std::string{ownerAccountId});
+        return m_calendarMaterializationRepairRequiredOwners.contains(std::string{ownerAccountId});
+    }
+
+    QCoro::Task<void>
+    CalendarApplicationService::repairIncompleteCalendarMaterialization(std::string ownerAccountId,
+                                                                        const bool repairRequired)
+    {
+        if (!repairRequired)
+            co_return;
+
+        const auto visible = m_visibleCalendarRanges.find(ownerAccountId);
+        if (visible == m_visibleCalendarRanges.end())
+            co_return;
+        const auto range = visible->second;
+        auto repair = co_await requestCalendarRange(ownerAccountId, range.interval,
+                                                    range.displayTimeZone, true);
+        if (const auto* repairError = std::get_if<javelin::jmap::OperationError>(&repair))
+            qWarning().noquote() << "Authoritative calendar materialization repair failed"
+                                 << QString::fromStdString(ownerAccountId) << repairError->message;
+    }
+
     QCoro::Task<javelin::jmap::calendar::AuthoritativeCalendarEventResult>
     CalendarApplicationService::getAuthoritativeCalendarEvent(std::string ownerAccountId,
                                                               std::string accountId,
@@ -4611,6 +4666,7 @@ namespace javelin::app
         auto result = co_await m_calendarMutationEngine.create(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
             std::move(command), projectionCommitted);
+        const bool repairRequired = noteCalendarEventMutation(ownerAccountId, result);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             if (const auto historyError = retainUnknownOrDiscard(m_undoManager, prepared, *error))
@@ -4646,6 +4702,7 @@ namespace javelin::app
                     std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
                 co_return javelin::jmap::operationError(*historyError);
         }
+        co_await repairIncompleteCalendarMaterialization(ownerAccountId, repairRequired);
         co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
                                 i18n("Create calendar event"), std::move(result));
     }
@@ -5146,6 +5203,7 @@ namespace javelin::app
         auto result = co_await m_calendarMutationEngine.update(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
             std::move(command), projectionCommitted);
+        const bool repairRequired = noteCalendarEventMutation(ownerAccountId, result);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             if (const auto historyError = retainUnknownOrDiscard(m_undoManager, prepared, *error))
@@ -5158,6 +5216,7 @@ namespace javelin::app
                     std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
                 co_return javelin::jmap::operationError(*historyError);
         }
+        co_await repairIncompleteCalendarMaterialization(ownerAccountId, repairRequired);
         co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
                                 i18n("Update calendar event"), std::move(result));
     }
@@ -5187,6 +5246,8 @@ namespace javelin::app
         auto result = co_await m_calendarMutationEngine.respond(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
             std::move(command), projectionCommitted);
+        const bool repairRequired = noteCalendarEventMutation(ownerAccountId, result);
+        co_await repairIncompleteCalendarMaterialization(ownerAccountId, repairRequired);
         co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
                                 i18n("Respond to calendar invitation"), std::move(result));
     }
@@ -5257,6 +5318,7 @@ namespace javelin::app
         auto result = co_await m_calendarMutationEngine.remove(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
             std::move(command), projectionCommitted);
+        const bool repairRequired = noteCalendarEventMutation(ownerAccountId, result);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             if (const auto historyError = retainUnknownOrDiscard(m_undoManager, prepared, *error))
@@ -5269,6 +5331,7 @@ namespace javelin::app
                     std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
                 co_return javelin::jmap::operationError(*historyError);
         }
+        co_await repairIncompleteCalendarMaterialization(ownerAccountId, repairRequired);
         co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
                                 i18n("Delete calendar event"), std::move(result));
     }

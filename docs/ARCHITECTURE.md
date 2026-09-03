@@ -524,8 +524,18 @@ notified only after that coordinator has established usable cached metadata; whe
 Calendar mutation prevents authoritative replacement, the projected cache remains usable but the
 coordinator does not mark metadata authoritative or suppress a later reconciliation fetch. Readiness
 is retained and replayed when background invitation delivery starts, so an early startup refresh
-cannot lose its consumer trigger. `CalendarInvitationService` consumes that cached Calendar metadata
-and owns only invitation-specific `CalendarEventNotification` reconciliation,
+cannot lose its consumer trigger. Calendar mutation correctness is likewise not delegated to GUI or
+history callers: `CalendarMutationEngine` determines when a successful recurring create or
+occurrence-affecting recurring update still requires authoritative range expansion and marks the
+commit receipt incomplete. `CalendarApplicationService` retains that repair demand until a
+post-mutation authoritative materialization of the current visible range succeeds. Range-refresh
+flights carry a materialization epoch, so a refresh that began before the accepted mutation cannot
+accidentally satisfy the repair even if it was itself an authoritative refresh; later event mutations
+that invalidate an in-flight repair preserve the outstanding repair demand. Durable query-window
+state remains stale across restart until authoritative materialization catches up, so this in-memory
+coalescing policy is not the only record of an incomplete presentation.
+`CalendarInvitationService` consumes that cached Calendar metadata and owns only invitation-specific
+`CalendarEventNotification` reconciliation,
 `ParticipantIdentity` synchronization, and event fetches required to resolve invitations outside the
 visible range. Pending invitations retain their own event snapshot for presentation and dispatch;
 invitation reconciliation never advances the authoritative `CalendarEvent` state token or overwrites

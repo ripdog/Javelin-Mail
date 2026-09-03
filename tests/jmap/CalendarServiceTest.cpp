@@ -831,6 +831,108 @@ TEST_CASE("calendar manager mutations project, reconcile, and preserve uncertain
           javelin::jmap::OperationErrorCode::Conflict);
 }
 
+TEST_CASE("recurring calendar creates require authoritative range materialization",
+          "[jmap][calendar][service][recurrence][materialization]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-recurring-create-materialization"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", session()).has_value());
+
+    javelin::jmap::cache::CalendarRepository calendars{connection};
+    REQUIRE_FALSE(calendars
+                      .replaceCalendars(
+                          "a1", "calendar-state-1",
+                          {javelin::jmap::calendar::Calendar{.accountId = "a1",
+                                                             .id = "work",
+                                                             .name = "Work",
+                                                             .description = std::nullopt,
+                                                             .color = std::nullopt,
+                                                             .sortOrder = 0,
+                                                             .isSubscribed = true,
+                                                             .isVisible = true,
+                                                             .isDefault = true,
+                                                             .timeZone = std::nullopt,
+                                                             .defaultAlertsWithTime = {},
+                                                             .defaultAlertsWithoutTime = {},
+                                                             .myRights = {.mayReadFreeBusy = true,
+                                                                          .mayReadItems = true,
+                                                                          .mayWriteAll = true,
+                                                                          .mayWriteOwn = true,
+                                                                          .mayUpdatePrivate = true,
+                                                                          .mayRSVP = true,
+                                                                          .mayShare = false,
+                                                                          .mayDelete = false}}})
+                      .has_value());
+    const javelin::jmap::calendar::VisibleInterval interval{
+        .start = {.value = "2026-07-01T00:00:00"},
+        .end = {.value = "2026-08-01T00:00:00"},
+    };
+    const javelin::jmap::calendar::TimeZoneId zone{.value = "Pacific/Auckland"};
+    REQUIRE_FALSE(calendars
+                      .reconcileWindow({.accountId = "a1",
+                                        .start = interval.start,
+                                        .end = interval.end,
+                                        .displayTimeZone = zone,
+                                        .queryState = "query-state-1",
+                                        .eventState = "event-state-1",
+                                        .events = {},
+                                        .occurrences = {}})
+                      .has_value());
+
+    FakeMethodTransport transport;
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/set",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"event-state-1","newState":"event-state-2","created":{"event":{"id":"event-2"}},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+              .callId = "calendar-event-set"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-recurring-create"});
+    javelin::jmap::calendar::CalendarCacheReader reader{connection};
+    javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
+    javelin::jmap::calendar::CalendarSyncEngine sync{connection, protocol};
+    javelin::jmap::calendar::CalendarMutationEngine mutation{connection, protocol, sync, reader};
+
+    auto recurring = event();
+    recurring.id.clear();
+    recurring.uid = "uid-recurring-create";
+    recurring.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
+    recurring.recurrenceRule->frequency = javelin::jmap::calendar::RecurrenceFrequency::Daily;
+    recurring.recurrenceRule->count = 5;
+    const auto created =
+        QCoro::waitFor(mutation.create({.sessionUrl = "https://example.test/.well-known/jmap",
+                                        .loginEmail = "alice@example.test",
+                                        .apiKey = "secret"},
+                                       "a1",
+                                       {.accountId = "a1",
+                                        .event = std::move(recurring),
+                                        .operationGroupId = std::nullopt,
+                                        .ifInState = std::nullopt,
+                                        .materialization = std::nullopt}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(created));
+    const auto& committed = std::get<javelin::jmap::calendar::CommittedMutation>(created);
+    CHECK(committed.createdId == std::optional<std::string>{"event-2"});
+    CHECK(committed.receipt.incompleteMaterialization);
+    REQUIRE(transport.requests.size() == 1);
+    REQUIRE(transport.requests.front().envelope.methodCalls.size() == 1);
+    CHECK(transport.requests.front().envelope.methodCalls.front().name == "CalendarEvent/set");
+
+    const auto cached = calendars.findEvent("a1", "event-2");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached));
+    REQUIRE(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached).has_value());
+    const auto window = calendars.loadWindow("a1", interval.start, interval.end, zone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(window));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(window).has_value());
+}
+
 TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][service]")
 {
     ensureApplication();

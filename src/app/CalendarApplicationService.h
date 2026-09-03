@@ -11,6 +11,7 @@
 #include <QObject>
 #include <QPromise>
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -138,6 +139,11 @@ namespace javelin::app
         requestCalendarMetadata(std::string ownerAccountId);
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
         requestCalendarChanges(std::string ownerAccountId);
+        [[nodiscard]] bool noteCalendarEventMutation(
+            std::string_view ownerAccountId,
+            const javelin::jmap::calendar::CalendarMutationResult& mutationResult);
+        QCoro::Task<void> repairIncompleteCalendarMaterialization(std::string ownerAccountId,
+                                                                  bool repairRequired);
 
         struct VisibleCalendarRange
         {
@@ -148,6 +154,8 @@ namespace javelin::app
         struct RangeRefreshFlight
         {
             VisibleCalendarRange range;
+            bool authoritative = false;
+            std::uint64_t materializationEpoch = 0;
             QFuture<javelin::jmap::calendar::CalendarRefreshResult> future;
             std::shared_ptr<QPromise<javelin::jmap::calendar::CalendarRefreshResult>> promise;
         };
@@ -170,6 +178,8 @@ namespace javelin::app
         std::unordered_map<std::string, QFuture<bool>> m_calendarStateRefreshesInFlight;
         std::unordered_set<std::string> m_calendarStateRefreshPending;
         std::unordered_set<std::string> m_calendarCatchUpRequiredOwners;
+        std::unordered_map<std::string, std::uint64_t> m_calendarMaterializationEpochs;
+        std::unordered_set<std::string> m_calendarMaterializationRepairRequiredOwners;
     };
 
 } // namespace javelin::app
