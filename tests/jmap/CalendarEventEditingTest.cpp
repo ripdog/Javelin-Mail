@@ -287,6 +287,51 @@ TEST_CASE("occurrence edits only override properties that differ from the series
     CHECK(occurrence.title == std::optional<std::string>{"Special meeting"});
 }
 
+TEST_CASE("calendar day alert offsets preserve wall time across DST transitions")
+{
+    const QTimeZone zone{QByteArrayLiteral("Pacific/Auckland")};
+    REQUIRE(zone.isValid());
+    const auto startsAt =
+        QDateTime::fromString(QStringLiteral("2026-09-25T22:00:00Z"), Qt::ISODate);
+    REQUIRE(startsAt.isValid());
+    const javelin::jmap::calendar::Alert calendarDay{
+        .id = "calendar-day",
+        .action = "display",
+        .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+        .relativeTo = "start",
+        .offset = javelin::jmap::calendar::Duration{.value = "P1D"},
+        .when = std::nullopt,
+        .acknowledged = std::nullopt};
+    auto elapsedDay = calendarDay;
+    elapsedDay.id = "elapsed-day";
+    elapsedDay.offset = javelin::jmap::calendar::Duration{.value = "PT24H"};
+
+    CHECK(javelin::jmap::calendar::alertTrigger(calendarDay, startsAt, startsAt, zone) ==
+          QDateTime::fromString(QStringLiteral("2026-09-26T21:00:00Z"), Qt::ISODate));
+    CHECK(javelin::jmap::calendar::alertTrigger(elapsedDay, startsAt, startsAt, zone) ==
+          QDateTime::fromString(QStringLiteral("2026-09-26T22:00:00Z"), Qt::ISODate));
+}
+
+TEST_CASE("negative calendar alert offsets apply elapsed time before calendar days")
+{
+    const QTimeZone zone{QByteArrayLiteral("Pacific/Auckland")};
+    REQUIRE(zone.isValid());
+    const auto startsAt =
+        QDateTime::fromString(QStringLiteral("2026-09-26T21:00:00Z"), Qt::ISODate);
+    REQUIRE(startsAt.isValid());
+    const javelin::jmap::calendar::Alert alert{
+        .id = "negative-mixed",
+        .action = "display",
+        .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+        .relativeTo = "start",
+        .offset = javelin::jmap::calendar::Duration{.value = "-P1DT1H"},
+        .when = std::nullopt,
+        .acknowledged = std::nullopt};
+
+    CHECK(javelin::jmap::calendar::alertTrigger(alert, startsAt, startsAt, zone) ==
+          QDateTime::fromString(QStringLiteral("2026-09-25T21:00:00Z"), Qt::ISODate));
+}
+
 TEST_CASE("acknowledging a calendar alert materializes it on the base event")
 {
     javelin::jmap::calendar::CalendarEvent event;

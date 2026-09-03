@@ -12,6 +12,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+
 namespace
 {
     void ensureApplication()
@@ -102,6 +104,55 @@ TEST_CASE("state-change routing includes groupware changes from secondary accoun
           javelin::jmap::sync::AccountTypeStateMap{
               {"mail-account", {{"Email", "mail-2"}, {"Mailbox", "boxes-2"}}},
               {"contacts-account", {{"ContactCard", "contacts-2"}}}});
+}
+
+TEST_CASE("WebSocket push messages parse calendar alerts without advancing push state",
+          "[jmap][push][websocket][calendar]")
+{
+    const javelin::jmap::sync::StateChangeSubscription subscription{
+        .accountId = "mail-account",
+        .lastState = "push-state-1",
+        .types = {"CalendarAlert"},
+        .groupwareAccountIds = {"calendar-account"},
+    };
+    const auto parsed = javelin::jmap::sync::parseWebSocketPushMessage(
+        subscription, subscription.lastState,
+        R"({"@type":"CalendarAlert","accountId":"calendar-account","calendarEventId":"event-1","uid":"uid-1","recurrenceId":null,"alertId":"alert-1"})");
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::CalendarAlertEvent>(parsed));
+    const auto& alert = std::get<javelin::jmap::sync::CalendarAlertEvent>(parsed);
+    CHECK(alert.accountId == "calendar-account");
+    CHECK(alert.calendarEventId == "event-1");
+    CHECK_FALSE(alert.recurrenceId.has_value());
+    CHECK(alert.alertId == "alert-1");
+}
+
+TEST_CASE("calendar alert recurrence ids must be canonical local date-times",
+          "[jmap][push][websocket][calendar]")
+{
+    const javelin::jmap::sync::StateChangeSubscription subscription{
+        .accountId = "mail-account",
+        .lastState = "push-state-1",
+        .types = {"CalendarAlert"},
+        .groupwareAccountIds = {"calendar-account"},
+    };
+    const std::array invalidPayloads{
+        R"({"@type":"CalendarAlert","accountId":"calendar-account","calendarEventId":"event-1","uid":"uid-1","recurrenceId":"","alertId":"alert-1"})",
+        R"({"@type":"CalendarAlert","accountId":"calendar-account","calendarEventId":"event-1","uid":"uid-1","recurrenceId":"2026-09-03T09:00:00Z","alertId":"alert-1"})",
+        R"({"@type":"CalendarAlert","accountId":"calendar-account","calendarEventId":"event-1","uid":"uid-1","recurrenceId":"2026-02-30T09:00:00","alertId":"alert-1"})",
+        R"({"@type":"CalendarAlert","accountId":"calendar-account","calendarEventId":"event-1","uid":"uid-1","recurrenceId":"2026-09-03T09:00:00.010","alertId":"alert-1"})",
+    };
+    for (const auto payload : invalidPayloads)
+    {
+        const auto parsed = javelin::jmap::sync::parseWebSocketPushMessage(
+            subscription, subscription.lastState, payload);
+        CHECK(std::holds_alternative<javelin::jmap::sync::PushProtocolError>(parsed));
+    }
+
+    const auto valid = javelin::jmap::sync::parseWebSocketPushMessage(
+        subscription, subscription.lastState,
+        R"({"@type":"CalendarAlert","accountId":"calendar-account","calendarEventId":"event-1","uid":"uid-1","recurrenceId":"2026-09-03T09:00:00.003","alertId":"alert-1"})");
+    CHECK(std::holds_alternative<javelin::jmap::sync::CalendarAlertEvent>(valid));
 }
 
 TEST_CASE("WebSocket push messages use the shared protocol parser", "[jmap][push][websocket]")

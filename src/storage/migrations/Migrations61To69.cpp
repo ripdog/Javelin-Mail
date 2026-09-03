@@ -248,6 +248,51 @@ namespace javelin::jmap::cache::migrations
                         QStringLiteral("DROP TABLE mail_notification_horizons"),
                     },
             },
+            MigrationStep{
+                .version = 69,
+                .name = QStringLiteral("isolate_calendar_invitation_snapshots"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "CREATE TEMP TABLE calendar_pending_invitations_v69_guard (invalid "
+                            "INTEGER NOT NULL CHECK(invalid=0)) STRICT"),
+                        QStringLiteral(
+                            "INSERT INTO calendar_pending_invitations_v69_guard(invalid) SELECT 1 "
+                            "FROM calendar_pending_invitations p LEFT JOIN calendar_events e ON "
+                            "e.account_id=p.account_id AND e.event_id=p.event_id WHERE "
+                            "e.event_id IS NULL LIMIT 1"),
+                        QStringLiteral("DROP TABLE calendar_pending_invitations_v69_guard"),
+                        QStringLiteral("ALTER TABLE calendar_pending_invitations RENAME TO "
+                                       "calendar_pending_invitations_v68"),
+                        QStringLiteral(
+                            "CREATE TABLE calendar_pending_invitations (account_id TEXT NOT NULL "
+                            "REFERENCES accounts(account_id) ON DELETE CASCADE,event_id TEXT NOT "
+                            "NULL,recurrence_id TEXT NOT NULL DEFAULT '',self_participant_id TEXT "
+                            "NOT NULL,source_notification_id TEXT,event_document_json TEXT NOT "
+                            "NULL,display_recurrence_id TEXT,display_start TEXT,display_utc_start "
+                            "TEXT,discovered_at TEXT NOT NULL DEFAULT "
+                            "CURRENT_TIMESTAMP,last_seen_at "
+                            "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY "
+                            "KEY(account_id,event_id,"
+                            "recurrence_id)) STRICT"),
+                        QStringLiteral(
+                            "INSERT INTO calendar_pending_invitations(account_id,event_id,"
+                            "recurrence_id,self_participant_id,source_notification_id,"
+                            "event_document_json,display_recurrence_id,display_start,"
+                            "display_utc_start,discovered_at,last_seen_at) SELECT p.account_id,"
+                            "p.event_id,p.recurrence_id,p.self_participant_id,"
+                            "p.source_notification_id,e.document_json,p.display_recurrence_id,"
+                            "p.display_start,p.display_utc_start,p.discovered_at,p.last_seen_at "
+                            "FROM "
+                            "calendar_pending_invitations_v68 p JOIN calendar_events e ON "
+                            "e.account_id=p.account_id AND e.event_id=p.event_id"),
+                        QStringLiteral("DROP TABLE calendar_pending_invitations_v68"),
+                        QStringLiteral(
+                            "CREATE INDEX idx_calendar_pending_invitations_discovered ON "
+                            "calendar_pending_invitations(discovered_at,account_id,event_id,"
+                            "recurrence_id)"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

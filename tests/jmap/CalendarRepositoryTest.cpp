@@ -73,6 +73,28 @@ namespace
                 .utcEnd = std::nullopt,
                 .allDay = false};
     }
+
+    void retainForReminders(javelin::jmap::cache::DatabaseConnection& connection,
+                            const std::vector<std::string>& occurrenceIds)
+    {
+        QSqlQuery horizon{connection.database()};
+        REQUIRE(horizon.exec(QStringLiteral(
+            "INSERT OR IGNORE INTO calendar_reminder_horizons(account_id,range_start,range_end,"
+            "display_time_zone) VALUES('a1','2000-01-01T00:00:00','2100-01-01T00:00:00',"
+            "'Etc/UTC')")));
+        QSqlQuery membership{connection.database()};
+        membership.prepare(QStringLiteral(
+            "INSERT OR REPLACE INTO calendar_reminder_occurrences(account_id,occurrence_id,"
+            "start_utc,end_utc) SELECT account_id,occurrence_id,start_utc,end_utc FROM "
+            "calendar_occurrences WHERE account_id='a1' AND occurrence_id=:occurrence"));
+        for (const auto& occurrenceId : occurrenceIds)
+        {
+            membership.bindValue(QStringLiteral(":occurrence"),
+                                 QString::fromStdString(occurrenceId));
+            REQUIRE(membership.exec());
+            REQUIRE(membership.numRowsAffected() == 1);
+        }
+    }
 } // namespace
 
 TEST_CASE("calendar create and delete projections render effective state",
@@ -164,6 +186,933 @@ TEST_CASE("calendar create and delete projections render effective state",
           accepted.end());
     CHECK(std::ranges::find(accepted, "pending-create", &javelin::jmap::calendar::Calendar::id) ==
           accepted.end());
+}
+
+TEST_CASE("calendar window freshness advances only from a known materialization state",
+          "[jmap][calendar][cache][state]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-window-state"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    QSqlQuery account{connection.database()};
+    REQUIRE(account.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    const javelin::jmap::calendar::TimeZoneId zone{.value = "Pacific/Auckland"};
+    const javelin::jmap::cache::CalendarWindow known{
+        .accountId = "a1",
+        .start = {.value = "2026-09-01T00:00:00"},
+        .end = {.value = "2026-10-01T00:00:00"},
+        .displayTimeZone = zone,
+        .queryState = "query-known",
+        .eventState = "event-state-1",
+        .events = {},
+        .occurrences = {},
+    };
+    REQUIRE_FALSE(repository.reconcileWindow(known).has_value());
+
+    QSqlQuery legacy{connection.database()};
+    REQUIRE(legacy.exec(QStringLiteral(
+        "INSERT INTO calendar_query_windows(account_id,range_start,range_end,display_time_zone,"
+        "query_state,event_state,updated_at) VALUES('a1','2026-10-01T00:00:00',"
+        "'2026-11-01T00:00:00','Pacific/Auckland','query-unknown',NULL,"
+        "'2000-01-01T00:00:00.000Z')")));
+
+    const auto stateAdvance = repository.advanceUnchangedEventState(
+        "a1", "calendar-state-2", "event-state-1", "event-state-2");
+    REQUIRE(std::holds_alternative<bool>(stateAdvance));
+    CHECK(std::get<bool>(stateAdvance));
+
+    const auto advanced = repository.loadWindow("a1", known.start, known.end, zone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(advanced));
+    const auto& advancedWindow =
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(advanced);
+    REQUIRE(advancedWindow.has_value());
+    CHECK(advancedWindow->eventState == "event-state-2");
+
+    const javelin::jmap::calendar::LocalDateTime unknownStart{.value = "2026-10-01T00:00:00"};
+    const javelin::jmap::calendar::LocalDateTime unknownEnd{.value = "2026-11-01T00:00:00"};
+    const auto unknown = repository.loadWindow("a1", unknownStart, unknownEnd, zone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(unknown));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(unknown).has_value());
+
+    QSqlQuery retainedUnknown{connection.database()};
+    REQUIRE(retainedUnknown.exec(QStringLiteral(
+        "SELECT event_state,updated_at FROM calendar_query_windows WHERE account_id='a1' AND "
+        "range_start='2026-10-01T00:00:00'")));
+    REQUIRE(retainedUnknown.next());
+    CHECK(retainedUnknown.value(0).isNull());
+    CHECK(retainedUnknown.value(1).toString() == QStringLiteral("2000-01-01T00:00:00.000Z"));
+}
+
+TEST_CASE("calendar event row state mirrors the owned collection cursor",
+          "[jmap][calendar][cache][state]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-event-row-state"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    auto reminderOnly = event("reminder-only", "2026-09-03T10:00:00");
+    reminderOnly.calendarIds.clear();
+    auto reminderOccurrence = occurrence("reminder-only", "2026-09-03T10:00:00");
+    reminderOccurrence.localEnd = {.value = "2026-09-03T11:00:00"};
+    REQUIRE_FALSE(repository
+                      .reconcileReminderHorizon({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-01T00:00:00"},
+                          .end = {.value = "2026-12-01T00:00:00"},
+                          .displayTimeZone = {.value = "Pacific/Auckland"},
+                          .eventState = "server-state-before-owned-cursor",
+                          .events = {reminderOnly},
+                          .occurrences = {reminderOccurrence},
+                      })
+                      .has_value());
+
+    auto projected = event("e1", "2026-09-03T10:00:00");
+    projected.calendarIds.clear();
+    auto firstTransaction = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Project first calendar event state"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(firstTransaction));
+    auto first = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(firstTransaction));
+    REQUIRE_FALSE(
+        repository.projectEvents(first, "a1", "cursor-1", {projected}, {}, {}).has_value());
+    REQUIRE_FALSE(first.commit().has_value());
+
+    projected.title = "Updated event";
+    auto secondTransaction = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Project second calendar event state"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(secondTransaction));
+    auto second = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(secondTransaction));
+    REQUIRE_FALSE(
+        repository.projectEvents(second, "a1", "cursor-2", {projected}, {}, {}).has_value());
+    REQUIRE_FALSE(second.commit().has_value());
+
+    const auto advanced =
+        repository.advanceUnchangedEventState("a1", "calendar-3", "cursor-2", "cursor-3");
+    REQUIRE(std::holds_alternative<bool>(advanced));
+    CHECK(std::get<bool>(advanced));
+    const auto stale =
+        repository.advanceUnchangedEventState("a1", "calendar-4", "cursor-2", "cursor-4");
+    REQUIRE(std::holds_alternative<bool>(stale));
+    CHECK_FALSE(std::get<bool>(stale));
+
+    QSqlQuery state{connection.database()};
+    REQUIRE(state.exec(QStringLiteral(
+        "SELECT e.state,s.state FROM calendar_events e JOIN calendar_state_tokens s ON "
+        "s.account_id=e.account_id AND s.data_type='CalendarEvent' WHERE e.account_id='a1' AND "
+        "e.event_id='e1'")));
+    REQUIRE(state.next());
+    CHECK(state.value(0).toString() == QStringLiteral("cursor-3"));
+    CHECK(state.value(1).toString() == QStringLiteral("cursor-3"));
+
+    QSqlQuery reminderState{connection.database()};
+    REQUIRE(reminderState.exec(QStringLiteral(
+        "SELECT state FROM calendar_events WHERE account_id='a1' AND event_id='reminder-only'")));
+    REQUIRE(reminderState.next());
+    CHECK(reminderState.value(0).isNull());
+
+    const auto calendarState = repository.stateToken("a1", "Calendar");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(calendarState));
+    CHECK(std::get<std::optional<std::string>>(calendarState) ==
+          std::optional<std::string>{"calendar-3"});
+}
+
+TEST_CASE("calendar projections attach new zoned occurrences only to comparable windows",
+          "[jmap][calendar][cache][timezone]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-projection-comparable-timezone"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    const javelin::jmap::calendar::LocalDateTime start{.value = "2026-09-03T00:00:00"};
+    const javelin::jmap::calendar::LocalDateTime end{.value = "2026-09-04T00:00:00"};
+    for (const auto& zone : {std::string{"Pacific/Auckland"}, std::string{"America/Los_Angeles"}})
+    {
+        REQUIRE_FALSE(repository
+                          .reconcileWindow({.accountId = "a1",
+                                            .start = start,
+                                            .end = end,
+                                            .displayTimeZone = {.value = zone},
+                                            .queryState = "query-" + zone,
+                                            .eventState = "event-state-1",
+                                            .events = {},
+                                            .occurrences = {}})
+                          .has_value());
+    }
+
+    auto projected = event("new-event", "2026-09-03T10:00:00");
+    projected.calendarIds.clear();
+    auto projectedOccurrence = occurrence("new-event", "2026-09-03T10:00:00");
+    projectedOccurrence.localEnd = {.value = "2026-09-03T11:00:00"};
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Project zoned calendar occurrence"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    REQUIRE_FALSE(repository
+                      .projectEvents(transaction, "a1", "event-state-1", {projected},
+                                     {projectedOccurrence}, {})
+                      .has_value());
+    REQUIRE_FALSE(transaction.commit().has_value());
+
+    QSqlQuery memberships{connection.database()};
+    REQUIRE(memberships.exec(QStringLiteral(
+        "SELECT display_time_zone FROM calendar_window_occurrences WHERE account_id='a1' AND "
+        "occurrence_id='new-event' ORDER BY display_time_zone")));
+    REQUIRE(memberships.next());
+    CHECK(memberships.value(0).toString() == QStringLiteral("Pacific/Auckland"));
+    CHECK_FALSE(memberships.next());
+}
+
+TEST_CASE("calendar projections attach floating occurrences to every overlapping display zone",
+          "[jmap][calendar][cache][timezone]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-projection-floating-timezone"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    const javelin::jmap::calendar::LocalDateTime start{.value = "2026-09-03T00:00:00"};
+    const javelin::jmap::calendar::LocalDateTime end{.value = "2026-09-04T00:00:00"};
+    for (const auto& zone : {std::string{"Pacific/Auckland"}, std::string{"America/Los_Angeles"}})
+    {
+        REQUIRE_FALSE(repository
+                          .reconcileWindow({.accountId = "a1",
+                                            .start = start,
+                                            .end = end,
+                                            .displayTimeZone = {.value = zone},
+                                            .queryState = "query-" + zone,
+                                            .eventState = "event-state-1",
+                                            .events = {},
+                                            .occurrences = {}})
+                          .has_value());
+    }
+
+    auto projected = event("floating-event", "2026-09-03T10:00:00");
+    projected.calendarIds.clear();
+    projected.timeZone.reset();
+    auto projectedOccurrence = occurrence("floating-event", "2026-09-03T10:00:00");
+    projectedOccurrence.localEnd = {.value = "2026-09-03T11:00:00"};
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Project floating calendar occurrence"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    REQUIRE_FALSE(repository
+                      .projectEvents(transaction, "a1", "event-state-1", {projected},
+                                     {projectedOccurrence}, {})
+                      .has_value());
+    REQUIRE_FALSE(transaction.commit().has_value());
+
+    QSqlQuery memberships{connection.database()};
+    REQUIRE(memberships.exec(QStringLiteral(
+        "SELECT display_time_zone FROM calendar_window_occurrences WHERE account_id='a1' AND "
+        "occurrence_id='floating-event' ORDER BY display_time_zone")));
+    REQUIRE(memberships.next());
+    CHECK(memberships.value(0).toString() == QStringLiteral("America/Los_Angeles"));
+    REQUIRE(memberships.next());
+    CHECK(memberships.value(0).toString() == QStringLiteral("Pacific/Auckland"));
+    CHECK_FALSE(memberships.next());
+}
+
+TEST_CASE("calendar projections relocate timed occurrences within a comparable timezone",
+          "[jmap][calendar][cache][timezone]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-projection-relocate-timezone"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    auto projected = event("moving-event", "2026-09-03T10:00:00");
+    projected.calendarIds.clear();
+    auto projectedOccurrence = occurrence("moving-event", "2026-09-03T10:00:00");
+    projectedOccurrence.localEnd = {.value = "2026-09-03T11:00:00"};
+    REQUIRE_FALSE(repository
+                      .reconcileWindow({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-03T00:00:00"},
+                          .end = {.value = "2026-09-04T00:00:00"},
+                          .displayTimeZone = {.value = "Pacific/Auckland"},
+                          .queryState = "query-state-1",
+                          .eventState = "event-state-1",
+                          .events = {projected},
+                          .occurrences = {projectedOccurrence},
+                      })
+                      .has_value());
+    REQUIRE_FALSE(repository
+                      .reconcileWindow({.accountId = "a1",
+                                        .start = {.value = "2026-09-04T00:00:00"},
+                                        .end = {.value = "2026-09-05T00:00:00"},
+                                        .displayTimeZone = {.value = "Pacific/Auckland"},
+                                        .queryState = "query-state-2",
+                                        .eventState = "event-state-1",
+                                        .events = {},
+                                        .occurrences = {}})
+                      .has_value());
+
+    projected.start = {.value = "2026-09-04T10:00:00"};
+    projectedOccurrence.localStart = projected.start;
+    projectedOccurrence.localEnd = {.value = "2026-09-04T11:00:00"};
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Relocate projected calendar occurrence"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    REQUIRE_FALSE(repository
+                      .projectEvents(transaction, "a1", "event-state-1", {projected},
+                                     {projectedOccurrence}, {})
+                      .has_value());
+    REQUIRE_FALSE(transaction.commit().has_value());
+
+    QSqlQuery memberships{connection.database()};
+    REQUIRE(memberships.exec(QStringLiteral(
+        "SELECT range_start FROM calendar_window_occurrences WHERE account_id='a1' AND "
+        "occurrence_id='moving-event' ORDER BY range_start")));
+    REQUIRE(memberships.next());
+    CHECK(memberships.value(0).toString() == QStringLiteral("2026-09-04T00:00:00"));
+    CHECK_FALSE(memberships.next());
+}
+
+TEST_CASE("calendar projections preserve authoritative cross-timezone occurrence membership",
+          "[jmap][calendar][cache][timezone]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-projection-preserve-cross-timezone"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    auto projected = event("cross-zone", "2026-09-03T10:00:00");
+    projected.calendarIds.clear();
+    auto projectedOccurrence = occurrence("cross-zone", "2026-09-03T10:00:00");
+    projectedOccurrence.localEnd = {.value = "2026-09-03T11:00:00"};
+    REQUIRE_FALSE(repository
+                      .reconcileWindow({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-02T00:00:00"},
+                          .end = {.value = "2026-09-04T00:00:00"},
+                          .displayTimeZone = {.value = "America/Los_Angeles"},
+                          .queryState = "query-state-1",
+                          .eventState = "event-state-1",
+                          .events = {projected},
+                          .occurrences = {projectedOccurrence},
+                      })
+                      .has_value());
+
+    projected.title = "Optimistically updated";
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Project cross-timezone calendar occurrence"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    REQUIRE_FALSE(repository
+                      .projectEvents(transaction, "a1", "event-state-1", {projected},
+                                     {projectedOccurrence}, {})
+                      .has_value());
+    REQUIRE_FALSE(transaction.commit().has_value());
+
+    QSqlQuery memberships{connection.database()};
+    REQUIRE(memberships.exec(QStringLiteral(
+        "SELECT display_time_zone FROM calendar_window_occurrences WHERE account_id='a1' AND "
+        "occurrence_id='cross-zone' ORDER BY display_time_zone")));
+    REQUIRE(memberships.next());
+    CHECK(memberships.value(0).toString() == QStringLiteral("America/Los_Angeles"));
+    CHECK_FALSE(memberships.next());
+}
+
+TEST_CASE("calendar projections preserve reminder ownership only while occurrence timing is stable",
+          "[jmap][calendar][cache][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-projection-reminder-ownership"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    auto projected = event("reminder-event", "2026-09-03T10:00:00");
+    projected.calendarIds.clear();
+    projected.utcStart = javelin::jmap::calendar::UtcInstant{.value = "2026-09-02T22:00:00Z"};
+    projected.utcEnd = javelin::jmap::calendar::UtcInstant{.value = "2026-09-02T23:00:00Z"};
+    auto projectedOccurrence = occurrence("reminder-event", "2026-09-03T10:00:00");
+    projectedOccurrence.localEnd = {.value = "2026-09-03T11:00:00"};
+    projectedOccurrence.utcStart = projected.utcStart;
+    projectedOccurrence.utcEnd = projected.utcEnd;
+    REQUIRE_FALSE(repository
+                      .reconcileWindow({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-02T00:00:00"},
+                          .end = {.value = "2026-09-04T00:00:00"},
+                          .displayTimeZone = {.value = "Pacific/Auckland"},
+                          .queryState = "query-state-1",
+                          .eventState = "event-state-1",
+                          .events = {projected},
+                          .occurrences = {projectedOccurrence},
+                      })
+                      .has_value());
+    REQUIRE_FALSE(repository
+                      .reconcileReminderHorizon({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-02T00:00:00"},
+                          .end = {.value = "2026-12-02T00:00:00"},
+                          .displayTimeZone = {.value = "Pacific/Auckland"},
+                          .eventState = "event-state-1",
+                          .events = {projected},
+                          .occurrences = {projectedOccurrence},
+                      })
+                      .has_value());
+
+    projected.title = "Title-only edit";
+    auto titleTransactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Project title-only calendar edit"));
+    REQUIRE(
+        std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(titleTransactionResult));
+    auto titleTransaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(titleTransactionResult));
+    REQUIRE_FALSE(repository
+                      .projectEvents(titleTransaction, "a1", "event-state-1", {projected},
+                                     {projectedOccurrence}, {})
+                      .has_value());
+    REQUIRE_FALSE(titleTransaction.commit().has_value());
+
+    QSqlQuery reminder{connection.database()};
+    REQUIRE(reminder.exec(QStringLiteral(
+        "SELECT start_utc,end_utc FROM calendar_reminder_occurrences WHERE account_id='a1' AND "
+        "occurrence_id='reminder-event'")));
+    REQUIRE(reminder.next());
+    CHECK(reminder.value(0).toString() == QStringLiteral("2026-09-02T22:00:00Z"));
+    CHECK(reminder.value(1).toString() == QStringLiteral("2026-09-02T23:00:00Z"));
+    CHECK_FALSE(reminder.next());
+
+    projected.start = {.value = "2026-09-03T12:00:00"};
+    projected.utcStart.reset();
+    projected.utcEnd.reset();
+    projectedOccurrence.localStart = projected.start;
+    projectedOccurrence.localEnd = {.value = "2026-09-03T13:00:00"};
+    projectedOccurrence.utcStart.reset();
+    projectedOccurrence.utcEnd.reset();
+    auto timingTransactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Project timing calendar edit"));
+    REQUIRE(
+        std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(timingTransactionResult));
+    auto timingTransaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(timingTransactionResult));
+    REQUIRE_FALSE(repository
+                      .projectEvents(timingTransaction, "a1", "event-state-1", {projected},
+                                     {projectedOccurrence}, {})
+                      .has_value());
+    REQUIRE_FALSE(timingTransaction.commit().has_value());
+
+    QSqlQuery invalidatedReminder{connection.database()};
+    REQUIRE(invalidatedReminder.exec(QStringLiteral(
+        "SELECT COUNT(*) FROM calendar_reminder_occurrences WHERE account_id='a1' AND "
+        "occurrence_id='reminder-event'")));
+    REQUIRE(invalidatedReminder.next());
+    CHECK(invalidatedReminder.value(0).toInt() == 0);
+}
+
+TEST_CASE("calendar reminder horizon derives UTC timing for floating occurrences",
+          "[jmap][calendar][cache][notification][timezone]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-reminder-floating-utc"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    auto floating = event("floating-reminder", "2026-09-03T10:00:00");
+    floating.calendarIds.clear();
+    floating.timeZone.reset();
+    auto floatingOccurrence = occurrence("floating-reminder", "2026-09-03T10:00:00");
+    floatingOccurrence.localEnd = {.value = "2026-09-03T11:00:00"};
+    REQUIRE_FALSE(repository
+                      .reconcileReminderHorizon({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-01T00:00:00"},
+                          .end = {.value = "2026-12-01T00:00:00"},
+                          .displayTimeZone = {.value = "America/Los_Angeles"},
+                          .eventState = "event-state-1",
+                          .events = {floating},
+                          .occurrences = {floatingOccurrence},
+                      })
+                      .has_value());
+
+    QSqlQuery timing{connection.database()};
+    REQUIRE(timing.exec(QStringLiteral(
+        "SELECT start_utc,end_utc FROM calendar_reminder_occurrences WHERE account_id='a1' AND "
+        "occurrence_id='floating-reminder'")));
+    REQUIRE(timing.next());
+    CHECK(timing.value(0).toString() == QStringLiteral("2026-09-03T17:00:00.000Z"));
+    CHECK(timing.value(1).toString() == QStringLiteral("2026-09-03T18:00:00.000Z"));
+}
+
+TEST_CASE("calendar projection removes stale occurrences when replacement set is empty",
+          "[jmap][calendar][cache][projection][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-projection-empty-replacement"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    auto series = event("series", "2026-09-03T10:00:00");
+    series.calendarIds.clear();
+    series.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
+    auto expanded = occurrence("series-occurrence", "2026-09-03T10:00:00");
+    expanded.eventId = "series";
+    expanded.recurrenceId = javelin::jmap::calendar::LocalDateTime{.value = "2026-09-03T10:00:00"};
+    expanded.localEnd = {.value = "2026-09-03T11:00:00"};
+    REQUIRE_FALSE(repository
+                      .reconcileWindow({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-01T00:00:00"},
+                          .end = {.value = "2026-10-01T00:00:00"},
+                          .displayTimeZone = {.value = "Pacific/Auckland"},
+                          .queryState = "query-state-1",
+                          .eventState = "event-state-1",
+                          .events = {series},
+                          .occurrences = {expanded},
+                      })
+                      .has_value());
+    REQUIRE_FALSE(repository
+                      .reconcileReminderHorizon({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-01T00:00:00"},
+                          .end = {.value = "2026-12-01T00:00:00"},
+                          .displayTimeZone = {.value = "Pacific/Auckland"},
+                          .eventState = "event-state-1",
+                          .events = {series},
+                          .occurrences = {expanded},
+                      })
+                      .has_value());
+
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Project empty recurring replacement"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    const std::array<std::string, 1> replacementEventIds{"series"};
+    REQUIRE_FALSE(
+        repository
+            .projectEvents(transaction, "a1", "event-state-1", {series}, {}, {},
+                           javelin::jmap::cache::CalendarEventStatePersistence::AdvanceCursor,
+                           replacementEventIds)
+            .has_value());
+    REQUIRE_FALSE(transaction.commit().has_value());
+
+    for (const auto& table :
+         {QStringLiteral("calendar_occurrences"), QStringLiteral("calendar_window_occurrences"),
+          QStringLiteral("calendar_reminder_occurrences")})
+    {
+        QSqlQuery remaining{connection.database()};
+        REQUIRE(remaining.exec(
+            QStringLiteral("SELECT COUNT(*) FROM %1 WHERE account_id='a1'").arg(table)));
+        REQUIRE(remaining.next());
+        CHECK(remaining.value(0).toInt() == 0);
+    }
+}
+
+TEST_CASE("calendar reminder horizon survives presentation-window eviction",
+          "[jmap][calendar][cache][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-reminder-horizon"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    QSqlQuery account{connection.database()};
+    REQUIRE(account.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    javelin::jmap::calendar::Calendar calendar{
+        .accountId = "a1",
+        .id = "work",
+        .name = "Work",
+        .description = std::nullopt,
+        .color = std::nullopt,
+        .sortOrder = 0,
+        .isSubscribed = true,
+        .isVisible = true,
+        .isDefault = true,
+        .timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Pacific/Auckland"},
+        .defaultAlertsWithTime = {},
+        .defaultAlertsWithoutTime = {},
+        .myRights = {.mayReadItems = true},
+    };
+    REQUIRE_FALSE(repository.replaceCalendars("a1", "calendar-state", {calendar}).has_value());
+    QSqlQuery eventCursor{connection.database()};
+    REQUIRE(eventCursor.exec(
+        QStringLiteral("INSERT INTO calendar_state_tokens(account_id,data_type,state) VALUES "
+                       "('a1','CalendarEvent','cursor-before-horizon')")));
+
+    auto reminderEvent = event("reminder", "2026-09-03T10:00:00");
+    reminderEvent.utcStart = javelin::jmap::calendar::UtcInstant{.value = "2026-09-02T22:00:00Z"};
+    reminderEvent.utcEnd = javelin::jmap::calendar::UtcInstant{.value = "2026-09-02T23:00:00Z"};
+    reminderEvent.alerts.emplace(
+        "alert-1", javelin::jmap::calendar::Alert{
+                       .id = "alert-1",
+                       .action = "display",
+                       .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+                       .relativeTo = "start",
+                       .offset = javelin::jmap::calendar::Duration{.value = "-PT10M"},
+                       .when = std::nullopt,
+                       .acknowledged = std::nullopt,
+                   });
+    auto reminderOccurrence = occurrence("reminder", "2026-09-03T10:00:00");
+    reminderOccurrence.localEnd = {.value = "2026-09-03T11:00:00"};
+    reminderOccurrence.utcStart = reminderEvent.utcStart;
+    reminderOccurrence.utcEnd = reminderEvent.utcEnd;
+    const javelin::jmap::cache::CalendarReminderHorizon horizon{
+        .accountId = "a1",
+        .start = {.value = "2026-09-02T00:00:00"},
+        .end = {.value = "2026-12-02T00:00:00"},
+        .displayTimeZone = {.value = "Pacific/Auckland"},
+        .eventState = "event-state-1",
+        .events = {reminderEvent},
+        .occurrences = {reminderOccurrence},
+    };
+    REQUIRE_FALSE(repository.reconcileReminderHorizon(horizon).has_value());
+    QSqlQuery retainedCursor{connection.database()};
+    REQUIRE(retainedCursor.exec(
+        QStringLiteral("SELECT state FROM calendar_state_tokens WHERE account_id='a1' AND "
+                       "data_type='CalendarEvent'")));
+    REQUIRE(retainedCursor.next());
+    CHECK(retainedCursor.value(0).toString() == QStringLiteral("cursor-before-horizon"));
+    QSqlQuery retainedEventState{connection.database()};
+    REQUIRE(retainedEventState.exec(QStringLiteral(
+        "SELECT state FROM calendar_events WHERE account_id='a1' AND event_id='reminder'")));
+    REQUIRE(retainedEventState.next());
+    CHECK(retainedEventState.value(0).toString() == QStringLiteral("cursor-before-horizon"));
+
+    for (int index = 0; index < 13; ++index)
+    {
+        const auto month = QStringLiteral("%1").arg(index + 1, 2, 10, QLatin1Char('0'));
+        const auto nextMonth = QStringLiteral("%1").arg(index + 2, 2, 10, QLatin1Char('0'));
+        const auto start = index < 12 ? QStringLiteral("2025-%1-01T00:00:00").arg(month)
+                                      : QStringLiteral("2026-01-01T00:00:00");
+        const auto end = index < 11    ? QStringLiteral("2025-%1-01T00:00:00").arg(nextMonth)
+                         : index == 11 ? QStringLiteral("2026-01-01T00:00:00")
+                                       : QStringLiteral("2026-02-01T00:00:00");
+        REQUIRE_FALSE(repository
+                          .reconcileWindow({
+                              .accountId = "a1",
+                              .start = {.value = start.toStdString()},
+                              .end = {.value = end.toStdString()},
+                              .displayTimeZone = {.value = "Pacific/Auckland"},
+                              .queryState = "query-" + std::to_string(index),
+                              .eventState = "event-state-" + std::to_string(index + 2),
+                              .events = {},
+                              .occurrences = {},
+                          })
+                          .has_value());
+    }
+
+    QSqlQuery windowCount{connection.database()};
+    REQUIRE(windowCount.exec(
+        QStringLiteral("SELECT COUNT(*) FROM calendar_query_windows WHERE account_id='a1'")));
+    REQUIRE(windowCount.next());
+    CHECK(windowCount.value(0).toInt() == 12);
+
+    QSqlQuery reminderCount{connection.database()};
+    REQUIRE(reminderCount.exec(QStringLiteral(
+        "SELECT COUNT(*) FROM calendar_reminder_occurrences WHERE account_id='a1' AND "
+        "occurrence_id='reminder'")));
+    REQUIRE(reminderCount.next());
+    CHECK(reminderCount.value(0).toInt() == 1);
+
+    javelin::jmap::cache::CalendarNotificationRepository notifications{connection};
+    const auto claimed = notifications.claimDue(
+        QDateTime::fromString(QStringLiteral("2026-09-02T21:55:00Z"), Qt::ISODate));
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
+            claimed));
+    const auto& candidates =
+        std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(claimed);
+    REQUIRE(candidates.size() == 1);
+    CHECK(candidates.front().eventId == "reminder");
+}
+
+TEST_CASE("calendar reminder timing is isolated from presentation timezone materialization",
+          "[jmap][calendar][cache][notification][timezone]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-reminder-timezone-isolation"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    const javelin::jmap::calendar::Calendar calendar{
+        .accountId = "a1",
+        .id = "work",
+        .name = "Work",
+        .description = std::nullopt,
+        .color = std::nullopt,
+        .sortOrder = 0,
+        .isSubscribed = true,
+        .isVisible = true,
+        .isDefault = true,
+        .timeZone = std::nullopt,
+        .defaultAlertsWithTime = {},
+        .defaultAlertsWithoutTime = {},
+        .myRights = {.mayReadItems = true},
+    };
+    REQUIRE_FALSE(repository.replaceCalendars("a1", "calendar-state", {calendar}).has_value());
+
+    auto floatingEvent = event("floating", "2026-09-03T10:00:00");
+    floatingEvent.timeZone.reset();
+    floatingEvent.alerts.emplace(
+        "alert-1", javelin::jmap::calendar::Alert{
+                       .id = "alert-1",
+                       .action = "display",
+                       .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+                       .relativeTo = "start",
+                       .offset = javelin::jmap::calendar::Duration{.value = "-PT10M"},
+                       .when = std::nullopt,
+                       .acknowledged = std::nullopt});
+    auto reminderOccurrence = occurrence("floating", "2026-09-03T10:00:00");
+    reminderOccurrence.localEnd = {.value = "2026-09-03T11:00:00"};
+    reminderOccurrence.utcStart =
+        javelin::jmap::calendar::UtcInstant{.value = "2026-09-02T22:00:00Z"};
+    reminderOccurrence.utcEnd =
+        javelin::jmap::calendar::UtcInstant{.value = "2026-09-02T23:00:00Z"};
+    auto reminderEvent = floatingEvent;
+    reminderEvent.utcStart = reminderOccurrence.utcStart;
+    reminderEvent.utcEnd = reminderOccurrence.utcEnd;
+    REQUIRE_FALSE(repository
+                      .reconcileReminderHorizon({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-02T00:00:00"},
+                          .end = {.value = "2026-12-02T00:00:00"},
+                          .displayTimeZone = {.value = "Pacific/Auckland"},
+                          .eventState = "event-state-1",
+                          .events = {reminderEvent},
+                          .occurrences = {reminderOccurrence},
+                      })
+                      .has_value());
+
+    auto presentationOccurrence = reminderOccurrence;
+    presentationOccurrence.utcStart =
+        javelin::jmap::calendar::UtcInstant{.value = "2026-09-03T17:00:00Z"};
+    presentationOccurrence.utcEnd =
+        javelin::jmap::calendar::UtcInstant{.value = "2026-09-03T18:00:00Z"};
+    auto presentationEvent = floatingEvent;
+    presentationEvent.utcStart = presentationOccurrence.utcStart;
+    presentationEvent.utcEnd = presentationOccurrence.utcEnd;
+    REQUIRE_FALSE(repository
+                      .reconcileWindow({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-03T00:00:00"},
+                          .end = {.value = "2026-09-04T00:00:00"},
+                          .displayTimeZone = {.value = "America/Los_Angeles"},
+                          .queryState = "query-state-2",
+                          .eventState = "event-state-2",
+                          .events = {presentationEvent},
+                          .occurrences = {presentationOccurrence},
+                      })
+                      .has_value());
+
+    QSqlQuery timing{connection.database()};
+    REQUIRE(timing.exec(
+        QStringLiteral("SELECT o.start_utc,r.start_utc FROM calendar_occurrences o JOIN "
+                       "calendar_reminder_occurrences r ON r.account_id=o.account_id AND "
+                       "r.occurrence_id=o.occurrence_id WHERE o.account_id='a1' AND "
+                       "o.occurrence_id='floating'")));
+    REQUIRE(timing.next());
+    CHECK(timing.value(0).toString() == QStringLiteral("2026-09-03T17:00:00Z"));
+    CHECK(timing.value(1).toString() == QStringLiteral("2026-09-02T22:00:00Z"));
+
+    javelin::jmap::cache::CalendarNotificationRepository notifications{connection};
+    const auto claimed = notifications.claimDue(
+        QDateTime::fromString(QStringLiteral("2026-09-02T21:55:00Z"), Qt::ISODate));
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
+            claimed));
+    const auto& candidates =
+        std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(claimed);
+    REQUIRE(candidates.size() == 1);
+    CHECK(candidates.front().eventId == "floating");
+    CHECK(candidates.front().startsAt ==
+          QDateTime::fromString(QStringLiteral("2026-09-02T22:00:00Z"), Qt::ISODate));
+}
+
+TEST_CASE("unchanged calendar state advancement preserves daemon reminder ownership",
+          "[jmap][calendar][cache][notification][state]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-reminder-state-advance"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    const javelin::jmap::calendar::Calendar calendar{
+        .accountId = "a1",
+        .id = "work",
+        .name = "Work",
+        .description = std::nullopt,
+        .color = std::nullopt,
+        .sortOrder = 0,
+        .isSubscribed = true,
+        .isVisible = true,
+        .isDefault = true,
+        .timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Pacific/Auckland"},
+        .defaultAlertsWithTime = {},
+        .defaultAlertsWithoutTime = {},
+        .myRights = {.mayReadItems = true},
+    };
+    REQUIRE_FALSE(repository.replaceCalendars("a1", "calendar-state-1", {calendar}).has_value());
+
+    const auto firstEvent = event("first", "2026-09-03T10:00:00");
+    const auto secondEvent = event("second", "2026-10-03T10:00:00");
+    auto firstOccurrence = occurrence("first", "2026-09-03T10:00:00");
+    firstOccurrence.localEnd = {.value = "2026-09-03T11:00:00"};
+    auto secondOccurrence = occurrence("second", "2026-10-03T10:00:00");
+    secondOccurrence.localEnd = {.value = "2026-10-03T11:00:00"};
+    REQUIRE_FALSE(repository
+                      .reconcileReminderHorizon({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-02T00:00:00"},
+                          .end = {.value = "2026-12-03T00:00:00"},
+                          .displayTimeZone = {.value = "Pacific/Auckland"},
+                          .eventState = "event-state-1",
+                          .events = {firstEvent, secondEvent},
+                          .occurrences = {firstOccurrence, secondOccurrence},
+                      })
+                      .has_value());
+    REQUIRE_FALSE(repository
+                      .reconcileWindow({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-01T00:00:00"},
+                          .end = {.value = "2026-09-10T00:00:00"},
+                          .displayTimeZone = {.value = "Pacific/Auckland"},
+                          .queryState = "query-state-1",
+                          .eventState = "event-state-1",
+                          .events = {firstEvent},
+                          .occurrences = {firstOccurrence},
+                      })
+                      .has_value());
+
+    const auto advanced = repository.advanceUnchangedEventState("a1", "calendar-state-2",
+                                                                "event-state-1", "event-state-2");
+    REQUIRE(std::holds_alternative<bool>(advanced));
+    CHECK(std::get<bool>(advanced));
+
+    QSqlQuery reminderMembership{connection.database()};
+    REQUIRE(reminderMembership.exec(QStringLiteral(
+        "SELECT occurrence_id FROM calendar_reminder_occurrences WHERE account_id='a1' "
+        "ORDER BY occurrence_id")));
+    REQUIRE(reminderMembership.next());
+    CHECK(reminderMembership.value(0).toString() == QStringLiteral("first"));
+    REQUIRE(reminderMembership.next());
+    CHECK(reminderMembership.value(0).toString() == QStringLiteral("second"));
+    CHECK_FALSE(reminderMembership.next());
+
+    QSqlQuery rowStates{connection.database()};
+    REQUIRE(rowStates.exec(QStringLiteral(
+        "SELECT DISTINCT state FROM calendar_events WHERE account_id='a1' ORDER BY state")));
+    REQUIRE(rowStates.next());
+    CHECK(rowStates.value(0).isNull());
+    REQUIRE(rowStates.next());
+    CHECK(rowStates.value(0).toString() == QStringLiteral("event-state-2"));
+    CHECK_FALSE(rowStates.next());
 }
 
 TEST_CASE("calendar windows retain occurrences referenced by overlapping windows",
@@ -258,7 +1207,7 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
         .end = {.value = "2026-05-10T00:00:00"},
         .displayTimeZone = zone,
         .queryState = "q2",
-        .eventState = "e2-state",
+        .eventState = "e1-state",
         .events = {event("e2", "2026-04-02T09:00:00")},
         .occurrences = {occurrence("e2", "2026-04-02T09:00:00")}};
     REQUIRE_FALSE(repository.reconcileWindow(second).has_value());
@@ -388,38 +1337,22 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
     REQUIRE(count.next());
     CHECK(count.value(0).toInt() == 1);
 
-    auto changedEvent = event("e2", "2026-04-02T10:00:00");
-    changedEvent.title = "Changed event";
-    const auto changedOccurrence = occurrence("e2", "2026-04-02T10:00:00");
-    REQUIRE_FALSE(
-        repository
-            .applyEventDelta("a1", "c2", "e3-state", zone, {changedEvent}, {changedOccurrence}, {})
-            .has_value());
-    const auto updatedFirst =
+    const auto advancedState =
+        repository.advanceUnchangedEventState("a1", "c2", "e1-state", "e2-state");
+    REQUIRE(std::holds_alternative<bool>(advancedState));
+    CHECK(std::get<bool>(advancedState));
+    const auto stateAdvancedFirst =
         repository.loadWindow("a1", first.start, first.end, first.displayTimeZone);
-    const auto updatedSecond =
+    const auto stateAdvancedSecond =
         repository.loadWindow("a1", second.start, second.end, second.displayTimeZone);
-    REQUIRE(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(updatedFirst)
-                ->events.size() == 1);
-    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(updatedFirst)
-              ->events.front()
-              .title == "Changed event");
-    REQUIRE(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(updatedSecond)
-                ->events.size() == 1);
-    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(updatedSecond)
-              ->events.front()
-              .title == "Changed event");
-
-    REQUIRE_FALSE(
-        repository.applyEventDelta("a1", "c2", "e4-state", zone, {}, {}, {"e2"}).has_value());
-    const auto destroyedFirst =
-        repository.loadWindow("a1", first.start, first.end, first.displayTimeZone);
-    const auto destroyedSecond =
-        repository.loadWindow("a1", second.start, second.end, second.displayTimeZone);
-    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(destroyedFirst)
-              ->events.empty());
-    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(destroyedSecond)
-              ->events.empty());
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(stateAdvancedFirst)
+                .has_value());
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(stateAdvancedSecond)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(stateAdvancedFirst)
+              ->eventState == "e2-state");
+    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(stateAdvancedSecond)
+              ->eventState == "e2-state");
 
     REQUIRE(count.exec(
         QStringLiteral("UPDATE calendar_query_windows SET updated_at=CASE range_start WHEN "
@@ -442,7 +1375,7 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
                                                           .displayTimeZone = zone,
                                                           .queryState =
                                                               "bounded-" + std::to_string(month),
-                                                          .eventState = "e4-state",
+                                                          .eventState = "e2-state",
                                                           .events = {},
                                                           .occurrences = {}};
         REQUIRE_FALSE(repository.reconcileWindow(window).has_value());
@@ -615,6 +1548,14 @@ TEST_CASE("calendar reminders are claimed once and can be snoozed or dismissed",
     javelin::jmap::cache::CalendarNotificationRepository notifications{connection};
     const QDateTime now =
         QDateTime::fromString(QStringLiteral("2026-07-18T10:05:00Z"), Qt::ISODate);
+    const auto presentationOnly = notifications.claimDue(now);
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
+            presentationOnly));
+    CHECK(
+        std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(presentationOnly)
+            .empty());
+    retainForReminders(connection, {"event-1"});
     auto first = notifications.claimDue(now);
     REQUIRE(
         std::holds_alternative<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
@@ -623,10 +1564,20 @@ TEST_CASE("calendar reminders are claimed once and can be snoozed or dismissed",
         std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(first);
     REQUIRE(candidates.size() == 1);
     CHECK(candidates.front().title == "Event event-1");
+    const auto originalTrigger =
+        QDateTime::fromString(QStringLiteral("2026-07-18T09:50:00Z"), Qt::ISODate);
+    CHECK(candidates.front().key ==
+          "a1:event-1:alert-1:" + std::to_string(originalTrigger.toMSecsSinceEpoch()));
+    CHECK(candidates.front().identityKey != candidates.front().key);
     CHECK(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
               notifications.claimDue(now))
               .empty());
-    REQUIRE_FALSE(notifications.markDelivered(candidates.front().key, now).has_value());
+    const auto duplicatePush = notifications.claimPushed(candidates.front().identityKey, now);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::CalendarPushedAlertClaim>(duplicatePush));
+    CHECK_FALSE(std::get<javelin::jmap::cache::CalendarPushedAlertClaim>(duplicatePush).claimed);
+    REQUIRE_FALSE(
+        notifications.markDelivered(candidates.front().key, candidates.front().identityKey, now)
+            .has_value());
 
     REQUIRE_FALSE(notifications.snooze(candidates.front().key, now.addSecs(300)).has_value());
     CHECK(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
@@ -636,7 +1587,9 @@ TEST_CASE("calendar reminders are claimed once and can be snoozed or dismissed",
     REQUIRE(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(snoozed)
                 .size() == 1);
     REQUIRE_FALSE(
-        notifications.markDelivered(candidates.front().key, now.addSecs(300)).has_value());
+        notifications
+            .markDelivered(candidates.front().key, candidates.front().identityKey, now.addSecs(300))
+            .has_value());
     REQUIRE_FALSE(notifications.dismiss(candidates.front().key).has_value());
     CHECK(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
               notifications.claimDue(now.addSecs(600)))
@@ -677,6 +1630,49 @@ TEST_CASE("calendar reminders are claimed once and can be snoozed or dismissed",
         std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(defaultReminder)
             .front()
             .alertId == "default-alert");
+
+    auto pushedEvent = event("event-2", "2026-07-18T10:00:00");
+    pushedEvent.timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Etc/UTC"};
+    pushedEvent.utcStart = javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T10:00:00Z"};
+    pushedEvent.utcEnd = javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T11:00:00Z"};
+    pushedEvent.alerts.emplace("push-alert",
+                               javelin::jmap::calendar::Alert{
+                                   .id = "push-alert",
+                                   .action = "display",
+                                   .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+                                   .relativeTo = "start",
+                                   .offset = javelin::jmap::calendar::Duration{.value = "-PT10M"},
+                                   .when = std::nullopt,
+                                   .acknowledged = std::nullopt});
+    const auto pushedIdentity = javelin::jmap::cache::calendarNotificationIdentityKey(
+        "a1", "event-2", std::nullopt, "push-alert", originalTrigger);
+    const auto pushedClaim = notifications.claimPushed(pushedIdentity, now);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::CalendarPushedAlertClaim>(pushedClaim));
+    REQUIRE(std::get<javelin::jmap::cache::CalendarPushedAlertClaim>(pushedClaim).claimed);
+    REQUIRE_FALSE(notifications.markDelivered(pushedIdentity, pushedIdentity, now).has_value());
+
+    auto pushedOccurrence = occurrence("event-2", "2026-07-18T10:00:00");
+    pushedOccurrence.localEnd = {.value = "2026-07-18T11:00:00"};
+    pushedOccurrence.utcStart =
+        javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T10:00:00Z"};
+    pushedOccurrence.utcEnd = javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T11:00:00Z"};
+    REQUIRE_FALSE(calendars
+                      .reconcileWindow({.accountId = "a1",
+                                        .start = {.value = "2026-07-01T00:00:00"},
+                                        .end = {.value = "2026-08-01T00:00:00"},
+                                        .displayTimeZone = {.value = "Etc/UTC"},
+                                        .queryState = "q4",
+                                        .eventState = "e4",
+                                        .events = {pushedEvent},
+                                        .occurrences = {pushedOccurrence}})
+                      .has_value());
+    const auto afterPushMaterialization = notifications.claimDue(now.addSecs(600));
+    const auto& afterPushCandidates =
+        std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
+            afterPushMaterialization);
+    CHECK(std::ranges::find(afterPushCandidates, "event-2",
+                            &javelin::jmap::cache::CalendarNotificationCandidate::eventId) ==
+          afterPushCandidates.end());
 }
 
 TEST_CASE("calendar reminders use their actual trigger rather than occurrence start bounds",
@@ -788,6 +1784,8 @@ TEST_CASE("calendar reminders use their actual trigger rather than occurrence st
                               .occurrences = {longOccurrence, firstFutureOccurrence,
                                               secondFutureOccurrence, defaultlessOccurrence}})
             .has_value());
+    retainForReminders(connection, {"long-event", "future-event:first", "future-event:second",
+                                    "defaultless-event"});
 
     javelin::jmap::cache::CalendarNotificationRepository notifications{connection};
     const auto trigger = QDateTime::fromString(QStringLiteral("2026-07-18T09:50:00Z"), Qt::ISODate);
@@ -906,6 +1904,8 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
                                         .occurrences = {futureOccurrence}})
                       .has_value());
 
+    auto invitationSnapshot = invitation;
+    invitationSnapshot.title = "Invitation snapshot";
     const javelin::jmap::calendar::CalendarEventNotification notification{
         .accountId = "a1",
         .id = "notification-1",
@@ -952,15 +1952,13 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
     REQUIRE_FALSE(invitations
                       .reconcile({.accountId = "a1",
                                   .notificationState = "n1",
-                                  .eventState = "e1",
                                   .replaceNotifications = true,
                                   .notifications = {notification},
                                   .deletedNotificationIds = {},
-                                  .events = {invitation},
-                                  .nonRecurringOccurrences = {},
                                   .destroyedEventIds = {},
                                   .consideredEventIds = {"invite-1"},
-                                  .pendingInvitations = {{.eventId = "invite-1",
+                                  .pendingInvitations = {{.event = invitationSnapshot,
+                                                          .eventId = "invite-1",
                                                           .selfParticipantId = "self",
                                                           .sourceNotificationId = "notification-1",
                                                           .enqueueDesktopNotification = true}}})
@@ -969,6 +1967,16 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
     auto state = calendars.stateToken("a1", "CalendarEventNotification");
     REQUIRE(std::holds_alternative<std::optional<std::string>>(state));
     CHECK(std::get<std::optional<std::string>>(state) == std::optional<std::string>{"n1"});
+    const auto eventState = calendars.stateToken("a1", "CalendarEvent");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(eventState));
+    CHECK(std::get<std::optional<std::string>>(eventState) == std::optional<std::string>{"e0"});
+    const auto authoritativeEvent = calendars.findEvent("a1", "invite-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(
+        authoritativeEvent));
+    REQUIRE(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(authoritativeEvent)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(authoritativeEvent)
+              ->title == invitation.title);
     QSqlQuery projected{connection.database()};
     REQUIRE(projected.exec(QStringLiteral(
         "SELECT p.self_participant_id,o.status FROM calendar_pending_invitations p JOIN "
@@ -978,6 +1986,15 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
     CHECK(projected.value(0).toString() == QStringLiteral("self"));
     CHECK(projected.value(1).toString() == QStringLiteral("pending"));
 
+    const auto pendingRead = cacheReader.pendingInvitations();
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::PendingCalendarInvitation>>(
+        pendingRead));
+    const auto& pendingInvitations =
+        std::get<std::vector<javelin::jmap::calendar::PendingCalendarInvitation>>(pendingRead);
+    REQUIRE(pendingInvitations.size() == 1);
+    CHECK(pendingInvitations.front().displayTime.value == "2099-08-20T10:00:00");
+    CHECK_FALSE(pendingInvitations.front().displayUtc.has_value());
+
     const auto firstClaim = invitations.claimPendingDispatches();
     REQUIRE(std::holds_alternative<
             std::vector<javelin::jmap::cache::CalendarInvitationDispatchCandidate>>(firstClaim));
@@ -985,7 +2002,9 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
         std::get<std::vector<javelin::jmap::cache::CalendarInvitationDispatchCandidate>>(
             firstClaim);
     REQUIRE(candidates.size() == 1);
+    CHECK(candidates.front().title == invitationSnapshot.title);
     CHECK(candidates.front().start.value == "2099-08-20T10:00:00");
+    CHECK_FALSE(candidates.front().utcStart.has_value());
     CHECK_FALSE(candidates.front().recurrenceId.has_value());
     CHECK(candidates.front().displayRecurrenceId ==
           std::optional<javelin::jmap::calendar::LocalDateTime>{{.value = "2099-08-20T10:00:00"}});
@@ -1050,15 +2069,13 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
     REQUIRE_FALSE(invitations
                       .reconcile({.accountId = "a1",
                                   .notificationState = "n-delivered-requeue",
-                                  .eventState = "e3",
                                   .replaceNotifications = false,
                                   .notifications = {},
                                   .deletedNotificationIds = {},
-                                  .events = {invitation},
-                                  .nonRecurringOccurrences = {},
                                   .destroyedEventIds = {},
                                   .consideredEventIds = {"invite-1"},
-                                  .pendingInvitations = {{.eventId = "invite-1",
+                                  .pendingInvitations = {{.event = invitation,
+                                                          .eventId = "invite-1",
                                                           .selfParticipantId = "self",
                                                           .sourceNotificationId = "notification-2",
                                                           .enqueueDesktopNotification = true}}})
@@ -1082,16 +2099,14 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
             .reconcile(
                 {.accountId = "a1",
                  .notificationState = "n2",
-                 .eventState = "e4",
                  .replaceNotifications = false,
                  .notifications = {},
                  .deletedNotificationIds = {},
-                 .events = {occurrenceInvitations},
-                 .nonRecurringOccurrences = {},
                  .destroyedEventIds = {},
                  .consideredEventIds = {"invite-1"},
                  .pendingInvitations =
-                     {{.eventId = "invite-1",
+                     {{.event = occurrenceInvitations,
+                       .eventId = "invite-1",
                        .recurrenceId =
                            javelin::jmap::calendar::LocalDateTime{.value = "2099-08-20T10:00:00"},
                        .selfParticipantId = "self",
@@ -1100,7 +2115,8 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
                        .displayStart =
                            javelin::jmap::calendar::LocalDateTime{.value = "2099-08-20T10:00:00"},
                        .enqueueDesktopNotification = true},
-                      {.eventId = "invite-1",
+                      {.event = occurrenceInvitations,
+                       .eventId = "invite-1",
                        .recurrenceId =
                            javelin::jmap::calendar::LocalDateTime{.value = "2099-08-27T10:00:00"},
                        .selfParticipantId = "self",
@@ -1142,16 +2158,14 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
             .reconcile(
                 {.accountId = "a1",
                  .notificationState = "n3",
-                 .eventState = "e6",
                  .replaceNotifications = false,
                  .notifications = {},
                  .deletedNotificationIds = {},
-                 .events = {occurrenceInvitations},
-                 .nonRecurringOccurrences = {},
                  .destroyedEventIds = {},
                  .consideredEventIds = {"invite-1"},
                  .pendingInvitations =
-                     {{.eventId = "invite-1",
+                     {{.event = occurrenceInvitations,
+                       .eventId = "invite-1",
                        .recurrenceId =
                            javelin::jmap::calendar::LocalDateTime{.value = "2099-08-20T10:00:00"},
                        .selfParticipantId = "self",
@@ -1160,7 +2174,8 @@ TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not 
                        .displayStart =
                            javelin::jmap::calendar::LocalDateTime{.value = "2099-08-20T10:00:00"},
                        .enqueueDesktopNotification = true},
-                      {.eventId = "invite-1",
+                      {.event = occurrenceInvitations,
+                       .eventId = "invite-1",
                        .recurrenceId =
                            javelin::jmap::calendar::LocalDateTime{.value = "2099-08-27T10:00:00"},
                        .selfParticipantId = "self",

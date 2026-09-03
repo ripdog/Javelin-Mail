@@ -5,6 +5,7 @@
 #include <QCoroTask>
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -64,6 +65,15 @@ namespace javelin::jmap::sync
         bool notifyConsumer = true;
     };
 
+    struct CalendarAlertEvent
+    {
+        std::string accountId;
+        std::string calendarEventId;
+        std::string uid;
+        std::optional<std::string> recurrenceId;
+        std::string alertId;
+    };
+
     struct StateChangeStreamSummary
     {
         std::string lastState;
@@ -98,6 +108,11 @@ namespace javelin::jmap::sync
         virtual ~StateChangeConsumer() = default;
 
         [[nodiscard]] virtual QCoro::Task<void> onStateChange(StateChangeEvent event) = 0;
+        [[nodiscard]] virtual QCoro::Task<void> onCalendarAlert(CalendarAlertEvent event)
+        {
+            static_cast<void>(event);
+            co_return;
+        }
     };
 
     class StateChangeSource

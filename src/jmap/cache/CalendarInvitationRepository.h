@@ -16,6 +16,7 @@ namespace javelin::jmap::cache
 {
     struct CalendarInvitationProjection
     {
+        calendar::CalendarEvent event;
         std::string eventId;
         std::optional<calendar::LocalDateTime> recurrenceId = std::nullopt;
         std::string selfParticipantId;
@@ -30,12 +31,9 @@ namespace javelin::jmap::cache
     {
         std::string accountId;
         std::string notificationState;
-        std::string eventState;
         bool replaceNotifications = false;
         std::vector<calendar::CalendarEventNotification> notifications;
         std::vector<std::string> deletedNotificationIds;
-        std::vector<calendar::CalendarEvent> events;
-        std::vector<calendar::Occurrence> nonRecurringOccurrences;
         std::vector<std::string> destroyedEventIds;
         std::vector<std::string> consideredEventIds;
         std::vector<CalendarInvitationProjection> pendingInvitations;

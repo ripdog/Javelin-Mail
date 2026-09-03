@@ -106,14 +106,13 @@ TEST_CASE("calendar notification scans expose the next exact trigger and sync co
         .utcEnd = javelin::jmap::calendar::UtcInstant{.value = "2026-07-28T10:30:00Z"},
         .allDay = false};
     REQUIRE_FALSE(calendars
-                      .reconcileWindow({.accountId = "calendar-account",
-                                        .start = {.value = "2026-07-01T00:00:00"},
-                                        .end = {.value = "2026-08-01T00:00:00"},
-                                        .displayTimeZone = {.value = "Etc/UTC"},
-                                        .queryState = "query-state",
-                                        .eventState = "event-state",
-                                        .events = {event},
-                                        .occurrences = {occurrence}})
+                      .reconcileReminderHorizon({.accountId = "calendar-account",
+                                                 .start = {.value = "2026-07-01T00:00:00"},
+                                                 .end = {.value = "2026-08-01T00:00:00"},
+                                                 .displayTimeZone = {.value = "Etc/UTC"},
+                                                 .eventState = "event-state",
+                                                 .events = {event},
+                                                 .occurrences = {occurrence}})
                       .has_value());
 
     javelin::jmap::cache::CalendarNotificationRepository notifications{connection};

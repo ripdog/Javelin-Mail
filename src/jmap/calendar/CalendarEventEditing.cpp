@@ -1,9 +1,11 @@
 #include "jmap/calendar/CalendarEventEditing.h"
 
+#include <QRegularExpression>
 #include <QUrl>
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
@@ -317,6 +319,81 @@ namespace javelin::jmap::calendar
         auto result = baseEvent;
         result.recurrenceOverrides[recurrenceId.value].excluded = true;
         return result;
+    }
+
+    namespace
+    {
+        struct DurationParts
+        {
+            qint64 calendarDays = 0;
+            qint64 elapsedSeconds = 0;
+            bool negative = false;
+        };
+
+        std::optional<DurationParts> durationParts(const Duration& duration)
+        {
+            static const QRegularExpression expression{
+                QStringLiteral("^([+-])?P(?:(\\d+)W)?(?:(\\d+)D)?(?:T(?:(\\d+)H)?(?:(\\d+)M)?"
+                               "(?:(\\d+(?:\\.\\d+)?)S)?)?$")};
+            const auto match = expression.match(QString::fromStdString(duration.value));
+            if (!match.hasMatch())
+                return std::nullopt;
+            return DurationParts{
+                .calendarDays = match.captured(2).toLongLong() * 7 + match.captured(3).toLongLong(),
+                .elapsedSeconds = match.captured(4).toLongLong() * 3600 +
+                                  match.captured(5).toLongLong() * 60 +
+                                  static_cast<qint64>(std::round(match.captured(6).toDouble())),
+                .negative = match.captured(1) == QStringLiteral("-"),
+            };
+        }
+    } // namespace
+
+    std::optional<qint64> durationSeconds(const Duration& duration)
+    {
+        const auto parts = durationParts(duration);
+        if (!parts)
+            return std::nullopt;
+        const qint64 seconds = parts->calendarDays * 86400 + parts->elapsedSeconds;
+        return parts->negative ? -seconds : seconds;
+    }
+
+    QDateTime alertTrigger(const Alert& alert, const QDateTime& startsAt, const QDateTime& endsAt,
+                           const QTimeZone& timeZone)
+    {
+        if (alert.triggerKind == AlertTriggerKind::Absolute && alert.when)
+            return QDateTime::fromString(QString::fromStdString(alert.when->value),
+                                         Qt::ISODateWithMs)
+                .toUTC();
+        if (!alert.offset)
+            return {};
+        const auto offset = durationParts(*alert.offset);
+        if (!offset)
+            return {};
+
+        auto trigger = alert.relativeTo == "end" ? endsAt : startsAt;
+        if (!trigger.isValid())
+            return {};
+        if (offset->negative)
+        {
+            trigger = trigger.addSecs(-offset->elapsedSeconds);
+            if (offset->calendarDays != 0)
+            {
+                if (!timeZone.isValid())
+                    return {};
+                trigger = trigger.toTimeZone(timeZone).addDays(-offset->calendarDays);
+            }
+        }
+        else
+        {
+            if (offset->calendarDays != 0)
+            {
+                if (!timeZone.isValid())
+                    return {};
+                trigger = trigger.toTimeZone(timeZone).addDays(offset->calendarDays);
+            }
+            trigger = trigger.addSecs(offset->elapsedSeconds);
+        }
+        return trigger.toUTC();
     }
 
     CalendarEvent acknowledgeAlert(CalendarEvent event, Alert alert,

@@ -412,7 +412,7 @@ TEST_CASE("calendar invitation service resolves the next recurring occurrence fo
             "calendar-invitation-next-occurrence"),
         response(
             "CalendarEvent/get",
-            R"({"accountId":"calendar-account","state":"e1","list":[{"@type":"Event","id":"instance-next","baseEventId":"series-1","recurrenceId":"2026-09-03T09:00:00","uid":"series-uid","calendarIds":{"work":true},"title":"Long-running meeting","start":"2026-09-03T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","isDraft":false,"isOrigin":false,"participants":{"self":{"@type":"Participant","name":"Alice","calendarAddress":"mailto:alice@example.test","participationStatus":"needs-action","roles":{"attendee":true}}}}],"notFound":[]})",
+            R"({"accountId":"calendar-account","state":"e1","list":[{"@type":"Event","id":"instance-next","baseEventId":"series-1","recurrenceId":"2099-09-03T09:00:00","uid":"series-uid","calendarIds":{"work":true},"title":"Long-running meeting","start":"2099-09-03T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","isDraft":false,"isOrigin":false,"participants":{"self":{"@type":"Participant","name":"Alice","calendarAddress":"mailto:alice@example.test","participationStatus":"needs-action","roles":{"attendee":true}}}}],"notFound":[]})",
             "calendar-invitation-event-get"),
     };
 
@@ -436,12 +436,12 @@ TEST_CASE("calendar invitation service resolves the next recurring occurrence fo
     const auto& invitation = invitations.front();
     REQUIRE(signal.has_value());
     CHECK(signal->eventId == QStringLiteral("series-1"));
-    CHECK(signal->recurrenceId == QStringLiteral("2026-09-03T09:00:00"));
-    CHECK(signal->navigationDate == QStringLiteral("2026-09-03"));
+    CHECK(signal->recurrenceId == QStringLiteral("2099-09-03T09:00:00"));
+    CHECK(signal->navigationDate == QStringLiteral("2099-09-03"));
     CHECK_FALSE(invitation.recurrenceId.has_value());
     REQUIRE(invitation.displayRecurrenceId.has_value());
-    CHECK(invitation.displayRecurrenceId->value == "2026-09-03T09:00:00");
-    CHECK(invitation.displayTime.value == "2026-09-03T09:00:00");
+    CHECK(invitation.displayRecurrenceId->value == "2099-09-03T09:00:00");
+    CHECK(invitation.displayTime.value == "2099-09-03T09:00:00");
     CHECK(transport.results.empty());
 }
 

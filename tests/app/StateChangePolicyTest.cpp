@@ -15,7 +15,7 @@ TEST_CASE("state-change subscriptions include supported groupware data types", "
               {.calendar = true, .contacts = true, .identities = true}) ==
           std::vector<std::string>{"Email", "Mailbox", "Identity", "Calendar", "CalendarEvent",
                                    "CalendarEventNotification", "ParticipantIdentity",
-                                   "AddressBook", "ContactCard"});
+                                   "CalendarAlert", "AddressBook", "ContactCard"});
 }
 
 TEST_CASE("secondary Identity changes survive subscription filtering", "[app][sync][identity]")

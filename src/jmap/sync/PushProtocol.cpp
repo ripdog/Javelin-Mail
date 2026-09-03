@@ -2,6 +2,9 @@
 
 #include <glaze/glaze.hpp>
 
+#include <QDateTime>
+#include <QRegularExpression>
+
 #include <algorithm>
 #include <charconv>
 #include <unordered_map>
@@ -26,6 +29,21 @@ namespace javelin::jmap::sync
     {
         std::optional<std::variant<unsigned int, std::string>> interval;
     };
+
+    struct RawCalendarAlert
+    {
+        std::optional<std::string> type;
+        std::string accountId;
+        std::string calendarEventId;
+        std::string uid;
+        std::optional<std::string> recurrenceId;
+        std::string alertId;
+    };
+
+    struct RawPushType
+    {
+        std::optional<std::string> type;
+    };
 } // namespace javelin::jmap::sync
 
 template <> struct glz::meta<javelin::jmap::sync::RawEventSourceStateChange>
@@ -46,6 +64,20 @@ template <> struct glz::meta<javelin::jmap::sync::RawPushPing>
 {
     using T = javelin::jmap::sync::RawPushPing;
     static constexpr auto value = glz::object("interval", &T::interval);
+};
+
+template <> struct glz::meta<javelin::jmap::sync::RawCalendarAlert>
+{
+    using T = javelin::jmap::sync::RawCalendarAlert;
+    static constexpr auto value = glz::object(
+        "@type", &T::type, "accountId", &T::accountId, "calendarEventId", &T::calendarEventId,
+        "uid", &T::uid, "recurrenceId", &T::recurrenceId, "alertId", &T::alertId);
+};
+
+template <> struct glz::meta<javelin::jmap::sync::RawPushType>
+{
+    using T = javelin::jmap::sync::RawPushType;
+    static constexpr auto value = glz::object("@type", &T::type);
 };
 
 namespace javelin::jmap::sync
@@ -74,6 +106,55 @@ namespace javelin::jmap::sync
                 }
             }
             return event;
+        }
+
+        template <typename T>
+        [[nodiscard]] std::variant<T, PushProtocolError> parseJson(std::string_view json);
+
+        [[nodiscard]] bool subscribedCalendarAccount(const StateChangeSubscription& subscription,
+                                                     const std::string_view accountId)
+        {
+            if (subscription.accountId == accountId)
+                return true;
+            return std::ranges::find(subscription.groupwareAccountIds, accountId) !=
+                   subscription.groupwareAccountIds.end();
+        }
+
+        [[nodiscard]] bool validLocalDateTime(const std::string_view value)
+        {
+            static const QRegularExpression expression{
+                QStringLiteral("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d*[1-9])?$")};
+            const QString text = QString::fromStdString(std::string{value});
+            if (!expression.match(text).hasMatch())
+                return false;
+            const QString base = text.first(19);
+            const auto parsed =
+                QDateTime::fromString(base, QStringLiteral("yyyy-MM-dd'T'HH:mm:ss"));
+            return parsed.isValid() &&
+                   parsed.toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss")) == base;
+        }
+
+        [[nodiscard]] PushMessage calendarAlertMessage(const StateChangeSubscription& subscription,
+                                                       const std::string_view payload)
+        {
+            const auto parsed = parseJson<RawCalendarAlert>(payload);
+            if (const auto* error = std::get_if<PushProtocolError>(&parsed))
+                return *error;
+            const auto& alert = std::get<RawCalendarAlert>(parsed);
+            if (alert.type != std::optional<std::string>{"CalendarAlert"} ||
+                alert.accountId.empty() || alert.calendarEventId.empty() || alert.uid.empty() ||
+                alert.alertId.empty() ||
+                (alert.recurrenceId && !validLocalDateTime(*alert.recurrenceId)))
+                return PushProtocolError{.message = "Invalid JMAP CalendarAlert payload."};
+            if (std::ranges::find(subscription.types, "CalendarAlert") ==
+                    subscription.types.end() ||
+                !subscribedCalendarAccount(subscription, alert.accountId))
+                return PushMessageIgnored{};
+            return CalendarAlertEvent{.accountId = alert.accountId,
+                                      .calendarEventId = alert.calendarEventId,
+                                      .uid = alert.uid,
+                                      .recurrenceId = alert.recurrenceId,
+                                      .alertId = alert.alertId};
         }
 
         template <typename T>
@@ -138,6 +219,8 @@ namespace javelin::jmap::sync
             return PushPing{.interval = *interval};
         }
 
+        if (eventName == "calendarAlert")
+            return calendarAlertMessage(subscription, eventData);
         if (eventName != "state")
             return PushMessageIgnored{};
 
@@ -169,6 +252,12 @@ namespace javelin::jmap::sync
                                           const std::string_view fallbackState,
                                           const std::string_view message)
     {
+        const auto typeRead = parseJson<RawPushType>(message);
+        if (const auto* error = std::get_if<PushProtocolError>(&typeRead))
+            return *error;
+        if (std::get<RawPushType>(typeRead).type == std::optional<std::string>{"CalendarAlert"})
+            return calendarAlertMessage(subscription, message);
+
         const auto parsed = parseJson<RawWebSocketStateChange>(message);
         if (const auto* error = std::get_if<PushProtocolError>(&parsed))
             return *error;

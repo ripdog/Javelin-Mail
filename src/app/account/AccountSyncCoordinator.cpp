@@ -302,6 +302,19 @@ namespace javelin::app
         co_return;
     }
 
+    QCoro::Task<void>
+    AccountSyncCoordinator::onCalendarAlert(javelin::jmap::sync::CalendarAlertEvent event)
+    {
+        if (m_runContext == nullptr)
+            co_return;
+        Q_EMIT calendarAlertReceived(
+            QString::fromStdString(m_accountId), QString::fromStdString(event.accountId),
+            QString::fromStdString(event.calendarEventId), QString::fromStdString(event.uid),
+            event.recurrenceId ? QString::fromStdString(*event.recurrenceId) : QString{},
+            QString::fromStdString(event.alertId));
+        co_return;
+    }
+
     bool AccountSyncCoordinator::hasValidSettings() const
     {
         return m_settings.has_value() && !m_settings->loginEmail.empty() &&

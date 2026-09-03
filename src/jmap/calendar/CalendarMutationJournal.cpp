@@ -169,6 +169,9 @@ namespace javelin::jmap::calendar
             if (const auto error = transaction.append(std::get<sync::MutationRecord>(generic)))
                 return error;
         }
+        if (const auto error = m_calendar.invalidateEventWindows(transaction.cacheTransaction(),
+                                                                 accountId, destroyedIds))
+            return error;
         if (const auto error =
                 m_calendar.projectEvents(transaction.cacheTransaction(), accountId, eventState,
                                          projectedEvents, nonRecurringOccurrences, destroyedIds))

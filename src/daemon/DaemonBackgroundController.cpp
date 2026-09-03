@@ -386,8 +386,9 @@ namespace javelin::app
         for (const auto& ownerAccountId :
              m_services.calendarApplicationService().calendarMetadataReadyOwners())
         {
-            m_services.calendarInvitationService().accountChanged(
-                QString::fromStdString(ownerAccountId));
+            const auto owner = QString::fromStdString(ownerAccountId);
+            m_services.calendarInvitationService().accountChanged(owner);
+            m_services.calendarNotificationService().calendarMetadataReady(owner);
         }
         if (enableNetworkReachability)
             setupNetworkReachability();

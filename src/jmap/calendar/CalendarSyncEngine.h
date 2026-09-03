@@ -29,6 +29,9 @@ namespace javelin::jmap::calendar
         refresh(LiveConnectionSettings settings, std::string ownerAccountId,
                 VisibleInterval interval, TimeZoneId displayTimeZone,
                 bool refreshCalendarMetadata = true);
+        [[nodiscard]] QCoro::Task<CalendarRefreshResult>
+        refreshReminderHorizon(LiveConnectionSettings settings, std::string ownerAccountId,
+                               VisibleInterval interval, TimeZoneId displayTimeZone);
         [[nodiscard]] QCoro::Task<std::variant<bool, OperationError>>
         refreshMetadata(LiveConnectionSettings settings, std::string ownerAccountId);
         [[nodiscard]] QCoro::Task<CalendarRefreshResult>
@@ -37,6 +40,16 @@ namespace javelin::jmap::calendar
         void invalidateRefresh(std::string_view ownerAccountId);
 
       private:
+        enum class MaterializationTarget
+        {
+            PresentationWindow,
+            ReminderHorizon,
+        };
+
+        [[nodiscard]] QCoro::Task<CalendarRefreshResult>
+        refreshMaterialization(LiveConnectionSettings settings, std::string ownerAccountId,
+                               VisibleInterval interval, TimeZoneId displayTimeZone,
+                               bool refreshCalendarMetadata, MaterializationTarget target);
         [[nodiscard]] std::uint64_t beginRefresh(std::string_view ownerAccountId);
         [[nodiscard]] bool isCurrentRefresh(std::string_view ownerAccountId,
                                             std::uint64_t generation) const;

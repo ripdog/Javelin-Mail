@@ -22,7 +22,15 @@ namespace
             co_return;
         }
 
+        [[nodiscard]] QCoro::Task<void>
+        onCalendarAlert(javelin::jmap::sync::CalendarAlertEvent event) override
+        {
+            alerts.push_back(std::move(event));
+            co_return;
+        }
+
         std::vector<javelin::jmap::sync::StateChangeEvent> events;
+        std::vector<javelin::jmap::sync::CalendarAlertEvent> alerts;
     };
 } // namespace
 
@@ -62,6 +70,28 @@ TEST_CASE("event source protocol parser returns typed pings", "[jmap][push][http
     REQUIRE(std::holds_alternative<javelin::jmap::sync::PushPing>(parsed));
     CHECK(std::get<javelin::jmap::sync::PushPing>(parsed).interval == 30s);
     CHECK(javelin::jmap::sync::pushActivityTimeout(30s) == 75s);
+}
+
+TEST_CASE("event source protocol parser returns subscribed calendar alerts",
+          "[jmap][push][event-source][calendar]")
+{
+    const javelin::jmap::sync::StateChangeSubscription subscription{
+        .accountId = "mail-account",
+        .lastState = "push-state-1",
+        .types = {"CalendarAlert"},
+        .groupwareAccountIds = {"calendar-account"},
+    };
+    const auto parsed = javelin::jmap::sync::parseEventSourcePushMessage(
+        subscription, subscription.lastState, "calendarAlert", "push-state-2",
+        R"({"@type":"CalendarAlert","accountId":"calendar-account","calendarEventId":"event-1","uid":"uid-1","recurrenceId":"2026-09-03T09:00:00","alertId":"alert-1"})");
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::CalendarAlertEvent>(parsed));
+    const auto& alert = std::get<javelin::jmap::sync::CalendarAlertEvent>(parsed);
+    CHECK(alert.accountId == "calendar-account");
+    CHECK(alert.calendarEventId == "event-1");
+    REQUIRE(alert.recurrenceId.has_value());
+    CHECK(*alert.recurrenceId == "2026-09-03T09:00:00");
+    CHECK(alert.alertId == "alert-1");
 }
 
 TEST_CASE("push stream sessions own state delivery for every transport", "[jmap][push]")
@@ -110,6 +140,20 @@ TEST_CASE("push stream sessions own state delivery for every transport", "[jmap]
     CHECK(stream.summary().updateCount == 1);
     REQUIRE(consumer.events.size() == 1);
     CHECK(consumer.events.front().newState == "state-3");
+
+    outcome = QCoro::waitFor(stream.accept(javelin::jmap::sync::CalendarAlertEvent{
+        .accountId = "calendar-account",
+        .calendarEventId = "event-1",
+        .uid = "uid-1",
+        .recurrenceId = std::nullopt,
+        .alertId = "alert-1",
+    }));
+    CHECK(std::holds_alternative<javelin::jmap::sync::PushStreamIgnored>(outcome));
+    CHECK(stream.subscription().lastState == "state-3");
+    CHECK(stream.summary().lastState == "state-3");
+    CHECK(stream.summary().updateCount == 2);
+    REQUIRE(consumer.alerts.size() == 1);
+    CHECK(consumer.alerts.front().calendarEventId == "event-1");
 }
 
 TEST_CASE("push activity tracking shares status and timeout state", "[jmap][push]")

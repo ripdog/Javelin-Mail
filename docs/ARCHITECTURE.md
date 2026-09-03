@@ -524,11 +524,63 @@ notified only after that coordinator has established usable cached metadata; whe
 Calendar mutation prevents authoritative replacement, the projected cache remains usable but the
 coordinator does not mark metadata authoritative or suppress a later reconciliation fetch. Readiness
 is retained and replayed when background invitation delivery starts, so an early startup refresh
-cannot lose its consumer trigger. `CalendarInvitationService` consumes that cached Calendar metadata
-and owns only invitation-specific `CalendarEventNotification` reconciliation,
+cannot lose its consumer trigger. Calendar mutation correctness is likewise not delegated to GUI or
+history callers: `CalendarMutationEngine` determines when a successful recurring create or
+occurrence-affecting recurring update still requires authoritative range expansion and marks the
+commit receipt incomplete. `CalendarApplicationService` retains that repair demand until a
+post-mutation authoritative materialization of the current visible range succeeds. Range-refresh
+flights carry a materialization epoch, so a refresh that began before the accepted mutation cannot
+accidentally satisfy the repair even if it was itself an authoritative refresh; later event mutations
+that invalidate an in-flight repair preserve the outstanding repair demand. Durable query-window
+state remains stale across restart until authoritative materialization catches up, so this in-memory
+coalescing policy is not the only record of an incomplete presentation. The legacy
+`calendar_events.state` field is maintained only as a mirror of Javelin's owned per-account
+`CalendarEvent` cursor: authoritative cursor advances update both atomically, while reminder-only
+`PreserveCursor` materialization reuses the currently owned cursor rather than recording the fetched
+server state. A `CalendarEvent/changes` page containing any created, updated, or destroyed event never
+mutates cached occurrences incrementally: event-local `start` values cannot safely place an occurrence
+into display-timezone query windows, so the sync engine performs authoritative server-side range
+rematerialization instead. Optimistic mutation projection follows the same timezone boundary: retained
+occurrence identities keep authoritative membership in display timezones that cannot be recalculated
+locally, while local range comparisons are used only for floating events or windows whose display
+zone exactly matches the event zone. Retained occurrence rows are upserted rather than deleted, so a
+non-timing edit does not accidentally discard daemon reminder-horizon ownership. A projection that
+changes the event or occurrence timing explicitly invalidates that reminder ownership; the daemon
+horizon refresh then re-establishes authoritative trigger UTC before the post-refresh reminder scan.
+Only a changes page with no event-object delta may advance the collection cursor in place; that
+compare-and-swap updates known-current query windows and cached event-row cursor mirrors atomically and
+rejects a stale expected cursor. There is no generic local CalendarEvent-delta materialization path.
+The row field is not an independent source of synchronization truth.
+`CalendarInvitationService` consumes that cached Calendar metadata and owns only invitation-specific
+`CalendarEventNotification` reconciliation,
 `ParticipantIdentity` synchronization, and event fetches required to resolve invitations outside the
-visible range. `CalendarCacheReader` owns cached reads. The GUI consumes typed calendar values from
-its read-only cache surface and commands through application ports such as `CalendarCommandPort`; it
+visible range. Pending invitations retain their own event snapshot and resolved display UTC for
+presentation and dispatch. A legacy/incomplete snapshot may use cached occurrence local time and
+recurrence identity to choose its visible instance, but it never borrows presentation-derived UTC from
+`calendar_occurrences`; without invitation-owned UTC it degrades to local display time until
+reconciliation repairs the snapshot. Invitation reconciliation never advances the authoritative
+`CalendarEvent` state token or overwrites the shared CalendarEvent cache. `CalendarNotificationService` separately owns reminder delivery and a
+bounded daemon reminder horizon. That horizon reuses `CalendarSyncEngine`'s authoritative server-side
+recurrence expansion and stores both reminder eligibility and the horizon-derived UTC trigger timing in
+`calendar_reminder_occurrences`; it is not a presentation/query window and does not own another
+CalendarEvent cursor. Local reminder scans consume only that daemon-owned membership, so stale or
+presentation-only occurrence rows cannot become notification candidates. Presentation-window eviction
+therefore cannot delete an occurrence still needed by the daemon's reminder horizon, and rematerializing
+a floating event for a GUI timezone cannot overwrite the UTC instant used by reminder delivery.
+Conversely, when an event changes, occurrence replacement drops its old reminder membership rather than
+retaining a possibly stale trigger; the notification service queues authoritative horizon
+rematerialization from CalendarEvent state changes and calendar cache commits. For Calendars-capable
+sessions, push subscriptions include the draft-26 `CalendarAlert` pseudo-type; these alerts are event notifications,
+not collection state, so handling them never advances a JMAP state token. The daemon persists each raw
+pushed alert before any follow-up fetch or desktop delivery, then resolves the authoritative event and
+shares the same durable notification identity used by local reminder scans. `CalendarAlert` remains the
+exact server-driven path outside the bounded local horizon as well as within it. Fetch,
+Calendar-metadata, desktop-publication, snooze, and restart recovery therefore cannot depend on a
+GUI-visible occurrence window or on the server repeating a push. Dismissing a pushed reminder whose
+event is not cached fetches the current authoritative event before submitting the acknowledgement
+through the normal calendar mutation path. `CalendarCacheReader` owns cached reads. The GUI consumes typed
+calendar values from its read-only cache surface and commands through application ports such as
+`CalendarCommandPort`; it
 never constructs method names or raw JSON. GUI connection-status changes are presentation state and
 do not create calendar synchronization demand; opening or navigating a calendar range does.
 
