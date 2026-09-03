@@ -45,8 +45,7 @@ namespace javelin::jmap::calendar
                                                   const LocalDateTime& recurrenceId);
     [[nodiscard]] std::optional<qint64> durationSeconds(const Duration& duration);
     [[nodiscard]] QDateTime alertTrigger(const Alert& alert, const QDateTime& startsAt,
-                                         const QDateTime& endsAt,
-                                         const QTimeZone& timeZone = QTimeZone::UTC);
+                                         const QDateTime& endsAt, const QTimeZone& timeZone);
     [[nodiscard]] CalendarEvent acknowledgeAlert(CalendarEvent event, Alert alert,
                                                  UtcInstant acknowledgedAt);
 } // namespace javelin::jmap::calendar

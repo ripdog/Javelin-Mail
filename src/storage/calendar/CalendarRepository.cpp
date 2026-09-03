@@ -3,8 +3,11 @@
 #include "jmap/api/CalendarMethods.h"
 #include "jmap/calendar/CalendarEventEditing.h"
 
+#include <QDateTime>
+#include <QDebug>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QTimeZone>
 
 #include <algorithm>
 #include <unordered_map>
@@ -46,6 +49,21 @@ namespace javelin::jmap::cache
         QVariant optionalString(const std::optional<std::string>& value)
         {
             return value ? QVariant{QString::fromStdString(*value)} : QVariant{};
+        }
+
+        std::optional<QString> utcInstant(const calendar::LocalDateTime& value,
+                                          const QTimeZone& timeZone)
+        {
+            if (!timeZone.isValid())
+                return std::nullopt;
+            const auto local =
+                QDateTime::fromString(QString::fromStdString(value.value), Qt::ISODate);
+            if (!local.isValid())
+                return std::nullopt;
+            const QDateTime zoned{local.date(), local.time(), timeZone};
+            if (!zoned.isValid())
+                return std::nullopt;
+            return zoned.toUTC().toString(Qt::ISODateWithMs);
         }
 
         bool exec(QSqlQuery& query, std::optional<DatabaseError>& failure, const QString& operation)
@@ -1245,20 +1263,55 @@ namespace javelin::jmap::cache
         addMembership.prepare(QStringLiteral(
             "INSERT INTO calendar_reminder_occurrences(account_id,occurrence_id,start_utc,end_utc) "
             "VALUES (:account,:occurrence,:start_utc,:end_utc)"));
+        std::unordered_map<std::string, const calendar::CalendarEvent*> eventsById;
+        for (const auto& event : horizon.events)
+            eventsById.emplace(event.id, &event);
+        const QTimeZone horizonZone{QByteArray::fromStdString(horizon.displayTimeZone.value)};
         for (const auto& occurrence : horizon.occurrences)
         {
+            auto startUtc = occurrence.utcStart
+                                ? std::optional{QString::fromStdString(occurrence.utcStart->value)}
+                                : std::optional<QString>{};
+            auto endUtc = occurrence.utcEnd
+                              ? std::optional{QString::fromStdString(occurrence.utcEnd->value)}
+                              : std::optional<QString>{};
+            if (!startUtc || !endUtc)
+            {
+                const auto event = eventsById.find(occurrence.eventId);
+                if (event == eventsById.end())
+                {
+                    qWarning().noquote()
+                        << "Skip calendar reminder occurrence without an event for UTC conversion"
+                        << QString::fromStdString(horizon.accountId)
+                        << QString::fromStdString(occurrence.id)
+                        << QString::fromStdString(occurrence.eventId);
+                    continue;
+                }
+                const QTimeZone eventZone =
+                    event->second->timeZone
+                        ? QTimeZone{QByteArray::fromStdString(event->second->timeZone->value)}
+                        : horizonZone;
+                if (!startUtc)
+                    startUtc = utcInstant(occurrence.localStart, eventZone);
+                if (!endUtc)
+                    endUtc = utcInstant(occurrence.localEnd, eventZone);
+                if (!startUtc || !endUtc)
+                {
+                    qWarning().noquote()
+                        << "Skip calendar reminder occurrence without usable UTC timing"
+                        << QString::fromStdString(horizon.accountId)
+                        << QString::fromStdString(occurrence.id)
+                        << QString::fromStdString(occurrence.eventId);
+                    continue;
+                }
+            }
+
             addMembership.bindValue(QStringLiteral(":account"),
                                     QString::fromStdString(horizon.accountId));
             addMembership.bindValue(QStringLiteral(":occurrence"),
                                     QString::fromStdString(occurrence.id));
-            addMembership.bindValue(
-                QStringLiteral(":start_utc"),
-                occurrence.utcStart ? QVariant{QString::fromStdString(occurrence.utcStart->value)}
-                                    : QVariant{});
-            addMembership.bindValue(QStringLiteral(":end_utc"),
-                                    occurrence.utcEnd
-                                        ? QVariant{QString::fromStdString(occurrence.utcEnd->value)}
-                                        : QVariant{});
+            addMembership.bindValue(QStringLiteral(":start_utc"), *startUtc);
+            addMembership.bindValue(QStringLiteral(":end_utc"), *endUtc);
             if (!exec(addMembership, failure,
                       QStringLiteral("Add calendar reminder horizon membership")))
                 return failure;
@@ -1326,11 +1379,14 @@ namespace javelin::jmap::cache
 
         QSqlQuery advanceRows{database};
         advanceRows.prepare(QStringLiteral(
-            "UPDATE calendar_events SET state=:new_state WHERE account_id=:account"));
+            "UPDATE calendar_events SET state=:new_state WHERE account_id=:account AND "
+            "state=:expected_state"));
         advanceRows.bindValue(QStringLiteral(":new_state"),
                               QString::fromStdString(std::string{newEventState}));
         advanceRows.bindValue(QStringLiteral(":account"),
                               QString::fromStdString(std::string{accountId}));
+        advanceRows.bindValue(QStringLiteral(":expected_state"),
+                              QString::fromStdString(std::string{expectedEventState}));
         if (!exec(advanceRows, failure, QStringLiteral("Advance cached calendar event row state")))
         {
             database.rollback();
@@ -1368,7 +1424,8 @@ namespace javelin::jmap::cache
         const std::string_view eventState, const std::vector<calendar::CalendarEvent>& events,
         const std::vector<calendar::Occurrence>& replacementOccurrences,
         const std::span<const std::string> destroyedEventIds,
-        const CalendarEventStatePersistence statePersistence)
+        const CalendarEventStatePersistence statePersistence,
+        const std::span<const std::string> occurrenceReplacementEventIds)
     {
         if (const auto error = m_connection.validate())
             return error;
@@ -1658,6 +1715,8 @@ namespace javelin::jmap::cache
         }
 
         std::unordered_map<std::string, std::unordered_set<std::string>> replacementIdsByEvent;
+        for (const auto& eventId : occurrenceReplacementEventIds)
+            replacementIdsByEvent.try_emplace(eventId);
         for (const auto& occurrence : replacementOccurrences)
             replacementIdsByEvent[occurrence.eventId].insert(occurrence.id);
 

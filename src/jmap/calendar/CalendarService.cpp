@@ -70,6 +70,7 @@ namespace javelin::jmap::calendar
                 return error(
                     OperationErrorCode::InvalidRequest,
                     QStringLiteral("The reminder horizon has an invalid date-time range."));
+            const auto normalizedStart = start;
 
             bool yearsValid = true;
             bool monthsValid = true;
@@ -89,9 +90,7 @@ namespace javelin::jmap::calendar
             start = start.addSecs(component(5) * 3600 + component(6) * 60);
             if (!match.captured(7).isEmpty())
                 start = start.addMSecs(qRound64(match.captured(7).toDouble() * 1000.0));
-            if (!start.isValid() ||
-                start <= QDateTime::fromString(QString::fromStdString(requested.start.value),
-                                               Qt::ISODate))
+            if (!start.isValid() || start <= normalizedStart)
                 return error(OperationErrorCode::ProtocolViolation,
                              QStringLiteral("The server advertised an unusable maximum recurrence "
                                             "expansion duration."));

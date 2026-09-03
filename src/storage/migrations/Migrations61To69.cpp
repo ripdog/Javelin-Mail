@@ -253,6 +253,15 @@ namespace javelin::jmap::cache::migrations
                 .name = QStringLiteral("isolate_calendar_invitation_snapshots"),
                 .statements =
                     {
+                        QStringLiteral(
+                            "CREATE TEMP TABLE calendar_pending_invitations_v69_guard (invalid "
+                            "INTEGER NOT NULL CHECK(invalid=0)) STRICT"),
+                        QStringLiteral(
+                            "INSERT INTO calendar_pending_invitations_v69_guard(invalid) SELECT 1 "
+                            "FROM calendar_pending_invitations p LEFT JOIN calendar_events e ON "
+                            "e.account_id=p.account_id AND e.event_id=p.event_id WHERE "
+                            "e.event_id IS NULL LIMIT 1"),
+                        QStringLiteral("DROP TABLE calendar_pending_invitations_v69_guard"),
                         QStringLiteral("ALTER TABLE calendar_pending_invitations RENAME TO "
                                        "calendar_pending_invitations_v68"),
                         QStringLiteral(
@@ -275,7 +284,7 @@ namespace javelin::jmap::cache::migrations
                             "p.source_notification_id,e.document_json,p.display_recurrence_id,"
                             "p.display_start,p.display_utc_start,p.discovered_at,p.last_seen_at "
                             "FROM "
-                            "calendar_pending_invitations_v68 p LEFT JOIN calendar_events e ON "
+                            "calendar_pending_invitations_v68 p JOIN calendar_events e ON "
                             "e.account_id=p.account_id AND e.event_id=p.event_id"),
                         QStringLiteral("DROP TABLE calendar_pending_invitations_v68"),
                         QStringLiteral(

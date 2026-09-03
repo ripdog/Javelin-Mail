@@ -290,6 +290,72 @@ TEST_CASE("pending calendar invitation migration isolates snapshots from event c
     CHECK(retained.value(0).toInt() == 1);
 }
 
+TEST_CASE("pending calendar invitation migration refuses orphaned legacy rows",
+          "[jmap][cache][database][calendar][migration]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+    const QString databasePath =
+        temporaryDir.filePath(QStringLiteral("orphan-calendar-invitation-cache.sqlite3"));
+    const QString fixtureConnectionName = makeConnectionName();
+    {
+        QSqlDatabase fixture =
+            QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), fixtureConnectionName);
+        fixture.setDatabaseName(databasePath);
+        REQUIRE(fixture.open());
+
+        const auto currentRunner = javelin::jmap::cache::createDefaultMigrationRunner();
+        const auto isolatedInvitationSnapshots = std::ranges::find_if(
+            currentRunner.steps(), [](const auto& step) { return step.version == 69; });
+        REQUIRE(isolatedInvitationSnapshots != currentRunner.steps().end());
+        std::vector<javelin::jmap::cache::MigrationStep> legacySteps{currentRunner.steps().begin(),
+                                                                     isolatedInvitationSnapshots};
+        const javelin::jmap::cache::MigrationRunner legacyRunner{std::move(legacySteps)};
+        REQUIRE_FALSE(legacyRunner.migrate(fixture).has_value());
+
+        QSqlQuery seed{fixture};
+        REQUIRE(seed.exec(QStringLiteral(
+            "INSERT INTO accounts(account_id,email_address,session_url,is_primary) "
+            "VALUES('account-1','alice@example.test','https://example.test/jmap',1)")));
+        REQUIRE(seed.exec(QStringLiteral(
+            "INSERT INTO calendar_pending_invitations(account_id,event_id,recurrence_id,"
+            "self_participant_id) VALUES('account-1','missing-event','','self')")));
+        seed.finish();
+        fixture.close();
+    }
+    QSqlDatabase::removeDatabase(fixtureConnectionName);
+
+    auto migratedResult = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = databasePath,
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseError>(migratedResult));
+    CHECK(std::get<javelin::jmap::cache::DatabaseError>(migratedResult)
+              .message.contains(QStringLiteral("Apply migration 69")));
+
+    const QString inspectConnectionName = makeConnectionName();
+    {
+        QSqlDatabase inspect =
+            QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), inspectConnectionName);
+        inspect.setDatabaseName(databasePath);
+        REQUIRE(inspect.open());
+        QSqlQuery version{inspect};
+        REQUIRE(version.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")));
+        REQUIRE(version.next());
+        CHECK(version.value(0).toInt() == 68);
+        QSqlQuery pending{inspect};
+        REQUIRE(pending.exec(QStringLiteral(
+            "SELECT event_id FROM calendar_pending_invitations WHERE account_id='account-1'")));
+        REQUIRE(pending.next());
+        CHECK(pending.value(0).toString() == QStringLiteral("missing-event"));
+        inspect.close();
+    }
+    QSqlDatabase::removeDatabase(inspectConnectionName);
+}
+
 TEST_CASE("calendar window event state migration leaves legacy materialization unknown",
           "[jmap][cache][database][calendar][migration]")
 {

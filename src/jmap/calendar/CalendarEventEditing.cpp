@@ -321,19 +321,40 @@ namespace javelin::jmap::calendar
         return result;
     }
 
+    namespace
+    {
+        struct DurationParts
+        {
+            qint64 calendarDays = 0;
+            qint64 elapsedSeconds = 0;
+            bool negative = false;
+        };
+
+        std::optional<DurationParts> durationParts(const Duration& duration)
+        {
+            static const QRegularExpression expression{
+                QStringLiteral("^([+-])?P(?:(\\d+)W)?(?:(\\d+)D)?(?:T(?:(\\d+)H)?(?:(\\d+)M)?"
+                               "(?:(\\d+(?:\\.\\d+)?)S)?)?$")};
+            const auto match = expression.match(QString::fromStdString(duration.value));
+            if (!match.hasMatch())
+                return std::nullopt;
+            return DurationParts{
+                .calendarDays = match.captured(2).toLongLong() * 7 + match.captured(3).toLongLong(),
+                .elapsedSeconds = match.captured(4).toLongLong() * 3600 +
+                                  match.captured(5).toLongLong() * 60 +
+                                  static_cast<qint64>(std::round(match.captured(6).toDouble())),
+                .negative = match.captured(1) == QStringLiteral("-"),
+            };
+        }
+    } // namespace
+
     std::optional<qint64> durationSeconds(const Duration& duration)
     {
-        static const QRegularExpression expression{
-            QStringLiteral("^([+-])?P(?:(\\d+)W)?(?:(\\d+)D)?(?:T(?:(\\d+)H)?(?:(\\d+)M)?"
-                           "(?:(\\d+(?:\\.\\d+)?)S)?)?$")};
-        const auto match = expression.match(QString::fromStdString(duration.value));
-        if (!match.hasMatch())
+        const auto parts = durationParts(duration);
+        if (!parts)
             return std::nullopt;
-        const qint64 seconds =
-            match.captured(2).toLongLong() * 7 * 86400 + match.captured(3).toLongLong() * 86400 +
-            match.captured(4).toLongLong() * 3600 + match.captured(5).toLongLong() * 60 +
-            static_cast<qint64>(std::round(match.captured(6).toDouble()));
-        return match.captured(1) == QStringLiteral("-") ? -seconds : seconds;
+        const qint64 seconds = parts->calendarDays * 86400 + parts->elapsedSeconds;
+        return parts->negative ? -seconds : seconds;
     }
 
     QDateTime alertTrigger(const Alert& alert, const QDateTime& startsAt, const QDateTime& endsAt,
@@ -343,39 +364,36 @@ namespace javelin::jmap::calendar
             return QDateTime::fromString(QString::fromStdString(alert.when->value),
                                          Qt::ISODateWithMs)
                 .toUTC();
-        if (!alert.offset || !timeZone.isValid())
+        if (!alert.offset)
+            return {};
+        const auto offset = durationParts(*alert.offset);
+        if (!offset)
             return {};
 
-        static const QRegularExpression expression{
-            QStringLiteral("^([+-])?P(?:(\\d+)W)?(?:(\\d+)D)?(?:T(?:(\\d+)H)?(?:(\\d+)M)?"
-                           "(?:(\\d+(?:\\.\\d+)?)S)?)?$")};
-        const auto match = expression.match(QString::fromStdString(alert.offset->value));
-        if (!match.hasMatch())
+        auto trigger = alert.relativeTo == "end" ? endsAt : startsAt;
+        if (!trigger.isValid())
             return {};
-        const qint64 calendarDays = match.captured(2).toLongLong() * 7 +
-                                    match.captured(3).toLongLong();
-        const qint64 elapsedMilliseconds =
-            match.captured(4).toLongLong() * 3600000 +
-            match.captured(5).toLongLong() * 60000 +
-            static_cast<qint64>(std::round(match.captured(6).toDouble() * 1000.0));
-        const bool negative = match.captured(1) == QStringLiteral("-");
-        const auto anchor = alert.relativeTo == "end" ? endsAt : startsAt;
-        if (!anchor.isValid())
-            return {};
-
-        if (!negative)
+        if (offset->negative)
         {
-            auto local = anchor.toTimeZone(timeZone).addDays(calendarDays);
-            if (!local.isValid())
-                return {};
-            return local.toUTC().addMSecs(elapsedMilliseconds);
+            trigger = trigger.addSecs(-offset->elapsedSeconds);
+            if (offset->calendarDays != 0)
+            {
+                if (!timeZone.isValid())
+                    return {};
+                trigger = trigger.toTimeZone(timeZone).addDays(-offset->calendarDays);
+            }
         }
-
-        auto local = anchor.addMSecs(-elapsedMilliseconds).toTimeZone(timeZone);
-        if (!local.isValid())
-            return {};
-        local = local.addDays(-calendarDays);
-        return local.isValid() ? local.toUTC() : QDateTime{};
+        else
+        {
+            if (offset->calendarDays != 0)
+            {
+                if (!timeZone.isValid())
+                    return {};
+                trigger = trigger.toTimeZone(timeZone).addDays(offset->calendarDays);
+            }
+            trigger = trigger.addSecs(offset->elapsedSeconds);
+        }
+        return trigger.toUTC();
     }
 
     CalendarEvent acknowledgeAlert(CalendarEvent event, Alert alert,

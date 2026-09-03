@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <utility>
 
 namespace
@@ -334,6 +335,49 @@ TEST_CASE("calendar alert push fetches an uncached event and delivers it once",
     REQUIRE(std::holds_alternative<javelin::jmap::cache::CalendarPushedAlertClaim>(claimedAgain));
     CHECK_FALSE(std::get<javelin::jmap::cache::CalendarPushedAlertClaim>(claimedAgain).claimed);
     CHECK(std::get<javelin::jmap::cache::CalendarPushedAlertClaim>(claimedAgain).completed);
+}
+
+TEST_CASE("durable pushed calendar alert identity includes the owning account",
+          "[app][calendar][notification][push][identity]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-notification-push-owner-identity"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    QSqlQuery accounts{connection.database()};
+    REQUIRE(accounts.exec(QStringLiteral(
+        "INSERT INTO accounts(account_id,email_address,session_url,is_primary) VALUES "
+        "('owner-a','a@example.test','https://a.example.test/jmap',1),"
+        "('owner-b','b@example.test','https://b.example.test/jmap',0)")));
+
+    FakeCalendarEvents calendarEvents;
+    calendarEvents.event = uncachedEvent();
+    javelin::app::CalendarNotificationService service{connection, calendarEvents, calendarEvents};
+    for (const auto& owner : {QStringLiteral("owner-a"), QStringLiteral("owner-b")})
+    {
+        calendarEvents.nextAuthoritativeError = javelin::jmap::OperationError{
+            .code = javelin::jmap::OperationErrorCode::NetworkUnavailable,
+            .message = QStringLiteral("offline"),
+        };
+        service.calendarAlertReceived(owner, QStringLiteral("shared-calendar-account"),
+                                      QStringLiteral("event-1"), QStringLiteral("uid-1"), QString{},
+                                      QStringLiteral("alert-1"));
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    }
+
+    javelin::jmap::cache::CalendarNotificationRepository repository{connection};
+    const auto pending = repository.pendingPushed();
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::CalendarPushedAlert>>(pending));
+    const auto& alerts = std::get<std::vector<javelin::jmap::cache::CalendarPushedAlert>>(pending);
+    REQUIRE(alerts.size() == 2);
+    CHECK(alerts[0].key != alerts[1].key);
+    CHECK(std::unordered_set<std::string>{alerts[0].ownerAccountId, alerts[1].ownerAccountId} ==
+          std::unordered_set<std::string>{"owner-a", "owner-b"});
 }
 
 TEST_CASE("dismissing an uncached pushed calendar alert acknowledges the authoritative event",

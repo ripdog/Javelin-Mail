@@ -302,15 +302,16 @@ namespace javelin::jmap::cache
         QSqlQuery query{database};
         query.prepare(QStringLiteral(
             "SELECT o.account_id,o.occurrence_id,o.event_id,r.start_utc,r.end_utc,e.title,"
-            "e.document_json,a.owner_account_id,o.recurrence_id,o.local_start,o.local_end,"
-            "h.display_time_zone FROM calendar_reminder_occurrences r JOIN calendar_occurrences o "
-            "ON o.account_id=r.account_id AND o.occurrence_id=r.occurrence_id JOIN "
-            "calendar_reminder_horizons h ON h.account_id=r.account_id JOIN calendar_events e ON "
-            "e.account_id=o.account_id AND e.event_id=o.event_id JOIN accounts a ON "
-            "a.account_id=o.account_id WHERE EXISTS (SELECT 1 FROM calendar_event_calendars ec "
-            "JOIN calendars c ON c.account_id=ec.account_id AND c.calendar_id=ec.calendar_id "
-            "WHERE ec.account_id=o.account_id AND ec.event_id=o.event_id AND c.is_subscribed=1) "
-            "ORDER BY r.start_utc"));
+            "e.document_json,a.owner_account_id,o.recurrence_id,h.display_time_zone FROM "
+            "calendar_reminder_occurrences r JOIN calendar_reminder_horizons h ON "
+            "h.account_id=r.account_id JOIN calendar_occurrences o ON o.account_id=r.account_id "
+            "AND "
+            "o.occurrence_id=r.occurrence_id JOIN calendar_events e ON e.account_id=o.account_id "
+            "AND e.event_id=o.event_id JOIN accounts a ON a.account_id=o.account_id WHERE EXISTS "
+            "(SELECT 1 FROM calendar_event_calendars ec JOIN calendars c ON "
+            "c.account_id=ec.account_id AND c.calendar_id=ec.calendar_id WHERE "
+            "ec.account_id=o.account_id AND ec.event_id=o.event_id AND c.is_subscribed=1) ORDER BY "
+            "r.start_utc"));
         if (!query.exec())
         {
             database.rollback();
@@ -336,29 +337,10 @@ namespace javelin::jmap::cache
                 api::parseCalendarEventDocument(accountId, query.value(6).toString().toStdString());
             if (!parsed.ok() || !parsed.value || parsed.value->isDraft)
                 continue;
-            auto alertZone = parsed.value->timeZone
-                                 ? QTimeZone{QByteArray::fromStdString(parsed.value->timeZone->value)}
-                                 : QTimeZone{query.value(11).toByteArray()};
-            if (!alertZone.isValid())
-                continue;
-            auto startsAt =
+            const QDateTime startsAt =
                 QDateTime::fromString(query.value(3).toString(), Qt::ISODateWithMs).toUTC();
-            auto endsAt =
+            const QDateTime endsAt =
                 QDateTime::fromString(query.value(4).toString(), Qt::ISODateWithMs).toUTC();
-            if (!startsAt.isValid())
-            {
-                const auto local = QDateTime::fromString(query.value(9).toString(), Qt::ISODate);
-                if (local.isValid())
-                    startsAt = QDateTime{local.date(), local.time(), alertZone}.toUTC();
-            }
-            if (!endsAt.isValid())
-            {
-                const auto local = QDateTime::fromString(query.value(10).toString(), Qt::ISODate);
-                if (local.isValid())
-                    endsAt = QDateTime{local.date(), local.time(), alertZone}.toUTC();
-            }
-            if (!startsAt.isValid() || !endsAt.isValid())
-                continue;
             auto effectiveAlerts = parsed.value->alerts;
             if (parsed.value->useDefaultAlerts)
             {
@@ -419,6 +401,10 @@ namespace javelin::jmap::cache
             {
                 if (alert.action != "display")
                     continue;
+                const auto alertZone =
+                    parsed.value->timeZone
+                        ? QTimeZone{QByteArray::fromStdString(parsed.value->timeZone->value)}
+                        : QTimeZone{query.value(9).toString().toUtf8()};
                 const QDateTime trigger =
                     calendar::alertTrigger(alert, startsAt, endsAt, alertZone);
                 if (!trigger.isValid() || trigger < oldestTrigger)

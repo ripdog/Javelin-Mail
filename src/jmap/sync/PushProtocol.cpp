@@ -2,7 +2,7 @@
 
 #include <glaze/glaze.hpp>
 
-#include <QDate>
+#include <QDateTime>
 #include <QRegularExpression>
 
 #include <algorithm>
@@ -122,18 +122,16 @@ namespace javelin::jmap::sync
 
         [[nodiscard]] bool validLocalDateTime(const std::string_view value)
         {
-            static const QRegularExpression expression{QStringLiteral(
-                "^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(?:\\.(\\d*[1-9]))?$")};
-            const auto match = expression.match(QString::fromUtf8(value.data(), value.size()));
-            if (!match.hasMatch())
+            static const QRegularExpression expression{
+                QStringLiteral("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d*[1-9])?$")};
+            const QString text = QString::fromStdString(std::string{value});
+            if (!expression.match(text).hasMatch())
                 return false;
-            const QDate date{match.captured(1).toInt(), match.captured(2).toInt(),
-                             match.captured(3).toInt()};
-            const int hour = match.captured(4).toInt();
-            const int minute = match.captured(5).toInt();
-            const int second = match.captured(6).toInt();
-            return date.isValid() && hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 &&
-                   second >= 0 && second <= 59;
+            const QString base = text.first(19);
+            const auto parsed =
+                QDateTime::fromString(base, QStringLiteral("yyyy-MM-dd'T'HH:mm:ss"));
+            return parsed.isValid() &&
+                   parsed.toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss")) == base;
         }
 
         [[nodiscard]] PushMessage calendarAlertMessage(const StateChangeSubscription& subscription,

@@ -270,6 +270,22 @@ TEST_CASE("calendar event row state mirrors the owned collection cursor",
         "('a1','alice@example.test','https://example.test/jmap',1)")));
 
     javelin::jmap::cache::CalendarRepository repository{connection};
+    auto reminderOnly = event("reminder-only", "2026-09-03T10:00:00");
+    reminderOnly.calendarIds.clear();
+    auto reminderOccurrence = occurrence("reminder-only", "2026-09-03T10:00:00");
+    reminderOccurrence.localEnd = {.value = "2026-09-03T11:00:00"};
+    REQUIRE_FALSE(repository
+                      .reconcileReminderHorizon({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-01T00:00:00"},
+                          .end = {.value = "2026-12-01T00:00:00"},
+                          .displayTimeZone = {.value = "Pacific/Auckland"},
+                          .eventState = "server-state-before-owned-cursor",
+                          .events = {reminderOnly},
+                          .occurrences = {reminderOccurrence},
+                      })
+                      .has_value());
+
     auto projected = event("e1", "2026-09-03T10:00:00");
     projected.calendarIds.clear();
     auto firstTransaction = javelin::jmap::cache::DatabaseTransaction::begin(
@@ -306,6 +322,13 @@ TEST_CASE("calendar event row state mirrors the owned collection cursor",
     REQUIRE(state.next());
     CHECK(state.value(0).toString() == QStringLiteral("cursor-3"));
     CHECK(state.value(1).toString() == QStringLiteral("cursor-3"));
+
+    QSqlQuery reminderState{connection.database()};
+    REQUIRE(reminderState.exec(QStringLiteral(
+        "SELECT state FROM calendar_events WHERE account_id='a1' AND event_id='reminder-only'")));
+    REQUIRE(reminderState.next());
+    CHECK(reminderState.value(0).isNull());
+
     const auto calendarState = repository.stateToken("a1", "Calendar");
     REQUIRE(std::holds_alternative<std::optional<std::string>>(calendarState));
     CHECK(std::get<std::optional<std::string>>(calendarState) ==
@@ -649,6 +672,123 @@ TEST_CASE("calendar projections preserve reminder ownership only while occurrenc
     CHECK(invalidatedReminder.value(0).toInt() == 0);
 }
 
+TEST_CASE("calendar reminder horizon derives UTC timing for floating occurrences",
+          "[jmap][calendar][cache][notification][timezone]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-reminder-floating-utc"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    auto floating = event("floating-reminder", "2026-09-03T10:00:00");
+    floating.calendarIds.clear();
+    floating.timeZone.reset();
+    auto floatingOccurrence = occurrence("floating-reminder", "2026-09-03T10:00:00");
+    floatingOccurrence.localEnd = {.value = "2026-09-03T11:00:00"};
+    REQUIRE_FALSE(repository
+                      .reconcileReminderHorizon({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-01T00:00:00"},
+                          .end = {.value = "2026-12-01T00:00:00"},
+                          .displayTimeZone = {.value = "America/Los_Angeles"},
+                          .eventState = "event-state-1",
+                          .events = {floating},
+                          .occurrences = {floatingOccurrence},
+                      })
+                      .has_value());
+
+    QSqlQuery timing{connection.database()};
+    REQUIRE(timing.exec(QStringLiteral(
+        "SELECT start_utc,end_utc FROM calendar_reminder_occurrences WHERE account_id='a1' AND "
+        "occurrence_id='floating-reminder'")));
+    REQUIRE(timing.next());
+    CHECK(timing.value(0).toString() == QStringLiteral("2026-09-03T17:00:00.000Z"));
+    CHECK(timing.value(1).toString() == QStringLiteral("2026-09-03T18:00:00.000Z"));
+}
+
+TEST_CASE("calendar projection removes stale occurrences when replacement set is empty",
+          "[jmap][calendar][cache][projection][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-projection-empty-replacement"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    auto series = event("series", "2026-09-03T10:00:00");
+    series.calendarIds.clear();
+    series.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
+    auto expanded = occurrence("series-occurrence", "2026-09-03T10:00:00");
+    expanded.eventId = "series";
+    expanded.recurrenceId = javelin::jmap::calendar::LocalDateTime{.value = "2026-09-03T10:00:00"};
+    expanded.localEnd = {.value = "2026-09-03T11:00:00"};
+    REQUIRE_FALSE(repository
+                      .reconcileWindow({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-01T00:00:00"},
+                          .end = {.value = "2026-10-01T00:00:00"},
+                          .displayTimeZone = {.value = "Pacific/Auckland"},
+                          .queryState = "query-state-1",
+                          .eventState = "event-state-1",
+                          .events = {series},
+                          .occurrences = {expanded},
+                      })
+                      .has_value());
+    REQUIRE_FALSE(repository
+                      .reconcileReminderHorizon({
+                          .accountId = "a1",
+                          .start = {.value = "2026-09-01T00:00:00"},
+                          .end = {.value = "2026-12-01T00:00:00"},
+                          .displayTimeZone = {.value = "Pacific/Auckland"},
+                          .eventState = "event-state-1",
+                          .events = {series},
+                          .occurrences = {expanded},
+                      })
+                      .has_value());
+
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Project empty recurring replacement"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    const std::array<std::string, 1> replacementEventIds{"series"};
+    REQUIRE_FALSE(
+        repository
+            .projectEvents(transaction, "a1", "event-state-1", {series}, {}, {},
+                           javelin::jmap::cache::CalendarEventStatePersistence::AdvanceCursor,
+                           replacementEventIds)
+            .has_value());
+    REQUIRE_FALSE(transaction.commit().has_value());
+
+    for (const auto& table :
+         {QStringLiteral("calendar_occurrences"), QStringLiteral("calendar_window_occurrences"),
+          QStringLiteral("calendar_reminder_occurrences")})
+    {
+        QSqlQuery remaining{connection.database()};
+        REQUIRE(remaining.exec(
+            QStringLiteral("SELECT COUNT(*) FROM %1 WHERE account_id='a1'").arg(table)));
+        REQUIRE(remaining.next());
+        CHECK(remaining.value(0).toInt() == 0);
+    }
+}
+
 TEST_CASE("calendar reminder horizon survives presentation-window eviction",
           "[jmap][calendar][cache][notification]")
 {
@@ -968,6 +1108,8 @@ TEST_CASE("unchanged calendar state advancement preserves daemon reminder owners
     QSqlQuery rowStates{connection.database()};
     REQUIRE(rowStates.exec(QStringLiteral(
         "SELECT DISTINCT state FROM calendar_events WHERE account_id='a1' ORDER BY state")));
+    REQUIRE(rowStates.next());
+    CHECK(rowStates.value(0).isNull());
     REQUIRE(rowStates.next());
     CHECK(rowStates.value(0).toString() == QStringLiteral("event-state-2"));
     CHECK_FALSE(rowStates.next());

@@ -77,12 +77,8 @@ namespace javelin::app
 
         QTimeZone eventTimeZone(const javelin::jmap::calendar::CalendarEvent& event)
         {
-            auto zone = event.timeZone
-                            ? QTimeZone{QByteArray::fromStdString(event.timeZone->value)}
-                            : QTimeZone::systemTimeZone();
-            if (!zone.isValid())
-                zone = QTimeZone::UTC;
-            return zone;
+            return event.timeZone ? QTimeZone{QByteArray::fromStdString(event.timeZone->value)}
+                                  : QTimeZone::systemTimeZone();
         }
 
         QDateTime startsAtUtc(const javelin::jmap::calendar::CalendarEvent& event)
@@ -99,6 +95,8 @@ namespace javelin::app
             if (!local.isValid())
                 return {};
             const auto zone = eventTimeZone(event);
+            if (!zone.isValid())
+                return {};
             return QDateTime{local.date(), local.time(), zone}.toUTC();
         }
 
@@ -464,8 +462,8 @@ namespace javelin::app
 
         const auto startsAt = startsAtUtc(effective);
         const auto endsAt = endsAtUtc(effective, startsAt);
-        const auto trigger = javelin::jmap::calendar::alertTrigger(
-            *resolvedAlert, startsAt, endsAt, eventTimeZone(effective));
+        const auto trigger = javelin::jmap::calendar::alertTrigger(*resolvedAlert, startsAt, endsAt,
+                                                                   eventTimeZone(effective));
         if (!startsAt.isValid() || !trigger.isValid() ||
             (resolvedAlert->acknowledged &&
              parseInstant(resolvedAlert->acknowledged->value) >= trigger))
